@@ -192,23 +192,165 @@
 }
 
 /* ---------------------------------------------------------------------------
-   The desktop window
-   The title bar is hidden so the conversation starts at the top of the glass.
-   That leaves the traffic lights sitting over the page, so the app owes them
-   both a strip to be dragged by and somewhere for the text to begin below.
+   The strip along the top
+   The window's title bar is hidden so the conversation starts at the top of the
+   glass. That leaves the traffic lights sitting over the page, so the app owes
+   them both a strip to be dragged by and somewhere for the text to begin below.
+
+   It earns its keep by holding the two quiet things that belong nowhere else:
+   which project this is, and the button that shows it to you. Both are as small
+   as they can be and still be read — this strip is furniture, and furniture that
+   asks for attention is furniture in the way.
    --------------------------------------------------------------------------- */
 
-.app__titlebar {
+.topbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   height: 38px;
-  z-index: 2;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
   background: var(--bg);
   -webkit-app-region: drag;
 }
 
-[data-shell='desktop'] .app__column {
+/* Room for the traffic lights, which the shell puts at 18px. */
+[data-shell='desktop'] .topbar {
+  padding-left: 92px;
+}
+
+/* The rail owns the right-hand edge, so the strip stops where it starts. */
+.app--railed .topbar {
+  right: var(--rail);
+}
+
+.topbar__name,
+.topbar__see {
+  -webkit-app-region: no-drag;
+}
+
+.topbar__name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 40%;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.topbar__name--quiet {
+  color: var(--text-faint);
+}
+
+.topbar__see {
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.topbar__see:active {
+  transform: scale(0.97);
+}
+
+/* The switcher, hanging under the name. A dropdown, so it enters the way a
+   dropdown does: up 4px with a fade, 200ms ease-out, once. */
+.topbar__switcher {
+  position: absolute;
+  top: calc(100% - var(--space-1));
+  left: var(--space-3);
+  width: 320px;
+  max-width: calc(100vw - var(--space-5));
+  padding: var(--space-2) 0 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  -webkit-app-region: no-drag;
+  animation: switcher-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+[data-shell='desktop'] .topbar__switcher {
+  left: 92px;
+}
+
+@keyframes switcher-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .topbar__name:hover,
+  .topbar__see:hover {
+    color: var(--text);
+  }
+
+  .topbar__see:hover {
+    border-color: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar__switcher {
+    animation: none;
+  }
+
+  .topbar__see:active {
+    transform: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Making room for the version rail
+   The rail is fixed to the right-hand edge, so the scroller is padded rather
+   than made into a flex row — the column inside it is centred by auto margins
+   and stays centred in whatever is left.
+   --------------------------------------------------------------------------- */
+
+.app--railed {
+  --rail: 328px;
+  padding-right: var(--rail);
+}
+
+/* The meter stays in the window's own corner rather than being pushed left by
+   the rail. The rail's lower half is empty and the composer's right-hand side is
+   not — moving the meter across would put a number on top of the send button in
+   any window narrower than a large display. */
+
+@media (max-width: 900px) {
+  .app--railed {
+    --rail: 260px;
+  }
+}
+
+/* The strip is always there now, so the column always starts below it. */
+.app__column {
   padding-top: var(--space-7);
 }

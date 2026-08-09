@@ -1,8 +1,17 @@
 import { useState } from 'react';
 import Composer from './components/Composer';
+import Gallery from './gallery/Gallery';
 import './App.css';
 
+/** /?gallery renders every component on one page instead of the app, so the UI
+ *  can be screenshotted and reviewed in both themes. Read once, at module load. */
+const showGallery = new URLSearchParams(window.location.search).has('gallery');
+
 export default function App() {
+  return showGallery ? <Gallery /> : <Conversation />;
+}
+
+function Conversation() {
   const [messages, setMessages] = useState<{ id: number; from: 'you' | 'graphe'; text: string }[]>(
     [],
   );
@@ -12,7 +21,7 @@ export default function App() {
   };
 
   // The first screen is a single centred conversation. Nothing else.
-  // Regions appear the first time they have something to say — see docs/UI-DESIGN.md.
+  // Regions appear the first time they have something to say — see notes/strategy/UI-DESIGN.md.
   const empty = messages.length === 0;
 
   return (
@@ -21,9 +30,7 @@ export default function App() {
         {empty ? (
           <div className="welcome">
             <h1 className="welcome__title">What do you want to make?</h1>
-            <p className="welcome__sub">
-              Start with a Figma file, a sketch, or just a sentence.
-            </p>
+            <p className="welcome__sub">Start with a Figma file, a sketch, or just a sentence.</p>
           </div>
         ) : (
           <div className="thread">

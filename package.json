@@ -20,12 +20,16 @@
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.2.4",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "playwright": "^1.49.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   }

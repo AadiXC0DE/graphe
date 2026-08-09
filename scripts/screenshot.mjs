@@ -25,7 +25,9 @@ for (const theme of ['light', 'dark']) {
   // Let entrance transitions settle so the capture is the resting state.
   await page.waitForTimeout(400);
   const file = join(outDir, `${name}-${theme}.png`);
-  await page.screenshot({ path: file });
+  // Full page: the gallery is taller than the viewport, and a review that only
+  // ever sees the top of a page is not a review.
+  await page.screenshot({ path: file, fullPage: true });
   console.log(`captured ${file}`);
   await page.close();
 }

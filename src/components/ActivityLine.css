@@ -1,0 +1,105 @@
+/* A read-only record of one thing the agent did. */
+
+.activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.activity {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.activity__icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  /* Optical alignment with the first line of text rather than the baseline box. */
+  transform: translateY(2px);
+}
+
+/* --text-muted throughout rather than --text-faint: the faint token measures
+   about 3:1 on both backgrounds, under AA for text and on the line for a
+   graphic. Nothing that carries meaning is drawn in it. */
+.activity--done .activity__icon {
+  color: var(--text-muted);
+}
+
+.activity--failed .activity__icon {
+  color: var(--accent);
+}
+
+/* A spinner, but never on its own — the sentence beside it is the point.
+   Constant rotation is the one case notes/strategy/UI-DESIGN.md exempts from the ban on
+   `linear`; an eased spin reads as stuttering. */
+.activity__spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: activity-spin 900ms linear infinite;
+}
+
+@keyframes activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.activity__text {
+  min-width: 0;
+}
+
+.activity--running .activity__label {
+  color: var(--text);
+}
+
+.activity--failed .activity__label {
+  color: var(--text);
+}
+
+.activity__detail {
+  color: var(--text-muted);
+}
+
+.activity__detail::before {
+  content: ' — ';
+}
+
+.activity__meta {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The state is announced in words as well as drawn as a shape. */
+.activity__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The counterpart: a still ring that still reads as "this one is the live one",
+   because it keeps the accent segment. Nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .activity__spinner {
+    animation: none;
+    transform: rotate(-45deg);
+  }
+}

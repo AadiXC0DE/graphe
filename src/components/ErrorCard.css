@@ -1,0 +1,183 @@
+/* Failure, at half speed. Nothing shakes, nothing flashes. */
+
+.errorcard {
+  max-width: 460px;
+  padding: var(--space-4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  /* Slower than the rest of the app, deliberately: --dur-large, not --dur-ui. */
+  animation: errorcard-settle var(--dur-large) var(--ease-out-quart) both;
+}
+
+@keyframes errorcard-settle {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.errorcard__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.errorcard__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.errorcard__what {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.errorcard__because {
+  margin: var(--space-2) 0 0;
+  padding-left: calc(22px + var(--space-3));
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.errorcard__actions {
+  margin-top: var(--space-4);
+  padding-left: calc(22px + var(--space-3));
+}
+
+.errorcard__button {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  /* Neutral rather than accent: on this card the colour belongs to the mark,
+     which is what carries the severity. Two accent objects in one small card is
+     one too many. */
+  background: var(--text);
+  color: var(--bg);
+  border: 1px solid var(--text);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.errorcard__button:active {
+  transform: scale(0.97);
+}
+
+.errorcard__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.errorcard__tech {
+  margin-top: var(--space-3);
+  padding-left: calc(22px + var(--space-3));
+}
+
+.errorcard__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  position: relative;
+  min-height: 28px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.errorcard__summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A caret that rotates instead of a second icon swapping in. */
+.errorcard__summary::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.errorcard__tech[open] .errorcard__summary::before {
+  transform: rotate(90deg);
+}
+
+/* 44px of hit area around a 12px label. */
+.errorcard__summary::after {
+  content: '';
+  position: absolute;
+  left: -8px;
+  right: -8px;
+  top: 50%;
+  height: 44px;
+  transform: translateY(-50%);
+}
+
+.errorcard__summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+.errorcard__pre {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .errorcard__button:hover {
+    background: color-mix(in srgb, var(--text) 86%, var(--bg));
+    border-color: color-mix(in srgb, var(--text) 86%, var(--bg));
+  }
+
+  .errorcard__summary:hover {
+    color: var(--text-muted);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .errorcard {
+    animation: none;
+  }
+
+  .errorcard__button:active {
+    transform: none;
+  }
+
+  .errorcard__summary::before {
+    transition: none;
+  }
+}

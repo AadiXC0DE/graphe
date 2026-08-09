@@ -1,6 +1,6 @@
 /** "This is a bigger job — about ₹35 and roughly four minutes. Want me to go ahead?"
  *
- * docs/COST-DESIGN.md §2. The estimate has to come from measured history of
+ * notes/strategy/COST-DESIGN.md §2. The estimate has to come from measured history of
  * similar work, and it has to appear *only* for large jobs — a confirmation on
  * every small tweak becomes noise, gets dismissed reflexively, and that reflex is
  * how "Accept All" was invented.

@@ -1,6 +1,6 @@
 /** The spend ledger: an append-only list of what money went where.
  *
- * The whole reason this file exists in the shape it does is docs/COST-DESIGN.md §3
+ * The whole reason this file exists in the shape it does is notes/strategy/COST-DESIGN.md §3
  * — at the end of a session we show the split between work the user asked for and
  * retries caused by our own failures:
  *

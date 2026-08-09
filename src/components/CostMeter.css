@@ -1,0 +1,111 @@
+/* Always-on furniture. There is not one transition or keyframe in this file, and
+   that is the design: see notes/strategy/COST-DESIGN.md §1. Nothing for reduced motion to
+   counter, because nothing here ever moves. */
+
+.cost-meter {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 168px;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.cost-meter--corner {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 5;
+}
+
+.cost-meter__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.cost-meter__label {
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.cost-meter__value {
+  font-size: var(--text-base);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.cost-meter__rule {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.cost-meter__fill {
+  display: block;
+  height: 100%;
+  /* Dark enough against the track to read as a gauge rather than a divider. */
+  background: var(--text-muted);
+}
+
+.cost-meter--nudge .cost-meter__fill,
+.cost-meter--stop .cost-meter__fill {
+  background: var(--accent);
+}
+
+/* Approaching the ceiling is carried by a sentence, not by colour alone. */
+.cost-meter__note {
+  margin: 0;
+  max-width: 26ch;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.cost-meter--stop .cost-meter__note {
+  color: var(--text);
+}
+
+.cost-meter__details {
+  align-self: flex-start;
+  position: relative;
+  padding: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--border-strong);
+}
+
+/* 44px of hit area without a 44px-tall link in a 100px-tall widget. */
+.cost-meter__details::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.cost-meter__details:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cost-meter__details:hover {
+    color: var(--text);
+    text-decoration-color: var(--text-muted);
+  }
+}

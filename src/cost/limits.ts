@@ -2,7 +2,7 @@
  *
  *     "Stop and ask me before going past ₹2,000 this month."
  *
- * docs/COST-DESIGN.md §6. Two rules govern everything here:
+ * notes/strategy/COST-DESIGN.md §6. Two rules govern everything here:
  *
  * **A nudge at 80%, not a wall at 100%.** The point of the limit is that nothing
  * is ever a surprise, which means the warning arrives while there is still room

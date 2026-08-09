@@ -1,5 +1,5 @@
 /* Graphe design tokens.
-   Motion values follow docs/UI-DESIGN.md — do not invent new easings or durations. */
+   Motion values follow notes/strategy/UI-DESIGN.md — do not invent new easings or durations. */
 
 :root {
   /* Motion — entering/exiting */
@@ -49,7 +49,9 @@
   --border-strong: #d2d2ce;
   --text: #1a1a19;
   --text-muted: #6b6b66;
-  --text-faint: #96968f;
+  /* Faint still has to clear AA as text — we cannot ship an inaccessible tool
+     that lectures people about accessibility. Nothing here drops below 4.5:1. */
+  --text-faint: #76766f;
   --accent: #b8492c;
   --accent-text: #ffffff;
   --accent-soft: #f6e9e4;
@@ -66,7 +68,7 @@
     --border-strong: #3a3a36;
     --text: #f2f2ef;
     --text-muted: #9a9a93;
-    --text-faint: #6b6b65;
+    --text-faint: #87877f;
     --accent: #e0714d;
     --accent-text: #1a1a19;
     --accent-soft: #2a1c17;
@@ -85,7 +87,7 @@
   --border-strong: #d2d2ce;
   --text: #1a1a19;
   --text-muted: #6b6b66;
-  --text-faint: #96968f;
+  --text-faint: #76766f;
   --accent: #b8492c;
   --accent-text: #ffffff;
   --accent-soft: #f6e9e4;
@@ -100,7 +102,7 @@
   --border-strong: #3a3a36;
   --text: #f2f2ef;
   --text-muted: #9a9a93;
-  --text-faint: #6b6b65;
+  --text-faint: #87877f;
   --accent: #e0714d;
   --accent-text: #1a1a19;
   --accent-soft: #2a1c17;

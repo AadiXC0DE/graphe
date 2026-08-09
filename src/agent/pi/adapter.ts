@@ -383,6 +383,53 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
   let closed = false;
 
+  /**
+   * Tidy a long conversation up, using Pi's own tidying and nobody else's.
+   *
+   * COST-DESIGN §5 and REUSE-PI.md, which is blunt about this: our "we've
+   * covered a lot in here" is **a wrapper over Pi's compaction, not our own
+   * summariser**. Everything below is arithmetic on two numbers Pi hands us and
+   * one call to `session.compact()`. There is no prompt here, no model call of
+   * ours, and no text we generate.
+   *
+   * ## Why we ask at all, when Pi already does this by itself
+   *
+   * Pi's automatic threshold is left on and is the backstop. But it fires when
+   * the conversation is nearly full, which is both the most expensive moment and
+   * the worst one to interrupt — it happens mid-turn, in the middle of somebody
+   * waiting for an answer. Doing it a little earlier, in the gap after a turn
+   * has finished, means the tidying is the only thing happening and the sentence
+   * about it does not arrive on top of half a reply.
+   *
+   * "A little earlier" is Pi's own `shouldCompact` with Pi's own settings and a
+   * larger reserve. Not a threshold of our own invention: if Pi changes how the
+   * decision is made, this changes with it.
+   *
+   * Everything is read defensively through small holes. A Pi upgrade that moves
+   * `getContextUsage` costs us the early tidy, not the session.
+   */
+  const early = {
+    ...pi.DEFAULT_COMPACTION_SETTINGS,
+    reserveTokens: pi.DEFAULT_COMPACTION_SETTINGS.reserveTokens * 2,
+  };
+
+  const tidyIfItHasGrownLong = async (): Promise<void> => {
+    if (closed) return;
+    try {
+      if (session.isCompacting) return;
+      const usage = session.getContextUsage();
+      if (usage === undefined || usage.tokens === null) return;
+      if (!pi.shouldCompact(usage.tokens, usage.contextWindow, early)) return;
+      // The window hears about this from Pi's own `compaction_start`, which the
+      // relay is already translating — so there is nothing to announce here, and
+      // nothing that could announce a tidy that did not happen.
+      await session.compact();
+    } catch {
+      // Pi's automatic threshold is still on and will do this itself when it
+      // has to. A conversation that stayed long is not worth a sentence.
+    }
+  };
+
   return {
     async prompt(text: string): Promise<void> {
       if (closed) throw new AdapterError('This session has been closed.');
@@ -393,6 +440,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         relay.failed(message);
         throw new AdapterError(message, { cause });
       }
+      // After the reply, never during it: `compact()` aborts whatever is running
+      // first, so calling it mid-turn would abandon the answer somebody is
+      // waiting for in order to tidy the notes about it.
+      await tidyIfItHasGrownLong();
     },
 
     async stop(): Promise<void> {

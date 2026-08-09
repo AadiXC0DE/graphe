@@ -11,6 +11,16 @@ type Props = {
   detail?: string;
   /** How long it took, said the way a person would say it: "4s", "under a minute". */
   meta?: string;
+  /**
+   * The real thing behind this step — the command, the path, the operation —
+   * shown only when "Show me" is on (BACKLOG D1, src/lib/showme.ts).
+   *
+   * Deliberately the last thing in the line and the quietest: it hangs under a
+   * sentence that already said what happened, and it never replaces it. The
+   * moment the machinery becomes the primary surface, this stops being an
+   * escape hatch and starts being the product.
+   */
+  real?: string;
 };
 
 /** One thing the agent did, as a read-only feed item.
@@ -24,7 +34,7 @@ type Props = {
  * apology, "Reading your Figma file" is information (notes/strategy/UI-DESIGN.md). The
  * state is carried by icon shape as well as colour, so nothing here depends on
  * colour alone. */
-export default function ActivityLine({ state, label, detail, meta }: Props) {
+export default function ActivityLine({ state, label, detail, meta, real }: Props) {
   return (
     <div className={`activity activity--${state}`}>
       <span className="activity__icon" aria-hidden="true">
@@ -55,6 +65,7 @@ export default function ActivityLine({ state, label, detail, meta }: Props) {
       <span className="activity__text">
         <span className="activity__label">{label}</span>
         {detail ? <span className="activity__detail">{detail}</span> : null}
+        {real ? <code className="activity__real">{real}</code> : null}
       </span>
 
       {meta ? <span className="activity__meta">{meta}</span> : null}

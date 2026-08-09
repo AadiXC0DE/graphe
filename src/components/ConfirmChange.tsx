@@ -7,6 +7,16 @@ type Props = {
   detail?: string;
   /** What it would mean afterwards. Usually the reassuring half. */
   consequence?: string;
+  /**
+   * The real thing being asked about — the command, the path, the operation —
+   * present only when "Show me" is on (BACKLOG D1).
+   *
+   * This is the one moment where the machinery's own words earn their place
+   * most: it is cheaper to read a command before approving it than to work out
+   * afterwards what was approved. It still sits below the plain question and
+   * still reads as a footnote to it.
+   */
+  technical?: string;
   /** The label on the option that does the risky thing. */
   confirmLabel: string;
   /** The label on the option that changes nothing. */
@@ -30,6 +40,7 @@ export default function ConfirmChange({
   question,
   detail,
   consequence,
+  technical,
   confirmLabel,
   cancelLabel,
   onConfirm,
@@ -40,6 +51,7 @@ export default function ConfirmChange({
       <h2 className="confirm__question">{question}</h2>
       {detail ? <p className="confirm__detail">{detail}</p> : null}
       {consequence ? <p className="confirm__consequence">{consequence}</p> : null}
+      {technical ? <code className="confirm__real">{technical}</code> : null}
 
       <div className="confirm__actions">
         {/* Safe first in the DOM, so it is also first for the keyboard. */}

@@ -33,6 +33,7 @@ import {
   shell,
   type IpcMainInvokeEvent,
 } from 'electron';
+import { spawn } from 'node:child_process';
 import { stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, join, resolve, sep } from 'node:path';
@@ -43,7 +44,9 @@ import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline, type Version } from '../src/history/timeline';
 import {
   CHANNEL,
+  type Hatches,
   type OpenedProject,
+  type Preferences,
   type PutBack,
   type RecentProject,
   type Result,
@@ -52,8 +55,10 @@ import {
   type ShowProgress,
   type Trouble,
 } from '../src/lib/ipc';
+import { PreferenceFile } from '../src/projects/preferences';
 import { Recents } from '../src/projects/recents';
 import { Workspaces } from '../src/projects/workspaces';
+import { findEditor, type Editor } from '../src/shell/editors';
 import type { Serving } from '../src/preview/serve';
 import { makeAndServe, ShowError, showSays } from '../src/preview/show';
 import { knownTrouble, plainMessage, plainTrouble } from './plainly';
@@ -419,6 +424,46 @@ function recents(): Promise<Recents> {
   return recentsPromise;
 }
 
+/**
+ * What this person has chosen about the app itself, and what this machine has
+ * to offer them.
+ *
+ * Both are opened once and held, for the same reason `recents` is: `app.getPath`
+ * cannot be asked before the app is ready, and looking through every
+ * Applications folder on every click would be a search for an answer that
+ * cannot change while the app is open.
+ */
+let preferencesPromise: Promise<PreferenceFile> | null = null;
+
+function preferences(): Promise<PreferenceFile> {
+  preferencesPromise ??= PreferenceFile.open(join(app.getPath('userData'), 'preferences.json'));
+  return preferencesPromise;
+}
+
+let editorPromise: Promise<Editor | null> | null = null;
+
+function editor(): Promise<Editor | null> {
+  editorPromise ??= findEditor().catch(() => null);
+  return editorPromise;
+}
+
+const NO_EDITOR: Trouble = {
+  what: 'I could not find a code editor on this computer.',
+  because:
+    'Nothing I recognise is installed, so there is nothing for me to open your folder in. You can still open the folder itself.',
+  actionLabel: 'Got it',
+};
+
+function couldNotOpenEditor(name: string, cause: unknown): Trouble {
+  return {
+    what: `I could not open ${name}.`,
+    because:
+      'It is installed, but this computer would not start it just now. Opening the folder and dragging it in does the same thing.',
+    actionLabel: 'Got it',
+    details: detailsOf(cause),
+  };
+}
+
 /** The remembered list, with "is that folder still there?" answered now rather
  *  than stored. A folder can go away while the app is not looking, and a picker
  *  that only finds out when you click it is a picker that greets you with a
@@ -620,6 +665,63 @@ function register(): void {
     } catch (cause) {
       return fail(historyTrouble(cause));
     }
+  });
+
+  handle<Preferences>(CHANNEL.preferences, async () => done((await preferences()).all()));
+
+  handle<Preferences>(CHANNEL.setShowMe, async (_event, args) => {
+    const [on] = args;
+    if (typeof on !== 'boolean') return done((await preferences()).all());
+    return done(await (await preferences()).change({ showMe: on }));
+  });
+
+  handle<Hatches>(CHANNEL.hatches, async () => done({ editor: (await editor())?.name ?? null }));
+
+  /**
+   * The escape hatch, D2.
+   *
+   * `open -a` rather than a CLI shim, and the folder rather than a file: an app
+   * launched from the Dock has none of a shell's PATH, so `code` is missing on
+   * machines that plainly have VS Code — see src/shell/editors.ts.
+   *
+   * `shell.openPath` is deliberately not used for the editor case, because it
+   * would open the folder in whatever the *system* has associated with folders,
+   * which is the Finder, which is the other button.
+   */
+  handle<null>(CHANNEL.openInEditor, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const found = await editor();
+    if (found === null) return fail(NO_EDITOR);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('open', ['-a', found.bundle, open.path], { stdio: 'ignore' });
+        child.on('error', reject);
+        child.on('exit', (code) =>
+          code === 0 ? resolve() : reject(new Error(`open exited with ${String(code)}`)),
+        );
+      });
+      return done(null);
+    } catch (cause) {
+      return fail(couldNotOpenEditor(found.name, cause));
+    }
+  });
+
+  handle<null>(CHANNEL.revealFolder, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    // Opens the folder itself rather than selecting it in its parent. Somebody
+    // asking to see their project wants to be inside it.
+    const trouble = await shell.openPath(open.path);
+    if (trouble !== '') {
+      return fail({
+        what: 'I could not open that folder.',
+        because: 'This computer would not show it to me just now.',
+        actionLabel: 'Got it',
+        details: trouble,
+      });
+    }
+    return done(null);
   });
 
   handle<ShowOutcome>(CHANNEL.show, async () => {

@@ -1,0 +1,157 @@
+/* The menu under the project's name: where you were, the way out, and the one
+   switch that changes how the app talks. */
+
+.projectmenu {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------------------------------------------------------------------------
+   The escape hatches
+   Two plain rows, the same shape as a row in the list above them, because they
+   are the same kind of thing: somewhere to go. Separated by a rule rather than
+   a heading — a heading would make them a section, and they are a footnote.
+   --------------------------------------------------------------------------- */
+
+/* No horizontal padding of its own: the rows inside line up with the project
+   rows above them, which is what makes the menu read as one list of places to
+   go rather than two lists stacked. */
+.projectmenu__hatches {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.projectmenu__hatch {
+  display: block;
+  width: 100%;
+  text-align: left;
+  /* Matches the rows in the list above it, which are 44px for the same reason:
+     hit areas are 44px minimum and this menu gets used on a laptop trackpad. */
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-radius: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .projectmenu__hatch:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
+}
+
+.projectmenu__hatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   Show me
+   A switch, because it is a state rather than an action: it stays on until it is
+   turned off, and it is remembered. The hint under it says what it does before
+   anybody has to try it and undo it.
+   --------------------------------------------------------------------------- */
+
+.projectmenu__showme {
+  padding: var(--space-3) var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.switch {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.switch__track {
+  flex: none;
+  position: relative;
+  width: 30px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-strong);
+  transition:
+    background-color var(--dur-ui) var(--ease-in-out-cubic),
+    border-color var(--dur-ui) var(--ease-in-out-cubic);
+}
+
+.switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  /* Already on screen and moving across it: ease-in-out, 200ms, transform only.
+     Rare enough to be allowed to move at all — this is not something anybody
+     sees a hundred times a day. */
+  transition:
+    transform var(--dur-ui) var(--ease-in-out-cubic),
+    background-color var(--dur-ui) var(--ease-in-out-cubic);
+}
+
+.switch[aria-checked='true'] .switch__track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch[aria-checked='true'] .switch__knob {
+  transform: translateX(12px);
+  background: var(--accent-text);
+}
+
+.switch__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.switch__label {
+  font-size: var(--text-sm);
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.switch__hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .switch:hover .switch__knob {
+    background: var(--text-muted);
+  }
+
+  .switch[aria-checked='true']:hover .switch__knob {
+    background: var(--accent-text);
+  }
+}
+
+/* The state is still legible with nothing moving: the track colour and the knob
+   position are both set, they simply arrive rather than travel. */
+@media (prefers-reduced-motion: reduce) {
+  .switch__track,
+  .switch__knob {
+    transition: none;
+  }
+}

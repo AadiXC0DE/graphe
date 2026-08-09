@@ -75,6 +75,24 @@
   content: ' — ';
 }
 
+/* "Show me": the real command, path or operation, under the sentence that
+   already said what happened in the user's own words.
+
+   Its own line, monospace, one step smaller and in the muted tone — the same
+   weight as `detail`, never more. It is secondary by construction: if the eye
+   lands here first, the escape hatch has become the product. Long commands
+   wrap rather than scroll, because a horizontal scrollbar inside a conversation
+   is a terminal wearing a costume. */
+.activity__real {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
 .activity__meta {
   margin-left: auto;
   flex: none;

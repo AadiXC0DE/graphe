@@ -12,3 +12,6 @@ coverage/
 
 # Internal working notes — strategy, research, product thinking. Not published.
 notes/
+
+release/
+build/icon.iconset/

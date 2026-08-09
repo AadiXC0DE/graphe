@@ -12,7 +12,9 @@
 import type { ActivityState } from '../components/ActivityLine';
 import type { MessageAuthor } from '../components/Message';
 import type { AgentEvent } from '../agent/types';
+import type { Prompt } from '../cost/phrasing';
 import { describeCall } from './describe';
+import { realWords } from './showme';
 import type { Decision, Trouble } from './ipc';
 
 /**
@@ -26,7 +28,18 @@ import type { Decision, Trouble } from './ipc';
  */
 export type Turn =
   | { kind: 'said'; id: string; from: MessageAuthor; text: string; streaming: boolean }
-  | { kind: 'did'; id: string; callId: string; state: ActivityState; label: string; detail?: string }
+  | {
+      kind: 'did';
+      id: string;
+      callId: string;
+      state: ActivityState;
+      label: string;
+      detail?: string;
+      /** The real command, path or operation behind this step. Recorded on
+       *  every turn and shown only when "Show me" is on — see the note on
+       *  `real` below. */
+      real?: string;
+    }
   | {
       kind: 'asked';
       id: string;
@@ -34,10 +47,45 @@ export type Turn =
       question: string;
       detail?: string;
       consequence?: string;
+      real?: string;
       /** Null while the question is still open. */
       answered: Decision | null;
     }
+  /**
+   * "This is a bigger job — about ₹35 and roughly four minutes."
+   *
+   * COST-DESIGN §2, and the one confirmation in the product that is not about
+   * safety. It holds the message somebody typed until they answer, which is why
+   * the text lives on the turn: the sentence must not be lost by the window
+   * while it waits, and it must not be sent by accident either.
+   *
+   * Only ever created above the user's own threshold. Every other request goes
+   * straight through without a word — a confirmation on every small change is
+   * noise, and noise gets dismissed without reading.
+   */
+  | {
+      kind: 'estimate';
+      id: string;
+      /** What they asked for, held until they say go ahead. */
+      text: string;
+      /** Every word of it from src/cost/phrasing.ts. Nothing is written here. */
+      prompt: Prompt;
+      /** Null while the question is still open. */
+      answered: 'went-ahead' | 'smaller' | null;
+    }
+  /**
+   * "We've covered a lot in here. I'll tidy up my notes so things stay quick."
+   *
+   * One line in the conversation, in the place it happened, said once. It is a
+   * `did`-shaped thing rather than a message because it is something happening
+   * with a beginning and an end — the spinner is honest, and it stops.
+   */
+  | { kind: 'tidying'; id: string; state: ActivityState }
   | { kind: 'trouble'; id: string; trouble: Trouble };
+
+/** The turn that holds a message back until somebody has seen what it will
+ *  cost. Named because the window passes one around. */
+export type EstimateTurn = Extract<Turn, { kind: 'estimate' }>;
 
 let counter = 0;
 
@@ -51,6 +99,10 @@ export function newId(): string {
 
 export function said(from: MessageAuthor, text: string): Turn {
   return { kind: 'said', id: newId(), from, text, streaming: false };
+}
+
+export function estimated(text: string, prompt: Prompt): Turn {
+  return { kind: 'estimate', id: newId(), text, prompt, answered: null };
 }
 
 /** Close off the most recent activity for a call. Returns the same array when
@@ -130,6 +182,11 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
           state: 'running',
           label: described.label,
           detail: described.detail,
+          // Recorded whether or not "Show me" is on, so that turning it on
+          // explains the conversation you already had rather than only the one
+          // you are about to have. A history that starts when you ask for it is
+          // no use for working out what just happened.
+          real: realWords(event.call),
         },
       ];
     }
@@ -149,6 +206,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
           state: 'failed',
           label: describeCall(event.call).label,
           detail: event.reason,
+          real: realWords(event.call),
         },
       ];
     }
@@ -163,6 +221,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
           question: event.verdict.question,
           detail: event.verdict.detail,
           consequence: event.verdict.consequence,
+          real: realWords(event.call),
           answered: null,
         },
       ];
@@ -173,6 +232,26 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
         because: event.message,
         actionLabel: 'Got it',
       });
+
+    case 'tidying': {
+      // Once. Pi can retry its own summarisation, and each attempt announces
+      // itself; three copies of "we've covered a lot in here" would be an app
+      // fretting rather than an app tidying.
+      const already = turns.some((turn) => turn.kind === 'tidying' && turn.state === 'running');
+      return already ? turns : [...turns, { kind: 'tidying', id: newId(), state: 'running' }];
+    }
+
+    case 'tidied': {
+      const index = turns.findLastIndex(
+        (turn) => turn.kind === 'tidying' && turn.state === 'running',
+      );
+      if (index === -1) return turns;
+      const next = [...turns];
+      // A tidy that could not be done leaves the line saying it was tried and
+      // nothing else. Nothing was lost, so there is nothing to apologise for.
+      next[index] = { kind: 'tidying', id: turns[index]!.id, state: event.ok ? 'done' : 'failed' };
+      return next;
+    }
 
     // Money says nothing in the thread. It is furniture in the corner, and the
     // split behind it is shown only when somebody asks for it — a running

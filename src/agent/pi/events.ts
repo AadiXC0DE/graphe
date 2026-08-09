@@ -95,6 +95,24 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
       return fromMessageEnd(source);
     case 'tool_execution_end':
       return fromToolExecutionEnd(source);
+    case 'compaction_start':
+      // Pi's own tidying of a long conversation, whichever side asked for it:
+      // `reason` is 'manual' when we did, 'threshold' or 'overflow' when Pi
+      // decided by itself. The user is told the same thing either way, because
+      // from where they are sitting it is the same event — and narrating only
+      // the half we caused would mean the app occasionally goes quiet for
+      // twenty seconds with no explanation.
+      return { type: 'tidying' };
+
+    case 'compaction_end':
+      // Aborted or failed is not a failure anybody needs to act on. Nothing was
+      // lost, the conversation is simply still long, and Pi will try again at
+      // its own threshold.
+      return {
+        type: 'tidied',
+        ok: flagAt(source, 'aborted') !== true && textAt(source, 'errorMessage') === null,
+      };
+
     case 'agent_settled':
       // Not "the reply is finished" — that is `message_end`. This is "there is
       // nothing left running", which is the only honest moment to add up what a

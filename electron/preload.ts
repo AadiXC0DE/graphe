@@ -21,7 +21,9 @@ import {
   type AgentNotice,
   type Decision,
   type GrapheApi,
+  type Hatches,
   type OpenedProject,
+  type Preferences,
   type PutBack,
   type RecentProject,
   type Result,
@@ -110,6 +112,29 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.nameVersion, versionId, name) as Promise<
       Result<readonly SavedVersion[]>
     >;
+  },
+
+  preferences(): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.preferences) as Promise<Result<Preferences>>;
+  },
+
+  setShowMe(on: boolean): Promise<Result<Preferences>> {
+    if (typeof on !== 'boolean') {
+      return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setShowMe, on) as Promise<Result<Preferences>>;
+  },
+
+  hatches(): Promise<Result<Hatches>> {
+    return ipcRenderer.invoke(CHANNEL.hatches) as Promise<Result<Hatches>>;
+  },
+
+  openInEditor(): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.openInEditor) as Promise<Result<null>>;
+  },
+
+  revealFolder(): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.revealFolder) as Promise<Result<null>>;
   },
 
   show(): Promise<Result<ShowOutcome>> {

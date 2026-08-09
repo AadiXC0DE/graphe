@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import VersionRow from './VersionRow';
 import type { PutBack, SavedVersion } from '../lib/ipc';
+import { behind } from '../lib/showme';
 import { ago, agoInSentence } from '../lib/when';
 import './Versions.css';
 
@@ -14,6 +15,11 @@ type Props = {
   onDismissPutBack: () => void;
   /** True while the shell is doing one of the above. */
   busy?: boolean;
+  /** Name what a version really is, when somebody has asked to be told
+   *  (BACKLOG D1). One sentence at the foot of the rail rather than a line per
+   *  row: the answer is the same for every row, and repeating it forty times
+   *  would turn the timeline into a log. */
+  showMe?: boolean;
 };
 
 /**
@@ -54,6 +60,7 @@ export default function Versions({
   onName,
   onDismissPutBack,
   busy,
+  showMe,
 }: Props) {
   /** The row whose name is being written. `VersionRow`'s own "open" is what
    *  selects it — there is no preview to show yet, so a click on the row means
@@ -111,6 +118,13 @@ export default function Versions({
           </li>
         )}
       </ul>
+
+      {showMe ? (
+        <div className="rail__real">
+          <p>{behind.versions}</p>
+          <p>{behind.putBack}</p>
+        </div>
+      ) : null}
     </aside>
   );
 }

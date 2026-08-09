@@ -28,7 +28,9 @@ import {
   type AgentNotice,
   type Decision,
   type GrapheApi,
+  type Hatches,
   type OpenedProject,
+  type Preferences,
   type PutBack,
   type RecentProject,
   type Result,
@@ -215,6 +217,10 @@ function previewBridge(): Bridge {
    *  browser tab cannot show by waiting for it to happen: money is spent by an
    *  agent doing work, and there is no agent here. Everything else in this
    *  preview waits to be asked for. */
+  /** The preview's own copy of what a person has chosen. Real state, so the
+   *  switch in the project menu can be turned on and its effect looked at. */
+  let preferred: Preferences = { showMe: false };
+
   let spendAnnounced = false;
   const announceSpend = (): void => {
     if (spendAnnounced) return;
@@ -316,6 +322,42 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(named));
     },
 
+    /** Remembered for as long as the tab is open, and no longer. A browser tab
+     *  has nowhere of its own to keep a preference, and writing one into
+     *  somebody's browser storage from a preview would be a surprise. */
+    preferences(): Promise<Result<Preferences>> {
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    setShowMe(on: boolean): Promise<Result<Preferences>> {
+      preferred = { ...preferred, showMe: on };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    /** Named, so the escape hatches can be looked at and reviewed. Pressing
+     *  either one says so rather than pretending it opened something. */
+    hatches(): Promise<Result<Hatches>> {
+      return Promise.resolve(done({ editor: 'VS Code' }));
+    },
+
+    openInEditor(): Promise<Result<null>> {
+      send({
+        type: 'error',
+        message:
+          'This is Graphe running in a browser tab, so there is no folder underneath and nothing to open. In the app this opens your project in your own editor.',
+      });
+      return Promise.resolve(done(null));
+    },
+
+    revealFolder(): Promise<Result<null>> {
+      send({
+        type: 'error',
+        message:
+          'This is Graphe running in a browser tab, so there is no folder underneath to show you. In the app this opens it in the Finder.',
+      });
+      return Promise.resolve(done(null));
+    },
+
     /** The two sentences, in order, and then the honest answer: there is no
      *  folder behind a browser tab, so there is nothing to get ready. */
     async show(): Promise<Result<ShowOutcome>> {
@@ -377,6 +419,11 @@ function connect(): Bridge {
     versions: () => api.versions(),
     putBack: (versionId) => api.putBack(versionId),
     nameVersion: (versionId, name) => api.nameVersion(versionId, name),
+    preferences: () => api.preferences(),
+    setShowMe: (on) => api.setShowMe(on),
+    hatches: () => api.hatches(),
+    openInEditor: () => api.openInEditor(),
+    revealFolder: () => api.revealFolder(),
     show: () => api.show(),
     onShowProgress: (listener) => api.onShowProgress(listener),
     onEvent: (listener) => api.onEvent(listener),

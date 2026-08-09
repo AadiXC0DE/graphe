@@ -53,6 +53,19 @@
   line-height: 1.55;
 }
 
+/* "Show me": the real command or path this question is about. A footnote to the
+   question, never a replacement for it — same muted tone as the detail line, one
+   step smaller, and it wraps rather than scrolling. */
+.confirm__real {
+  display: block;
+  margin: var(--space-3) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
 .confirm__actions {
   display: flex;
   flex-wrap: wrap;

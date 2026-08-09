@@ -1,0 +1,115 @@
+import ProjectPicker from './ProjectPicker';
+import type { RecentProject } from '../lib/ipc';
+import { showMeCopy } from '../lib/showme';
+import './ProjectMenu.css';
+
+type Props = {
+  projects: readonly RecentProject[];
+  openPath: string | null;
+  onOpen: (project: RecentProject) => void;
+  onForget: (project: RecentProject) => void;
+  onBrowse: () => void;
+
+  /** The name of the editor installed on this machine, or null when there is
+   *  none to offer. Never a guess: the shell looked. */
+  editor: string | null;
+  onOpenInEditor: () => void;
+  onRevealFolder: () => void;
+
+  showMe: boolean;
+  onShowMe: (on: boolean) => void;
+};
+
+/**
+ * Everything about *this project* that is not the conversation.
+ *
+ * ## Why all three of these live in one menu
+ *
+ * The escape hatches (BACKLOG D2) and the "Show me" switch (D1) are the same
+ * promise from two directions: **the agent manages everything by default, and
+ * anyone who wants the wheel can have it.** One says "here is the real folder,
+ * go and look"; the other says "here is the real name of what I just did".
+ * Somebody who wants either almost always wants both, and they are answers to
+ * the same question — *what is actually going on underneath this?*
+ *
+ * ## Why they are behind the project's name, and not in the strip
+ *
+ * The strip along the top is 38 pixels of furniture holding two things: which
+ * project this is, and the button that shows it to you. Three more permanent
+ * controls in there would make the furniture louder than the work, and they
+ * would be loudest for the people who will never press them — which is most
+ * people, by design.
+ *
+ * The project's name is already the affordance for "this project": it is how you
+ * switch between them, and people who have more than one folder click it every
+ * session. Hanging "open this project's folder" and "open this project in your
+ * editor" under it puts them exactly where somebody would look for them, one
+ * click from anywhere in the app, with nothing to discover and no settings
+ * screen to find. They are never conditional, never hidden behind a mode, and
+ * never further away than they are right now.
+ *
+ * The one thing this menu must not become is a preferences window. It holds the
+ * things that are true of a project, plus the single switch that changes how the
+ * app talks. If a fourth setting ever wants to live here, that is the moment to
+ * ask whether it should exist at all.
+ */
+export default function ProjectMenu({
+  projects,
+  openPath,
+  onOpen,
+  onForget,
+  onBrowse,
+  editor,
+  onOpenInEditor,
+  onRevealFolder,
+  showMe,
+  onShowMe,
+}: Props) {
+  return (
+    <div className="projectmenu">
+      <ProjectPicker
+        projects={projects}
+        openPath={openPath}
+        onOpen={onOpen}
+        onForget={onForget}
+        onBrowse={onBrowse}
+        compact
+      />
+
+      {/* Only once there is a folder. An escape hatch out of nowhere leads
+          nowhere, and a button that explains why it cannot work is worse than
+          no button. */}
+      {openPath === null ? null : (
+        <div className="projectmenu__hatches">
+          {editor === null ? null : (
+            <button type="button" className="projectmenu__hatch" onClick={onOpenInEditor}>
+              Open in {editor}
+            </button>
+          )}
+          <button type="button" className="projectmenu__hatch" onClick={onRevealFolder}>
+            Show the folder
+          </button>
+        </div>
+      )}
+
+      <div className="projectmenu__showme">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={showMe}
+          className="switch"
+          onClick={() => onShowMe(!showMe)}
+          id="show-me"
+        >
+          <span className="switch__track" aria-hidden="true">
+            <span className="switch__knob" />
+          </span>
+          <span className="switch__text">
+            <span className="switch__label">{showMeCopy.label}</span>
+            <span className="switch__hint">{showMeCopy.hint}</span>
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -127,6 +127,30 @@ export type ShowOutcome =
 export type ShowProgress = { says: string; done: boolean };
 
 /**
+ * The few things a person can change about the app itself.
+ *
+ * Sticky: set once, remembered on this computer. Kept in the shell rather than
+ * in the window because the window is thrown away on every reload and a
+ * preference that forgets itself is not a preference.
+ */
+export type Preferences = {
+  /** Name the real command, path or git operation under each step. Off by
+   *  default. See src/lib/showme.ts for what "the real thing" means and why
+   *  that file is the one place jargon is allowed. */
+  showMe: boolean;
+};
+
+/**
+ * What the escape hatches can offer on this machine.
+ *
+ * `editor` is the name of the first code editor found installed — "VS Code",
+ * "Cursor" — or null when there is none, in which case the interface offers
+ * only the folder. Worked out once by the shell; the window is not in a
+ * position to know what is installed and should not guess.
+ */
+export type Hatches = { editor: string | null };
+
+/**
  * The two sentences "See it" is allowed to say while it works.
  *
  * Here rather than in the shell because both sides say them: the window says
@@ -168,6 +192,11 @@ export const CHANNEL = {
   nameVersion: 'graphe:name-version',
   show: 'graphe:show',
   showProgress: 'graphe:show-progress',
+  preferences: 'graphe:preferences',
+  setShowMe: 'graphe:set-show-me',
+  hatches: 'graphe:hatches',
+  openInEditor: 'graphe:open-in-editor',
+  revealFolder: 'graphe:reveal-folder',
 } as const;
 
 /**
@@ -204,6 +233,20 @@ export type GrapheApi = {
   putBack(versionId: string): Promise<Result<PutBack>>;
   /** Give a version a name of the user's own. */
   nameVersion(versionId: string, name: string): Promise<Result<readonly SavedVersion[]>>;
+
+  /** What this person has chosen, as remembered on this computer. */
+  preferences(): Promise<Result<Preferences>>;
+  /** Turn "Show me" on or off. Returns the whole set, so the window never has
+   *  to reason about what it did not ask about. */
+  setShowMe(on: boolean): Promise<Result<Preferences>>;
+
+  /** What the escape hatches can offer here — which editor, if any. */
+  hatches(): Promise<Result<Hatches>>;
+  /** Open the project folder in the editor `hatches` named. */
+  openInEditor(): Promise<Result<null>>;
+  /** Show the project folder in the Finder. Always available: every project is
+   *  an ordinary folder, and this is the one hatch that cannot fail to exist. */
+  revealFolder(): Promise<Result<null>>;
 
   /** Make the project, then open the made thing in their own browser. */
   show(): Promise<Result<ShowOutcome>>;

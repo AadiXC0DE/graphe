@@ -6,14 +6,16 @@ import ConfirmChange from '../components/ConfirmChange';
 import CostMeter from '../components/CostMeter';
 import ErrorCard from '../components/ErrorCard';
 import Message from '../components/Message';
+import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
 import VersionRow from '../components/VersionRow';
 import Versions from '../components/Versions';
 import type { PutBack, RecentProject, SavedVersion } from '../lib/ipc';
 import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
-import { biggerJob, estimateNote } from '../cost/phrasing';
+import { biggerJob, estimateNote, longConversation } from '../cost/phrasing';
 import type { Estimate } from '../cost/estimate';
+import { behind, realWords } from '../lib/showme';
 import './Gallery.css';
 
 /** Every presentational component on one page, in both themes, with the content
@@ -92,6 +94,12 @@ const SCREENSHOT = `data:image/svg+xml,${encodeURIComponent(
     '<rect x="6" y="31" width="30" height="4" rx="2" fill="#cdc6bd"/>' +
     '</svg>',
 )}`;
+
+/** Real tool-call inputs, so the "Show me" lines below are produced by the same
+ *  function the app uses rather than typed out to look right. */
+const FIGMA_FILE = { path: '/Users/you/Sites/paper-street/design/landing-v4.fig' };
+const TOKENS_FILE = { path: '/Users/you/Sites/paper-street/src/styles/tokens.css' };
+const BUILD = { command: 'npm run build' };
 
 const ATTACHED: readonly Attachment[] = [
   { id: 'a1', kind: 'figma', name: 'Landing v4', note: 'Figma file', url: 'https://figma.com' },
@@ -193,6 +201,9 @@ function noop() {}
 export default function Gallery() {
   const [theme, setTheme] = useState<Theme>('system');
   const [attached, setAttached] = useState<readonly Attachment[]>(ATTACHED);
+  /** Live, so the switch can be turned on here and the sections below it change
+   *  — which is the only way to review "quiet and secondary" as a claim. */
+  const [showMe, setShowMe] = useState(false);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -279,6 +290,7 @@ export default function Gallery() {
                 label="Read your Figma file"
                 detail="12 frames, 3 with variants"
                 meta="6s"
+                real={showMe ? realWords({ id: '1', name: 'read', input: FIGMA_FILE }) : undefined}
               />
               <ActivityLine state="done" label="Got your project ready" meta="3s" />
               <ActivityLine
@@ -286,10 +298,66 @@ export default function Gallery() {
                 label="Matched the type scale to your tokens"
                 detail="4 sizes"
                 meta="11s"
+                real={showMe ? realWords({ id: '2', name: 'edit', input: TOKENS_FILE }) : undefined}
               />
-              <ActivityLine state="failed" label="Ran your build" detail="stopped on one file" />
+              <ActivityLine
+                state="failed"
+                label="Ran your build"
+                detail="stopped on one file"
+                real={showMe ? realWords({ id: '3', name: 'bash', input: BUILD }) : undefined}
+              />
               <ActivityLine state="running" label="Checking it against your design system" />
             </div>
+          </Section>
+
+          <Section
+            title="Show me"
+            note="Off by default, sticky once set, and it lives under the project’s name — the same place you go to switch projects or open the folder. Turn it on here and the sections on this page change with it."
+          >
+            <div className="gallery__menu">
+              <ProjectMenu
+                projects={REMEMBERED}
+                openPath="/Users/you/Sites/paper-street"
+                onOpen={noop}
+                onForget={noop}
+                onBrowse={noop}
+                editor="VS Code"
+                onOpenInEditor={noop}
+                onRevealFolder={noop}
+                showMe={showMe}
+                onShowMe={setShowMe}
+              />
+            </div>
+            <p className="gallery__caption">
+              Three things, one menu: where you were, the way out, and the switch. The escape hatches
+              are never conditional and never further away than this — the project is an ordinary
+              folder in ordinary git, and a product that makes that hard has quietly become a walled
+              garden. What the button says is whatever editor the machine actually has; with none
+              installed there is one row here, not a button that opens nothing.
+            </p>
+          </Section>
+
+          <Section
+            title="A long conversation, tidied"
+            note="One sentence, said once, in the place it happened. Behind it is the agent runtime’s own tidying — we do not summarise anything ourselves."
+          >
+            <div className="activity-feed">
+              <ActivityLine
+                state="running"
+                label={longConversation.tidying}
+                real={showMe ? behind.tidying : undefined}
+              />
+              <ActivityLine
+                state="done"
+                label={longConversation.tidying}
+                real={showMe ? behind.tidying : undefined}
+              />
+            </div>
+            <p className="gallery__caption">
+              Running and finished. Nothing is lost either way, and the full conversation is still
+              there to scroll back through — which is the fear that keeps people in bloated
+              conversations in the first place, so it is the half of the sentence that matters.
+            </p>
           </Section>
 
           <Section
@@ -360,15 +428,19 @@ export default function Gallery() {
               question="Replace the colour styles in your design system?"
               detail="The eleven styles in Brand / Core would point at the new tokens instead of the old hexes."
               consequence="I’ll save a version first, so putting it back is one click."
+              technical={showMe ? realWords({ id: '4', name: 'edit', input: TOKENS_FILE }) : undefined}
               cancelLabel="Leave them as they are"
               confirmLabel="Replace them"
               onCancel={noop}
               onConfirm={noop}
             />
+            {/* Composed exactly as src/App.tsx composes it, so what is reviewed
+                here is what ships: the question, the number and the minutes,
+                and then how much of that number is a measurement. */}
             <ConfirmChange
               question={bigJob.title}
-              detail={bigJobNote ? `${bigJob.body} ${bigJobNote}` : bigJob.body}
-              consequence="You’ve spent ₹1,200 today, so this would put you at about ₹1,235."
+              detail={bigJob.body}
+              consequence={bigJobNote ?? undefined}
               cancelLabel={bigJob.alternative}
               confirmLabel={bigJob.confirm}
               onCancel={noop}
@@ -426,6 +498,7 @@ export default function Gallery() {
                 onPutBack={noop}
                 onName={noop}
                 onDismissPutBack={noop}
+                showMe={showMe}
               />
             </div>
             <p className="gallery__caption">

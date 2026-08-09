@@ -7,20 +7,26 @@ import ConfirmChange from './components/ConfirmChange';
 import CostMeter from './components/CostMeter';
 import ErrorCard from './components/ErrorCard';
 import Message from './components/Message';
+import ProjectMenu from './components/ProjectMenu';
 import ProjectPicker from './components/ProjectPicker';
 import Versions from './components/Versions';
 import Gallery from './gallery/Gallery';
-import { retryHonesty, sessionSummary } from './cost/phrasing';
+import type { Task } from './cost/estimate';
+import { longConversation, retryHonesty, sessionSummary } from './cost/phrasing';
+import { sizeUp } from './cost/sizing';
 import { bridge } from './lib/bridge';
+import { quote, smallerFirst } from './lib/estimating';
 import {
   showWords,
   type Decision,
   type OpenedProject,
+  type Preferences,
   type RecentProject,
   type ShowProgress,
   type Trouble,
 } from './lib/ipc';
 import { usePrefersReducedMotion } from './lib/motion';
+import { behind } from './lib/showme';
 import {
   changeCurrent,
   changeDesk,
@@ -31,7 +37,14 @@ import {
   receive,
   type Desks,
 } from './lib/projects';
-import { said, withTrouble, STOPPED_PART_WAY, type Turn } from './lib/thread';
+import {
+  estimated,
+  said,
+  withTrouble,
+  STOPPED_PART_WAY,
+  type EstimateTurn,
+  type Turn,
+} from './lib/thread';
 import './App.css';
 
 /** /?gallery renders every component on one page instead of the app, so the UI
@@ -89,6 +102,19 @@ function Conversation() {
   const [pickerTrouble, setPickerTrouble] = useState<{ path: string; trouble: Trouble } | null>(
     null,
   );
+
+  /**
+   * What this person has chosen about the app itself, and what this machine can
+   * offer them (BACKLOG D1, D2).
+   *
+   * Both are asked for once, on the way in. `showMe` starts off — the default is
+   * load-bearing, because for the audience this product exists for a second line
+   * of machinery under every step is the exact texture of the tools they came
+   * here to avoid. Once somebody turns it on, the shell remembers, and it stays
+   * on until they say otherwise.
+   */
+  const [preferences, setPreferences] = useState<Preferences>({ showMe: false });
+  const [editor, setEditor] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
   /** What "See it" is up to, in its own words. Null when it is not up to
@@ -215,6 +241,12 @@ function Conversation() {
 
   useEffect(() => {
     let stillHere = true;
+    void bridge.preferences().then((answer) => {
+      if (stillHere && answer.ok) setPreferences(answer.value);
+    });
+    void bridge.hatches().then((answer) => {
+      if (stillHere && answer.ok) setEditor(answer.value.editor);
+    });
     void bridge.recentProjects().then((answer) => {
       if (!stillHere) return;
       setRecent(answer.ok ? answer.value : []);
@@ -268,6 +300,34 @@ function Conversation() {
     void bridge.stop();
   }, []);
 
+  /* ------------------------------------------------- the way out, and the words */
+
+  /** Sticky, so the answer comes back from the shell rather than being assumed
+   *  here — if the write failed, the switch shows what was actually kept. */
+  const changeShowMe = useCallback((on: boolean) => {
+    setPreferences((was) => ({ ...was, showMe: on }));
+    void bridge.setShowMe(on).then((answer) => {
+      if (answer.ok) setPreferences(answer.value);
+    });
+  }, []);
+
+  /** Both hatches close the menu on the way out: the thing you asked for is
+   *  about to appear in front of this window, and a dropdown still hanging open
+   *  behind it is litter. */
+  const openInEditor = useCallback(() => {
+    setSwitching(false);
+    void bridge.openInEditor().then((answer) => {
+      if (!answer.ok) troubleHere(answer.trouble);
+    });
+  }, [troubleHere]);
+
+  const revealFolder = useCallback(() => {
+    setSwitching(false);
+    void bridge.revealFolder().then((answer) => {
+      if (!answer.ok) troubleHere(answer.trouble);
+    });
+  }, [troubleHere]);
+
   /* Esc cancels the current run, and closes the switcher — the keyboard rules in
      UI-DESIGN.md. ⌘O opens a folder; ⌘1–9 goes straight to one we remember. */
   useEffect(() => {
@@ -298,49 +358,20 @@ function Conversation() {
   /* ----------------------------------------------------------------- saying */
 
   /**
-   * Send one message.
+   * Hand the message over, and remember what kind of job it was.
    *
-   * The folder is still asked for here when there is not one, because a first
-   * launch with nothing remembered is a conversation and nothing else — the
-   * picker only exists once there is something to pick.
+   * Everything that decides *whether* to send is above this. The task is put on
+   * the desk before the work starts so that whatever this turn costs can be
+   * filed against it when the sitting settles — which is what turns the next
+   * estimate from a guess into a measurement (COST-DESIGN §2).
    */
-  const send = useCallback(
-    async (text: string) => {
-      const before = desks.current;
+  const deliver = useCallback(
+    async (text: string, task: Task) => {
       setDesks((current) =>
-        current.current === null
-          ? current
-          : changeCurrent(current, (one) => ({ ...one, turns: [...one.turns, said('you', text)] })),
+        changeCurrent(current, (one) => ({ ...one, doing: { task, startedAt: Date.now() } })),
       );
       setBusy(true);
-
       try {
-        if (before === null) {
-          if (!bridge.desktop) return;
-          const picked = await bridge.chooseFolder();
-          if (!picked.ok) {
-            setPickerTrouble({ path: '', trouble: picked.trouble });
-            return;
-          }
-          if (picked.value === null) {
-            setPickerTrouble({
-              path: '',
-              trouble: {
-                what: 'I still do not have a folder to work in.',
-                because: NO_FOLDER_YET,
-                actionLabel: 'Got it',
-              },
-            });
-            return;
-          }
-          await open(picked.value);
-          // The sentence goes on the desk that has just been made, so it is not
-          // lost with the screen it was typed on.
-          setDesks((current) =>
-            changeCurrent(current, (one) => ({ ...one, turns: [...one.turns, said('you', text)] })),
-          );
-        }
-
         const reply = await bridge.prompt(text);
         if (!reply.ok) troubleHere(reply.trouble);
       } catch (cause) {
@@ -356,7 +387,105 @@ function Conversation() {
         setBusy(false);
       }
     },
-    [desks.current, open, troubleHere],
+    [troubleHere],
+  );
+
+  /**
+   * Send one message.
+   *
+   * The folder is still asked for here when there is not one, because a first
+   * launch with nothing remembered is a conversation and nothing else — the
+   * picker only exists once there is something to pick.
+   *
+   * The one thing that can come between typing and sending is an estimate, and
+   * only for a job big enough to be worth interrupting for (BACKLOG F7).
+   * Everything else goes straight through with nothing said about money at all.
+   */
+  const send = useCallback(
+    async (text: string) => {
+      const before = desks.current;
+      setDesks((current) =>
+        current.current === null
+          ? current
+          : changeCurrent(current, (one) => ({ ...one, turns: [...one.turns, said('you', text)] })),
+      );
+
+      if (before === null) {
+        if (!bridge.desktop) return;
+        setBusy(true);
+        const picked = await bridge.chooseFolder().finally(() => setBusy(false));
+        if (!picked.ok) {
+          setPickerTrouble({ path: '', trouble: picked.trouble });
+          return;
+        }
+        if (picked.value === null) {
+          setPickerTrouble({
+            path: '',
+            trouble: {
+              what: 'I still do not have a folder to work in.',
+              because: NO_FOLDER_YET,
+              actionLabel: 'Got it',
+            },
+          });
+          return;
+        }
+        await open(picked.value);
+        // The sentence goes on the desk that has just been made, so it is not
+        // lost with the screen it was typed on.
+        setDesks((current) =>
+          changeCurrent(current, (one) => ({ ...one, turns: [...one.turns, said('you', text)] })),
+        );
+      }
+
+      // Priced against what this project has actually cost so far, which on a
+      // first visit is nothing — and the estimate then says so in its own words
+      // rather than quoting a precision it does not have.
+      const desk = currentDesk(desks);
+      const priced = quote(desk?.jobs ?? [], desk?.spent?.total ?? null, text);
+      const asking = priced.prompt;
+      if (asking !== null) {
+        setDesks((current) =>
+          changeCurrent(current, (one) => ({
+            ...one,
+            turns: [...one.turns, estimated(text, asking)],
+          })),
+        );
+        return;
+      }
+
+      await deliver(text, priced.task);
+    },
+    [deliver, desks, open],
+  );
+
+  /**
+   * The answer to "this is a bigger job".
+   *
+   * Saying no does not throw the message away and does not send a smaller
+   * version of it on somebody's behalf — it says one sentence and leaves the
+   * next move with them. Guessing at "smaller" would be us deciding what to
+   * build, which is the one thing this confirmation exists to avoid.
+   */
+  const answerEstimate = useCallback(
+    (answered: EstimateTurn, go: boolean) => {
+      setDesks((current) =>
+        changeCurrent(current, (one) => ({
+          ...one,
+          turns: one.turns.flatMap((turn): Turn[] => {
+            if (turn.kind !== 'estimate' || turn.id !== answered.id) return [turn];
+            return go
+              ? [{ ...turn, answered: 'went-ahead' }]
+              : [{ ...turn, answered: 'smaller' }, said('graphe', smallerFirst)];
+          }),
+        })),
+      );
+      // The message was never sent, so sending it now is the whole of "go
+      // ahead". Sized again rather than remembered: the same sentence gives the
+      // same answer, and one fewer thing on the turn is one fewer thing to keep
+      // in step.
+      if (go) void deliver(answered.text, sizeUp(answered.text));
+    },
+    [deliver],
   );
 
   const respond = useCallback((turnId: string, callId: string, decision: Decision) => {
@@ -528,13 +657,17 @@ function Conversation() {
 
           {switching && recent !== null ? (
             <div className="topbar__switcher" role="menu">
-              <ProjectPicker
+              <ProjectMenu
                 projects={recent}
                 openPath={desks.current}
                 onOpen={(project) => void open(project.path)}
                 onForget={(project) => void forget(project)}
                 onBrowse={() => void browse()}
-                compact
+                editor={editor}
+                onOpenInEditor={openInEditor}
+                onRevealFolder={revealFolder}
+                showMe={preferences.showMe}
+                onShowMe={changeShowMe}
               />
             </div>
           ) : null}
@@ -557,7 +690,14 @@ function Conversation() {
         ) : (
           <div className="thread">
             {desk.turns.map((turn) => (
-              <Turnstile key={turn.id} turn={turn} onRespond={respond} onDismiss={dismiss} />
+              <Turnstile
+                key={turn.id}
+                turn={turn}
+                onRespond={respond}
+                onDismiss={dismiss}
+                onAnswerEstimate={answerEstimate}
+                showMe={preferences.showMe}
+              />
             ))}
           </div>
         )}
@@ -631,6 +771,7 @@ function Conversation() {
           onName={(versionId, name) => void nameVersion(versionId, name)}
           onDismissPutBack={dismissPutBack}
           busy={busy}
+          showMe={preferences.showMe}
         />
       ) : null}
 
@@ -653,10 +794,17 @@ function Turnstile({
   turn,
   onRespond,
   onDismiss,
+  onAnswerEstimate,
+  showMe,
 }: {
   turn: Turn;
   onRespond: (turnId: string, callId: string, decision: Decision) => void;
   onDismiss: (turnId: string) => void;
+  onAnswerEstimate: (turn: EstimateTurn, go: boolean) => void;
+  /** Name the real command, path or operation under each step (BACKLOG D1).
+   *  The words themselves were recorded when the step happened, so turning this
+   *  on explains the conversation you already had. */
+  showMe: boolean;
 }) {
   switch (turn.kind) {
     case 'said':
@@ -667,7 +815,14 @@ function Turnstile({
       );
 
     case 'did':
-      return <ActivityLine state={turn.state} label={turn.label} detail={turn.detail} />;
+      return (
+        <ActivityLine
+          state={turn.state}
+          label={turn.label}
+          detail={turn.detail}
+          real={showMe ? turn.real : undefined}
+        />
+      );
 
     case 'asked':
       // Once it is answered the question stops being a control and becomes part
@@ -678,6 +833,7 @@ function Turnstile({
           question={turn.question}
           detail={turn.detail}
           consequence={turn.consequence}
+          technical={showMe ? turn.real : undefined}
           confirmLabel="Yes, go ahead"
           cancelLabel="No, leave it"
           onConfirm={() => onRespond(turn.id, turn.callId, 'yes')}
@@ -688,6 +844,49 @@ function Turnstile({
           state={turn.answered === 'yes' ? 'done' : 'failed'}
           label={turn.question}
           detail={turn.answered === 'yes' ? 'You said yes.' : 'You said no, so I left it alone.'}
+          real={showMe ? turn.real : undefined}
+        />
+      );
+
+    case 'estimate':
+      // Same shape as any other question, and the same grammar: the option that
+      // spends less carries the visual weight. Every word of it is written by
+      // src/cost/phrasing.ts and none of it by this file.
+      return turn.answered === null ? (
+        <ConfirmChange
+          question={turn.prompt.title}
+          detail={turn.prompt.body}
+          consequence={turn.prompt.note}
+          confirmLabel={turn.prompt.confirm}
+          cancelLabel={turn.prompt.alternative}
+          onConfirm={() => onAnswerEstimate(turn, true)}
+          onCancel={() => onAnswerEstimate(turn, false)}
+        />
+      ) : (
+        // Answered, it stops being a control and becomes part of the record —
+        // the same shape the Guard's own questions take once they have been
+        // answered, for the same reason: a live pair of buttons for a decision
+        // already taken is how people learn to click without reading.
+        <ActivityLine
+          state="done"
+          label={turn.prompt.title}
+          detail={
+            turn.answered === 'went-ahead'
+              ? 'You said go ahead.'
+              : 'You said you would rather start smaller.'
+          }
+        />
+      );
+
+    case 'tidying':
+      // Behind this is Pi's own tidying of a long conversation. In front of it
+      // is one plain sentence, from src/cost/phrasing.ts — and, for anyone who
+      // asked, its real name underneath.
+      return (
+        <ActivityLine
+          state={turn.state}
+          label={longConversation.tidying}
+          real={showMe ? behind.tidying : undefined}
         />
       );
 

@@ -27,6 +27,7 @@
  */
 
 import type { Attachment } from '../components/Attachments';
+import type { Task, TaskObservation } from '../cost/estimate';
 import type { AgentNotice, PutBack, SavedVersion } from './ipc';
 import { applySpend, type SpendView } from './spend';
 import { applyEvent, type Turn } from './thread';
@@ -47,6 +48,28 @@ export type Desk = {
   versions: readonly SavedVersion[];
   /** The offer to undo the last "put back", while it is still on offer. */
   putBack: PutBack | null;
+
+  /**
+   * What jobs like this have actually cost in this project (COST-DESIGN §2).
+   *
+   * Per desk, because the estimate should be about *this* project. A portfolio
+   * of four pages and a client site with a shop in it do not cost the same to
+   * work on, and an average across both is a number that describes neither.
+   */
+  jobs: readonly TaskObservation[];
+  /** The job in flight, and when it started, so what it came to can be
+   *  measured when it settles. Null when nothing is running. */
+  doing: { task: Task; startedAt: number } | null;
+  /**
+   * How much of this sitting's running total has already been attributed to a
+   * finished job.
+   *
+   * The shell's ledger reports the whole sitting each time it settles, so each
+   * job is charged the difference. Without this the second job of an afternoon
+   * would be recorded as costing everything spent since lunch, and every
+   * estimate after it would be nonsense.
+   */
+  counted: number;
 };
 
 /** Every desk, and which one is in front. */
@@ -66,6 +89,9 @@ function blankDesk(path: string, name: string): Desk {
     attachments: [],
     versions: [],
     putBack: null,
+    jobs: [],
+    doing: null,
+    counted: 0,
   };
 }
 
@@ -122,14 +148,55 @@ export function changeCurrent(desks: Desks, change: (desk: Desk) => Desk): Desks
  * has counted something the thread has not yet mentioned is a meter nobody
  * trusts.
  */
-export function receive(desks: Desks, notice: AgentNotice): Desks {
+export function receive(desks: Desks, notice: AgentNotice, at: number = Date.now()): Desks {
   const path = notice.project ?? desks.current;
   if (path === null) return desks;
   return changeDesk(desks, path, (desk) => ({
     ...desk,
     turns: applyEvent(desk.turns, notice.event),
     spent: applySpend(desk.spent, notice.event),
+    ...measure(desk, notice, at),
   }));
+}
+
+/**
+ * File what the last job actually came to, when the shell says the sitting has
+ * settled and told us the ledger.
+ *
+ * The next estimate is built from these, which is the whole of what makes it a
+ * measurement rather than a guess (COST-DESIGN §2, and the honest note at the
+ * top of `estimate.ts`). Only the difference since the last settle is recorded
+ * — see `Desk.counted`.
+ */
+function measure(
+  desk: Desk,
+  notice: AgentNotice,
+  at: number,
+): Pick<Desk, 'jobs' | 'doing' | 'counted'> {
+  const unchanged = { jobs: desk.jobs, doing: desk.doing, counted: desk.counted };
+  if (notice.event.type !== 'spend-summary') return unchanged;
+
+  const total = notice.event.summary.total;
+  const spent = total.minor - desk.counted;
+  // Nothing to file: no job in flight, or it cost nothing measurable. A zero is
+  // not an observation, and recording one would drag every later estimate down.
+  if (desk.doing === null || spent <= 0) {
+    return { jobs: desk.jobs, doing: null, counted: Math.max(desk.counted, total.minor) };
+  }
+
+  return {
+    jobs: [
+      ...desk.jobs,
+      {
+        ...desk.doing.task,
+        cost: { minor: spent, currency: total.currency },
+        durationMs: Math.max(0, at - desk.doing.startedAt),
+        at,
+      },
+    ],
+    doing: null,
+    counted: total.minor,
+  };
 }
 
 /** Forget a project entirely — used when its folder has gone. If it was the one

@@ -5,7 +5,7 @@
   "description": "A gentle coding agent for designers",
   "license": "MIT",
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/main.mjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -13,7 +13,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "shot": "node scripts/screenshot.mjs"
+    "shot": "node scripts/screenshot.mjs",
+    "app:build": "node scripts/build-electron.mjs",
+    "app:electron": "npm run app:build && electron .",
+    "app": "concurrently -k -n vite,app -c gray,cyan \"node scripts/dev-server.mjs\" \"npm run app:electron\""
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

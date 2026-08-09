@@ -1,0 +1,90 @@
+.composer {
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  transition: border-color var(--dur-ui) var(--ease-hover);
+}
+
+/* The composer as a whole is the focus target, so the inner textarea suppresses
+   its own ring and the container carries the state instead. */
+.composer:focus-within {
+  border-color: var(--border-strong);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 3px var(--accent-soft);
+}
+
+.composer__input:focus-visible {
+  outline: none;
+}
+
+.composer__input {
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font-size: var(--text-base);
+  line-height: 1.6;
+  padding: var(--space-1) var(--space-2);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.composer__input::placeholder {
+  color: var(--text-faint);
+}
+
+.composer__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2) 0;
+}
+
+.composer__hint {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.composer__send {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  flex-shrink: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* 44px hit area without changing the visual size */
+.composer__send::after {
+  content: '';
+  position: absolute;
+  width: 44px;
+  height: 44px;
+}
+
+.composer__send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* One line, and it makes the whole app feel real */
+.composer__send:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .composer__send:not(:disabled):hover {
+    opacity: 0.9;
+  }
+}

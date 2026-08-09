@@ -1,0 +1,106 @@
+/* A fenced block of code.
+   Nothing here animates on arrival: code appears inside a reply, which is the
+   most frequent thing in the app, and the frequency rule in
+   notes/strategy/UI-DESIGN.md says the frequent things stay still. The only
+   transitions are on hover and press, which are the two the rule allows. */
+
+.codeblock {
+  margin: var(--space-3) 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.codeblock__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.codeblock__lang {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+/* Always present rather than appearing on hover: a control that only exists for
+   a mouse is a control that does not exist for the keyboard. */
+.codeblock__copy {
+  position: relative;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* 44px of hit area around a 12px label. */
+.codeblock__copy::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.codeblock__copy:active {
+  transform: scale(0.97);
+}
+
+.codeblock__copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .codeblock__copy:hover {
+    color: var(--text);
+  }
+}
+
+/* The plain and the coloured block are the same shape on purpose — same font,
+   same size, same line height, same padding — so the upgrade from one to the
+   other changes colour and nothing else. */
+.codeblock__code pre {
+  margin: 0;
+  padding: var(--space-3);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.codeblock .codeblock__code code {
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* Long lines scroll, and the scroller takes focus so a keyboard can reach the
+   end of them. */
+.codeblock__code pre:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .codeblock__copy {
+    transition: color var(--dur-micro) var(--ease-hover);
+  }
+
+  .codeblock__copy:active {
+    transform: none;
+  }
+}

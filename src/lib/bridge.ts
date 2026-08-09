@@ -45,13 +45,44 @@ function done<T>(value: T): Result<T> {
 /* A browser tab, with nothing underneath it                                   */
 /* -------------------------------------------------------------------------- */
 
-const PREVIEW_REPLY =
-  'This is Graphe running in a browser tab, so there are no files here for me to open and nothing I can build for you yet. Everything you can see is real — the conversation, and the questions I ask before I change anything. Open the desktop app and I will get to work.';
+const PREVIEW_REPLY = `This is Graphe running in a browser tab, so there are no files here for me to open and nothing I can build for you yet.
 
-/** Roughly a phrase at a time, so the streaming path is genuinely exercised
- *  rather than one delta pretending to be many. */
+**What is real on this page**
+
+- the conversation, streamed the way the desktop app streams it
+- the questions I ask before I change anything, and the answers you give
+- the meter in the corner, with the same arithmetic behind it
+
+What is not real is anything that would reach a folder. In the app, this is where the work itself would arrive — written in your own tokens, with a version saved before it, so putting it back is one click:
+
+\`\`\`css
+.hero__title {
+  font-size: var(--text-2xl);
+  letter-spacing: -0.02em;
+  margin-block: var(--space-5) var(--space-3);
+}
+\`\`\`
+
+Open the desktop app and I will get to work. If you came to look at the interface rather than to use it, add \`?gallery\` to the address — every piece of it is on one page there, in both themes.`;
+
+/**
+ * A couple of words at a time, so the streaming path is genuinely exercised
+ * rather than one delta pretending to be many.
+ *
+ * Small pieces matter more than they look. They are how the formatting gets
+ * tested against the state it is nearly always in: a list with one and a half
+ * bullets, a code fence that has been opened and not yet closed, a sentence
+ * that ends in the middle of a word. Whatever renders a reply has to hold all
+ * of those without flinching, and a preview that arrived in one lump would
+ * never have shown us.
+ */
 function inPieces(text: string): string[] {
-  return text.split(/(?<=[,.] )/);
+  const words = text.split(/(?<=\s)/);
+  const pieces: string[] = [];
+  for (let index = 0; index < words.length; index += 2) {
+    pieces.push(words.slice(index, index + 2).join(''));
+  }
+  return pieces;
 }
 
 /**
@@ -115,7 +146,7 @@ function previewBridge(): Bridge {
 
     async prompt(): Promise<Result<null>> {
       for (const piece of inPieces(PREVIEW_REPLY)) {
-        await new Promise((wake) => setTimeout(wake, 24));
+        await new Promise((wake) => setTimeout(wake, 40));
         send({ type: 'message-delta', text: piece });
       }
       send({ type: 'message-end' });

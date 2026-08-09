@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import ActivityLine from '../components/ActivityLine';
+import type { Attachment } from '../components/Attachments';
+import Composer from '../components/Composer';
 import ConfirmChange from '../components/ConfirmChange';
 import CostMeter from '../components/CostMeter';
 import ErrorCard from '../components/ErrorCard';
@@ -36,6 +38,64 @@ const bigJobNote = estimateNote(estimate);
 
 type Theme = 'system' | 'light' | 'dark';
 
+/* -------------------------------------------------------------------------- */
+/* Copy for the formatting section                                             */
+/* -------------------------------------------------------------------------- */
+
+/** A reply with everything in it the agent actually writes: emphasis, a
+ *  numbered list, a fenced block, a table, a quote, a link, inline code. */
+const FORMATTED = `Done — the hero is built from your Figma frame, and I kept to the spacing scale.
+
+**Two things worth knowing**
+
+1. The frame puts 68px above the headline, which is not a step on your scale. I used **72px**, the nearest one you already use everywhere else.
+2. Your \`--text-2xl\` was only defined in the light theme, so dark was falling back to the browser's own size. It is set in both now.
+
+\`\`\`css
+.hero__title {
+  font-size: var(--text-2xl);
+  letter-spacing: -0.02em;
+  margin-block: var(--space-5) var(--space-3);
+}
+\`\`\`
+
+| What | In the frame | Built |
+| --- | --- | --- |
+| Space above the headline | 68px | 72px |
+| Cards | 3 × 320px | 3 × 320px |
+| Container | 1024px | 1024px |
+
+> The cards are the only part that does not sit on your 12-column grid at 1024px.
+
+The type scale came from [the file you linked](https://www.figma.com/design/8Kx2/Landing-v4) — say the word and I will widen the container instead.`;
+
+/** The same renderer, mid-sentence, with a fence that has been opened and not
+ *  closed. This is what the thread looks like for most of a reply's life. */
+const HALF_WRITTEN = `Widening the container to 1200px. Here is the change so far:
+
+\`\`\`css
+.hero {
+  max-width: 1200px;
+  padding-inl`;
+
+/** Stands in for somebody's screenshot. It is drawn here rather than fetched
+ *  because the gallery has to render with nothing behind it — and because the
+ *  colours in a thumbnail belong to the user's work, not to our chrome. */
+const SCREENSHOT = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48">' +
+    '<rect width="48" height="48" fill="#efe9e3"/>' +
+    '<rect x="6" y="9" width="34" height="7" rx="2" fill="#b8492c"/>' +
+    '<rect x="6" y="22" width="24" height="4" rx="2" fill="#cdc6bd"/>' +
+    '<rect x="6" y="31" width="30" height="4" rx="2" fill="#cdc6bd"/>' +
+    '</svg>',
+)}`;
+
+const ATTACHED: readonly Attachment[] = [
+  { id: 'a1', kind: 'figma', name: 'Landing v4', note: 'Figma file', url: 'https://figma.com' },
+  { id: 'a2', kind: 'image', name: 'hero-sketch.png', note: 'PNG · 1.2 MB', preview: SCREENSHOT },
+  { id: 'a3', kind: 'document', name: 'Brand guidelines.pdf', note: 'PDF · 4.8 MB' },
+];
+
 function Section({ title, note, children }: { title: string; note: string; children: ReactNode }) {
   return (
     <section className="gsection">
@@ -52,6 +112,7 @@ function noop() {}
 
 export default function Gallery() {
   const [theme, setTheme] = useState<Theme>('system');
+  const [attached, setAttached] = useState<readonly Attachment[]>(ATTACHED);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -65,7 +126,7 @@ export default function Gallery() {
         <div>
           <h1 className="gallery__title">Graphe interface kit</h1>
           <p className="gallery__sub">
-            The six presentational pieces of the conversation, with real copy. Motion follows
+            Every presentational piece of the conversation, with real copy. Motion follows
             notes/strategy/UI-DESIGN.md — most of what is on this page deliberately does not move.
           </p>
         </div>
@@ -106,6 +167,26 @@ export default function Gallery() {
                 the container to 1200px, or drop the card
               </Message>
             </div>
+          </Section>
+
+          <Section
+            title="Formatting"
+            note="Graphe's turns are read as Markdown; yours are left exactly as typed, so asterisks around a measurement stay asterisks. Code is plain first and gains its colour a moment later — the highlighter is a large thing to load and no reply waits for it."
+          >
+            <div className="thread-sample">
+              <Message from="you">
+                Make the space above the headline *roughly* 40px — I’ll fine-tune it after.
+              </Message>
+              <Message from="graphe">{FORMATTED}</Message>
+              <Message from="graphe" streaming>
+                {HALF_WRITTEN}
+              </Message>
+            </div>
+            <p className="gallery__caption">
+              The last one is mid-sentence, with a fence opened and not yet closed. That is the state
+              a reply is in for most of its life, so it is the state worth looking at: the block
+              simply grows a line at a time, and nothing flickers as it does.
+            </p>
           </Section>
 
           <Section
@@ -171,6 +252,26 @@ export default function Gallery() {
         </div>
 
         <div className="gallery__col">
+          <Section
+            title="The composer"
+            note="Drag a file onto it, paste a screenshot, paste a Figma link, or press the paperclip. Being dropped on turns the box it is already in into the target — no dashed rectangle drawn inside a solid one, nothing that bounces."
+          >
+            <div className="composer-sample">
+              <Composer
+                onSend={noop}
+                attachments={attached}
+                onAttachmentsChange={setAttached}
+                placeholder="Describe it, or drop a Figma link or a screenshot"
+              />
+            </div>
+            <p className="gallery__caption">
+              A Figma link keeps its own chip and its own name, because it is a place rather than a
+              copy. This composer is live — drop something on it. Nothing is sent anywhere: the
+              chips stay put after a message goes, and the hint says so instead of letting anyone
+              believe a picture went along with their sentence.
+            </p>
+          </Section>
+
           <Section
             title="Before something risky"
             note="Rises 12px with a fade over 200ms and then stays put, beside the work. Never a modal over the preview — a dimmed backdrop is the grammar of an error, and being asked a question is ordinary."

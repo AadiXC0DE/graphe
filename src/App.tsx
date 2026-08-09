@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useStickToBottom } from 'use-stick-to-bottom';
 import ActivityLine, { type ActivityState } from './components/ActivityLine';
+import type { Attachment } from './components/Attachments';
 import Composer from './components/Composer';
 import ConfirmChange from './components/ConfirmChange';
 import CostMeter from './components/CostMeter';
@@ -11,6 +13,7 @@ import { retryHonesty, sessionSummary } from './cost/phrasing';
 import { bridge } from './lib/bridge';
 import { describeCall } from './lib/describe';
 import type { Decision, OpenedProject, Trouble } from './lib/ipc';
+import { usePrefersReducedMotion } from './lib/motion';
 import { applySpend, type SpendView } from './lib/spend';
 import './App.css';
 
@@ -218,7 +221,50 @@ function Conversation() {
    */
   const [spent, setSpent] = useState<SpendView | null>(null);
 
-  const foot = useRef<HTMLDivElement>(null);
+  /**
+   * What has been brought in: dropped files, pasted screenshots, Figma links.
+   *
+   * They live here rather than inside the composer because an attachment is
+   * part of what somebody is preparing to say, and outlives any one keystroke.
+   *
+   * They are not sent. Nothing on this list reaches the agent yet, so nothing
+   * pretends to: sending a message leaves the chips exactly where they were,
+   * and the composer says as much in its own hint rather than letting somebody
+   * believe a picture went along with their sentence. Wiring them through is a
+   * separate piece of work with its own consequences.
+   */
+  const [attachments, setAttachments] = useState<readonly Attachment[]>([]);
+
+  /**
+   * Following the reply, until somebody would rather read something else.
+   *
+   * The thread used to be scrolled to the end on every change to `turns`, which
+   * during a stream is every token. Scrolling up to re-read the paragraph above
+   * meant being dragged back down a few milliseconds later, over and over, and
+   * it was the worst thing in the interface.
+   *
+   * `use-stick-to-bottom` separates the two cases the old effect could not tell
+   * apart: it watches the content with a ResizeObserver, so it knows a scroll it
+   * caused from a scroll a person caused, and it lets go the instant the wheel
+   * turns upward. Sticking is `instant` in both directions — the thread grows
+   * while the reply streams, and animating that would mean the page is
+   * permanently gliding under the words somebody is trying to read.
+   */
+  const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom({
+    initial: 'instant',
+    resize: 'instant',
+  });
+  const reducedMotion = usePrefersReducedMotion();
+
+  /* The one scroll a person asks for by name, so it is allowed to be a movement
+     rather than a jump — a spring, damped so it settles instead of bouncing,
+     and instant for anyone who has asked for less of that. It is interruptible:
+     touching the wheel on the way down stops it where it is. */
+  const jumpToLatest = useCallback(() => {
+    void scrollToBottom({
+      animation: reducedMotion ? 'instant' : { damping: 0.9, stiffness: 0.1, mass: 1 },
+    });
+  }, [scrollToBottom, reducedMotion]);
 
   const say = useCallback((from: MessageAuthor, text: string) => {
     setTurns((current) => [...current, { kind: 'said', id: newId(), from, text, streaming: false }]);
@@ -235,13 +281,6 @@ function Conversation() {
       }),
     [],
   );
-
-  /* Keep the newest thing in view. No smooth scrolling — the thread grows while
-     the reply streams, and animating that would mean the page is permanently
-     gliding under the words somebody is trying to read. */
-  useEffect(() => {
-    foot.current?.scrollIntoView({ block: 'end' });
-  }, [turns]);
 
   const halt = useCallback(() => {
     void bridge.stop();
@@ -349,10 +388,10 @@ function Conversation() {
   const empty = turns.length === 0;
 
   return (
-    <main className={`app ${empty ? 'app--empty' : ''}`}>
+    <main className={`app ${empty ? 'app--empty' : ''}`} ref={scrollRef}>
       {bridge.desktop ? <div className="app__titlebar" /> : null}
 
-      <div className="app__column">
+      <div className="app__column" ref={contentRef}>
         {empty ? (
           <div className="welcome">
             <h1 className="welcome__title">What do you want to make?</h1>
@@ -363,12 +402,39 @@ function Conversation() {
             {turns.map((turn) => (
               <Turnstile key={turn.id} turn={turn} onRespond={respond} onDismiss={dismiss} />
             ))}
-            <div ref={foot} className="thread__foot" />
           </div>
         )}
 
         <div className="app__composer">
-          <Composer onSend={(text) => void send(text)} autoFocus busy={busy} />
+          {/* Only once somebody has scrolled away from the end, and quiet even
+              then: it is an offer, not an alert. It stays in the document while
+              it is hidden so the transition works in both directions, and goes
+              inert so the keyboard cannot land on something invisible. */}
+          <button
+            type="button"
+            className={`jump ${empty || isAtBottom ? '' : 'jump--shown'}`}
+            onClick={jumpToLatest}
+            inert={empty || isAtBottom}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M8 3v10M8 13l-4.5-4.5M8 13l4.5-4.5"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Jump to latest
+          </button>
+
+          <Composer
+            onSend={(text) => void send(text)}
+            autoFocus
+            busy={busy}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+          />
           {busy ? (
             <button type="button" className="app__stop" onClick={halt}>
               Stop

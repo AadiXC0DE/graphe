@@ -195,3 +195,9 @@
   max-width: 680px;
   padding: var(--space-2) var(--space-4) var(--space-2) 0;
 }
+
+/* The composer at the width it has in the app, so the chips wrap where they
+   would really wrap. */
+.composer-sample {
+  max-width: 680px;
+}

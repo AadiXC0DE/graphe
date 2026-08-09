@@ -7,7 +7,8 @@ Working from [research/04](research/04-positioning-and-naming.md). Two rules gov
 2. **Prove with the artifact, not the adjective.** Show the real diff, the real preview, the real
    published URL. Never claim it is simple.
 
-`{Name}` is a placeholder — the name is unresolved.
+Named for γραφή — *drawing*, *line*. Pair it with the descriptor in metadata and titles
+("Graphe — the coding agent that starts from your design") so search intent stays clean.
 
 ---
 
@@ -19,7 +20,7 @@ Working from [research/04](research/04-positioning-and-naming.md). Two rules gov
 > picture, and publishes when you're ready.
 >
 > ```
-> brew install --cask {name}
+> brew install --cask graphe
 > ```
 > <sub>Copy · for Mac · [what's this?]</sub>
 >
@@ -106,7 +107,7 @@ accommodation (a user statement). Compare Rive: "No mockups, no prototypes, no h
 > Connect Claude, ChatGPT or Copilot and the work goes through your own account. There's a running
 > meter so you always know what you've spent, and a limit you set yourself.
 >
-> Nothing is metered by us, because there's no us in the middle. {Name} is free and open source, and
+> Nothing is metered by us, because there's no us in the middle. Graphe is free and open source, and
 > there's no account to make.
 
 **This is the strongest section on the page after Section 4, and the research says so.** Designers are
@@ -146,7 +147,7 @@ funnel. Done well it is thirty seconds and a small feeling of competence.
 > Open Terminal — press ⌘Space, type "terminal", hit return. Paste this in and press return again.
 >
 > ```
-> brew install --cask {name}
+> brew install --cask graphe
 > ```
 > **[Copy]**
 >
@@ -181,7 +182,7 @@ quotes around "Terminal". Treating it as unremarkable is what makes it unremarka
 
 > ### Made by people who watched designers get stuck.
 >
-> {Name} is open source. Take it apart, file an issue, send a patch.
+> Graphe is open source. Take it apart, file an issue, send a patch.
 >
 > **[Download for Mac]** · [GitHub] · [How it works]
 

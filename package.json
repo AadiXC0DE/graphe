@@ -4,6 +4,7 @@
   "private": true,
   "description": "A gentle coding agent for designers",
   "license": "MIT",
+  "author": "Graphe contributors",
   "type": "module",
   "main": "dist-electron/main.mjs",
   "scripts": {
@@ -16,7 +17,13 @@
     "shot": "node scripts/screenshot.mjs",
     "app:build": "node scripts/build-electron.mjs",
     "app:electron": "npm run app:build && electron .",
-    "app": "concurrently -k -n vite,app -c gray,cyan \"node scripts/dev-server.mjs\" \"npm run app:electron\""
+    "app": "concurrently -k -n vite,app -c gray,cyan \"node scripts/dev-server.mjs\" \"npm run app:electron\"",
+    "licenses": "node scripts/third-party-licenses.mjs",
+    "licenses:check": "node scripts/third-party-licenses.mjs --check",
+    "icon": "node scripts/make-icon.mjs",
+    "package": "node scripts/package-app.mjs",
+    "package:quick": "node scripts/package-app.mjs --arm64",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

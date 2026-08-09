@@ -46,10 +46,11 @@ or in connection with the software or the use or other dealings in the software.
 ## Everything else
 
 React, Vite, and the rest of the runtime dependencies ship under MIT or similarly permissive
-licences. A complete, generated manifest of every bundled package and its licence text is produced
-at build time and included in the distributed application.
+licences. The complete list — every package redistributed inside the application bundle, its version,
+its licence and its full licence text — is in **[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)**.
 
-> **TODO before the first public release:** wire `scripts/third-party-licenses.mjs` into the build so
-> this manifest is generated from the actual dependency tree rather than maintained by hand. A
-> hand-maintained list goes stale, and a stale licence file is a compliance problem, not a tidiness
-> one.
+That file is generated, never edited. `scripts/third-party-licenses.mjs` walks the dependency tree
+that actually ships and reads each package's own licence, and `npm run package` regenerates it before
+every build, so it cannot describe a tree we are no longer shipping. `npm run licenses:check` fails if
+the committed file has fallen behind. Both this file and the generated one are copied into the app at
+`Contents/Resources/`.

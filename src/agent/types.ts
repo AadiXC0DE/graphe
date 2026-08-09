@@ -101,6 +101,23 @@ export type AgentEvent =
    * activity feed uses — 'Changing contact.html', never a tool or model name.
    */
   | { type: 'spend'; amount: Money; label: string; reason: SpendReason }
+  /**
+   * A long conversation is being tidied up.
+   *
+   * COST-DESIGN §5: the real driver of runaway cost is a conversation that grew
+   * huge, and the sentence people are usually shown about it is the kind that
+   * makes a designer feel stupid. So the app says one plain thing — "we've
+   * covered a lot in here, I'll tidy up my notes" — and then does it.
+   *
+   * Behind it is the agent runtime's own tidying, not ours. REUSE-PI.md is
+   * explicit: if we find ourselves writing a summariser, stop. These two events
+   * exist only so the window can narrate something Pi is doing, whether we asked
+   * for it or Pi decided on its own.
+   */
+  | { type: 'tidying' }
+  /** Finished. `ok` is false when it could not be done, which changes nothing
+   *  about the conversation — it simply stays long. */
+  | { type: 'tidied'; ok: boolean }
   /** The agent has finished everything it was doing, tool calls included. The
    *  moment the session split is worth working out. */
   | { type: 'settled' }

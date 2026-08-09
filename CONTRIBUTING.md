@@ -17,6 +17,13 @@ went wrong", money.
 There are tests that fail the build if banned vocabulary reaches a user-facing string. They are not
 being fussy — this is the product.
 
+**The one exemption is `src/lib/showme.ts`.** "Show me" exists to name the real command, the real
+path and the real git operation for anybody who wants them, and softening those into friendlier words
+would make the feature useless and slightly patronising at the same time. So the machinery's own
+vocabulary is allowed in that file and nowhere else, it is always secondary to a sentence that
+already said what happened in plain language, and it is off by default. If you find yourself wanting
+to put a command anywhere else, that is the signal that it belongs there instead.
+
 ## Two rules that aren't negotiable
 
 **Safety cannot be made optional.** Confirmations for destructive operations, secrets, and deploys
@@ -58,6 +65,18 @@ New behaviour needs tests. Safety-related changes need adversarial tests — ass
 confused or being manipulated, and write the case that catches it.
 
 Commit messages: plain sentences explaining *why*, not what. The diff already says what.
+
+## Shipping it
+
+`npm run package` builds a disk image and a zip for both Mac architectures, regenerates the
+third-party licence manifest, and then opens the bundle it just made and checks it is what we meant.
+The whole release procedure — versioning, tagging, the Homebrew cask, and why the app is ad-hoc
+signed rather than notarized — is in [RELEASING.md](RELEASING.md).
+
+Two things there are easy to get wrong and expensive to discover late: the agent runtime is left
+external by the shell build and has to arrive through electron-builder's dependency copy, and an
+unsigned app does not launch on Apple Silicon at all. `scripts/verify-package.mjs` checks both, and
+a failing check means the build does not go out.
 
 ## Architecture, briefly
 

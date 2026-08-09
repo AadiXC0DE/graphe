@@ -247,3 +247,25 @@
     transform: none;
   }
 }
+
+/* "Show me": what a version actually is, said once at the foot of the rail
+   rather than once per row. Deliberately the smallest and quietest text in the
+   rail — it is a footnote for whoever went looking, not a caption on the
+   feature. */
+.rail__real {
+  margin: var(--space-4) var(--space-4) 0;
+  padding: var(--space-3) 0 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.rail__real p {
+  margin: 0 0 var(--space-2);
+}
+
+.rail__real p:last-child {
+  margin-bottom: 0;
+}

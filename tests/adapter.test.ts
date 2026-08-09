@@ -399,12 +399,38 @@ describe('translating one event', () => {
     ).toEqual({ type: 'tool-end', id: 'c1', ok: false });
   });
 
+  /* F8. Tidying a long conversation is Pi's own compaction and never ours
+     (REUSE-PI.md), so the only thing on our side is the narration — and it has
+     to cover the case where Pi decided by itself, or the app goes quiet for
+     twenty seconds with no explanation. */
+  it('narrates a long conversation being tidied, whoever asked for it', () => {
+    for (const reason of ['manual', 'threshold', 'overflow']) {
+      expect(translatePiEvent({ type: 'compaction_start', reason })).toEqual({ type: 'tidying' });
+    }
+  });
+
+  it('closes the tidying off, and does not dress a failed one up as done', () => {
+    expect(
+      translatePiEvent({ type: 'compaction_end', reason: 'manual', aborted: false }),
+    ).toEqual({ type: 'tidied', ok: true });
+    expect(
+      translatePiEvent({ type: 'compaction_end', reason: 'threshold', aborted: true }),
+    ).toEqual({ type: 'tidied', ok: false });
+    expect(
+      translatePiEvent({
+        type: 'compaction_end',
+        reason: 'overflow',
+        aborted: false,
+        errorMessage: 'the summary call failed',
+      }),
+    ).toEqual({ type: 'tidied', ok: false });
+  });
+
   it('says nothing about the events that are not ours', () => {
     for (const event of [
       { type: 'agent_start' },
       { type: 'agent_end', messages: [] },
       { type: 'turn_start' },
-      { type: 'compaction_start', reason: 'threshold' },
       { type: 'queue_update', steering: [], followUp: [] },
       // Pi announces a tool call before the Guard has decided about it. Ours
       // comes from the Guard instead, so this one is dropped on purpose.

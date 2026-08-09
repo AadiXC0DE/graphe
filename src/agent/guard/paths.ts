@@ -6,7 +6,7 @@
  *
  * The trade-off is honest: we cannot follow a symlink that already exists on
  * disk, so a link inside the project pointing out of it is invisible to us.
- * That case belongs to the container boundary (docs/ARCHITECTURE.md, decision 3,
+ * That case belongs to the container boundary (notes/strategy/ARCHITECTURE.md, decision 3,
  * layer 2). What we *can* do is refuse to create one, and refuse anything whose
  * destination we cannot work out with confidence.
  *

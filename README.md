@@ -1,89 +1,137 @@
-# Graphe — a gentle coding agent for designers
+<div align="center">
 
-> **Status: research phase.** Nothing is built yet. This repo currently holds the thinking.
-> Named for γραφή — *drawing*, *line*, *the act of setting something down*.
-> ([why not Pico or Eidos](docs/research/04-positioning-and-naming.md))
+# Graphe
 
-A designer opens a Figma file, describes what they want, and gets a real, working, published web
-page — without meeting a terminal, a git branch, or a deploy config. The code underneath is ordinary
-and exportable. Free and open source, built on the [Pi agent](https://github.com/earendil-works/pi).
+**The coding agent that starts from your design.**
 
-If Claude Code is an 8/10 in difficulty for a designer, this is aiming at 1/10 — without being a toy,
-and without producing worse code.
+Give it a Figma file, a screenshot, or a sentence. It writes real code, shows you every change as a
+picture, and publishes when you're ready.
 
----
+Free · open source · runs on the AI subscription you already have
 
-## The documents
-
-| Doc | What's in it |
-|---|---|
-| **[Differentiators](docs/DIFFERENTIATORS.md)** | **The ten things no other agent has, and why they can't copy them** |
-| [PRD](docs/PRD.md) | Vision, users, the honest risk assessment, scope, v1 cut |
-| [Features](docs/FEATURES.md) | Full catalogue by pillar, each tracing to a documented pain |
-| [UI and motion](docs/UI-DESIGN.md) | Chat-first layout, visual language, motion tokens, anti-patterns |
-| [Cost design](docs/COST-DESIGN.md) | Money in, jargon out — no tokens, no context windows |
-| [Architecture](docs/ARCHITECTURE.md) | Local-first desktop app on Pi, the safety layer, what it costs to run |
-| [Test plan](docs/TEST-PLAN.md) | Safety, functional, and gentleness testing with release gates |
-| [Landing page](docs/LANDING-PAGE.md) | Copy and art direction |
-
-### Research
-
-| Doc | What it settles |
-|---|---|
-| [01 — Pi agent](docs/research/01-pi-agent.md) | Can we build on it, and what it refuses to give us |
-| [02 — Competitive landscape](docs/research/02-competitive-landscape.md) | Who else is here and whether this is defensible |
-| [03 — Designer pain points](docs/research/03-designer-pain-points.md) | Where people actually get stuck, with evidence |
-| [04 — Positioning and naming](docs/research/04-positioning-and-naming.md) | How to talk about it; why the name must change |
+</div>
 
 ---
 
-## What the research settled
+> **Status: early.** The interface, the safety layer, the version history and the cost engine are
+> built and tested. The agent runtime is being wired in now. Not yet ready to install.
 
-**The position is vacant.** Onlook coined "Cursor for Designers", reached 26k stars — and has shipped
-**8 commits and zero features in 8 months**. Figma import was never built. Self-serve signup is closed.
+---
 
-**Credit pricing is driving designers out**, and this is our clearest opening. Real quotes: *"I spent
-over $300 to fix a simple parser bug"* · *"64 AI credits to move a toast 50px"* · *"Hiring a fulltime
-dev will be cheaper than using FigmaMake."* **None of the 14 tools researched offers no-markup
-bring-your-own-subscription for its core agent.**
+## Why this exists
 
-**Nobody has solved Figma import** — not Bolt (which tells you to use screenshot mode), not Figma Make
-(which ignores your design tokens, confirmed by Figma's own support), not Webflow (~75% on clean
-files). That makes it our best differentiator and our biggest technical risk at the same time.
+Designers have started shipping code, and the tools they've been handed come in two shapes.
 
-### The four things that decide whether this works
+**Prompt-to-app builders** get you something visible in minutes, then trap it. Figma Make's zip export
+omits `package.json` and won't run. Lovable has no clean local export. You reach for a real domain, a
+real database, or a developer, and discover the thing you built doesn't travel.
 
-1. **Safety is ours to build.** Pi has no permission system and says sandboxing is out of scope, by
-   design. Our users cannot judge whether a command is dangerous. Largest engineering item, non-negotiable.
-2. **Figma import has to clear a bar nobody has cleared.** Prototype it before committing to anything else.
-3. **The subscription story needs verifying.** Claude Pro through a third-party harness appears to bill
-   metered usage rather than draw on plan limits. If true, the cost pitch needs rewording everywhere.
-4. **Gentle must not mean limited.** The moment a designer hits a wall they can't get past, they go
-   back to hiring a developer. Every simplification needs an escape hatch that doesn't punish them
-   for taking it.
+**Coding agents** produce genuinely good code and hand you a real repo — then assume a terminal, git
+literacy, and the judgment to review a diff. A non-coder's first day with Cursor starts with three
+infrastructure accounts.
+
+Graphe is the third shape: **a real repo, without the machinery.**
+
+---
+
+## What makes it different
+
+**You can always go back.** Every version is kept, with a thumbnail and a plain title. Hover to look,
+click to return — including the change you made an hour ago and regret now. Snapshots happen before
+anything destructive, automatically, and going back is itself undoable.
+
+**You see what changed, as a picture.** A before and after of the page itself, plus a sentence
+describing what moved. Not a wall of code — though the code is one click away whenever you want it.
+
+**It tells you what things cost, in money.** No tokens, no context windows, no model names. An estimate
+before a large job, a running total, and a limit you set. At the end of a session it tells you what you
+spent on real work and what you spent on *its own* retries — a number no metered competitor will ever
+show you.
+
+**Dangerous things are structurally hard.** Every action the agent takes is checked before it runs.
+Nothing outside your project folder, ever. Destructive operations snapshot first. There is no "accept
+everything" mode to switch on, because that switch is the first thing people flip and the last thing
+they should.
+
+**It speaks design.** Leading, tracking, optical alignment, your 8pt grid. Changes come back described
+the same way: "moved the button 8px down, used your brand blue, added a gentle hover."
+
+**Nothing is trapped.** Your project is an ordinary folder with ordinary git from the first second.
+Open it in VS Code tomorrow. Hand it to a developer. There is nothing to export because nothing was
+ever locked in.
 
 ---
 
 ## Built on Pi
 
-The agent runtime underneath Graphe is [**Pi**](https://github.com/earendil-works/pi) by Mario
-Zechner — an excellent, genuinely open agent harness. Graphe is the designer-facing layer on top:
-the safety policy, the visual review, the version timeline, the cost work, and the interface.
+The agent runtime is [**Pi**](https://github.com/earendil-works/pi) by Mario Zechner — an excellent,
+genuinely open agent harness. Graphe is the designer-facing layer on top: the safety policy, the
+visual review, the version timeline, the cost engine, and the interface.
 
-**Graphe is not a fork.** We depend on Pi as a published package, which means Pi's improvements
-arrive by upgrading rather than by merging, and none of our changes fragment their project. If you
-want the terminal-native, developer-facing version of this idea, use Pi directly — it is very good.
+**Graphe is not a fork.** It depends on Pi as a published package, so Pi's improvements arrive by
+upgrading rather than by merging, and nothing here fragments their project. If you want the
+terminal-native, developer-facing version of this idea, use Pi directly — it is very good.
 
-Graphe is MIT licensed, as is Pi. Attribution and licence texts live in
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Graphe is not affiliated with or endorsed by the
-Pi project.
+Licences and attribution: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Graphe is not affiliated
+with or endorsed by the Pi project.
+
+---
+
+## Running it from source
+
+```bash
+git clone https://github.com/AadiXC0DE/graphe
+cd graphe
+npm install
+npm run dev          # the interface, at localhost:5273
+npm run dev -- --open '/?gallery'   # every component, both themes
+```
+
+```bash
+npm test             # 375 tests
+npm run typecheck
+npm run shot <name>  # screenshot the running UI in both themes
+```
+
+---
+
+## How it's built
+
+| | |
+|---|---|
+| **Local-first** | Runs on your machine. No account, no server, no telemetry. Your code never leaves your disk |
+| **Bring your own model** | Connect Claude, ChatGPT or Copilot. Nothing is metered by us, because there is no us in the middle |
+| **Real git underneath** | Version history is ordinary commits with readable messages. The word "commit" never appears in the interface |
+| **Guarded execution** | Every tool call is evaluated before it runs — allow, snapshot first, confirm, or deny |
+
+```
+src/
+├── agent/      the agent runtime and the safety guard
+├── cost/       spend tracking, estimates, limits
+├── history/    version timeline over real git
+├── components/ the interface
+└── styles/     design tokens
+```
+
+Safety notes and how to report a vulnerability: [SECURITY.md](SECURITY.md).
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
 ## Principles
 
-- Never put the user's lack in the subject of a sentence.
-- Every destructive action is snapshotted first, and no confirmation can be globally disabled.
-- The technical truth is always one click away, and never in the way.
-- The project is a real repo from minute one. Nothing to migrate off, ever.
-- If a simplification can't be escaped, it's a trap, not a simplification.
+These are load-bearing, not decoration. Pull requests are measured against them.
+
+- **Never put the user's lack in the subject of a sentence.** Not "you don't need to know git." The
+  subject is their design and their judgment; the machinery is the object being handled.
+- **Every destructive action snapshots first,** and no confirmation can be globally switched off.
+- **The technical truth is always one click away, and never in the way.**
+- **A real repo from minute one.** Nothing to migrate off, ever.
+- **If a simplification can't be escaped, it's a trap, not a simplification.**
+- **Gentle is not the same as limited.**
+
+---
+
+<div align="center">
+<sub>MIT licensed. Built by <a href="https://heyaadi.com">Aaditya Chowdhury</a>.</sub>
+</div>

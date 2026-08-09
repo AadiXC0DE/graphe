@@ -1,6 +1,6 @@
 /** The Guard's policy engine.
  *
- * Pi has no permission system by design (docs/ARCHITECTURE.md, decision 3), and
+ * Pi has no permission system by design (notes/strategy/ARCHITECTURE.md, decision 3), and
  * our users cannot judge whether a command is dangerous. Every tool call the
  * model wants to make passes through `evaluate` before anything runs.
  *

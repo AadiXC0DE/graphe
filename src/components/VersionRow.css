@@ -1,0 +1,149 @@
+/* The timeline. Hovering costs nothing and moves nothing. */
+
+.version-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-width: 420px;
+}
+
+.versionrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: var(--space-2);
+  border-radius: var(--radius-md);
+  /* Colour only — the token comment is explicit that --ease-hover is for hover
+     and colour, and nothing in this row is allowed to move. */
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.versionrow + .versionrow {
+  margin-top: 2px;
+}
+
+.versionrow__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+.versionrow__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.versionrow__thumb {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 38px;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--border-strong);
+  transition: border-color var(--dur-micro) var(--ease-hover);
+}
+
+.versionrow__placeholder {
+  width: 100%;
+  height: 100%;
+}
+
+.versionrow__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.versionrow__title {
+  font-size: var(--text-sm);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.versionrow__time {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.versionrow__badge {
+  margin-left: auto;
+  flex: none;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+}
+
+/* The version on screen is marked by an edge as well as by the badge, so it does
+   not depend on colour alone. --bg-raised rather than --bg-sunken because a row
+   that darkens in the dark theme reads as a hole rather than a highlight. */
+.versionrow--current {
+  background: var(--bg-raised);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.versionrow--current .versionrow__thumb {
+  border-color: var(--border-strong);
+}
+
+.versionrow__restore {
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.versionrow__restore:active {
+  transform: scale(0.97);
+}
+
+.versionrow__restore:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  color: var(--text);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .versionrow:hover {
+    background: var(--bg-raised);
+  }
+
+  .versionrow:hover .versionrow__thumb {
+    border-color: var(--border-strong);
+  }
+
+  .versionrow__restore:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .versionrow__restore:active {
+    transform: none;
+  }
+}

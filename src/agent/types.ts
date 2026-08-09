@@ -1,6 +1,6 @@
 /** Shared contracts between the Pi adapter, the Guard, and the cost ledger.
  *
- * Nothing outside src/agent/pi/ may import Pi directly — see docs/ARCHITECTURE.md.
+ * Nothing outside src/agent/pi/ may import Pi directly — see notes/strategy/ARCHITECTURE.md.
  * Pi shipped three breaking SDK changes in six weeks, so the blast radius of an
  * upgrade has to stay inside one module. These types are ours, not Pi's. */
 

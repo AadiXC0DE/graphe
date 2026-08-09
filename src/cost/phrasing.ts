@@ -1,7 +1,7 @@
 /** Every user-facing sentence the cost module can produce, in one file.
  *
  * It lives here and nowhere else so it can be read end to end and audited as
- * language — test C-01 in docs/COST-DESIGN.md and L-01 in the test plan. Copy
+ * language — test C-01 in notes/strategy/COST-DESIGN.md and L-01 in the test plan. Copy
  * scattered across components cannot be swept; copy in one file can.
  *
  * ## The words that never appear

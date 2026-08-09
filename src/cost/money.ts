@@ -1,6 +1,6 @@
 /** Money, held as whole units of the smallest denomination a currency has.
  *
- * Everything the user ever sees about cost is money — see docs/COST-DESIGN.md §1.
+ * Everything the user ever sees about cost is money — see notes/strategy/COST-DESIGN.md §1.
  * That makes the arithmetic underneath load-bearing, and floats are the wrong
  * tool for it: 0.1 + 0.2 is not 0.3, and a meter that ticks up a few hundred
  * times in a session would drift visibly inside an afternoon.

@@ -1,0 +1,73 @@
+/* One conversation turn.
+   Deliberately free of transitions and keyframes: the frequency rule in
+   notes/strategy/UI-DESIGN.md says the most-seen element in the app never animates, so
+   there is nothing here for prefers-reduced-motion to counter. */
+
+.message {
+  display: block;
+}
+
+.message__who {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  /* --text-muted, not --text-faint: the faint token lands at ~3:1 on both
+     backgrounds, which is under AA for text. Faint is for graphics only. */
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.message__body {
+  font-size: var(--text-base);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The user's own words sit on a surface so the eye can find where each exchange
+   begins; Graphe answers as plain text on the page, because the reply is the
+   subject and a bubble around it is just packaging. */
+.message--you .message__body {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  color: var(--text);
+}
+
+.message--graphe .message__body {
+  color: var(--text);
+  /* Uneven by design — the reply hangs slightly into the margin of its label. */
+  padding-right: var(--space-5);
+}
+
+/* Static, never blinking. It marks "still writing" without becoming decoration. */
+.message__caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+.message__aside {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.message__body code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.05em 0.35em;
+}
+
+.message--you .message__body code {
+  background: var(--bg-raised);
+}

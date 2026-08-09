@@ -43,6 +43,11 @@ Nobody shows the price before the work, and nobody refunds you when the agent br
 their spend went on the agent's mistakes is directly against their interest. **It costs us nothing,
 because we take no cut.**
 
+**And the whole thing is expressed in money, never in jargon.** No tokens, no context windows, no
+model names — a designer has no intuition for any of it and no reason to acquire one. Full design in
+**[COST-DESIGN.md](COST-DESIGN.md)**, including how long conversations get handled without ever
+saying the word "context".
+
 ## 3. Fidelity report — honest about what didn't survive
 
 **The gap:** every tool oversells Figma import. Bolt's own docs tell you to switch to screenshot mode.

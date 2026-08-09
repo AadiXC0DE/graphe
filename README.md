@@ -1,8 +1,8 @@
-# {Name} — a gentle coding agent for designers
+# Graphe — a gentle coding agent for designers
 
 > **Status: research phase.** Nothing is built yet. This repo currently holds the thinking.
-> The name is a placeholder — "Pico" is taken by a direct competitor and a ByteDance hardware brand
-> ([why](docs/research/04-positioning-and-naming.md#1-the-naming-problem--recommend-against-pico)).
+> Named for γραφή — *drawing*, *line*, *the act of setting something down*.
+> ([why not Pico or Eidos](docs/research/04-positioning-and-naming.md))
 
 A designer opens a Figma file, describes what they want, and gets a real, working, published web
 page — without meeting a terminal, a git branch, or a deploy config. The code underneath is ordinary
@@ -20,7 +20,8 @@ and without producing worse code.
 | **[Differentiators](docs/DIFFERENTIATORS.md)** | **The ten things no other agent has, and why they can't copy them** |
 | [PRD](docs/PRD.md) | Vision, users, the honest risk assessment, scope, v1 cut |
 | [Features](docs/FEATURES.md) | Full catalogue by pillar, each tracing to a documented pain |
-| [UI and motion](docs/UI-DESIGN.md) | Layout, visual language, motion tokens, anti-patterns |
+| [UI and motion](docs/UI-DESIGN.md) | Chat-first layout, visual language, motion tokens, anti-patterns |
+| [Cost design](docs/COST-DESIGN.md) | Money in, jargon out — no tokens, no context windows |
 | [Architecture](docs/ARCHITECTURE.md) | Local-first desktop app on Pi, the safety layer, what it costs to run |
 | [Test plan](docs/TEST-PLAN.md) | Safety, functional, and gentleness testing with release gates |
 | [Landing page](docs/LANDING-PAGE.md) | Copy and art direction |

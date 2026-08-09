@@ -1,4 +1,4 @@
-# PRD — {Name}
+# PRD — Graphe
 
 Draft 1, 2026-08-09. Research phase; nothing built.
 

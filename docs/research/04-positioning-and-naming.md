@@ -27,10 +27,68 @@ amount of good copy fixes.
 **A second consideration now that this is open source:** a name echoing "Pi" invites confusion about
 whether we are an official Pi project. MIT covers the code, not the trademark.
 
-### Shortlist of alternatives
+---
 
-Not yet cleared — each still needs a USPTO search in software classes, exact-domain checks on
-`.com`/`.dev`/`.app`, and a plain `"[name]" app` google (the test that killed Pico).
+## 1b. "Eidos" — checked, and it doesn't work either
+
+Lovely meaning (Plato's *form* — the idea a thing takes when it becomes real, which is exactly what
+this product does). Unusable in practice, for a more specific reason than Pico.
+
+**On GitHub — the platform this project actually lives on:**
+
+| Repo | Stars | What it is |
+|---|---|---|
+| `mayneyao/eidos` | **3,172** ⭐ | "An extensible framework for Personal Data Management" — local-first prosumer tooling, adjacent audience |
+| `agenticnotetaking/eidos` | 58 ⭐ | **"Spec Driven Development — Claude Code plugin"** — an AI coding tool, our exact category |
+| `opisaac9001/eidos` | 23 ⭐ | "A Self-Growing AI Agent with Long-Term Memory" |
+| `clulab/eidos`, `google/eidos-audition`, `ratt-ru/eidos` | 34–37 ⭐ | ML/science projects |
+
+We would be the **fourth** AI/dev tool named Eidos on GitHub, behind a 3.2k-star incumbent. `npm i eidos`
+is also taken (`Wandalen/eidos`).
+
+**Trademark:** `eidos.com` **and** `eidos.dev` both 301-redirect to **eidosmontreal.com** — Eidos-Montréal,
+the Embracer-owned studio behind *Deus Ex* and *Tomb Raider*. The `.com` is registered through
+**MarkMonitor**, the corporate brand-protection registrar. They have already defensively claimed the
+`.dev` a developer tool would want, which tells you they are actively policing the mark across
+software TLDs. Games and dev tools both sit in trademark class 9 (computer software).
+
+**Domains:** `.com` `.dev` `.app` `.io` `.sh` `.design` and `geteidos.com` are all registered.
+`eidos.design` — the fallback suggested — is **already taken** (NameCheap). Only `useeidos.com` was free.
+
+**Verdict: same failure as Pico, discovered one layer deeper.** For an open-source project the domain
+matters less than the GitHub namespace and search distinctiveness, and Eidos fails on exactly those.
+
+### The test that matters for an OSS project
+
+Domains are secondary. Rank candidates on:
+
+1. **Is `github.com/<org>/<name>` uncontested?** No established repo with the same name.
+2. **Is it searchable?** `"<name>" figma` or `"<name>" design tool` should not return a wall of
+   other things.
+3. **No large software trademark holder.**
+4. Domain — *later*, and a modifier is fine.
+
+### Shortlist, checked against GitHub
+
+| Name | GitHub collision | Meaning | Read |
+|---|---|---|---|
+| **Kern** | **None** — no exact-name repo | Typography: the space between letters. Designers know it intimately | **Strongest.** Short, sayable, design-native, clean namespace |
+| **Colophon** | 5 ⭐ (`alphagov/colophon`) | The note at the end of a book recording how it was made | **Excellent meaning** for a tool that builds things and shows its work. Longer to type |
+| **Gesso** | 72 ⭐ (a Drupal theme) | The primer coat applied before painting — the preparation that makes real work possible | Strong metaphor, minor unrelated collision |
+| **Deckle** | 3 ⭐ | The rough edge of handmade paper | Nearly clear, but obscure |
+| Ferrule | 10 ⭐ | The metal band on a brush | Clear-ish, hard to spell |
+| Maquette | 783 ⭐ virtual DOM library | A preliminary scale model | **Avoid** — collides inside the JS ecosystem |
+| Purl | 1,840 ⭐ JS utility | A knitting stitch | **Avoid** |
+| Quire | 147 ⭐ (Getty publishing) | Sheets of folded paper | Moderate collision in publishing |
+
+**Recommendation: Kern.** It is the only candidate with a genuinely clean GitHub namespace, it is a
+word this exact audience uses every day, and it carries the right idea — the craft of small spacing
+decisions, which is precisely what separates a designer's output from a developer's.
+
+### Original shortlist (superseded, single dictionary words)
+
+All of `cairn` `nib` `vane` `plumb` `kiln` `awl` `poise` have `.com`/`.dev`/`.app` already
+registered — expected for common words. Kept here only for reference.
 
 | Name | Why it works | Watch for |
 |---|---|---|

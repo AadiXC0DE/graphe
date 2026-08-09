@@ -27,6 +27,7 @@
  */
 
 import type { AgentEvent, ToolCall, Verdict } from '../types';
+import { SpendWatch, type SpendReport } from './spend';
 
 type ConfirmVerdict = Extract<Verdict, { kind: 'confirm' }>;
 
@@ -94,6 +95,11 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
       return fromMessageEnd(source);
     case 'tool_execution_end':
       return fromToolExecutionEnd(source);
+    case 'agent_settled':
+      // Not "the reply is finished" — that is `message_end`. This is "there is
+      // nothing left running", which is the only honest moment to add up what a
+      // sitting cost.
+      return { type: 'settled' };
     default:
       return null;
   }
@@ -147,18 +153,37 @@ function fromToolExecutionEnd(source: Fields): AgentEvent | null {
  * the ordering rule above be a property of this file rather than a convention
  * the adapter has to remember.
  */
+export type RelayOptions = {
+  /** Pi's own running total for the session, in whole currency units, or null
+   *  when it cannot be read. Consulted once, when everything settles, so what
+   *  the meter shows and what the account is billed cannot drift apart. */
+  billedSoFar?: () => number | null;
+  /** Overridable for a test. There is one per session otherwise. */
+  spend?: SpendWatch;
+};
+
 export class EventRelay {
   /** Calls the Guard let through and Pi has not finished yet. */
   private readonly running = new Set<string>();
   /** Calls the Guard stopped. Pi still reports a result for these. */
   private readonly refused = new Set<string>();
+  /** Whose fault the money was. See spend.ts. */
+  private readonly spend: SpendWatch;
+  private readonly billedSoFar: (() => number | null) | undefined;
 
-  constructor(private readonly deliver: (event: AgentEvent) => void) {}
+  constructor(
+    private readonly deliver: (event: AgentEvent) => void,
+    options: RelayOptions = {},
+  ) {
+    this.spend = options.spend ?? new SpendWatch();
+    this.billedSoFar = options.billedSoFar;
+  }
 
   /** A call that passed the Guard and is about to run. */
   started(call: ToolCall): void {
     this.refused.delete(call.id);
     this.running.add(call.id);
+    this.spend.started(call);
     this.deliver({ type: 'tool-start', call });
   }
 
@@ -166,6 +191,7 @@ export class EventRelay {
   blocked(call: ToolCall, reason: string): void {
     this.running.delete(call.id);
     this.refused.add(call.id);
+    this.spend.refused(call.id);
     this.deliver({ type: 'blocked', call, reason });
   }
 
@@ -180,7 +206,20 @@ export class EventRelay {
 
   /** One event straight out of Pi. Silently drops what is not ours. */
   fromPi(event: unknown): void {
+    // Every event, priced or not: what failed and what Pi is retrying are told
+    // by events that have no money on them at all.
+    const report = this.spend.fromPi(event);
     const translated = translatePiEvent(event);
+
+    if (translated !== null && translated.type === 'settled') {
+      // Before, not after. Whoever is keeping the ledger has to have every
+      // entry in hand by the time it is asked for the split.
+      this.paid(this.spend.settle(this.billedSoFar?.() ?? null));
+      this.deliver(translated);
+      return;
+    }
+
+    this.paid(report);
     if (translated === null) return;
 
     if (translated.type === 'tool-end') {
@@ -193,5 +232,17 @@ export class EventRelay {
     }
 
     this.deliver(translated);
+  }
+
+  /** Money, said in money. Nothing else about how it was worked out survives
+   *  this line — see usage.ts. */
+  private paid(report: SpendReport | null): void {
+    if (report === null) return;
+    this.deliver({
+      type: 'spend',
+      amount: report.amount,
+      label: report.label,
+      reason: report.reason,
+    });
   }
 }

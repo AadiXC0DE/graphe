@@ -21,6 +21,8 @@
  */
 
 import type { AgentEvent } from '../agent/types';
+import { Ledger } from '../cost/ledger';
+import { money } from '../cost/money';
 import type { Decision, GrapheApi, OpenedProject, Result } from './ipc';
 
 declare global {
@@ -52,10 +54,55 @@ function inPieces(text: string): string[] {
   return text.split(/(?<=[,.] )/);
 }
 
+/**
+ * A sitting's worth of spend, for a tab with no shell under it.
+ *
+ * The numbers are invented — there is no account here and nothing has been
+ * billed — but everything about how they travel is real: the same `spend`
+ * events the adapter emits, priced in the same currency Pi prices in, recorded
+ * in the same `Ledger` the desktop shell uses, and summarised by the same
+ * `summary()` call. So the meter in a screenshot is the real meter with real
+ * arithmetic behind it, rather than a mock that drifts away from the thing it
+ * stands in for.
+ *
+ * The split is the point of it: a fifth of this went on an attempt that did not
+ * work, which is the one number in the product nobody else can print.
+ */
+const PREVIEW_SPEND: readonly { minor: number; label: string; reason: 'work' | 'retry-after-failure' }[] =
+  [
+    { minor: 21, label: 'Looking through your files', reason: 'work' },
+    { minor: 18, label: 'Changing contact.html', reason: 'work' },
+    { minor: 12, label: 'Changing contact.html', reason: 'retry-after-failure' },
+    { minor: 11, label: 'Writing styles.css', reason: 'work' },
+  ];
+
+const PREVIEW_CURRENCY = 'USD';
+
 function previewBridge(): Bridge {
   const listeners = new Set<(event: AgentEvent) => void>();
   const send = (event: AgentEvent): void => {
     for (const listener of listeners) listener(event);
+  };
+
+  /** Once, shortly after the interface starts listening. It is the one thing a
+   *  browser tab cannot show by waiting for it to happen: money is spent by an
+   *  agent doing work, and there is no agent here. Everything else in this
+   *  preview waits to be asked for. */
+  let spendAnnounced = false;
+  const announceSpend = (): void => {
+    if (spendAnnounced) return;
+    spendAnnounced = true;
+
+    const ledger = new Ledger(PREVIEW_CURRENCY);
+    // Entry by entry, as it arrives from the shell, then the split once
+    // everything has settled — the same two things, in the same order.
+    for (const entry of PREVIEW_SPEND) {
+      const amount = money(entry.minor, PREVIEW_CURRENCY);
+      ledger.record({ amount, reason: entry.reason, label: entry.label });
+      send({ type: 'spend', amount, label: entry.label, reason: entry.reason });
+    }
+    send({ type: 'settled' });
+    send({ type: 'spend-summary', summary: ledger.summary() });
   };
 
   return {
@@ -89,6 +136,10 @@ function previewBridge(): Bridge {
 
     onEvent(listener: (event: AgentEvent) => void): () => void {
       listeners.add(listener);
+      // A beat, so the interface is mounted and the meter arrives the way it
+      // does in the desktop app — as something that appears, not as part of the
+      // first paint.
+      setTimeout(announceSpend, 60);
       return () => {
         listeners.delete(listener);
       };

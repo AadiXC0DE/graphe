@@ -64,6 +64,22 @@ files). That makes it our best differentiator and our biggest technical risk at 
 
 ---
 
+## Built on Pi
+
+The agent runtime underneath Graphe is [**Pi**](https://github.com/earendil-works/pi) by Mario
+Zechner — an excellent, genuinely open agent harness. Graphe is the designer-facing layer on top:
+the safety policy, the visual review, the version timeline, the cost work, and the interface.
+
+**Graphe is not a fork.** We depend on Pi as a published package, which means Pi's improvements
+arrive by upgrading rather than by merging, and none of our changes fragment their project. If you
+want the terminal-native, developer-facing version of this idea, use Pi directly — it is very good.
+
+Graphe is MIT licensed, as is Pi. Attribution and licence texts live in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Graphe is not affiliated with or endorsed by the
+Pi project.
+
+---
+
 ## Principles
 
 - Never put the user's lack in the subject of a sentence.

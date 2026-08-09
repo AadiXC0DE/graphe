@@ -1,0 +1,107 @@
+/* Graphe design tokens.
+   Motion values follow docs/UI-DESIGN.md — do not invent new easings or durations. */
+
+:root {
+  /* Motion — entering/exiting */
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+  /* Motion — already on screen, moving */
+  --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
+  /* Motion — hover and colour only */
+  --ease-hover: ease;
+
+  --dur-micro: 120ms;
+  --dur-ui: 200ms;
+  --dur-large: 280ms;
+
+  /* Type */
+  --font-ui:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui,
+    sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+
+  /* Space — deliberately not a uniform scale; even padding everywhere reads as a template */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 72px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  /* Light theme */
+  --bg: #fbfbfa;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f2f2f0;
+  --border: #e4e4e1;
+  --border-strong: #d2d2ce;
+  --text: #1a1a19;
+  --text-muted: #6b6b66;
+  --text-faint: #96968f;
+  --accent: #b8492c;
+  --accent-text: #ffffff;
+  --accent-soft: #f6e9e4;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131312;
+    --bg-raised: #1c1c1a;
+    --bg-sunken: #0e0e0d;
+    --border: #2b2b28;
+    --border-strong: #3a3a36;
+    --text: #f2f2ef;
+    --text-muted: #9a9a93;
+    --text-faint: #6b6b65;
+    --accent: #e0714d;
+    --accent-text: #1a1a19;
+    --accent-soft: #2a1c17;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 20px rgb(0 0 0 / 0.4);
+  }
+}
+
+/* Explicit override wins over the media query in both directions */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #fbfbfa;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f2f2f0;
+  --border: #e4e4e1;
+  --border-strong: #d2d2ce;
+  --text: #1a1a19;
+  --text-muted: #6b6b66;
+  --text-faint: #96968f;
+  --accent: #b8492c;
+  --accent-text: #ffffff;
+  --accent-soft: #f6e9e4;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #131312;
+  --bg-raised: #1c1c1a;
+  --bg-sunken: #0e0e0d;
+  --border: #2b2b28;
+  --border-strong: #3a3a36;
+  --text: #f2f2ef;
+  --text-muted: #9a9a93;
+  --text-faint: #6b6b65;
+  --accent: #e0714d;
+  --accent-text: #1a1a19;
+  --accent-soft: #2a1c17;
+}

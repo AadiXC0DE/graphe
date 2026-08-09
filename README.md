@@ -13,8 +13,10 @@ Free · open source · runs on the AI subscription you already have
 
 ---
 
-> **Status: early.** The interface, the safety layer, the version history and the cost engine are
-> built and tested. The agent runtime is being wired in now. Not yet ready to install.
+> **Status: early, but it runs.** The agent, the safety layer, version history, cost tracking,
+> multiple projects and a one-button preview all work, and `npm run package` produces a disk image
+> that installs. Still missing: Figma import, visual before/after diffs, and sharing a link. No
+> release yet — build it from source if you want to try it.
 
 ---
 

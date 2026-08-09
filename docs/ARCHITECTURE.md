@@ -20,6 +20,37 @@ And one honest disadvantage: **we cannot promise "no infrastructure worries" in 
 because we don't own the infrastructure. What we can do is make connecting *their* accounts a
 three-click OAuth flow and absorb every subsequent decision. See "Publishing" below.
 
+### What this actually costs to run
+
+Close to zero, but not zero. The gap is code signing.
+
+| Item | Cost | Notes |
+|---|---|---|
+| Model inference | **$0 to us** | The user's own subscription |
+| Hosting, builds, databases | **$0 to us** | The user's own Vercel/Netlify account |
+| Landing page | **$0** | Vercel, Netlify, Cloudflare or GitHub Pages free tier |
+| CI | **$0** | GitHub Actions is free for public repos |
+| Release binaries | **$0** | GitHub Releases |
+| Figma API | **$0** | Free with a personal access token |
+| **Apple Developer Program** | **$99/year** | **Unavoidable.** See below |
+| Domain | ~$15/year | Optional at first |
+| Windows code signing | $200–400/year | Deferred — v1 is macOS only |
+
+> ⚠️ **The $99 is not optional if we want this audience.** Apple confirms notarization and Developer
+> ID signing require paid Developer Program membership; there is **no free tier that permits
+> notarization for public distribution**
+> ([Apple](https://developer.apple.com/support/compare-memberships/)).
+>
+> Without it, macOS Gatekeeper tells the user the app "cannot be opened because Apple cannot check it
+> for malicious software," and they must right-click → Open or dig into System Settings. For an
+> audience defined by *fear of breaking something*, that is the worst possible first thirty seconds —
+> and it lands before they have seen a single thing the product does.
+>
+> Fee waivers exist for nonprofits and educational institutions, which may be worth exploring.
+
+**Realistic total: ~$115/year.** Worth stating plainly in the repo so nobody is surprised, and worth
+covering with GitHub Sponsors rather than absorbing quietly.
+
 ---
 
 ## Shape

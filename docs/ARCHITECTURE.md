@@ -36,20 +36,43 @@ Close to zero, but not zero. The gap is code signing.
 | Domain | ~$15/year | Optional at first |
 | Windows code signing | $200–400/year | Deferred — v1 is macOS only |
 
-> ⚠️ **The $99 is not optional if we want this audience.** Apple confirms notarization and Developer
-> ID signing require paid Developer Program membership; there is **no free tier that permits
-> notarization for public distribution**
-> ([Apple](https://developer.apple.com/support/compare-memberships/)).
->
-> Without it, macOS Gatekeeper tells the user the app "cannot be opened because Apple cannot check it
-> for malicious software," and they must right-click → Open or dig into System Settings. For an
-> audience defined by *fear of breaking something*, that is the worst possible first thirty seconds —
-> and it lands before they have seen a single thing the product does.
->
-> Fee waivers exist for nonprofits and educational institutions, which may be worth exploring.
+### Can we ship without paying Apple? Yes — with one catch
 
-**Realistic total: ~$115/year.** Worth stating plainly in the repo so nobody is surprised, and worth
-covering with GitHub Sponsors rather than absorbing quietly.
+There **is** a free path, and it hinges on a detail most people miss.
+
+Gatekeeper's "Apple cannot check it for malicious software" dialog is triggered by the
+`com.apple.quarantine` extended attribute. **That attribute is applied by the downloading application** —
+browsers and mail clients set it; `curl`, `wget` and Homebrew do not. An app installed from the
+terminal arrives without quarantine and **launches with no warning at all.**
+
+Apple Silicon additionally requires every binary to carry *a* signature, but an **ad-hoc signature**
+(`codesign --sign -`) satisfies this, costs nothing, and runs locally in CI.
+
+| Distribution route | Needs $99? | User experience |
+|---|---|---|
+| `brew install --cask <name>` | **No** | Launches clean, no warning |
+| `curl … \| sh` install script | **No** | Launches clean, no warning |
+| `.dmg` downloaded in a browser | **Yes** | "Apple could not verify…" → System Settings → Open Anyway |
+| Mac App Store | Yes | Not applicable — we need filesystem access |
+
+> ⚠️ **The catch is the audience.** The free path requires the user to open a terminal and type a
+> command — and this product exists precisely so designers never have to do that. Shipping it via
+> `brew install` filters for the exact people we are not building for, and the landing page CTA
+> becomes a command line.
+>
+> Note also that macOS 15+ removed the old right-click → Open bypass; a quarantined app now sends the
+> user into System Settings, which is worse than it used to be.
+
+**Recommended staging:**
+
+1. **Alpha — free, Homebrew and curl.** Audience is early adopters, contributors, and designers who
+   already dabble. Zero cost, and the terminal requirement is a reasonable filter while things are
+   rough anyway.
+2. **Public launch — pay the $99.** Ship a signed, notarized `.dmg` with drag-to-Applications. By then
+   there should be enough traction for GitHub Sponsors to cover it, and $99/year is a low bar to clear.
+
+**Realistic total: $0 to start, ~$115/year once it goes properly public.** Worth stating plainly in the
+repo so nobody is surprised. Fee waivers exist for nonprofits and educational institutions.
 
 ---
 

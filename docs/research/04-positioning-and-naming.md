@@ -58,6 +58,50 @@ software TLDs. Games and dev tools both sit in trademark class 9 (computer softw
 **Verdict: same failure as Pico, discovered one layer deeper.** For an open-source project the domain
 matters less than the GitHub namespace and search distinctiveness, and Eidos fails on exactly those.
 
+---
+
+## 1c. "Morphe" — this one clears the bar
+
+μορφή, *form* — the shape a thing takes when it becomes real. Same family of meaning as Eidos, and apt.
+
+| Check | Result |
+|---|---|
+| **GitHub exact-name repo** | ✅ **Clear** — none exists |
+| Same-category competitor | ✅ **None** — this is what killed Pico and Eidos |
+| npm `morphe` | ✖ Taken (minor — a desktop app can publish scoped or not at all) |
+| Trademark | ⚠️ **Morphe Cosmetics** — large, active beauty brand. Class 3 (cosmetics), we would be class 9/42 (software). **Different classes, so materially lower risk than Eidos-Montréal**, who hold a software mark |
+| Domains | ✖ `.com` `.dev` `.app` `.design` `.studio` `getmorphe.com` all registered |
+| SEO | ⚠️ Bare "morphe" returns makeup. But *"morphe design tool"* or *"morphe github"* would surface us — we would not be competing against a rival product for the same intent |
+
+**Verdict: Morphe works.** It passes the test the other two failed — the GitHub namespace is clean and
+there is no competing developer tool wearing the name. The weaknesses are real but survivable: a
+crowded search term and no obvious domain.
+
+Since domains are a later problem for a free OSS project, and the trademark holder is in an unrelated
+class, **this is a legitimate choice.** Kern remains marginally stronger on searchability and is
+design-native rather than design-adjacent, but Morphe is defensible and Greek, which was the brief.
+
+**If choosing Morphe, do this:** register something with a modifier early (`morphe.tools`,
+`morphedesign.com`, `usemorphe.com`) and always publish as "Morphe" alongside a descriptor —
+*"Morphe — the coding agent that starts from your design"* — so search intent separates from cosmetics.
+
+### Other Greek options checked
+
+| Name | Meaning | GitHub |
+|---|---|---|
+| **Morphe** | Form | ✅ Clear |
+| **Graphe** (γραφή) | Drawing, writing, line | ✅ Clear — arguably the most design-native Greek word available |
+| **Ergon** (ἔργον) | Work, the thing produced | ✅ Clear |
+| **Plasis** (πλάσις) | Moulding, shaping | ✅ Clear |
+| Techne (τέχνη) | Craft | ✖ 104⭐ — and it is an **AI-agent skills repo**, our exact category |
+| Poiesis | The act of bringing into being | ✖ 36⭐ |
+| Harmonia | Proportion | ✖ 575⭐ |
+| Metron | Measure | ✖ 870⭐ Apache Metron |
+
+**Graphe deserves a look** — it means *drawing* and *line*, the GitHub namespace is clear, and it is
+closer to what the product actually does than "form" is. The only risk is being read as a typo of
+"graph".
+
 ### The test that matters for an OSS project
 
 Domains are secondary. Rank candidates on:

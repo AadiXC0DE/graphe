@@ -18,7 +18,10 @@ Working from [research/04](research/04-positioning-and-naming.md). Two rules gov
 > Give it a Figma file, a screenshot, or a sentence. It writes real code, shows you every change as a
 > picture, and publishes when you're ready.
 >
-> **[Download for Mac]**  ·  [See how it works]
+> ```
+> brew install --cask {name}
+> ```
+> <sub>Copy · for Mac · [what's this?]</sub>
 >
 > <sub>Free and open source. Works with the AI subscription you already pay for.</sub>
 
@@ -131,6 +134,48 @@ reader make the comparison.
 > when you're stuck.
 >
 > Plenty of people never turn it on. That's fine too.
+
+## Section 8 — Installing it
+
+The one place on the page that has to be handled with real care. We are asking a terminal-averse
+audience to open a terminal, on the landing page, before they trust us. Done badly it is the whole
+funnel. Done well it is thirty seconds and a small feeling of competence.
+
+> ### One line, once.
+>
+> Open Terminal — press ⌘Space, type "terminal", hit return. Paste this in and press return again.
+>
+> ```
+> brew install --cask {name}
+> ```
+> **[Copy]**
+>
+> That's the only time you'll need it. Everything after this is a window.
+>
+> <sub>No Homebrew yet? [One more line, and we'll explain that too →]</sub>
+
+**Why this copy works:**
+
+- **"One line, once"** sets the scope before the fear arrives. The dread isn't the command, it's not
+  knowing where it ends.
+- **The ⌘Space instruction is not condescending** — it's the same register as telling a new colleague
+  which room the meeting is in. Assume competence, supply the coordinate.
+- **"That's the only time you'll need it. Everything after this is a window"** is the single most
+  important sentence on the page. It converts a red flag into a one-off toll, and it is a promise the
+  product actually keeps.
+- **A copy button, not a "select the text" instruction.** Mis-pasting a partial command is the most
+  likely first failure.
+
+**Also build:** a short silent loop showing the paste and the app opening. Seeing it take fifteen
+seconds removes more anxiety than any sentence can. And a linked page for the Homebrew prerequisite,
+written in the same voice, because "command not found: brew" is the most probable point of collapse.
+
+**Do not:** apologise for the terminal, joke about it ("don't worry, it won't bite!"), or use scare
+quotes around "Terminal". Treating it as unremarkable is what makes it unremarkable.
+
+> **Note for later:** this is the alpha route, and it is free — Homebrew installs aren't quarantined,
+> so there's no Gatekeeper warning ([architecture](ARCHITECTURE.md)). When there's traction, $99/year
+> to Apple buys a signed `.dmg` and this section becomes a download button.
 
 ## Closing
 

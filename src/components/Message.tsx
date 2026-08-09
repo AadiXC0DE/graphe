@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react';
+import Markdown from './Markdown';
 import './Message.css';
 
 export type MessageAuthor = 'you' | 'graphe';
 
 type Props = {
   from: MessageAuthor;
-  /** The turn's text. Rendered as-is; newlines are preserved. */
+  /** The turn's text. Graphe's is read as Markdown; yours is left exactly as
+   *  you typed it. Anything that is not a plain string is rendered as given. */
   children: ReactNode;
   /** True while the reply is still arriving. Adds no motion — see below. */
   streaming?: boolean;
@@ -24,20 +26,35 @@ type Props = {
  * where the text is still growing, and the live region politeness that lets a
  * screen reader follow along. The caret does not blink: a blinking or pulsing
  * element is decoration standing in for substance, and it would draw the eye
- * away from the words themselves. */
+ * away from the words themselves.
+ *
+ * **Only Graphe's turns are read as Markdown.** A designer who writes
+ * `*roughly* 40px` means the asterisks — they are describing a value, not
+ * emphasising a word — and a composer that quietly eats punctuation is a
+ * composer people stop trusting with anything technical. What you typed is what
+ * is shown.
+ */
 export default function Message({ from, children, streaming, aside }: Props) {
   const mine = from === 'you';
+  const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
+  const formatted = !mine && typeof children === 'string';
 
   return (
     <article className={`message message--${from}`} aria-label={mine ? 'You' : 'Graphe'}>
       <div className="message__who">{mine ? 'You' : 'Graphe'}</div>
       <div
-        className="message__body"
+        className={`message__body ${formatted ? 'message__body--rich' : ''}`}
         aria-live={!mine && streaming ? 'polite' : undefined}
         aria-busy={streaming || undefined}
       >
-        {children}
-        {streaming ? <span className="message__caret" aria-hidden="true" /> : null}
+        {formatted ? (
+          <Markdown text={children} caret={caret} />
+        ) : (
+          <>
+            {children}
+            {caret}
+          </>
+        )}
       </div>
       {aside ? <p className="message__aside">{aside}</p> : null}
     </article>

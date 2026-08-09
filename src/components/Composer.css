@@ -1,4 +1,5 @@
 .composer {
+  position: relative;
   width: 100%;
   background: var(--bg-raised);
   border: 1px solid var(--border);
@@ -47,11 +48,108 @@
 }
 
 .composer__hint {
+  flex: 1;
+  min-width: 0;
   font-size: var(--text-xs);
   color: var(--text-faint);
 }
 
+/* The quiet way in, for people who would rather pick than drag. */
+.composer__attach {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  margin-left: calc(var(--space-1) * -1);
+  border-radius: 999px;
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* 44px hit area without changing the visual size */
+.composer__attach::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.composer__attach:active {
+  transform: scale(0.97);
+}
+
+.composer__attach:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .composer__attach:hover {
+    color: var(--text);
+  }
+}
+
+/* Never in front of anyone: the picker is opened by the button beside it. */
+.composer__file {
+  display: none;
+}
+
+/* One sentence about why something did not come in. It says what would work
+   instead, and it never says the word "invalid". */
+.composer__refused {
+  margin: 0;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* Empty it takes no room; with something to say it takes a line. */
+.composer__refused:not(:empty) {
+  margin-top: var(--space-2);
+}
+
+/* ---------------------------------------------------------------------------
+   Being dropped on
+   The box that is already there becomes the target. No dashed border, nothing
+   that bounces, nothing that grows: a dashed rectangle drawn inside a solid one
+   is a second frame saying what the first frame already said.
+   --------------------------------------------------------------------------- */
+
+.composer--dropping {
+  border-color: var(--accent);
+}
+
+.composer__drop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: var(--accent-soft);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-ui) var(--ease-out-quart);
+}
+
+.composer--dropping .composer__drop {
+  opacity: 1;
+}
+
+.composer__droptext {
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+
 .composer__send {
+  position: relative;
   display: grid;
   place-items: center;
   width: 30px;
@@ -69,8 +167,11 @@
 .composer__send::after {
   content: '';
   position: absolute;
+  left: 50%;
+  top: 50%;
   width: 44px;
   height: 44px;
+  transform: translate(-50%, -50%);
 }
 
 .composer__send:disabled {
@@ -86,5 +187,23 @@
 @media (hover: hover) and (pointer: fine) {
   .composer__send:not(:disabled):hover {
     opacity: 0.9;
+  }
+}
+
+/* Every animation ships with its counterpart. No exceptions, including the
+   press on the send button and the fade of the drop state. */
+@media (prefers-reduced-motion: reduce) {
+  .composer,
+  .composer__drop {
+    transition: none;
+  }
+
+  .composer__send:not(:disabled):active,
+  .composer__attach:active {
+    transform: none;
+  }
+
+  .composer__attach {
+    transition: color var(--dur-micro) var(--ease-hover);
   }
 }

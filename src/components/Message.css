@@ -25,6 +25,13 @@
   overflow-wrap: anywhere;
 }
 
+/* Once a reply is read as Markdown, the blank lines in it are structure rather
+   than typography — the parser has already turned them into paragraphs, and
+   keeping them as literal whitespace as well would double every gap. */
+.message__body--rich {
+  white-space: normal;
+}
+
 /* The user's own words sit on a surface so the eye can find where each exchange
    begins; Graphe answers as plain text on the page, because the reply is the
    subject and a bubble around it is just packaging. */

@@ -33,7 +33,10 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.1",
+    "marked": "^18.0.9",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "shiki": "^4.4.2",
+    "use-stick-to-bottom": "^1.1.6"
   }
 }

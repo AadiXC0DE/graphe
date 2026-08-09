@@ -57,6 +57,32 @@
   --accent-soft: #f6e9e4;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
+
+  /* Code, which is the same palette wearing a different job.
+     Shiki emits these variable names instead of hexes (src/lib/highlight.ts), so
+     syntax colour is our own three tones — text, muted, the one accent — rather
+     than somebody's imported theme. Written once here and not per theme: each
+     value is a reference, so it resolves against whichever palette has won on
+     :root, and light and dark follow for free.
+
+     Three tones is the whole scheme. Code that is coloured like a fruit bowl is
+     the same tell as a purple-to-blue gradient. */
+  --code-foreground: var(--text);
+  --code-background: transparent;
+  --code-token-comment: var(--text-muted);
+  --code-token-punctuation: var(--text-muted);
+  --code-token-keyword: var(--accent);
+  --code-token-link: var(--accent);
+  --code-token-string: color-mix(in srgb, var(--accent) 45%, var(--text));
+  --code-token-string-expression: color-mix(in srgb, var(--accent) 45%, var(--text));
+  --code-token-constant: var(--text);
+  --code-token-parameter: var(--text);
+  --code-token-function: var(--text);
+  /* A diff says which line is which with a + and a -, so these carry emphasis
+     rather than meaning — nothing here depends on colour alone. */
+  --code-token-inserted: var(--text);
+  --code-token-deleted: var(--text-muted);
+  --code-token-changed: var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {

@@ -1,0 +1,142 @@
+/* Chips for whatever has been brought in.
+   They arrive with a small rise and a fade, once, because attaching something
+   is a rare deliberate act rather than a hundred-times-a-day one — and it is
+   worth being sure the thing you dropped actually landed. */
+
+.chips {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  /* Lined up with the first character of the placeholder, not with the edge of
+     the box: the chips are part of the message, so they start where the message
+     starts. */
+  padding: 0 var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  animation: chip-land var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes chip-land {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* A link is not a file, and it does not look like one. */
+.chip--figma {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.chip__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  overflow: hidden;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+}
+
+.chip--figma .chip__mark {
+  color: var(--accent);
+  background: var(--bg-raised);
+}
+
+.chip__thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.chip__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.chip__name {
+  font-size: var(--text-xs);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+
+.chip__note {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.chip__remove {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* 44px of hit area around a 22px control. */
+.chip__remove::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.chip__remove:active {
+  transform: scale(0.97);
+}
+
+.chip__remove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  color: var(--text);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chip__remove:hover {
+    color: var(--text);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip {
+    animation: none;
+  }
+
+  .chip__remove:active {
+    transform: none;
+  }
+}

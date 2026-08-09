@@ -1,0 +1,170 @@
+/* Formatting inside a reply.
+   Sized to sit in a conversation rather than on a documentation page: a heading
+   here is a line with weight on it, not a banner, and the whole thing keeps the
+   measure of the paragraph it interrupts. Nothing animates — this is the most
+   frequent surface in the app. */
+
+.md__p {
+  margin: 0 0 var(--space-3);
+}
+
+.md__p--plain {
+  white-space: pre-wrap;
+}
+
+.md__heading {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+h3.md__heading {
+  font-size: var(--text-lg);
+  letter-spacing: -0.015em;
+}
+
+.md__list {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+}
+
+.md__item {
+  margin-bottom: var(--space-1);
+}
+
+.md__item::marker {
+  color: var(--text-muted);
+}
+
+.md__item > .md__p:last-child {
+  margin-bottom: 0;
+}
+
+/* A checklist the agent wrote is a record, not a control. It reads as a tick or
+   an empty box and it cannot be clicked, because a checkbox that does nothing
+   when you press it is worse than no checkbox at all. */
+.md__item--task {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-left: calc(var(--space-5) * -1);
+}
+
+.md__check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-top: 0.28em;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--accent);
+}
+
+.md__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.md__quote {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-muted);
+}
+
+.md__rule {
+  margin: var(--space-4) 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.md__link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+.md__image {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.md__code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.05em 0.35em;
+  overflow-wrap: anywhere;
+}
+
+/* Tables scroll inside their own box rather than widening the reply. */
+.md__tablewrap {
+  margin: 0 0 var(--space-3);
+  overflow-x: auto;
+}
+
+.md__table {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  min-width: 100%;
+}
+
+.md__table th,
+.md__table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.md__table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.md__table tr:last-child td {
+  border-bottom: none;
+}
+
+/* When the last thing said is a block rather than a sentence, the still-writing
+   mark sits under it instead of inside it — so the block closes up to keep the
+   two of them reading as one thing that has not finished. */
+.codeblock:has(+ .message__caret) {
+  margin-bottom: var(--space-1);
+}
+
+/* The last thing in a reply never carries a trailing gap. */
+.message__body > *:last-child,
+.md__quote > *:last-child {
+  margin-bottom: 0;
+}
+
+.message__body > *:first-child {
+  margin-top: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .md__link:hover {
+    text-decoration-thickness: 2px;
+  }
+}

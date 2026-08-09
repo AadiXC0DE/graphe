@@ -14,10 +14,10 @@
  *
  * In memory only, by design. Persistence belongs to whatever owns the session. */
 
-import type { Money, SpendEntry, SpendReason } from '../agent/types';
+import type { LabelTotal, Money, SpendEntry, SpendReason, SpendSummary } from '../agent/types';
 import { add, compare, sum, ratio, zero } from './money';
 
-export type { SpendEntry, SpendReason };
+export type { LabelTotal, SpendEntry, SpendReason, SpendSummary };
 
 /** What a caller has at the moment of recording. `id` and `at` are filled in
  *  unless the caller is replaying a stored session. */
@@ -30,31 +30,10 @@ export type SpendDraft = {
   at?: number;
 };
 
-export type LabelTotal = {
-  label: string;
-  amount: Money;
-  entryCount: number;
-};
-
-export type SessionSummary = {
-  currency: string;
-  /** Everything, both kinds. */
-  total: Money;
-  /** What the user asked for. */
-  work: Money;
-  /** What our own failures cost them. */
-  retry: Money;
-  /** `retry` as a fraction of `total`, 0 when nothing has been spent. */
-  retryShare: number;
-  entryCount: number;
-  /** Epoch ms of the first and last entry, or null for an empty ledger. */
-  firstAt: number | null;
-  lastAt: number | null;
-  /** The single thing we wasted the most on — this is what fills in the
-   *  "mostly me retrying the contact form" half of the sentence. Null when
-   *  nothing was wasted, or when no one thing dominates. */
-  largestRetry: LabelTotal | null;
-};
+/** What `summary()` returns. The shape itself lives in src/agent/types.ts,
+ *  because the desktop shell keeps the ledger and the window is sent the
+ *  result — see the note on `SpendSummary` there. */
+export type SessionSummary = SpendSummary;
 
 /** A retry has to account for at least this much of the wasted spend before we
  *  name it. Naming a 12% contributor would be technically true and misleading. */

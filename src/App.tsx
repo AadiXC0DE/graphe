@@ -6,10 +6,12 @@ import CostMeter from './components/CostMeter';
 import ErrorCard from './components/ErrorCard';
 import Message, { type MessageAuthor } from './components/Message';
 import Gallery from './gallery/Gallery';
-import type { AgentEvent, Money } from './agent/types';
+import type { AgentEvent } from './agent/types';
+import { retryHonesty, sessionSummary } from './cost/phrasing';
 import { bridge } from './lib/bridge';
 import { describeCall } from './lib/describe';
 import type { Decision, OpenedProject, Trouble } from './lib/ipc';
+import { applySpend, type SpendView } from './lib/spend';
 import './App.css';
 
 /** /?gallery renders every component on one page instead of the app, so the UI
@@ -174,6 +176,14 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
         because: event.message,
         actionLabel: 'Got it',
       });
+
+    // Money says nothing in the thread. It is furniture in the corner, and the
+    // split behind it is shown only when somebody asks for it — a running
+    // commentary on cost is the anxiety this design exists to avoid.
+    case 'spend':
+    case 'spend-summary':
+    case 'settled':
+      return turns;
   }
 }
 
@@ -201,12 +211,12 @@ function Conversation() {
    * there is a number, and stays (notes/strategy/UI-DESIGN.md) — so it is gated
    * on this rather than always mounted.
    *
-   * Nothing sets it yet: `AgentEvent` in src/agent/types.ts carries no money,
-   * so the window has no honest figure to show and shows nothing rather than a
-   * zero or an estimate dressed up as a total. When spend does start arriving,
-   * this is the only line that changes.
+   * Null until the shell reports a first spend, which means somebody without an
+   * account connected never sees it at all. That is the intended behaviour and
+   * not an empty state: a meter reading zero is a thing to work out in exchange
+   * for no information.
    */
-  const [spent] = useState<Money | null>(null);
+  const [spent, setSpent] = useState<SpendView | null>(null);
 
   const foot = useRef<HTMLDivElement>(null);
 
@@ -217,7 +227,14 @@ function Conversation() {
   /* Everything the agent does, in order. Subscribed once for the life of the
      window: the bridge outlives any one prompt, and re-subscribing per send
      would drop events that arrive between them. */
-  useEffect(() => bridge.onEvent((event) => setTurns((current) => applyEvent(current, event))), []);
+  useEffect(
+    () =>
+      bridge.onEvent((event) => {
+        setTurns((current) => applyEvent(current, event));
+        setSpent((current) => applySpend(current, event));
+      }),
+    [],
+  );
 
   /* Keep the newest thing in view. No smooth scrolling — the thread grows while
      the reply streams, and animating that would mean the page is permanently
@@ -312,6 +329,21 @@ function Conversation() {
     setTurns((current) => current.filter((turn) => turn.id !== turnId));
   }, []);
 
+  /**
+   * "See where it went": the split between the work and our own retries.
+   *
+   * It is said in the conversation rather than shown in a panel, because it is
+   * us telling somebody something, and because the sentence that admits what
+   * our mistakes cost them should sit in the same thread as everything else we
+   * said — not in a report they have to go and open. Every word of it comes
+   * from src/cost/phrasing.ts, and every number from the shell's own ledger.
+   */
+  const showSplit = useCallback(() => {
+    const split = spent?.split;
+    if (!split) return;
+    say('graphe', `${sessionSummary(split).lines.join('\n')}\n\n${retryHonesty}`);
+  }, [spent, say]);
+
   // The first screen is a single centred conversation. Nothing else.
   // Regions appear the first time they have something to say — see notes/strategy/UI-DESIGN.md.
   const empty = turns.length === 0;
@@ -345,7 +377,13 @@ function Conversation() {
         </div>
       </div>
 
-      {spent !== null ? <CostMeter spent={spent} corner /> : null}
+      {spent !== null ? (
+        <CostMeter
+          spent={spent.total}
+          corner
+          onDetails={spent.split === null ? undefined : showSplit}
+        />
+      ) : null}
     </main>
   );
 }

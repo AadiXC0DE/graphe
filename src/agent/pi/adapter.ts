@@ -304,7 +304,33 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   const pi = await loadPi();
 
   const facts: GuardFacts = { ...options.guard, projectRoot: options.projectRoot };
-  const relay = new EventRelay(options.onEvent);
+
+  /**
+   * Pi's own running total for this session, in whole currency units.
+   *
+   * Pi adds this up across every entry the session has ever had, including the
+   * ones tidied away, so it is the same figure the account is billed. We price
+   * each turn as it happens because that is the only way to know *whose fault*
+   * it was, and then check the sum against this when everything settles: work
+   * Pi bills for without ever emitting an assistant message — summarising, and
+   * the tidying up of a long conversation — would otherwise be invisible, and a
+   * meter that reads under the real bill is the one failure this whole feature
+   * exists to prevent.
+   *
+   * Read defensively and through a hole the size of one number. If a Pi upgrade
+   * moves it, the meter loses a reconciliation, not its contents.
+   */
+  let running: { getSessionStats?: () => { cost?: unknown } } | null = null;
+  const billedSoFar = (): number | null => {
+    try {
+      const cost = running?.getSessionStats?.().cost;
+      return typeof cost === 'number' && Number.isFinite(cost) ? cost : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const relay = new EventRelay(options.onEvent, { billedSoFar });
   const confirmations = new Confirmations();
   const review = createGuardInterceptor({
     facts,
@@ -348,6 +374,8 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     // all we can do is say so without a stack trace.
     throw new AdapterError('I am not set up to work yet.', { cause });
   }
+
+  running = session;
 
   const unsubscribe = session.subscribe((event) => {
     relay.fromPi(event);

@@ -48,6 +48,41 @@ export type SpendEntry = {
   label: string;
 };
 
+/** Spend grouped under one plain-language label. */
+export type LabelTotal = {
+  label: string;
+  amount: Money;
+  entryCount: number;
+};
+
+/**
+ * The end-of-session split: what the work cost, and what our own failures cost.
+ *
+ * It lives here rather than in `src/cost/` because it crosses the IPC wire — the
+ * ledger is kept in the desktop shell and the window is told the result. Every
+ * field is plain data for exactly that reason: no methods, no `Ledger`, nothing
+ * that a structured clone would quietly drop.
+ */
+export type SpendSummary = {
+  currency: string;
+  /** Everything, both kinds. */
+  total: Money;
+  /** What the user asked for. */
+  work: Money;
+  /** What our own failures cost them. */
+  retry: Money;
+  /** `retry` as a fraction of `total`, 0 when nothing has been spent. */
+  retryShare: number;
+  entryCount: number;
+  /** Epoch ms of the first and last entry, or null for an empty ledger. */
+  firstAt: number | null;
+  lastAt: number | null;
+  /** The single thing we wasted the most on — this is what fills in the
+   *  "mostly me retrying the contact form" half of the sentence. Null when
+   *  nothing was wasted, or when no one thing dominates. */
+  largestRetry: LabelTotal | null;
+};
+
 export type AgentEvent =
   | { type: 'message-delta'; text: string }
   | { type: 'message-end' }
@@ -55,4 +90,20 @@ export type AgentEvent =
   | { type: 'tool-end'; id: string; ok: boolean }
   | { type: 'blocked'; call: ToolCall; reason: string }
   | { type: 'needs-confirmation'; call: ToolCall; verdict: Extract<Verdict, { kind: 'confirm' }> }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  /**
+   * Money that has just been spent, already priced.
+   *
+   * The unit a model is billed in never appears in this union, and never
+   * reaches the window: it is turned into money inside `src/agent/pi/`, at the
+   * moment it is read, and nothing downstream is given the chance to display it
+   * (notes/strategy/COST-DESIGN.md §1). `label` is the same plain sentence the
+   * activity feed uses — 'Changing contact.html', never a tool or model name.
+   */
+  | { type: 'spend'; amount: Money; label: string; reason: SpendReason }
+  /** The agent has finished everything it was doing, tool calls included. The
+   *  moment the session split is worth working out. */
+  | { type: 'settled' }
+  /** The split, from the shell's ledger. Emitted after `settled`, and only when
+   *  there is something to split — no spend, no summary, no zero state. */
+  | { type: 'spend-summary'; summary: SpendSummary };

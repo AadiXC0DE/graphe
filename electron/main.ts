@@ -39,6 +39,7 @@ import { basename, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSession, type Decision, type GrapheSession } from '../src/agent/pi/adapter';
 import type { AgentEvent } from '../src/agent/types';
+import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline } from '../src/history/timeline';
 import { CHANNEL, type OpenedProject, type Result, type Trouble } from '../src/lib/ipc';
 import { knownTrouble, plainMessage, plainTrouble } from './plainly';
@@ -157,14 +158,32 @@ const PICKER_FAILED: Trouble = {
 
 let mainWindow: BrowserWindow | null = null;
 
-function forward(event: AgentEvent): void {
+/**
+ * What has been spent, kept here rather than in the window.
+ *
+ * This process is the one that sees every spend, so it is the one that keeps
+ * the book. The window is told each entry as it happens — that is what the
+ * meter in the corner counts — and the split between real work and our own
+ * retries once a sitting settles. Nothing is kept between projects: opening a
+ * different folder starts a fresh sitting, and so a fresh ledger.
+ */
+let spend = new SpendRecorder();
+
+function send(event: AgentEvent): void {
   if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.event, event);
+}
+
+function forward(event: AgentEvent): void {
   // Failures are the one kind of event that can arrive in somebody else's
   // words — see the note at the top of plainly.ts. Everything else in the
   // stream was written by us or by the Guard and goes through untouched.
   const said: AgentEvent =
     event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
-  mainWindow.webContents.send(CHANNEL.event, said);
+  send(said);
+  // Recorded whether or not there is a window to tell: a reload must not lose
+  // money that was already spent.
+  for (const also of spend.observe(said)) send(also);
 }
 
 /** Ours, or somebody else's? Everything not served by our own dev server or
@@ -298,6 +317,7 @@ function closeSession(): void {
   agent?.dispose();
   agent = null;
   project = null;
+  spend = new SpendRecorder();
 }
 
 async function openProject(folder: string): Promise<Result<OpenedProject>> {

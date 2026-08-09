@@ -6,7 +6,10 @@ import ConfirmChange from '../components/ConfirmChange';
 import CostMeter from '../components/CostMeter';
 import ErrorCard from '../components/ErrorCard';
 import Message from '../components/Message';
+import ProjectPicker from '../components/ProjectPicker';
 import VersionRow from '../components/VersionRow';
+import Versions from '../components/Versions';
+import type { PutBack, RecentProject, SavedVersion } from '../lib/ipc';
 import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
 import { biggerJob, estimateNote } from '../cost/phrasing';
@@ -95,6 +98,83 @@ const ATTACHED: readonly Attachment[] = [
   { id: 'a2', kind: 'image', name: 'hero-sketch.png', note: 'PNG · 1.2 MB', preview: SCREENSHOT },
   { id: 'a3', kind: 'document', name: 'Brand guidelines.pdf', note: 'PDF · 4.8 MB' },
 ];
+
+/* -------------------------------------------------------------------------- */
+/* Projects and versions                                                       */
+/* -------------------------------------------------------------------------- */
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const NOW = Date.now();
+
+/** Three remembered projects, one of which has been moved or thrown away since
+ *  it was last opened — the state the picker has to draw and that nobody would
+ *  ever come across by accident. */
+const REMEMBERED: readonly RecentProject[] = [
+  {
+    path: '/Users/you/Sites/paper-street',
+    name: 'paper-street',
+    lastOpenedAt: NOW - 12 * MINUTE,
+    lastSpend: money(62, 'USD'),
+    missing: false,
+  },
+  {
+    path: '/Users/you/Sites/atlas-studio',
+    name: 'atlas-studio',
+    lastOpenedAt: NOW - 26 * HOUR,
+    lastSpend: money(214, 'USD'),
+    missing: false,
+  },
+  {
+    path: '/Users/you/Sites/field-notes',
+    name: 'field-notes',
+    lastOpenedAt: NOW - 5 * 24 * HOUR,
+    lastSpend: null,
+    missing: true,
+  },
+];
+
+const TIMELINE: readonly SavedVersion[] = [
+  {
+    id: 'v5',
+    at: NOW - 2 * MINUTE,
+    title: 'Went back to “before I broke the nav”',
+    by: 'you',
+    named: false,
+    current: true,
+  },
+  {
+    id: 'v4',
+    at: NOW - 9 * MINUTE,
+    title: 'Hero rebuilt from your Figma frame',
+    by: 'graphe',
+    named: false,
+    current: false,
+  },
+  {
+    id: 'v3',
+    at: NOW - 55 * MINUTE,
+    title: 'before I broke the nav',
+    by: 'you',
+    named: true,
+    current: false,
+  },
+  {
+    id: 'v2',
+    at: NOW - 3 * HOUR,
+    title: 'Cards moved onto the grid',
+    by: 'graphe',
+    named: false,
+    current: false,
+  },
+];
+
+const JUST_PUT_BACK: PutBack = {
+  title: 'before I broke the nav',
+  at: NOW - 55 * MINUTE,
+  undoTo: 'v4',
+  versions: TIMELINE,
+};
 
 function Section({ title, note, children }: { title: string; note: string; children: ReactNode }) {
   return (
@@ -332,6 +412,44 @@ export default function Gallery() {
             </ul>
             <p className="gallery__caption">
               “Put back”, not “restore to commit”. Every action is reversible from a picture.
+            </p>
+          </Section>
+
+          <Section
+            title="The rail, as it is mounted"
+            note="Appears the first time there is a second version and then stays — a fade, 200ms, once. Fixed to the right-hand edge in the app; shown here in the flow of the page so it can be read beside everything else."
+          >
+            <div className="gallery__rail">
+              <Versions
+                versions={TIMELINE}
+                putBack={JUST_PUT_BACK}
+                onPutBack={noop}
+                onName={noop}
+                onDismissPutBack={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              Going back is itself a version, so it can be undone like anything else. The strip says
+              which moment you are looking at and offers to take it back — and it goes away when it
+              stops being true. Clicking a row opens a field to name it.
+            </p>
+          </Section>
+
+          <Section
+            title="Coming back to a project"
+            note="The first screen of every launch after the first one. A list and one link, and nothing that moves — a list of places is not an event."
+          >
+            <ProjectPicker
+              projects={REMEMBERED}
+              onOpen={noop}
+              onForget={noop}
+              onBrowse={noop}
+              openPath="/Users/you/Sites/paper-street"
+            />
+            <p className="gallery__caption">
+              A folder that has been moved or thrown away stays on the list, says so in words as
+              well as in colour, and offers the only useful thing left to do with it. It is not an
+              error card, because nothing has gone wrong with the app.
             </p>
           </Section>
 

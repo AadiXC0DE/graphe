@@ -201,3 +201,23 @@
 .composer-sample {
   max-width: 680px;
 }
+
+/* The version rail, taken out of the corner it lives in.
+
+   In the app it is fixed to the right-hand edge of the window. Here it sits in
+   the flow of the page so it can be read beside everything else — same width,
+   same rows, same everything, in a box instead of against the glass. */
+.gallery__rail {
+  width: 328px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.gallery__rail .rail {
+  position: static;
+  width: 100%;
+  border-left: none;
+  padding-top: var(--space-4);
+  animation: none;
+}

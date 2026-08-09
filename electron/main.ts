@@ -35,13 +35,27 @@ import {
 } from 'electron';
 import { stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { basename, resolve, sep } from 'node:path';
+import { basename, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSession, type Decision, type GrapheSession } from '../src/agent/pi/adapter';
 import type { AgentEvent } from '../src/agent/types';
 import { SpendRecorder } from '../src/cost/recorder';
-import { Timeline } from '../src/history/timeline';
-import { CHANNEL, type OpenedProject, type Result, type Trouble } from '../src/lib/ipc';
+import { Timeline, type Version } from '../src/history/timeline';
+import {
+  CHANNEL,
+  type OpenedProject,
+  type PutBack,
+  type RecentProject,
+  type Result,
+  type SavedVersion,
+  type ShowOutcome,
+  type ShowProgress,
+  type Trouble,
+} from '../src/lib/ipc';
+import { Recents } from '../src/projects/recents';
+import { Workspaces } from '../src/projects/workspaces';
+import type { Serving } from '../src/preview/serve';
+import { makeAndServe, ShowError, showSays } from '../src/preview/show';
 import { knownTrouble, plainMessage, plainTrouble } from './plainly';
 
 /**
@@ -140,6 +154,19 @@ const NOT_A_FOLDER: Trouble = {
   actionLabel: 'Got it',
 };
 
+/** The one the picker hits: a project that was here last time and is not here
+ *  now. It is worth its own sentence, because "I could not open that" reads as
+ *  our failure and this one is a fact about their computer — and because the
+ *  useful thing to offer is taking it off the list, not trying again. */
+function movedOrGone(name: string): Trouble {
+  return {
+    what: `I cannot find ${name} any more.`,
+    because:
+      'The folder has been moved, renamed or thrown away since you last opened it. Nothing of yours has been touched — I just do not know where to look.',
+    actionLabel: 'Take it off the list',
+  };
+}
+
 const NOTHING_OPEN: Trouble = {
   what: 'I do not have a folder to work in yet.',
   because: 'Pick the folder your project lives in and I will start there.',
@@ -152,38 +179,80 @@ const PICKER_FAILED: Trouble = {
   actionLabel: 'Got it',
 };
 
+const NOTHING_TO_SHOW: Trouble = {
+  what: 'There is nothing to look at yet.',
+  because: 'Open the folder your project lives in and I will get it ready for you.',
+  actionLabel: 'Got it',
+};
+
+const NO_SUCH_VERSION: Trouble = {
+  what: 'I could not find that version of your project.',
+  because: 'It is not one of the versions I have saved for this folder.',
+  actionLabel: 'Got it',
+};
+
+/**
+ * Something the timeline could not do, in its own words.
+ *
+ * `HistoryError` messages are already written for a person — that module exists
+ * so git is never spoken aloud — so the sentence comes straight through and only
+ * the raw output is tucked away. Anything else is a failure we did not plan for,
+ * and it gets the generic card rather than whatever text happened to be on it.
+ */
+function historyTrouble(cause: unknown): Trouble {
+  const details = detailsOf(cause);
+  if (cause instanceof Error && cause.name === 'HistoryError') {
+    const raw = (cause as Error & { details?: string }).details ?? details ?? '';
+    return {
+      what: cause.message,
+      because: 'Nothing in your project has been changed.',
+      actionLabel: 'Got it',
+      ...(raw.trim() === '' ? {} : { details: raw }),
+    };
+  }
+  return {
+    what: 'I could not do that to your project’s versions.',
+    because: 'I have stopped where I was. Nothing has been changed.',
+    actionLabel: 'Got it',
+    ...(details === undefined ? {} : { details }),
+  };
+}
+
+/** A failure while getting a project ready. The reason goes through the shell's
+ *  own translation first — a project that could not fetch what it needs usually
+ *  failed for a reason we already have words for — and falls back to the
+ *  sentence the preview module wrote. The raw output never leaves `details`. */
+function couldNotShow(cause: unknown): Trouble {
+  const said = cause instanceof ShowError ? cause.message : showSays.didNotFinish;
+  const raw = cause instanceof ShowError ? cause.details : detailsOf(cause) ?? '';
+  return (
+    knownTrouble(raw, raw) ?? {
+      what: said,
+      because:
+        'Something in your project stopped part way through, so there is nothing finished to look at yet. Tell me what you were expecting and I will take a look.',
+      actionLabel: 'Got it',
+      ...(raw.trim() === '' ? {} : { details: raw }),
+    }
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* The window                                                                  */
 /* -------------------------------------------------------------------------- */
 
 let mainWindow: BrowserWindow | null = null;
 
-/**
- * What has been spent, kept here rather than in the window.
- *
- * This process is the one that sees every spend, so it is the one that keeps
- * the book. The window is told each entry as it happens — that is what the
- * meter in the corner counts — and the split between real work and our own
- * retries once a sitting settles. Nothing is kept between projects: opening a
- * different folder starts a fresh sitting, and so a fresh ledger.
- */
-let spend = new SpendRecorder();
-
-function send(event: AgentEvent): void {
+/** Every event carries the folder it belongs to. A reply that was still
+ *  arriving when somebody switched projects belongs to the project it started
+ *  in, and this is what lets the window put it there — see `AgentNotice`. */
+function send(project: string | null, event: AgentEvent): void {
   if (mainWindow === null || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(CHANNEL.event, event);
+  mainWindow.webContents.send(CHANNEL.event, { project, event });
 }
 
-function forward(event: AgentEvent): void {
-  // Failures are the one kind of event that can arrive in somebody else's
-  // words — see the note at the top of plainly.ts. Everything else in the
-  // stream was written by us or by the Guard and goes through untouched.
-  const said: AgentEvent =
-    event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
-  send(said);
-  // Recorded whether or not there is a window to tell: a reload must not lose
-  // money that was already spent.
-  for (const also of spend.observe(said)) send(also);
+function tell(progress: ShowProgress): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.showProgress, progress);
 }
 
 /** Ours, or somebody else's? Everything not served by our own dev server or
@@ -310,23 +379,120 @@ function createWindow(): void {
 /* The session                                                                 */
 /* -------------------------------------------------------------------------- */
 
-let agent: GrapheSession | null = null;
-let project: OpenedProject | null = null;
+/**
+ * Everything the shell holds for one project.
+ *
+ * All of it per project, none of it shared. The ledger especially: this process
+ * is the one that sees every spend, so it keeps the book — and a book kept per
+ * window rather than per folder would have quietly billed one project for
+ * another's afternoon the first time somebody switched.
+ */
+type Held = {
+  timeline: Timeline;
+  spend: SpendRecorder;
+  /** Null only for the moment between the timeline opening and the session
+   *  starting, which is the window in which the session can fail. */
+  session: GrapheSession | null;
+  /** The finished site being looked at, if "See it" has been pressed here. */
+  serving: Serving | null;
+};
 
-function closeSession(): void {
-  agent?.dispose();
-  agent = null;
-  project = null;
-  spend = new SpendRecorder();
+const workspaces = new Workspaces<Held>({
+  close: (held) => {
+    held.session?.dispose();
+    void held.serving?.stop();
+  },
+});
+
+/**
+ * The list of projects this computer remembers.
+ *
+ * Opened on demand rather than at module scope because `app.getPath` is not
+ * answerable before the app is ready, and this file is imported long before it
+ * is. One promise, so two calls in the same tick cannot make two readers of the
+ * same file.
+ */
+let recentsPromise: Promise<Recents> | null = null;
+
+function recents(): Promise<Recents> {
+  recentsPromise ??= Recents.open(join(app.getPath('userData'), 'projects.json'));
+  return recentsPromise;
+}
+
+/** The remembered list, with "is that folder still there?" answered now rather
+ *  than stored. A folder can go away while the app is not looking, and a picker
+ *  that only finds out when you click it is a picker that greets you with a
+ *  failure. */
+async function rememberedProjects(): Promise<readonly RecentProject[]> {
+  const list = (await recents()).list();
+  return Promise.all(
+    list.map(async (one) => {
+      const found = await stat(one.path).catch(() => null);
+      return { ...one, missing: found === null || !found.isDirectory() };
+    }),
+  );
+}
+
+/** What the window is told about a version. */
+function asSaved(version: Version, currentId: string | null): SavedVersion {
+  return {
+    id: version.id,
+    at: version.at,
+    title: version.title,
+    by: version.by,
+    named: version.named,
+    current: version.id === currentId,
+  };
+}
+
+/** The whole timeline of the project in front, newest first. No project open is
+ *  an empty list rather than a failure: the rail simply has nothing to draw, and
+ *  a card saying so would be a card about us. */
+async function versionsOf(held: Held): Promise<readonly SavedVersion[]> {
+  const [versions, current] = await Promise.all([held.timeline.versions(), held.timeline.currentVersion()]);
+  return versions.map((version) => asSaved(version, current?.id ?? null));
+}
+
+function forwardTo(path: string, held: Held): (event: AgentEvent) => void {
+  return (event) => {
+    // Failures are the one kind of event that can arrive in somebody else's
+    // words — see the note at the top of plainly.ts. Everything else in the
+    // stream was written by us or by the Guard and goes through untouched.
+    const said: AgentEvent =
+      event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
+    send(path, said);
+    // Recorded whether or not there is a window to tell: a reload must not lose
+    // money that was already spent.
+    for (const also of held.spend.observe(said)) {
+      send(path, also);
+      // What a sitting came to is worth keeping beside the project's name, so
+      // opening it again is not the first time anybody finds out.
+      if (also.type === 'spend-summary') {
+        void recents().then((list) => list.recordSpend(path, also.summary.total));
+      }
+    }
+  };
 }
 
 async function openProject(folder: string): Promise<Result<OpenedProject>> {
   const path = resolve(folder);
+  const name = basename(path) === '' ? path : basename(path);
 
   const found = await stat(path).catch(() => null);
-  if (found === null || !found.isDirectory()) return fail(NOT_A_FOLDER);
+  if (found === null || !found.isDirectory()) {
+    // Only a project we already knew about gets the "take it off the list"
+    // wording — for anything else, being handed a path that is not a folder is
+    // an ordinary mistake and not a list to be tidied.
+    const known = (await recents()).list().some((one) => one.path === path);
+    return fail(known ? movedOrGone(name) : NOT_A_FOLDER);
+  }
 
-  closeSession();
+  // Already open: come straight back to it. The session, the ledger and the
+  // history are all exactly where they were left, which is the whole of B2.
+  if (workspaces.resume(path) !== null) {
+    await (await recents()).remember({ path, name });
+    return done({ path, name });
+  }
 
   let timeline: Timeline;
   try {
@@ -335,8 +501,14 @@ async function openProject(folder: string): Promise<Result<OpenedProject>> {
     return fail(noSafetyNet(cause));
   }
 
+  const held: Held = { timeline, spend: new SpendRecorder(), session: null, serving: null };
+
   try {
-    agent = await createSession({ projectRoot: path, onEvent: forward, timeline });
+    held.session = await createSession({
+      projectRoot: path,
+      onEvent: forwardTo(path, held),
+      timeline,
+    });
   } catch (cause) {
     // The adapter wraps whatever went wrong in a sentence of its own, so the
     // reason worth reading is down the `cause` chain rather than on top of it.
@@ -345,8 +517,13 @@ async function openProject(folder: string): Promise<Result<OpenedProject>> {
     return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
   }
 
-  project = { path, name: basename(path) === '' ? path : basename(path) };
-  return done(project);
+  workspaces.adopt({ path, name, held });
+  await (await recents()).remember({ path, name });
+  return done({ path, name });
+}
+
+function closeSession(): void {
+  workspaces.closeAll();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -390,9 +567,89 @@ function register(): void {
     return openProject(path);
   });
 
+  handle<readonly RecentProject[]>(CHANNEL.recentProjects, async () =>
+    done(await rememberedProjects()),
+  );
+
+  handle<readonly RecentProject[]>(CHANNEL.forgetProject, async (_event, args) => {
+    const [path] = args;
+    if (typeof path === 'string' && path.trim() !== '') {
+      // The list, and only the list. Nothing on disk is touched, ever.
+      await (await recents()).forget(path);
+      workspaces.close(resolve(path));
+    }
+    return done(await rememberedProjects());
+  });
+
+  handle<readonly SavedVersion[]>(CHANNEL.versions, async () => {
+    const open = workspaces.current;
+    if (open === null) return done([]);
+    try {
+      return done(await versionsOf(open.held));
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  handle<PutBack>(CHANNEL.putBack, async (_event, args) => {
+    const [versionId] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof versionId !== 'string' || versionId.trim() === '') return fail(NO_SUCH_VERSION);
+    try {
+      const restored = await open.held.timeline.restoreTo(versionId);
+      return done({
+        title: restored.wentBackTo.title,
+        at: restored.wentBackTo.at,
+        undoTo: restored.undoTo,
+        versions: await versionsOf(open.held),
+      });
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  handle<readonly SavedVersion[]>(CHANNEL.nameVersion, async (_event, args) => {
+    const [versionId, name] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof versionId !== 'string' || typeof name !== 'string') return fail(NO_SUCH_VERSION);
+    try {
+      await open.held.timeline.nameVersion(versionId, name);
+      return done(await versionsOf(open.held));
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  handle<ShowOutcome>(CHANNEL.show, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_TO_SHOW);
+
+    // One at a time per project. Pressing it again means "show me what it looks
+    // like now", so the old one goes and a new one takes its place.
+    await open.held.serving?.stop();
+    open.held.serving = null;
+
+    try {
+      const outcome = await makeAndServe({ folder: open.path, says: tell });
+      if (outcome.kind === 'unsure') return done({ kind: 'unsure', question: outcome.question });
+      open.held.serving = outcome.serving;
+      // Their own browser, not a window of ours. It is the one they already
+      // trust, it is where their client will open the link we send later, and
+      // the alternative is us drawing somebody else's HTML inside the same app
+      // that holds their folder open.
+      await shell.openExternal(outcome.serving.address);
+      return done({ kind: 'showing', name: open.name });
+    } catch (cause) {
+      return fail(couldNotShow(cause));
+    }
+  });
+
   handle<null>(CHANNEL.prompt, async (_event, args) => {
     const [text] = args;
     if (typeof text !== 'string' || text.trim() === '') return done(null);
+    const agent = workspaces.current?.held.session ?? null;
     if (agent === null) return fail(NOTHING_OPEN);
     try {
       await agent.prompt(text);
@@ -409,13 +666,14 @@ function register(): void {
   });
 
   handle<null>(CHANNEL.stop, async () => {
-    await agent?.stop();
+    await workspaces.current?.held.session?.stop();
     return done(null);
   });
 
   handle<boolean>(CHANNEL.answer, async (_event, args) => {
     const [callId, decision] = args;
     if (typeof callId !== 'string' || (decision !== 'yes' && decision !== 'no')) return done(false);
+    const agent = workspaces.current?.held.session ?? null;
     return done(agent?.answer(callId, decision as Decision) ?? false);
   });
 
@@ -425,7 +683,7 @@ function register(): void {
       title: 'Which folder should I work in?',
       buttonLabel: 'Work here',
       properties: ['openDirectory', 'createDirectory'],
-      defaultPath: project?.path ?? app.getPath('home'),
+      defaultPath: workspaces.current?.path ?? app.getPath('home'),
     });
     if (picked.canceled) return done(null);
     return done(picked.filePaths[0] ?? null);

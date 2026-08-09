@@ -1,0 +1,249 @@
+/* The rail on the far right.
+
+   It appears the first time there is a second version and then stays — fade,
+   200ms, once (notes/strategy/UI-DESIGN.md). After that nothing in here moves
+   except the undo strip arriving, because scrubbing a list of forty versions
+   has to feel weightless and a rail that reacts is a rail people stop touching. */
+
+.rail {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  /* Set by .app--railed, which pads the scroller by the same amount. One number,
+     one place — the two must agree or the conversation slides under the rail. */
+  width: var(--rail, 328px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-3) var(--space-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+
+  animation: rail-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+/* Room for the traffic lights, which sit over the whole window. */
+[data-shell='desktop'] .rail {
+  padding-top: var(--space-7);
+}
+
+@keyframes rail-arrives {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rail__title {
+  margin: 0;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.rail__list {
+  max-width: none;
+}
+
+/* A title is the whole reason the timeline is readable, and "Hero rebuilt fr…"
+   is not a title. In a 320px rail it gets two lines rather than an ellipsis;
+   `VersionRow` keeps its single line everywhere else, where there is room. */
+.rail .versionrow__title {
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  line-height: 1.35;
+}
+
+.rail .versionrow__open {
+  align-items: flex-start;
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.rail .versionrow__thumb {
+  margin-top: 1px;
+}
+
+.rail .versionrow__restore,
+.rail .versionrow__badge {
+  align-self: flex-start;
+  margin-top: var(--space-2);
+}
+
+/* ---------------------------------------------------------------------------
+   "Put back to 2 minutes ago · Undo"
+   Rises 6px with a fade over 200ms and then sits still. It is a statement about
+   something that has already happened, so it is calm; and it is the one thing in
+   this rail allowed to move, because it is rare.
+   --------------------------------------------------------------------------- */
+
+.rail__putback {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-sm);
+  animation: putback-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes putback-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rail__putbacksaid {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.rail__putbackrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.rail__putbackwhat {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rail__undo {
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  margin-right: calc(var(--space-2) * -1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--accent);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.rail__undo:active {
+  transform: scale(0.97);
+}
+
+.rail__undo:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------------------
+   Naming a version
+   --------------------------------------------------------------------------- */
+
+.rail__naming {
+  padding: var(--space-2) var(--space-2) var(--space-3);
+}
+
+.naming {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.naming__label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.naming__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.naming__field {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-sm);
+}
+
+.naming__field::placeholder {
+  color: var(--text-faint);
+}
+
+.naming__field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.naming__save {
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.naming__save:active {
+  transform: scale(0.97);
+}
+
+.naming__save:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .rail__undo:hover:not(:disabled),
+  .naming__save:hover:not(:disabled) {
+    color: var(--text);
+  }
+
+  .naming__save:hover:not(:disabled) {
+    border-color: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail,
+  .rail__putback {
+    animation: none;
+  }
+
+  .rail__undo:active,
+  .naming__save:active {
+    transform: none;
+  }
+}

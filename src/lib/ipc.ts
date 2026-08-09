@@ -12,7 +12,7 @@
  * see.
  */
 
-import type { AgentEvent } from '../agent/types';
+import type { AgentEvent, Money } from '../agent/types';
 
 /** Yes or no, from a person. Same two answers the Guard accepts, and no third. */
 export type Decision = 'yes' | 'no';
@@ -50,6 +50,108 @@ export type OpenedProject = {
   name: string;
 };
 
+/**
+ * A project this computer remembers, for the picker on launch.
+ *
+ * `missing` is worked out at the moment the list is asked for rather than
+ * stored, because a folder can be moved, renamed or thrown away while the app is
+ * not looking, and a list that only finds out when you click is a list that
+ * greets you with a failure.
+ */
+export type RecentProject = {
+  path: string;
+  name: string;
+  /** Epoch ms. Newest first is the order the picker shows them in. */
+  lastOpenedAt: number;
+  /** What the last sitting in this folder cost, or null if nothing was spent. */
+  lastSpend: Money | null;
+  /** True when the folder is not where we left it. */
+  missing: boolean;
+};
+
+/**
+ * One entry in the version timeline, as the window draws it.
+ *
+ * Deliberately not `history/timeline`'s own `Version`. That type belongs to a
+ * module that spawns processes and reads folders; this one crosses a structured
+ * clone into a sandbox, and the seam between them is the point of this file.
+ */
+export type SavedVersion = {
+  id: string;
+  /** Epoch ms. The window turns it into "4 minutes ago" itself. */
+  at: number;
+  /** Plain language, one line: "Made the header sticky". */
+  title: string;
+  /** Who caused it. */
+  by: 'you' | 'graphe';
+  /** True when a person chose this title. */
+  named: boolean;
+  /** The version the project currently looks like. Exactly one, once there is
+   *  anything saved at all. */
+  current: boolean;
+};
+
+/**
+ * What happened when somebody put their project back.
+ *
+ * Going back is itself a version, so it can be undone like anything else —
+ * `undoTo` is the id to hand back to `putBack` to do exactly that. The window
+ * offers it for a while and then stops offering it; the version is still there
+ * either way.
+ */
+export type PutBack = {
+  /** The version the project now looks like, in the user's words. */
+  title: string;
+  /** When that version was made. Epoch ms — "Put back to 2 minutes ago". */
+  at: number;
+  /** Hand this back to `putBack` to undo the whole thing. */
+  undoTo: string;
+  /** The list as it now stands, so the rail does not have to ask twice. */
+  versions: readonly SavedVersion[];
+};
+
+/**
+ * The answer to "See it".
+ *
+ * `unsure` is a real outcome rather than a failure. A folder we cannot read the
+ * shape of gets a question in the conversation instead of a guess that opens
+ * the wrong thing — see notes/strategy/SHARING.md §1 for why guessing here is
+ * more dangerous than it looks.
+ */
+export type ShowOutcome =
+  | { kind: 'showing'; name: string }
+  | { kind: 'unsure'; question: string };
+
+/** A sentence about how it is going, and whether that is the last one. Never a
+ *  percentage and never a log line — "Never a spinner without a sentence". */
+export type ShowProgress = { says: string; done: boolean };
+
+/**
+ * The two sentences "See it" is allowed to say while it works.
+ *
+ * Here rather than in the shell because both sides say them: the window says
+ * the first one the instant somebody presses the button, so the press has an
+ * answer inside 100ms rather than after a folder has been read, and the shell
+ * says both as it actually reaches them. Two copies of a sentence that must
+ * match is exactly the sort of thing that stops matching.
+ */
+export const showWords = {
+  gettingPieces: 'Getting the pieces your project needs…',
+  puttingTogether: 'Putting your site together…',
+  ready: 'Ready',
+} as const;
+
+/**
+ * One event, and which project it belongs to.
+ *
+ * The envelope is the whole reason nothing leaks between projects. A reply that
+ * started arriving for one folder must not land in the conversation of the one
+ * somebody has just switched to, and the only process that knows which is which
+ * is the one that owns the sessions. `project` is null only for something that
+ * belongs to no folder at all.
+ */
+export type AgentNotice = { project: string | null; event: AgentEvent };
+
 /** Channel names. Namespaced so nothing else on the wire can be mistaken for
  *  ours, and centralised so preload and main cannot drift apart. */
 export const CHANNEL = {
@@ -59,6 +161,13 @@ export const CHANNEL = {
   answer: 'graphe:answer',
   chooseFolder: 'graphe:choose-folder',
   event: 'graphe:event',
+  recentProjects: 'graphe:recent-projects',
+  forgetProject: 'graphe:forget-project',
+  versions: 'graphe:versions',
+  putBack: 'graphe:put-back',
+  nameVersion: 'graphe:name-version',
+  show: 'graphe:show',
+  showProgress: 'graphe:show-progress',
 } as const;
 
 /**
@@ -67,11 +176,12 @@ export const CHANNEL = {
  * There is no `invoke(channel, ...args)` here on purpose. A generic escape hatch
  * would mean the renderer — the one process that loads other people's HTML,
  * other people's CSS and, one day, other people's previews — could reach any
- * handler the main process has ever registered. Six named verbs can be read in
- * one sitting and audited in another.
+ * handler the main process has ever registered. A dozen named verbs can still be
+ * read in one sitting and audited in another; a wildcard never can.
  */
 export type GrapheApi = {
-  /** Work in this folder from now on. Replaces whatever was open before. */
+  /** Work in this folder from now on. A folder that is already open is resumed
+   *  exactly where it was left, conversation and spend included. */
   openProject(path: string): Promise<Result<OpenedProject>>;
   /** Say something to the agent. Resolves when it has finished responding. */
   prompt(text: string): Promise<Result<null>>;
@@ -81,6 +191,25 @@ export type GrapheApi = {
   answer(callId: string, decision: Decision): Promise<Result<boolean>>;
   /** Ask the person to pick a folder. Null when they closed the picker. */
   chooseFolder(): Promise<Result<string | null>>;
+
+  /** The projects this computer remembers, newest first. */
+  recentProjects(): Promise<Result<readonly RecentProject[]>>;
+  /** Take a project off that list. The folder itself is never touched. */
+  forgetProject(path: string): Promise<Result<readonly RecentProject[]>>;
+
+  /** Every version of the open project, newest first. Empty before anything has
+   *  been saved, and empty — not a failure — when no project is open. */
+  versions(): Promise<Result<readonly SavedVersion[]>>;
+  /** Put the project back to a version. Undoable; see `PutBack`. */
+  putBack(versionId: string): Promise<Result<PutBack>>;
+  /** Give a version a name of the user's own. */
+  nameVersion(versionId: string, name: string): Promise<Result<readonly SavedVersion[]>>;
+
+  /** Make the project, then open the made thing in their own browser. */
+  show(): Promise<Result<ShowOutcome>>;
+  /** Follow along while that happens. Returns the function that stops. */
+  onShowProgress(listener: (progress: ShowProgress) => void): () => void;
+
   /** Listen to the agent. Returns the function that stops listening. */
-  onEvent(listener: (event: AgentEvent) => void): () => void;
+  onEvent(listener: (notice: AgentNotice) => void): () => void;
 };

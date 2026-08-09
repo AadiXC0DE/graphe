@@ -360,9 +360,11 @@ describe('the split survives the whole path', () => {
     // they travel is the same one the desktop app uses.
     const seen: AgentEvent[] = [];
     const settled = new Promise<void>((resolve) => {
-      const stop = bridge.onEvent((event) => {
-        seen.push(event);
-        if (event.type === 'spend-summary') {
+      // Each event now arrives with the folder it belongs to, so the window can
+      // put a reply on the desk it started on — see `AgentNotice`.
+      const stop = bridge.onEvent((notice) => {
+        seen.push(notice.event);
+        if (notice.event.type === 'spend-summary') {
           stop();
           resolve();
         }

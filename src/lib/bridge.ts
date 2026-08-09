@@ -23,7 +23,19 @@
 import type { AgentEvent } from '../agent/types';
 import { Ledger } from '../cost/ledger';
 import { money } from '../cost/money';
-import type { Decision, GrapheApi, OpenedProject, Result } from './ipc';
+import {
+  showWords,
+  type AgentNotice,
+  type Decision,
+  type GrapheApi,
+  type OpenedProject,
+  type PutBack,
+  type RecentProject,
+  type Result,
+  type SavedVersion,
+  type ShowOutcome,
+  type ShowProgress,
+} from './ipc';
 
 declare global {
   interface Window {
@@ -109,11 +121,95 @@ const PREVIEW_SPEND: readonly { minor: number; label: string; reason: 'work' | '
 
 const PREVIEW_CURRENCY = 'USD';
 
+/* -------------------------------------------------------------------------- */
+/* Two projects and their versions, so the picker and the rail have something  */
+/* to be                                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A browser tab has no folders in it, and the two regions that appear only when
+ * there is something to say — the project picker and the version rail — would
+ * therefore never appear at all. That would make them unreviewable: the only
+ * acceptance test that counts for an interface is looking at it.
+ *
+ * So the preview has two projects with different histories. Different on
+ * purpose: switching between them is how you see, in one glance, that a project
+ * carries its own versions and its own spend rather than the window's.
+ */
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const started = Date.now();
+
+const PREVIEW_PROJECTS: readonly { path: string; name: string; ago: number; spent: number | null }[] =
+  [
+    { path: '/Users/you/Sites/paper-street', name: 'paper-street', ago: 12 * MINUTE, spent: 62 },
+    { path: '/Users/you/Sites/atlas-studio', name: 'atlas-studio', ago: 26 * HOUR, spent: 214 },
+    { path: '/Users/you/Sites/field-notes', name: 'field-notes', ago: 5 * 24 * HOUR, spent: null },
+  ];
+
+type PreviewVersion = { title: string; ago: number; by: 'you' | 'graphe'; named?: boolean };
+
+const PREVIEW_VERSIONS: Readonly<Record<string, readonly PreviewVersion[]>> = {
+  '/Users/you/Sites/paper-street': [
+    { title: 'Hero rebuilt from your Figma frame', ago: 2 * MINUTE, by: 'graphe' },
+    { title: 'Spacing matched to your scale', ago: 18 * MINUTE, by: 'graphe' },
+    { title: 'before I broke the nav', ago: 55 * MINUTE, by: 'you', named: true },
+    { title: 'Cards moved onto the grid', ago: 3 * HOUR, by: 'graphe' },
+    { title: 'First pass at the landing page', ago: 26 * HOUR, by: 'graphe' },
+  ],
+  '/Users/you/Sites/atlas-studio': [
+    { title: 'Made the header sticky', ago: 26 * HOUR, by: 'graphe' },
+    { title: 'Added the case study page', ago: 2 * 24 * HOUR, by: 'graphe' },
+  ],
+  '/Users/you/Sites/field-notes': [{ title: 'Started the project', ago: 5 * 24 * HOUR, by: 'you' }],
+};
+
+function previewVersions(path: string): SavedVersion[] {
+  const list = PREVIEW_VERSIONS[path] ?? [];
+  return list.map((one, index) => ({
+    id: `${path}#${index}`,
+    at: started - one.ago,
+    title: one.title,
+    by: one.by,
+    named: one.named ?? false,
+    current: index === 0,
+  }));
+}
+
 function previewBridge(): Bridge {
-  const listeners = new Set<(event: AgentEvent) => void>();
+  const listeners = new Set<(notice: AgentNotice) => void>();
+  const watching = new Set<(progress: ShowProgress) => void>();
+
+  /** Whatever project the tab has open. Every event is stamped with it, the way
+   *  the shell stamps its own — the window's routing is then exercised here
+   *  rather than only in the app. */
+  let openPath: string | null = null;
+
   const send = (event: AgentEvent): void => {
-    for (const listener of listeners) listener(event);
+    for (const listener of listeners) listener({ project: openPath, event });
   };
+
+  const versions = new Map<string, SavedVersion[]>();
+  const versionsFor = (path: string): SavedVersion[] => {
+    const already = versions.get(path);
+    if (already !== undefined) return already;
+    const made = previewVersions(path);
+    versions.set(path, made);
+    return made;
+  };
+
+  const forgotten = new Set<string>();
+  const remembered = (): readonly RecentProject[] =>
+    PREVIEW_PROJECTS.filter((one) => !forgotten.has(one.path)).map((one) => ({
+      path: one.path,
+      name: one.name,
+      lastOpenedAt: started - one.ago,
+      lastSpend: one.spent === null ? null : money(one.spent, PREVIEW_CURRENCY),
+      // One of them has gone missing, because "a folder that is not there any
+      // more" is a state the picker has to draw and nobody would ever see it by
+      // accident.
+      missing: one.path === '/Users/you/Sites/field-notes',
+    }));
 
   /** Once, shortly after the interface starts listening. It is the one thing a
    *  browser tab cannot show by waiting for it to happen: money is spent by an
@@ -140,7 +236,9 @@ function previewBridge(): Bridge {
     desktop: false,
 
     openProject(path: string): Promise<Result<OpenedProject>> {
-      const name = path.split('/').filter(Boolean).pop() ?? path;
+      const known = PREVIEW_PROJECTS.find((one) => one.path === path);
+      const name = known?.name ?? path.split('/').filter(Boolean).pop() ?? path;
+      openPath = path;
       return Promise.resolve(done({ path, name }));
     },
 
@@ -161,11 +259,86 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(true));
     },
 
+    /** The third project, as though somebody had gone and found it. A browser
+     *  tab has no folder picker to open, and answering "you closed it" would
+     *  leave the one control on the empty picker doing nothing at all. */
     chooseFolder(): Promise<Result<string | null>> {
-      return Promise.resolve(done(null));
+      const unopened = PREVIEW_PROJECTS.find((one) => one.path !== openPath);
+      return Promise.resolve(done(unopened?.path ?? null));
     },
 
-    onEvent(listener: (event: AgentEvent) => void): () => void {
+    recentProjects(): Promise<Result<readonly RecentProject[]>> {
+      return Promise.resolve(done(remembered()));
+    },
+
+    forgetProject(path: string): Promise<Result<readonly RecentProject[]>> {
+      forgotten.add(path);
+      return Promise.resolve(done(remembered()));
+    },
+
+    versions(): Promise<Result<readonly SavedVersion[]>> {
+      return Promise.resolve(done(openPath === null ? [] : versionsFor(openPath)));
+    },
+
+    putBack(versionId: string): Promise<Result<PutBack>> {
+      if (openPath === null) return Promise.resolve(done(emptyPutBack()));
+      const list = versionsFor(openPath);
+      const target = list.find((one) => one.id === versionId) ?? list[0];
+      if (target === undefined) return Promise.resolve(done(emptyPutBack()));
+
+      // Going back is itself a version, exactly as it is in the app.
+      const wentBack: SavedVersion = {
+        id: `${openPath}#back-${list.length}`,
+        at: Date.now(),
+        title: `Went back to “${target.title}”`,
+        by: 'you',
+        named: false,
+        current: true,
+      };
+      const next = [wentBack, ...list.map((one) => ({ ...one, current: false }))];
+      versions.set(openPath, next);
+      return Promise.resolve(
+        done({
+          title: target.title,
+          at: target.at,
+          undoTo: list[0]?.id ?? target.id,
+          versions: next,
+        }),
+      );
+    },
+
+    nameVersion(versionId: string, name: string): Promise<Result<readonly SavedVersion[]>> {
+      if (openPath === null) return Promise.resolve(done([]));
+      const named = versionsFor(openPath).map((one) =>
+        one.id === versionId ? { ...one, title: name.trim() || one.title, named: true } : one,
+      );
+      versions.set(openPath, named);
+      return Promise.resolve(done(named));
+    },
+
+    /** The two sentences, in order, and then the honest answer: there is no
+     *  folder behind a browser tab, so there is nothing to get ready. */
+    async show(): Promise<Result<ShowOutcome>> {
+      for (const progress of watching) {
+        progress({ says: showWords.puttingTogether, done: false });
+      }
+      await new Promise((wake) => setTimeout(wake, 900));
+      for (const progress of watching) progress({ says: showWords.ready, done: true });
+      return done({
+        kind: 'unsure',
+        question:
+          'This is Graphe running in a browser tab, so there is no folder underneath and nothing for me to get ready. Open the desktop app and this button will show you your own site.',
+      });
+    },
+
+    onShowProgress(listener: (progress: ShowProgress) => void): () => void {
+      watching.add(listener);
+      return () => {
+        watching.delete(listener);
+      };
+    },
+
+    onEvent(listener: (notice: AgentNotice) => void): () => void {
       listeners.add(listener);
       // A beat, so the interface is mounted and the meter arrives the way it
       // does in the desktop app — as something that appears, not as part of the
@@ -176,6 +349,12 @@ function previewBridge(): Bridge {
       };
     },
   };
+}
+
+/** Nothing to go back to. Only reachable in the preview, where a person can
+ *  press the button before anything has been opened. */
+function emptyPutBack(): PutBack {
+  return { title: '', at: Date.now(), undoTo: '', versions: [] };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -193,6 +372,13 @@ function connect(): Bridge {
     stop: () => api.stop(),
     answer: (callId, decision) => api.answer(callId, decision),
     chooseFolder: () => api.chooseFolder(),
+    recentProjects: () => api.recentProjects(),
+    forgetProject: (path) => api.forgetProject(path),
+    versions: () => api.versions(),
+    putBack: (versionId) => api.putBack(versionId),
+    nameVersion: (versionId, name) => api.nameVersion(versionId, name),
+    show: () => api.show(),
+    onShowProgress: (listener) => api.onShowProgress(listener),
     onEvent: (listener) => api.onEvent(listener),
   };
 }

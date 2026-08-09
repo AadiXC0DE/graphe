@@ -8,30 +8,64 @@ suggestions; inconsistent motion is the single most common way an interface read
 
 ---
 
-## Layout
+## Layout — it looks like ChatGPT, because that is the interface they already know
 
-Three regions, resizable, no floating panels:
+**This is the most important decision in the product.** Every designer alive has used ChatGPT. It is
+the most familiar AI surface on earth: a box you type in, answers above it. Starting anywhere else
+spends the user's attention on learning our layout instead of doing their work.
+
+So the first screen is a single centred conversation. Nothing else. No panels, no sidebar, no canvas.
 
 ```
-┌──────────────┬───────────────────────────┬──────────┐
-│              │                           │          │
-│ Conversation │       Live preview        │ Timeline │
-│              │                           │          │
-│  what you    │   the actual thing,       │ every    │
-│  asked for   │   at real size            │ version, │
-│              │                           │ newest   │
-│              │                           │ first    │
-│ ┌──────────┐ │  ┌─────┬─────┬─────┐      │          │
-│ │ cost     │ │  │phone│tablet│desk│      │ [thumb]  │
-│ └──────────┘ │  └─────┴─────┴─────┘      │ [thumb]  │
-└──────────────┴───────────────────────────┴──────────┘
+        ┌─────────────────────────────────────┐
+        │                                     │
+        │       What do you want to make?     │
+        │                                     │
+        │   ┌─────────────────────────────┐   │
+        │   │ Describe it, or drop a      │   │
+        │   │ Figma link or a screenshot  │   │
+        │   └─────────────────────────────┘   │
+        │                                     │
+        └─────────────────────────────────────┘
 ```
 
-**Preview is the largest region and it is never covered.** Diffs, confirmations and errors appear
-*beside* it, never on top of it. The designer's work is the subject of the screen at all times — the
-moment a modal covers the artwork, the app becomes about itself.
+**The interface earns its complexity.** Each region appears the first time it has something to say,
+and then stays:
 
-Timeline collapses to a rail. Conversation collapses. Preview never does.
+| Appears when | What appears | How |
+|---|---|---|
+| There is something to look at | **Preview**, sliding in from the right to take half the width | `280ms ease-out`, once |
+| A second version exists | **Timeline** rail on the far right, collapsed to thumbnails | Fade, `200ms` |
+| The first spend registers | **Cost meter**, small, in the corner | No animation — just present |
+| Only when asked | Code, git, terminal, file tree | Behind "Show the code" |
+
+A first-time user sees a text box. A user three hours in has a full workbench. **Nobody is shown a
+control before they need it** — the progressive-disclosure principle from
+[research/03](research/03-designer-pain-points.md), applied to our own interface and not just to our
+vocabulary.
+
+**Once the preview exists, it is never covered.** Diffs, confirmations and errors appear beside it,
+never on top. The designer's work stays the subject of the screen — the moment a modal covers the
+artwork, the app becomes about itself.
+
+### Familiar surface, serious agent
+
+The familiarity is the disguise, not the ceiling. Behind the same chat box ChatGPT trained everyone to
+use, this is a full agent loop with real tools — reading and writing files, running builds, taking
+screenshots, inspecting the rendered result, and iterating until the thing actually works.
+
+What the Claude Code and Codex desktop apps don't do, and aren't trying to:
+
+- **It sees what it made.** Screenshot the rendered page, compare it against the Figma frame, fix the
+  difference. An agent that only reads code is working blind on a visual problem.
+- **It works inside a real design system** — your tokens, your spacing scale, your components — as
+  enforced constraints rather than polite suggestions.
+- **Every action is reversible from a picture**, not a git command.
+- **It stops itself** — cost ceilings, loop detection, confirmations that can't be switched off.
+- **It publishes**, and inspects the site for leaked keys and broken config before it does.
+
+The bet: usable like ChatGPT on day one, while running something more capable than what sits on most
+engineers' machines.
 
 ---
 

@@ -17,9 +17,11 @@ and without producing worse code.
 
 | Doc | What's in it |
 |---|---|
+| **[Differentiators](docs/DIFFERENTIATORS.md)** | **The ten things no other agent has, and why they can't copy them** |
 | [PRD](docs/PRD.md) | Vision, users, the honest risk assessment, scope, v1 cut |
 | [Features](docs/FEATURES.md) | Full catalogue by pillar, each tracing to a documented pain |
-| [Architecture](docs/ARCHITECTURE.md) | Local-first desktop app on Pi, the safety layer, key decisions |
+| [UI and motion](docs/UI-DESIGN.md) | Layout, visual language, motion tokens, anti-patterns |
+| [Architecture](docs/ARCHITECTURE.md) | Local-first desktop app on Pi, the safety layer, what it costs to run |
 | [Test plan](docs/TEST-PLAN.md) | Safety, functional, and gentleness testing with release gates |
 | [Landing page](docs/LANDING-PAGE.md) | Copy and art direction |
 

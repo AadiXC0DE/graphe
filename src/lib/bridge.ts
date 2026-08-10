@@ -37,6 +37,9 @@ import {
   type SavedVersion,
   type ShowOutcome,
   type ShowProgress,
+  type VisualChange,
+  type VisualFrames,
+  type VisualNotice,
 } from './ipc';
 
 declare global {
@@ -178,9 +181,80 @@ function previewVersions(path: string): SavedVersion[] {
   }));
 }
 
+/* -------------------------------------------------------------------------- */
+/* A before and after, for a tab with no folder behind it                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Two pictures of a page, drawn rather than photographed.
+ *
+ * The desktop app photographs the user's own site. A browser tab has no site,
+ * and the alternative to this would be the strip never appearing at all — which
+ * would make the one component in the product with a gesture in it the one
+ * component nobody can review. So the preview draws a plain page twice, with one
+ * real difference between them: the button is 8px lower and wearing the accent
+ * colour, which is the exact example DIFFERENTIATORS §5 uses.
+ *
+ * Drawn as pictures rather than mocked as markup on purpose. Everything
+ * downstream — the wipe, the outlines, the piece-lifting in "just what changed"
+ * — treats these as opaque images, so what gets reviewed here is the real
+ * component doing its real job on a real pair.
+ */
+function samplePage(moved: boolean): string {
+  const buttonY = moved ? 268 : 260;
+  const buttonFill = moved ? '#b8492c' : '#3d3d3a';
+  const page = `<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="820" viewBox="0 0 1180 820">
+<rect width="1180" height="820" fill="#ffffff"/>
+<rect x="0" y="0" width="1180" height="64" fill="#fbfbfa"/>
+<rect x="0" y="63" width="1180" height="1" fill="#e4e4e1"/>
+<rect x="64" y="26" width="92" height="12" rx="3" fill="#1a1a19"/>
+<rect x="820" y="28" width="60" height="8" rx="3" fill="#9a9a93"/>
+<rect x="906" y="28" width="60" height="8" rx="3" fill="#9a9a93"/>
+<rect x="992" y="28" width="60" height="8" rx="3" fill="#9a9a93"/>
+<rect x="1078" y="22" width="38" height="20" rx="6" fill="#e4e4e1"/>
+<rect x="64" y="150" width="520" height="26" rx="4" fill="#1a1a19"/>
+<rect x="64" y="188" width="420" height="26" rx="4" fill="#1a1a19"/>
+<rect x="64" y="232" width="470" height="9" rx="3" fill="#9a9a93"/>
+<rect x="64" y="${String(buttonY)}" width="168" height="44" rx="8" fill="${buttonFill}"/>
+<rect x="92" y="${String(buttonY + 18)}" width="88" height="8" rx="3" fill="#ffffff"/>
+<rect x="660" y="140" width="456" height="248" rx="12" fill="#f2f2f0"/>
+<rect x="64" y="470" width="336" height="180" rx="12" fill="#fbfbfa" stroke="#e4e4e1"/>
+<rect x="422" y="470" width="336" height="180" rx="12" fill="#fbfbfa" stroke="#e4e4e1"/>
+<rect x="780" y="470" width="336" height="180" rx="12" fill="#fbfbfa" stroke="#e4e4e1"/>
+<rect x="96" y="504" width="130" height="11" rx="3" fill="#1a1a19"/>
+<rect x="454" y="504" width="150" height="11" rx="3" fill="#1a1a19"/>
+<rect x="812" y="504" width="118" height="11" rx="3" fill="#1a1a19"/>
+<rect x="96" y="534" width="252" height="8" rx="3" fill="#9a9a93"/>
+<rect x="454" y="534" width="252" height="8" rx="3" fill="#9a9a93"/>
+<rect x="812" y="534" width="252" height="8" rx="3" fill="#9a9a93"/>
+<rect x="96" y="556" width="200" height="8" rx="3" fill="#9a9a93"/>
+<rect x="454" y="556" width="220" height="8" rx="3" fill="#9a9a93"/>
+<rect x="812" y="556" width="180" height="8" rx="3" fill="#9a9a93"/>
+<rect x="0" y="720" width="1180" height="100" fill="#f2f2f0"/>
+<rect x="64" y="756" width="150" height="8" rx="3" fill="#9a9a93"/>
+</svg>`;
+  // Base64 rather than percent-encoding: the same string is used as a CSS
+  // `url()` in "just what changed", and raw SVG in a url() is a quoting
+  // argument nobody wins.
+  return `data:image/svg+xml;base64,${globalThis.btoa(page)}`;
+}
+
+const PREVIEW_CHANGE: VisualChange = {
+  id: 'preview-change',
+  at: started,
+  headline: 'Moved the button down and used your brand blue',
+  where: 'One area changed, near the top on the left.',
+  areas: [{ x: 0.045, y: 0.305, width: 0.155, height: 0.08 }],
+  beforeThumb: samplePage(false),
+  afterThumb: samplePage(true),
+  width: 1180,
+  height: 820,
+};
+
 function previewBridge(): Bridge {
   const listeners = new Set<(notice: AgentNotice) => void>();
   const watching = new Set<(progress: ShowProgress) => void>();
+  const looking = new Set<(notice: VisualNotice) => void>();
 
   /** Whatever project the tab has open. Every event is stamped with it, the way
    *  the shell stamps its own — the window's routing is then exercised here
@@ -245,6 +319,13 @@ function previewBridge(): Bridge {
       const known = PREVIEW_PROJECTS.find((one) => one.path === path);
       const name = known?.name ?? path.split('/').filter(Boolean).pop() ?? path;
       openPath = path;
+      // A beat after the folder is open, so the strip lands in a conversation
+      // that exists. In the app this arrives when a turn has finished and the
+      // pictures have been taken; here it is on a timer, because there is no
+      // folder to photograph.
+      setTimeout(() => {
+        for (const one of looking) one({ project: path, change: PREVIEW_CHANGE });
+      }, 500);
       return Promise.resolve(done({ path, name }));
     },
 
@@ -390,6 +471,22 @@ function previewBridge(): Bridge {
         listeners.delete(listener);
       };
     },
+
+    /** The same two pictures every time. They are drawn rather than
+     *  photographed — see `samplePage` — but everything the component does with
+     *  them is the real thing. */
+    visualFrames(): Promise<Result<VisualFrames>> {
+      return Promise.resolve(
+        done({ before: PREVIEW_CHANGE.beforeThumb, after: PREVIEW_CHANGE.afterThumb }),
+      );
+    },
+
+    onVisualChange(listener: (notice: VisualNotice) => void): () => void {
+      looking.add(listener);
+      return () => {
+        looking.delete(listener);
+      };
+    },
   };
 }
 
@@ -427,6 +524,8 @@ function connect(): Bridge {
     show: () => api.show(),
     onShowProgress: (listener) => api.onShowProgress(listener),
     onEvent: (listener) => api.onEvent(listener),
+    visualFrames: (changeId) => api.visualFrames(changeId),
+    onVisualChange: (listener) => api.onVisualChange(listener),
   };
 }
 

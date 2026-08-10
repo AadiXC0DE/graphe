@@ -54,7 +54,14 @@ import {
   type ShowOutcome,
   type ShowProgress,
   type Trouble,
+  type VisualChange,
+  type VisualFrames,
 } from '../src/lib/ipc';
+import { capture, forget, readPicture, readShot, whatMoved } from '../src/diff/capture';
+import { filesWrittenBy } from '../src/diff/changed';
+import { landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
+import type { Bitmap } from '../src/diff/regions';
+import { tellWhatHappened } from '../src/diff/summary';
 import { PreferenceFile } from '../src/projects/preferences';
 import { Recents } from '../src/projects/recents';
 import { Workspaces } from '../src/projects/workspaces';
@@ -190,6 +197,15 @@ const NOTHING_TO_SHOW: Trouble = {
   actionLabel: 'Got it',
 };
 
+/** The before-and-after has been cleared away — a long conversation keeps only
+ *  the last dozen pictures. Nothing has gone wrong and nothing of theirs is
+ *  missing, so it says what it is rather than apologising. */
+const NO_SUCH_PICTURE: Trouble = {
+  what: 'I do not have those pictures any more.',
+  because: 'I keep the last few before-and-afters and let the older ones go.',
+  actionLabel: 'Got it',
+};
+
 const NO_SUCH_VERSION: Trouble = {
   what: 'I could not find that version of your project.',
   because: 'It is not one of the versions I have saved for this folder.',
@@ -258,6 +274,11 @@ function send(project: string | null, event: AgentEvent): void {
 function tell(progress: ShowProgress): void {
   if (mainWindow === null || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send(CHANNEL.showProgress, progress);
+}
+
+function showChange(project: string, change: VisualChange): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.visualChange, { project, change });
 }
 
 /** Ours, or somebody else's? Everything not served by our own dev server or
@@ -392,6 +413,55 @@ function createWindow(): void {
  * window rather than per folder would have quietly billed one project for
  * another's afternoon the first time somebody switched.
  */
+/**
+ * What this project's before-and-after needs to remember between turns.
+ *
+ * All of it per project, like everything else on a `Held` — a picture taken in
+ * one folder must never be offered as the "before" of a change in another.
+ */
+type Looking = {
+  /** Pictures taken here, oldest last. */
+  shots: Shot[];
+  /** The newest picture's pixels, held so the next comparison does not have to
+   *  read a megabyte back off the disk to find out that one button moved. */
+  pixels: Bitmap | null;
+  /** The newest picture, small, for the strip's "before" half. */
+  thumbnail: string | null;
+  /** What was asked for this turn, in their words. */
+  instruction: string | null;
+  /** Everything written since the last picture. A set, because an agent that
+   *  edits one file six times has changed one file. */
+  files: Set<string>;
+  /** True once a picture has been attempted here, however it went.
+   *
+   *  Not "we have one" — "we have tried". The difference matters for a project
+   *  that cannot be built: without it, every single turn would keep trying for
+   *  a first picture, including the turns that only touched the notes file. */
+  tried: boolean;
+  /** True while a picture is being taken. Nothing waits on it. */
+  busy: boolean;
+  /** Something else changed while we were busy. Take another when this ends. */
+  again: boolean;
+  /** Change id → the two files behind it, for `visualFrames`. */
+  frames: Map<string, { before: string; after: string }>;
+  counter: number;
+};
+
+function nothingSeenYet(): Looking {
+  return {
+    shots: [],
+    pixels: null,
+    thumbnail: null,
+    instruction: null,
+    files: new Set(),
+    tried: false,
+    busy: false,
+    again: false,
+    frames: new Map(),
+    counter: 0,
+  };
+}
+
 type Held = {
   timeline: Timeline;
   spend: SpendRecorder;
@@ -400,6 +470,8 @@ type Held = {
   session: GrapheSession | null;
   /** The finished site being looked at, if "See it" has been pressed here. */
   serving: Serving | null;
+  /** The before-and-after (BACKLOG F2). */
+  looking: Looking;
 };
 
 const workspaces = new Workspaces<Held>({
@@ -498,6 +570,121 @@ async function versionsOf(held: Held): Promise<readonly SavedVersion[]> {
   return versions.map((version) => asSaved(version, current?.id ?? null));
 }
 
+/* -------------------------------------------------------------------------- */
+/* The before and after                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A picture of the project, and what it says next to the one before it.
+ *
+ * BACKLOG F2, and the README's oldest unkept promise: *"You see what changed,
+ * as a picture. A before and after of the page itself, plus a sentence
+ * describing what moved."*
+ *
+ * ## Nothing waits on this
+ *
+ * Not one caller awaits it. It starts after a turn has already settled — after
+ * the reply has finished streaming, after the versions have been refreshed —
+ * and the conversation is usable throughout. Getting a project ready can take
+ * half a minute on a cold folder, and a person who has to wait half a minute to
+ * be told what they can already see on screen would rightly turn this off.
+ *
+ * ## And nothing is said when it fails
+ *
+ * Every failure here is silence. A project that will not build, a page that
+ * never loads, a folder we cannot write into: none of that is something the
+ * person did, none of it changed anything, and a card saying "I could not take
+ * a screenshot" is an app talking about itself in the middle of somebody's
+ * work.
+ */
+async function look(project: string, held: Held): Promise<void> {
+  const looking = held.looking;
+  if (looking.busy) {
+    looking.again = true;
+    return;
+  }
+
+  looking.busy = true;
+  try {
+    // Taken now and cleared now, so a turn that arrives while the picture is
+    // being taken starts its own list rather than inheriting this one.
+    const changed = whatCouldBeSeen(looking.files);
+    const instruction = looking.instruction;
+    const first = !looking.tried;
+    looking.files = new Set();
+    looking.instruction = null;
+    looking.tried = true;
+
+    // Nothing that could move a pixel. The picture we already have is still
+    // true, so there is nothing to take and nothing to say.
+    if (!first && changed.length === 0) return;
+
+    const id = `${Date.now().toString(36)}-${looking.counter}`;
+    looking.counter += 1;
+
+    const taken = await capture({ folder: project, id });
+    if (taken === null) return;
+
+    const shelved = landed(looking.shots, taken.picture);
+    looking.shots = [...shelved.kept];
+    void forget(shelved.forget.map((one) => one.file));
+
+    // The older half. Usually still in hand from last time; read back off the
+    // disk only when it is not, which is the case where the project was opened,
+    // photographed, and then left alone long enough for nothing else to happen.
+    const before = shelved.pair === null ? null : shelved.pair.before;
+    const held =
+      before !== null && (looking.pixels === null || looking.thumbnail === null)
+        ? await readShot(before.file)
+        : null;
+    const beforePixels = before === null ? null : (looking.pixels ?? held?.bitmap ?? null);
+    const beforeThumb = before === null ? null : (looking.thumbnail ?? held?.thumbnail ?? null);
+
+    // Whatever happens next, this is the picture the following turn compares
+    // itself against.
+    looking.pixels = taken.bitmap;
+    looking.thumbnail = taken.thumbnail;
+
+    if (before === null || beforePixels === null || beforeThumb === null) return;
+
+    const moved = whatMoved(beforePixels, taken.bitmap);
+    // Two pictures the same. It happens — a change to a file that only shows on
+    // a page we did not photograph, or below where the picture stops. Showing a
+    // before and after with nothing between them teaches people that the strip
+    // is noise, and then they stop opening the ones that matter.
+    if (moved.fraction === 0) return;
+
+    const told = tellWhatHappened({
+      files: changed,
+      instruction: instruction ?? undefined,
+      areas: moved.areas,
+      fraction: moved.fraction,
+    });
+
+    looking.frames.set(id, { before: before.file, after: taken.picture.file });
+
+    showChange(project, {
+      id,
+      at: taken.picture.at,
+      headline: told.headline,
+      where: told.where,
+      areas: moved.areas,
+      beforeThumb,
+      afterThumb: taken.thumbnail,
+      width: taken.picture.width,
+      height: taken.picture.height,
+    });
+  } catch {
+    // Silence, deliberately. See the note above.
+  } finally {
+    looking.busy = false;
+    if (looking.again) {
+      looking.again = false;
+      void look(project, held);
+    }
+  }
+}
+
 function forwardTo(path: string, held: Held): (event: AgentEvent) => void {
   return (event) => {
     // Failures are the one kind of event that can arrive in somebody else's
@@ -506,6 +693,19 @@ function forwardTo(path: string, held: Held): (event: AgentEvent) => void {
     const said: AgentEvent =
       event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
     send(path, said);
+
+    // Which files a turn wrote, collected as it goes. Read off the same stream
+    // the conversation is drawn from rather than by asking the folder
+    // afterwards: the folder cannot say what this turn did, only what is
+    // different from the last saved version, and the two stop being the same
+    // thing the moment anything is saved mid-turn.
+    if (said.type === 'tool-start') {
+      for (const file of filesWrittenBy(said.call)) held.looking.files.add(file);
+    }
+    // Everything has stopped. The right moment for a picture, and the only one
+    // where taking it cannot slow anything down.
+    if (said.type === 'settled') void look(path, held);
+
     // Recorded whether or not there is a window to tell: a reload must not lose
     // money that was already spent.
     for (const also of held.spend.observe(said)) {
@@ -546,7 +746,13 @@ async function openProject(folder: string): Promise<Result<OpenedProject>> {
     return fail(noSafetyNet(cause));
   }
 
-  const held: Held = { timeline, spend: new SpendRecorder(), session: null, serving: null };
+  const held: Held = {
+    timeline,
+    spend: new SpendRecorder(),
+    session: null,
+    serving: null,
+    looking: nothingSeenYet(),
+  };
 
   try {
     held.session = await createSession({
@@ -564,6 +770,14 @@ async function openProject(folder: string): Promise<Result<OpenedProject>> {
 
   workspaces.adopt({ path, name, held });
   await (await recents()).remember({ path, name });
+
+  // The picture of the project as it stands, taken before anybody asks for
+  // anything. Without it the first change of a sitting has nothing to be
+  // compared against, and the one change people most want to see is usually the
+  // first one they made. Nothing waits on it — `openProject` has already
+  // returned by the time this gets anywhere near a browser window.
+  void look(path, held);
+
   return done({ path, name });
 }
 
@@ -751,8 +965,13 @@ function register(): void {
   handle<null>(CHANNEL.prompt, async (_event, args) => {
     const [text] = args;
     if (typeof text !== 'string' || text.trim() === '') return done(null);
-    const agent = workspaces.current?.held.session ?? null;
-    if (agent === null) return fail(NOTHING_OPEN);
+    const open = workspaces.current;
+    const agent = open?.held.session ?? null;
+    if (open === null || agent === null) return fail(NOTHING_OPEN);
+    // Their own words, kept for the sentence beside the pictures. The same
+    // sentence the version timeline writes for the same moment — see
+    // src/diff/summary.ts.
+    open.held.looking.instruction = text;
     try {
       await agent.prompt(text);
       return done(null);
@@ -777,6 +996,31 @@ function register(): void {
     if (typeof callId !== 'string' || (decision !== 'yes' && decision !== 'no')) return done(false);
     const agent = workspaces.current?.held.session ?? null;
     return done(agent?.answer(callId, decision as Decision) ?? false);
+  });
+
+  /**
+   * The full-size pair, fetched at the moment somebody opens a strip.
+   *
+   * Two pictures of a web page are the better part of a megabyte once they are
+   * text rather than bytes, and a long conversation can hold a dozen strips. So
+   * the thumbnails travel with the change and the real thing waits to be asked
+   * for — which it usually never is, because the strip stays shut unless
+   * somebody wants a closer look.
+   *
+   * Looked for across every open project rather than only the one in front: a
+   * change can arrive for a folder somebody has just switched away from, and
+   * the window is perfectly entitled to draw it when they switch back.
+   */
+  handle<VisualFrames>(CHANNEL.visualFrames, async (_event, args) => {
+    const [changeId] = args;
+    if (typeof changeId !== 'string' || changeId.trim() === '') return fail(NO_SUCH_PICTURE);
+    const held = workspaces.open.find((one) => one.held.looking.frames.has(changeId))?.held;
+    const pair = held?.looking.frames.get(changeId);
+    if (pair === undefined) return fail(NO_SUCH_PICTURE);
+
+    const [before, after] = await Promise.all([readPicture(pair.before), readPicture(pair.after)]);
+    if (before === null || after === null) return fail(NO_SUCH_PICTURE);
+    return done({ before, after });
   });
 
   handle<string | null>(CHANNEL.chooseFolder, async () => {

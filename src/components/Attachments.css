@@ -38,6 +38,25 @@
   }
 }
 
+/* And the way out: shorter than the way in, scale and opacity only, and to
+   0.96 rather than to nothing — a chip that collapses to a point is a chip
+   being sucked away, which is a bigger event than deleting a file name. */
+.chip--leaving {
+  animation: chip-leaves var(--dur-exit) var(--ease-out-quart) both;
+  pointer-events: none;
+}
+
+@keyframes chip-leaves {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
 /* A link is not a file, and it does not look like one. */
 .chip--figma {
   background: var(--accent-soft);
@@ -86,7 +105,7 @@
 }
 
 .chip__note {
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
   color: var(--text-muted);
 }
 
@@ -131,8 +150,11 @@
   }
 }
 
+/* Nothing arrives and nothing leaves — Attachments.tsx removes a chip outright
+   under this setting rather than waiting for an animation that will not run. */
 @media (prefers-reduced-motion: reduce) {
-  .chip {
+  .chip,
+  .chip--leaving {
     animation: none;
   }
 

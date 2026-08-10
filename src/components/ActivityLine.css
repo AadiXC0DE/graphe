@@ -1,34 +1,67 @@
-/* A read-only record of one thing the agent did. */
+/* A read-only record of one thing the agent did.
+
+   Read as a group rather than as five unrelated lines: consecutive steps are
+   joined by a hairline through the icon column, so a glance answers "how far in
+   is it" without anything having to claim a percentage it does not know. The
+   only thing that moves is the spinner on the one step that is actually
+   running. No shimmer, no bar filling up, nothing pretending to measure. */
+
+/* The two numbers the whole column is hung off, so the spine runs dead straight
+   whether a line has a detail under it or not — and so the gap between two rows
+   and the length of the line joining them are the same number by construction.
+   Declared on both, because a line can stand on its own inside the thread as
+   well as inside a feed. */
+.activity-feed,
+.activity {
+  --activity-gap: var(--space-3);
+  --activity-icon: 16px;
+}
 
 .activity-feed {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--activity-gap);
 }
 
 .activity {
+  position: relative;
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: var(--space-3);
-  padding: var(--space-1) 0;
   font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--text-muted);
 }
 
-.activity__icon {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  display: grid;
-  place-items: center;
-  /* Optical alignment with the first line of text rather than the baseline box. */
-  transform: translateY(2px);
+/* The join to the next step. It starts under this icon and ends at the top of
+   the next one, which is exactly the gap between the rows — so nothing has to
+   know how tall this row's text is. */
+.activity:has(+ .activity)::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--activity-icon) / 2);
+  top: calc(var(--activity-icon) + 1px);
+  bottom: calc(var(--activity-gap) * -1);
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
 }
 
-/* --text-muted throughout rather than --text-faint: the faint token measures
-   about 3:1 on both backgrounds, under AA for text and on the line for a
-   graphic. Nothing that carries meaning is drawn in it. */
+.activity__icon {
+  flex: none;
+  width: var(--activity-icon);
+  height: var(--activity-icon);
+  display: grid;
+  place-items: center;
+  /* Optically centred on the first line of text: the line box is 1.5 × 13px,
+     so a 16px icon sitting 2px down splits it evenly. Set on the box rather
+     than by baseline alignment, because a baseline moves when a detail line
+     wraps and the spine would move with it. */
+  margin-top: 2px;
+}
+
+/* --text-muted throughout rather than --text-faint: nothing that carries
+   meaning is drawn in the faintest tone. */
 .activity--done .activity__icon {
   color: var(--text-muted);
 }
@@ -41,8 +74,8 @@
    Constant rotation is the one case notes/strategy/UI-DESIGN.md exempts from the ban on
    `linear`; an eased spin reads as stuttering. */
 .activity__spinner {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
   border: 1.5px solid var(--border-strong);
   border-top-color: var(--accent);
@@ -57,22 +90,31 @@
 
 .activity__text {
   min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
+/* The step that is happening now is the one the eye should find, and it finds
+   it by weight rather than by anything moving. */
 .activity--running .activity__label {
   color: var(--text);
+  font-weight: 500;
 }
 
 .activity--failed .activity__label {
   color: var(--text);
 }
 
+/* Its own line rather than an em-dash continuation. "Ran your build — stopped
+   on one file" reads as one long label; stacked, the sentence is the sentence
+   and the particulars are the particulars, and a long detail no longer pushes
+   the duration off the end of the row. */
 .activity__detail {
+  display: block;
   color: var(--text-muted);
-}
-
-.activity__detail::before {
-  content: ' — ';
+  overflow-wrap: anywhere;
 }
 
 /* "Show me": the real command, path or operation, under the sentence that
@@ -94,11 +136,13 @@
 }
 
 .activity__meta {
-  margin-left: auto;
   flex: none;
+  /* On the same optical line as the label, not the block. */
+  margin-top: 1px;
   font-size: var(--text-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* The state is announced in words as well as drawn as a shape. */

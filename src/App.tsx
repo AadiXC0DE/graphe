@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useStickToBottom } from 'use-stick-to-bottom';
 import ActivityLine from './components/ActivityLine';
 import type { Attachment } from './components/Attachments';
@@ -10,6 +10,7 @@ import Message from './components/Message';
 import ProjectMenu from './components/ProjectMenu';
 import ProjectPicker from './components/ProjectPicker';
 import Versions from './components/Versions';
+import VisualDiff from './components/VisualDiff';
 import Gallery from './gallery/Gallery';
 import type { Task } from './cost/estimate';
 import { longConversation, retryHonesty, sessionSummary } from './cost/phrasing';
@@ -24,6 +25,7 @@ import {
   type RecentProject,
   type ShowProgress,
   type Trouble,
+  type VisualChange,
 } from './lib/ipc';
 import { usePrefersReducedMotion } from './lib/motion';
 import { behind } from './lib/showme';
@@ -76,6 +78,44 @@ function workingIn(project: OpenedProject): string {
 const SEE_IT = 'See it';
 
 /* -------------------------------------------------------------------------- */
+/* Where a before-and-after sits in the conversation                           */
+/* -------------------------------------------------------------------------- */
+
+/** One before-and-after, and the turn it arrived after. Null when it arrived
+ *  before anything had been said, which only happens on a first launch. */
+type Pinned = { change: VisualChange; after: string | null };
+
+/**
+ * Sort the pictures into the turns they belong under.
+ *
+ * A pin whose turn is no longer in the conversation — dismissed, or from a
+ * thread that has been cleared — is not thrown away; it goes to the end, where
+ * it is still true and still about the last thing that happened. Dropping it
+ * instead would mean an error card being dismissed silently taking a picture of
+ * somebody's page with it.
+ */
+function sortPictures(
+  pictures: readonly Pinned[],
+  turns: readonly Turn[],
+): { under: Map<string, Pinned[]>; last: Pinned[] } {
+  const known = new Set(turns.map((turn) => turn.id));
+  const under = new Map<string, Pinned[]>();
+  const last: Pinned[] = [];
+
+  for (const picture of pictures) {
+    if (picture.after === null || !known.has(picture.after)) {
+      last.push(picture);
+      continue;
+    }
+    const already = under.get(picture.after);
+    if (already === undefined) under.set(picture.after, [picture]);
+    else already.push(picture);
+  }
+
+  return { under, last };
+}
+
+/* -------------------------------------------------------------------------- */
 /* The app                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -115,6 +155,23 @@ function Conversation() {
    */
   const [preferences, setPreferences] = useState<Preferences>({ showMe: false });
   const [editor, setEditor] = useState<string | null>(null);
+
+  /**
+   * The before-and-afters, per project, each pinned to the moment it belongs to
+   * (BACKLOG F2).
+   *
+   * Pictures are taken after a turn has already settled and can take a while to
+   * arrive — a project that has to be built first is half a minute of work — so
+   * by the time one lands the conversation may well have moved on. Pinning it to
+   * the last thing that had been said when the turn ended is what keeps it under
+   * the change it describes rather than at the bottom of whatever is happening
+   * now.
+   */
+  const [changes, setChanges] = useState<Record<string, readonly Pinned[]>>({});
+  /** Read inside the listener below, which is subscribed once and must not be
+   *  torn down and rebuilt every time somebody says something. */
+  const desksNow = useRef(desks);
+  desksNow.current = desks;
 
   const [busy, setBusy] = useState(false);
   /** What "See it" is up to, in its own words. Null when it is not up to
@@ -233,6 +290,14 @@ function Conversation() {
   const forget = useCallback(async (project: { path: string }) => {
     setPickerTrouble(null);
     setDesks((current) => closeDesk(current, project.path));
+    // The pictures go with the desk. A project taken off the list must not
+    // leave screenshots of itself in the window's memory.
+    setChanges((current) => {
+      if (current[project.path] === undefined) return current;
+      const next = { ...current };
+      delete next[project.path];
+      return next;
+    });
     const answer = await bridge.forgetProject(project.path);
     if (answer.ok) setRecent(answer.value);
   }, []);
@@ -282,6 +347,23 @@ function Conversation() {
   );
 
   useEffect(() => bridge.onShowProgress(setProgress), []);
+
+  /* A before and after has been worked out. Pinned to whatever the conversation
+     had last said for that project at the moment it arrived — see `Pinned`. */
+  useEffect(
+    () =>
+      bridge.onVisualChange(({ project, change }) => {
+        if (project === null) return;
+        const turns = desksNow.current.byPath[project]?.turns ?? [];
+        const after = turns[turns.length - 1]?.id ?? null;
+        setChanges((current) => {
+          const already = current[project] ?? [];
+          if (already.some((one) => one.change.id === change.id)) return current;
+          return { ...current, [project]: [...already, { change, after }] };
+        });
+      }),
+    [],
+  );
 
   /* A dropdown closes when you look away from it. Pointer down rather than
      click, so it is gone by the time the finger lifts. */
@@ -613,6 +695,11 @@ function Conversation() {
   // The first screen is a single centred conversation. Nothing else.
   // Regions appear the first time they have something to say — see
   // notes/strategy/UI-DESIGN.md.
+  const pictures = sortPictures(
+    desks.current === null ? [] : (changes[desks.current] ?? []),
+    desk?.turns ?? [],
+  );
+
   const picking = desk === null && recent !== null && recent.length > 0;
   const empty = desk === null || desk.turns.length === 0;
   // A rail listing one version teaches nobody anything. It arrives with the
@@ -690,14 +777,21 @@ function Conversation() {
         ) : (
           <div className="thread">
             {desk.turns.map((turn) => (
-              <Turnstile
-                key={turn.id}
-                turn={turn}
-                onRespond={respond}
-                onDismiss={dismiss}
-                onAnswerEstimate={answerEstimate}
-                showMe={preferences.showMe}
-              />
+              <Fragment key={turn.id}>
+                <Turnstile
+                  turn={turn}
+                  onRespond={respond}
+                  onDismiss={dismiss}
+                  onAnswerEstimate={answerEstimate}
+                  showMe={preferences.showMe}
+                />
+                {(pictures.under.get(turn.id) ?? []).map((one) => (
+                  <Picture key={one.change.id} change={one.change} />
+                ))}
+              </Fragment>
+            ))}
+            {pictures.last.map((one) => (
+              <Picture key={one.change.id} change={one.change} />
             ))}
           </div>
         )}
@@ -783,6 +877,33 @@ function Conversation() {
         />
       ) : null}
     </main>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* One before-and-after, drawn                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** The strip in the conversation. The full-size pair is asked for the moment
+ *  somebody opens it and never before — see `VisualChange` in src/lib/ipc.ts. */
+function Picture({ change }: { change: VisualChange }) {
+  return (
+    <VisualDiff
+      headline={change.headline}
+      where={change.where}
+      areas={change.areas}
+      beforeThumb={change.beforeThumb}
+      afterThumb={change.afterThumb}
+      width={change.width}
+      height={change.height}
+      onOpen={async () => {
+        const answer = await bridge.visualFrames(change.id);
+        // A pair we no longer have is not worth a card. The small pictures are
+        // already on screen and stay there, which is a slightly soft comparison
+        // rather than none at all.
+        return answer.ok ? answer.value : null;
+      }}
+    />
   );
 }
 

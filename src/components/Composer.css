@@ -52,6 +52,17 @@
   min-width: 0;
   font-size: var(--text-xs);
   color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Gone the moment there is a sentence in the box. Instantly, with no fade: this
+   is the most-used control in the app and the frequency rule says the frequent
+   things do not animate. The row keeps its height either way, because the two
+   round buttons beside it set it. */
+.composer:not(:has(.composer__input:placeholder-shown)):not(:has(.chip)) .composer__hint {
+  visibility: hidden;
 }
 
 /* The quiet way in, for people who would rather pick than drag. */
@@ -145,7 +156,8 @@
 
 .composer__droptext {
   font-size: var(--text-sm);
-  color: var(--accent);
+  /* On --accent-soft, which is what this overlay is painted in. */
+  color: var(--accent-ink);
 }
 
 .composer__send {
@@ -155,11 +167,14 @@
   width: 30px;
   height: 30px;
   border-radius: 999px;
+  border: 1px solid var(--accent);
   background: var(--accent);
   color: var(--accent-text);
   flex-shrink: 0;
   transition:
-    opacity var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
@@ -174,8 +189,15 @@
   transform: translate(-50%, -50%);
 }
 
+/* Not the same button faded out. A washed-out accent disc reads as a colour
+   that failed to load — in the dark theme it went the colour of rust. Nothing to
+   send is a different state, so it is a different object: an outline, in the
+   same greys as the paperclip beside it, which fills with colour the moment
+   there is a sentence to send. */
 .composer__send:disabled {
-  opacity: 0.35;
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-faint);
   cursor: default;
 }
 
@@ -186,7 +208,8 @@
 
 @media (hover: hover) and (pointer: fine) {
   .composer__send:not(:disabled):hover {
-    opacity: 0.9;
+    background: color-mix(in srgb, var(--accent) 88%, var(--text));
+    border-color: color-mix(in srgb, var(--accent) 88%, var(--text));
   }
 }
 

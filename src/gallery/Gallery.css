@@ -192,14 +192,21 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  max-width: 680px;
+  max-width: var(--thread-width);
   padding: var(--space-2) var(--space-4) var(--space-2) 0;
 }
 
 /* The composer at the width it has in the app, so the chips wrap where they
    would really wrap. */
 .composer-sample {
-  max-width: 680px;
+  max-width: var(--thread-width);
+}
+
+/* The first screen, at the width it has in the app — it centres itself inside
+   the conversation column, so the box it is shown in here is that column. */
+.welcome-sample {
+  max-width: var(--thread-width);
+  padding: var(--space-4) 0;
 }
 
 /* The version rail, taken out of the corner it lives in.
@@ -208,18 +215,31 @@
    the flow of the page so it can be read beside everything else — same width,
    same rows, same everything, in a box instead of against the glass. */
 .gallery__rail {
-  width: 328px;
+  width: var(--rail-width);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
+}
+
+/* The narrowest the rail ever gets, so the rows can be judged where they are
+   hardest — see "When everything is too long". */
+.gallery__rail--tight {
+  width: var(--rail-width-tight);
 }
 
 .gallery__rail .rail {
   position: static;
   width: 100%;
   border-left: none;
-  padding-top: var(--space-4);
+  padding-bottom: var(--space-3);
   animation: none;
+}
+
+/* In the app the title carries the strip's height so it can pin to the glass.
+   In a box on a page there is no strip and nothing to pin to. */
+.gallery__rail .rail__title {
+  position: static;
+  padding-top: var(--space-3);
 }
 
 /* The project menu, taken out from under the project's name.

@@ -109,9 +109,13 @@
 
 .pickerrow__badge {
   min-height: 0;
-  padding: 2px var(--space-2);
+  padding: 1px var(--space-2);
   border-radius: 999px;
-  color: var(--accent);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.02em;
+  /* --accent-ink, not --accent: accent on --accent-soft is 4.39:1 in the light
+     theme, under AA for text this small. */
+  color: var(--accent-ink);
   background: var(--accent-soft);
 }
 
@@ -132,24 +136,47 @@
   color: var(--text);
 }
 
+/* The last row of the list rather than a button parked under it. Centred, it
+   made three alignments out of a heading, a list and a control; as a row it
+   makes one — and "open another one" is the same kind of thing as the rows
+   above it, so it looks like them. */
 .picker__browse {
-  align-self: center;
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-3);
+  width: 100%;
   min-height: 44px;
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  margin-top: calc(var(--space-4) * -1 + var(--space-2));
+  padding: 0 var(--space-3);
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
   font-size: var(--text-sm);
   color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* With nothing remembered there is no list for it to be the last row of, so it
+   goes back to being what it is: the one control on the screen. */
+.picker__browse--only {
+  align-self: center;
+  width: auto;
+  justify-content: center;
+  margin-top: 0;
+  padding: 0 var(--space-5);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  color: var(--text);
   transition:
     color var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
-.picker__browse:active {
+.picker__browse--only:active {
   transform: scale(0.97);
 }
 
@@ -170,12 +197,13 @@
 }
 
 .picker--compact .picker__browse {
-  align-self: stretch;
-  justify-content: space-between;
-  border: none;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  padding: 0 var(--space-3);
+  margin-top: calc(var(--space-2) * -1);
+}
+
+.picker__browse:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  color: var(--text);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -183,16 +211,25 @@
     background: var(--bg-raised);
   }
 
-  .pickerrow__forget:hover,
-  .picker__browse:hover {
+  .pickerrow__forget:hover {
     color: var(--text);
     border-color: var(--border-strong);
+  }
+
+  .picker__browse:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
+
+  .picker__browse--only:hover {
+    background: none;
+    border-color: var(--text-faint);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pickerrow__forget:active,
-  .picker__browse:active {
+  .picker__browse--only:active {
     transform: none;
   }
 }

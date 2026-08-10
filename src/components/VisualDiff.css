@@ -1,0 +1,492 @@
+/* The before and after of the page itself.
+
+   Two rules from notes/strategy/UI-DESIGN.md shape everything below.
+
+   "Once the preview exists, it is never covered." So this is a card in the
+   conversation, in the place the change happened, and never a modal over the
+   work. The designer's own page is the only thing in here with any colour in it;
+   our chrome is one border, one accent and nothing else.
+
+   "Anything a user sees a hundred times a day should not animate at all." The
+   strip is that thing — it arrives after every turn that moves something — so
+   the strip itself does not move, ever. The motion budget is spent entirely on
+   opening it, which is a decision somebody makes rarely and deliberately. */
+
+.vdiff {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.vdiff--open {
+  border-color: var(--border-strong);
+}
+
+/* ------------------------------------------------------------------ shut */
+
+/* The whole strip is the control. A row with a small "expand" affordance at one
+   end is a row people miss; a row that is entirely clickable is a row they find
+   by accident, which is the only way anybody finds anything. */
+.vdiff__strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.vdiff__strip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-lg);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .vdiff__strip:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+/* Two stamps, overlapped a little, so the strip says "a pair of pictures"
+   before a word of it has been read. */
+.vdiff__pips {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.vdiff__pip {
+  width: 44px;
+  height: 32px;
+  object-fit: cover;
+  object-position: top center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.vdiff__pip + .vdiff__pip {
+  margin-left: -10px;
+  /* The newer one on top, which is also the one somebody is asking about. */
+  position: relative;
+  box-shadow: -2px 0 0 var(--bg-raised);
+}
+
+.vdiff__said {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.vdiff__headline {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vdiff__where {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Said once. While it is shut the sentence lives in the strip, because that is
+   the only place there is; once it is open it moves down beside the pictures,
+   where it belongs, and two copies of it would read as two different facts. */
+.vdiff--open .vdiff__where {
+  display: none;
+}
+
+.vdiff__more {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .vdiff__strip:hover .vdiff__more {
+    color: var(--text);
+  }
+}
+
+/* ------------------------------------------------------------------ open */
+
+.vdiff__body {
+  padding: 0 var(--space-3) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.vdiff__ways {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.vdiff__way {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.vdiff__way--on {
+  background: var(--bg-sunken);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.vdiff__way:active {
+  transform: scale(0.97);
+}
+
+.vdiff__way:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .vdiff__way:hover {
+    color: var(--text);
+  }
+}
+
+/* -------------------------------------------------------------- the stage */
+
+/* One shape for all three ways of looking, set from the pictures' own size, so
+   switching between them does not resize the card under somebody's cursor. */
+.vdiff__wipe,
+.vdiff__only {
+  position: relative;
+  aspect-ratio: var(--shape, 4 / 3);
+  max-height: 460px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  /* Not the page's, ours: a screenshot of a white site on a dark card needs a
+     line around it or it reads as a hole. */
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.vdiff__wipe {
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.vdiff__picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+  /* A screenshot being scaled down is the one place a browser's default
+     smoothing is worth asking for by name. */
+  image-rendering: auto;
+}
+
+/* The older picture, laid over the newer one and cut off at the handle.
+
+   `clip-path` rather than a width, and it is the one property in this file that
+   is neither transform nor opacity. It earns the exception: an inset clip on a
+   composited layer changes nothing about layout and repaints nothing — the
+   picture is already uploaded and the compositor simply shows less of it — so
+   this holds 60fps under a finger where animating a width would relayout the
+   image on every frame. */
+.vdiff__reveal {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 calc(100% - var(--wipe)) 0 0);
+  will-change: clip-path;
+}
+
+/* Nothing sits between a finger and the stage: the whole thing is the control,
+   so a press anywhere on it moves the handle to that spot. */
+.vdiff__wipe .vdiff__marks {
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------- the handle */
+
+.vdiff__handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--wipe);
+  width: 44px;
+  margin-left: -22px;
+  display: grid;
+  place-items: center;
+  cursor: ew-resize;
+  /* The line itself is 1px; the thing you can grab is 44px wide, which is the
+     minimum hit area and the reason this is a box around a line rather than a
+     line. */
+  touch-action: none;
+}
+
+.vdiff__handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.25);
+}
+
+.vdiff__grip {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* The two chevrons, drawn rather than imported. */
+.vdiff__grip::before,
+.vdiff__grip::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  border-top: 1.5px solid var(--text-muted);
+  border-right: 1.5px solid var(--text-muted);
+}
+
+.vdiff__grip::before {
+  left: 7px;
+  transform: translateY(-50%) rotate(-135deg);
+}
+
+.vdiff__grip::after {
+  right: 7px;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.vdiff__handle:focus-visible {
+  outline: none;
+}
+
+.vdiff__handle:focus-visible .vdiff__grip {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.vdiff__handle:active .vdiff__grip {
+  transform: scale(0.94);
+}
+
+/* Which half is which, said once, quietly, in the corners. */
+.vdiff__tag {
+  position: absolute;
+  top: var(--space-2);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+  border: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.vdiff__tag--before {
+  left: var(--space-2);
+}
+
+.vdiff__tag--after {
+  right: var(--space-2);
+}
+
+/* ---------------------------------------------------------- side by side */
+
+.vdiff__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.vdiff__half {
+  position: relative;
+  margin: 0;
+  aspect-ratio: var(--shape, 4 / 3);
+  max-height: 460px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.vdiff__caption {
+  position: absolute;
+  left: var(--space-2);
+  top: var(--space-2);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+  border: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* A narrow window is a phone, and two half-width screenshots on a phone are two
+   things nobody can see. */
+@media (max-width: 560px) {
+  .vdiff__pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* -------------------------------------------------- just what changed */
+
+/* Everything except the changed parts, pushed back far enough to read as
+   context and not far enough to disappear — a designer still needs to know
+   *where on their page* they are looking.
+
+   A wash of the app's own sunken tone rather than a lower opacity on the
+   picture, for two reasons: the entrance animation owns opacity on that element
+   and would overrule it, and a wash takes its colour from the theme, so the
+   hushed part of the page recedes towards black in the dark theme and towards
+   paper in the light one instead of always fading towards white. */
+.vdiff__hush {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-sunken);
+  opacity: 0.74;
+  pointer-events: none;
+}
+
+.vdiff__lifted,
+.vdiff__marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* One changed area, showing its own piece of the picture at full strength. The
+   background is the same picture, blown up and slid so this piece fills the
+   box — see the note in VisualDiff.tsx. */
+.vdiff__lift {
+  position: absolute;
+  background-repeat: no-repeat;
+  border-radius: 2px;
+}
+
+/* The outline itself. Soft, and made of the one accent colour rather than a
+   traffic-light red — nothing here has gone wrong, something has moved. */
+.vdiff__mark {
+  position: absolute;
+  border-radius: 3px;
+  outline: 1.5px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.vdiff__note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* -------------------------------------------------------------- opening */
+
+/* "Before/after slide in together from an 8px offset, 200ms ease-out-quart,
+   sharing timing." Together is the load-bearing word: one duration, one easing,
+   no delay on either, so the two halves are one object arriving rather than two
+   things queueing. They come from opposite sides, which is what makes the
+   arrival read as a comparison being assembled. */
+@keyframes vdiff-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes vdiff-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.vdiff__reveal,
+.vdiff__half--before {
+  animation: vdiff-from-left var(--dur-ui) var(--ease-out-quart) both;
+}
+
+.vdiff__picture--after,
+.vdiff__half--after,
+.vdiff__only > .vdiff__picture,
+.vdiff__lifted {
+  animation: vdiff-from-right var(--dur-ui) var(--ease-out-quart) both;
+}
+
+/* The controls and the handle are not part of that pair and do not join in;
+   they are simply there when it opens. */
+
+/* ------------------------------------------------------- less movement */
+
+/* The counterpart, and it is the whole of it: everything is where it would have
+   ended up, immediately. The handle stops springing too — `usePrefersReduced-
+   Motion` in VisualDiff.tsx puts it exactly where it is pointed, because a
+   stylesheet cannot reach a value being animated in JavaScript. */
+@media (prefers-reduced-motion: reduce) {
+  .vdiff__reveal,
+  .vdiff__half--before,
+  .vdiff__picture--after,
+  .vdiff__half--after,
+  .vdiff__only > .vdiff__picture,
+  .vdiff__lifted {
+    animation: none;
+  }
+
+  .vdiff__way:active,
+  .vdiff__handle:active .vdiff__grip {
+    transform: none;
+  }
+
+  .vdiff__grip {
+    transition: none;
+  }
+}

@@ -143,9 +143,16 @@
   color: var(--text-muted);
 }
 
+/* A build log can be two hundred lines. Unbounded, opening the details pushes
+   the button that fixes the problem off the bottom of the window — so it is
+   capped at about fifteen lines and scrolls inside itself. Nothing is hidden:
+   the whole thing is still there to scroll or select. */
 .errorcard__pre {
   margin: var(--space-2) 0 0;
   padding: var(--space-3);
+  max-height: 15lh;
+  overflow: auto;
+  overscroll-behavior: contain;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

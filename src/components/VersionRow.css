@@ -10,8 +10,17 @@
 }
 
 .versionrow {
+  /* Where the node sits, measured from the row's top-left. The spine, the dot
+     and the first line of the title are all hung off these two numbers, so the
+     line runs dead straight through a list of forty rows whether their titles
+     are one line or two. */
+  --node-size: 9px;
+  --node-left: 15px;
+  --node-top: 19px;
+
+  position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
   padding-right: var(--space-2);
   border-radius: var(--radius-md);
@@ -20,18 +29,41 @@
   transition: background-color var(--dur-micro) var(--ease-hover);
 }
 
-.versionrow + .versionrow {
-  margin-top: 2px;
+/* The spine: one hairline through the whole list, broken at each node by the
+   node's own ring. It stops at the first and last node rather than running off
+   into the padding, because a timeline has two ends. */
+.versionrow::before {
+  content: '';
+  position: absolute;
+  left: var(--node-left);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.versionrow:first-child::before {
+  top: var(--node-top);
+}
+
+.versionrow:last-child::before {
+  bottom: calc(100% - var(--node-top));
+}
+
+/* A list with one row in it has no line to draw. */
+.versionrow:only-child::before {
+  display: none;
 }
 
 .versionrow__open {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-3);
   min-height: 44px;
-  padding: var(--space-2) var(--space-2);
+  padding: var(--space-3) var(--space-2);
   border-radius: var(--radius-md);
   text-align: left;
 }
@@ -41,76 +73,150 @@
   outline-offset: -2px;
 }
 
+/* The node. Hollow for a moment you can go back to, filled for the one you are
+   looking at — a shape difference as well as a colour one. The ring is painted
+   in the page background rather than left transparent, so the spine passes
+   behind it instead of through it. */
+.versionrow__node {
+  flex: none;
+  position: relative;
+  width: var(--node-size);
+  height: var(--node-size);
+  margin-top: calc(var(--node-top) - var(--space-3) - var(--node-size) / 2);
+  margin-left: calc(var(--node-left) - var(--space-2) - var(--node-size) / 2);
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow:
+    0 0 0 1px var(--border-control) inset,
+    0 0 0 3px var(--bg);
+  transition: box-shadow var(--dur-micro) var(--ease-hover);
+}
+
+.versionrow--current .versionrow__node {
+  background: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent) inset,
+    0 0 0 3px var(--bg);
+}
+
+/* A real picture of the project, when there is one. Same anchor as the node, so
+   a list of some-with-and-some-without still lines up. */
 .versionrow__thumb {
   flex: none;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 38px;
+  width: 44px;
+  height: 30px;
   overflow: hidden;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--border-strong);
   transition: border-color var(--dur-micro) var(--ease-hover);
 }
 
-.versionrow__placeholder {
+.versionrow__thumb > * {
   width: 100%;
   height: 100%;
+  object-fit: cover;
 }
 
 .versionrow__text {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
+/* Two lines, not an ellipsis at 14 characters: the title is the whole reason
+   the timeline is readable, and "Hero rebuilt fr…" is not a title. Long words
+   break rather than pushing the row wider. */
 .versionrow__title {
   font-size: var(--text-sm);
+  line-height: 1.35;
   color: var(--text);
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+/* When it happened, and — for the one on screen — that it is. Both on one line
+   so the row's right-hand column only ever holds the action, which is what
+   makes a list of forty of them scan as a column rather than a jumble. */
+.versionrow__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .versionrow__time {
   font-size: var(--text-xs);
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .versionrow__badge {
-  margin-left: auto;
   flex: none;
-  padding: 2px var(--space-2);
+  padding: 1px var(--space-2);
   border-radius: 999px;
-  font-size: var(--text-xs);
-  color: var(--accent);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.02em;
+  /* --accent-ink, not --accent: accent on --accent-soft is 4.39:1 in the light
+     theme, which is under AA for text this small. */
+  color: var(--accent-ink);
   background: var(--accent-soft);
-  border: 1px solid transparent;
+  white-space: nowrap;
 }
 
-/* The version on screen is marked by an edge as well as by the badge, so it does
-   not depend on colour alone. --bg-raised rather than --bg-sunken because a row
-   that darkens in the dark theme reads as a hole rather than a highlight. */
+/* The version on screen is marked by an edge, a filled node and a badge, so it
+   does not depend on colour alone. --bg-raised rather than --bg-sunken because a
+   row that darkens in the dark theme reads as a hole rather than a highlight.
+
+   The edge is a real bar rather than an inset shadow: on a 10px radius an inset
+   shadow bends round the corner and renders as a crescent, which at 2× looks
+   like a stray mark. */
 .versionrow--current {
   background: var(--bg-raised);
-  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.versionrow--current::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  bottom: var(--space-2);
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.versionrow--current .versionrow__node,
+.versionrow--current .versionrow__thumb {
+  box-shadow:
+    0 0 0 1px var(--accent) inset,
+    0 0 0 3px var(--bg-raised);
 }
 
 .versionrow--current .versionrow__thumb {
   border-color: var(--border-strong);
+  box-shadow: none;
 }
 
 .versionrow__restore {
   flex: none;
+  align-self: center;
   min-height: 44px;
   padding: 0 var(--space-3);
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   color: var(--text-muted);
   border: 1px solid transparent;
+  white-space: nowrap;
   transition:
     color var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
@@ -130,6 +236,18 @@
 @media (hover: hover) and (pointer: fine) {
   .versionrow:hover {
     background: var(--bg-raised);
+  }
+
+  .versionrow:hover .versionrow__node {
+    box-shadow:
+      0 0 0 1px var(--text-muted) inset,
+      0 0 0 3px var(--bg-raised);
+  }
+
+  .versionrow--current:hover .versionrow__node {
+    box-shadow:
+      0 0 0 1px var(--accent) inset,
+      0 0 0 3px var(--bg-raised);
   }
 
   .versionrow:hover .versionrow__thumb {

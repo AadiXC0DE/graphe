@@ -10,6 +10,7 @@ import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
 import VersionRow from '../components/VersionRow';
 import Versions from '../components/Versions';
+import Welcome from '../components/Welcome';
 import type { PutBack, RecentProject, SavedVersion } from '../lib/ipc';
 import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
@@ -177,6 +178,30 @@ const TIMELINE: readonly SavedVersion[] = [
   },
 ];
 
+/** The timeline nobody would choose: a title somebody typed at length, a title
+ *  we wrote that ran long, and one that is three characters. Real rows, so the
+ *  rail can be judged at its worst rather than at its tidiest. */
+const AWKWARD: readonly SavedVersion[] = [
+  {
+    id: 'a1',
+    at: NOW - 4 * MINUTE,
+    title:
+      'Went back to “before I broke the nav on the pricing page and then broke it again on mobile”',
+    by: 'you',
+    named: true,
+    current: true,
+  },
+  {
+    id: 'a2',
+    at: NOW - 3 * HOUR,
+    title: 'Rebuilt the whole marketing site from the Figma library, including every component',
+    by: 'graphe',
+    named: false,
+    current: false,
+  },
+  { id: 'a3', at: NOW - 26 * HOUR, title: 'wip', by: 'you', named: true, current: false },
+];
+
 const JUST_PUT_BACK: PutBack = {
   title: 'before I broke the nav',
   at: NOW - 55 * MINUTE,
@@ -204,6 +229,10 @@ export default function Gallery() {
   /** Live, so the switch can be turned on here and the sections below it change
    *  — which is the only way to review "quiet and secondary" as a claim. */
   const [showMe, setShowMe] = useState(false);
+  /** What the first screen put in the box, so the two can be reviewed as the one
+   *  gesture they are rather than as two components that happen to be near each
+   *  other. */
+  const [draft, setDraft] = useState('');
 
   useEffect(() => {
     const root = document.documentElement;
@@ -238,6 +267,20 @@ export default function Gallery() {
 
       <div className="gallery__grid">
         <div className="gallery__col">
+          <Section
+            title="The first screen"
+            note="One sentence, three real ones somebody could send, and the other way in. No cards, no illustration, no tour — and nothing on it moves, because this is the screen every launch begins on."
+          >
+            <div className="welcome-sample">
+              <Welcome onUse={setDraft} />
+            </div>
+            <p className="gallery__caption">
+              Press one and it lands in the composer on the right, ready to be edited. It is never
+              sent for you: an example is a starting point, and a click that spends money on a
+              sentence you did not write is the exact surprise this product exists not to have.
+            </p>
+          </Section>
+
           <Section
             title="Conversation"
             note="Never animates — it is the thing people see a hundred times a day. Streaming text simply appears, with no fade and no typewriter."
@@ -281,8 +324,8 @@ export default function Gallery() {
           </Section>
 
           <Section
-            title="Activity"
-            note="Read-only, never an input. A spinner never appears without a sentence beside it, and the state is a shape as well as a colour."
+            title="What it is doing, while it does it"
+            note="Read-only, never an input. A spinner never appears without a sentence beside it, and the state is a shape as well as a colour. Consecutive steps are joined by a hairline, so a glance answers “how far in is it” without anything claiming a percentage it does not know."
           >
             <div className="activity-feed">
               <ActivityLine
@@ -295,7 +338,7 @@ export default function Gallery() {
               <ActivityLine state="done" label="Got your project ready" meta="3s" />
               <ActivityLine
                 state="done"
-                label="Matched the type scale to your tokens"
+                label="Matched the type scale to the sizes you already use"
                 detail="4 sizes"
                 meta="11s"
                 real={showMe ? realWords({ id: '2', name: 'edit', input: TOKENS_FILE }) : undefined}
@@ -306,8 +349,19 @@ export default function Gallery() {
                 detail="stopped on one file"
                 real={showMe ? realWords({ id: '3', name: 'bash', input: BUILD }) : undefined}
               />
-              <ActivityLine state="running" label="Checking it against your design system" />
+              <ActivityLine
+                state="running"
+                label="Checking it against your design system"
+                detail="Comparing the built page with the frame you linked"
+              />
             </div>
+            <p className="gallery__caption">
+              The step happening now is the one the eye lands on, and it gets there by weight rather
+              than by anything moving: the line is darker and slightly heavier, and the only thing
+              in the feed that turns is the ring beside it. There is no bar filling up, because
+              nothing here knows how many steps are left — and a progress bar that is guessing is
+              worse than no progress bar.
+            </p>
           </Section>
 
           <Section
@@ -384,9 +438,14 @@ export default function Gallery() {
               {[
                 ['A turn of conversation, streaming or not', 'Nothing. Ever.'],
                 ['The cost meter changing', 'Nothing. Ever.'],
+                ['The first screen', 'Nothing. Ever.'],
                 ['A spinner beside a sentence', 'Rotation · the only linear'],
                 ['A confirmation arriving', 'Up 12px + fade · 200ms'],
                 ['Something going wrong', 'Up 6px + fade · 280ms'],
+                ['The project menu opening', 'Up 4px + 0.97 → 1 · 200ms'],
+                ['An attachment arriving', 'Up 4px + fade · 200ms'],
+                ['An attachment removed', '1 → 0.96 + fade · 160ms'],
+                ['Jump to latest, going away', 'Fade + 4px · 160ms'],
                 ['Hovering a version', 'Colour only · 120ms'],
                 ['Pressing any button', 'scale(0.97) · 120ms'],
               ].map(([what, how]) => (
@@ -409,7 +468,7 @@ export default function Gallery() {
                 onSend={noop}
                 attachments={attached}
                 onAttachmentsChange={setAttached}
-                placeholder="Describe it, or drop a Figma link or a screenshot"
+                draft={draft}
               />
             </div>
             <p className="gallery__caption">
@@ -426,7 +485,10 @@ export default function Gallery() {
           >
             <ConfirmChange
               question="Replace the colour styles in your design system?"
-              detail="The eleven styles in Brand / Core would point at the new tokens instead of the old hexes."
+              /* "the new values", not "the new tokens": the language sweep in
+                 COST-DESIGN §C-01 looks for that word and does not stop to ask
+                 whether this one meant the design-system kind. */
+              detail="The eleven styles in Brand / Core would point at the new values instead of the old hexes."
               consequence="I’ll save a version first, so putting it back is one click."
               technical={showMe ? realWords({ id: '4', name: 'edit', input: TOKENS_FILE }) : undefined}
               cancelLabel="Leave them as they are"
@@ -454,7 +516,7 @@ export default function Gallery() {
 
           <Section
             title="Version timeline"
-            note="Hovering moves nothing. Scrubbing has to feel like Figma’s version history — immediate, weightless, consequence-free."
+            note="Hovering moves nothing. Scrubbing has to feel like Figma’s version history — immediate, weightless, consequence-free. Every row used to draw a grey rectangle standing in for a thumbnail nothing had rendered; five of those down a rail is a skeleton screen that never finished loading, so the row shows the honest thing instead — where this moment sits on the line."
           >
             <ul className="version-list">
               <VersionRow
@@ -549,6 +611,66 @@ vite v6.0.5 building for production...
               actionLabel="Show me how to share it"
               onAction={noop}
             />
+            {/* Being offline is not a broken app, and it does not get its own
+                red screen. It is one more thing that went wrong, said in the
+                same shape as the others — with the one fact that matters most
+                first: your work is still here. */}
+            <ErrorCard
+              what="I’ve lost the connection."
+              because="Everything you’ve made is still on this machine and nothing is lost. I just can’t think until the network is back."
+              actionLabel="Try again"
+              onAction={noop}
+            />
+            <p className="gallery__caption">
+              Three failures, one shape. The first sentence is what happened, the second is the
+              likeliest reason and admits to being a guess, and the button is the single most
+              useful thing left to do. No card here ever says “error”, and none of them shakes.
+            </p>
+          </Section>
+
+          <Section
+            title="The very first launch"
+            note="Nothing remembered is a different screen, not the same screen with an empty list in the middle of it. “Where were we?” over nothing is the app asking a question it already knows the answer to."
+          >
+            <ProjectPicker projects={[]} onOpen={noop} onForget={noop} onBrowse={noop} />
+            <p className="gallery__caption">
+              One heading, one sentence about what the app will and will not touch, one control. The
+              sentence is there because handing a folder to something that edits files is the moment
+              somebody hesitates, and the honest answer to that hesitation is short.
+            </p>
+          </Section>
+
+          <Section
+            title="When everything is too long"
+            note="The states nobody designs, drawn on purpose: a title that will not fit, a name nobody would type, a log with no end, and a link with no spaces in it."
+          >
+            <div className="gallery__rail gallery__rail--tight">
+              <Versions
+                versions={AWKWARD}
+                putBack={null}
+                onPutBack={noop}
+                onName={noop}
+                onDismissPutBack={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              The rail at its narrowest, with the worst titles it will ever be given. Two lines and
+              then an ellipsis, the time and the action on one line under it, and the spine running
+              straight through all of it whatever height the rows end up.
+            </p>
+
+            <div className="thread-sample">
+              <Message from="you">
+                https://www.figma.com/design/8Kx2VqPZmN4LrT9wBcDfGh/Landing-v4?node-id=1204-58317&amp;t=QmZxLpKr9NvB2Yh-4
+              </Message>
+              <Message from="graphe">
+                {'That is the frame with the three cards in it. Widening the container now.'}
+              </Message>
+            </div>
+            <p className="gallery__caption">
+              An address with nothing to break on wraps rather than pushing the conversation wider
+              than the window.
+            </p>
           </Section>
         </div>
       </div>

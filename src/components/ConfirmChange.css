@@ -93,11 +93,12 @@
   border: 1px solid var(--accent);
 }
 
-/* The risky one: legible, reachable, never dominant. */
+/* The risky one: legible, reachable, never dominant. Its outline is the only
+   thing that says it is a button, so the outline clears 3:1. */
 .confirm__button--go {
   background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-control);
 }
 
 .confirm__button:active {

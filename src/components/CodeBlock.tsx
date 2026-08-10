@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { canHighlight, highlight } from '../lib/highlight';
 import './CodeBlock.css';
 
@@ -9,6 +9,16 @@ type Props = {
   language: string | null;
   /** What the fence said, tidied for a person: "TypeScript", "Shell". */
   label: string | null;
+  /**
+   * The still-writing mark, when this block is the last thing said.
+   *
+   * It goes *inside* the code, after the final character, because that is where
+   * the writing has got to. Rendered as a sibling underneath — which is what
+   * happened before — it became an orange bar alone on a line below a finished-
+   * looking box, and the one thing a caret must never say is "something else is
+   * about to appear down here".
+   */
+  tail?: ReactNode;
 };
 
 /**
@@ -34,7 +44,7 @@ const SETTLED_MS = 120;
  * The coloured markup is Shiki's, built from the code as text; the model's own
  * output never reaches the DOM as markup. See src/lib/highlight.ts.
  */
-export default function CodeBlock({ code, language, label }: Props) {
+export default function CodeBlock({ code, language, label, tail }: Props) {
   const [coloured, setColoured] = useState<{ code: string; html: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,8 +72,16 @@ export default function CodeBlock({ code, language, label }: Props) {
 
   /* Only ever shown for the code it was made from. A block that is still
      growing falls back to plain text rather than showing a coloured version of
-     what it used to say. */
-  const html = coloured !== null && coloured.code === code ? coloured.html : null;
+     what it used to say.
+
+     A block carrying the still-writing mark is by definition the one being
+     written, so it stays plain: the coloured path is a string of markup and
+     there is nowhere inside it to put a React node. In practice this changes
+     nothing — a fence that is still growing has never settled long enough to be
+     coloured — but it means the caret is never the reason the two paths
+     disagree. */
+  const html =
+    tail === undefined && coloured !== null && coloured.code === code ? coloured.html : null;
 
   const copy = () => {
     void navigator.clipboard?.writeText(code).then(
@@ -90,7 +108,10 @@ export default function CodeBlock({ code, language, label }: Props) {
       {html === null ? (
         <div className="codeblock__code">
           <pre tabIndex={0}>
-            <code>{code}</code>
+            <code>
+              {code}
+              {tail}
+            </code>
           </pre>
         </div>
       ) : (

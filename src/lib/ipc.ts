@@ -127,6 +127,51 @@ export type ShowOutcome =
 export type ShowProgress = { says: string; done: boolean };
 
 /**
+ * A rectangle of a picture, as fractions of its width and height (0–1).
+ *
+ * Fractions rather than pixels because the window has no idea how big it will
+ * draw the picture — the same area has to sit correctly over a 120px strip and
+ * over a full-width stage, and doing that arithmetic on this side of the wire
+ * would mean sending it again every time somebody resized the window.
+ */
+export type ChangedArea = { x: number; y: number; width: number; height: number };
+
+/**
+ * A before and after of the page itself — the README's oldest unkept promise
+ * (BACKLOG F2).
+ *
+ * Only the small pictures travel with this. The full ones are hundreds of
+ * kilobytes each and almost nobody opens every diff in a long conversation, so
+ * they are asked for by `visualFrames` at the moment somebody actually looks.
+ */
+export type VisualChange = {
+  id: string;
+  /** Epoch ms. */
+  at: number;
+  /** One line, past tense: "Made the header sticky". */
+  headline: string;
+  /** Where it landed: "Two areas changed, near the top." Null when the picture
+   *  has nothing useful to add. */
+  where: string | null;
+  /** What moved, for the outlines. Empty is a real answer. */
+  areas: readonly ChangedArea[];
+  /** Small pictures for the collapsed strip, as data URIs. */
+  beforeThumb: string;
+  afterThumb: string;
+  /** The full pictures' own size, so the window can hold the right shape open
+   *  before it has them. */
+  width: number;
+  height: number;
+};
+
+/** The full-size pair, fetched only when somebody opens one. */
+export type VisualFrames = { before: string; after: string };
+
+/** One visual change, and which project it belongs to. Same envelope, and same
+ *  reason for it, as `AgentNotice`. */
+export type VisualNotice = { project: string | null; change: VisualChange };
+
+/**
  * The few things a person can change about the app itself.
  *
  * Sticky: set once, remembered on this computer. Kept in the shell rather than
@@ -197,6 +242,8 @@ export const CHANNEL = {
   hatches: 'graphe:hatches',
   openInEditor: 'graphe:open-in-editor',
   revealFolder: 'graphe:reveal-folder',
+  visualChange: 'graphe:visual-change',
+  visualFrames: 'graphe:visual-frames',
 } as const;
 
 /**
@@ -255,4 +302,11 @@ export type GrapheApi = {
 
   /** Listen to the agent. Returns the function that stops listening. */
   onEvent(listener: (notice: AgentNotice) => void): () => void;
+
+  /** The full-size before and after for one change. Asked for when somebody
+   *  opens the strip, and not before — see `VisualChange`. */
+  visualFrames(changeId: string): Promise<Result<VisualFrames>>;
+  /** A before and after has been worked out. Returns the function that stops
+   *  listening. */
+  onVisualChange(listener: (notice: VisualNotice) => void): () => void;
 };

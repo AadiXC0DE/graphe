@@ -44,7 +44,7 @@ export default function ActivityLine({ state, label, detail, meta, real }: Props
             <path
               d="M3 7.4 5.7 10 11 4.4"
               stroke="currentColor"
-              strokeWidth="1.7"
+              strokeWidth="1.6"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -53,9 +53,9 @@ export default function ActivityLine({ state, label, detail, meta, real }: Props
         {state === 'failed' ? (
           <svg viewBox="0 0 14 14" width="14" height="14" fill="none">
             <path
-              d="M4 4l6 6M10 4l-6 6"
+              d="M3.9 3.9l6.2 6.2M10.1 3.9l-6.2 6.2"
               stroke="currentColor"
-              strokeWidth="1.7"
+              strokeWidth="1.6"
               strokeLinecap="round"
             />
           </svg>

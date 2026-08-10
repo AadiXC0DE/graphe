@@ -156,13 +156,18 @@ function renderBlock(token: Token, key: string, tail?: ReactNode): ReactNode {
       );
     }
 
+    /* The mark goes inside the block, at the end of the last line of code —
+       see the note on CodeBlock's `tail`. */
     case 'code': {
       const language = languageOf(token.lang);
       return (
-        <div key={key}>
-          <CodeBlock code={String(token.text ?? '')} language={language} label={languageLabel(token.lang)} />
-          {tail}
-        </div>
+        <CodeBlock
+          key={key}
+          code={String(token.text ?? '')}
+          language={language}
+          label={languageLabel(token.lang)}
+          tail={tail}
+        />
       );
     }
 
@@ -198,13 +203,11 @@ function renderBlock(token: Token, key: string, tail?: ReactNode): ReactNode {
       );
     }
 
+    /* No mark after a rule. A rule cannot be half-drawn, so a caret under one
+       says only "something is about to appear in this empty space", which is the
+       one thing it must never say. The next block brings its own. */
     case 'hr':
-      return (
-        <div key={key}>
-          <hr className="md__rule" />
-          {tail}
-        </div>
-      );
+      return <hr className="md__rule" key={key} />;
 
     /* A block of raw HTML. It is shown, not run — see the note at the top. */
     case 'html':

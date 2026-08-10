@@ -46,12 +46,24 @@ export default function ProjectPicker({
   openPath,
   compact,
 }: Props) {
+  /* Nothing remembered is a different screen, not the same screen with an empty
+     list in the middle of it. "Where were we?" over nothing is the app asking a
+     question it already knows the answer to, and an empty <ul> above a button is
+     a layout with a hole in it. */
+  const firstRun = projects.length === 0;
+
   return (
     <section className={`picker ${compact ? 'picker--compact' : ''}`}>
       {compact ? null : (
         <div className="picker__head">
-          <h1 className="picker__title">Where were we?</h1>
-          <p className="picker__sub">Pick up where you left off, or start somewhere new.</p>
+          <h1 className="picker__title">
+            {firstRun ? 'Which folder should I work in?' : 'Where were we?'}
+          </h1>
+          <p className="picker__sub">
+            {firstRun
+              ? 'Pick the folder your project lives in. I only ever touch what is inside it.'
+              : 'Pick up where you left off, or start somewhere new.'}
+          </p>
         </div>
       )}
 
@@ -104,7 +116,11 @@ export default function ProjectPicker({
         ))}
       </ul>
 
-      <button type="button" className="picker__browse" onClick={onBrowse}>
+      <button
+        type="button"
+        className={`picker__browse ${firstRun && !compact ? 'picker__browse--only' : ''}`}
+        onClick={onBrowse}
+      >
         Open a folder…
         <kbd className="picker__key" aria-hidden="true">
           ⌘O

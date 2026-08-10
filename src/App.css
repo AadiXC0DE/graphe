@@ -57,6 +57,33 @@
   overflow-anchor: none;
 }
 
+/* The same short ramp the composer has, the other way up.
+   The strip along the top is opaque, so a conversation scrolling past it was
+   sliced off at a hard horizontal edge — the exact thing the ramp under the
+   composer exists to stop, left undone at the other end of the window.
+
+   It hangs off the scroller rather than off the strip because the strip is what
+   the window is dragged by, and `-webkit-app-region` is inherited: a pseudo
+   under it would have quietly turned sixteen pixels of the conversation into
+   somewhere you cannot select text. Static — there is nothing here to
+   animate. */
+.app::before {
+  content: '';
+  position: fixed;
+  z-index: 2;
+  top: var(--topbar-height);
+  left: 0;
+  right: 0;
+  height: var(--space-4);
+  background: linear-gradient(to bottom, var(--bg), transparent);
+  pointer-events: none;
+}
+
+/* The rail owns the right-hand edge; the ramp belongs to the conversation. */
+.app--railed::before {
+  right: var(--rail-width);
+}
+
 .app__column {
   width: 100%;
   max-width: var(--thread-width);
@@ -68,17 +95,29 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  /* A conversation grows downward from the composer, the way every chat anybody
-     has used does. Before this the thread was pinned to the top and the slack
-     collected between the first message and the box you type in — a hundred
-     empty pixels that read as "something failed to load". */
-  justify-content: flex-end;
+  /* The conversation starts at the top, on the same band as the rail's title.
+     It was pinned to the bottom before this pass, which is what a chat with no
+     second column does — but with the rail up it left the whole top-left
+     quarter of the window empty while the top-right was dense, and the two
+     stopped reading as one page. Top-aligned, the first line of the
+     conversation and the first version sit on one line, the eye crosses the
+     window once, and the slack all collects at the bottom where both columns
+     have already finished. The composer does not move either way: it is sticky
+     and lives on the bottom edge whatever the thread is doing. */
+  justify-content: flex-start;
 }
 
-/* Empty state centres vertically; once there is a thread it sits at the bottom. */
+/* Empty state centres vertically; once there is a thread it starts at the top.
+   The composer's auto margin below would otherwise win over `center` and split
+   the two apart — on the first screen the sentence and the box you answer it in
+   are one object and are centred as one. */
 .app--empty .app__column {
   justify-content: center;
   padding-bottom: var(--space-8);
+}
+
+.app--empty .app__composer {
+  margin-top: 0;
 }
 
 .thread {
@@ -116,6 +155,13 @@
   position: sticky;
   bottom: 0;
   z-index: 1;
+  /* The bottom edge of the window, whatever the thread above is doing. `sticky`
+     alone does not do this — with `bottom: 0` it only ever pulls an element
+     back up into view, so a short conversation left the box hanging in the
+     middle of the glass with nothing under it. The auto margin eats the slack
+     and puts it where it belongs: between the last thing said and the place you
+     answer it. */
+  margin-top: auto;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -369,6 +415,13 @@
   /* The right-hand padding is the chevron's room: 9px of arrow with a gap
      either side of it. */
   padding: 0 calc(var(--space-2) * 2 + 9px) 0 var(--space-2);
+  /* Optical, not box, alignment. The strip's padding puts this button's *edge*
+     on the conversation's left margin, which put the project's name eight
+     pixels to the right of the first word under it — near enough to look like a
+     mistake rather than a decision. The negative margin hands the padding back
+     so the letters line up and the hover ground still bleeds out to where the
+     button's edge was. */
+  margin-left: calc(var(--space-2) * -1);
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   /* The line box is the button, so the text is centred without flexbox. */

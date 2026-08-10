@@ -99,14 +99,32 @@
 }
 
 /* The other way in, said once, in the place where somebody who has a file
-   rather than a sentence would be looking. */
+   rather than a sentence would be looking — which is the left margin of the
+   list, not the middle of the gap under it. --text-muted rather than
+   --text-faint: this is one of the two things the screen exists to say, and the
+   faintest tone in the palette is for graphics and fine print. */
 .welcome__drop {
-  margin: var(--space-5) 0 0;
-  font-size: var(--text-xs);
-  line-height: 1.5;
-  color: var(--text-faint);
-  text-align: center;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+  /* The list's own row padding, so the paperclip sits under the first letter of
+     the examples rather than under their border. */
+  padding: 0 var(--space-2) 0 var(--space-3);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--text-muted);
   text-wrap: pretty;
+}
+
+/* Same 16px, same 1.5 stroke, same paperclip as the composer's own — one icon
+   for one idea, drawn once and used twice. */
+.welcome__clip {
+  flex: none;
+  /* Optically on the first line of text: 1.45 × 13px is a 19px line box, so a
+     16px glyph sitting 1px down splits it evenly. */
+  margin-top: 1px;
+  color: var(--text-faint);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -52,6 +52,11 @@
   top: 0;
   z-index: 1;
   margin: 0;
+  /* "Cleanly" was doing a lot of work in that sentence: an opaque band cuts the
+     row underneath it in half at a hard edge. The same short ramp the
+     conversation gets under its own top strip, so rows read as passing behind
+     the title rather than being trimmed by it. */
+  --title-ramp: var(--space-3);
   padding: calc(var(--topbar-height) + var(--space-3)) var(--space-2) var(--space-2);
   background: var(--bg);
   font-size: var(--text-xs);
@@ -59,6 +64,17 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-faint);
+}
+
+.rail__title::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--title-ramp);
+  background: linear-gradient(to bottom, var(--bg), transparent);
+  pointer-events: none;
 }
 
 .rail__list {

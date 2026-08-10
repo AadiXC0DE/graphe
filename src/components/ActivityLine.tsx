@@ -37,6 +37,13 @@ type Props = {
 export default function ActivityLine({ state, label, detail, meta, real }: Props) {
   return (
     <div className={`activity activity--${state}`}>
+      {/* 1.4 on a 14-unit box, which renders as a 1.4px stroke — the same
+          rendered weight as the mark on an error card, and one step above the
+          1.2 the 11–13px glyphs carry. These two were at 1.6, the heaviest
+          stroke anywhere in the app, on the icons it repeats most often. The
+          rule the rest of the kit follows is that the drawn weight scales with
+          the glyph: the number in the file is the same, the rendered line
+          differs because the box does. */}
       <span className="activity__icon" aria-hidden="true">
         {state === 'running' ? <span className="activity__spinner" /> : null}
         {state === 'done' ? (
@@ -44,7 +51,7 @@ export default function ActivityLine({ state, label, detail, meta, real }: Props
             <path
               d="M3 7.4 5.7 10 11 4.4"
               stroke="currentColor"
-              strokeWidth="1.6"
+              strokeWidth="1.4"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -55,7 +62,7 @@ export default function ActivityLine({ state, label, detail, meta, real }: Props
             <path
               d="M3.9 3.9l6.2 6.2M10.1 3.9l-6.2 6.2"
               stroke="currentColor"
-              strokeWidth="1.6"
+              strokeWidth="1.4"
               strokeLinecap="round"
             />
           </svg>

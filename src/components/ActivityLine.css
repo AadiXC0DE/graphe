@@ -73,11 +73,17 @@
 /* A spinner, but never on its own — the sentence beside it is the point.
    Constant rotation is the one case notes/strategy/UI-DESIGN.md exempts from the ban on
    `linear`; an eased spin reads as stuttering. */
+/* Fatter and with a fainter track than it had, for one reason: the eye has to
+   find the live step in a feed where a failed step is already wearing the
+   accent. At 1.5px on --border-strong the ring read as another piece of grey
+   furniture and the red cross above it won the glance. Two pixels of accent
+   over a --border track puts the weight on the segment that means "this one",
+   without adding a second thing that moves. */
 .activity__spinner {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  border: 1.5px solid var(--border-strong);
+  border: 2px solid var(--border);
   border-top-color: var(--accent);
   animation: activity-spin 900ms linear infinite;
 }

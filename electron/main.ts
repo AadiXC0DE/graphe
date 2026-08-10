@@ -57,7 +57,14 @@ import {
   type VisualChange,
   type VisualFrames,
 } from '../src/lib/ipc';
-import { capture, forget, readPicture, readShot, whatMoved } from '../src/diff/capture';
+import {
+  capture,
+  forget,
+  forgetEverything,
+  readPicture,
+  readShot,
+  whatMoved,
+} from '../src/diff/capture';
 import { filesWrittenBy } from '../src/diff/changed';
 import { landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
 import type { Bitmap } from '../src/diff/regions';
@@ -619,6 +626,12 @@ async function look(project: string, held: Held): Promise<void> {
     // true, so there is nothing to take and nothing to say.
     if (!first && changed.length === 0) return;
 
+    // On the way in, everything left over from last time goes. A pairing is
+    // "the picture before this one" and that only exists in memory, so nothing
+    // already in the folder can ever be compared against anything — and left
+    // alone it would grow by one picture per launch, forever.
+    if (first) await forgetEverything(project);
+
     const id = `${Date.now().toString(36)}-${looking.counter}`;
     looking.counter += 1;
 
@@ -833,9 +846,12 @@ function register(): void {
   handle<readonly RecentProject[]>(CHANNEL.forgetProject, async (_event, args) => {
     const [path] = args;
     if (typeof path === 'string' && path.trim() !== '') {
-      // The list, and only the list. Nothing on disk is touched, ever.
+      // The list, and only the list. Nothing of theirs on disk is touched, ever.
       await (await recents()).forget(path);
       workspaces.close(resolve(path));
+      // Ours, though, goes. Somebody who has just said "I am done with this
+      // project" should not be left holding a folder of our screenshots of it.
+      await forgetEverything(resolve(path));
     }
     return done(await rememberedProjects());
   });

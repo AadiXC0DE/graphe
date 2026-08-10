@@ -236,9 +236,13 @@
 }
 
 /* In the app the title carries the strip's height so it can pin to the glass.
-   In a box on a page there is no strip and nothing to pin to. */
+   In a box on a page there is no strip and nothing to pin to.
+
+   `relative` rather than `static`: the title hangs a ramp off itself so rows
+   read as passing behind it, and an unpositioned parent would send that ramp
+   off to whatever ancestor happened to be positioned instead. */
 .gallery__rail .rail__title {
-  position: static;
+  position: relative;
   padding-top: var(--space-3);
 }
 

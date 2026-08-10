@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { filesWrittenBy } from '../src/diff/changed';
-import { couldBeSeen, landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
+import { couldBeSeen, KEEP, landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
 import { comparePictures, realSize, type Bitmap, type ChangedArea } from '../src/diff/regions';
 import { shotFile, shotName, shotsFolder } from '../src/diff/shots';
 import { hasSettled, stepSpring } from '../src/diff/spring';
@@ -216,6 +216,23 @@ describe('V-02 pairing', () => {
     expect(history).toHaveLength(4);
     expect(history.map((one) => one.id)).toEqual(['s6', 's7', 's8', 's9']);
     expect(dropped).toEqual(['s0', 's1', 's2', 's3', 's4', 's5']);
+  });
+
+  it('holds a project to its ceiling however long the sitting runs', () => {
+    // The retention policy, as a number. A hundred turns in one afternoon still
+    // leaves twelve pictures on the disk, and every one that falls off the end
+    // comes back in `forget` so it can actually be deleted rather than merely
+    // dropped from a list.
+    let history: readonly Shot[] = [];
+    let deleted = 0;
+    for (let index = 0; index < 100; index += 1) {
+      const result = landed(history, shot(`s${String(index)}`, index));
+      history = result.kept;
+      deleted += result.forget.length;
+    }
+
+    expect(history).toHaveLength(KEEP);
+    expect(deleted).toBe(100 - KEEP);
   });
 
   it('never keeps fewer than a pair, however small it is asked to be', () => {

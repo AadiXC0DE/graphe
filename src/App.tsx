@@ -11,6 +11,7 @@ import ProjectMenu from './components/ProjectMenu';
 import ProjectPicker from './components/ProjectPicker';
 import Versions from './components/Versions';
 import VisualDiff from './components/VisualDiff';
+import Welcome from './components/Welcome';
 import Gallery from './gallery/Gallery';
 import type { Task } from './cost/estimate';
 import { longConversation, retryHonesty, sessionSummary } from './cost/phrasing';
@@ -182,6 +183,12 @@ function Conversation() {
    *  open they live on its desk, like everything else. */
   const [loose, setLoose] = useState<readonly Attachment[]>([]);
   const attachments = desk?.attachments ?? loose;
+
+  /** An example from the welcome screen, put in the box ready to be edited.
+   *  Never sent on anybody's behalf — a click that spends money on a sentence
+   *  the user did not write is exactly the surprise this product exists to
+   *  avoid. */
+  const [draft, setDraft] = useState('');
 
   /**
    * Following the reply, until somebody would rather read something else.
@@ -770,10 +777,7 @@ function Conversation() {
             onBrowse={() => void browse()}
           />
         ) : desk === null || desk.turns.length === 0 ? (
-          <div className="welcome">
-            <h1 className="welcome__title">What do you want to make?</h1>
-            <p className="welcome__sub">Start with a Figma file, a sketch, or just a sentence.</p>
-          </div>
+          <Welcome onUse={setDraft} />
         ) : (
           <div className="thread">
             {desk.turns.map((turn) => (
@@ -838,6 +842,7 @@ function Conversation() {
               onSend={(text) => void send(text)}
               autoFocus
               busy={busy}
+              draft={draft}
               attachments={attachments}
               onAttachmentsChange={(next) => {
                 if (desks.current === null) setLoose(next);

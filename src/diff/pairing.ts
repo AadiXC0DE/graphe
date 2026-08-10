@@ -55,9 +55,19 @@ export type Landed = {
   forget: readonly Shot[];
 };
 
-/** Enough to look back over an afternoon's work, few enough that a project
- *  folder does not quietly grow by a hundred megabytes. */
-const KEEP = 12;
+/**
+ * How many pictures a project may hold at once.
+ *
+ * This is the whole retention policy and it is worth stating as a number: a
+ * screenshot of a page is around 120KB, so a project tops out near 1.5MB, and
+ * that is the ceiling whatever anybody does — a hundred turns in one sitting
+ * still leaves twelve pictures. The rest is swept as it falls off the end.
+ *
+ * The other half of the policy lives in `forgetEverything`: everything from a
+ * previous run is deleted the moment a project is opened, because a picture
+ * with nothing to be compared against is not history, it is litter.
+ */
+export const KEEP = 12;
 
 /**
  * File a fresh picture, and say what it can be compared against.

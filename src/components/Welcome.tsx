@@ -55,8 +55,14 @@ export default function Welcome({ onUse, examples = firstMoves }: Props) {
   return (
     <div className="welcome">
       <h1 className="welcome__title">What do you want to make?</h1>
+      {/* The second sentence is the only instruction on the screen, and it is
+          there because nothing else says what pressing a row does. Without it
+          the examples are decoration and somebody has to click one to find out
+          whether it costs money. */}
       <p className="welcome__sub">
-        Describe it in a sentence. If you already have the design, bring that instead.
+        {examples.length === 0
+          ? 'Describe it in a sentence.'
+          : 'Describe it in a sentence. Press one of these to start from it.'}
       </p>
 
       {examples.length === 0 ? null : (
@@ -92,8 +98,33 @@ export default function Welcome({ onUse, examples = firstMoves }: Props) {
         </ul>
       )}
 
+      {/* The other way in, and it needs to look like one.
+          It was the faintest, smallest, most centred line on the screen — fine
+          print under a list, which is exactly where somebody holding a Figma
+          file would not look. It now sits on the list's own left margin,
+          carries the same paperclip the composer wears, and is read in the same
+          tone as everything else here: an alternative, not a footnote. */}
       <p className="welcome__drop">
-        Or drop a Figma file, a screenshot or a photo of a sketch straight onto the box below.
+        <svg
+          className="welcome__clip"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M9.6 4.2 5.2 8.6a1.9 1.9 0 0 0 2.7 2.7l4.7-4.7a3.2 3.2 0 0 0-4.5-4.5L3.3 6.9a4.5 4.5 0 0 0 6.4 6.4l3.6-3.6"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span>
+          Already have it? Drop a Figma file, a screenshot or a photo of a sketch onto the box
+          below.
+        </span>
       </p>
     </div>
   );

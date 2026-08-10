@@ -269,7 +269,7 @@ export default function Gallery() {
         <div className="gallery__col">
           <Section
             title="The first screen"
-            note="One sentence, three real ones somebody could send, and the other way in. No cards, no illustration, no tour — and nothing on it moves, because this is the screen every launch begins on."
+            note="One sentence, three real ones somebody could send, and the other way in — which sits on the list's own left margin wearing the composer's paperclip, because somebody holding a Figma file was never going to read fine print centred under a list. No cards, no illustration, no tour, and nothing on it moves: this is the screen every launch begins on."
           >
             <div className="welcome-sample">
               <Welcome onUse={setDraft} />
@@ -361,6 +361,39 @@ export default function Gallery() {
               in the feed that turns is the ring beside it. There is no bar filling up, because
               nothing here knows how many steps are left — and a progress bar that is guessing is
               worse than no progress bar.
+            </p>
+          </Section>
+
+          <Section
+            title="When there is barely anything to say"
+            note="The other end of “when everything is too long”, and the one that catches interfaces out more often: one word, one step, one version. Nothing here is padded out to look substantial."
+          >
+            <div className="thread-sample">
+              <Message from="you">Undo that</Message>
+              <Message from="graphe">Done.</Message>
+            </div>
+            <div className="activity-feed">
+              <ActivityLine state="done" label="Put it back" meta="1s" />
+            </div>
+            {/* Two is the whole rail on the day it first appears — it arrives
+                with the second version, so this is the state every project
+                passes through and nobody screenshots. */}
+            <div className="gallery__rail">
+              <Versions
+                versions={TIMELINE.slice(0, 2)}
+                putBack={null}
+                onPutBack={noop}
+                onName={noop}
+                onDismissPutBack={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              A one-word reply keeps the same label above it and the same left edge as a reply forty
+              lines long, so a conversation of mixed lengths still reads as one column. A single
+              step draws no spine, because a line joining one thing to nothing is a line about
+              nothing. And the rail with two rows in it is a timeline rather than a stub: the line
+              runs between the two nodes and stops at both, instead of trailing off past the last
+              one.
             </p>
           </Section>
 

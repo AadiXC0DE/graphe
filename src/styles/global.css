@@ -48,7 +48,7 @@ input {
 }
 
 ::selection {
-  background: var(--accent-soft);
+  background: var(--selection);
   color: var(--text);
 }
 

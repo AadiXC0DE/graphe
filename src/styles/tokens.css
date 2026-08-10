@@ -100,6 +100,18 @@
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
 
+  /* Selected text.
+     Written once here rather than per theme, because it is a mix and the mix
+     resolves against whichever palette has won on :root.
+
+     It was --accent-soft, which is the badge tint — and in the dark theme that
+     is #2a1c17 sitting on a #131312 page. Dragging across a paragraph produced
+     almost no visible change, which reads as "selection is broken" rather than
+     as restraint. 22% of the accent is the lightest mix that is unmistakably
+     there in both themes while leaving --text far above AA on top of it —
+     measured at 12.5:1 in light and 12.0:1 in dark. */
+  --selection: color-mix(in srgb, var(--accent) 22%, var(--bg));
+
   /* Code, which is the same palette wearing a different job.
      Shiki emits these variable names instead of hexes (src/lib/highlight.ts), so
      syntax colour is our own three tones — text, muted, the one accent — rather

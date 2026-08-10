@@ -128,7 +128,7 @@ function renderBlock(token: Token, key: string, tail?: ReactNode): ReactNode {
                   <path
                     d="M3 7.4 5.7 10 11 4.4"
                     stroke="currentColor"
-                    strokeWidth="1.7"
+                    strokeWidth="1.4"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />

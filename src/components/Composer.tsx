@@ -20,6 +20,17 @@ type Props = {
    *  an attachment outlives the keystroke that produced it. */
   attachments?: readonly Attachment[];
   onAttachmentsChange?: (next: readonly Attachment[]) => void;
+  /**
+   * A sentence put into the box from outside it — one of the examples on the
+   * first screen.
+   *
+   * It seeds the field and focuses it, and then it is an ordinary draft: it can
+   * be edited, cleared, or ignored. It is never sent on somebody's behalf. An
+   * example is a starting point, and a click that spends money on a sentence
+   * the user did not write is the exact surprise this product exists not to
+   * have.
+   */
+  draft?: string;
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -54,6 +65,7 @@ export default function Composer({
   busy,
   attachments = [],
   onAttachmentsChange,
+  draft,
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -93,6 +105,19 @@ export default function Composer({
       window.removeEventListener('drop', swallow);
     };
   }, []);
+
+  /* Seeded from outside, with the cursor left at the end of it so the next
+     keystroke continues the sentence rather than landing in the middle of it. */
+  useEffect(() => {
+    if (draft === undefined || draft === '') return;
+    setValue(draft);
+    const field = areaRef.current;
+    if (field === null) return;
+    field.focus();
+    field.setSelectionRange(draft.length, draft.length);
+    field.style.height = 'auto';
+    field.style.height = `${Math.min(field.scrollHeight, 220)}px`;
+  }, [draft]);
 
   const take = useCallback(
     (files: readonly File[]) => {
@@ -235,7 +260,7 @@ export default function Composer({
         value={value}
         rows={1}
         autoFocus={autoFocus}
-        placeholder={placeholder ?? 'Describe it, or drop a Figma link or a screenshot'}
+        placeholder={placeholder ?? 'Describe what you want, or drop in a Figma link or a screenshot'}
         onChange={(e) => {
           setValue(e.target.value);
           resize(e.target);
@@ -256,17 +281,23 @@ export default function Composer({
             <path
               d="M9.6 4.2 5.2 8.6a1.9 1.9 0 0 0 2.7 2.7l4.7-4.7a3.2 3.2 0 0 0-4.5-4.5L3.3 6.9a4.5 4.5 0 0 0 6.4 6.4l3.6-3.6"
               stroke="currentColor"
-              strokeWidth="1.4"
+              strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
           </svg>
         </button>
 
+        {/* One line, one job. It used to repeat the placeholder back at you in
+            smaller grey type — two strings saying the same thing, in the one
+            place the composer has to teach something. Now it says the thing the
+            placeholder cannot: how to send, and how not to. Once there is
+            anything in the box it goes quiet (see Composer.css), because a hint
+            you have already acted on is furniture. */}
         <span className="composer__hint">
           {attachments.length > 0
             ? 'Held here for now — I can’t open these yet.'
-            : 'Drop a Figma link, a screenshot, or a photo of a sketch'}
+            : 'Enter to send · Shift + Enter for a new line'}
         </span>
 
         <button
@@ -277,9 +308,9 @@ export default function Composer({
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path
-              d="M8 13V3M8 3L3.5 7.5M8 3l4.5 4.5"
+              d="M8 12.75V3.5M8 3.5 4 7.5M8 3.5l4 4"
               stroke="currentColor"
-              strokeWidth="1.6"
+              strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />

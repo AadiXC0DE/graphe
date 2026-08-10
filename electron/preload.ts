@@ -30,6 +30,8 @@ import {
   type SavedVersion,
   type ShowOutcome,
   type ShowProgress,
+  type VisualFrames,
+  type VisualNotice,
 } from '../src/lib/ipc';
 
 /** Refused before it reaches the wire. The shape matches everything else the
@@ -158,6 +160,23 @@ const api: GrapheApi = {
     ipcRenderer.on(CHANNEL.event, forward);
     return () => {
       ipcRenderer.off(CHANNEL.event, forward);
+    };
+  },
+
+  visualFrames(changeId: string): Promise<Result<VisualFrames>> {
+    if (typeof changeId !== 'string' || changeId.trim() === '') {
+      return Promise.resolve(refuse<VisualFrames>('I could not tell which change you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.visualFrames, changeId) as Promise<Result<VisualFrames>>;
+  },
+
+  onVisualChange(listener: (notice: VisualNotice) => void): () => void {
+    const forward = (_source: IpcRendererEvent, notice: VisualNotice): void => {
+      listener(notice);
+    };
+    ipcRenderer.on(CHANNEL.visualChange, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.visualChange, forward);
     };
   },
 };

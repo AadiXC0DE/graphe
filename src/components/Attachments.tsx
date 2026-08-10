@@ -1,6 +1,12 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AttachmentKind } from '../lib/attachments';
+import { usePrefersReducedMotion } from '../lib/motion';
 import './Attachments.css';
+
+/** How long a chip takes to leave. Kept in step with --dur-exit in tokens.css,
+ *  which is the "exits run about 20% faster than entrances" rule from
+ *  notes/strategy/UI-DESIGN.md written down as a number. */
+const LEAVING_MS = 160;
 
 /**
  * One thing brought into the conversation.
@@ -29,8 +35,8 @@ function Mark({ kind }: { kind: AttachmentKind }) {
   if (kind === 'figma') {
     return (
       <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
-        <rect x="3" y="2.5" width="10" height="11" rx="2" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M3 6.2h10M6.6 6.2v7.3" stroke="currentColor" strokeWidth="1.4" />
+        <rect x="3" y="2.5" width="10" height="11" rx="2" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M3 6.2h10M6.6 6.2v7.3" stroke="currentColor" strokeWidth="1.5" />
       </svg>
     );
   }
@@ -39,10 +45,10 @@ function Mark({ kind }: { kind: AttachmentKind }) {
       <path
         d="M4 2.5h5l3 3v8h-8z"
         stroke="currentColor"
-        strokeWidth="1.4"
+        strokeWidth="1.5"
         strokeLinejoin="round"
       />
-      <path d="M9 2.5v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M9 2.5v3h3" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -73,33 +79,80 @@ export default function Attachments({
   items: readonly Attachment[];
   onRemove: (id: string) => void;
 }) {
+  /**
+   * Chips on their way out.
+   *
+   * A chip arrives with a small rise, and until now it left by ceasing to
+   * exist between two frames — which reads as a glitch rather than as a thing
+   * you removed, and leaves you unsure whether you clicked the right one. So
+   * the press marks it, it shrinks and fades over --dur-exit, and only then is
+   * it actually taken off the list. Rare and deliberate, which is the test for
+   * whether motion is allowed at all.
+   */
+  const [leaving, setLeaving] = useState<readonly string[]>([]);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const reducedMotion = usePrefersReducedMotion();
+
+  useEffect(
+    () => () => {
+      for (const timer of timers.current) clearTimeout(timer);
+    },
+    [],
+  );
+
+  const remove = useCallback(
+    (id: string) => {
+      if (reducedMotion) {
+        onRemove(id);
+        return;
+      }
+      setLeaving((was) => (was.includes(id) ? was : [...was, id]));
+      timers.current.push(
+        setTimeout(() => {
+          setLeaving((was) => was.filter((one) => one !== id));
+          onRemove(id);
+        }, LEAVING_MS),
+      );
+    },
+    [onRemove, reducedMotion],
+  );
+
   if (items.length === 0) return null;
 
   return (
     <ul className="chips" aria-label="Attached">
-      {items.map((item) => (
-        <li className={`chip chip--${item.kind}`} key={item.id}>
-          <span className="chip__mark" aria-hidden="true">
-            <Thumbnail kind={item.kind} preview={item.preview} />
-          </span>
+      {items.map((item) => {
+        const going = leaving.includes(item.id);
+        return (
+          <li className={`chip chip--${item.kind} ${going ? 'chip--leaving' : ''}`} key={item.id}>
+            <span className="chip__mark" aria-hidden="true">
+              <Thumbnail kind={item.kind} preview={item.preview} />
+            </span>
 
-          <span className="chip__text">
-            <span className="chip__name">{item.name}</span>
-            <span className="chip__note">{item.note}</span>
-          </span>
+            <span className="chip__text">
+              <span className="chip__name">{item.name}</span>
+              <span className="chip__note">{item.note}</span>
+            </span>
 
-          <button
-            type="button"
-            className="chip__remove"
-            onClick={() => onRemove(item.id)}
-            aria-label={`Remove ${item.name}`}
-          >
-            <svg viewBox="0 0 14 14" width="11" height="11" fill="none" aria-hidden="true">
-              <path d="M4 4l6 6M10 4l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-          </button>
-        </li>
-      ))}
+            <button
+              type="button"
+              className="chip__remove"
+              onClick={() => remove(item.id)}
+              disabled={going}
+              aria-label={`Remove ${item.name}`}
+            >
+              <svg viewBox="0 0 14 14" width="11" height="11" fill="none" aria-hidden="true">
+                <path
+                  d="M4.2 4.2l5.6 5.6M9.8 4.2l-5.6 5.6"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }

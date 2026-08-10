@@ -1,0 +1,117 @@
+/* The first screen. Nothing in this file moves — it is the screen every launch
+   begins on, and the frequency rule says the frequent things stay still. */
+
+.welcome {
+  display: flex;
+  flex-direction: column;
+  /* Narrower than the conversation it sits in. A heading and three short lines
+     centred across the full 680px would leave the eye travelling further than
+     the words are long. */
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto;
+}
+
+.welcome__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.welcome__sub {
+  margin: 0 0 var(--space-6);
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+/* With no examples under it there is nothing for that gap to separate. */
+.welcome__sub:last-child {
+  margin-bottom: 0;
+}
+
+/* Rows, not cards. Three cards side by side is the grammar of a landing page,
+   and this is a list of sentences — so it looks like a list of sentences. */
+.welcome__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.welcome__list > li {
+  border-bottom: 1px solid var(--border);
+}
+
+.welcome__example {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-3);
+  text-align: left;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.welcome__exampletext {
+  flex: 1;
+  min-width: 0;
+  /* A long example wraps rather than being cut off. There is no version of an
+     example sentence with the end missing that is worth showing. */
+  overflow-wrap: anywhere;
+}
+
+/* Permanently visible, never hover-only: a control that appears under a mouse
+   does not exist for a keyboard. Quiet until you go near it. */
+.welcome__chevron {
+  flex: none;
+  color: var(--text-faint);
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.welcome__example:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .welcome__example:hover {
+    color: var(--text);
+    background: var(--bg-raised);
+  }
+
+  .welcome__example:hover .welcome__chevron {
+    color: var(--text-muted);
+  }
+}
+
+/* The other way in, said once, in the place where somebody who has a file
+   rather than a sentence would be looking. */
+.welcome__drop {
+  margin: var(--space-5) 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+  text-align: center;
+  text-wrap: pretty;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome__example,
+  .welcome__chevron {
+    transition: none;
+  }
+}

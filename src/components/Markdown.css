@@ -146,11 +146,15 @@ h3.md__heading {
   border-bottom: none;
 }
 
-/* When the last thing said is a block rather than a sentence, the still-writing
-   mark sits under it instead of inside it — so the block closes up to keep the
-   two of them reading as one thing that has not finished. */
-.codeblock:has(+ .message__caret) {
-  margin-bottom: var(--space-1);
+/* The still-writing mark, where a block is the last thing said.
+
+   Inside a fence it is part of the code now (Markdown.tsx passes it to
+   CodeBlock), sitting after the final character where the writing has actually
+   got to. Under a table it stays a sibling, because there is no last line to
+   put it on — it hangs one step below and reads as "there is more coming",
+   which is exactly what it means. */
+.md__tablewrap > .message__caret {
+  margin-top: var(--space-1);
 }
 
 /* The last thing in a reply never carries a trailing gap. */

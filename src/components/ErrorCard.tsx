@@ -33,7 +33,7 @@ export default function ErrorCard({
       <div className="errorcard__head">
         <span className="errorcard__mark" aria-hidden="true">
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-            <path d="M8 4.2v4.4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            <path d="M8 4.2v4.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             <circle cx="8" cy="11.4" r="0.95" fill="currentColor" />
           </svg>
         </span>

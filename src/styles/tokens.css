@@ -13,6 +13,10 @@
   --dur-micro: 120ms;
   --dur-ui: 200ms;
   --dur-large: 280ms;
+  /* "Exits run ~20% faster than entrances" (UI-DESIGN.md) was written down and
+     never given a number, so every exit in the app was running at the entrance
+     speed. This is that rule, expressed once. */
+  --dur-exit: 160ms;
 
   /* Type */
   --font-ui:
@@ -20,6 +24,10 @@
     sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
 
+  /* One step under --text-xs, for the second line of a chip and nothing bigger.
+     It was already in the app as a literal in Attachments.css; it is here now so
+     there is one smallest size rather than one smallest size and an exception. */
+  --text-2xs: 0.6875rem;
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-base: 0.9375rem;
@@ -41,20 +49,54 @@
   --radius-md: 10px;
   --radius-lg: 14px;
 
+  /* Layout — the three numbers the window is built out of.
+
+     Each of these was a literal repeated in two or three files, and the comment
+     in App.css already warned that the rail width "must agree or the
+     conversation slides under the rail". A number with a warning attached to it
+     is a number that wants to be a token. */
+  --topbar-height: 38px;
+  /* The reading measure. 680px at --text-base is about 66 characters, which is
+     inside the 60–75 that prose wants; it deliberately does not grow with the
+     window, because a wider line is a worse line. */
+  --thread-width: 680px;
+  --rail-width: 328px;
+  /* Under about 1100px the rail has to give room back to the conversation. */
+  --rail-width-tight: 276px;
+  /* How far the conversation is allowed to drift from the rail on a very wide
+     display. Without a cap the two centre themselves in their own halves and
+     stop reading as one composition. */
+  --pair-gap-max: 120px;
+
   /* Light theme */
   --bg: #fbfbfa;
   --bg-raised: #ffffff;
   --bg-sunken: #f2f2f0;
   --border: #e4e4e1;
   --border-strong: #d2d2ce;
+  /* The edge of a control that is identified by its edge — a bare text field, a
+     switch that is off. WCAG 1.4.11 asks 3:1 for those, and --border-strong
+     measures 1.46:1 on this background, so it cannot be the one doing that job.
+     Everything decorative stays on --border / --border-strong. */
+  --border-control: #8f8f89;
   --text: #1a1a19;
   --text-muted: #6b6b66;
   /* Faint still has to clear AA as text — we cannot ship an inaccessible tool
-     that lectures people about accessibility. Nothing here drops below 4.5:1. */
-  --text-faint: #76766f;
+     that lectures people about accessibility. Nothing here drops below 4.5:1.
+     Was #76766f, which measured 4.42:1 on --bg and 4.08:1 on --bg-sunken and so
+     failed the claim in this comment; it is used for the placeholder, the
+     composer's hint and the rail's title, all of which are text somebody reads.
+     #6e6e68 is 4.95 / 5.13 / 4.58 on --bg / --bg-raised / --bg-sunken. */
+  --text-faint: #6e6e68;
   --accent: #b8492c;
   --accent-text: #ffffff;
   --accent-soft: #f6e9e4;
+  /* Accent-coloured *text* sitting on --accent-soft — the "On screen" and "Open"
+     badges. --accent on --accent-soft is 4.39:1, just under AA; this is 4.83:1
+     there and 5.54:1 on --bg, so one token covers both places a badge can sit.
+     In the dark theme the plain accent already clears it, so the two are the
+     same value there and nothing is tinted twice. */
+  --accent-ink: #ad4529;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
 
@@ -92,12 +134,14 @@
     --bg-sunken: #0e0e0d;
     --border: #2b2b28;
     --border-strong: #3a3a36;
+    --border-control: #6e6e66;
     --text: #f2f2ef;
     --text-muted: #9a9a93;
     --text-faint: #87877f;
     --accent: #e0714d;
     --accent-text: #1a1a19;
     --accent-soft: #2a1c17;
+    --accent-ink: #e0714d;
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
     --shadow-md: 0 4px 20px rgb(0 0 0 / 0.4);
   }
@@ -111,12 +155,14 @@
   --bg-sunken: #f2f2f0;
   --border: #e4e4e1;
   --border-strong: #d2d2ce;
+  --border-control: #8f8f89;
   --text: #1a1a19;
   --text-muted: #6b6b66;
-  --text-faint: #76766f;
+  --text-faint: #6e6e68;
   --accent: #b8492c;
   --accent-text: #ffffff;
   --accent-soft: #f6e9e4;
+  --accent-ink: #ad4529;
 }
 
 :root[data-theme='dark'] {
@@ -126,10 +172,12 @@
   --bg-sunken: #0e0e0d;
   --border: #2b2b28;
   --border-strong: #3a3a36;
+  --border-control: #6e6e66;
   --text: #f2f2ef;
   --text-muted: #9a9a93;
   --text-faint: #87877f;
   --accent: #e0714d;
   --accent-text: #1a1a19;
   --accent-soft: #2a1c17;
+  --accent-ink: #e0714d;
 }

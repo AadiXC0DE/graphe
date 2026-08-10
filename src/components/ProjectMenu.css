@@ -81,7 +81,9 @@
   margin-top: 1px;
   border-radius: 999px;
   background: var(--bg-sunken);
-  border: 1px solid var(--border-strong);
+  /* Off, this track is identified by its outline and nothing else, so the
+     outline carries the 3:1 WCAG 1.4.11 asks of a control boundary. */
+  border: 1px solid var(--border-control);
   transition:
     background-color var(--dur-ui) var(--ease-in-out-cubic),
     border-color var(--dur-ui) var(--ease-in-out-cubic);

@@ -1,3 +1,20 @@
+/* The window, as one composition.
+
+   Three regions share one set of edges: the strip along the top, the
+   conversation, and the version rail. Before this pass they each centred
+   themselves in whatever space they happened to have, which is why the thread
+   floated in the middle of a wide window while the rail sat dense against the
+   glass. Everything below exists to make the three read as one page:
+
+     · one top edge  — --topbar-height, so the rail's title and the first line of
+                       the conversation sit on the same band
+     · one gutter    — capped at --pair-gap-max, so a 2000px display cannot push
+                       the conversation away from the rail
+     · one bottom    — the composer and the meter both end on the window's edge
+
+   Nothing here animates except the two things that already did: the switcher
+   arriving and the jump-to-latest offer. */
+
 /* The scroller, and the reason it is not a flex container.
    A flex item is stretched to the line's height, which is a definite height —
    so the column stayed 820px tall while the conversation inside it grew past
@@ -7,6 +24,29 @@
    stick-to-bottom that never sticks. A block box with auto margins centres the
    column just as well and grows with what is in it. */
 .app {
+  /* How much of the window the rail is holding, and how far the conversation is
+     allowed to sit from it. Both are declared here so the strip along the top
+     can line its two controls up with the column below — they are measured
+     against the viewport rather than against a parent, because the strip is
+     fixed and a percentage inside it would be measured against the window while
+     the same percentage inside the column would be measured against the window
+     minus the rail. One unit, one answer, everything lines up. */
+  --rail-take: 0px;
+  --pair-gap: clamp(
+    0px,
+    calc((100vw - var(--rail-take) - var(--thread-width)) / 2),
+    var(--pair-gap-max)
+  );
+  /* The conversation's own side padding, named because the strip's contents have
+     to land on the same line the words do. */
+  --column-pad: var(--space-5);
+  /* Where the strip's contents start: the first character of the conversation
+     below it. */
+  --topbar-inset: max(
+    var(--column-pad),
+    calc(100vw - var(--rail-take) - var(--pair-gap) - var(--thread-width) + var(--column-pad))
+  );
+
   height: 100%;
   /* Both axes, rather than overflow-y alone: this is the element
      use-stick-to-bottom watches, and it identifies the scroller it is being
@@ -19,68 +59,84 @@
 
 .app__column {
   width: 100%;
-  max-width: 680px;
+  max-width: var(--thread-width);
   margin: 0 auto;
   min-height: 100%;
-  padding: var(--space-6) var(--space-5) var(--space-5);
+  /* The strip along the top is always there, so the column always starts below
+     it — and it starts on the same line the rail's title does. */
+  padding: calc(var(--topbar-height) + var(--space-3)) var(--column-pad) var(--space-5);
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  /* A conversation grows downward from the composer, the way every chat anybody
+     has used does. Before this the thread was pinned to the top and the slack
+     collected between the first message and the box you type in — a hundred
+     empty pixels that read as "something failed to load". */
+  justify-content: flex-end;
 }
 
-/* Empty state centres vertically; once there is a thread it sits at the top. */
+/* Empty state centres vertically; once there is a thread it sits at the bottom. */
 .app--empty .app__column {
   justify-content: center;
-  min-height: 100%;
   padding-bottom: var(--space-8);
-}
-
-.welcome {
-  text-align: center;
-}
-
-.welcome__title {
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin: 0 0 var(--space-2);
-}
-
-.welcome__sub {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-base);
 }
 
 .thread {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  /* Takes the slack, so a two-line conversation still has the composer where a
-     hundred-line one does: at the bottom of the window, under the thumbs. */
-  flex: 1 0 auto;
+  /* No longer 1 0 auto: the column takes the slack now, at the top, where an
+     older conversation has scrolled away to. */
+  flex: 0 0 auto;
   /* Room for the composer, which sits over the end of the thread. */
   padding-bottom: var(--space-2);
 }
 
-/* Consecutive activity lines are one paragraph of doing, not four separate
-   events. They close up to the same rhythm as .activity-feed. */
-.thread .activity + .activity {
-  margin-top: calc(var(--space-3) * -1);
+/* Generous, uneven whitespace — an exchange begins when you say something, so
+   that is where the extra air goes. Inside one exchange the turns stay close
+   enough to read as one answer. */
+.thread > * + .message--you {
+  margin-top: var(--space-3);
 }
 
-/* The composer stays where the hands are. Sticky rather than fixed so it still
-   sits inside the 680px column and cannot drift over the window edge. */
+/* Consecutive activity lines are one paragraph of doing, not four separate
+   events. They close up to the rhythm ActivityLine.css sets for its own feed,
+   so the connecting spine between them is the same length in both places. */
+.thread .activity + .activity {
+  margin-top: calc(var(--activity-gap, 12px) - var(--space-4));
+}
+
+/* ---------------------------------------------------------------------------
+   The composer
+   Stays where the hands are. Sticky rather than fixed so it still sits inside
+   the reading column and cannot drift over the window edge.
+   --------------------------------------------------------------------------- */
+
 .app__composer {
   position: sticky;
   bottom: 0;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: var(--space-2);
   background: var(--bg);
-  padding-bottom: var(--space-2);
+  padding-bottom: var(--space-3);
+}
+
+/* The last line of the conversation used to end at a hard horizontal edge where
+   the composer's background began. A short ramp instead, so the thread reads as
+   passing behind the box rather than being cut off by it. Static — there is
+   nothing here to animate. */
+.app__composer::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: var(--space-5);
+  background: linear-gradient(to top, var(--bg), transparent);
+  pointer-events: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -89,13 +145,14 @@
    the composer, and says what it does. Rare enough to be allowed a transition:
    the frequency rule bans motion on the things people see a hundred times a
    day, and this is a thing people see when they have gone looking for
-   something. Opacity and transform only, --dur-ui, and gone under
-   prefers-reduced-motion.
+   something. Opacity and transform only, --dur-ui in, --dur-exit out, and gone
+   under prefers-reduced-motion.
    --------------------------------------------------------------------------- */
 
 .jump {
   position: absolute;
-  bottom: calc(100% + var(--space-2));
+  z-index: 1;
+  bottom: calc(100% + var(--space-3));
   left: 50%;
   display: inline-flex;
   align-items: center;
@@ -113,9 +170,11 @@
   opacity: 0;
   transform: translate(-50%, 4px);
   pointer-events: none;
+  /* Leaving: quicker than arriving, and it does not need to be watched on the
+     way out. */
   transition:
-    opacity var(--dur-ui) var(--ease-out-quart),
-    transform var(--dur-ui) var(--ease-out-quart),
+    opacity var(--dur-exit) var(--ease-out-quart),
+    transform var(--dur-exit) var(--ease-out-quart),
     color var(--dur-micro) var(--ease-hover);
 }
 
@@ -123,6 +182,10 @@
   opacity: 1;
   transform: translate(-50%, 0);
   pointer-events: auto;
+  transition:
+    opacity var(--dur-ui) var(--ease-out-quart),
+    transform var(--dur-ui) var(--ease-out-quart),
+    color var(--dur-micro) var(--ease-hover);
 }
 
 /* 44px of hit area under a 34px pill. */
@@ -149,11 +212,13 @@
 @media (hover: hover) and (pointer: fine) {
   .jump--shown:hover {
     color: var(--text);
+    border-color: var(--border-strong);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .jump {
+  .jump,
+  .jump--shown {
     transition: none;
     transform: translate(-50%, 0);
   }
@@ -163,21 +228,58 @@
   }
 }
 
-/* Only while something is running, and quiet even then. Esc does the same
-   thing — this is here for the people who never learn that. */
+/* ---------------------------------------------------------------------------
+   Stop
+   Only while something is running, and quiet even then. Esc does the same
+   thing — this is here for the people who never learn that. It is centred under
+   the composer rather than stretched across it, because it is one small word
+   and a full-width button would read as the main action on the screen.
+   --------------------------------------------------------------------------- */
+
 .app__stop {
-  font-size: var(--text-sm);
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--text-muted);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-sm);
-  /* 44px hit area without a 44px-looking button. */
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  /* 36px tall, 44px of hit area under it. */
   min-height: 36px;
-  transition: color var(--dur-micro) var(--ease-hover);
+  position: relative;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* A square, which is what stop means everywhere else on a computer. Drawn
+   rather than lettered so the button reads at a glance without being loud. */
+.app__stop::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.app__stop::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 44px;
+  transform: translateY(-50%);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .app__stop:hover {
     color: var(--text);
+    border-color: var(--border-strong);
   }
 }
 
@@ -186,6 +288,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app__stop {
+    transition: color var(--dur-micro) var(--ease-hover);
+  }
+
   .app__stop:active {
     transform: none;
   }
@@ -200,7 +306,7 @@
    It earns its keep by holding the two quiet things that belong nowhere else:
    which project this is, and the button that shows it to you. Both are as small
    as they can be and still be read — this strip is furniture, and furniture that
-   asks for attention is furniture in the way.
+   asks for attention is furniture in the way. Small to look at, 44px to hit.
    --------------------------------------------------------------------------- */
 
 .topbar {
@@ -208,25 +314,36 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 38px;
+  height: var(--topbar-height);
   z-index: 3;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 0 var(--space-3);
+  /* Lined up with the conversation underneath rather than with the glass. The
+     strip still spans the window — it is what the window is dragged by — but
+     which project this is now sits above the first word of the thread, and "See
+     it" above its last. Without this the two controls pin themselves to the
+     window's corners and, on a wide display, end up several hundred pixels from
+     anything they belong to. */
+  padding-left: var(--topbar-inset);
+  padding-right: calc(var(--pair-gap) + var(--column-pad));
   background: var(--bg);
   -webkit-app-region: drag;
 }
 
-/* Room for the traffic lights, which the shell puts at 18px. */
-[data-shell='desktop'] .topbar {
-  padding-left: 92px;
+/* Room for the traffic lights, which the shell puts at 18px. They are the one
+   thing the strip cannot slide under. */
+[data-shell='desktop'] .app {
+  --topbar-inset: max(
+    92px,
+    calc(100vw - var(--rail-take) - var(--pair-gap) - var(--thread-width) + var(--space-5))
+  );
 }
 
 /* The rail owns the right-hand edge, so the strip stops where it starts. */
 .app--railed .topbar {
-  right: var(--rail);
+  right: var(--rail-width);
 }
 
 .topbar__name,
@@ -234,15 +351,28 @@
   -webkit-app-region: no-drag;
 }
 
+/* A block with the chevron parked on top of it, rather than a flex row.
+
+   The name is a bare text node next to an <svg>. Inside a flex row that text
+   becomes an anonymous item, and an anonymous item cannot be given min-width: 0
+   — so a 50-character project name refused to shrink, overflowed, and took the
+   chevron with it: no ellipsis, and no visible sign the name was a menu at all.
+   As a plain block the text ellipsises the ordinary way, and the chevron is
+   taken out of the flow and given reserved room in the padding. The affordance
+   survives the longest name anybody has. */
 .topbar__name {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  max-width: 40%;
+  position: relative;
+  display: block;
+  /* max-width stops a long name eating the "See it" button. */
+  max-width: 44%;
   min-height: 26px;
-  padding: 0 var(--space-2);
+  /* The right-hand padding is the chevron's room: 9px of arrow with a gap
+     either side of it. */
+  padding: 0 calc(var(--space-2) * 2 + 9px) 0 var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
+  /* The line box is the button, so the text is centred without flexbox. */
+  line-height: 26px;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -252,11 +382,19 @@
     background-color var(--dur-micro) var(--ease-hover);
 }
 
+.topbar__name > svg {
+  position: absolute;
+  right: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
 .topbar__name--quiet {
   color: var(--text-faint);
 }
 
 .topbar__see {
+  position: relative;
   min-height: 26px;
   padding: 0 var(--space-3);
   border-radius: var(--radius-sm);
@@ -270,6 +408,19 @@
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
+/* 44px of hit area under two 26px controls. The strip stays 38px tall; the
+   target overhangs it, which is invisible and is the whole point. */
+.topbar__name::after,
+.topbar__see::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 44px;
+  transform: translateY(-50%);
+}
+
 .topbar__see:active {
   transform: scale(0.97);
 }
@@ -279,7 +430,8 @@
 .topbar__switcher {
   position: absolute;
   top: calc(100% - var(--space-1));
-  left: var(--space-3);
+  /* Under the name it hangs from, wherever the strip has put that. */
+  left: var(--topbar-inset);
   width: 320px;
   max-width: calc(100vw - var(--space-5));
   padding: var(--space-2) 0 0;
@@ -288,21 +440,20 @@
   background: var(--bg-raised);
   box-shadow: var(--shadow-md);
   -webkit-app-region: no-drag;
+  transform-origin: top left;
   animation: switcher-arrives var(--dur-ui) var(--ease-out-quart) both;
 }
 
-[data-shell='desktop'] .topbar__switcher {
-  left: 92px;
-}
-
+/* From scale(0.97), never from scale(0) — it grows out of the name it hangs
+   from rather than being inflated from nothing. */
 @keyframes switcher-arrives {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-4px) scale(0.97);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -310,6 +461,10 @@
   .topbar__name:hover,
   .topbar__see:hover {
     color: var(--text);
+  }
+
+  .topbar__name:hover {
+    background: var(--bg-sunken);
   }
 
   .topbar__see:hover {
@@ -328,29 +483,130 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Making room for the version rail
+   Making room for the version rail, and keeping it in the same composition
    The rail is fixed to the right-hand edge, so the scroller is padded rather
    than made into a flex row — the column inside it is centred by auto margins
    and stays centred in whatever is left.
+
+   Centred, though, only up to a point. On a 2000px display "centred in what is
+   left" puts 500px of nothing between the conversation and the rail, and the
+   two stop being one page. The right-hand margin is therefore capped: past
+   about 1200px of window the conversation stops drifting and the empty space
+   all collects on the left, where nothing is looking.
    --------------------------------------------------------------------------- */
 
 .app--railed {
-  --rail: 328px;
-  padding-right: var(--rail);
+  --rail-take: var(--rail-width);
+  padding-right: var(--rail-width);
 }
 
-/* The meter stays in the window's own corner rather than being pushed left by
-   the rail. The rail's lower half is empty and the composer's right-hand side is
-   not — moving the meter across would put a number on top of the send button in
-   any window narrower than a large display. */
+.app--railed .app__column {
+  margin-right: var(--pair-gap);
+  margin-left: auto;
+}
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .app--railed {
-    --rail: 260px;
+    --rail-width: var(--rail-width-tight);
   }
 }
 
-/* The strip is always there now, so the column always starts below it. */
-.app__column {
-  padding-top: var(--space-7);
+/* Below this the rail and a readable conversation cannot both have what they
+   need, and the conversation is the product. */
+@media (max-width: 720px) {
+  .app--railed {
+    --rail-width: 240px;
+  }
+
+  .app {
+    --column-pad: var(--space-4);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The meter, docked
+   On its own it is a small card in the window's corner. With the rail up, a
+   bordered card floating inside a bordered panel is two frames saying the same
+   thing — so it becomes the rail's own foot instead: same width, flush to the
+   glass, one hairline between it and the versions above it.
+   --------------------------------------------------------------------------- */
+
+.app--railed .cost-meter--corner {
+  right: 0;
+  bottom: 0;
+  width: var(--rail-width);
+  border: none;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+/* ---------------------------------------------------------------------------
+   Things that are true of every screen
+   App.css is loaded whichever surface is drawn, so the handful of rules that
+   belong to the app rather than to any one component sit here.
+   --------------------------------------------------------------------------- */
+
+/* Scrollbars, in our own greys rather than the platform's — but only inside the
+   small boxes that scroll on purpose: a block of code, a build log, a composer
+   that has grown past its ceiling.
+
+   Deliberately *not* on the window's own scroller or on the rail. Naming
+   ::-webkit-scrollbar for an element makes Chromium give it a classic scrollbar
+   instead of the overlay one macOS draws over the top, and a classic bar takes
+   real layout width — so the reading column would jump sideways by ten pixels
+   the moment a conversation grew past one screen. The platform's own overlay is
+   both better behaved and better looking there. */
+.codeblock__code pre,
+.errorcard__pre,
+.composer__input {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.codeblock__code pre::-webkit-scrollbar,
+.errorcard__pre::-webkit-scrollbar,
+.composer__input::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.codeblock__code pre::-webkit-scrollbar-track,
+.errorcard__pre::-webkit-scrollbar-track,
+.composer__input::-webkit-scrollbar-track,
+.codeblock__code pre::-webkit-scrollbar-corner,
+.errorcard__pre::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.codeblock__code pre::-webkit-scrollbar-thumb,
+.errorcard__pre::-webkit-scrollbar-thumb,
+.composer__input::-webkit-scrollbar-thumb {
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: var(--border-strong);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .codeblock__code pre::-webkit-scrollbar-thumb:hover,
+  .errorcard__pre::-webkit-scrollbar-thumb:hover,
+  .composer__input::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-faint);
+  }
+}
+
+/* Headings set two or three words long look broken when the last word drops to
+   its own line. Prose gets `pretty`, which only guards the last line. */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
 }

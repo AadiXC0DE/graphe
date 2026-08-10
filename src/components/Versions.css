@@ -11,13 +11,18 @@
   right: 0;
   bottom: 0;
   z-index: 2;
-  /* Set by .app--railed, which pads the scroller by the same amount. One number,
+  /* Set on .app--railed, which pads the scroller by the same amount. One number,
      one place — the two must agree or the conversation slides under the rail. */
-  width: var(--rail, 328px);
+  width: var(--rail-width);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-5) var(--space-3) var(--space-4);
+  /* No top padding of its own: the title carries it, so that when the list is
+     long enough to scroll the title can pin to the glass and cover the whole
+     band rather than letting rows slide through the gap above it. The bottom
+     leaves room for the meter, which docks into the foot of this rail rather
+     than floating over it. */
+  padding: 0 var(--space-3) 128px;
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--bg);
@@ -27,7 +32,7 @@
 }
 
 /* Room for the traffic lights, which sit over the whole window. */
-[data-shell='desktop'] .rail {
+[data-shell='desktop'] .rail__title {
   padding-top: var(--space-7);
 }
 
@@ -40,47 +45,24 @@
   }
 }
 
+/* Sticky, so forty versions deep you still know what you are looking at. It
+   carries the rail's own background so the rows pass behind it cleanly. */
 .rail__title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   margin: 0;
-  padding: 0 var(--space-2);
+  padding: calc(var(--topbar-height) + var(--space-3)) var(--space-2) var(--space-2);
+  background: var(--bg);
   font-size: var(--text-xs);
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-faint);
 }
 
 .rail__list {
   max-width: none;
-}
-
-/* A title is the whole reason the timeline is readable, and "Hero rebuilt fr…"
-   is not a title. In a 320px rail it gets two lines rather than an ellipsis;
-   `VersionRow` keeps its single line everywhere else, where there is room. */
-.rail .versionrow__title {
-  white-space: normal;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  line-height: 1.35;
-}
-
-.rail .versionrow__open {
-  align-items: flex-start;
-  padding-top: var(--space-2);
-  padding-bottom: var(--space-2);
-}
-
-.rail .versionrow__thumb {
-  margin-top: 1px;
-}
-
-.rail .versionrow__restore,
-.rail .versionrow__badge {
-  align-self: flex-start;
-  margin-top: var(--space-2);
 }
 
 /* ---------------------------------------------------------------------------
@@ -94,6 +76,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin: 0 var(--space-1);
   padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -116,6 +99,7 @@
 .rail__putbacksaid {
   margin: 0;
   font-size: var(--text-sm);
+  line-height: 1.4;
   color: var(--text);
 }
 
@@ -142,7 +126,7 @@
   margin-right: calc(var(--space-2) * -1);
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
-  color: var(--accent);
+  color: var(--accent-ink);
   transition:
     color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
@@ -182,15 +166,19 @@
   gap: var(--space-2);
 }
 
+/* --border-control rather than --border-strong: a bare field on a plain
+   background is identified by its edge and nothing else, and WCAG 1.4.11 asks
+   3:1 for that. */
 .naming__field {
   flex: 1;
   min-width: 0;
   min-height: 44px;
   padding: 0 var(--space-2);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
   font-size: var(--text-sm);
+  transition: border-color var(--dur-micro) var(--ease-hover);
 }
 
 .naming__field::placeholder {
@@ -200,6 +188,7 @@
 .naming__field:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+  border-color: var(--accent);
 }
 
 .naming__save {
@@ -231,6 +220,10 @@
     color: var(--text);
   }
 
+  .naming__field:hover {
+    border-color: var(--text-faint);
+  }
+
   .naming__save:hover:not(:disabled) {
     border-color: var(--border-strong);
   }
@@ -253,7 +246,7 @@
    rail — it is a footnote for whoever went looking, not a caption on the
    feature. */
 .rail__real {
-  margin: var(--space-4) var(--space-4) 0;
+  margin: var(--space-4) var(--space-2) 0;
   padding: var(--space-3) 0 0;
   border-top: 1px solid var(--border);
   font-size: var(--text-xs);

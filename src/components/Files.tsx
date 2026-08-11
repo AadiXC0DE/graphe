@@ -61,7 +61,6 @@ export default function Files({
   everything,
   onEverything,
 }: Props) {
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
   /** The row the keyboard is on, which is not the same as the file on screen. */
   const [active, setActive] = useState<string | null>(null);
   const [selectedHere, setSelectedHere] = useState<string | null>(null);
@@ -78,6 +77,13 @@ export default function Files({
 
   const tree = useMemo(() => buildTree(files, all ? EVERYTHING : {}), [files, all]);
   const shown = useMemo(() => (only ? changedOnly(tree) : tree), [tree, only]);
+
+  /* Open on the first paint rather than a frame later, so nothing that is about
+     to be showing is briefly folded away. */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() =>
+    only ? new Set(expandAll(shown)) : new Set<string>(),
+  );
+
   const rows = useMemo(() => flatten(shown, expanded), [shown, expanded]);
 
   /* What changed is worth seeing without opening four folders to find it. */

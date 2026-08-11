@@ -192,6 +192,16 @@ async function photograph(
     );
     if (arrived !== true) return null;
 
+    // Our own furniture never appears in a picture of somebody's work. The
+    // preview carries a way to point at things; a photograph of the page must
+    // not, or every before-and-after would show it. A page that will not take
+    // the stylesheet still photographs fine.
+    try {
+      await window.webContents.insertCSS('[data-graphe]{display:none !important}');
+    } catch {
+      /* nothing to hide, or nothing that would take it */
+    }
+
     await rest(SETTLE);
 
     // As tall as the page, within reason. A screenshot of the first screenful

@@ -144,12 +144,16 @@ describe('the script that runs on somebody else’s page', () => {
   });
 
   it('takes its listeners back off when it stops', () => {
-    const added = POINTER_SCRIPT.match(/addEventListener\('(mousemove|mousedown|pointerdown|click|keydown|scroll|resize)'/g);
-    const removed = POINTER_SCRIPT.match(/removeEventListener\('(mousemove|mousedown|pointerdown|click|keydown|scroll|resize)'/g);
+    // Only the ones put on the page itself. What our own launcher listens to
+    // lives as long as the launcher does, and is not paired with anything.
+    const watched = '(mousemove|mousedown|pointerdown|click|keydown|scroll|resize)';
+    const added = POINTER_SCRIPT.match(new RegExp(`(document|window)\\.addEventListener\\('${watched}'`, 'g'));
+    const removed = POINTER_SCRIPT.match(new RegExp(`(document|window)\\.removeEventListener\\('${watched}'`, 'g'));
     expect(added?.length).toBe(removed?.length);
   });
 
-  it('parses, and touches nothing on the page until it is asked to', () => {
+  it('parses, and watches nothing on the page until it is asked to', () => {
+    const made: { tag: string; marker: string | null }[] = [];
     const listeners: string[] = [];
     const window = {
       addEventListener: (name: string) => listeners.push(`window:${name}`),
@@ -157,16 +161,43 @@ describe('the script that runs on somebody else’s page', () => {
       parent: null,
       opener: null,
     } as Record<string, unknown>;
+    const body = { appendChild: () => undefined };
     const document = {
       readyState: 'complete',
       addEventListener: (name: string) => listeners.push(`document:${name}`),
       documentElement: { style: {} },
+      body,
+      createElement: (tag: string) => {
+        const made1 = { tag, marker: null as string | null };
+        made.push(made1);
+        return {
+          style: { cssText: '' },
+          setAttribute: (name: string, value: string) => {
+            if (name === 'data-graphe') made1.marker = value;
+          },
+          addEventListener: () => undefined,
+          appendChild: () => undefined,
+          set textContent(_: string) {},
+          set type(_: string) {},
+        };
+      },
     };
 
     new Function('window', 'document', POINTER_SCRIPT)(window, document);
 
+    // The way in is on the page, so it is built on arrival. Everything that
+    // watches the page still waits to be asked.
     expect(listeners).toEqual(['window:message', 'window:pagehide']);
+    expect(made).toEqual([{ tag: 'button', marker: 'launcher' }]);
     expect(window['__graphePointer']).toBeTypeOf('object');
+  });
+
+  it('marks everything it adds, so a photograph can leave it out', () => {
+    // capture.ts hides `[data-graphe]` before taking a picture. Anything we put
+    // on the page without that marker would land in every before-and-after.
+    const created = POINTER_SCRIPT.match(/createElement\('?"?(\w+)/g) ?? [];
+    const marked = POINTER_SCRIPT.match(/setAttribute\('data-graphe'/g) ?? [];
+    expect(marked.length).toBe(created.length);
   });
 
   it('highlights in the app’s own accent', () => {

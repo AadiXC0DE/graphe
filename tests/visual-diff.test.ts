@@ -35,6 +35,8 @@ const bench = vi.hoisted(() => {
     /** Null when the page cannot be measured at all. */
     reading: { tall: number; wide: number } | null;
     captures: boolean;
+    /** The stylesheets slipped in before the picture was taken. */
+    hidden?: string[];
   };
 
   return {
@@ -42,6 +44,7 @@ const bench = vi.hoisted(() => {
       loads: true,
       reading: { tall: height, wide: width },
       captures: true,
+      hidden: [],
     }),
     opened: [] as { width: number; height: number; destroyed: boolean }[],
   };
@@ -76,6 +79,11 @@ vi.mock('electron', () => {
             ? Promise.reject(new Error('nothing to measure'))
             : Promise.resolve(page.reading),
         capturePage: () => Promise.resolve(image(!page.captures)),
+        // Our own furniture is hidden before every picture — see capture.ts.
+        insertCSS: (css: string) => {
+          (page.hidden ??= []).push(css);
+          return Promise.resolve('');
+        },
       };
     }
 

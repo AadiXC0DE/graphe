@@ -981,7 +981,12 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   const resumed = workspaces.resume(path);
   if (resumed !== null) {
     await (await recents()).remember({ path, name });
-    return done({ path, name, history: resumed.held.session?.history ?? [] });
+    return done({
+      path,
+      name,
+      history: resumed.held.session?.history ?? [],
+      conversation: resumed.held.session?.conversation ?? null,
+    });
   }
 
   let timeline: Timeline;
@@ -1043,7 +1048,12 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
 
   // The conversation this folder left behind, if there is one — the window
   // turns it back into the desk it was (BACKLOG B1.1).
-  return done({ path, name, history: held.session.history });
+  return done({
+    path,
+    name,
+    history: held.session.history,
+    conversation: held.session.conversation,
+  });
 }
 
 function closeSession(): void {
@@ -1540,7 +1550,12 @@ function register(): void {
       const chain = detailsOf(cause);
       return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
     }
-    return done({ path: open.path, name: open.name, history: held.session.history });
+    return done({
+      path: open.path,
+      name: open.name,
+      history: held.session.history,
+      conversation: held.session.conversation,
+    });
   });
 
   /** One shelf per run. Building it reads settings off disk, and the screen it

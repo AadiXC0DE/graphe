@@ -48,6 +48,10 @@ export type ElementWords = {
 /** The app's own accent, so the highlight belongs to us on somebody else's page. */
 const ACCENT = '#b8492c';
 
+/** On the page itself, where the thing being pointed at is. */
+const ASK = 'Point at something';
+const PICKING = 'Click anything · Esc to stop';
+
 /**
  * The whole judgement, as one closed function.
  *
@@ -359,10 +363,13 @@ function pointerScript(): string {
 
   var G = (${String(judgement)})();
   var ACCENT = '${ACCENT}';
+  var ASK = '${ASK}';
+  var PICKING = '${PICKING}';
   var live = false;
   var box = null;
   var chip = null;
   var over = null;
+  var launcher = null;
   var wasCursor = '';
 
   function nthOf(el) {
@@ -447,6 +454,7 @@ function pointerScript(): string {
       'border:2px solid ' + ACCENT + ';border-radius:3px;background:rgba(184,73,44,0.07);' +
       'transition:left 70ms ease-out,top 70ms ease-out,width 70ms ease-out,height 70ms ease-out;';
     chip = document.createElement('div');
+    chip.setAttribute('data-graphe', 'label');
     chip.style.cssText =
       'position:absolute;left:-2px;top:-23px;max-width:24rem;overflow:hidden;' +
       'text-overflow:ellipsis;white-space:nowrap;padding:2px 7px;border-radius:3px;' +
@@ -468,7 +476,29 @@ function pointerScript(): string {
   }
 
   function ours(el) {
-    return box !== null && (el === box || box.contains(el));
+    if (box !== null && (el === box || box.contains(el))) return true;
+    return launcher !== null && (el === launcher || launcher.contains(el));
+  }
+
+  /* The way in. A button in the app beside an identical one taught nobody what
+     pointing was; the control belongs on the page it acts on. */
+  function mount() {
+    if (launcher) return;
+    launcher = document.createElement('button');
+    launcher.type = 'button';
+    launcher.setAttribute('data-graphe', 'launcher');
+    launcher.textContent = ASK;
+    launcher.style.cssText =
+      'position:fixed;right:16px;bottom:16px;z-index:2147483647;border:0;cursor:pointer;' +
+      'padding:9px 14px;border-radius:999px;background:' + ACCENT + ';color:#fff;' +
+      'box-shadow:0 2px 10px rgba(0,0,0,0.22);opacity:0.92;' +
+      'font:500 12px/1.2 ui-sans-serif,system-ui,-apple-system,sans-serif;';
+    launcher.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (live) stop(); else start();
+    });
+    (document.body || document.documentElement).appendChild(launcher);
   }
 
   function moved(event) {
@@ -488,10 +518,17 @@ function pointerScript(): string {
     if (event.stopImmediatePropagation) event.stopImmediatePropagation();
   }
 
+  /* Our own controls stay clickable while pointing is live — swallowing their
+     presses at the capture phase would leave no way to switch it back off. */
+  function block(event) {
+    if (ours(event.target)) return;
+    swallow(event);
+  }
+
   function clicked(event) {
     var el = event.target;
-    swallow(event);
     if (!el || el.nodeType !== 1 || ours(el)) return;
+    swallow(event);
     send(pointedFrom(el));
     stop();
   }
@@ -522,11 +559,13 @@ function pointerScript(): string {
   function start() {
     if (live) return;
     live = true;
+    mount();
+    if (launcher) launcher.textContent = PICKING;
     wasCursor = document.documentElement.style.cursor;
     document.documentElement.style.cursor = 'crosshair';
     document.addEventListener('mousemove', moved, true);
-    document.addEventListener('mousedown', swallow, true);
-    document.addEventListener('pointerdown', swallow, true);
+    document.addEventListener('mousedown', block, true);
+    document.addEventListener('pointerdown', block, true);
     document.addEventListener('click', clicked, true);
     document.addEventListener('keydown', key, true);
     window.addEventListener('scroll', redraw, true);
@@ -536,10 +575,11 @@ function pointerScript(): string {
   function stop() {
     if (!live) return;
     live = false;
+    if (launcher) launcher.textContent = ASK;
     document.documentElement.style.cursor = wasCursor;
     document.removeEventListener('mousemove', moved, true);
-    document.removeEventListener('mousedown', swallow, true);
-    document.removeEventListener('pointerdown', swallow, true);
+    document.removeEventListener('mousedown', block, true);
+    document.removeEventListener('pointerdown', block, true);
     document.removeEventListener('click', clicked, true);
     document.removeEventListener('keydown', key, true);
     window.removeEventListener('scroll', redraw, true);
@@ -557,6 +597,12 @@ function pointerScript(): string {
   });
   window.addEventListener('pagehide', stop);
   window.__graphePointer = { start: start, stop: stop };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mount);
+  } else {
+    mount();
+  }
 
   // The preview opens in the designer's own browser, where nothing can post a
   // message in. Asking for it in the address is the other way to switch it on.

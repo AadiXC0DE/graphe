@@ -2,12 +2,15 @@
 
    A slider writes the token and the page reloads — no model, no round trip, no
    bill. It sits in the panel rather than in the conversation because it is not
-   something you say, it is something you do while looking at your work. */
+   something you say, it is something you do while looking at your work.
+
+   Density is the whole design here: a colour is a square, not a row, so a real
+   palette arrives whole in the space a handful of rows used to take. */
 
 .styles {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .styles__none {
@@ -17,45 +20,157 @@
   color: var(--text-faint);
 }
 
-.styles__knob {
+/* ------------------------------------------------------------------ shelves */
+
+.styles__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.styles__band {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-1) 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.styles__caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  border-left: 5px solid currentColor;
+  opacity: 0.7;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.styles__band--open .styles__caret {
+  transform: rotate(90deg) translateX(1px);
+}
+
+.styles__shelf {
+  flex: 1;
+  min-width: 0;
+}
+
+.styles__count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.styles__body {
+  padding-bottom: var(--space-2);
+}
+
+.styles__rest {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------------ palette */
+
+.styles__palette {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
 
-.styles__name {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
+.styles__wells {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(26px, 1fr));
+  gap: var(--space-1);
 }
 
-.styles__slider,
-.styles__colour {
+/* The well is the control: the value is painted on it as written, so a blend
+   or a near-white reads as itself. Its own hairline, or a white swatch on the
+   light page is a blank square. */
+.styles__well {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  min-height: 26px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.styles__pick {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.styles__pick:disabled {
+  cursor: default;
+}
+
+.styles__well:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* One line for the whole grid, so nothing has to be written beside a square. */
+.styles__read {
   display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  min-height: 1.2em;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------------- scales */
+
+.styles__scale {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.styles__scale--type {
+  gap: var(--space-2);
+}
+
+.styles__row {
+  display: grid;
+  grid-template-columns: minmax(0, 6em) 1fr auto;
   align-items: center;
   gap: var(--space-2);
 }
 
-.styles__slider input[type='range'] {
-  flex: 1;
+.styles__name {
   min-width: 0;
-  accent-color: var(--accent);
-}
-
-/* The swatch is the control. A colour input's own chrome is the one place the
-   platform draws better than we would. */
-.styles__picker {
-  width: 26px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: none;
-  cursor: pointer;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .styles__value {
   flex: none;
-  min-width: 4.5em;
+  min-width: 3.6em;
   text-align: right;
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
@@ -63,13 +178,97 @@
   font-variant-numeric: tabular-nums;
 }
 
+.styles__slider {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------- type */
+
+.styles__type {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* A number says nothing about type. The letters do, and they move with the
+   slider — clamped only so one loud step cannot push the panel around. */
+.styles__specimen {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  min-width: 2.2em;
+  line-height: 1;
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+.styles__typebody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.styles__typehead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ shadows */
+
+.styles__lifts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: var(--space-2);
+}
+
+.styles__lift {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-1) var(--space-1) 0;
+}
+
+.styles__card {
+  display: block;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+
+/* -------------------------------------------------------------------- where */
+
 .styles__where {
   margin: 0;
   font-size: var(--text-2xs);
   color: var(--text-faint);
 }
 
-.styles__knob input:focus-visible {
+.styles__slider:focus-visible,
+.styles__band:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .styles__band:hover {
+    color: var(--text);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .styles__caret {
+    transition: none;
+  }
 }

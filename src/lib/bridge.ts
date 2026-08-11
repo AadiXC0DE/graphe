@@ -350,7 +350,7 @@ function previewBridge(): Bridge {
       }, 500);
       // No saved conversation in a browser tab — there is no disk. The window
       // therefore greets the folder the way it greets a new one (B1.1).
-      return Promise.resolve(done({ path, name, history: [] }));
+      return Promise.resolve(done({ path, name, history: [], conversation: null }));
     },
 
     async prompt(
@@ -609,7 +609,7 @@ function previewBridge(): Bridge {
     openConversation(): Promise<Result<OpenedProject>> {
       const first = PREVIEW_PROJECTS[0];
       return Promise.resolve(
-        done({ path: first?.path ?? '', name: first?.name ?? '', history: [] }),
+        done({ path: first?.path ?? '', name: first?.name ?? '', history: [], conversation: null }),
       );
     },
 

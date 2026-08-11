@@ -35,17 +35,34 @@ import {
 } from 'electron';
 import { spawn } from 'node:child_process';
 import { stat } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { basename, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createSession, type Decision, type GrapheSession } from '../src/agent/pi/adapter';
-import type { AgentEvent } from '../src/agent/types';
+import { patchWorkerThreads } from '../src/agent/pi/node-shim';
+import {
+  connectToProvider,
+  connection as readConnection,
+  createSession,
+  defaultAgentDir,
+  disconnectProvider,
+  discoveredAccounts,
+  importAccount,
+  type Decision,
+  type FoundAccount,
+  type GrapheSession,
+  type OurAuthInteraction,
+} from '../src/agent/pi/adapter';
+import type { AgentEvent, ImageCard } from '../src/agent/types';
 import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline, type Version } from '../src/history/timeline';
 import {
   CHANNEL,
+  type ConnectOutcome,
+  type ConnectStep,
+  type ConnectionState,
+  type GitSnapshot,
   type Hatches,
   type OpenedProject,
+  type Overview,
   type Preferences,
   type PutBack,
   type RecentProject,
@@ -57,6 +74,7 @@ import {
   type VisualChange,
   type VisualFrames,
 } from '../src/lib/ipc';
+import { parseGitStatus } from '../src/lib/gitstatus';
 import {
   capture,
   forget,
@@ -78,34 +96,18 @@ import { makeAndServe, ShowError, showSays } from '../src/preview/show';
 import { knownTrouble, plainMessage, plainTrouble } from './plainly';
 
 /**
- * One missing function in Electron's Node, patched before anything can miss it.
+ * One missing function in Electron's Node, patched before anything can miss it
+ * (and, in the helper processes the `task` tool spawns, patched there too).
  *
  * Electron 33 ships Node 20.18 without `worker_threads.markAsUncloneable`.
  * undici — which Pi depends on for every network call it makes — reads that
  * function at import time, and gets `undefined`. The result is that
  * `import('@earendil-works/pi-coding-agent')` throws inside Electron and works
  * everywhere else, so the whole agent is unreachable from the desktop app and
- * perfectly fine from the tests. It is worth being precise about how that
- * presents, because it wasted an hour: the adapter catches the failure and says
- * "I could not start the part of me that does the work", which reads exactly
- * like a missing account.
- *
- * The real function marks an object so that structuredClone refuses to copy it.
- * A no-op means such objects can be cloned instead of throwing, which nothing
- * here relies on. Remove this the day Electron ships a Node that has it.
- *
- * It has to run before the first `import()` of Pi. The adapter's import is
- * dynamic and does not happen until somebody opens a project, so module scope
- * here is early enough with room to spare.
+ * perfectly fine from the tests. The patch lives in src/agent/pi/node-shim.ts
+ * with the full story; here it just has to run first. Remove the moment
+ * Electron ships a Node that has it.
  */
-function patchWorkerThreads(): void {
-  const workers = createRequire(import.meta.url)('node:worker_threads') as {
-    markAsUncloneable?: (value: object) => void;
-  };
-  if (typeof workers.markAsUncloneable !== 'function') {
-    workers.markAsUncloneable = () => {};
-  }
-}
 patchWorkerThreads();
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -145,8 +147,27 @@ function done<T>(value: T): Result<T> {
   return { ok: true, value };
 }
 
+/** A window-typed `FoundAccount` checked at the door: only a handful of
+ *  fields, each of them a short string from a closed set. The one field a
+ *  person could mistype is `providerId`, and a wrong one simply finds no
+ *  credential to carry. */
+function isFoundAccount(value: unknown): value is FoundAccount {
+  if (typeof value !== 'object' || value === null) return false;
+  const one = value as Record<string, unknown>;
+  return (
+    typeof one.providerId === 'string' &&
+    one.providerId !== '' &&
+    typeof one.name === 'string' &&
+    one.name.length <= 40 &&
+    (one.kind === 'api-key' || one.kind === 'sign-in') &&
+    (one.source === 'opencode' || one.source === 'codex')
+  );
+}
+
 /** By far the most likely failure in this file, and the one most often shown as
- *  a stack trace by everything else on the market. */
+ *  a stack trace by everything else on the market. The marker is what turns
+ *  this from a card into the connect screen: a first-time user's job is not to
+ *  read about the missing account, it is to connect one. */
 function noAccountConnected(cause: unknown): Trouble {
   return {
     what: 'I am not ready to work yet.',
@@ -154,6 +175,7 @@ function noAccountConnected(cause: unknown): Trouble {
       'It looks like no account has been connected on this computer, so there is nothing for me to think with. Connect one and open the folder again.',
     actionLabel: 'Got it',
     details: detailsOf(cause),
+    marker: 'connect',
   };
 }
 
@@ -578,6 +600,76 @@ async function versionsOf(held: Held): Promise<readonly SavedVersion[]> {
 }
 
 /* -------------------------------------------------------------------------- */
+/* The pictures and the folder's saved state                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What arrived over the wire as attachments, checked into the picture cards the
+ * session knows. Anything that does not look like a real image is let go rather
+ * than refused: one odd entry should cost the whole message nothing.
+ */
+function imageCards(value: unknown): readonly ImageCard[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const cards: ImageCard[] = [];
+  for (const entry of value) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const picture = entry as Record<string, unknown>;
+    if (picture['kind'] !== 'image') continue;
+    const bytes = picture['bytes'];
+    const mimeType = picture['mimeType'];
+    if (typeof bytes !== 'string' || bytes === '' || typeof mimeType !== 'string' || mimeType === '') {
+      continue;
+    }
+    cards.push({ bytes, mimeType });
+  }
+  return cards.length === 0 ? undefined : cards;
+}
+
+/**
+ * The folder's saved state, in the window's words.
+ *
+ * The overview panel lives or dies on this being a folder fact, not a process
+ * fact: a folder that is not a repository, or a machine without git, is "git:
+ * null" — a fact about the folder, shown as an empty history rather than a
+ * failure. Read with a short timeout so a folder that will not answer (a
+ * network drive, a locked machine) costs the panel the section, not the window.
+ */
+function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
+  return new Promise((resolve) => {
+    const child = spawn('git', ['status', '--porcelain=v2', '--branch'], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    // stderr is drained and thrown away: a folder that is not a repository
+    // answers on the exit code, and the error text belongs to git, not to the
+    // window.
+    child.stderr.setEncoding('utf8');
+    child.stderr.resume();
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve(null);
+    }, 4000);
+    child.on('error', () => {
+      clearTimeout(timeout);
+      resolve(null);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+      resolve(parseGitStatus(out));
+    });
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* The before and after                                                        */
 /* -------------------------------------------------------------------------- */
 
@@ -767,11 +859,16 @@ async function openProject(folder: string): Promise<Result<OpenedProject>> {
     looking: nothingSeenYet(),
   };
 
+  // A folder opened with nothing chosen is the first-run case, and Pi will not
+  // pick later — so pick now, before the session is made and binds it.
+  if ((await preferences()).all().model === null) await chooseAModelIfNoneIs();
+
   try {
     held.session = await createSession({
       projectRoot: path,
       onEvent: forwardTo(path, held),
       timeline,
+      model: (await preferences()).all().model,
     });
   } catch (cause) {
     // The adapter wraps whatever went wrong in a sentence of its own, so the
@@ -832,6 +929,154 @@ function handle<T>(channel: string, run: (event: IpcMainInvokeEvent, args: unkno
   });
 }
 
+/* -------------------------------------------------------------------------- */
+/* Connecting an account                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * After connecting: make sure something is actually chosen to think with.
+ *
+ * Pi binds a model when the session is made and will not pick one later, so an
+ * account connected with no model chosen leaves the agent with nothing — and
+ * the failure it raises then is "no model selected", which reads to everybody
+ * as the account not having worked. Connecting is somebody saying "use this";
+ * picking the first thing it offers is what they meant.
+ *
+ * Only ever fills a blank. A choice already made is never overwritten, and a
+ * choice whose provider is still offering it is a choice already made.
+ */
+async function chooseAModelIfNoneIs(): Promise<void> {
+  const prefs = await preferences();
+  const providers = await readConnection(await defaultAgentDir());
+
+  const chosen = prefs.all().model;
+  const stillGood =
+    chosen !== null &&
+    providers.some(
+      (provider) =>
+        provider.providerId === chosen.providerId &&
+        provider.connected &&
+        provider.models.some((model) => model.id === chosen.modelId && model.available),
+    );
+  if (stillGood) return;
+
+  for (const provider of providers) {
+    if (!provider.connected) continue;
+    const first = provider.models.find((model) => model.available);
+    if (first === undefined) continue;
+    await prefs.change({ model: { providerId: provider.providerId, modelId: first.id } });
+    await workspaces.current?.held.session?.useModel({
+      providerId: provider.providerId,
+      modelId: first.id,
+    });
+    return;
+  }
+}
+
+/** The window hears about every step of a connection as it happens. */
+function sendConnectStep(step: ConnectStep): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.connectStep, step);
+}
+
+/** One question asked while connecting, waiting on the window's answer. */
+type PendingPrompt = {
+  resolve: (value: string) => void;
+  reject: (error: Error) => void;
+};
+
+const pendingPrompts = new Map<string, PendingPrompt>();
+
+/** The connection in progress, if any. One at a time: two browser sign-ins
+ *  would be two windows nobody is watching. */
+let connecting: AbortController | null = null;
+
+/**
+ * The bridge between Pi's login flow and this window.
+ *
+ * `auth_url` and `device_code` are told to the window *and* opened here, so
+ * the browser appears even if the window is busy; the window's paste field is
+ * the fallback for when the redirect never makes it back. Every prompt is
+ * parked until the window answers with `connectAnswer`.
+ */
+function dialogueFor(controller: AbortController): OurAuthInteraction {
+  let serial = 0;
+  return {
+    signal: controller.signal,
+    prompt: (prompt) =>
+      new Promise<string>((resolve, reject) => {
+        const promptId = `prompt-${++serial}`;
+        const pending: PendingPrompt = { resolve, reject };
+        pendingPrompts.set(promptId, pending);
+
+        // A prompt Pi races against something else (a callback server) comes
+        // with its own signal; when it fires, the prompt is over and the race
+        // has been decided elsewhere. "Cancelled" either way, and the login
+        // continues without this branch.
+        let detach: (() => void) | undefined;
+        const cancel = () => reject(new Error('Login cancelled'));
+        if (prompt.signal !== undefined) {
+          if (prompt.signal.aborted) {
+            pendingPrompts.delete(promptId);
+            cancel();
+            return;
+          }
+          prompt.signal.addEventListener('abort', cancel, { once: true });
+          detach = () => prompt.signal?.removeEventListener('abort', cancel);
+        }
+        // The resolution path owns the cleanup, whichever side it came from.
+        pendingPrompts.set(promptId, {
+          resolve: (value) => {
+            detach?.();
+            pendingPrompts.delete(promptId);
+            resolve(value);
+          },
+          reject: (error) => {
+            detach?.();
+            pendingPrompts.delete(promptId);
+            reject(error);
+          },
+        });
+
+        sendConnectStep({
+          type: 'prompt',
+          promptId,
+          kind: prompt.type,
+          message: prompt.message,
+          ...(prompt.type === 'select' || prompt.placeholder === undefined
+            ? {}
+            : { placeholder: prompt.placeholder }),
+          ...(prompt.type === 'select'
+            ? { options: prompt.options.map((one) => ({ id: one.id, label: one.label })) }
+            : {}),
+        });
+      }),
+    notify: (event) => {
+      if (event.type === 'auth_url') {
+        sendConnectStep({ type: 'auth-url', url: event.url, ...(event.instructions === undefined ? {} : { instructions: event.instructions }) });
+        void shell.openExternal(event.url);
+      } else if (event.type === 'device_code') {
+        sendConnectStep({
+          type: 'device-code',
+          userCode: event.userCode,
+          verificationUri: event.verificationUri,
+          ...(event.expiresInSeconds === undefined ? {} : { expiresInSeconds: event.expiresInSeconds }),
+        });
+        void shell.openExternal(event.verificationUri);
+      } else if (event.type === 'info' || event.type === 'progress') {
+        sendConnectStep({ type: 'progress', message: event.message });
+      }
+    },
+  };
+}
+
+/** Every open question is answered no when a connection ends, whichever way
+ *  it ended. An unanswered prompt must never outlive the attempt. */
+function abandonPrompts(): void {
+  for (const { reject } of pendingPrompts.values()) reject(new Error('Login cancelled'));
+  pendingPrompts.clear();
+}
+
 function register(): void {
   handle<OpenedProject>(CHANNEL.openProject, async (_event, args) => {
     const [path] = args;
@@ -864,6 +1109,12 @@ function register(): void {
     } catch (cause) {
       return fail(historyTrouble(cause));
     }
+  });
+
+  handle<Overview>(CHANNEL.overview, async () => {
+    const open = workspaces.current;
+    if (open === null) return done({ git: null, preview: null });
+    return done({ git: await readGitStatus(open.path), preview: open.held.serving?.address ?? null });
   });
 
   handle<PutBack>(CHANNEL.putBack, async (_event, args) => {
@@ -979,7 +1230,7 @@ function register(): void {
   });
 
   handle<null>(CHANNEL.prompt, async (_event, args) => {
-    const [text] = args;
+    const [text, attachments] = args;
     if (typeof text !== 'string' || text.trim() === '') return done(null);
     const open = workspaces.current;
     const agent = open?.held.session ?? null;
@@ -989,7 +1240,7 @@ function register(): void {
     // src/diff/summary.ts.
     open.held.looking.instruction = text;
     try {
-      await agent.prompt(text);
+      await agent.prompt(text, imageCards(attachments));
       return done(null);
     } catch (cause) {
       // The adapter has already relayed this as an `error` event, worded by the
@@ -1049,6 +1300,144 @@ function register(): void {
     });
     if (picked.canceled) return done(null);
     return done(picked.filePaths[0] ?? null);
+  });
+
+  /* -------------------------------------------------------------- connecting */
+
+  handle<ConnectionState>(CHANNEL.connection, async () => {
+    const [providers, prefs] = await Promise.all([
+      readConnection(await defaultAgentDir()),
+      preferences(),
+    ]);
+    return done({ providers, chosen: prefs.all().model });
+  });
+
+  handle<ConnectOutcome>(CHANNEL.connect, async (_event, args) => {
+    const [providerId, method] = args;
+    if (typeof providerId !== 'string' || providerId.trim() === '') {
+      return done({ kind: 'failed', because: 'I could not tell which provider you meant.' });
+    }
+    if (method !== 'oauth' && method !== 'api-key') {
+      return done({ kind: 'failed', because: 'I could not tell how you wanted to connect.' });
+    }
+    if (connecting !== null) {
+      return done({ kind: 'failed', because: 'A connection is already in progress.' });
+    }
+
+    const controller = new AbortController();
+    connecting = controller;
+    try {
+      await connectToProvider(await defaultAgentDir(), providerId, method, dialogueFor(controller));
+      await chooseAModelIfNoneIs();
+      return done({ kind: 'connected' });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (cause instanceof Error && (cause.name === 'AbortError' || message === 'Login cancelled')) {
+        return done({ kind: 'cancelled' });
+      }
+      return done({ kind: 'failed', because: message });
+    } finally {
+      connecting = null;
+      abandonPrompts();
+    }
+  });
+
+  handle<null>(CHANNEL.connectAnswer, async (_event, args) => {
+    const [promptId, value] = args;
+    const pending =
+      typeof promptId === 'string' && promptId !== '' ? pendingPrompts.get(promptId) : undefined;
+    if (pending === undefined) return done(null);
+    if (typeof value === 'string' && value.trim() !== '') pending.resolve(value);
+    else pending.reject(new Error('Login cancelled'));
+    return done(null);
+  });
+
+  handle<null>(CHANNEL.cancelConnect, async () => {
+    connecting?.abort();
+    return done(null);
+  });
+
+  handle<null>(CHANNEL.disconnect, async (_event, args) => {
+    const [providerId] = args;
+    if (typeof providerId === 'string' && providerId.trim() !== '') {
+      try {
+        await disconnectProvider(await defaultAgentDir(), providerId);
+      } catch {
+        // Forgetting an account that was already gone is not worth a sentence.
+      }
+      const prefs = await preferences();
+      if (prefs.all().model?.providerId === providerId) {
+        await prefs.change({ model: null });
+      }
+    }
+    return done(null);
+  });
+
+  handle<Preferences>(CHANNEL.selectModel, async (_event, args) => {
+    const [providerId, modelId] = args;
+    const prefs = await preferences();
+    if (typeof providerId !== 'string' || typeof modelId !== 'string') return done(prefs.all());
+    // A model that does not exist is not a preference. The list the window
+    // drew is the list the shell reads, so a stray id means a stale window —
+    // the shell's answer is to keep what was already chosen.
+    const providers = await readConnection(await defaultAgentDir());
+    const known = providers.some(
+      (provider) => provider.providerId === providerId && provider.models.some((model) => model.id === modelId),
+    );
+    if (!known) return done(prefs.all());
+    const saved = await prefs.change({ model: { providerId, modelId } });
+    // And on the conversation already in front of somebody, not only on the
+    // next one they open. Choosing a model and finding the old one still
+    // answering — with no way to tell, because nothing on screen said which was
+    // which — was the whole of this bug. A session that will not take the model
+    // keeps the one it had; the preference is still saved, so opening the
+    // project again picks it up.
+    await workspaces.current?.held.session?.useModel({ providerId, modelId });
+    return done(saved);
+  });
+
+  handle<null>(CHANNEL.openLink, async (_event, args) => {
+    const [url] = args;
+    // https only, and nothing else: this window must never become somebody's
+    // browser. The one thing it may open is a link a person asked for.
+    if (typeof url !== 'string' || !/^https:\/\//.test(url)) return done(null);
+    await shell.openExternal(url);
+    return done(null);
+  });
+
+  handle<readonly FoundAccount[]>(CHANNEL.discoveredAccounts, async () => {
+    try {
+      return done(await discoveredAccounts(await defaultAgentDir()));
+    } catch {
+      // A machine without opencode or Codex is not a failure — it is a list of
+      // nothing. Only a broken Pi runtime would get here, and that is better
+      // left unspoken than announced as if the person had done something.
+      return done([]);
+    }
+  });
+
+  handle<null>(CHANNEL.importAccount, async (_event, args) => {
+    const [raw] = args;
+    const account = isFoundAccount(raw) ? raw : null;
+    if (account === null) {
+      return fail({
+        what: 'I could not tell which account you meant.',
+        because: 'The window asked for an account that does not make sense, so I left it alone.',
+        actionLabel: 'Got it',
+      });
+    }
+    try {
+      await importAccount(await defaultAgentDir(), account);
+      await chooseAModelIfNoneIs();
+      return done(null);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      return fail({
+        what: 'I could not bring that account over.',
+        because: message,
+        actionLabel: 'Got it',
+      });
+    }
   });
 }
 

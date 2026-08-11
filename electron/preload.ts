@@ -19,11 +19,19 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import {
   CHANNEL,
   type AgentNotice,
+  type ConnectOutcome,
+  type ConnectStep,
+  type ConnectionState,
   type Decision,
+  type FoundAccount,
   type GrapheApi,
   type Hatches,
+  type ModelChoice,
   type OpenedProject,
+  type Overview,
   type Preferences,
+  type PromptAttachment,
+  type ProviderMethod,
   type PutBack,
   type RecentProject,
   type Result,
@@ -59,11 +67,24 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.openProject, path) as Promise<Result<OpenedProject>>;
   },
 
-  prompt(text: string): Promise<Result<null>> {
+  prompt(text: string, attachments?: readonly PromptAttachment[]): Promise<Result<null>> {
     if (typeof text !== 'string' || text.trim() === '') {
       return Promise.resolve(refuse<null>('There was nothing to send.'));
     }
-    return ipcRenderer.invoke(CHANNEL.prompt, text) as Promise<Result<null>>;
+    const clean =
+      attachments === undefined
+        ? undefined
+        : attachments.filter(
+            (one) =>
+              one !== null &&
+              typeof one === 'object' &&
+              one.kind === 'image' &&
+              typeof one.name === 'string' &&
+              typeof one.mimeType === 'string' &&
+              typeof one.bytes === 'string' &&
+              one.bytes !== '',
+          );
+    return ipcRenderer.invoke(CHANNEL.prompt, text, clean) as Promise<Result<null>>;
   },
 
   stop(): Promise<Result<null>> {
@@ -83,6 +104,10 @@ const api: GrapheApi = {
 
   recentProjects(): Promise<Result<readonly RecentProject[]>> {
     return ipcRenderer.invoke(CHANNEL.recentProjects) as Promise<Result<readonly RecentProject[]>>;
+  },
+
+  overview(): Promise<Result<Overview>> {
+    return ipcRenderer.invoke(CHANNEL.overview) as Promise<Result<Overview>>;
   },
 
   forgetProject(path: string): Promise<Result<readonly RecentProject[]>> {
@@ -178,6 +203,94 @@ const api: GrapheApi = {
     return () => {
       ipcRenderer.off(CHANNEL.visualChange, forward);
     };
+  },
+
+  connection(): Promise<Result<ConnectionState>> {
+    return ipcRenderer.invoke(CHANNEL.connection) as Promise<Result<ConnectionState>>;
+  },
+
+  connect(providerId: string, method: ProviderMethod): Promise<Result<ConnectOutcome>> {
+    if (
+      typeof providerId !== 'string' ||
+      providerId.trim() === '' ||
+      (method !== 'oauth' && method !== 'api-key')
+    ) {
+      return Promise.resolve(
+        refuse<ConnectOutcome>('I could not tell who you wanted to connect.'),
+      );
+    }
+    return ipcRenderer.invoke(CHANNEL.connect, providerId, method) as Promise<
+      Result<ConnectOutcome>
+    >;
+  },
+
+  connectAnswer(promptId: string, value: string | null): Promise<Result<null>> {
+    if (typeof promptId !== 'string' || promptId.trim() === '') {
+      return Promise.resolve(refuse<null>('I could not tell which question you answered.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.connectAnswer, promptId, value) as Promise<Result<null>>;
+  },
+
+  cancelConnect(): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.cancelConnect) as Promise<Result<null>>;
+  },
+
+  disconnect(providerId: string): Promise<Result<null>> {
+    if (typeof providerId !== 'string' || providerId.trim() === '') {
+      return Promise.resolve(refuse<null>('I could not tell which account you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.disconnect, providerId) as Promise<Result<null>>;
+  },
+
+  selectModel(choice: ModelChoice): Promise<Result<Preferences>> {
+    if (
+      typeof choice !== 'object' ||
+      choice === null ||
+      typeof choice.providerId !== 'string' ||
+      typeof choice.modelId !== 'string'
+    ) {
+      return Promise.resolve(refuse<Preferences>('I could not tell which model you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.selectModel, choice.providerId, choice.modelId) as Promise<
+      Result<Preferences>
+    >;
+  },
+
+  onConnectStep(listener: (step: ConnectStep) => void): () => void {
+    const forward = (_source: IpcRendererEvent, step: ConnectStep): void => {
+      listener(step);
+    };
+    ipcRenderer.on(CHANNEL.connectStep, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.connectStep, forward);
+    };
+  },
+
+  discoveredAccounts(): Promise<Result<readonly FoundAccount[]>> {
+    return ipcRenderer.invoke(CHANNEL.discoveredAccounts) as Promise<
+      Result<readonly FoundAccount[]>
+    >;
+  },
+
+  importAccount(account: FoundAccount): Promise<Result<null>> {
+    if (
+      typeof account !== 'object' ||
+      account === null ||
+      typeof account.providerId !== 'string' ||
+      account.providerId.trim() === '' ||
+      (account.kind !== 'api-key' && account.kind !== 'sign-in') ||
+      (account.source !== 'opencode' && account.source !== 'codex')
+    ) {
+      return Promise.resolve(refuse<null>('I could not tell which account you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.importAccount, account) as Promise<Result<null>>;
+  },
+
+  openLink(url: string): Promise<Result<null>> {
+    if (typeof url !== 'string' || !/^https:\/\//.test(url)) {
+      return Promise.resolve(refuse<null>('I could not open that link.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.openLink, url) as Promise<Result<null>>;
   },
 };
 

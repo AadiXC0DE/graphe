@@ -35,6 +35,18 @@ export type Money = {
   currency: string;
 };
 
+/** A picture handed to the agent along with a message.
+ *
+ * Carried as base64 bytes and the MIME type rather than a `File`: the picture
+ * crosses the IPC wire twice (renderer → shell → Pi), and a structured clone
+ * drops methods and handles long before it reaches the model. The bytes are
+ * already encoded by the time anything outside the renderer sees them. */
+export type ImageCard = {
+  mimeType: string;
+  /** The picture, base64-encoded without the data: prefix. */
+  bytes: string;
+};
+
 /** Why a spend happened. Retries caused by the agent's own failure are tracked
  *  separately so we can show the user what they paid for our mistakes. */
 export type SpendReason = 'work' | 'retry-after-failure';
@@ -88,6 +100,9 @@ export type AgentEvent =
   | { type: 'message-end' }
   | { type: 'tool-start'; call: ToolCall }
   | { type: 'tool-end'; id: string; ok: boolean }
+  /** A tool that is still running has something to say — the helper the `task`
+   *  tool spawns, reporting as it reads. Replaces the step's own detail line. */
+  | { type: 'tool-progress'; id: string; text: string }
   | { type: 'blocked'; call: ToolCall; reason: string }
   | { type: 'needs-confirmation'; call: ToolCall; verdict: Extract<Verdict, { kind: 'confirm' }> }
   | { type: 'error'; message: string }

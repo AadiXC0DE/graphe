@@ -27,15 +27,32 @@ type Known = {
   when: RegExp;
   what: string;
   because: string;
+  /** What the window should do instead of showing the card. `'connect'` means
+   *  "there is no account connected" — the single most likely first-run
+   *  failure — and the window opens the connect screen rather than a card
+   *  that dead-ends in "Got it". */
+  marker?: 'connect';
 };
 
 /** Ordered: the first match wins, so the more specific patterns come first. */
 const KNOWN: readonly Known[] = [
   {
+    /* Ahead of the "no account" rule, because Pi's no-model message also
+       carries the "/login" help paragraph — so that rule swallowed this one and
+       told people to connect an account the connect screen showed as already
+       connected. An account and a model are two different things to be missing. */
+    when: /no model selected|no model (is )?(available|configured)|select a model/i,
+    what: 'I do not know what to think with yet.',
+    because:
+      'An account is connected, but no model has been picked from it. Choose one and ask me again.',
+    marker: 'connect',
+  },
+  {
     when: /no api key|api[_ -]?key|not logged in|unauthor|forbidden|\b401\b|\b403\b|\/login\b|credential|sign(ed)? in/i,
     what: 'I am not ready to work yet.',
     because:
       'No account has been connected on this computer, so there is nothing for me to think with. Connect one and ask me again.',
+    marker: 'connect',
   },
   {
     when: /insufficient|out of credit|billing|payment|quota exceeded|balance/i,
@@ -108,7 +125,12 @@ export function plainMessage(raw: string): string {
 export function knownTrouble(raw: string, details?: string): Trouble | null {
   const known = KNOWN.find((entry) => entry.when.test(raw));
   if (known === undefined) return null;
-  const trouble: Trouble = { what: known.what, because: known.because, actionLabel: 'Got it' };
+  const trouble: Trouble = {
+    what: known.what,
+    because: known.because,
+    actionLabel: 'Got it',
+    ...(known.marker === undefined ? {} : { marker: known.marker }),
+  };
   return details === undefined || details.trim() === '' ? trouble : { ...trouble, details };
 }
 
@@ -119,6 +141,7 @@ export function plainTrouble(raw: string, details?: string): Trouble {
     what: known?.what ?? GENERIC_WHAT,
     because: known?.because ?? (readsLikeAPerson(raw) ? raw.trim() : NOTHING_TO_SAY),
     actionLabel: 'Got it',
+    ...(known?.marker === undefined ? {} : { marker: known.marker }),
   };
   const beneath = details ?? raw;
   return beneath.trim() === '' ? trouble : { ...trouble, details: beneath };

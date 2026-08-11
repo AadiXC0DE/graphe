@@ -1,35 +1,47 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { useStickToBottom } from 'use-stick-to-bottom';
-import ActivityLine from './components/ActivityLine';
-import type { Attachment } from './components/Attachments';
-import Composer from './components/Composer';
-import ConfirmChange from './components/ConfirmChange';
-import CostMeter from './components/CostMeter';
-import ErrorCard from './components/ErrorCard';
-import Message from './components/Message';
-import ProjectMenu from './components/ProjectMenu';
-import ProjectPicker from './components/ProjectPicker';
-import Versions from './components/Versions';
-import VisualDiff from './components/VisualDiff';
-import Welcome from './components/Welcome';
-import Gallery from './gallery/Gallery';
-import type { Task } from './cost/estimate';
-import { longConversation, retryHonesty, sessionSummary } from './cost/phrasing';
-import { sizeUp } from './cost/sizing';
-import { bridge } from './lib/bridge';
-import { quote, smallerFirst } from './lib/estimating';
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useStickToBottom } from "use-stick-to-bottom";
+import ActivityLine from "./components/ActivityLine";
+import type { Attachment } from "./components/Attachments";
+import Composer from "./components/Composer";
+import ConfirmChange from "./components/ConfirmChange";
+import ConnectModal from "./components/ConnectModal";
+import CostMeter from "./components/CostMeter";
+import ErrorCard from "./components/ErrorCard";
+import Message from "./components/Message";
+import Overview from "./components/Overview";
+import ProjectMenu from "./components/ProjectMenu";
+import ProjectPicker from "./components/ProjectPicker";
+import Sidebar from "./components/Sidebar";
+import VisualDiff from "./components/VisualDiff";
+import Welcome from "./components/Welcome";
+import Gallery from "./gallery/Gallery";
+import type { Task } from "./cost/estimate";
+import {
+  longConversation,
+  retryHonesty,
+  sessionSummary,
+} from "./cost/phrasing";
+import { sizeUp } from "./cost/sizing";
+import { bridge } from "./lib/bridge";
+import { quote, smallerFirst } from "./lib/estimating";
 import {
   showWords,
+  type ConnectStep,
+  type ConnectionState,
   type Decision,
+  type FoundAccount,
+  type ModelChoice,
   type OpenedProject,
   type Preferences,
+  type PromptAttachment,
+  type ProviderMethod,
   type RecentProject,
   type ShowProgress,
   type Trouble,
   type VisualChange,
-} from './lib/ipc';
-import { usePrefersReducedMotion } from './lib/motion';
-import { behind } from './lib/showme';
+} from "./lib/ipc";
+import { usePrefersReducedMotion } from "./lib/motion";
+import { behind } from "./lib/showme";
 import {
   changeCurrent,
   changeDesk,
@@ -38,8 +50,10 @@ import {
   noDesks,
   openDesk,
   receive,
+  researchLog,
   type Desks,
-} from './lib/projects';
+  type Reference,
+} from "./lib/projects";
 import {
   estimated,
   said,
@@ -47,18 +61,18 @@ import {
   STOPPED_PART_WAY,
   type EstimateTurn,
   type Turn,
-} from './lib/thread';
-import './App.css';
+} from "./lib/thread";
+import "./App.css";
 
 /** /?gallery renders every component on one page instead of the app, so the UI
  *  can be screenshotted and reviewed in both themes. Read once, at module load. */
-const showGallery = new URLSearchParams(window.location.search).has('gallery');
+const showGallery = new URLSearchParams(window.location.search).has("gallery");
 
 /** /?open=<name> opens one of the preview's own projects on load, so the states
  *  that only exist once a folder is open — the version rail, the strip with the
  *  project's name in it — can be screenshotted without a desktop shell under the
  *  page. Ignored by the app: a window loaded by the shell has no query string. */
-const openOnLoad = new URLSearchParams(window.location.search).get('open');
+const openOnLoad = new URLSearchParams(window.location.search).get("open");
 
 export default function App() {
   return showGallery ? <Gallery /> : <Conversation />;
@@ -69,14 +83,32 @@ export default function App() {
 /* -------------------------------------------------------------------------- */
 
 const NO_FOLDER_YET =
-  'Before I can start I need to know which folder your project lives in. Send that again when you have picked one.';
+  "Before I can start I need to know which folder your project lives in. Send that again when you have picked one.";
 
 function workingIn(project: OpenedProject): string {
   return `Working in ${project.name}.`;
 }
 
 /** The label on the button that gets a project ready and opens it. */
-const SEE_IT = 'See it';
+const PREVIEW = "Open preview";
+
+/** A picture file, read as the base64 the shell expects — no data: prefix,
+ *  which is the one thing that would corrupt the card on the other side. Null
+ *  when the file cannot be read, in which case the picture simply does not go
+ *  (the reference it belongs to is already recorded, so the overview still
+ *  tells the true story of what this message was about). */
+function pictureBytes(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      resolve(comma === -1 ? null : result.slice(comma + 1));
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
 
 /* -------------------------------------------------------------------------- */
 /* Where a before-and-after sits in the conversation                           */
@@ -140,9 +172,10 @@ function Conversation() {
   const [switching, setSwitching] = useState(false);
   /** A project that would not open, said beside the picker rather than in a
    *  conversation that does not exist yet. */
-  const [pickerTrouble, setPickerTrouble] = useState<{ path: string; trouble: Trouble } | null>(
-    null,
-  );
+  const [pickerTrouble, setPickerTrouble] = useState<{
+    path: string;
+    trouble: Trouble;
+  } | null>(null);
 
   /**
    * What this person has chosen about the app itself, and what this machine can
@@ -154,8 +187,183 @@ function Conversation() {
    * here to avoid. Once somebody turns it on, the shell remembers, and it stays
    * on until they say otherwise.
    */
-  const [preferences, setPreferences] = useState<Preferences>({ showMe: false });
+  const [preferences, setPreferences] = useState<Preferences>({
+    showMe: false,
+    model: null,
+  });
   const [editor, setEditor] = useState<string | null>(null);
+
+  /* ------------------------------------------------------------- connecting */
+
+  /** Whether the connect screen is up. Null before the shell has ever been
+   *  asked, so the first open does not flash an empty list. */
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [connection, setConnection] = useState<ConnectionState | null>(null);
+  /** The step the connection in progress is on, or null when it is not. */
+  const [connectStep, setConnectStep] = useState<ConnectStep | null>(null);
+  const [connectBusy, setConnectBusy] = useState(false);
+  /** What the last attempt said when it failed, or null. */
+  const [connectFailure, setConnectFailure] = useState<string | null>(null);
+  /** The accounts opencode and Codex have saved on this computer. Asked for
+   *  each time the screen opens, so a key pasted into opencode while this app
+   *  was running is there when the screen opens. */
+  const [discovered, setDiscovered] = useState<readonly FoundAccount[]>([]);
+  /** The account being brought over right now, or null. */
+  const [importing, setImporting] = useState<FoundAccount | null>(null);
+
+  /** The folder somebody asked for and could not have, because nothing was
+   *  connected yet. Without it, connecting an account left the folder shut and
+   *  the next sentence went to a window with no session behind it. */
+  const waitingFor = useRef<string | null>(null);
+  /** The current `open`, reachable from the connect callbacks declared above it. */
+  const openRef = useRef<((path: string) => Promise<void>) | null>(null);
+
+  /** Connecting finished, so finish what the person was actually doing. */
+  const resumeWaiting = useCallback(() => {
+    const path = waitingFor.current;
+    if (path === null) return;
+    void openRef.current?.(path);
+  }, []);
+
+  /** Ask the shell for the whole state of "who can think for me". Rebuilt
+   *  after every connect, disconnect and model choice — the shell owns the
+   *  truth, and the window's job is to draw it, not to remember it. */
+  const refreshConnection = useCallback(() => {
+    void bridge.connection().then((answer) => {
+      if (answer.ok) setConnection(answer.value);
+    });
+  }, []);
+
+  useEffect(() => {
+    refreshConnection();
+  }, [refreshConnection]);
+
+  /** Follow along while a connection happens. Each step is one moment of the
+   *  provider's sign-in — a browser it opened, a question it asked. The step
+   *  is kept for as long as the modal is up and then let go. */
+  useEffect(
+    () =>
+      bridge.onConnectStep((step) => {
+        setConnectStep(step);
+      }),
+    [],
+  );
+
+  const openConnect = useCallback(() => {
+    setConnectFailure(null);
+    setConnectStep(null);
+    setConnectOpen(true);
+    refreshConnection();
+    void bridge.discoveredAccounts().then((answer) => {
+      if (answer.ok) setDiscovered(answer.value);
+    });
+  }, [refreshConnection]);
+
+  /** Bring an account opencode or Codex saved over into this app's own store.
+   *  The shell does the moving; here is only the waiting and the telling. */
+  const importAccount = useCallback(
+    (account: FoundAccount) => {
+      setImporting(account);
+      void bridge.importAccount(account).then((answer) => {
+        setImporting(null);
+        if (!answer.ok) {
+          setConnectFailure(answer.trouble.because);
+          return;
+        }
+        setConnectFailure(null);
+        refreshConnection();
+        void bridge.discoveredAccounts().then((found) => {
+          if (found.ok) setDiscovered(found.value);
+        });
+        resumeWaiting();
+      });
+    },
+    [refreshConnection, resumeWaiting],
+  );
+
+  const closeConnect = useCallback(() => {
+    if (connectBusy) {
+      void bridge.cancelConnect();
+      setConnectBusy(false);
+    }
+    setConnectOpen(false);
+    // Closing this screen is somebody saying they are done here. If they came
+    // to it because a folder would not open, that folder is what they were
+    // actually trying to do — so it opens now, without being asked for twice.
+    resumeWaiting();
+  }, [connectBusy, resumeWaiting]);
+
+  const startConnect = useCallback(
+    (providerId: string, method: ProviderMethod) => {
+      setConnectFailure(null);
+      setConnectStep(null);
+      setConnectBusy(true);
+      void bridge.connect(providerId, method).then((answer) => {
+        setConnectBusy(false);
+        if (!answer.ok) {
+          setConnectFailure(answer.trouble.because);
+          return;
+        }
+        if (answer.value.kind === "failed") {
+          setConnectFailure(answer.value.because);
+          return;
+        }
+        setConnectStep(null);
+        refreshConnection();
+        resumeWaiting();
+      });
+    },
+    [refreshConnection, resumeWaiting],
+  );
+
+  const answerConnect = useCallback((promptId: string, value: string | null) => {
+    void bridge.connectAnswer(promptId, value);
+  }, []);
+
+  const cancelConnect = useCallback(() => {
+    void bridge.cancelConnect();
+    setConnectBusy(false);
+    setConnectStep(null);
+  }, []);
+
+  const selectModel = useCallback(
+    (choice: ModelChoice) => {
+      void bridge.selectModel(choice).then((answer) => {
+        if (!answer.ok) return;
+        setPreferences(answer.value);
+        setConnection((current) =>
+          current === null ? current : { ...current, chosen: answer.value.model },
+        );
+        resumeWaiting();
+      });
+    },
+    [resumeWaiting],
+  );
+
+  const disconnect = useCallback(
+    (providerId: string) => {
+      void bridge.disconnect(providerId).then(() => {
+        refreshConnection();
+        // An account that was carried over and then forgotten is an account
+        // the other tool still has — it belongs back in the found list.
+        void bridge.discoveredAccounts().then((answer) => {
+          if (answer.ok) setDiscovered(answer.value);
+        });
+        setConnection((current) => {
+          if (current === null) return current;
+          return {
+            ...current,
+            providers: current.providers.map((provider) =>
+              provider.providerId === providerId
+                ? { ...provider, connected: false, available: false }
+                : provider,
+            ),
+          };
+        });
+      });
+    },
+    [refreshConnection],
+  );
 
   /**
    * The before-and-afters, per project, each pinned to the moment it belongs to
@@ -174,6 +382,10 @@ function Conversation() {
   const desksNow = useRef(desks);
   desksNow.current = desks;
 
+  /** Whether the shelf is open. Deliberately not remembered across launches —
+   *  it is a thing people flip all the time and it costs nothing to reset. */
+  const [shelfOpen, setShelfOpen] = useState(true);
+
   const [busy, setBusy] = useState(false);
   /** What "See it" is up to, in its own words. Null when it is not up to
    *  anything. */
@@ -184,11 +396,18 @@ function Conversation() {
   const [loose, setLoose] = useState<readonly Attachment[]>([]);
   const attachments = desk?.attachments ?? loose;
 
+  /** Attachments, read inside `deliver` the same way `desksNow` is read inside
+   *  the listener: `deliver` is rebuilt whenever the desk in front changes,
+   *  but the attachments it sends are the ones sitting in the box at the
+   *  moment it runs. */
+  const attachmentsNow = useRef(attachments);
+  attachmentsNow.current = attachments;
+
   /** An example from the welcome screen, put in the box ready to be edited.
    *  Never sent on anybody's behalf — a click that spends money on a sentence
    *  the user did not write is exactly the surprise this product exists to
    *  avoid. */
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState("");
 
   /**
    * Following the reply, until somebody would rather read something else.
@@ -200,10 +419,11 @@ function Conversation() {
    * while the reply streams, and animating that would mean the page is
    * permanently gliding under the words somebody is trying to read.
    */
-  const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom({
-    initial: 'instant',
-    resize: 'instant',
-  });
+  const { scrollRef, contentRef, isAtBottom, scrollToBottom } =
+    useStickToBottom({
+      initial: "instant",
+      resize: "instant",
+    });
   const reducedMotion = usePrefersReducedMotion();
 
   /* The one scroll a person asks for by name, so it is allowed to be a movement
@@ -212,7 +432,9 @@ function Conversation() {
      touching the wheel on the way down stops it where it is. */
   const jumpToLatest = useCallback(() => {
     void scrollToBottom({
-      animation: reducedMotion ? 'instant' : { damping: 0.9, stiffness: 0.1, mass: 1 },
+      animation: reducedMotion
+        ? "instant"
+        : { damping: 0.9, stiffness: 0.1, mass: 1 },
     });
   }, [scrollToBottom, reducedMotion]);
 
@@ -220,15 +442,32 @@ function Conversation() {
    *  a sentence with nowhere to go is a sentence nobody reads. */
   const say = useCallback((text: string) => {
     setDesks((current) =>
-      changeCurrent(current, (one) => ({ ...one, turns: [...one.turns, said('graphe', text)] })),
+      changeCurrent(current, (one) => ({
+        ...one,
+        turns: [...one.turns, said("graphe", text)],
+      })),
     );
   }, []);
 
   const troubleHere = useCallback((trouble: Trouble) => {
+    // A failed connect is not a desk problem — the connect screen is the place
+    // where connecting matters, so the failure sentence goes there instead of
+    // into whatever conversation this window was having.
+    if (trouble.marker === "connect") {
+      setConnectOpen(true);
+      setConnectBusy(false);
+      setConnectStep(null);
+      setConnectFailure(trouble.because);
+      refreshConnection();
+      return;
+    }
     setDesks((current) =>
-      changeCurrent(current, (one) => ({ ...one, turns: withTrouble(one.turns, trouble) })),
+      changeCurrent(current, (one) => ({
+        ...one,
+        turns: withTrouble(one.turns, trouble),
+      })),
     );
-  }, []);
+  }, [refreshConnection]);
 
   /* ---------------------------------------------------------------- versions */
 
@@ -241,7 +480,26 @@ function Conversation() {
     if (!answer.ok) return;
     setDesks((current) =>
       current.current === path
-        ? changeDesk(current, path, (one) => ({ ...one, versions: answer.value }))
+        ? changeDesk(current, path, (one) => ({
+            ...one,
+            versions: answer.value,
+          }))
+        : current,
+    );
+  }, []);
+
+  /** Ask for the git state of the project in front, for the overview. Applied
+   *  only if it is still the one in front by the time the answer comes back —
+   *  the same guard `refreshVersions` stands on, for the same reason. */
+  const refreshOverview = useCallback(async (path: string) => {
+    const answer = await bridge.overview();
+    if (!answer.ok) return;
+    setDesks((current) =>
+      current.current === path
+        ? changeDesk(current, path, (one) => ({
+            ...one,
+            overview: answer.value,
+          }))
         : current,
     );
   }, []);
@@ -252,12 +510,30 @@ function Conversation() {
     async (path: string): Promise<void> => {
       const opened = await bridge.openProject(path);
       if (!opened.ok) {
+        // A connect problem while opening means there is no model to think
+        // with; the picker's usual "this folder is a dud" phrasing would be
+        // wrong, so the connect screen opens to say what is actually wrong.
+        if (opened.trouble.marker === "connect") {
+          // Held so that connecting can finish this, rather than leaving
+          // somebody on a screen about accounts with the folder still shut.
+          waitingFor.current = path;
+          troubleHere(opened.trouble);
+          return;
+        }
         // Before there is a conversation the picker is the only place a sentence
         // can go, and the useful thing to offer there is taking the project off
         // the list rather than trying the same folder again.
-        if (desks.current === null) setPickerTrouble({ path, trouble: opened.trouble });
+        if (desks.current === null)
+          setPickerTrouble({ path, trouble: opened.trouble });
         else troubleHere(opened.trouble);
         return;
+      }
+
+      // If this was the folder waiting on an account, the connect screen has
+      // done its job and should get out of the way.
+      if (waitingFor.current === path) {
+        waitingFor.current = null;
+        setConnectOpen(false);
       }
 
       setSwitching(false);
@@ -270,23 +546,26 @@ function Conversation() {
         return desk !== undefined && desk.turns.length === 0
           ? changeDesk(next, opened.value.path, (one) => ({
               ...one,
-              turns: [said('graphe', workingIn(opened.value))],
+              turns: [said("graphe", workingIn(opened.value))],
             }))
           : next;
       });
 
       void refreshVersions(opened.value.path);
+      void refreshOverview(opened.value.path);
       void bridge.recentProjects().then((answer) => {
         if (answer.ok) setRecent(answer.value);
       });
     },
-    [desks.current, refreshVersions, troubleHere],
+    [desks.current, refreshVersions, refreshOverview, troubleHere],
   );
+  openRef.current = open;
 
   const browse = useCallback(async () => {
     const picked = await bridge.chooseFolder();
     if (!picked.ok) {
-      if (desks.current === null) setPickerTrouble({ path: '', trouble: picked.trouble });
+      if (desks.current === null)
+        setPickerTrouble({ path: "", trouble: picked.trouble });
       else troubleHere(picked.trouble);
       return;
     }
@@ -345,12 +624,13 @@ function Conversation() {
       bridge.onEvent((notice) => {
         setDesks((current) => receive(current, notice));
         // A sitting that has settled is a sitting that has been saved, so the
-        // timeline has something new in it.
-        if (notice.event.type === 'settled' && notice.project !== null) {
+        // timeline and the overview have something new in them.
+        if (notice.event.type === "settled" && notice.project !== null) {
           void refreshVersions(notice.project);
+          void refreshOverview(notice.project);
         }
       }),
-    [refreshVersions],
+    [refreshVersions, refreshOverview],
   );
 
   useEffect(() => bridge.onShowProgress(setProgress), []);
@@ -365,7 +645,8 @@ function Conversation() {
         const after = turns[turns.length - 1]?.id ?? null;
         setChanges((current) => {
           const already = current[project] ?? [];
-          if (already.some((one) => one.change.id === change.id)) return current;
+          if (already.some((one) => one.change.id === change.id))
+            return current;
           return { ...current, [project]: [...already, { change, after }] };
         });
       }),
@@ -378,11 +659,12 @@ function Conversation() {
     if (!switching) return;
     const away = (event: PointerEvent) => {
       const target = event.target;
-      if (target instanceof Element && target.closest('.topbar') !== null) return;
+      if (target instanceof Element && target.closest(".topbar") !== null)
+        return;
       setSwitching(false);
     };
-    window.addEventListener('pointerdown', away);
-    return () => window.removeEventListener('pointerdown', away);
+    window.addEventListener("pointerdown", away);
+    return () => window.removeEventListener("pointerdown", away);
   }, [switching]);
 
   const halt = useCallback(() => {
@@ -418,18 +700,27 @@ function Conversation() {
   }, [troubleHere]);
 
   /* Esc cancels the current run, and closes the switcher — the keyboard rules in
-     UI-DESIGN.md. ⌘O opens a folder; ⌘1–9 goes straight to one we remember. */
+     UI-DESIGN.md. ⌘O opens a folder; ⌘B folds the shelf; ⌘1–9 goes straight to
+     one we remember. */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (switching) setSwitching(false);
+      if (event.key === "Escape") {
+        if (connectOpen) {
+          if (connectBusy) cancelConnect();
+          else closeConnect();
+        } else if (switching) setSwitching(false);
         else if (busy) halt();
         return;
       }
       if (!event.metaKey && !event.ctrlKey) return;
-      if (event.key === 'o') {
+      if (event.key === "o") {
         event.preventDefault();
         void browse();
+        return;
+      }
+      if (event.key === "b" && desk !== null) {
+        event.preventDefault();
+        setShelfOpen((was) => !was);
         return;
       }
       const nth = Number.parseInt(event.key, 10);
@@ -440,9 +731,21 @@ function Conversation() {
         void open(wanted.path);
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [busy, halt, switching, browse, open, recent]);
+      window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    busy,
+    halt,
+    switching,
+    browse,
+    open,
+    recent,
+    desk,
+    connectOpen,
+    connectBusy,
+    cancelConnect,
+    closeConnect,
+  ]);
 
   /* ----------------------------------------------------------------- saying */
 
@@ -456,21 +759,60 @@ function Conversation() {
    */
   const deliver = useCallback(
     async (text: string, task: Task) => {
+      // What is in the box at the moment of sending — never a snapshot from
+      // whenever this callback was last rebuilt (see `attachmentsNow`).
+      const inTheBox = attachmentsNow.current;
+
+      // The pictures go along for the ride: read into the base64 the shell
+      // expects, and — the same moment — recorded in the overview as the
+      // references this message worked from. The recording happens whether or
+      // not the shell could read the bytes, so a reference that did not reach
+      // the agent is still a reference somebody meant it to have.
+      const reference: Reference[] = [];
+      const pictures: PromptAttachment[] = [];
+      for (const attached of inTheBox) {
+        if (attached.kind === "image" || attached.kind === "figma") {
+          reference.push({
+            id: attached.id,
+            kind: attached.kind,
+            name: attached.name,
+            note: attached.note,
+            preview: attached.preview,
+          });
+        }
+        if (attached.kind === "image" && attached.file !== undefined) {
+          const bytes = await pictureBytes(attached.file);
+          if (bytes !== null) {
+            pictures.push({
+              kind: "image",
+              name: attached.name,
+              mimeType: attached.file.type,
+              bytes,
+            });
+          }
+        }
+      }
+
       setDesks((current) =>
-        changeCurrent(current, (one) => ({ ...one, doing: { task, startedAt: Date.now() } })),
+        changeCurrent(current, (one) => ({
+          ...one,
+          doing: { task, startedAt: Date.now() },
+          references: [...one.references, ...reference],
+        })),
       );
       setBusy(true);
       try {
-        const reply = await bridge.prompt(text);
+        const reply = await bridge.prompt(text, pictures);
         if (!reply.ok) troubleHere(reply.trouble);
       } catch (cause) {
         // The bridge is not supposed to throw. If it ever does, the window says
         // something calm rather than turning white.
         troubleHere({
           what: STOPPED_PART_WAY,
-          because: 'Something went wrong on my side. Nothing has been changed.',
-          actionLabel: 'Got it',
-          details: cause instanceof Error ? (cause.stack ?? cause.message) : undefined,
+          because: "Something went wrong on my side. Nothing has been changed.",
+          actionLabel: "Got it",
+          details:
+            cause instanceof Error ? (cause.stack ?? cause.message) : undefined,
         });
       } finally {
         setBusy(false);
@@ -496,24 +838,29 @@ function Conversation() {
       setDesks((current) =>
         current.current === null
           ? current
-          : changeCurrent(current, (one) => ({ ...one, turns: [...one.turns, said('you', text)] })),
+          : changeCurrent(current, (one) => ({
+              ...one,
+              turns: [...one.turns, said("you", text)],
+            })),
       );
 
       if (before === null) {
         if (!bridge.desktop) return;
         setBusy(true);
-        const picked = await bridge.chooseFolder().finally(() => setBusy(false));
+        const picked = await bridge
+          .chooseFolder()
+          .finally(() => setBusy(false));
         if (!picked.ok) {
-          setPickerTrouble({ path: '', trouble: picked.trouble });
+          setPickerTrouble({ path: "", trouble: picked.trouble });
           return;
         }
         if (picked.value === null) {
           setPickerTrouble({
-            path: '',
+            path: "",
             trouble: {
-              what: 'I still do not have a folder to work in.',
+              what: "I still do not have a folder to work in.",
               because: NO_FOLDER_YET,
-              actionLabel: 'Got it',
+              actionLabel: "Got it",
             },
           });
           return;
@@ -522,7 +869,10 @@ function Conversation() {
         // The sentence goes on the desk that has just been made, so it is not
         // lost with the screen it was typed on.
         setDesks((current) =>
-          changeCurrent(current, (one) => ({ ...one, turns: [...one.turns, said('you', text)] })),
+          changeCurrent(current, (one) => ({
+            ...one,
+            turns: [...one.turns, said("you", text)],
+          })),
         );
       }
 
@@ -561,10 +911,14 @@ function Conversation() {
         changeCurrent(current, (one) => ({
           ...one,
           turns: one.turns.flatMap((turn): Turn[] => {
-            if (turn.kind !== 'estimate' || turn.id !== answered.id) return [turn];
+            if (turn.kind !== "estimate" || turn.id !== answered.id)
+              return [turn];
             return go
-              ? [{ ...turn, answered: 'went-ahead' }]
-              : [{ ...turn, answered: 'smaller' }, said('graphe', smallerFirst)];
+              ? [{ ...turn, answered: "went-ahead" }]
+              : [
+                  { ...turn, answered: "smaller" },
+                  said("graphe", smallerFirst),
+                ];
           }),
         })),
       );
@@ -577,17 +931,22 @@ function Conversation() {
     [deliver],
   );
 
-  const respond = useCallback((turnId: string, callId: string, decision: Decision) => {
-    setDesks((current) =>
-      changeCurrent(current, (one) => ({
-        ...one,
-        turns: one.turns.map((turn) =>
-          turn.kind === 'asked' && turn.id === turnId ? { ...turn, answered: decision } : turn,
-        ),
-      })),
-    );
-    void bridge.answer(callId, decision);
-  }, []);
+  const respond = useCallback(
+    (turnId: string, callId: string, decision: Decision) => {
+      setDesks((current) =>
+        changeCurrent(current, (one) => ({
+          ...one,
+          turns: one.turns.map((turn) =>
+            turn.kind === "asked" && turn.id === turnId
+              ? { ...turn, answered: decision }
+              : turn,
+          ),
+        })),
+      );
+      void bridge.answer(callId, decision);
+    },
+    [],
+  );
 
   const dismiss = useCallback((turnId: string) => {
     setDesks((current) =>
@@ -635,14 +994,19 @@ function Conversation() {
         return;
       }
       setDesks((current) =>
-        changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
+        changeDesk(current, path, (one) => ({
+          ...one,
+          versions: answer.value,
+        })),
       );
     },
     [desks.current, troubleHere],
   );
 
   const dismissPutBack = useCallback(() => {
-    setDesks((current) => changeCurrent(current, (one) => ({ ...one, putBack: null })));
+    setDesks((current) =>
+      changeCurrent(current, (one) => ({ ...one, putBack: null })),
+    );
   }, []);
 
   /* ------------------------------------------------------------------ money */
@@ -658,7 +1022,7 @@ function Conversation() {
   const showSplit = useCallback(() => {
     const split = desk?.spent?.split;
     if (!split) return;
-    say(`${sessionSummary(split).lines.join('\n')}\n\n${retryHonesty}`);
+    say(`${sessionSummary(split).lines.join("\n")}\n\n${retryHonesty}`);
   }, [desk, say]);
 
   /* ----------------------------------------------------------------- see it */
@@ -683,7 +1047,7 @@ function Conversation() {
         troubleHere(answer.trouble);
         return;
       }
-      if (answer.value.kind === 'unsure') {
+      if (answer.value.kind === "unsure") {
         setProgress(null);
         say(answer.value.question);
         return;
@@ -692,10 +1056,13 @@ function Conversation() {
       // startling without a sentence somewhere saying it was meant to.
       setProgress({ says: showWords.ready, done: true });
       window.setTimeout(() => setProgress(null), 1400);
+      // The overview keeps the address of what was just served, so the pill can
+      // take you back to it all evening.
+      void refreshOverview(desks.current);
     } catch {
       setProgress(null);
     }
-  }, [desks.current, say, troubleHere]);
+  }, [desks.current, say, troubleHere, refreshOverview]);
 
   /* ------------------------------------------------------------------- draw */
 
@@ -709,13 +1076,29 @@ function Conversation() {
 
   const picking = desk === null && recent !== null && recent.length > 0;
   const empty = desk === null || desk.turns.length === 0;
-  // A rail listing one version teaches nobody anything. It arrives with the
-  // second one, and then it stays.
-  const railed = desk !== null && desk.versions.length >= 2;
+  // Which regions have earned their place (notes/strategy/UI-DESIGN.md):
+  // the shelf the moment there is a folder in front; the overview the moment
+  // there is anything at all to tell about the work — a git state, a search, a
+  // reference, or a second version. Both appear once and then stay.
+  const shelved = desk !== null;
+  const research = researchLog(desk?.turns ?? []);
+  const overviewed =
+    desk !== null &&
+    (desk.overview?.git !== null ||
+      research.length > 0 ||
+      desk.references.length > 0 ||
+      desk.versions.length >= 2);
+
+  // The pill that takes you back to the live preview. It earns its place the
+  // moment there is an address to go to — nothing here is worth a button before
+  // the work is actually being served.
+  const previewUrl = desk?.overview?.preview ?? null;
+  const pillShown = desk !== null && (previewUrl !== null || progress !== null);
+  const pillLabel = progress !== null ? progress.says : PREVIEW;
 
   return (
     <main
-      className={`app ${empty ? 'app--empty' : ''} ${railed ? 'app--railed' : ''}`}
+      className={`app ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -731,7 +1114,13 @@ function Conversation() {
               aria-haspopup="menu"
             >
               {desk.name}
-              <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 0 12 12"
+                fill="none"
+                aria-hidden="true"
+              >
                 <path
                   d="M2.5 4.5 6 8l3.5-3.5"
                   stroke="currentColor"
@@ -743,10 +1132,13 @@ function Conversation() {
             </button>
           )}
 
+          {/* The wordmark, dead centre. It does not do anything — it is the
+              composition's anchor, and the two working controls sit on either
+              side of it. */}
           {desk === null ? null : (
-            <button type="button" className="topbar__see" onClick={() => void seeIt()}>
-              {progress === null ? SEE_IT : progress.says}
-            </button>
+            <span className="topbar__mark" aria-hidden="true">
+              Graphe
+            </span>
           )}
 
           {switching && recent !== null ? (
@@ -762,10 +1154,38 @@ function Conversation() {
                 onRevealFolder={revealFolder}
                 showMe={preferences.showMe}
                 onShowMe={changeShowMe}
+                onPreview={() => void seeIt()}
+                onAccount={openConnect}
               />
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {/* The preview pill floats over the right edge — near the words about the
+          work, not the housekeeping of the top bar. Disabled while a serving is
+          on the way, so it cannot be asked twice. */}
+      {pillShown ? (
+        <button
+          type="button"
+          className="previewpill"
+          onClick={() => void seeIt()}
+          disabled={busy || (progress !== null && !progress.done)}
+        >
+          {pillLabel}
+        </button>
+      ) : null}
+
+      {shelved ? (
+        <Sidebar
+          projects={recent ?? []}
+          openPath={desks.current}
+          onOpen={(project) => void open(project.path)}
+          onForget={forget}
+          onBrowse={() => void browse()}
+          open={shelfOpen}
+          onToggle={() => setShelfOpen((was) => !was)}
+        />
       ) : null}
 
       <div className="app__column" ref={contentRef}>
@@ -808,7 +1228,7 @@ function Conversation() {
             onAction={() => {
               const gone = pickerTrouble.path;
               setPickerTrouble(null);
-              if (gone !== '') void forget({ path: gone });
+              if (gone !== "") void forget({ path: gone });
             }}
             technicalDetails={pickerTrouble.trouble.details}
           />
@@ -822,11 +1242,17 @@ function Conversation() {
                 inert so the keyboard cannot land on something invisible. */}
             <button
               type="button"
-              className={`jump ${empty || isAtBottom ? '' : 'jump--shown'}`}
+              className={`jump ${empty || isAtBottom ? "" : "jump--shown"}`}
               onClick={jumpToLatest}
               inert={empty || isAtBottom}
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
                 <path
                   d="M8 3v10M8 13l-4.5-4.5M8 13l4.5-4.5"
                   stroke="currentColor"
@@ -844,11 +1270,17 @@ function Conversation() {
               busy={busy}
               draft={draft}
               attachments={attachments}
+              connection={connection}
+              onSelectModel={selectModel}
+              onConnect={openConnect}
               onAttachmentsChange={(next) => {
                 if (desks.current === null) setLoose(next);
                 else {
                   setDesks((current) =>
-                    changeCurrent(current, (one) => ({ ...one, attachments: next })),
+                    changeCurrent(current, (one) => ({
+                      ...one,
+                      attachments: next,
+                    })),
                   );
                 }
               }}
@@ -862,8 +1294,11 @@ function Conversation() {
         )}
       </div>
 
-      {railed && desk !== null ? (
-        <Versions
+      {overviewed && desk !== null ? (
+        <Overview
+          git={desk.overview?.git ?? null}
+          research={research}
+          references={desk.references}
           versions={desk.versions}
           putBack={desk.putBack}
           onPutBack={(versionId) => void putBack(versionId)}
@@ -871,16 +1306,35 @@ function Conversation() {
           onDismissPutBack={dismissPutBack}
           busy={busy}
           showMe={preferences.showMe}
+          spent={desk.spent}
+          onShowSplit={showSplit}
         />
       ) : null}
 
-      {desk !== null && desk.spent !== null ? (
+      {!overviewed && desk !== null && desk.spent !== null ? (
         <CostMeter
           spent={desk.spent.total}
           corner
           onDetails={desk.spent.split === null ? undefined : showSplit}
         />
       ) : null}
+
+      <ConnectModal
+        open={connectOpen}
+        state={connection}
+        step={connectStep}
+        busy={connectBusy}
+        failure={connectFailure}
+        discovered={discovered}
+        importing={importing}
+        onClose={closeConnect}
+        onConnect={(providerId, method) => startConnect(providerId, method)}
+        onAnswer={answerConnect}
+        onCancel={cancelConnect}
+        onImport={importAccount}
+        onSelect={selectModel}
+        onDisconnect={disconnect}
+      />
     </main>
   );
 }
@@ -933,14 +1387,14 @@ function Turnstile({
   showMe: boolean;
 }) {
   switch (turn.kind) {
-    case 'said':
+    case "said":
       return (
         <Message from={turn.from} streaming={turn.streaming}>
           {turn.text}
         </Message>
       );
 
-    case 'did':
+    case "did":
       return (
         <ActivityLine
           state={turn.state}
@@ -950,7 +1404,7 @@ function Turnstile({
         />
       );
 
-    case 'asked':
+    case "asked":
       // Once it is answered the question stops being a control and becomes part
       // of the record — a live pair of buttons for a decision already taken is
       // how people learn to click without reading.
@@ -962,19 +1416,23 @@ function Turnstile({
           technical={showMe ? turn.real : undefined}
           confirmLabel="Yes, go ahead"
           cancelLabel="No, leave it"
-          onConfirm={() => onRespond(turn.id, turn.callId, 'yes')}
-          onCancel={() => onRespond(turn.id, turn.callId, 'no')}
+          onConfirm={() => onRespond(turn.id, turn.callId, "yes")}
+          onCancel={() => onRespond(turn.id, turn.callId, "no")}
         />
       ) : (
         <ActivityLine
-          state={turn.answered === 'yes' ? 'done' : 'failed'}
+          state={turn.answered === "yes" ? "done" : "failed"}
           label={turn.question}
-          detail={turn.answered === 'yes' ? 'You said yes.' : 'You said no, so I left it alone.'}
+          detail={
+            turn.answered === "yes"
+              ? "You said yes."
+              : "You said no, so I left it alone."
+          }
           real={showMe ? turn.real : undefined}
         />
       );
 
-    case 'estimate':
+    case "estimate":
       // Same shape as any other question, and the same grammar: the option that
       // spends less carries the visual weight. Every word of it is written by
       // src/cost/phrasing.ts and none of it by this file.
@@ -997,14 +1455,14 @@ function Turnstile({
           state="done"
           label={turn.prompt.title}
           detail={
-            turn.answered === 'went-ahead'
-              ? 'You said go ahead.'
-              : 'You said you would rather start smaller.'
+            turn.answered === "went-ahead"
+              ? "You said go ahead."
+              : "You said you would rather start smaller."
           }
         />
       );
 
-    case 'tidying':
+    case "tidying":
       // Behind this is Pi's own tidying of a long conversation. In front of it
       // is one plain sentence, from src/cost/phrasing.ts — and, for anyone who
       // asked, its real name underneath.
@@ -1016,7 +1474,7 @@ function Turnstile({
         />
       );
 
-    case 'trouble':
+    case "trouble":
       return (
         <ErrorCard
           what={turn.trouble.what}

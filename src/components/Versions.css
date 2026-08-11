@@ -11,8 +11,10 @@
   right: 0;
   bottom: 0;
   z-index: 2;
-  /* Set on .app--railed, which pads the scroller by the same amount. One number,
-     one place — the two must agree or the conversation slides under the rail. */
+  /* Set on .app--overviewed, which pads the scroller by the same amount. One
+     number, one place — the two must agree or the conversation slides under the
+     panel. The overview mounts this rail inside itself, where .overview keeps
+     it static; on its own it is fixed, the way it has always been. */
   width: var(--rail-width);
   display: flex;
   flex-direction: column;

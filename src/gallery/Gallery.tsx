@@ -3,15 +3,20 @@ import ActivityLine from '../components/ActivityLine';
 import type { Attachment } from '../components/Attachments';
 import Composer from '../components/Composer';
 import ConfirmChange from '../components/ConfirmChange';
+import ConnectModal from '../components/ConnectModal';
 import CostMeter from '../components/CostMeter';
 import ErrorCard from '../components/ErrorCard';
 import Message from '../components/Message';
 import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
+import Overview from '../components/Overview';
+import Sidebar from '../components/Sidebar';
 import VersionRow from '../components/VersionRow';
 import Versions from '../components/Versions';
 import Welcome from '../components/Welcome';
-import type { PutBack, RecentProject, SavedVersion } from '../lib/ipc';
+import type { ConnectionState, FoundAccount, PutBack, RecentProject, SavedVersion } from '../lib/ipc';
+import type { Reference, ResearchEntry } from '../lib/projects';
+import type { SpendView } from '../lib/spend';
 import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
 import { biggerJob, estimateNote, longConversation } from '../cost/phrasing';
@@ -209,6 +214,123 @@ const JUST_PUT_BACK: PutBack = {
   versions: TIMELINE,
 };
 
+/* -------------------------------------------------------------------------- */
+/* The overview                                                                */
+/* -------------------------------------------------------------------------- */
+
+/** A clean git state, a branch ahead of its remote, and a dirty one — the two
+ *  sentences the panel gets to say, in the same words src/App.tsx would give
+ *  them. */
+const GIT_DIRTY = {
+  branch: 'paper-street',
+  dirty: true,
+  unstaged: 2,
+  staged: 1,
+  untracked: 1,
+  ahead: 0,
+  behind: 0,
+};
+
+const RESEARCH: readonly ResearchEntry[] = [
+  { id: 'r1', query: 'css clamp() fluid type best practices', state: 'done' },
+  { id: 'r2', query: 'framer motion vs css animations 2026', state: 'done' },
+  {
+    id: 'r3',
+    query: 'how wide should a landing page container be at 1440px',
+    state: 'running',
+  },
+];
+
+const REFERENCES: readonly Reference[] = [
+  {
+    id: 'ref1',
+    kind: 'image',
+    name: 'hero-sketch.png',
+    note: 'Sent with “build the hero from this”',
+    preview: SCREENSHOT,
+  },
+  {
+    id: 'ref2',
+    kind: 'figma',
+    name: 'Landing v4',
+    note: 'Sent with “match the spacing scale”',
+  },
+];
+
+const SPENT: SpendView = {
+  total: inr(4000),
+  split: null,
+};
+
+/* -------------------------------------------------------------------------- */
+/* The connect screen                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** The provider list, built with the same shapes src/agent/pi sends: two
+ *  connected or connectable accounts with their real method labels, and a
+ *  Google that has no account yet and no way to get one from here. */
+const CONNECT_STATE: ConnectionState = {
+  chosen: null,
+  providers: [
+    {
+      providerId: 'anthropic',
+      name: 'Anthropic',
+      methods: ['oauth', 'api-key'],
+      oauthLabel: 'Sign in with Claude Pro or Max',
+      apiKeyLabel: 'Anthropic API key',
+      connected: true,
+      available: true,
+      models: [
+        { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5', available: true },
+        { id: 'claude-opus-4-5', label: 'Opus 4.5', available: false },
+      ],
+    },
+    {
+      providerId: 'openai',
+      name: 'OpenAI',
+      methods: ['oauth', 'api-key'],
+      oauthLabel: 'Sign in with ChatGPT',
+      apiKeyLabel: 'OpenAI API key',
+      connected: false,
+      available: false,
+      models: [
+        { id: 'gpt-5', label: 'GPT-5', available: true },
+        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: true },
+      ],
+    },
+    {
+      providerId: 'opencode-go',
+      name: 'OpenCode Go',
+      methods: ['api-key'],
+      oauthLabel: null,
+      apiKeyLabel: 'OpenCode Go API key',
+      connected: false,
+      available: false,
+      models: [{ id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', available: true }],
+    },
+    {
+      providerId: 'google',
+      name: 'Google',
+      methods: ['oauth', 'api-key'],
+      oauthLabel: 'Sign in with Google AI',
+      apiKeyLabel: 'Gemini API key',
+      connected: false,
+      available: false,
+      models: [
+        { id: 'gemini-3', label: 'Gemini 3', available: true },
+        { id: 'gemini-3-flash', label: 'Gemini 3 Flash', available: true },
+      ],
+    },
+  ],
+};
+
+/** What opencode and Codex have saved on this machine — the two rows that
+ *  appear above the list, with the same words the app writes about them. */
+const FOUND_ACCOUNTS: readonly FoundAccount[] = [
+  { providerId: 'opencode-go', name: 'OpenCode Go', kind: 'api-key', source: 'opencode' },
+  { providerId: 'openai', name: 'OpenAI', kind: 'sign-in', source: 'codex' },
+];
+
 function Section({ title, note, children }: { title: string; note: string; children: ReactNode }) {
   return (
     <section className="gsection">
@@ -229,6 +351,9 @@ export default function Gallery() {
   /** Live, so the switch can be turned on here and the sections below it change
    *  — which is the only way to review "quiet and secondary" as a claim. */
   const [showMe, setShowMe] = useState(false);
+  /** Live for the same reason: the connect screen is a moment, not a picture,
+   *  and the closest thing to the moment is opening and closing it. */
+  const [connectOpen, setConnectOpen] = useState(false);
   /** What the first screen put in the box, so the two can be reviewed as the one
    *  gesture they are rather than as two components that happen to be near each
    *  other. */
@@ -411,16 +536,43 @@ export default function Gallery() {
                 editor="VS Code"
                 onOpenInEditor={noop}
                 onRevealFolder={noop}
+                onPreview={noop}
+                onAccount={noop}
                 showMe={showMe}
                 onShowMe={setShowMe}
               />
             </div>
             <p className="gallery__caption">
-              Three things, one menu: where you were, the way out, and the switch. The escape hatches
-              are never conditional and never further away than this — the project is an ordinary
-              folder in ordinary git, and a product that makes that hard has quietly become a walled
-              garden. What the button says is whatever editor the machine actually has; with none
-              installed there is one row here, not a button that opens nothing.
+              One menu, everything under the project's name: where you were, the way out, the
+              preview, the account, and the switch. The escape hatches are never conditional and
+              never further away than this — the project is an ordinary folder in ordinary git, and
+              a product that makes that hard has quietly become a walled garden. What the button
+              says is whatever editor the machine actually has; with none installed there is one
+              row here, not a button that opens nothing.
+            </p>
+          </Section>
+
+          <Section
+            title="Who should I think with?"
+            note="The one screen that appears before the work does, so it is the rare moment that gets the dark treatment. Every provider and every model on the table at once — nothing is gated behind a second click, because there is no smaller step worth hiding behind. It is live: open it, close it, look again."
+          >
+            <button
+              type="button"
+              className="gallery__live"
+              onClick={() => setConnectOpen(true)}
+            >
+              Open the connect screen
+            </button>
+            <p className="gallery__caption">
+              At the top, before the list, the accounts opencode and Codex have saved on this
+              machine — “Already on this computer” — because pasting a key that is already on the
+              disk is the first friction this screen exists to remove, and the sentence under the
+              name says which tool saved it and what kind of account it is. One click brings it
+              over; the credential is copied between the tool's own files by the shell and never
+              crosses to this window, which only ever sees the name, the kind, and the source. The
+              provider then flips to “working on this machine” below. Below that, the sign-in
+              options lead through the provider's own site, and a model is a plain row you can
+              pick whenever you like — “now working with this” is the same row, turned on.
             </p>
           </Section>
 
@@ -502,8 +654,17 @@ export default function Gallery() {
                 attachments={attached}
                 onAttachmentsChange={setAttached}
                 draft={draft}
+                connection={CONNECT_STATE}
+                onSelectModel={noop}
+                onConnect={noop}
               />
             </div>
+            <p className="gallery__caption">
+              The chip on the left of the row says which model is answering, and opens the whole
+              list of models that account can actually use. It is the one piece of the machinery
+              the composer shows on purpose: a model decides what a reply costs and how good it
+              is, and it is the setting people change most often.
+            </p>
             <p className="gallery__caption">
               A Figma link keeps its own chip and its own name, because it is a place rather than a
               copy. This composer is live — drop something on it. Nothing is sent anywhere: the
@@ -622,6 +783,84 @@ export default function Gallery() {
           </Section>
 
           <Section
+            title="The shelf"
+            note="Appears the day a folder opens and then stays, against the left edge, under the top bar. It is the navigation — the list of places this machine remembers — so it is allowed to be a permanent region while the first screen stays one sentence. Collapsing it (the mark, or ⌘B) gives the conversation the whole window; there is no animation either way, because toggling a sidebar is a thing people do constantly."
+          >
+            <div className="shelf-sample">
+              <Sidebar
+                projects={REMEMBERED}
+                openPath="/Users/you/Sites/paper-street"
+                onOpen={noop}
+                onForget={noop}
+                onBrowse={noop}
+                open
+                onToggle={noop}
+              />
+              <Sidebar
+                projects={REMEMBERED}
+                openPath="/Users/you/Sites/paper-street"
+                onOpen={noop}
+                onForget={noop}
+                onBrowse={noop}
+                open={false}
+                onToggle={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              Expanded and reduced. The strip keeps the mark at the top, so the way back is in the
+              place the expanded shelf used it. Everything else about the project — the way out,
+              the machinery switch — stays under the project's name in the top bar, where a person
+              who wants the wheel already knows where to look.
+            </p>
+          </Section>
+
+          <Section
+            title="Back to the work"
+            note="Floats over the right edge of the conversation from the moment there is an address to go to — it earns its place only when the work is actually being served. Disabled while the serving is still on its way, so it can never be asked twice."
+          >
+            <div className="gallery__pillframe">
+              <button type="button" className="previewpill">
+                Open preview
+              </button>
+              <button type="button" className="previewpill" disabled>
+                Preparing…
+              </button>
+            </div>
+            <p className="gallery__caption">
+              Ready, and still getting there. It is the same row the menu offers under the
+              project's name — one destination, two doors, both reachable with the keyboard. Near
+              the words about the work, not the housekeeping of the top bar: the preview is the
+              point, and the pill lives beside it.
+            </p>
+          </Section>
+
+          <Section
+            title="The overview"
+            note="Folded against the right edge, the same place the version rail used to live — the rail is now its bottom half. It appears the first time there is anything to tell and then stays: a git state the shell has seen, a search, a reference, or a second version. Everything in it is a reading of things that happened elsewhere; nothing here is a new event to respond to."
+          >
+            <div className="gallery__overview">
+              <Overview
+                git={GIT_DIRTY}
+                research={RESEARCH}
+                references={REFERENCES}
+                versions={TIMELINE}
+                putBack={JUST_PUT_BACK}
+                onPutBack={noop}
+                onName={noop}
+                onDismissPutBack={noop}
+                spent={SPENT}
+                onShowSplit={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              Git says it in a designer's words — “2 files changed, 1 new” — and the branch in
+              mono, because names are not translated. A search that worked leaves nothing but its
+              question; only a failure says “stopped”. The meter docks into the foot, the way it
+              docked into the foot of the rail.
+            </p>
+          </Section>
+
+          <Section
             title="When it goes wrong"
             note="Slower than everything else: 280ms, no shake, no red flash. Colour carries the severity; motion stays gentle."
           >
@@ -707,6 +946,25 @@ vite v6.0.5 building for production...
           </Section>
         </div>
       </div>
+
+      {/* Mounted exactly as the app mounts it, so what is reviewed here is what
+          ships: the backdrop, the panel, the found rows, the whole thing. */}
+      <ConnectModal
+        open={connectOpen}
+        onClose={() => setConnectOpen(false)}
+        state={CONNECT_STATE}
+        step={null}
+        busy={false}
+        failure={null}
+        discovered={FOUND_ACCOUNTS}
+        importing={null}
+        onConnect={noop}
+        onAnswer={noop}
+        onCancel={noop}
+        onImport={noop}
+        onSelect={noop}
+        onDisconnect={noop}
+      />
     </main>
   );
 }

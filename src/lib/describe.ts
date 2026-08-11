@@ -107,7 +107,30 @@ export function describeCall(call: ToolCall): Described {
     case 'browse':
       return { label: 'Reading something on the web', detail: short(textField(input, ['url'])) };
 
+    case 'websearch':
+    case 'searchweb':
+      return {
+        label: WEB_SEARCH_LABEL,
+        detail: short(textField(input, ['query', 'q'])),
+      };
+
+    case 'task':
+    case 'subagent':
+    case 'delegate':
+      return {
+        label: TASK_LABEL,
+        detail: short(textField(input, ['task', 'instructions'])),
+      };
+
     default:
       return { label: 'Working on your project' };
   }
 }
+
+/** The words a web search wears in the thread and in the overview's research
+ *  log. One name in both places, so the log is derived from the thread rather
+ *  than kept separately and left to drift. */
+export const WEB_SEARCH_LABEL = 'Searching the web';
+
+/** The words a delegated piece of work wears in the thread. */
+export const TASK_LABEL = 'Sending a piece of work to a helper';

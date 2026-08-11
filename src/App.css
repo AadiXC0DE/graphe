@@ -24,28 +24,34 @@
    stick-to-bottom that never sticks. A block box with auto margins centres the
    column just as well and grows with what is in it. */
 .app {
-  /* How much of the window the rail is holding, and how far the conversation is
-     allowed to sit from it. Both are declared here so the strip along the top
-     can line its two controls up with the column below — they are measured
-     against the viewport rather than against a parent, because the strip is
-     fixed and a percentage inside it would be measured against the window while
-     the same percentage inside the column would be measured against the window
-     minus the rail. One unit, one answer, everything lines up. */
-  --rail-take: 0px;
+  /* How much of the window the overview is holding, how much the shelf is, and
+     how far the conversation is allowed to sit from the overview. All declared
+     here so the strip along the top can line its two controls up with the
+     column below — they are measured against the viewport rather than against
+     a parent, because the strip is fixed and a percentage inside it would be
+     measured against the window while the same percentage inside the column
+     would be measured against the window minus the panels. One unit, one
+     answer, everything lines up. */
+  --overview-take: 0px;
+  --shelf-take: 0px;
   --pair-gap: clamp(
     0px,
-    calc((100vw - var(--rail-take) - var(--thread-width)) / 2),
+    calc((100vw - var(--shelf-take) - var(--overview-take) - var(--thread-width)) / 2),
     var(--pair-gap-max)
   );
   /* The conversation's own side padding, named because the strip's contents have
      to land on the same line the words do. */
   --column-pad: var(--space-5);
   /* Where the strip's contents start: the first character of the conversation
-     below it. */
-  --topbar-inset: max(
-    var(--column-pad),
-    calc(100vw - var(--rail-take) - var(--pair-gap) - var(--thread-width) + var(--column-pad))
-  );
+     below it.
+
+     Which is the shelf, then the gap the centred column leaves, then the
+     column's own padding — and nothing else. It used to be written the long way
+     round, subtracting the panels and the gap out of the viewport, and that
+     only agreed with the column when the shelf was shut and the gap had not hit
+     its clamp. Open the shelf on a wide display and the name drifted two
+     hundred pixels right of the words it names, into the wordmark. */
+  --topbar-inset: calc(var(--shelf-take) + var(--pair-gap) + var(--column-pad));
 
   height: 100%;
   /* Both axes, rather than overflow-y alone: this is the element
@@ -79,8 +85,8 @@
   pointer-events: none;
 }
 
-/* The rail owns the right-hand edge; the ramp belongs to the conversation. */
-.app--railed::before {
+/* The overview owns the right-hand edge; the ramp belongs to the conversation. */
+.app--overviewed::before {
   right: var(--rail-width);
 }
 
@@ -362,18 +368,24 @@
   right: 0;
   height: var(--topbar-height);
   z-index: 3;
-  display: flex;
+  /* Three columns, not a flex row with an absolutely-centred wordmark on top of
+     it. The wordmark sits dead centre of the strip and the name sits over the
+     conversation's left margin, and those two facts are only compatible while
+     the name is short: at 44% of a narrow window the name reached the centre
+     and printed itself through GRAPHE. Grid makes the collision impossible —
+     the outer columns are `minmax(0, 1fr)`, so they are equal (the mark stays
+     centred) and they are allowed to shrink below their content (a long name
+     ellipsises instead of pushing).
+
+     The strip's own padding is gone, because padding would centre the middle
+     column in the padding box rather than in the window. The inset that lines
+     the name up with the first word of the thread is now the name's margin —
+     same alignment, no effect on where the centre is. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
-  /* Lined up with the conversation underneath rather than with the glass. The
-     strip still spans the window — it is what the window is dragged by — but
-     which project this is now sits above the first word of the thread, and "See
-     it" above its last. Without this the two controls pin themselves to the
-     window's corners and, on a wide display, end up several hundred pixels from
-     anything they belong to. */
-  padding-left: var(--topbar-inset);
-  padding-right: calc(var(--pair-gap) + var(--column-pad));
+  padding: 0;
   background: var(--bg);
   -webkit-app-region: drag;
 }
@@ -383,17 +395,17 @@
 [data-shell='desktop'] .app {
   --topbar-inset: max(
     92px,
-    calc(100vw - var(--rail-take) - var(--pair-gap) - var(--thread-width) + var(--space-5))
+    calc(var(--shelf-take) + var(--pair-gap) + var(--column-pad))
   );
 }
 
-/* The rail owns the right-hand edge, so the strip stops where it starts. */
-.app--railed .topbar {
+/* The overview owns the right-hand edge, so the strip stops where it starts. */
+.app--overviewed .topbar {
   right: var(--rail-width);
 }
 
 .topbar__name,
-.topbar__see {
+.topbar__preview {
   -webkit-app-region: no-drag;
 }
 
@@ -409,8 +421,11 @@
 .topbar__name {
   position: relative;
   display: block;
-  /* max-width stops a long name eating the "See it" button. */
-  max-width: 44%;
+  /* The grid column is the limit now — it cannot reach the wordmark, and it
+     cannot be reached by it. `max-width` only has to stop the button from
+     growing past the column it was given. */
+  justify-self: start;
+  max-width: 100%;
   min-height: 26px;
   /* The right-hand padding is the chevron's room: 9px of arrow with a gap
      either side of it. */
@@ -420,8 +435,9 @@
      pixels to the right of the first word under it — near enough to look like a
      mistake rather than a decision. The negative margin hands the padding back
      so the letters line up and the hover ground still bleeds out to where the
-     button's edge was. */
-  margin-left: calc(var(--space-2) * -1);
+     button's edge was. The inset the strip used to carry as padding is added
+     here, for the reason given on `.topbar`. */
+  margin-left: calc(var(--topbar-inset) - var(--space-2));
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   /* The line box is the button, so the text is centred without flexbox. */
@@ -442,29 +458,9 @@
   transform: translateY(-50%);
 }
 
-.topbar__name--quiet {
-  color: var(--text-faint);
-}
-
-.topbar__see {
-  position: relative;
-  min-height: 26px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  white-space: nowrap;
-  transition:
-    color var(--dur-micro) var(--ease-hover),
-    border-color var(--dur-micro) var(--ease-hover),
-    transform var(--dur-micro) var(--ease-out-quart);
-}
-
-/* 44px of hit area under two 26px controls. The strip stays 38px tall; the
+/* 44px of hit area under a 26px control. The strip stays 38px tall; the
    target overhangs it, which is invisible and is the whole point. */
-.topbar__name::after,
-.topbar__see::after {
+.topbar__name::after {
   content: '';
   position: absolute;
   left: 0;
@@ -474,8 +470,59 @@
   transform: translateY(-50%);
 }
 
-.topbar__see:active {
+.topbar__name--quiet {
+  color: var(--text-faint);
+}
+
+/* The wordmark, centred in the strip. It is the least informative thing on
+   screen — you know what the app is called, you are using it — so it is the
+   quietest: the smallest type, letterspaced wide, and it does not even accept
+   focus or clicks. It exists to hold the composition together while the name
+   and the button do the work on either side. */
+.topbar__mark {
+  /* The strip's middle column. In the flow, so nothing can be drawn under it. */
+  grid-column: 2;
+  justify-self: center;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The pill that shows the live preview, floating in the place the old button
+   had: the strip's right-hand slot, just below the strip itself. It appears
+   the moment there is an address to go to and stays for the whole evening —
+   the same job the button did, only it never asks to be remembered. */
+.previewpill {
+  position: fixed;
+  top: calc(var(--topbar-height) + var(--space-4));
+  right: calc(var(--pair-gap) + var(--column-pad));
+  z-index: 4;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--accent-ink);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  -webkit-app-region: no-drag;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.previewpill:active {
   transform: scale(0.97);
+}
+
+.previewpill:disabled {
+  opacity: 0.55;
 }
 
 /* The switcher, hanging under the name. A dropdown, so it enters the way a
@@ -512,7 +559,7 @@
 
 @media (hover: hover) and (pointer: fine) {
   .topbar__name:hover,
-  .topbar__see:hover {
+  .previewpill:hover {
     color: var(--text);
   }
 
@@ -520,8 +567,8 @@
     background: var(--bg-sunken);
   }
 
-  .topbar__see:hover {
-    border-color: var(--border-strong);
+  .previewpill:hover {
+    background: var(--accent-soft);
   }
 }
 
@@ -530,44 +577,59 @@
     animation: none;
   }
 
-  .topbar__see:active {
+  .previewpill:active {
     transform: none;
   }
 }
 
 /* ---------------------------------------------------------------------------
-   Making room for the version rail, and keeping it in the same composition
-   The rail is fixed to the right-hand edge, so the scroller is padded rather
-   than made into a flex row — the column inside it is centred by auto margins
-   and stays centred in whatever is left.
+   Making room for the shelf and the overview
+   Both panels are fixed to their edges, so the scroller is padded rather than
+   made into a flex row — the column inside it is centred by auto margins and
+   stays centred in whatever is left.
 
    Centred, though, only up to a point. On a 2000px display "centred in what is
-   left" puts 500px of nothing between the conversation and the rail, and the
-   two stop being one page. The right-hand margin is therefore capped: past
+   left" puts 500px of nothing between the conversation and the overview, and
+   the two stop being one page. The right-hand margin is therefore capped: past
    about 1200px of window the conversation stops drifting and the empty space
    all collects on the left, where nothing is looking.
    --------------------------------------------------------------------------- */
 
-.app--railed {
-  --rail-take: var(--rail-width);
+.app--overviewed {
+  --overview-take: var(--rail-width);
   padding-right: var(--rail-width);
 }
 
-.app--railed .app__column {
+.app--overviewed .app__column {
   margin-right: var(--pair-gap);
   margin-left: auto;
 }
 
+/* The shelf is a second fixed panel on the left. It holds 232px when it is
+   open and 54px when it is reduced to its mark; the composition pads by
+   whichever is true, and — like the shelf itself — the change is instant,
+   because collapsing a sidebar is the definition of the hundred-times-a-day
+   motion the frequency rule bans. */
+.app--shelved {
+  --shelf-take: var(--shelf-width);
+  padding-left: var(--shelf-width);
+}
+
+.app--shelved.app--shelfclosed {
+  --shelf-take: var(--shelf-thin);
+  padding-left: var(--shelf-thin);
+}
+
 @media (max-width: 1100px) {
-  .app--railed {
+  .app--overviewed {
     --rail-width: var(--rail-width-tight);
   }
 }
 
-/* Below this the rail and a readable conversation cannot both have what they
-   need, and the conversation is the product. */
+/* Below this the overview and a readable conversation cannot both have what
+   they need, and the conversation is the product. */
 @media (max-width: 720px) {
-  .app--railed {
+  .app--overviewed {
     --rail-width: 240px;
   }
 
@@ -578,24 +640,10 @@
 
 /* ---------------------------------------------------------------------------
    The meter, docked
-   On its own it is a small card in the window's corner. With the rail up, a
-   bordered card floating inside a bordered panel is two frames saying the same
-   thing — so it becomes the rail's own foot instead: same width, flush to the
-   glass, one hairline between it and the versions above it.
+   On its own it is a small card in the window's corner. Inside the overview it
+   becomes the panel's own foot — see Overview.css, which owns that context the
+   way this file owns the corner.
    --------------------------------------------------------------------------- */
-
-.app--railed .cost-meter--corner {
-  right: 0;
-  bottom: 0;
-  width: var(--rail-width);
-  border: none;
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  border-radius: 0;
-  box-shadow: none;
-  background: var(--bg);
-  padding: var(--space-3) var(--space-4) var(--space-4);
-}
 
 /* ---------------------------------------------------------------------------
    Things that are true of every screen

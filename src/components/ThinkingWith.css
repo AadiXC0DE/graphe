@@ -1,0 +1,198 @@
+/* Which model is answering — the one permanent fact about the machinery that
+   the composer shows. Quiet enough to be furniture, legible enough to be read
+   without looking for it. */
+
+.thinking {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.thinking__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 220px;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.thinking__chip:active {
+  transform: scale(0.97);
+}
+
+.thinking__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The dot is the whole of the status: filled means something is answering,
+   hollow means nothing is connected. No colour, no word "connected" — this is
+   the corner of a text box, not a dashboard. */
+.thinking__dot {
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--text-faint);
+}
+
+.thinking__chip--none {
+  color: var(--accent-ink);
+}
+
+.thinking__chip--none .thinking__dot {
+  background: none;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+@media (hover: hover) {
+  .thinking__chip:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
+}
+
+/* The list. It grows upward out of the chip, because the chip is at the bottom
+   of the window and a menu that opens downward from there opens off-screen. */
+.thinking__menu {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 6;
+  width: 280px;
+  max-width: calc(100vw - var(--space-5));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  transform-origin: bottom left;
+  animation: thinking-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes thinking-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking__menu {
+    animation: none;
+  }
+}
+
+.thinking__search {
+  flex-shrink: 0;
+  margin: var(--space-2) var(--space-2) 0;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+.thinking__search:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.thinking__list {
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2);
+}
+
+.thinking__group + .thinking__group {
+  margin-top: var(--space-2);
+}
+
+.thinking__groupname {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.thinking__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.thinking__optionlabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Reserved whether or not there is a tick in it, so choosing does not shuffle
+   every label sideways by ten pixels. */
+.thinking__tick {
+  display: grid;
+  place-items: center;
+  width: 10px;
+  flex-shrink: 0;
+  color: var(--accent-ink);
+}
+
+.thinking__option--chosen {
+  color: var(--text);
+  font-weight: 500;
+}
+
+@media (hover: hover) {
+  .thinking__option:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+.thinking__empty {
+  padding: var(--space-3) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.thinking__more {
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: left;
+}
+
+@media (hover: hover) {
+  .thinking__more:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}

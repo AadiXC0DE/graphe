@@ -34,6 +34,10 @@ export type Trouble = {
   actionLabel: string;
   /** Raw text for whoever wants it. Never shown unless asked for. */
   details?: string;
+  /** Something worth doing instead of dismissing. `'connect'` means "there is
+   *  no account connected" — the window opens the connect screen rather than
+   *  showing a card that dead-ends in a "Got it" button. */
+  marker?: 'connect';
 };
 
 /** Nothing on this bridge throws across the wire. A call either worked or it
@@ -183,7 +187,105 @@ export type Preferences = {
    *  default. See src/lib/showme.ts for what "the real thing" means and why
    *  that file is the one place jargon is allowed. */
   showMe: boolean;
+  /** The model chosen to work with, or null for "whatever is available". */
+  model: ModelChoice | null;
 };
+
+/** One model, named by the provider it belongs to and its own id. Both ids are
+ *  the provider's own — the window stores them and never invents them. */
+export type ModelChoice = { providerId: string; modelId: string };
+
+/* -------------------------------------------------------------------------- */
+/* Connecting an account                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** The two ways to connect a provider: a subscription account, or a key from
+ *  the provider's own site. Named after the thing the person does, not the
+ *  protocol: "sign in" and "paste a key". */
+export type ProviderMethod = 'oauth' | 'api-key';
+
+/** One model a provider offers, and whether it can be used right now. */
+export type ModelOption = {
+  /** The provider's own id — e.g. 'claude-sonnet-4-5'. */
+  id: string;
+  /** The name people know it by. */
+  label: string;
+  /** True when the current account can actually use it. */
+  available: boolean;
+};
+
+/** Everything the window knows about one provider: how to connect to it, and
+ *  which of its models can be used. */
+export type ProviderAuth = {
+  /** e.g. 'anthropic'. */
+  providerId: string;
+  /** e.g. 'Anthropic'. */
+  name: string;
+  /** How this provider can be connected, in the order to offer them. */
+  methods: readonly ProviderMethod[];
+  /** The label on the sign-in option, e.g. 'Sign in with Claude Pro or Max'. */
+  oauthLabel: string | null;
+  /** The label on the API-key option, e.g. 'Anthropic API key'. */
+  apiKeyLabel: string | null;
+  /** True when an account is already connected on this computer. */
+  connected: boolean;
+  /** True when work could start right now. Differs from `connected` when the
+   *  credential is there but something else is missing. */
+  available: boolean;
+  models: readonly ModelOption[];
+};
+
+/** The whole state of "who can think for me", asked for by the window and
+ *  rebuilt by the shell each time — credentials change on another machine's
+ *  login, and a stale list is worse than none. */
+export type ConnectionState = {
+  providers: readonly ProviderAuth[];
+  /** The model chosen to work with, or null for "whatever is available". */
+  chosen: ModelChoice | null;
+};
+
+/** One moment of connecting, sent to the window as it happens. A connection
+ *  can take a minute — a browser round trip — and "it is working" is not a
+ *  sentence until the person can see which of these it is. */
+export type ConnectStep =
+  | { type: 'auth-url'; url: string; instructions?: string }
+  | {
+      type: 'device-code';
+      userCode: string;
+      verificationUri: string;
+      expiresInSeconds?: number;
+    }
+  | {
+      type: 'prompt';
+      /** Hand this back to `connectAnswer` with the person's answer. */
+      promptId: string;
+      kind: 'text' | 'secret' | 'select' | 'manual_code';
+      message: string;
+      placeholder?: string;
+      options?: readonly { id: string; label: string }[];
+    }
+  | { type: 'progress'; message: string };
+
+/** An account another tool has saved on this computer, offered so it can be
+ *  carried over in one click instead of pasted twice. Only the parts the
+ *  window may see travel: a name, a kind, and which tool saved it. */
+export type FoundAccount = {
+  /** The provider, in this app's own spelling — e.g. 'anthropic'. */
+  providerId: string;
+  /** The name people know the provider by — e.g. 'Anthropic'. */
+  name: string;
+  /** 'api-key' — a key pasted into opencode or Codex. 'sign-in' — a token
+   *  from a subscription login (ChatGPT Plus, Copilot). */
+  kind: 'api-key' | 'sign-in';
+  /** Which tool's file it was read from, for the sentence about it. */
+  source: 'opencode' | 'codex';
+};
+
+/** How a connection attempt ended. */
+export type ConnectOutcome =
+  | { kind: 'connected' }
+  | { kind: 'cancelled' }
+  | { kind: 'failed'; because: string };
 
 /**
  * What the escape hatches can offer on this machine.
@@ -194,6 +296,66 @@ export type Preferences = {
  * position to know what is installed and should not guess.
  */
 export type Hatches = { editor: string | null };
+
+/**
+ * A picture brought in to be shown to the agent.
+ *
+ * The bytes cross the wire as base64 because a structured clone would strip a
+ * `File` to nothing once it leaves the renderer; the shell hands them on to
+ * the session, which hands them to the model. `name` is only for the row of
+ * attached things — it never leaves the window.
+ */
+export type PromptAttachment = {
+  kind: 'image';
+  /** The person's own file name, for showing. */
+  name: string;
+  /** e.g. 'image/png'. */
+  mimeType: string;
+  /** The picture, base64-encoded without the data: prefix. */
+  bytes: string;
+};
+
+/**
+ * What the overview panel knows about the project's folder.
+ *
+ * Anything that lives a folder away — exactly where it is in the world of
+ * changes the agent is making — is found out here by the shell and handed over
+ * whole, because the renderer has no Node and should not have to guess whether
+ * a folder remembers its history.
+ */
+export type Overview = {
+  /**
+   * The folder's saved-state summary, or null when it is not one git knows
+   * about — a folder that was never a repository has no branch and no history,
+   * which is a fact about it rather than a problem.
+   */
+  git: GitSnapshot | null;
+  /**
+   * The address of the live preview being served for this folder, or null when
+   * nothing is being served. The window shows its preview button only while
+   * this is set — a preview that exists gets a button; one that does not gets
+   * nothing.
+   */
+  preview: string | null;
+};
+
+/** One reading of the folder's saved state, at the moment it was asked for. */
+export type GitSnapshot = {
+  /** The branch, or null when no commit exists yet. */
+  branch: string | null;
+  /** True when saved work differs from what is on disk. */
+  dirty: boolean;
+  /** Files changed but not yet saved to the project's history. */
+  unstaged: number;
+  /** Files saved to history since the last mark but not yet committed. */
+  staged: number;
+  /** Files the folder holds that history knows nothing about. */
+  untracked: number;
+  /** Saved work owned by this machine and not yet in the shared copy. */
+  ahead: number;
+  /** Saved work owned by the shared copy and not yet on this machine. */
+  behind: number;
+};
 
 /**
  * The two sentences "See it" is allowed to say while it works.
@@ -230,6 +392,7 @@ export const CHANNEL = {
   answer: 'graphe:answer',
   chooseFolder: 'graphe:choose-folder',
   event: 'graphe:event',
+  overview: 'graphe:overview',
   recentProjects: 'graphe:recent-projects',
   forgetProject: 'graphe:forget-project',
   versions: 'graphe:versions',
@@ -244,6 +407,16 @@ export const CHANNEL = {
   revealFolder: 'graphe:reveal-folder',
   visualChange: 'graphe:visual-change',
   visualFrames: 'graphe:visual-frames',
+  connection: 'graphe:connection',
+  connect: 'graphe:connect',
+  connectAnswer: 'graphe:connect-answer',
+  cancelConnect: 'graphe:cancel-connect',
+  disconnect: 'graphe:disconnect',
+  selectModel: 'graphe:select-model',
+  connectStep: 'graphe:connect-step',
+  discoveredAccounts: 'graphe:discovered-accounts',
+  importAccount: 'graphe:import-account',
+  openLink: 'graphe:open-link',
 } as const;
 
 /**
@@ -259,8 +432,9 @@ export type GrapheApi = {
   /** Work in this folder from now on. A folder that is already open is resumed
    *  exactly where it was left, conversation and spend included. */
   openProject(path: string): Promise<Result<OpenedProject>>;
-  /** Say something to the agent. Resolves when it has finished responding. */
-  prompt(text: string): Promise<Result<null>>;
+  /** Say something to the agent, with any pictures that go with it. Resolves
+   *  when it has finished responding. */
+  prompt(text: string, attachments?: readonly PromptAttachment[]): Promise<Result<null>>;
   /** Stop what it is doing. Open questions are answered no. */
   stop(): Promise<Result<null>>;
   /** Answer a question the Guard asked. False when there was no such question. */
@@ -270,6 +444,11 @@ export type GrapheApi = {
 
   /** The projects this computer remembers, newest first. */
   recentProjects(): Promise<Result<readonly RecentProject[]>>;
+
+  /** What the open project's folder looks like right now — its branch, its
+   *  saved state, how it stands against the shared copy. Empty git, not an
+   *  error, when the folder is not a repository. */
+  overview(): Promise<Result<Overview>>;
   /** Take a project off that list. The folder itself is never touched. */
   forgetProject(path: string): Promise<Result<readonly RecentProject[]>>;
 
@@ -309,4 +488,31 @@ export type GrapheApi = {
   /** A before and after has been worked out. Returns the function that stops
    *  listening. */
   onVisualChange(listener: (notice: VisualNotice) => void): () => void;
+
+  /** Everything the window knows about who can think for it. */
+  connection(): Promise<Result<ConnectionState>>;
+  /** Sign in to a provider, or paste its API key. Follows along while it
+   *  happens via `onConnectStep`; ask for `connectAnswer` when a step asks a
+   *  question. Resolves when the whole attempt is over. */
+  connect(providerId: string, method: ProviderMethod): Promise<Result<ConnectOutcome>>;
+  /** The answer to a question asked while connecting. Null cancels it. */
+  connectAnswer(promptId: string, value: string | null): Promise<Result<null>>;
+  /** Stop the connection in progress. */
+  cancelConnect(): Promise<Result<null>>;
+  /** Forget the account for one provider. The provider's own tokens are
+   *  removed from this computer. */
+  disconnect(providerId: string): Promise<Result<null>>;
+  /** Choose which model to work with. Returns the whole set of preferences. */
+  selectModel(choice: ModelChoice): Promise<Result<Preferences>>;
+  /** Follow along with a connection while it happens. Returns the function
+   *  that stops listening. */
+  onConnectStep(listener: (step: ConnectStep) => void): () => void;
+  /** The accounts opencode and Codex have saved on this computer — the ones
+   *  a person can carry over instead of connecting again. Nothing secret is
+   *  ever part of the answer. */
+  discoveredAccounts(): Promise<Result<readonly FoundAccount[]>>;
+  /** Carry one of the discovered accounts into this app's own store. */
+  importAccount(account: FoundAccount): Promise<Result<null>>;
+  /** Open a link in the person's own browser, never inside this window. */
+  openLink(url: string): Promise<Result<null>>;
 };

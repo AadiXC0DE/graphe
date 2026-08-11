@@ -162,8 +162,16 @@ const SAY = {
 /* Tool names                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/** These three sets meet at one branch in `judgeCall` and all come out `allow()`.
+ *  Three rather than one so a name sits with what it resembles, in case the
+ *  branches ever part company. A read left out of them falls to the
+ *  deny-by-default floor and starts asking permission, which is how `find`
+ *  behaved until it was listed here. */
 const READ_TOOLS = new Set(['read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat']);
-const LIST_TOOLS = new Set(['list', 'listfiles', 'listdir', 'ls', 'glob', 'tree']);
+/** Pi's `find` is `glob` under another name: it runs `fd` and returns file names
+ *  without opening any of them. The shell command of the same word is a
+ *  different program entirely — see `judgeFind`. */
+const LIST_TOOLS = new Set(['list', 'listfiles', 'listdir', 'ls', 'glob', 'tree', 'find']);
 const SEARCH_TOOLS = new Set(['search', 'grep', 'ripgrep', 'findfiles', 'codebasesearch']);
 const WRITE_TOOLS = new Set([
   'write',
@@ -188,6 +196,15 @@ const DELETE_TOOLS = new Set(['delete', 'deletefile', 'remove', 'removefile', 'r
 const SHELL_TOOLS = new Set(['bash', 'shell', 'sh', 'terminal', 'exec', 'execute', 'runcommand', 'command', 'run']);
 const SQL_TOOLS = new Set(['sql', 'query', 'dbquery', 'runsql', 'executesql', 'database', 'db', 'migrate']);
 const NETWORK_TOOLS = new Set(['fetch', 'http', 'httprequest', 'request', 'webfetch', 'download', 'upload', 'post', 'apicall']);
+/** Search engines. Their whole job is sending words out and bringing the
+ *  answer back, so the question is always about reaching the internet and
+ *  never about anything on this machine. */
+const WEB_TOOLS = new Set(['websearch', 'searchweb', 'googlesearch', 'ddgsearch', 'websearchlite']);
+/** Delegating a piece of work to a helper agent. Graphe's own helper is
+ *  read-only and cannot ask questions, but the model should not start helpers
+ *  without the person knowing — this is the one tool that spends money on
+ *  another context window. */
+const TASK_TOOLS = new Set(['task', 'subagent', 'delegate', 'handoff']);
 const PUBLISH_TOOLS = new Set(['deploy', 'publish', 'release', 'ship']);
 const SESSION_EXPORT_TOOLS = new Set(['export', 'exportsession', 'share', 'sharesession', 'sendlog', 'uploadlogs']);
 /** Our own design tools. Read-only by construction, so they stay silent. */
@@ -510,6 +527,18 @@ function collectText(input: Record<string, unknown>): string {
   return parts.join('\n');
 }
 
+/** Keys that name the payload a tool actually ships elsewhere. `query` asks the
+ *  web, `task` briefs the helper — a key hiding in either travels exactly as
+ *  far as one hiding in file contents, so both are worth the same look. */
+const OUTGOING_KEYS = ['query', 'question', 'q', 'task', 'instructions', 'prompt', 'description', 'message'];
+
+function payloadText(input: Record<string, unknown>): string {
+  const payload = readString(input, OUTGOING_KEYS);
+  const collected = collectText(input);
+  if (payload === null || payload === '') return collected;
+  return collected === '' ? payload : `${collected}\n${payload}`;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Shell parsing                                                               */
 /* -------------------------------------------------------------------------- */
@@ -768,6 +797,11 @@ function judgeRemove(tokens: Token[]): Judgement {
   return snapshotFirst('Deleting files from your project.');
 }
 
+/** The shell's `find`, which is not the tool called `find`. This one runs what
+ *  it is handed on everything it meets, which is how `find . -delete` empties a
+ *  project (S-03). Nothing joins the two paths: this is keyed on the first word
+ *  of a parsed command line and never reads the tool-name sets, so listing a
+ *  word up there cannot loosen anything down here. */
 function judgeFind(tokens: Token[]): Judgement {
   const texts = tokens.map((token) => token.text);
   if (texts.includes('-delete')) return deny(SAY.wipe);
@@ -1405,6 +1439,41 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
         ? 'Only send things you are happy for that website to keep.'
         : 'What comes back is not something I can check beforehand.',
       { mutates: sending },
+    );
+  }
+
+  if (WEB_TOOLS.has(name)) {
+    const where = readString(input, ['cwd', 'dir', 'directory', 'workingDirectory']);
+    if (where !== null) {
+      const check = containsPath(ctx.projectRoot, where);
+      if (!check.inside) return deny(check.reason ?? SAY.outsideProject);
+    }
+    // The whole point of the tool is sending words out. A key in the question
+    // is a key sent to a stranger.
+    const outbound = payloadText(input);
+    if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
+    return ask(
+      'Look something up on the internet?',
+      'I will send your question to a search provider and bring back what it finds.',
+      'The question itself is sent out, so keep keys and private details out of it.',
+      { mutates: false },
+    );
+  }
+
+  if (TASK_TOOLS.has(name)) {
+    const where = readString(input, ['cwd', 'dir', 'directory', 'workingDirectory']);
+    if (where !== null) {
+      const check = containsPath(ctx.projectRoot, where);
+      if (!check.inside) return deny(check.reason ?? SAY.outsideProject);
+    }
+    // The task text travels to a fresh process and, through it, maybe the web.
+    const outbound = payloadText(input);
+    if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
+    return ask(
+      'Send a piece of work to a helper?',
+      'I start a fresh helper with its own clean memory. It can read the project and search the web, and it cannot change anything.',
+      'It costs a little more, and its findings come back to this conversation.',
+      { mutates: false },
     );
   }
 

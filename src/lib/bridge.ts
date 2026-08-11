@@ -26,11 +26,19 @@ import { money } from '../cost/money';
 import {
   showWords,
   type AgentNotice,
+  type ConnectOutcome,
+  type ConnectStep,
+  type ConnectionState,
   type Decision,
+  type FoundAccount,
   type GrapheApi,
   type Hatches,
+  type ModelChoice,
   type OpenedProject,
+  type Overview,
   type Preferences,
+  type PromptAttachment,
+  type ProviderMethod,
   type PutBack,
   type RecentProject,
   type Result,
@@ -255,11 +263,16 @@ function previewBridge(): Bridge {
   const listeners = new Set<(notice: AgentNotice) => void>();
   const watching = new Set<(progress: ShowProgress) => void>();
   const looking = new Set<(notice: VisualNotice) => void>();
+  const connecting = new Set<(step: ConnectStep) => void>();
 
   /** Whatever project the tab has open. Every event is stamped with it, the way
    *  the shell stamps its own — the window's routing is then exercised here
    *  rather than only in the app. */
   let openPath: string | null = null;
+
+  /** The preview's own copy of what a person has chosen. Real state, so the
+   *  switch in the project menu can be turned on and its effect looked at. */
+  let preferred: Preferences = { showMe: false, model: null };
 
   const send = (event: AgentEvent): void => {
     for (const listener of listeners) listener({ project: openPath, event });
@@ -291,10 +304,6 @@ function previewBridge(): Bridge {
    *  browser tab cannot show by waiting for it to happen: money is spent by an
    *  agent doing work, and there is no agent here. Everything else in this
    *  preview waits to be asked for. */
-  /** The preview's own copy of what a person has chosen. Real state, so the
-   *  switch in the project menu can be turned on and its effect looked at. */
-  let preferred: Preferences = { showMe: false };
-
   let spendAnnounced = false;
   const announceSpend = (): void => {
     if (spendAnnounced) return;
@@ -329,7 +338,10 @@ function previewBridge(): Bridge {
       return Promise.resolve(done({ path, name }));
     },
 
-    async prompt(): Promise<Result<null>> {
+    async prompt(
+      _text: string,
+      _attachments?: readonly PromptAttachment[],
+    ): Promise<Result<null>> {
       for (const piece of inPieces(PREVIEW_REPLY)) {
         await new Promise((wake) => setTimeout(wake, 40));
         send({ type: 'message-delta', text: piece });
@@ -357,6 +369,19 @@ function previewBridge(): Bridge {
     recentProjects(): Promise<Result<readonly RecentProject[]>> {
       return Promise.resolve(done(remembered()));
     },
+
+  /** The preview's folder is a folder somebody made up, but its git is real
+   *  enough to draw the section: a branch, an uncommitted change, something
+   *  waiting on the other side. Nothing is being served for it, so there is no
+   *  preview to offer — a button that opens nothing is worse than no button. */
+  overview(): Promise<Result<Overview>> {
+    return Promise.resolve(
+      done({
+        git: { branch: 'main', dirty: true, unstaged: 2, staged: 1, untracked: 1, ahead: 0, behind: 2 },
+        preview: null,
+      }),
+    );
+  },
 
     forgetProject(path: string): Promise<Result<readonly RecentProject[]>> {
       forgotten.add(path);
@@ -487,6 +512,68 @@ function previewBridge(): Bridge {
         looking.delete(listener);
       };
     },
+
+    /** The sample connection above, with whatever model the visitor chose
+     *  worn over it. */
+    connection(): Promise<Result<ConnectionState>> {
+      return Promise.resolve(done({ ...PREVIEW_CONNECTION, chosen: preferred.model }));
+    },
+
+    /** A pretend connection: the steps are real, the browser tab is not. The
+     *  window follows along exactly as it would in the app, which is the point
+     *  of the exercise. */
+    async connect(
+      _providerId: string,
+      _method: ProviderMethod,
+    ): Promise<Result<ConnectOutcome>> {
+      for (const listener of connecting) {
+        listener({ type: 'progress', message: 'Checking what this account can do…' });
+      }
+      await new Promise((wake) => setTimeout(wake, 700));
+      for (const listener of connecting) {
+        listener({ type: 'progress', message: 'Connected.' });
+      }
+      return Promise.resolve(done({ kind: 'connected' }));
+    },
+
+    connectAnswer(_promptId: string, _value: string | null): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    cancelConnect(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    disconnect(_providerId: string): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    /** Remembered for as long as the tab is open, exactly like the switch. */
+    selectModel(choice: ModelChoice): Promise<Result<Preferences>> {
+      preferred = { ...preferred, model: choice };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    onConnectStep(listener: (step: ConnectStep) => void): () => void {
+      connecting.add(listener);
+      return () => {
+        connecting.delete(listener);
+      };
+    },
+
+    /** A browser tab has no shell and no other tool's files; there is nothing
+     *  to find, honestly. */
+    discoveredAccounts(): Promise<Result<readonly FoundAccount[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    importAccount(_account: FoundAccount): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    openLink(_url: string): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
   };
 }
 
@@ -495,6 +582,64 @@ function previewBridge(): Bridge {
 function emptyPutBack(): PutBack {
   return { title: '', at: Date.now(), undoTo: '', versions: [] };
 }
+
+/* -------------------------------------------------------------------------- */
+/* An account and some models, for a tab with no shell under it                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Who can think for this tab: the same three providers a real computer offers,
+ * in the same shape — Anthropic with an account already there, the other two
+ * waiting. The numbers are invented, but the states are the real states: what
+ * "connected" looks like against "not yet", and how a chosen model reads when
+ * it is the only thing wearing the accent.
+ */
+const PREVIEW_CONNECTION: ConnectionState = {
+  providers: [
+    {
+      providerId: 'anthropic',
+      name: 'Anthropic',
+      methods: ['oauth', 'api-key'],
+      oauthLabel: 'Sign in with Claude Pro or Max',
+      apiKeyLabel: 'Anthropic API key',
+      connected: true,
+      available: true,
+      models: [
+        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: true },
+        { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', available: true },
+        { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', available: true },
+      ],
+    },
+    {
+      providerId: 'openai-codex',
+      name: 'OpenAI Codex',
+      methods: ['oauth'],
+      oauthLabel: 'Sign in with ChatGPT Plus or Pro',
+      apiKeyLabel: null,
+      connected: false,
+      available: false,
+      models: [
+        { id: 'gpt-5', label: 'GPT-5', available: false },
+        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: false },
+      ],
+    },
+    {
+      providerId: 'opencode',
+      name: 'OpenCode Zen',
+      methods: ['api-key'],
+      oauthLabel: null,
+      apiKeyLabel: 'OpenCode API key',
+      connected: false,
+      available: false,
+      models: [
+        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: false },
+        { id: 'deepseek-v3.1', label: 'DeepSeek V3.1', available: false },
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', available: false },
+      ],
+    },
+  ],
+  chosen: { providerId: 'anthropic', modelId: 'claude-sonnet-4-5' },
+};
 
 /* -------------------------------------------------------------------------- */
 /* The one the app uses                                                        */
@@ -507,11 +652,12 @@ function connect(): Bridge {
   return {
     desktop: true,
     openProject: (path) => api.openProject(path),
-    prompt: (text) => api.prompt(text),
+    prompt: (text, attachments) => api.prompt(text, attachments),
     stop: () => api.stop(),
     answer: (callId, decision) => api.answer(callId, decision),
     chooseFolder: () => api.chooseFolder(),
     recentProjects: () => api.recentProjects(),
+    overview: () => api.overview(),
     forgetProject: (path) => api.forgetProject(path),
     versions: () => api.versions(),
     putBack: (versionId) => api.putBack(versionId),
@@ -526,6 +672,16 @@ function connect(): Bridge {
     onEvent: (listener) => api.onEvent(listener),
     visualFrames: (changeId) => api.visualFrames(changeId),
     onVisualChange: (listener) => api.onVisualChange(listener),
+    connection: () => api.connection(),
+    connect: (providerId, method) => api.connect(providerId, method),
+    connectAnswer: (promptId, value) => api.connectAnswer(promptId, value),
+    cancelConnect: () => api.cancelConnect(),
+    disconnect: (providerId) => api.disconnect(providerId),
+    selectModel: (choice) => api.selectModel(choice),
+    onConnectStep: (listener) => api.onConnectStep(listener),
+    discoveredAccounts: () => api.discoveredAccounts(),
+    importAccount: (account) => api.importAccount(account),
+    openLink: (url) => api.openLink(url),
   };
 }
 

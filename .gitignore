@@ -9,6 +9,9 @@ dist-electron/
 coverage/
 .screenshots/*.png
 !.screenshots/.gitkeep
+.agents/
+.claude/
+skills-lock.json
 
 # Internal working notes — strategy, research, product thinking. Not published.
 notes/

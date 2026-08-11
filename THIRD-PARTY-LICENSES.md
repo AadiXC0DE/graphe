@@ -9,7 +9,7 @@ what we depend on and why lives in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.
 Graphe is not a fork of any of these projects. We depend on them as published packages and have
 not modified their source. Their names and marks belong to their respective owners.
 
-186 packages, generated 2026-08-09.
+187 packages, generated 2026-08-11.
 
 ## Summary
 
@@ -182,6 +182,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [trim-lines](https://github.com/wooorm/trim-lines) | 3.0.1 | MIT |
 | [ts-algebra](https://github.com/ThomasAribart/ts-algebra#readme) | 2.0.0 | MIT |
 | [tslib](https://www.typescriptlang.org/) | 2.8.1 | 0BSD |
+| [typebox](https://github.com/sinclairzx81/typebox) | 1.3.12 | MIT |
 | [typebox](https://github.com/sinclairzx81/typebox) | 1.3.7 | MIT |
 | [undici](https://undici.nodejs.org) | 8.9.0 | MIT |
 | [undici-types](https://undici.nodejs.org) | 6.21.0 | MIT |
@@ -1858,6 +1859,16 @@ Licence: MIT
 <https://www.typescriptlang.org/>
 
 Licence: 0BSD
+
+```
+[object Object]
+```
+
+### typebox 1.3.12
+
+<https://github.com/sinclairzx81/typebox>
+
+Licence: MIT
 
 ```
 [object Object]

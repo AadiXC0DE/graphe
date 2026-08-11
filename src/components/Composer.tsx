@@ -8,6 +8,8 @@ import {
   type KeyboardEvent,
 } from 'react';
 import Attachments, { type Attachment } from './Attachments';
+import ThinkingWith from './ThinkingWith';
+import type { ConnectionState, ModelChoice } from '../lib/ipc';
 import { checkFile, extensionOf, figmaLink, readableSize } from '../lib/attachments';
 import './Composer.css';
 
@@ -31,6 +33,10 @@ type Props = {
    * have.
    */
   draft?: string;
+  /** Who can think for this computer, for the chip in the row below the box. */
+  connection?: ConnectionState | null;
+  onSelectModel?: (choice: ModelChoice) => void;
+  onConnect?: () => void;
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -66,6 +72,9 @@ export default function Composer({
   attachments = [],
   onAttachmentsChange,
   draft,
+  connection,
+  onSelectModel,
+  onConnect,
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -287,6 +296,14 @@ export default function Composer({
             />
           </svg>
         </button>
+
+        {onSelectModel === undefined || onConnect === undefined ? null : (
+          <ThinkingWith
+            state={connection ?? null}
+            onSelect={onSelectModel}
+            onConnect={onConnect}
+          />
+        )}
 
         {/* One line, one job. It used to repeat the placeholder back at you in
             smaller grey type — two strings saying the same thing, in the one

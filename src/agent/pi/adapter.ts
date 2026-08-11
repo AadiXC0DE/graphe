@@ -36,9 +36,18 @@
 
 import type { GuardFacts } from '../guard/policy';
 import { evaluate, requiresSnapshot } from '../guard/policy';
-import type { AgentEvent, ToolCall, Verdict } from '../types';
+import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
+import { grapheTools } from './tools';
+import {
+  collectAccounts,
+  credentialFor,
+  readFoundCredentials,
+  type FoundAccount as FoundOnDisk,
+} from './importers';
+
+import { join } from 'node:path';
 
 /** Yes or no, from a person. There is deliberately no third answer: no "always",
  *  no "for this session", no "don't ask again". Confirmation fatigue is what
@@ -235,6 +244,10 @@ export type CreateSessionOptions = {
    *  `~/.pi/agent`, which is where signing in puts them. Worth overriding in a
    *  test: Pi creates the folder on sight. */
   agentDir?: string;
+  /** The model chosen to work with, or null for "whatever is available". The
+   *  id is Pi's own — resolved inside this file, where the model objects
+   *  live, and never heard of outside it. */
+  model?: { providerId: string; modelId: string } | null;
 };
 
 /**
@@ -246,8 +259,15 @@ export type CreateSessionOptions = {
  * agreed to keep working through the next breaking change.
  */
 export type GrapheSession = {
-  /** Say something to the agent. Resolves when it has finished responding. */
-  prompt(text: string): Promise<void>;
+  /** Say something to the agent. Resolves when it has finished responding.
+   *  Pictures travel with the message; omitted when there are none. */
+  prompt(text: string, images?: readonly ImageCard[]): Promise<void>;
+  /** Work with a different model from now on, keeping the conversation. False
+   *  when the choice does not resolve to a model this computer can use; the
+   *  session then carries on with what it had rather than picking for you. */
+  useModel(choice: { providerId: string; modelId: string } | null): Promise<boolean>;
+  /** Which model is answering, or null for "whatever the account offers". */
+  readonly model: { providerId: string; modelId: string } | null;
   /** Stop what it is doing now. Open questions are answered no. */
   stop(): Promise<void>;
   /** Finish with this session. Safe to call twice. */
@@ -260,12 +280,281 @@ export type GrapheSession = {
 
 type Pi = typeof import('@earendil-works/pi-coding-agent');
 type PiToolCallEvent = import('@earendil-works/pi-coding-agent').ToolCallEvent;
+/** The runtime instance, and the interaction its login flow asks for. Both are
+ *  Pi shapes; the app's own copies are declared below and cast at this seam.
+ *  Derived from `create` rather than the class itself — the constructor is
+ *  private, and the seam should never depend on it either. */
+type PiRuntime = Awaited<ReturnType<Pi['ModelRuntime']['create']>>;
+type PiAuthInteraction = Parameters<PiRuntime['login']>[2];
 
 async function loadPi(): Promise<Pi> {
   try {
     return await import('@earendil-works/pi-coding-agent');
   } catch (cause) {
     throw new AdapterError('I could not start the part of me that does the work.', { cause });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Connecting an account                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** The two ways to connect a provider, in the words the window offers them. */
+export type ProviderMethod = 'oauth' | 'api-key';
+
+/** One provider, as plain data the window can draw. Everything Pi-shaped is
+ *  read through here and left behind: the window never hears the words
+ *  "credential", "runtime" or "catalog". */
+export type ProviderSummary = {
+  providerId: string;
+  name: string;
+  methods: readonly ProviderMethod[];
+  oauthLabel: string | null;
+  apiKeyLabel: string | null;
+  connected: boolean;
+  available: boolean;
+  models: readonly { id: string; label: string; available: boolean }[];
+};
+
+/** The app's own copy of Pi's auth interaction. The shapes match on purpose —
+ *  the main process implements this, the window implements the steps it emits,
+ *  and neither side is allowed to know the shapes belong to Pi. */
+export type OurAuthPrompt =
+  | { type: 'text'; message: string; placeholder?: string; signal?: AbortSignal }
+  | { type: 'secret'; message: string; placeholder?: string; signal?: AbortSignal }
+  | { type: 'manual_code'; message: string; placeholder?: string; signal?: AbortSignal }
+  | {
+      type: 'select';
+      message: string;
+      options: readonly { id: string; label: string; description?: string }[];
+      signal?: AbortSignal;
+    };
+
+export type OurAuthEvent =
+  | { type: 'auth_url'; url: string; instructions?: string }
+  | {
+      type: 'device_code';
+      userCode: string;
+      verificationUri: string;
+      intervalSeconds?: number;
+      expiresInSeconds?: number;
+    }
+  | { type: 'progress'; message: string }
+  | { type: 'info'; message: string };
+
+export type OurAuthInteraction = {
+  signal?: AbortSignal;
+  prompt(prompt: OurAuthPrompt): Promise<string>;
+  notify(event: OurAuthEvent): void;
+};
+
+/** The default credential folder — `~/.pi/agent`, the same place Pi's own
+ *  command line signs in to. One home for accounts, so connecting here is
+ *  connecting everywhere. */
+export async function defaultAgentDir(): Promise<string> {
+  const pi = await loadPi();
+  return pi.getAgentDir();
+}
+
+/** One runtime per credential folder, created once and shared by every
+ *  session and every connection. It writes the same `auth.json` a session
+ *  would read, so a provider connected here works the next time a folder
+ *  opens — no restart, no handshake between the two halves. */
+const runtimes = new Map<string, Promise<PiRuntime>>();
+
+function runtimeFor(agentDir: string): Promise<PiRuntime> {
+  const already = runtimes.get(agentDir);
+  if (already !== undefined) return already;
+  const pending = loadPi().then((pi) =>
+    pi.ModelRuntime.create({
+      authPath: join(agentDir, 'auth.json'),
+      modelsPath: join(agentDir, 'models.json'),
+    }),
+  );
+  runtimes.set(agentDir, pending);
+  // A failure here is a failure of the whole folder's worth of connections;
+  // forget it so the next ask tries again rather than inheriting the error.
+  void pending.catch(() => {
+    runtimes.delete(agentDir);
+  });
+  return pending;
+}
+
+/** Everything the window can know about who can think for it, read through
+ *  one call. Nothing here throws for a provider in a bad state — each is read
+ *  defensively and reported as it actually is, because a provider the runtime
+ *  cannot reach is a provider the window should still see, greyed out. */
+export async function connection(agentDir: string): Promise<readonly ProviderSummary[]> {
+  const runtime = await runtimeFor(agentDir);
+
+  let connected = new Set<string>();
+  try {
+    for (const one of await runtime.listCredentials()) connected.add(one.providerId);
+  } catch {
+    // No account list is still a list — of nothing.
+  }
+
+  const summaries: ProviderSummary[] = [];
+  for (const provider of runtime.getProviders()) {
+    let models: readonly { id: string; label: string; available: boolean }[] = [];
+    try {
+      models = provider.getModels().map((model) => ({ id: model.id, label: model.name, available: false }));
+    } catch {
+      // Unreadable providers are not offered at all.
+    }
+    if (models.length === 0) continue;
+
+    const methods: ProviderMethod[] = [];
+    let oauthLabel: string | null = null;
+    let apiKeyLabel: string | null = null;
+    if (provider.auth.oauth?.login !== undefined) {
+      methods.push('oauth');
+      oauthLabel = provider.auth.oauth.loginLabel ?? provider.auth.oauth.name ?? null;
+    }
+    if (provider.auth.apiKey?.login !== undefined) {
+      methods.push('api-key');
+      apiKeyLabel = provider.auth.apiKey.name ?? null;
+    }
+    if (methods.length === 0) continue;
+
+    // Which of its models can actually be used right now. Read through the
+    // runtime's own judgement — it knows how the stored credential resolves
+    // per model, and the window should not have to guess.
+    let usable = new Set<string>();
+    try {
+      for (const model of await runtime.getAvailable(provider.id)) usable.add(model.id);
+    } catch {
+      // Nothing usable is a true answer for a provider that is not configured.
+    }
+
+    summaries.push({
+      providerId: provider.id,
+      name: provider.name,
+      methods,
+      oauthLabel,
+      apiKeyLabel,
+      connected: connected.has(provider.id),
+      available: safeConfigured(runtime, provider.id),
+      models: models.map((model) =>
+        usable.has(model.id) ? { ...model, available: true } : model,
+      ),
+    });
+  }
+  return summaries;
+}
+
+function safeConfigured(runtime: PiRuntime, providerId: string): boolean {
+  try {
+    return runtime.hasConfiguredAuth(providerId);
+  } catch {
+    return false;
+  }
+}
+
+/** Sign in to a provider, or paste its API key. The interaction is the main
+ *  process's: it opens the browser, asks the window for keys and pasted
+ *  codes, and reports each step on its way. Resolves when the attempt is
+ *  over, or rejects with the reason it was not. */
+export async function connectToProvider(
+  agentDir: string,
+  providerId: string,
+  method: ProviderMethod,
+  interaction: OurAuthInteraction,
+): Promise<void> {
+  const runtime = await runtimeFor(agentDir);
+  // Pi spells the api-key method with an underscore. The window never hears
+  // either spelling — this seam is where one becomes the other.
+  const piMethod = method === 'api-key' ? 'api_key' : 'oauth';
+  await runtime.login(providerId, piMethod, interaction as PiAuthInteraction);
+}
+
+/** Forget a provider's account on this computer. */
+export async function disconnectProvider(agentDir: string, providerId: string): Promise<void> {
+  const runtime = await runtimeFor(agentDir);
+  await runtime.logout(providerId);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Accounts other tools already saved                                          */
+/* -------------------------------------------------------------------------- */
+
+/** An account opencode or Codex saved, as the window may see it. */
+export type FoundAccount = FoundOnDisk & { name: string };
+
+/**
+ * Accounts opencode and Codex have saved on this computer, narrowed to what
+ * this app can actually use: a provider Pi does not know, or an account it
+ * already has, is not offered. Nothing secret crosses back — the window sees
+ * a name, a kind and a sentence of where it came from.
+ */
+export async function discoveredAccounts(
+  agentDir: string,
+): Promise<readonly FoundAccount[]> {
+  const runtime = await runtimeFor(agentDir);
+  const known = new Map<string, string>();
+  for (const provider of runtime.getProviders()) known.set(provider.id, provider.name);
+
+  let connected = new Set<string>();
+  try {
+    for (const one of await runtime.listCredentials()) connected.add(one.providerId);
+  } catch {
+    // No account list is still a list — of nothing.
+  }
+
+  const found = collectAccounts(await readFoundCredentials());
+  return found
+    .filter((one) => known.has(one.providerId) && !connected.has(one.providerId))
+    .map((one) => ({ ...one, name: known.get(one.providerId) ?? one.providerId }));
+}
+
+/**
+ * Carry one of those accounts into this app's own store — the same `auth.json`
+ * a session would read, so the connection works the moment it lands. The
+ * secret is re-read from the other tool's file here, at import time, and never
+ * cached anywhere else.
+ *
+ * It goes through `login` because `setRuntimeApiKey`, which this used to call,
+ * only sets a key in a Map — an account brought over that way was gone on quit,
+ * and never reached the separate process the `task` tool spawns. `login` is the
+ * one public way to save a credential, and its paste-a-key flow asks a single
+ * question, which we answer with the key we already have.
+ */
+export async function importAccount(
+  agentDir: string,
+  account: FoundOnDisk,
+): Promise<void> {
+  const credential = await credentialFor(account);
+  if (credential === null) {
+    throw new AdapterError(
+      `That account is no longer saved on this computer — the tool that kept it must have forgotten it.`,
+    );
+  }
+  const runtime = await runtimeFor(agentDir);
+
+  // Both kinds of credential arrive the same way at Pi: as the bearer key its
+  // openai-style providers send. A sign-in token is a token with the same
+  // job — this is exactly how opencode itself uses the ChatGPT one.
+  // Only the question that asked for a secret. A few providers ask more than
+  // one — Cloudflare wants an account id, Bedrock opens with a menu — and
+  // answering all of them with the key files it in the wrong place, or hands it
+  // to a `select` that throws with the answer in the message.
+  const answerWithTheKey: OurAuthInteraction = {
+    prompt: async (question) => {
+      if (question.type !== 'secret') {
+        throw new AdapterError(
+          `${account.providerId} asks for more than a key, so it cannot be brought over from another tool. Connect it here instead.`,
+        );
+      }
+      return credential.secret;
+    },
+    notify: () => {},
+  };
+
+  try {
+    await runtime.login(account.providerId, 'api_key', answerWithTheKey as PiAuthInteraction);
+  } catch (cause) {
+    if (cause instanceof AdapterError) throw cause;
+    throw new AdapterError('I could not save that account on this computer.', { cause });
   }
 }
 
@@ -283,6 +572,16 @@ function plainly(cause: unknown): string {
   if (cause instanceof Error && cause.message !== '') return cause.message;
   return 'Something went wrong on my side, and I have stopped where I was.';
 }
+
+/**
+ * All seven of Pi's tools, named rather than inherited.
+ *
+ * Pi's default turns on only four — `grep`, `find` and `ls` are built and then
+ * never handed to the model — which left the agent spelling its searches as
+ * shell commands for the Guard to parse, instead of making the reads they are.
+ * Naming the set here also means a Pi upgrade cannot quietly change it.
+ */
+const WORKING_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as const;
 
 /**
  * Open a session against a project.
@@ -339,7 +638,8 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     timeline: options.timeline,
   });
 
-  const agentDir = options.agentDir ?? pi.getAgentDir();
+  const agentDir = options.agentDir ?? (await defaultAgentDir());
+  const runtime = await runtimeFor(agentDir);
   const loader = new pi.DefaultResourceLoader({
     cwd: options.projectRoot,
     agentDir,
@@ -356,6 +656,27 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   });
   await loader.reload();
 
+  // Graphe's own tools — the web search and the task helper — travel as Pi's
+  // `customTools`, which keeps them out of the extension machinery entirely:
+  // no discovery, no third-party injection point, no name collision with
+  // something a plugin registered. The Guard still sees every one of their
+  // calls, because they are ordinary tool calls like any other.
+  const customTools = grapheTools(agentDir);
+
+  // The chosen model, resolved here where the model objects live. A choice
+  // that no longer exists — the provider removed it, or the ids changed — is
+  // simply no choice: Pi falls back to whatever the account makes available
+  // rather than the window learning about it as a failure.
+  const chosen = options.model;
+  const model =
+    chosen === null || chosen === undefined
+      ? undefined
+      : runtime.getModel(chosen.providerId, chosen.modelId) ?? undefined;
+
+  /* Our own ids rather than Pi's `Model`, so no Pi shape leaves this file. */
+  let inUse: { providerId: string; modelId: string } | null =
+    model === undefined || chosen === null || chosen === undefined ? null : chosen;
+
   let session;
   try {
     session = (
@@ -363,6 +684,13 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         cwd: options.projectRoot,
         agentDir,
         resourceLoader: loader,
+        // Naming `tools` at all switches Pi from "the four defaults plus every
+        // custom tool" to "exactly this list", so ours have to be in it or they
+        // vanish. Taken off the tools themselves rather than written twice.
+        tools: [...WORKING_TOOLS, ...customTools.map((tool) => tool.name)],
+        customTools,
+        modelRuntime: runtime,
+        model,
         sessionManager:
           options.sessionPath === undefined
             ? pi.SessionManager.inMemory(options.projectRoot)
@@ -431,10 +759,23 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   };
 
   return {
-    async prompt(text: string): Promise<void> {
+    async prompt(text: string, images?: readonly ImageCard[]): Promise<void> {
       if (closed) throw new AdapterError('This session has been closed.');
       try {
-        await session.prompt(text);
+        // Pi's own envelope, made only at this seam: nothing outside this file
+        // ever hears the words `ImageContent`. The pictures are sent only when
+        // there are some — an empty array is not an image to attach.
+        const withPictures =
+          images === undefined || images.length === 0
+            ? undefined
+            : {
+                images: images.map((picture) => ({
+                  type: 'image' as const,
+                  data: picture.bytes,
+                  mimeType: picture.mimeType,
+                })),
+              };
+        await session.prompt(text, withPictures);
       } catch (cause) {
         const message = plainly(cause);
         relay.failed(message);
@@ -444,6 +785,28 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       // first, so calling it mid-turn would abandon the answer somebody is
       // waiting for in order to tidy the notes about it.
       await tidyIfItHasGrownLong();
+    },
+
+    async useModel(next): Promise<boolean> {
+      if (closed) return false;
+      // Pi has no "no model" to set, so clearing only affects the next session.
+      if (next === null) {
+        inUse = null;
+        return true;
+      }
+      const resolved = runtime.getModel(next.providerId, next.modelId);
+      if (resolved === undefined) return false;
+      try {
+        await session.setModel(resolved);
+      } catch {
+        return false;
+      }
+      inUse = next;
+      return true;
+    },
+
+    get model(): { providerId: string; modelId: string } | null {
+      return inUse;
     },
 
     async stop(): Promise<void> {

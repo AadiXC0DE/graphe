@@ -191,6 +191,13 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       ];
     }
 
+    case 'tool-progress':
+      return turns.map((turn) =>
+        turn.kind === 'did' && turn.callId === event.id && turn.state === 'running'
+          ? { ...turn, detail: event.text }
+          : turn,
+      );
+
     case 'tool-end':
       return closeActivity(turns, event.id, event.ok ? 'done' : 'failed');
 

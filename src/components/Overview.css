@@ -1,0 +1,275 @@
+/* The overview: one panel folded against the right edge.
+
+   It replaces the standalone version rail — the same width, the same kind of
+   fixed panel, the same first-appearance fade — and the rail now lives inside
+   it, wearing the panel's edges instead of its own. Everything here is a
+   reading of things that happened elsewhere (see Overview.tsx), and everything
+   here is quiet: hairlines between the blocks, the smallest type the product
+   ships, and the meter docked into the foot where it has always docked. */
+
+.overview {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: var(--rail-width);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+
+  /* The rail's old arrival, once, and only once: this panel appears the first
+     time there is something to tell and then stays. */
+  animation: overview-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes overview-arrives {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Room for the traffic lights, which sit over the whole window. */
+[data-shell='desktop'] .overview__block:first-child {
+  padding-top: var(--space-7);
+}
+
+.overview__block {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The same section-heading grammar the rail's title always used. */
+.overview__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   Git
+   The branch in the machine's own letters — a branch is a name, and a name
+   is the one thing here that is not a translation — and the state in the
+   words a designer would use: saved, not saved.
+   --------------------------------------------------------------------------- */
+
+.overview__git-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.overview__gitline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.overview__branch {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.overview__gitstate {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview__gitsub {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   Research
+   The searches this project has made, last first. Silence is the success
+   state — a search that worked leaves no marker; the only words under a
+   query are the ones that say it did not.
+   --------------------------------------------------------------------------- */
+
+.overview__research {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.overview__researchrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.overview__query {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview__researchnote {
+  flex: none;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.overview__more {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   References
+   What the agent was sent to work from. The picture is a real thumbnail when
+   there is one, and a folder glyph when there is not — a design file is a
+   place, and a place has no thumbnail.
+   --------------------------------------------------------------------------- */
+
+.overview__refs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.overview__ref {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.overview__thumb {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.overview__reficon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+
+.overview__reftext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.overview__refname {
+  font-size: var(--text-sm);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview__refnote {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------------------
+   The timeline, mounted in the panel
+   The rail's own CSS still thinks it owns the right-hand edge of the window.
+   Here it becomes a block in the panel's flow: the panel is the fixed body,
+   the rail's border and its own scroll are the panel's, and the sticky title
+   becomes the panel's section heading.
+   --------------------------------------------------------------------------- */
+
+.overview .rail {
+  position: static;
+  width: auto;
+  border-left: none;
+  padding: 0;
+  overflow: visible;
+  animation: none;
+}
+
+.overview .rail__title {
+  position: static;
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  background: var(--bg);
+}
+
+.overview .rail__list {
+  padding: 0 var(--space-2) var(--space-3);
+}
+
+/* The panel is a flex column that ends with the meter, which docks into its
+   foot: the versions list scrolls above it and the meter sits on the bottom
+   edge whether the list above it is one row or forty. */
+.overview {
+  padding-bottom: var(--space-3);
+}
+
+/* The meter, docked. The panel's own foot — flush to the glass, one hairline
+   between it and the timeline above it. */
+.overview .cost-meter--corner {
+  position: static;
+  width: auto;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  margin: auto 0 0;
+}
+
+@media (max-width: 1100px) {
+  .overview {
+    width: var(--rail-width-tight);
+  }
+}
+
+@media (max-width: 720px) {
+  .overview {
+    width: 240px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overview {
+    animation: none;
+  }
+}

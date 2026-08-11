@@ -23,6 +23,7 @@ import * as path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import type { AgentEvent, Money } from '../src/agent/types';
+import { TASK_LABEL, WEB_SEARCH_LABEL } from '../src/lib/describe';
 import type { AgentNotice, SavedVersion } from '../src/lib/ipc';
 import {
   changeCurrent,
@@ -32,7 +33,9 @@ import {
   noDesks,
   openDesk,
   receive,
+  researchLog,
 } from '../src/lib/projects';
+import type { Turn } from '../src/lib/thread';
 import { MOST_REMEMBERED, Recents, nameOf } from '../src/projects/recents';
 import { Workspaces } from '../src/projects/workspaces';
 
@@ -416,5 +419,77 @@ describe('P-03 desks, in the window', () => {
     expect(after.current).toBeNull();
     expect(currentDesk(after)).toBeNull();
     expect(after.byPath[TWO.path]).toBe(desks.byPath[TWO.path]);
+  });
+});
+
+describe('P-04 the research log, derived from the thread', () => {
+  /** A web-search step, the shape `describe.ts` and the event stream actually
+   *  make: one turn per search, the query in the detail, the state from the
+   *  two events that bracket the call. */
+  const search = (id: string, query: string, state: 'running' | 'done' | 'failed'): Turn => ({
+    kind: 'did',
+    id,
+    callId: `call-${id}`,
+    state,
+    label: WEB_SEARCH_LABEL,
+    detail: query,
+  });
+
+  it('picks the web searches out of a mixed conversation', () => {
+    const turns: Turn[] = [
+      { kind: 'said', id: 't1', from: 'you', text: 'check how big this should be', streaming: false },
+      search('t2', 'css clamp() fluid type best practices', 'done'),
+      { kind: 'said', id: 't3', from: 'graphe', text: 'Done.', streaming: false },
+      search('t4', 'framer motion vs css animations', 'failed'),
+    ];
+
+    expect(researchLog(turns)).toEqual([
+      { id: 't2', query: 'css clamp() fluid type best practices', state: 'done' },
+      { id: 't4', query: 'framer motion vs css animations', state: 'failed' },
+    ]);
+  });
+
+  it('leaves the work-alone steps out — a delegate is not a search', () => {
+    const turns: Turn[] = [
+      search('t2', 'css clamp() fluid type best practices', 'done'),
+      {
+        kind: 'did',
+        id: 't5',
+        callId: 'call-t5',
+        state: 'done',
+        label: TASK_LABEL,
+        detail: 'a small script to try',
+      },
+    ];
+
+    expect(researchLog(turns)).toHaveLength(1);
+  });
+
+  it('keeps the state a search is in, and says a running search is running', () => {
+    expect(researchLog([search('t6', 'what is this', 'running')])).toEqual([
+      { id: 't6', query: 'what is this', state: 'running' },
+    ]);
+  });
+
+  it('does not invent a query where the search said nothing', () => {
+    const quiet: Turn = {
+      kind: 'did',
+      id: 't7',
+      callId: 'call-t7',
+      state: 'done',
+      label: WEB_SEARCH_LABEL,
+    };
+
+    expect(researchLog([quiet])).toEqual([{ id: 't7', query: '', state: 'done' }]);
+  });
+
+  it('survives the whole loop — the running line becomes the done line', () => {
+    // What the window actually keeps: the same turn, its state rewritten by the
+    // second half of the search's two events.
+    const turn = search('t8', 'one more search', 'running');
+    const finished = search('t8', 'one more search', 'done');
+
+    expect(researchLog([turn])[0]?.state).toBe('running');
+    expect(researchLog([finished])[0]?.state).toBe('done');
   });
 });

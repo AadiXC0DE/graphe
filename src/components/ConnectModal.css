@@ -1,0 +1,683 @@
+/* The connect screen: who can think for this computer.
+
+   It is the one screen the product shows that it does not own the look of — a
+   dark panel over whatever theme the window wears. That is deliberate: the
+   window around it is furniture for reading and writing, and the moment of
+   connecting is the one time the app asks for something *before* any of that
+   exists. A deliberate, self-contained dark room reads as "this is the moment
+   that sets everything else up", and it looks the same on somebody's bright
+   desktop and somebody's dark one — which is when first impressions happen.
+
+   Everything here is its own palette, written out rather than borrowed from
+   the tokens, so nothing theme-dependent can leak in. */
+
+.connectmodal {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+}
+
+/* The dim behind the panel, and the whole screen as one click-to-close. */
+.connectmodal__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  background: rgb(0 0 0 / 0.5);
+  cursor: default;
+  animation: backdrop-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes backdrop-arrives {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.connectmodal__panel {
+  position: relative;
+  width: min(520px, 100%);
+  max-height: min(680px, calc(100vh - var(--space-7)));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #2b2b28;
+  border-radius: var(--radius-lg);
+  background: #171716;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.5);
+  color: #f2f2ef;
+  animation: panel-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes panel-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.connectmodal__head {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5) var(--space-3);
+  border-bottom: 1px solid #262624;
+}
+
+.connectmodal__titlewrap {
+  min-width: 0;
+}
+
+.connectmodal__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #f2f2ef;
+}
+
+.connectmodal__sub {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: #a2a29a;
+}
+
+.connectmodal__close {
+  flex: none;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #8b8b83;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.connectmodal__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.connectmodal__body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.connectmodal__loading {
+  margin: var(--space-3) 0;
+  font-size: var(--text-sm);
+  color: #a2a29a;
+}
+
+/* ---------------------------------------------------------------------------
+   Accounts other tools already saved
+   The top of the body, before any provider card: what opencode and Codex
+   have saved on this machine, each one a single "use this" away. The whole
+   promise is that nothing already on the computer gets pasted twice.
+   --------------------------------------------------------------------------- */
+
+.connectmodal__found {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid #262624;
+}
+
+.connectmodal__foundsub {
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8b8b83;
+}
+
+.connectmodal__foundrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid #2e2e2b;
+  border-radius: var(--radius-md);
+  background: #1d1d1b;
+}
+
+.connectmodal__foundtext {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.connectmodal__foundname {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: #f2f2ef;
+}
+
+.connectmodal__foundsource {
+  font-size: var(--text-2xs);
+  color: #8b8b83;
+}
+
+.connectmodal__foundrow .connectmodal__action {
+  flex: none;
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   The step the connection is on
+   One line at the top of the body, so the question being asked is never below
+   the fold. A connection that is working shows a spinner beside its sentence;
+   a connection asking for something shows the asking, in full.
+   --------------------------------------------------------------------------- */
+
+.connectmodal__step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid #2e2e2b;
+  border-radius: var(--radius-md);
+  background: #1d1d1b;
+}
+
+.connectmodal__spin {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 2px solid #3a3a36;
+  border-top-color: #e0714d;
+  animation: connectmodal-spin 0.9s linear infinite;
+}
+
+@keyframes connectmodal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.connectmodal__stepmessage {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: #d6d6cf;
+}
+
+.connectmodal__host {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: #f2f2ef;
+}
+
+.connectmodal__usercode {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  letter-spacing: 0.18em;
+  color: #f2f2ef;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid #3a3a36;
+  border-radius: var(--radius-sm);
+  background: #10100f;
+}
+
+.connectmodal__prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid #2e2e2b;
+  border-radius: var(--radius-md);
+  background: #1d1d1b;
+}
+
+.connectmodal__promptform {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.connectmodal__input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 var(--space-3);
+  border: 1px solid #3a3a36;
+  border-radius: var(--radius-sm);
+  background: #10100f;
+  color: #f2f2ef;
+  font-size: var(--text-sm);
+  font-family: inherit;
+}
+
+.connectmodal__input::placeholder {
+  color: #8b8b83;
+}
+
+.connectmodal__input:focus-visible {
+  outline: 2px solid #e0714d;
+  outline-offset: 1px;
+}
+
+.connectmodal__promptrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.connectmodal__send {
+  min-height: 34px;
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: #e0714d;
+  color: #171716;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.connectmodal__send:active {
+  transform: scale(0.97);
+}
+
+.connectmodal__send:focus-visible {
+  outline: 2px solid #f2f2ef;
+  outline-offset: 2px;
+}
+
+.connectmodal__send:disabled {
+  opacity: 0.45;
+}
+
+.connectmodal__bare,
+.connectmodal__selectoption--bare {
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #a2a29a;
+  font-size: var(--text-sm);
+}
+
+.connectmodal__select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.connectmodal__selectoption {
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid #3a3a36;
+  border-radius: var(--radius-sm);
+  background: #262624;
+  color: #f2f2ef;
+  font-size: var(--text-sm);
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* ---------------------------------------------------------------------------
+   The filter
+   Only once the list is long enough to be worth filtering. A field above six
+   rows you can already see is a field in the way.
+   --------------------------------------------------------------------------- */
+
+.connectmodal__filter {
+  padding: var(--space-3) var(--space-5) 0;
+}
+
+.connectmodal__filterfield {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid #2e2e2b;
+  border-radius: var(--radius-sm);
+  background: #10100f;
+  color: #f2f2ef;
+  font-size: var(--text-sm);
+  font-family: inherit;
+}
+
+.connectmodal__filterfield::placeholder {
+  color: #8b8b83;
+}
+
+.connectmodal__filterfield:focus-visible {
+  outline: 2px solid #e0714d;
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------------------
+   A provider
+   One row: name, whether it is connected, and how many models it has. The
+   models are underneath and folded away — the chip beside the composer is
+   where a model gets picked day to day, so this screen leads with accounts.
+   --------------------------------------------------------------------------- */
+
+.connectmodal__provider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid #262624;
+  border-radius: var(--radius-md);
+  background: #1d1d1b;
+}
+
+/* No height animation on the fold. This is the most-clicked thing on the
+   screen, and the frequency rule bans motion on what people see constantly. */
+.connectmodal__providerhead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+
+.connectmodal__providerhead:focus-visible {
+  outline: 2px solid #e0714d;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.connectmodal__chevron {
+  display: inline-flex;
+  flex: none;
+  color: #8b8b83;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.connectmodal__chevron--open {
+  transform: rotate(90deg);
+}
+
+.connectmodal__providername {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: #f2f2ef;
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.connectmodal__state {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8b8b83;
+}
+
+.connectmodal__state--on {
+  color: #7fbf8f;
+}
+
+.connectmodal__connectrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.connectmodal__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #7fbf8f;
+  color: #10100f;
+}
+
+.connectmodal__checklabel {
+  font-size: var(--text-xs);
+  color: #a2a29a;
+}
+
+.connectmodal__disconnect {
+  margin-left: auto;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #8b8b83;
+  font-size: var(--text-xs);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.connectmodal__action {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid #3a3a36;
+  border-radius: var(--radius-sm);
+  background: #262624;
+  color: #f2f2ef;
+  font-size: var(--text-sm);
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.connectmodal__action:active {
+  transform: scale(0.97);
+}
+
+.connectmodal__action:focus-visible,
+.connectmodal__disconnect:focus-visible,
+.connectmodal__bare:focus-visible,
+.connectmodal__selectoption:focus-visible {
+  outline: 2px solid #e0714d;
+  outline-offset: 1px;
+}
+
+.connectmodal__action:disabled,
+.connectmodal__disconnect:disabled {
+  opacity: 0.45;
+}
+
+.connectmodal__emptymethods {
+  font-size: var(--text-xs);
+  color: #8b8b83;
+}
+
+/* The whole model list, one row per model. */
+.connectmodal__models {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.connectmodal__model {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 34px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  color: #d6d6cf;
+  font-size: var(--text-sm);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.connectmodal__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3a3a36;
+}
+
+.connectmodal__model--available .connectmodal__dot,
+.connectmodal__model:not(.connectmodal__model--off) .connectmodal__dot {
+  background: #7fbf8f;
+}
+
+.connectmodal__modellabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connectmodal__now,
+.connectmodal__ready,
+.connectmodal__locked {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--text-2xs);
+}
+
+.connectmodal__ready {
+  color: #7fbf8f;
+}
+
+.connectmodal__locked {
+  color: #8b8b83;
+}
+
+.connectmodal__now {
+  color: #e0714d;
+}
+
+.connectmodal__model--chosen {
+  border-color: #3a3a36;
+  background: #262624;
+}
+
+.connectmodal__model--off {
+  color: #8b8b83;
+}
+
+/* ---------------------------------------------------------------------------
+   The foot
+   The quietest part: how the attempt ended, and where the screen lives for
+   next time. */
+.connectmodal__failure {
+  margin: 0;
+  padding: var(--space-2) var(--space-5);
+  border-top: 1px solid #262624;
+  background: #201514;
+  color: #e8a08a;
+  font-size: var(--text-sm);
+}
+
+.connectmodal__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-5);
+  border-top: 1px solid #262624;
+}
+
+.connectmodal__hint,
+.connectmodal__fineprint {
+  font-size: var(--text-2xs);
+  color: #8b8b83;
+}
+
+.connectmodal__cancel {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid #3a3a36;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #d6d6cf;
+  font-size: var(--text-xs);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .connectmodal__close:hover {
+    color: #f2f2ef;
+    background: #262624;
+  }
+
+  .connectmodal__action:hover,
+  .connectmodal__selectoption:hover {
+    border-color: #5a5a54;
+    background: #2e2e2c;
+  }
+
+  .connectmodal__disconnect:hover {
+    color: #e8a08a;
+    border-color: #3a3a36;
+  }
+
+  .connectmodal__model:not(.connectmodal__model--off):not(:disabled):hover {
+    background: #262624;
+  }
+
+  .connectmodal__bare:hover,
+  .connectmodal__selectoption--bare:hover {
+    color: #f2f2ef;
+  }
+
+  .connectmodal__providerhead:hover .connectmodal__chevron,
+  .connectmodal__providerhead:hover .connectmodal__providername {
+    color: #f2f2ef;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connectmodal__backdrop,
+  .connectmodal__panel {
+    animation: none;
+  }
+
+  .connectmodal__spin {
+    animation-duration: 1.4s;
+  }
+}

@@ -63,6 +63,10 @@
   --rail-width: 328px;
   /* Under about 1100px the rail has to give room back to the conversation. */
   --rail-width-tight: 276px;
+  /* The shelf on the left: the projects list, and the narrow strip it
+     collapses to. Two numbers, so the composition knows which applies. */
+  --shelf-width: 232px;
+  --shelf-thin: 54px;
   /* How far the conversation is allowed to drift from the rail on a very wide
      display. Without a cap the two centre themselves in their own halves and
      stop reading as one composition. */

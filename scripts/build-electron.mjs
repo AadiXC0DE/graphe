@@ -1,9 +1,13 @@
-// Compiles the desktop shell — electron/main.ts and electron/preload.ts — into
-// dist-electron/, which is what package.json's "main" points at.
+// Compiles the desktop shell — electron/main.ts, electron/preload.ts and the
+// subagent helper — into dist-electron/, which is what package.json's "main"
+// points at. The helper is spawned at runtime by the `task` tool, and it must
+// sit where the shell expects it: beside itself, so packaged and unpackaged
+// builds behave the same (src/agent/pi/tools.ts resolves it relative to the
+// shell's own file).
 //
 //   node scripts/build-electron.mjs [--watch]
 //
-// Two builds rather than one, because the two files load in different worlds and
+// Three builds rather than one, because the files load in different worlds and
 // the module format is not a style choice in either case:
 //
 //   main    → ESM (.mjs). Pi is an ESM-only package and the adapter reaches it
@@ -14,6 +18,10 @@
 //   preload → CommonJS (.cjs). Electron does not load ES modules in a sandboxed
 //             preload, and we are not giving up the sandbox to have nicer
 //             syntax there.
+//
+//   runner  → ESM (.mjs). The subagent child runs under `ELECTRON_RUN_AS_NODE`,
+//             which is Electron's Node: it reads ESM fine, and the child needs
+//             to reach Pi exactly like the shell does.
 //
 // esbuild comes with Vite. Nothing new is installed to build the app.
 
@@ -68,6 +76,18 @@ const builds = [
     outfile: `${root}dist-electron/preload.cjs`,
     format: 'cjs',
   },
+  {
+    ...shared,
+    entryPoints: [`${root}src/agent/pi/subagent-runner.ts`],
+    outfile: `${root}dist-electron/subagent-runner.mjs`,
+    format: 'esm',
+    banner: {
+      js: [
+        "import { createRequire as __createRequire } from 'node:module';",
+        'const require = __createRequire(import.meta.url);',
+      ].join('\n'),
+    },
+  },
 ];
 
 await rm(`${root}dist-electron`, { recursive: true, force: true });
@@ -78,5 +98,5 @@ if (watch) {
   console.log('watching electron/ — ctrl-c to stop');
 } else {
   await Promise.all(builds.map((options) => build(options)));
-  console.log('built dist-electron/main.mjs and dist-electron/preload.cjs');
+  console.log('built dist-electron/main.mjs, dist-electron/preload.cjs and dist-electron/subagent-runner.mjs');
 }

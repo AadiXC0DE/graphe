@@ -93,6 +93,8 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
       return fromMessageUpdate(source);
     case 'message_end':
       return fromMessageEnd(source);
+    case 'tool_execution_update':
+      return fromToolExecutionUpdate(source);
     case 'tool_execution_end':
       return fromToolExecutionEnd(source);
     case 'compaction_start':
@@ -151,6 +153,17 @@ function fromMessageEnd(source: Fields): AgentEvent | null {
   const failure = textAt(message, 'errorMessage');
   if (failure !== null) return { type: 'error', message: failure };
   return { type: 'message-end' };
+}
+
+/** Only the last line, and only a short one. This is a step's one-line detail,
+ *  not a second conversation running underneath the first. */
+function fromToolExecutionUpdate(source: Fields): AgentEvent | null {
+  const id = textAt(source, 'toolCallId');
+  const partial = textAt(source, 'partialResult');
+  if (id === null || partial === null) return null;
+  const last = partial.split('\n').map((line) => line.trim()).filter(Boolean).pop();
+  if (last === undefined || last === '') return null;
+  return { type: 'tool-progress', id, text: last.length > 120 ? `${last.slice(0, 119)}…` : last };
 }
 
 function fromToolExecutionEnd(source: Fields): AgentEvent | null {

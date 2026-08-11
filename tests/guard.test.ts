@@ -1041,3 +1041,154 @@ describe('path containment', () => {
     expect(shipsToBrowser('/p/app/README.md')).toBe(false);
   });
 });
+
+/* ========================================================================== */
+/* 1.6 The two tools Graphe adds to Pi                                         */
+/* ========================================================================== */
+
+const KEY = 'sk-aPlEfIxEdStRaYtEcHnIcAlKeY0123456789';
+
+describe('G-01 websearch - a read that goes out to the internet', () => {
+  it('asks first, in the words of a question, not a command', () => {
+    const verdict = evaluate(call('websearch', { query: 'current react version' }), ctx);
+    expect(verdict.kind).toBe('confirm');
+    expect(spoken(verdict)).toContain('Look something up on the internet?');
+  });
+
+  it('is a read: nothing changes, no restore point is forced', () => {
+    expect(changesAnything(call('websearch', { query: 'react version' }), ctx)).toBe(false);
+    expect(requiresSnapshot(call('websearch', { query: 'react version' }), ctx)).toBe(false);
+  });
+
+  it('refuses to search from a folder outside the project', () => {
+    const verdict = evaluate(call('websearch', { query: 'react', cwd: '/somewhere/else' }), ctx);
+    expect(verdict.kind).toBe('deny');
+    expect(spoken(verdict)).toContain('outside your project');
+  });
+
+  it('never sends a key inside the question', () => {
+    const verdict = evaluate(call('websearch', { query: `what is ${KEY}` }), ctx);
+    expect(verdict.kind).toBe('deny');
+    expect(spoken(verdict)).toContain('private key');
+  });
+
+  it('treats every spelling of the tool the same', () => {
+    for (const name of ['searchweb', 'googlesearch', 'ddgsearch', 'websearchlite']) {
+      expect(kindOf(call(name, { query: 'react' }), ctx), name).toBe('confirm');
+    }
+  });
+});
+
+describe('G-02 task - sending a piece of work to a helper', () => {
+  it('asks first, and names what the helper is', () => {
+    const verdict = evaluate(call('task', { task: 'summarise the README' }), ctx);
+    expect(verdict.kind).toBe('confirm');
+    expect(spoken(verdict)).toContain('Send a piece of work to a helper?');
+  });
+
+  it('is not a change: no restore point is forced', () => {
+    expect(changesAnything(call('task', { task: 'summarise the README' }), ctx)).toBe(false);
+    expect(requiresSnapshot(call('task', { task: 'summarise the README' }), ctx)).toBe(false);
+  });
+
+  it('refuses to run a helper outside the project', () => {
+    const verdict = evaluate(call('task', { task: 'look around', cwd: '/somewhere/else' }), ctx);
+    expect(verdict.kind).toBe('deny');
+  });
+
+  it('never hands a key to the helper', () => {
+    const verdict = evaluate(call('task', { task: `use ${KEY} to check the api` }), ctx);
+    expect(verdict.kind).toBe('deny');
+    expect(spoken(verdict)).toContain('private key');
+  });
+
+  it('treats every spelling of the tool the same', () => {
+    for (const name of ['subagent', 'delegate', 'handoff']) {
+      expect(kindOf(call(name, { task: 'summarise the README' }), ctx), name).toBe('confirm');
+    }
+  });
+});
+
+/* ========================================================================== */
+/* The seven tools Pi ships on its own                                         */
+/* ========================================================================== */
+
+describe('P-01 find - Pi\'s glob tool, and the shell command wearing its name', () => {
+  const glob = (input: Record<string, unknown>): ToolCall => call('find', input);
+
+  it('is a look at file names, so it happens silently', () => {
+    expect(kindOf(glob({ pattern: '**/*.tsx' }))).toBe('allow');
+    expect(kindOf(glob({ pattern: '*.css', path: 'src/styles' }))).toBe('allow');
+  });
+
+  it('changes nothing, so it forces no restore point and no question', () => {
+    expect(changesAnything(glob({ pattern: '**/*.tsx' }), ctx)).toBe(false);
+    expect(requiresSnapshot(glob({ pattern: '**/*.tsx' }), ctx)).toBe(false);
+  });
+
+  it('stays silent even while "ask me first" is in force, like every other read', () => {
+    const asked: GuardFacts = { projectRoot: ROOT, askBeforeEveryChange: true };
+    expect(kindOf(glob({ pattern: '**/*.tsx' }), asked)).toBe('allow');
+  });
+
+  it('is still held inside the project folder', () => {
+    expect(kindOf(glob({ pattern: '*', path: '../..' }))).toBe('deny');
+    expect(kindOf(glob({ pattern: '*', path: '/etc' }))).toBe('deny');
+    expect(kindOf(glob({ pattern: '*', path: '.env' }))).toBe('deny');
+  });
+
+  /** The crux: allowing the tool must not reach the command of the same name. */
+  it('does not soften the command that shares its name', () => {
+    expect(kindOf(bash('find . -name "*.tsx" -delete'))).toBe('deny');
+    expect(kindOf(bash('find src -delete'))).toBe('deny');
+    expect(kindOf(bash('find . -type f -exec rm -rf {} \\;'))).toBe('deny');
+    expect(kindOf(bash('find src -name "*.map" -exec rm {} +'))).toBe('deny');
+    expect(kindOf(bash('find . -execdir rm {} \\;'))).toBe('deny');
+  });
+
+  it('still asks before running one instruction over every file it turns up', () => {
+    const sweep = bash('find src -name "*.tsx" -exec sed -i "" s/a/b/ {} \\;');
+    expect(kindOf(sweep)).toBe('confirm');
+    expect(requiresSnapshot(sweep, ctx)).toBe(true);
+  });
+
+  it('leaves an ordinary look through the files alone', () => {
+    expect(kindOf(bash('find src -name "*.tsx"'))).toBe('allow');
+    expect(kindOf(bash('find . -type d'))).toBe('allow');
+  });
+
+  it('will not let a command escape by riding in on the tool instead', () => {
+    // The tool takes a glob, never a command line. Anything shaped like one is
+    // an unfamiliar tool call, not a read.
+    expect(kindOf(call('bash', { command: 'find . -delete' }))).toBe('deny');
+  });
+});
+
+describe('P-02 none of the tools Pi ships falls through the floor', () => {
+  /** A built-in nobody listed becomes an unrecognised *change*, so a plain read
+   *  starts asking permission — which is how `find` behaved. */
+  const builtins: ToolCall[] = [
+    call('read', { path: 'src/App.tsx' }),
+    call('ls', { path: 'src' }),
+    call('grep', { pattern: 'header', path: 'src' }),
+    call('find', { pattern: '**/*.tsx' }),
+    call('edit', { path: 'src/App.tsx', content: 'export const a = 1;' }),
+    call('write', { path: 'src/App.tsx', content: 'export const a = 1;' }),
+    bash('ls src'),
+  ];
+
+  for (const toolCall of builtins) {
+    it(`recognises ${toolCall.name}`, () => {
+      expect(kindOf(toolCall)).toBe('allow');
+      expect(spoken(evaluate(toolCall, ctx))).not.toContain('do not fully recognise');
+    });
+  }
+
+  it('keeps the four read-only ones out of the way of "ask me first"', () => {
+    const asked: GuardFacts = { projectRoot: ROOT, askBeforeEveryChange: true };
+    for (const name of ['read', 'ls', 'grep', 'find']) {
+      expect(changesAnything(call(name, { pattern: 'x', path: 'src' }), asked), name).toBe(false);
+      expect(kindOf(call(name, { pattern: 'x', path: 'src' }), asked), name).toBe('allow');
+    }
+  });
+});

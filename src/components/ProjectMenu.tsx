@@ -16,6 +16,12 @@ type Props = {
   onOpenInEditor: () => void;
   onRevealFolder: () => void;
 
+  /** Get the project ready and open it — the same thing the floating pill
+   *  does, kept here too for the people who live in this menu. */
+  onPreview: () => void;
+  /** Open the connect screen, where the account and the model are chosen. */
+  onAccount: () => void;
+
   showMe: boolean;
   onShowMe: (on: boolean) => void;
 };
@@ -62,6 +68,8 @@ export default function ProjectMenu({
   editor,
   onOpenInEditor,
   onRevealFolder,
+  onPreview,
+  onAccount,
   showMe,
   onShowMe,
 }: Props) {
@@ -81,6 +89,9 @@ export default function ProjectMenu({
           no button. */}
       {openPath === null ? null : (
         <div className="projectmenu__hatches">
+          <button type="button" className="projectmenu__hatch" onClick={onPreview}>
+            Show the preview
+          </button>
           {editor === null ? null : (
             <button type="button" className="projectmenu__hatch" onClick={onOpenInEditor}>
               Open in {editor}
@@ -91,6 +102,12 @@ export default function ProjectMenu({
           </button>
         </div>
       )}
+
+      <div className="projectmenu__hatches">
+        <button type="button" className="projectmenu__hatch" onClick={onAccount}>
+          Account &amp; model
+        </button>
+      </div>
 
       <div className="projectmenu__showme">
         <button

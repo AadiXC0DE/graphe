@@ -28,9 +28,32 @@
 
 import type { Attachment } from '../components/Attachments';
 import type { Task, TaskObservation } from '../cost/estimate';
-import type { AgentNotice, PutBack, SavedVersion } from './ipc';
+import type { AgentNotice, Overview, PutBack, SavedVersion } from './ipc';
 import { applySpend, type SpendView } from './spend';
 import { applyEvent, type Turn } from './thread';
+import { WEB_SEARCH_LABEL } from './describe';
+
+/** One thing the agent was given to work from — a screenshot it was sent, or a
+ *  design file its link named. Recorded in the overview the moment it is sent,
+ *  because the overview's job is the story of the work, and a picture that
+ *  shaped the work belongs in it whether the thread still mentions it or not. */
+export type Reference = {
+  id: string;
+  kind: 'image' | 'figma';
+  name: string;
+  note: string;
+  /** An object URL, for images only. Live for as long as this session. */
+  preview?: string;
+};
+
+/** One line of the research log: a web search the agent made for this project.
+ *  Derived from the thread, not kept a second time — see `researchLog`. */
+export type ResearchEntry = {
+  id: string;
+  /** What it searched for, as it said it. */
+  query: string;
+  state: 'running' | 'done' | 'failed';
+};
 
 /** Everything the window knows about one project. */
 export type Desk = {
@@ -44,6 +67,11 @@ export type Desk = {
   spent: SpendView | null;
   /** What has been brought in and not yet said. */
   attachments: readonly Attachment[];
+  /** What has been brought in *and said* — the story of the work. */
+  references: readonly Reference[];
+  /** The git state of the project, as the shell last reported it. Null until
+   *  the overview has been asked for. */
+  overview: Overview | null;
   /** The timeline, newest first. Empty until the shell has been asked. */
   versions: readonly SavedVersion[];
   /** The offer to undo the last "put back", while it is still on offer. */
@@ -87,6 +115,8 @@ function blankDesk(path: string, name: string): Desk {
     turns: [],
     spent: null,
     attachments: [],
+    references: [],
+    overview: null,
     versions: [],
     putBack: null,
     jobs: [],
@@ -206,4 +236,27 @@ export function closeDesk(desks: Desks, path: string): Desks {
   const byPath = { ...desks.byPath };
   delete byPath[path];
   return { current: desks.current === path ? null : desks.current, byPath };
+}
+
+/**
+ * The research log: every web search this conversation made, in order.
+ *
+ * Derived from the turns rather than recorded alongside them, because the turns
+ * are the one copy of the truth — a second list that has to be kept in step is a
+ * second list that will drift. The thread already carries the label and the
+ * query for every search (`describe.ts` put them there); this only picks those
+ * turns out and presents them as the overview needs them.
+ */
+export function researchLog(turns: readonly Turn[]): readonly ResearchEntry[] {
+  return turns.flatMap((turn): ResearchEntry[] => {
+    if (turn.kind !== 'did' || turn.state === undefined) return [];
+    if (turn.label !== WEB_SEARCH_LABEL) return [];
+    return [
+      {
+        id: turn.id,
+        query: turn.detail ?? '',
+        state: turn.state === 'running' ? 'running' : turn.state === 'failed' ? 'failed' : 'done',
+      },
+    ];
+  });
 }

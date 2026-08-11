@@ -20,6 +20,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
+import type { ModelChoice } from '../lib/ipc';
+
 /** Everything a person can change about the app itself. */
 export type Preferences = {
   /**
@@ -31,9 +33,17 @@ export type Preferences = {
    * that is the exact texture of the tools they came here to avoid.
    */
   showMe: boolean;
+  /**
+   * The model chosen to work with, or null for "whatever is available".
+   *
+   * Null is the honest default: with no choice made, every session starts with
+   * whatever the connected account makes available, and the window shows the
+   * full list so a choice is never more than one click away.
+   */
+  model: ModelChoice | null;
 };
 
-export const defaultPreferences: Preferences = { showMe: false };
+export const defaultPreferences: Preferences = { showMe: false, model: null };
 
 type Stored = { version: 1; preferences: Preferences };
 
@@ -41,8 +51,22 @@ function asPreferences(value: unknown): Preferences {
   if (typeof value !== 'object' || value === null) return { ...defaultPreferences };
   const raw = (value as { preferences?: unknown }).preferences;
   if (typeof raw !== 'object' || raw === null) return { ...defaultPreferences };
-  const showMe = (raw as Record<string, unknown>)['showMe'];
-  return { showMe: showMe === true };
+  const record = raw as Record<string, unknown>;
+  const showMe = record['showMe'];
+  const model = record['model'];
+  return {
+    showMe: showMe === true,
+    model:
+      typeof model === 'object' &&
+      model !== null &&
+      typeof (model as Record<string, unknown>)['providerId'] === 'string' &&
+      typeof (model as Record<string, unknown>)['modelId'] === 'string'
+        ? {
+            providerId: (model as Record<string, unknown>)['providerId'] as string,
+            modelId: (model as Record<string, unknown>)['modelId'] as string,
+          }
+        : null,
+  };
 }
 
 export class PreferenceFile {
@@ -66,7 +90,11 @@ export class PreferenceFile {
    *  the window has to remember what it did not ask about. */
   async change(some: Partial<Preferences>): Promise<Preferences> {
     const next: Preferences = { ...this.#preferences, ...some };
-    if (next.showMe === this.#preferences.showMe) return this.all();
+    const unchanged =
+      next.showMe === this.#preferences.showMe &&
+      next.model?.providerId === this.#preferences.model?.providerId &&
+      next.model?.modelId === this.#preferences.model?.modelId;
+    if (unchanged) return this.all();
     this.#preferences = next;
     await this.#write();
     return this.all();

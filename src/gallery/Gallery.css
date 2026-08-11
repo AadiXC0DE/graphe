@@ -246,6 +246,44 @@
   padding-top: var(--space-3);
 }
 
+/* The shelf, taken out of the corners it lives in, side by side: the expanded
+   panel and the strip it reduces to (⌘B). In the app both sit against the left
+   edge under the top bar; here they sit in the flow so they can be read next
+   to each other and next to the list they host. */
+.shelf-sample {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+
+.shelf-sample .shelf {
+  position: static;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.shelf-sample .shelf--closed {
+  width: var(--shelf-thin);
+}
+
+/* The overview, taken out of the right-hand edge it is fixed to in the app.
+   Same width, same sections, same everything — in a box instead of against the
+   glass, so it can be read beside the rail and the shelves. */
+.gallery__overview {
+  width: var(--rail-width);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.gallery__overview .overview {
+  position: static;
+  height: auto;
+  border-left: none;
+  animation: none;
+}
+
 /* The project menu, taken out from under the project's name.
 
    In the app it hangs from the strip along the top as a dropdown. Here it sits
@@ -263,4 +301,41 @@
 
 .gallery__menu .picker {
   padding-top: var(--space-2);
+}
+
+/* The button that opens the connect screen. The screen itself is mounted
+   exactly as the app mounts it — fixed, over everything — so the only thing
+   this needs to do is be a button worth pressing. */
+.gallery__live {
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.gallery__live:active {
+  transform: scale(0.97);
+}
+
+/* The preview pill, in the flow of the page instead of pinned to the
+   viewport. App.css fixes it to the top-right of the window; here the same
+   element stands still so both its states can be read side by side. */
+.gallery__pillframe {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.gallery__pillframe .previewpill {
+  position: static;
+  top: auto;
+  right: auto;
 }

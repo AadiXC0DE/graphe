@@ -91,6 +91,32 @@
   }
 }
 
+/* In the strip along the top there is no composer under it, so the list hangs
+   down from the chip instead of growing up out of it. */
+.thinking--bare .thinking__chip {
+  -webkit-app-region: no-drag;
+}
+
+.thinking--bare .thinking__menu {
+  bottom: auto;
+  top: calc(100% + var(--space-2));
+  left: auto;
+  right: 0;
+  transform-origin: top right;
+  animation-name: thinking-hangs;
+}
+
+@keyframes thinking-hangs {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .thinking__menu {
     animation: none;
@@ -126,6 +152,9 @@
 }
 
 .thinking__groupname {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
   font-size: var(--text-2xs);
   font-weight: 500;
@@ -134,20 +163,46 @@
   color: var(--text-faint);
 }
 
+/* What the band is for, in ordinary sentence case beside the heading's caps. */
+.thinking__groupnote {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-faint);
+  opacity: 0.85;
+}
+
 .thinking__option {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  min-height: 30px;
-  padding: 0 var(--space-2);
+  min-height: 38px;
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   color: var(--text-muted);
   text-align: left;
 }
 
+.thinking__optiontext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .thinking__optionlabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The provider and the real id, for whoever came here knowing exactly what
+   they wanted. */
+.thinking__optionid {
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

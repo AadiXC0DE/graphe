@@ -96,6 +96,15 @@
   white-space: nowrap;
 }
 
+.vdiff__design {
+  font-size: var(--text-xs);
+  color: var(--text);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .vdiff__where {
   font-size: var(--text-xs);
   color: var(--text-muted);
@@ -108,7 +117,16 @@
 /* Said once. While it is shut the sentence lives in the strip, because that is
    the only place there is; once it is open it moves down beside the pictures,
    where it belongs, and two copies of it would read as two different facts. */
-.vdiff--open .vdiff__where {
+.vdiff--open .vdiff__design {
+  font-size: var(--text-xs);
+  color: var(--text);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vdiff__where {
   display: none;
 }
 

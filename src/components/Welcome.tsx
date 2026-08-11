@@ -1,3 +1,4 @@
+import { STARTERS, type Recipe } from '../lib/recipes';
 import './Welcome.css';
 
 /** Three sentences somebody would actually type.
@@ -22,6 +23,8 @@ type Props = {
   onUse?: (text: string) => void;
   /** Overridable so the gallery can show a long one and a short one. */
   examples?: readonly string[];
+  /** The saved starting points, ours and theirs. Left out, ours are shown. */
+  recipes?: readonly Recipe[];
 };
 
 /**
@@ -51,7 +54,7 @@ type Props = {
  * launch begins on, which by the frequency rule is exactly the screen that
  * should be still.
  */
-export default function Welcome({ onUse, examples = firstMoves }: Props) {
+export default function Welcome({ onUse, examples = firstMoves, recipes = STARTERS }: Props) {
   return (
     <div className="welcome">
       <h1 className="welcome__title">What do you want to make?</h1>
@@ -96,6 +99,29 @@ export default function Welcome({ onUse, examples = firstMoves }: Props) {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* The things people ask for again and again, as buttons. Pressing one
+          fills the box rather than sending it — the same rule the examples
+          above follow, for the same reason. */}
+      {recipes.length === 0 ? null : (
+        <div className="welcome__recipes">
+          <span className="welcome__recipesname">Or something you ask for often</span>
+          <ul className="welcome__chips" aria-label="Things to ask for">
+            {recipes.map((recipe) => (
+              <li key={recipe.id}>
+                <button
+                  type="button"
+                  className={`welcome__chip ${recipe.from === 'yours' ? 'welcome__chip--yours' : ''}`}
+                  onClick={() => onUse?.(recipe.prompt)}
+                  title={recipe.prompt}
+                >
+                  {recipe.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {/* The other way in, and it needs to look like one.

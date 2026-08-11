@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import Attachments, { type Attachment } from './Attachments';
+import HowToWork, { type Plans } from './HowToWork';
 import ThinkingWith from './ThinkingWith';
 import type { ConnectionState, ModelChoice } from '../lib/ipc';
 import { checkFile, extensionOf, figmaLink, readableSize } from '../lib/attachments';
@@ -15,6 +16,10 @@ import './Composer.css';
 
 type Props = {
   onSend: (text: string) => void;
+  /** Called instead of send while a turn is running: the same button in its
+   *  other state (BACKLOG A1). Send and Stop are one affordance in opposite
+   *  states — swapping in place is why the layout does not jump. */
+  onStop?: () => void;
   placeholder?: string;
   autoFocus?: boolean;
   busy?: boolean;
@@ -35,6 +40,9 @@ type Props = {
   draft?: string;
   /** Who can think for this computer, for the chip in the row below the box. */
   connection?: ConnectionState | null;
+  /** Whether a message gets a looking-around pass first. */
+  plans?: Plans;
+  onPlans?: (plans: Plans) => void;
   onSelectModel?: (choice: ModelChoice) => void;
   onConnect?: () => void;
 };
@@ -66,6 +74,7 @@ function newId(): string {
  */
 export default function Composer({
   onSend,
+  onStop,
   placeholder,
   autoFocus,
   busy,
@@ -73,6 +82,8 @@ export default function Composer({
   onAttachmentsChange,
   draft,
   connection,
+  plans,
+  onPlans,
   onSelectModel,
   onConnect,
 }: Props) {
@@ -269,7 +280,7 @@ export default function Composer({
         value={value}
         rows={1}
         autoFocus={autoFocus}
-        placeholder={placeholder ?? 'Describe what you want, or drop in a Figma link or a screenshot'}
+        placeholder={placeholder ?? 'Describe what you want — or paste a screenshot of it'}
         onChange={(e) => {
           setValue(e.target.value);
           resize(e.target);
@@ -297,6 +308,10 @@ export default function Composer({
           </svg>
         </button>
 
+        {plans === undefined || onPlans === undefined ? null : (
+          <HowToWork plans={plans} onPlans={onPlans} />
+        )}
+
         {onSelectModel === undefined || onConnect === undefined ? null : (
           <ThinkingWith
             state={connection ?? null}
@@ -313,25 +328,54 @@ export default function Composer({
             you have already acted on is furniture. */}
         <span className="composer__hint">
           {attachments.length > 0
-            ? 'Held here for now — I can’t open these yet.'
+            ? 'I can see this — say what you want changed.'
             : 'Enter to send · Shift + Enter for a new line'}
         </span>
 
+        {/* The same button in two states (BACKLOG A1): an arrow that sends, or a
+            square that stops. They swap in place so the layout does not jump
+            when a turn begins, and the Stop half is never disabled — a run that
+            has been started must always be stoppable, even with an empty box. */}
         <button
           className="composer__send"
-          onClick={submit}
-          disabled={!value.trim() || busy}
-          aria-label="Send"
+          onClick={busy && onStop !== undefined ? onStop : submit}
+          disabled={busy && onStop !== undefined ? false : !value.trim() || busy}
+          aria-label={busy && onStop !== undefined ? 'Stop' : 'Send'}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path
-              d="M8 12.75V3.5M8 3.5 4 7.5M8 3.5l4 4"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          {busy && onStop !== undefined ? (
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              aria-hidden="true"
+            >
+              <rect
+                x="1.5"
+                y="1.5"
+                width="9"
+                height="9"
+                rx="1.5"
+                fill="currentColor"
+              />
+            </svg>
+          ) : (
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M8 12.75V3.5M8 3.5 4 7.5M8 3.5l4 4"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
         </button>
       </div>
 

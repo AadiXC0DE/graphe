@@ -242,7 +242,12 @@ export default function ConnectModal({
                         >
                           {method === 'oauth'
                             ? (provider.oauthLabel ?? `Sign in with ${provider.name}`)
-                            : (provider.apiKeyLabel ?? 'Use an API key')}
+                            : /* The provider's own wording when it has one — the
+                                 thing you go and fetch is called an API key on
+                                 their site, and renaming it here would only make
+                                 it harder to find. Ours is the fallback, and it
+                                 says what you do rather than what it is. */
+                              (provider.apiKeyLabel ?? `Paste a key from ${provider.name}`)}
                         </button>
                       ))}
                       {provider.methods.length === 0 ? (

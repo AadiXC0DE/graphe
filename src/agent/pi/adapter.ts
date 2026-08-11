@@ -36,9 +36,12 @@
 
 import type { GuardFacts } from '../guard/policy';
 import { evaluate, requiresSnapshot } from '../guard/policy';
+import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
+import { eventsFromEntries } from './history';
+import { readConversations, type Conversation } from './conversations';
 import { grapheTools } from './tools';
 import {
   collectAccounts,
@@ -47,7 +50,7 @@ import {
   type FoundAccount as FoundOnDisk,
 } from './importers';
 
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 /** Yes or no, from a person. There is deliberately no third answer: no "always",
  *  no "for this session", no "don't ask again". Confirmation fatigue is what
@@ -154,6 +157,10 @@ export type InterceptorOptions = {
    *  the host chose to open a session with no history — but it runs with no way
    *  back, which is why `createSession` takes a Timeline and expects one. */
   timeline?: SnapshotSource | undefined;
+  /** True while the turn is only allowed to look. Anything that could change
+   *  the project is refused with a sentence telling the model to propose it
+   *  instead, which is the whole of planning before doing. */
+  planning?: () => boolean;
 };
 
 function whyItMatters(verdict: Verdict): string {
@@ -175,7 +182,7 @@ function whyItMatters(verdict: Verdict): string {
 export function createGuardInterceptor(
   options: InterceptorOptions,
 ): (call: ToolCall) => Promise<Interception> {
-  const { facts, relay, confirmations, timeline } = options;
+  const { facts, relay, confirmations, timeline, planning } = options;
 
   /* Fails closed. A host with no history wired cannot run destructive work at all:
      "every destructive action is snapshotted first" is a promise, and a promise with
@@ -192,6 +199,12 @@ export function createGuardInterceptor(
   };
 
   return async function review(call: ToolCall): Promise<Interception> {
+    // Looking only. Withheld rather than refused-as-an-error: the model is told
+    // to put it in the plan, which is the answer we actually want back.
+    if (planning?.() === true && readOnlyTools([call.name]).length === 0) {
+      return { block: true, reason: PLAN_WORDS.withheld };
+    }
+
     const verdict = evaluate(call, facts);
 
     if (verdict.kind === 'deny') {
@@ -240,6 +253,18 @@ export type CreateSessionOptions = {
   /** A transcript file to open. Left out, the transcript is in memory only and
    *  nothing is written to the user's disk. */
   sessionPath?: string;
+  /** Where this project's conversations live on disk. Given, the session
+   *  resumes the most recent one and keeps writing to it — a project reopened
+   *  is a conversation continued, not one started again (BACKLOG B1.1). When
+   *  neither this nor `sessionPath` is given, nothing is ever written. */
+  sessionDir?: string;
+  /** A Figma credential, when one has been connected. Given, the agent can read
+   *  the frames and values behind a Figma link instead of the link's text. */
+  figmaToken?: string;
+  /** Whether to load the recipes and skills the opened project carries. Left
+   *  out, they are not loaded: project-supplied prompt text is attacker
+   *  controllable, and it reaches the system prompt. */
+  trustProject?: () => boolean;
   /** Where Pi keeps credentials and its model list. Defaults to the user's own
    *  `~/.pi/agent`, which is where signing in puts them. Worth overriding in a
    *  test: Pi creates the folder on sight. */
@@ -261,7 +286,11 @@ export type CreateSessionOptions = {
 export type GrapheSession = {
   /** Say something to the agent. Resolves when it has finished responding.
    *  Pictures travel with the message; omitted when there are none. */
-  prompt(text: string, images?: readonly ImageCard[]): Promise<void>;
+  prompt(
+    text: string,
+    images?: readonly ImageCard[],
+    options?: { lookFirst?: boolean },
+  ): Promise<void>;
   /** Work with a different model from now on, keeping the conversation. False
    *  when the choice does not resolve to a model this computer can use; the
    *  session then carries on with what it had rather than picking for you. */
@@ -276,6 +305,10 @@ export type GrapheSession = {
   answer(callId: string, decision: Decision): boolean;
   /** Calls waiting on a person right now, oldest first. */
   readonly awaitingAnswer: readonly string[];
+  /** The conversation this session started with, as the events that would have
+   *  made it — an earlier sitting read back so the window can show it again
+   *  (BACKLOG B1.1). Empty when this is a brand-new conversation. */
+  readonly history: readonly AgentEvent[];
 };
 
 type Pi = typeof import('@earendil-works/pi-coding-agent');
@@ -313,7 +346,17 @@ export type ProviderSummary = {
   apiKeyLabel: string | null;
   connected: boolean;
   available: boolean;
-  models: readonly { id: string; label: string; available: boolean }[];
+  models: readonly ModelSummary[];
+};
+
+/** One model, as plain data. The rates are dollars per million tokens, which is
+ *  how every provider quotes them and how Pi's catalog stores them. */
+export type ModelSummary = {
+  id: string;
+  label: string;
+  available: boolean;
+  rates: { input: number; output: number } | null;
+  contextWindow: number | null;
 };
 
 /** The app's own copy of Pi's auth interaction. The shapes match on purpose —
@@ -396,9 +439,15 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
 
   const summaries: ProviderSummary[] = [];
   for (const provider of runtime.getProviders()) {
-    let models: readonly { id: string; label: string; available: boolean }[] = [];
+    let models: readonly ModelSummary[] = [];
     try {
-      models = provider.getModels().map((model) => ({ id: model.id, label: model.name, available: false }));
+      models = provider.getModels().map((model) => ({
+        id: model.id,
+        label: model.name,
+        available: false,
+        rates: ratesOf(model),
+        contextWindow: typeof model.contextWindow === 'number' ? model.contextWindow : null,
+      }));
     } catch {
       // Unreadable providers are not offered at all.
     }
@@ -441,6 +490,91 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
     });
   }
   return summaries;
+}
+
+/**
+ * Keep the extensions somebody deliberately added; drop the ones a folder
+ * brought with it.
+ *
+ * An extension is arbitrary code running in the same process as the agent, so
+ * "it was in the repository I opened" is not consent. Anything resolving inside
+ * the project is left out, which is the same line `trustProject` draws for
+ * skills and recipes. What the person installed themselves lives under their own
+ * agent directory and loads normally.
+ *
+ * The Guard is unaffected either way: it is registered as a factory here, and a
+ * tool an extension registers under a name the Guard does not know falls to the
+ * deny-by-default floor rather than through it.
+ */
+function onlyTheirs(projectRoot: string) {
+  const root = projectRoot.endsWith(sep) ? projectRoot : projectRoot + sep;
+  return <T extends { extensions: readonly { resolvedPath?: string; path?: string }[] }>(
+    base: T,
+  ): T => ({
+    ...base,
+    extensions: base.extensions.filter((one) => {
+      const where = one.resolvedPath ?? one.path ?? '';
+      return where !== '' && !where.startsWith(root);
+    }),
+  });
+}
+
+/** Every conversation this folder has had. Never throws: a folder with no
+ *  transcripts is an empty list, not a failure. */
+export async function listConversations(
+  projectRoot: string,
+  sessionDir: string,
+): Promise<readonly Conversation[]> {
+  try {
+    const pi = await loadPi();
+    return readConversations(await pi.SessionManager.list(projectRoot, sessionDir));
+  } catch {
+    return [];
+  }
+}
+
+export type { Conversation };
+
+/**
+ * The things that can be added to Graphe, and the two verbs that change them.
+ *
+ * Pi's own package manager does the work; the catalogue comes from the npm
+ * registry, because Pi has no search of its own. Nothing here throws — every
+ * failure is a sentence.
+ */
+export async function packageHost(agentDir: string, projectRoot: string) {
+  const pi = await loadPi();
+  const settings = pi.SettingsManager.create(projectRoot, agentDir);
+  const manager = new pi.DefaultPackageManager({ cwd: projectRoot, agentDir, settingsManager: settings });
+  return {
+    async search(term: string): Promise<unknown> {
+      const asked = term.trim() === '' ? 'pi-' : term.trim();
+      const url = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(asked)}&size=40`;
+      const answered = await fetch(url, { headers: { accept: 'application/json' } });
+      if (!answered.ok) throw new Error('registry');
+      return answered.json();
+    },
+    list(): Promise<unknown> {
+      return Promise.resolve(manager.listConfiguredPackages());
+    },
+    async add(id: string): Promise<void> {
+      await manager.installAndPersist(`npm:${id}`);
+    },
+    async remove(id: string): Promise<void> {
+      await manager.removeAndPersist(`npm:${id}`);
+    },
+  };
+}
+
+/** Read defensively: a provider that quotes nothing gets null rather than a
+ *  zero, because free and unpriced are not the same claim. */
+function ratesOf(model: { cost?: unknown }): { input: number; output: number } | null {
+  const cost = model.cost;
+  if (cost === null || typeof cost !== 'object') return null;
+  const { input, output } = cost as { input?: unknown; output?: unknown };
+  if (typeof input !== 'number' || typeof output !== 'number') return null;
+  if (!Number.isFinite(input) || !Number.isFinite(output)) return null;
+  return { input, output };
 }
 
 function safeConfigured(runtime: PiRuntime, providerId: string): boolean {
@@ -596,8 +730,11 @@ const WORKING_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as
  * inline factory below is still loaded: `noExtensions` filters discovered files,
  * not factories passed in.
  *
- * `SessionManager.inMemory` unless a path is given. Opening a project should not
- * leave transcripts on somebody's disk they did not ask for.
+ * `SessionManager.inMemory` unless the session is given somewhere to live. A
+ * path opens a particular transcript; a directory resumes the most recent
+ * conversation in it (BACKLOG B1.1). The desktop shell always passes a
+ * directory under the app's own data folder, so transcripts never appear inside
+ * the user's project, and nothing is written to disk at all unless one is given.
  */
 export async function createSession(options: CreateSessionOptions): Promise<GrapheSession> {
   const pi = await loadPi();
@@ -620,7 +757,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
    * moves it, the meter loses a reconciliation, not its contents.
    */
   let running: { getSessionStats?: () => { cost?: unknown } } | null = null;
-  const billedSoFar = (): number | null => {
+  const rawBill = (): number | null => {
     try {
       const cost = running?.getSessionStats?.().cost;
       return typeof cost === 'number' && Number.isFinite(cost) ? cost : null;
@@ -629,13 +766,32 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     }
   };
 
-  const relay = new EventRelay(options.onEvent, { billedSoFar });
+  /** What a resumed conversation had already cost. Pi's total covers every entry
+   *  the manager holds, history included, so without this the first settle would
+   *  report yesterday's bill as money spent just now. */
+  let alreadyBilled = 0;
+  const billedSoFar = (): number | null => {
+    const raw = rawBill();
+    return raw === null ? null : raw - alreadyBilled;
+  };
+
+  /** True only for the length of a looking-around pass. */
+  let planning = false;
+  /** What was said during one, kept so the proposal can be read out of it. */
+  let proposed = '';
+  const say = (event: AgentEvent): void => {
+    if (planning && event.type === 'message-delta') proposed += event.text;
+    options.onEvent(event);
+  };
+
+  const relay = new EventRelay(say, { billedSoFar });
   const confirmations = new Confirmations();
   const review = createGuardInterceptor({
     facts,
     relay,
     confirmations,
     timeline: options.timeline,
+    planning: () => planning,
   });
 
   const agentDir = options.agentDir ?? (await defaultAgentDir());
@@ -643,7 +799,12 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   const loader = new pi.DefaultResourceLoader({
     cwd: options.projectRoot,
     agentDir,
-    noExtensions: true,
+    // Extensions are on, but only the ones the person chose for themselves.
+    // `extensionsOverride` runs after discovery and before anything is
+    // installed into the session, so it is the one place a rule like that can
+    // be enforced — see `onlyTheirs` for what it keeps.
+    noExtensions: false,
+    extensionsOverride: onlyTheirs(options.projectRoot),
     noThemes: true,
     extensionFactories: [
       {
@@ -654,14 +815,21 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       },
     ],
   });
-  await loader.reload();
+  // Skills and prompt templates that came with the *project* are text an
+  // attacker can put in a repository, and Pi would otherwise load them straight
+  // into the system prompt of an agent holding somebody's folder open. Trusted
+  // only once the person has been shown what arrived and said yes; the ones from
+  // their own home directory are theirs and load as normal.
+  await loader.reload({
+    resolveProjectTrust: async () => (options.trustProject ?? (() => false))(),
+  });
 
   // Graphe's own tools — the web search and the task helper — travel as Pi's
   // `customTools`, which keeps them out of the extension machinery entirely:
   // no discovery, no third-party injection point, no name collision with
   // something a plugin registered. The Guard still sees every one of their
   // calls, because they are ordinary tool calls like any other.
-  const customTools = grapheTools(agentDir);
+  const customTools = grapheTools(agentDir, options.figmaToken);
 
   // The chosen model, resolved here where the model objects live. A choice
   // that no longer exists — the provider removed it, or the ids changed — is
@@ -677,6 +845,18 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   let inUse: { providerId: string; modelId: string } | null =
     model === undefined || chosen === null || chosen === undefined ? null : chosen;
 
+  // The manager stays in our hands after the session is built, because the read
+  // side of a resumed conversation needs the same manager that will keep
+  // writing to it. `continueRecent` resumes the newest session for this folder,
+  // or starts one when there is none yet — so "open the project again" is the
+  // whole of B1.1, and nothing else has to decide anything.
+  const manager =
+    options.sessionPath === undefined
+      ? options.sessionDir === undefined
+        ? pi.SessionManager.inMemory(options.projectRoot)
+        : pi.SessionManager.continueRecent(options.projectRoot, options.sessionDir)
+      : pi.SessionManager.open(options.sessionPath);
+
   let session;
   try {
     session = (
@@ -691,10 +871,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         customTools,
         modelRuntime: runtime,
         model,
-        sessionManager:
-          options.sessionPath === undefined
-            ? pi.SessionManager.inMemory(options.projectRoot)
-            : pi.SessionManager.open(options.sessionPath),
+        sessionManager: manager,
       })
     ).session;
   } catch (cause) {
@@ -704,6 +881,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   }
 
   running = session;
+  alreadyBilled = rawBill() ?? 0;
 
   const unsubscribe = session.subscribe((event) => {
     relay.fromPi(event);
@@ -759,8 +937,18 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   };
 
   return {
-    async prompt(text: string, images?: readonly ImageCard[]): Promise<void> {
-      if (closed) throw new AdapterError('This session has been closed.');
+    async prompt(
+      text: string,
+      images?: readonly ImageCard[],
+      options?: { lookFirst?: boolean },
+    ): Promise<void> {
+      if (closed) throw new AdapterError('That project is no longer open.');
+      const looking = options?.lookFirst === true;
+      if (looking) {
+        planning = true;
+        proposed = '';
+        say({ type: 'planning' });
+      }
       try {
         // Pi's own envelope, made only at this seam: nothing outside this file
         // ever hears the words `ImageContent`. The pictures are sent only when
@@ -775,11 +963,16 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
                   mimeType: picture.mimeType,
                 })),
               };
-        await session.prompt(text, withPictures);
+        await session.prompt(looking ? `${text}\n\n${PLAN_WORDS.asked}` : text, withPictures);
       } catch (cause) {
         const message = plainly(cause);
         relay.failed(message);
         throw new AdapterError(message, { cause });
+      } finally {
+        if (looking) {
+          planning = false;
+          say({ type: 'planned', ...parseProposal(proposed) });
+        }
       }
       // After the reply, never during it: `compact()` aborts whatever is running
       // first, so calling it mid-turn would abandon the answer somebody is
@@ -828,6 +1021,12 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
     get awaitingAnswer(): readonly string[] {
       return confirmations.pending;
+    },
+
+    // Read when asked, not once at the top: a window reloading mid-sitting needs
+    // the conversation as it stands, not as it was when the session was built.
+    get history(): readonly AgentEvent[] {
+      return eventsFromEntries(manager.buildContextEntries());
     },
   };
 }

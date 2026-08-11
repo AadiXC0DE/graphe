@@ -42,22 +42,25 @@
   /* The conversation's own side padding, named because the strip's contents have
      to land on the same line the words do. */
   --column-pad: var(--space-5);
-  /* Where the strip's contents start: the first character of the conversation
-     below it.
-
-     Which is the shelf, then the gap the centred column leaves, then the
-     column's own padding — and nothing else. It used to be written the long way
-     round, subtracting the panels and the gap out of the viewport, and that
-     only agreed with the column when the shelf was shut and the gap had not hit
-     its clamp. Open the shelf on a wide display and the name drifted two
-     hundred pixels right of the words it names, into the wordmark. */
-  --topbar-inset: calc(var(--shelf-take) + var(--pair-gap) + var(--column-pad));
+  /* The column's real edges, measured in App.tsx and written here. Every
+     arithmetic version of this drifted — from the clamp on --pair-gap, from the
+     scrollbar's width, from the shelf being open — and each drift put the
+     project's name somewhere the conversation under it is not. */
+  --column-left: 0px;
+  --column-right: 0px;
+  --topbar-inset: calc(var(--column-left) + var(--column-pad));
 
   height: 100%;
   /* Both axes, rather than overflow-y alone: this is the element
      use-stick-to-bottom watches, and it identifies the scroller it is being
      asked about by reading the computed `overflow` shorthand. */
   overflow: auto;
+  /* No bar on the window itself. macOS apps do not put one down the side of
+     their main content, and under *Show scroll bars: Always* Chromium would
+     draw a permanent classic one 328px from the words it belongs to, on top of
+     the rail. Hidden, not disabled: wheel, trackpad and keyboard all still
+     scroll, and the small boxes that scroll on purpose keep their own bar. */
+  scrollbar-width: none;
   /* The browser's own scroll anchoring and a stick-to-bottom hook are two
      things trying to hold the same rope. Ours wins. */
   overflow-anchor: none;
@@ -85,6 +88,15 @@
   pointer-events: none;
 }
 
+/* The strip only spans the conversation: both panels run the full height of the
+   window, and the strip sitting over them would cut their first heading off.
+   With the shelf there, the traffic lights sit over it rather than over the
+   strip, so the strip owes them nothing. */
+.app--shelved .topbar {
+  left: var(--shelf-take);
+  padding-left: 0;
+}
+
 /* The overview owns the right-hand edge; the ramp belongs to the conversation. */
 .app--overviewed::before {
   right: var(--rail-width);
@@ -97,32 +109,38 @@
   min-height: 100%;
   /* The strip along the top is always there, so the column always starts below
      it — and it starts on the same line the rail's title does. */
-  padding: calc(var(--topbar-height) + var(--space-3)) var(--column-pad) var(--space-5);
+  /* No bottom padding: it sat inside the sticky composer's containing block, so
+     the last 24px of a long scroll un-stuck the box and the composer hopped up
+     off the glass at the end of every scroll. The room lives on the composer
+     itself now, where it travels with it. */
+  padding: calc(var(--topbar-height) + var(--space-3)) var(--column-pad) 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  /* The conversation starts at the top, on the same band as the rail's title.
-     It was pinned to the bottom before this pass, which is what a chat with no
-     second column does — but with the rail up it left the whole top-left
-     quarter of the window empty while the top-right was dense, and the two
-     stopped reading as one page. Top-aligned, the first line of the
-     conversation and the first version sit on one line, the eye crosses the
-     window once, and the slack all collects at the bottom where both columns
-     have already finished. The composer does not move either way: it is sticky
-     and lives on the bottom edge whatever the thread is doing. */
+  /* The conversation starts at the top once it is long enough to fill the
+     window. While it is short, the thread's own auto margin (see .thread)
+     pushes the whole exchange down to the composer, so the first thing a
+     fullscreen window shows is the answer box next to the thing you just
+     said — not an 800px void (BACKLOG A10.1). Both readings have a home: at
+     the top, the first line sits on the same band as the rail's title; at the
+     bottom, the exchange reads as one object with the place you answer it.
+     The composer itself is sticky and never moves. */
   justify-content: flex-start;
 }
 
 /* Empty state centres vertically; once there is a thread it starts at the top.
-   The composer's auto margin below would otherwise win over `center` and split
-   the two apart — on the first screen the sentence and the box you answer it in
-   are one object and are centred as one. */
+   On the first screen the sentence and the box you answer it in are one
+   object, so they are centred as one. */
 .app--empty .app__column {
   justify-content: center;
-  padding-bottom: var(--space-8);
+  padding-bottom: var(--space-7);
 }
 
-.app--empty .app__composer {
+/* An auto margin beats `justify-content` for the free space, so the thread has
+   to give it up here or the first screen would bottom-align instead of centre.
+   Today the two never coexist — App.tsx draws the welcome instead of an empty
+   thread — and this is what keeps that a CSS fact rather than a JSX one. */
+.app--empty .thread {
   margin-top: 0;
 }
 
@@ -130,11 +148,42 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  /* No longer 1 0 auto: the column takes the slack now, at the top, where an
-     older conversation has scrolled away to. */
   flex: 0 0 auto;
-  /* Room for the composer, which sits over the end of the thread. */
+  /* Reading order, top down: the header, then the first thing said, then the
+     rest. Pushing a short conversation to the bottom instead left the whole top
+     of the window empty under its own heading, which reads as broken rather
+     than as roomy. */
   padding-bottom: var(--space-2);
+}
+
+/* ---------------------------------------------------------------------------
+   The workspace header
+   The project as a page title, on the same band as the panel's first heading.
+   It replaces the greeting that used to be the transcript's first message —
+   a permanent fact about where you are does not belong in a conversation.
+   --------------------------------------------------------------------------- */
+
+.workhead {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.workhead__name {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.workhead__note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
 }
 
 /* Generous, uneven whitespace — an exchange begins when you say something, so
@@ -161,19 +210,17 @@
   position: sticky;
   bottom: 0;
   z-index: 1;
-  /* The bottom edge of the window, whatever the thread above is doing. `sticky`
-     alone does not do this — with `bottom: 0` it only ever pulls an element
-     back up into view, so a short conversation left the box hanging in the
-     middle of the glass with nothing under it. The auto margin eats the slack
-     and puts it where it belongs: between the last thing said and the place you
-     answer it. */
+  /* The bottom edge of the window, whatever the thread above is doing. The auto
+     margin eats the slack of a short conversation so the box sits on the glass
+     rather than half way up it; `sticky` holds it there once the thread is long
+     enough to scroll. The place you answer is always an edge. */
   margin-top: auto;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: var(--space-2);
   background: var(--bg);
-  padding-bottom: var(--space-3);
+  padding-bottom: calc(var(--space-5) + var(--space-3));
 }
 
 /* The last line of the conversation used to end at a hard horizontal edge where
@@ -281,75 +328,6 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Stop
-   Only while something is running, and quiet even then. Esc does the same
-   thing — this is here for the people who never learn that. It is centred under
-   the composer rather than stretched across it, because it is one small word
-   and a full-width button would read as the main action on the screen.
-   --------------------------------------------------------------------------- */
-
-.app__stop {
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  padding: 0 var(--space-3);
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
-  /* 36px tall, 44px of hit area under it. */
-  min-height: 36px;
-  position: relative;
-  transition:
-    color var(--dur-micro) var(--ease-hover),
-    border-color var(--dur-micro) var(--ease-hover),
-    transform var(--dur-micro) var(--ease-out-quart);
-}
-
-/* A square, which is what stop means everywhere else on a computer. Drawn
-   rather than lettered so the button reads at a glance without being loud. */
-.app__stop::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-
-.app__stop::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 44px;
-  transform: translateY(-50%);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .app__stop:hover {
-    color: var(--text);
-    border-color: var(--border-strong);
-  }
-}
-
-.app__stop:active {
-  transform: scale(0.97);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .app__stop {
-    transition: color var(--dur-micro) var(--ease-hover);
-  }
-
-  .app__stop:active {
-    transform: none;
-  }
-}
-
-/* ---------------------------------------------------------------------------
    The strip along the top
    The window's title bar is hidden so the conversation starts at the top of the
    glass. That leaves the traffic lights sitting over the page, so the app owes
@@ -368,35 +346,31 @@
   right: 0;
   height: var(--topbar-height);
   z-index: 3;
-  /* Three columns, not a flex row with an absolutely-centred wordmark on top of
-     it. The wordmark sits dead centre of the strip and the name sits over the
-     conversation's left margin, and those two facts are only compatible while
-     the name is short: at 44% of a narrow window the name reached the centre
-     and printed itself through GRAPHE. Grid makes the collision impossible —
-     the outer columns are `minmax(0, 1fr)`, so they are equal (the mark stays
-     centred) and they are allowed to shrink below their content (a long name
-     ellipsises instead of pushing).
-
-     The strip's own padding is gone, because padding would centre the middle
-     column in the padding box rather than in the window. The inset that lines
-     the name up with the first word of the thread is now the name's margin —
-     same alignment, no effect on where the centre is. */
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* One row holding one control. The wordmark that used to be centred here is
+     gone: it named an app whose name is already in the menu bar, the Dock and
+     the window's title, and being centred in the strip while the name was
+     aligned to the conversation made the two collide on any narrow window. */
+  display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0;
+  justify-content: center;
+  /* Centred over the conversation, which is the thing it names. The strip's own
+     `left`/`right` already stop where the panels start, so the only inset left
+     to make is the traffic lights' — and only when the shelf is not there to
+     hold them, or the name would be printed through by the buttons. */
+  padding-left: var(--lights, 0px);
   background: var(--bg);
   -webkit-app-region: drag;
 }
 
 /* Room for the traffic lights, which the shell puts at 18px. They are the one
-   thing the strip cannot slide under. */
+   thing the strip cannot slide under — until full screen, where macOS takes
+   them away and the reserved room is just a dent in the layout. */
 [data-shell='desktop'] .app {
-  --topbar-inset: max(
-    92px,
-    calc(var(--shelf-take) + var(--pair-gap) + var(--column-pad))
-  );
+  --lights: 92px;
+}
+
+[data-full='yes'] .app {
+  --lights: 0px;
 }
 
 /* The overview owns the right-hand edge, so the strip stops where it starts. */
@@ -407,6 +381,15 @@
 .topbar__name,
 .topbar__preview {
   -webkit-app-region: no-drag;
+}
+
+/* The strip's right-hand end, where the model chip sits on the screens that
+   have no composer to hold it. */
+.topbar__thinking {
+  margin-left: auto;
+  margin-right: var(--space-4);
+  display: flex;
+  align-items: center;
 }
 
 /* A block with the chevron parked on top of it, rather than a flex row.
@@ -421,23 +404,16 @@
 .topbar__name {
   position: relative;
   display: block;
-  /* The grid column is the limit now — it cannot reach the wordmark, and it
-     cannot be reached by it. `max-width` only has to stop the button from
-     growing past the column it was given. */
-  justify-self: start;
-  max-width: 100%;
+  /* A long project name ellipsises rather than pushing anything. */
+  min-width: 0;
+  max-width: 320px;
   min-height: 26px;
   /* The right-hand padding is the chevron's room: 9px of arrow with a gap
      either side of it. */
   padding: 0 calc(var(--space-2) * 2 + 9px) 0 var(--space-2);
-  /* Optical, not box, alignment. The strip's padding puts this button's *edge*
-     on the conversation's left margin, which put the project's name eight
-     pixels to the right of the first word under it — near enough to look like a
-     mistake rather than a decision. The negative margin hands the padding back
-     so the letters line up and the hover ground still bleeds out to where the
-     button's edge was. The inset the strip used to carry as padding is added
-     here, for the reason given on `.topbar`. */
-  margin-left: calc(var(--topbar-inset) - var(--space-2));
+  /* Padding on both sides now, because it is centred rather than aligned to
+     anything. The chevron's room is on the right. */
+  padding: 0 calc(var(--space-2) * 2 + 9px) 0 var(--space-3);
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   /* The line box is the button, so the text is centred without flexbox. */
@@ -474,32 +450,14 @@
   color: var(--text-faint);
 }
 
-/* The wordmark, centred in the strip. It is the least informative thing on
-   screen — you know what the app is called, you are using it — so it is the
-   quietest: the smallest type, letterspaced wide, and it does not even accept
-   focus or clicks. It exists to hold the composition together while the name
-   and the button do the work on either side. */
-.topbar__mark {
-  /* The strip's middle column. In the flow, so nothing can be drawn under it. */
-  grid-column: 2;
-  justify-self: center;
-  white-space: nowrap;
-  font-size: var(--text-xs);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  pointer-events: none;
-  user-select: none;
-}
-
-/* The pill that shows the live preview, floating in the place the old button
-   had: the strip's right-hand slot, just below the strip itself. It appears
-   the moment there is an address to go to and stays for the whole evening —
-   the same job the button did, only it never asks to be remembered. */
+/* The pill that shows the live preview, on the conversation's own right margin
+   just below the strip. It appears the moment there is an address to go to and
+   stays for the whole evening. */
 .previewpill {
   position: fixed;
   top: calc(var(--topbar-height) + var(--space-4));
-  right: calc(var(--pair-gap) + var(--column-pad));
+  /* The column's measured right edge, so the rail can never be painted over. */
+  right: calc(var(--column-right) + var(--column-pad));
   z-index: 4;
   min-height: 30px;
   padding: 0 var(--space-3);
@@ -530,8 +488,10 @@
 .topbar__switcher {
   position: absolute;
   top: calc(100% - var(--space-1));
-  /* Under the name it hangs from, wherever the strip has put that. */
-  left: var(--topbar-inset);
+  /* Under the name it hangs from, which is the middle of the strip. */
+  left: 50%;
+  transform-origin: top center;
+  margin-left: -160px;
   width: 320px;
   max-width: calc(100vw - var(--space-5));
   padding: var(--space-2) 0 0;
@@ -620,6 +580,15 @@
   padding-left: var(--shelf-thin);
 }
 
+/* One step wider on a desk-sized display. Pictures and code go wider still —
+   see .picture and CodeBlock.css — because a before-and-after squeezed to the
+   width of a paragraph is the one thing here that is not prose. */
+@media (min-width: 1400px) {
+  .app {
+    --thread-width: var(--thread-width-wide);
+  }
+}
+
 @media (max-width: 1100px) {
   .app--overviewed {
     --rail-width: var(--rail-width-tight);
@@ -651,53 +620,27 @@
    belong to the app rather than to any one component sit here.
    --------------------------------------------------------------------------- */
 
-/* Scrollbars, in our own greys rather than the platform's — but only inside the
-   small boxes that scroll on purpose: a block of code, a build log, a composer
-   that has grown past its ceiling.
+/* Scrollbars, in our own greys rather than the platform's.
 
-   Deliberately *not* on the window's own scroller or on the rail. Naming
-   ::-webkit-scrollbar for an element makes Chromium give it a classic scrollbar
-   instead of the overlay one macOS draws over the top, and a classic bar takes
-   real layout width — so the reading column would jump sideways by ten pixels
-   the moment a conversation grew past one screen. The platform's own overlay is
-   both better behaved and better looking there. */
+   With *Show scroll bars: Always* — the default whenever a mouse is connected —
+   macOS has no overlay bar to fall back on: anything that genuinely overflows
+   gets a classic bar taking real width, ours or the platform's. Ours is thinner
+   (11px against 15) and its track is transparent, so an empty scroller shows
+   nothing at all.
+
+   Standard properties only. The ::-webkit-scrollbar pseudo-elements that used
+   to sit under this were measured in Electron 33 and are ignored the moment
+   scrollbar-width is set on the same element — fifty lines that rendered
+   nothing. */
+.app,
+.shelf,
+.overview,
+.connectmodal__body,
 .codeblock__code pre,
 .errorcard__pre,
 .composer__input {
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
-}
-
-.codeblock__code pre::-webkit-scrollbar,
-.errorcard__pre::-webkit-scrollbar,
-.composer__input::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-.codeblock__code pre::-webkit-scrollbar-track,
-.errorcard__pre::-webkit-scrollbar-track,
-.composer__input::-webkit-scrollbar-track,
-.codeblock__code pre::-webkit-scrollbar-corner,
-.errorcard__pre::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-.codeblock__code pre::-webkit-scrollbar-thumb,
-.errorcard__pre::-webkit-scrollbar-thumb,
-.composer__input::-webkit-scrollbar-thumb {
-  background-clip: padding-box;
-  border: 3px solid transparent;
-  border-radius: 999px;
-  background-color: var(--border-strong);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .codeblock__code pre::-webkit-scrollbar-thumb:hover,
-  .errorcard__pre::-webkit-scrollbar-thumb:hover,
-  .composer__input::-webkit-scrollbar-thumb:hover {
-    background-color: var(--text-faint);
-  }
 }
 
 /* Headings set two or three words long look broken when the last word drops to
@@ -710,4 +653,35 @@ h3 {
 
 p {
   text-wrap: pretty;
+}
+
+/* The two ways into the preview, side by side. */
+.previewpill__pair {
+  position: fixed;
+  top: calc(var(--topbar-height) + var(--space-4));
+  right: calc(var(--column-right) + var(--column-pad));
+  z-index: 4;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.previewpill__pair .previewpill {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
+/* The quieter of the pair: the same shape, none of the colour. */
+.previewpill--point {
+  border-color: var(--border);
+  color: var(--text-muted);
+  background: var(--bg-raised);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .previewpill--point:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+    background: var(--bg-raised);
+  }
 }

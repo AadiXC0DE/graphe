@@ -200,6 +200,25 @@
   margin-top: calc(var(--space-2) * -1);
 }
 
+/* One line each, in a column too narrow for two. "12 minutes ago · $0.62 last
+   time" wrapped to three lines in the shelf and turned every row into a
+   paragraph. */
+.picker--compact .pickerrow__meta {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker--compact .pickerrow__open {
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+}
+
+.picker--compact .pickerrow__forget {
+  padding: 0 var(--space-2);
+}
+
 .picker__browse:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;

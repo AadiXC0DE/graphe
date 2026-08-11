@@ -1,0 +1,119 @@
+/** The conversations in this project, named the way the person named them.
+ *
+ * Pure: the shapes Pi hands back are read defensively, field by field, so a
+ * changed record or a half-written one costs one row rather than the list.
+ */
+
+import { ago } from '../../lib/when';
+
+export type Conversation = {
+  id: string;
+  path: string;
+  title: string;
+  at: number;
+  messages: number;
+};
+
+/** Long enough to recognise the thought, short enough to scan a column of them. */
+const LIMIT = 40;
+
+/** Markdown is how people type, not what they meant to say. */
+function withoutMarkup(text: string): string {
+  return text
+    .replace(/^\s*([-*_])\1{2,}\s*$/gm, ' ')
+    .replace(/^\s*```.*$/gm, ' ')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]*)\]\[[^\]]*\]/g, '$1')
+    .replace(/`+/g, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/(^|\W)_([^_]+)_(?=\W|$)/g, '$1$2')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}>+\s?/gm, '')
+    .replace(/^\s*([-*+]|\d+[.)])\s+/gm, '')
+    .replace(/<[^>]+>/g, ' ');
+}
+
+/** Cut at the last whole word, unless the first word alone is already too long. */
+function shortened(text: string): string {
+  if (text.length <= LIMIT) return text;
+  const head = text.slice(0, LIMIT + 1);
+  const space = head.lastIndexOf(' ');
+  const kept = space > LIMIT / 2 ? head.slice(0, space) : head.slice(0, LIMIT);
+  return `${kept.replace(/[\s.,;:!?—–-]+$/, '')}…`;
+}
+
+/** What to call a conversation: the person's own opening words, or — when there
+ *  were none worth keeping — when it happened. */
+export function titleOf(firstMessage: string, at: number): string {
+  const said =
+    typeof firstMessage === 'string' ? withoutMarkup(firstMessage).replace(/\s+/g, ' ').trim() : '';
+  // Leftover punctuation is not a name anybody would recognise.
+  return /[\p{L}\p{N}]/u.test(said) ? shortened(said) : ago(at);
+}
+
+type Fields = Readonly<Record<string, unknown>>;
+
+function fieldsOf(value: unknown): Fields | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Fields;
+}
+
+function textAt(source: Fields, key: string): string | null {
+  const value = source[key];
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/** A moment, written down as a Date, an ISO string, or milliseconds. */
+function momentAt(source: Fields, key: string): number | null {
+  const value = source[key];
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+function countAt(source: Fields, key: string): number | null {
+  const value = source[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.floor(value));
+}
+
+function conversationOf(info: unknown): Conversation | null {
+  const source = fieldsOf(info);
+  if (source === null) return null;
+  const id = textAt(source, 'id');
+  const path = textAt(source, 'path');
+  if (id === null || path === null) return null;
+  const at = momentAt(source, 'modified') ?? momentAt(source, 'created');
+  if (at === null) return null;
+  const messages = countAt(source, 'messageCount');
+  // An empty conversation is a file, not something anyone remembers starting.
+  if (messages === null || messages === 0) return null;
+  const first = source['firstMessage'];
+  return {
+    id,
+    path,
+    title: titleOf(typeof first === 'string' ? first : '', at),
+    at,
+    messages,
+  };
+}
+
+/** Newest first. Anything that cannot be read all the way through is left out
+ *  rather than shown as a row with holes in it. */
+export function readConversations(infos: readonly unknown[]): readonly Conversation[] {
+  if (!Array.isArray(infos)) return [];
+  const found: Conversation[] = [];
+  for (const info of infos) {
+    const conversation = conversationOf(info);
+    if (conversation !== null) found.push(conversation);
+  }
+  return found.sort((a, b) => b.at - a.at);
+}

@@ -33,8 +33,8 @@ import {
   shell,
   type IpcMainInvokeEvent,
 } from 'electron';
-import { spawn } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
@@ -49,6 +49,9 @@ import {
   type Decision,
   type FoundAccount,
   type GrapheSession,
+  listConversations,
+  packageHost,
+  type Conversation,
   type OurAuthInteraction,
 } from '../src/agent/pi/adapter';
 import type { AgentEvent, ImageCard } from '../src/agent/types';
@@ -64,6 +67,7 @@ import {
   type OpenedProject,
   type Overview,
   type Preferences,
+  type PromptOptions,
   type PutBack,
   type RecentProject,
   type Result,
@@ -87,12 +91,22 @@ import { filesWrittenBy } from '../src/diff/changed';
 import { landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
 import type { Bitmap } from '../src/diff/regions';
 import { tellWhatHappened } from '../src/diff/summary';
+import { inDesignWords, readChanges, NOTHING_TO_SAY, type Edit } from '../src/design/words';
 import { PreferenceFile } from '../src/projects/preferences';
 import { Recents } from '../src/projects/recents';
 import { Workspaces } from '../src/projects/workspaces';
 import { findEditor, type Editor } from '../src/shell/editors';
+import { pagesIn, type Page } from '../src/preview/pages';
+import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
+import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
+import { readTokens, steps, writeToken } from '../src/design/tokens';
+import { lookAtEveryWidth } from '../src/diff/capture';
+import { readsWell, type Look } from '../src/design/widths';
+import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
+
 import type { Serving } from '../src/preview/serve';
 import { makeAndServe, ShowError, showSays } from '../src/preview/show';
+import { describePointed, type Pointed } from '../src/preview/point';
 import { knownTrouble, plainMessage, plainTrouble } from './plainly';
 
 /**
@@ -109,6 +123,33 @@ import { knownTrouble, plainMessage, plainTrouble } from './plainly';
  * Electron ships a Node that has it.
  */
 patchWorkerThreads();
+
+/**
+ * The PATH a Finder-launched app inherits is `/usr/bin:/bin:/usr/sbin:/sbin`,
+ * which does not contain a Homebrew, nvm or mise node. Adding packages spawns
+ * `npm`, so without this it fails with a spawn error on most developers'
+ * machines and on nobody's terminal. Asked of the login shell once, at startup.
+ */
+function widenPath(): void {
+  if (process.platform === 'win32') return;
+  try {
+    const shell = process.env['SHELL'] ?? '/bin/zsh';
+    const asked = spawnSync(shell, ['-lic', 'printf %s "$PATH"'], {
+      encoding: 'utf8',
+      timeout: 4000,
+    });
+    const found = asked.stdout?.trim() ?? '';
+    if (found === '' || !found.includes('/')) return;
+    const already = new Set((process.env['PATH'] ?? '').split(':'));
+    const added = found.split(':').filter((one) => one !== '' && !already.has(one));
+    if (added.length > 0) process.env['PATH'] = [...already, ...added].join(':');
+  } catch {
+    // The narrow PATH still works for everything except adding packages, and
+    // that failure already says something a person can act on.
+  }
+}
+
+widenPath();
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 /** Vite in development, the built files in a shipped app. */
@@ -422,6 +463,17 @@ function createWindow(): void {
   mainWindow = win;
   guardNavigation(win.webContents);
   win.once('ready-to-show', () => win.show());
+
+  // In full screen macOS takes the traffic lights away, so the room reserved
+  // for them is room wasted. The window says which it is and the stylesheet
+  // does the rest.
+  const sayHowItSits = (): void => {
+    if (win.isDestroyed()) return;
+    win.webContents.send(CHANNEL.windowState, { fullScreen: win.isFullScreen() });
+  };
+  win.on('enter-full-screen', sayHowItSits);
+  win.on('leave-full-screen', sayHowItSits);
+  win.webContents.on('did-finish-load', sayHowItSits);
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
     closeSession();
@@ -698,6 +750,9 @@ function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
  */
 async function look(project: string, held: Held): Promise<void> {
   const looking = held.looking;
+  // Held onto out here: the block below declares a `held` of its own for the
+  // older picture, and the timeline is still wanted after it.
+  const timeline = held.timeline;
   if (looking.busy) {
     looking.again = true;
     return;
@@ -772,6 +827,7 @@ async function look(project: string, held: Held): Promise<void> {
       id,
       at: taken.picture.at,
       headline: told.headline,
+      inDesignWords: await saidInDesignWords(timeline, project, changed),
       where: told.where,
       areas: moved.areas,
       beforeThumb,
@@ -788,6 +844,34 @@ async function look(project: string, held: Held): Promise<void> {
       void look(project, held);
     }
   }
+}
+
+/**
+ * What changed, in the vocabulary of design rather than of files.
+ *
+ * "Spacing on three cards, from 16 to 24" instead of "edited Card.tsx". The
+ * before is the last saved version of each file and the after is what is on
+ * disk now; anything unreadable is simply left out of the comparison.
+ */
+async function saidInDesignWords(
+  timeline: Timeline,
+  root: string,
+  files: readonly string[],
+): Promise<string | null> {
+  const current = await timeline.currentVersion().catch(() => null);
+  if (current === null) return null;
+  const edits: Edit[] = [];
+  for (const file of files.slice(0, 20)) {
+    const [before, after] = await Promise.all([
+      timeline.fileAt(current.id, file).catch(() => null),
+      readFile(join(root, file), 'utf8').catch(() => null),
+    ]);
+    if (before === null || after === null || before === after) continue;
+    edits.push({ file, before, after });
+  }
+  if (edits.length === 0) return null;
+  const said = inDesignWords(readChanges(edits));
+  return said === NOTHING_TO_SAY ? null : said;
 }
 
 function forwardTo(path: string, held: Held): (event: AgentEvent) => void {
@@ -824,8 +908,63 @@ function forwardTo(path: string, held: Held): (event: AgentEvent) => void {
   };
 }
 
-async function openProject(folder: string): Promise<Result<OpenedProject>> {
+/** The likeliest places a project keeps its own design tokens. */
+const TOKEN_FILES = [
+  'src/styles/tokens.css',
+  'src/styles/variables.css',
+  'src/tokens.css',
+  'styles/tokens.css',
+  'app/globals.css',
+  'src/app/globals.css',
+  'src/index.css',
+  'styles/globals.css',
+];
+
+/**
+ * The project's own tokens, and where they live.
+ *
+ * Whichever candidate file holds the most of them wins — a project with both a
+ * token file and a globals file keeps its tokens in one of them, and counting
+ * is a better guess than an ordering we made up.
+ */
+async function styleTokens(
+  root: string,
+): Promise<{ file: string; tokens: readonly import('../src/lib/ipc').StyleToken[] } | null> {
+  let best: { file: string; tokens: readonly import('../src/lib/ipc').StyleToken[] } | null = null;
+  for (const candidate of TOKEN_FILES) {
+    const css = await readFile(join(root, candidate), 'utf8').catch(() => null);
+    if (css === null) continue;
+    const found = readTokens(css);
+    if (found.length === 0) continue;
+    const withSteps = found.map((one) => ({ ...one, steps: steps(one, found) }));
+    if (best === null || withSteps.length > best.tokens.length) {
+      best = { file: candidate, tokens: withSteps };
+    }
+  }
+  return best;
+}
+
+/** Where every project's conversations are kept. */
+function sessionsFolder(): string {
+  return join(app.getPath('userData'), 'sessions');
+}
+
+/** Opens asked for and not yet answered, by folder. Two requests for the same
+ *  folder inside the window between the "already open" check and `adopt` would
+ *  build two sessions appending to one transcript; the second caller waits for
+ *  the first instead. */
+const opening = new Map<string, Promise<Result<OpenedProject>>>();
+
+function openProject(folder: string): Promise<Result<OpenedProject>> {
   const path = resolve(folder);
+  const already = opening.get(path);
+  if (already !== undefined) return already;
+  const attempt = openTheProject(path).finally(() => opening.delete(path));
+  opening.set(path, attempt);
+  return attempt;
+}
+
+async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   const name = basename(path) === '' ? path : basename(path);
 
   const found = await stat(path).catch(() => null);
@@ -839,9 +978,10 @@ async function openProject(folder: string): Promise<Result<OpenedProject>> {
 
   // Already open: come straight back to it. The session, the ledger and the
   // history are all exactly where they were left, which is the whole of B2.
-  if (workspaces.resume(path) !== null) {
+  const resumed = workspaces.resume(path);
+  if (resumed !== null) {
     await (await recents()).remember({ path, name });
-    return done({ path, name });
+    return done({ path, name, history: resumed.held.session?.history ?? [] });
   }
 
   let timeline: Timeline;
@@ -869,6 +1009,19 @@ async function openProject(folder: string): Promise<Result<OpenedProject>> {
       onEvent: forwardTo(path, held),
       timeline,
       model: (await preferences()).all().model,
+      // One folder of transcripts for all projects, under the app's own data
+      // directory — never inside the user's project, so uninstalling Graphe
+      // takes them with it. Opening a project again resumes its most recent
+      // conversation (BACKLOG B1.1); Pi tells them apart by the folder each was
+      // recorded in, not by where the file sits.
+      //
+      // Two known limits of that, both accepted for now: a project that is
+      // renamed or moved no longer matches, so it opens a fresh conversation and
+      // the old file stays behind; and nothing prunes this folder, so a
+      // long-lived install accumulates transcripts (pictures included, which are
+      // the bulk of it). Both want the "forget this conversation" action B1.1
+      // asks for, which is not built yet.
+      sessionDir: sessionsFolder(),
     });
   } catch (cause) {
     // The adapter wraps whatever went wrong in a sentence of its own, so the
@@ -888,11 +1041,72 @@ async function openProject(folder: string): Promise<Result<OpenedProject>> {
   // returned by the time this gets anywhere near a browser window.
   void look(path, held);
 
-  return done({ path, name });
+  // The conversation this folder left behind, if there is one — the window
+  // turns it back into the desk it was (BACKLOG B1.1).
+  return done({ path, name, history: held.session.history });
 }
 
 function closeSession(): void {
   workspaces.closeAll();
+}
+
+/** Folders a page never lives in, skipped before they are opened — a project
+ *  with node_modules in it is otherwise most of a minute of reading. */
+const NOT_WORTH_WALKING = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  'out',
+  '.next',
+  '.svelte-kit',
+  'coverage',
+  '.cache',
+]);
+
+/** Six levels is deeper than any route anybody nests, and it bounds the walk on
+ *  a folder that turns out to be somebody's home directory. */
+const DEPTH = 6;
+const MOST_FILES = 4000;
+
+/** Every file under a folder, relative to it. Unreadable folders are skipped
+ *  rather than fatal: a project with one locked directory still has pages. */
+async function filesUnder(root: string): Promise<string[]> {
+  const found: string[] = [];
+  const walk = async (folder: string, prefix: string, depth: number): Promise<void> => {
+    if (depth > DEPTH || found.length >= MOST_FILES) return;
+    let entries;
+    try {
+      entries = await readdir(folder, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (found.length >= MOST_FILES) return;
+      const name = entry.name;
+      if (name.startsWith('.') && name !== '.') continue;
+      if (entry.isDirectory()) {
+        if (NOT_WORTH_WALKING.has(name)) continue;
+        await walk(join(folder, name), `${prefix}${name}/`, depth + 1);
+      } else if (entry.isFile()) {
+        found.push(`${prefix}${name}`);
+      }
+    }
+  };
+  await walk(root, '', 0);
+  return found;
+}
+
+/** One path inside a project, or null when it tries to leave. */
+function inside(root: string, file: string): string | null {
+  const full = resolve(root, file);
+  return full === root || full.startsWith(root + sep) ? full : null;
+}
+
+/** The served address, pointed at one page of it. */
+function atPage(address: string, at: unknown): string {
+  if (typeof at !== 'string' || !at.startsWith('/')) return address;
+  return `${address.replace(/\/$/, '')}${at}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1113,8 +1327,45 @@ function register(): void {
 
   handle<Overview>(CHANNEL.overview, async () => {
     const open = workspaces.current;
-    if (open === null) return done({ git: null, preview: null });
-    return done({ git: await readGitStatus(open.path), preview: open.held.serving?.address ?? null });
+    if (open === null) {
+      return done({ git: null, preview: null, artifacts: [], swatches: [], styles: null });
+    }
+    const made = artifactsAmong([...open.held.looking.files]);
+    // A palette is only a palette once its colours have been read, and it is the
+    // one artifact worth opening a file for.
+    const palette = made.find((one) => one.kind === 'palette') ?? null;
+    const swatches =
+      palette === null
+        ? []
+        : paletteFrom(await readFile(join(open.path, palette.path), 'utf8').catch(() => ''));
+    return done({
+      git: await readGitStatus(open.path),
+      preview: open.held.serving?.address ?? null,
+      artifacts: made,
+      swatches,
+      styles: await styleTokens(open.path),
+    });
+  });
+
+  handle<readonly SavedVersion[]>(CHANNEL.nudgeToken, async (_event, args) => {
+    const [name, value] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof name !== 'string' || typeof value !== 'string') return fail(NOTHING_OPEN);
+    const styles = await styleTokens(open.path);
+    if (styles === null) return fail(NOTHING_OPEN);
+    const where = join(open.path, styles.file);
+    try {
+      const css = await readFile(where, 'utf8');
+      const next = writeToken(css, name, value);
+      if (next === css) return done(await versionsOf(open.held));
+      await writeFile(where, next, 'utf8');
+      await open.held.timeline.snapshot({ boundary: 'user-asked', by: 'you' });
+      return done(await versionsOf(open.held));
+    } catch (cause) {
+      const raw = cause instanceof Error ? cause.message : String(cause);
+      return fail(plainTrouble(raw, detailsOf(cause)));
+    }
   });
 
   handle<PutBack>(CHANNEL.putBack, async (_event, args) => {
@@ -1169,14 +1420,19 @@ function register(): void {
    * would open the folder in whatever the *system* has associated with folders,
    * which is the Finder, which is the other button.
    */
-  handle<null>(CHANNEL.openInEditor, async () => {
+  handle<null>(CHANNEL.openInEditor, async (_event, args) => {
+    const [file] = args;
     const open = workspaces.current;
     if (open === null) return fail(NOTHING_OPEN);
     const found = await editor();
     if (found === null) return fail(NO_EDITOR);
+    // One file when one was named, and only ever one inside the project — a
+    // path from the window is not a path to trust with `open -a`.
+    const target = typeof file === 'string' && file !== '' ? inside(open.path, file) : open.path;
+    if (target === null) return fail(NOTHING_OPEN);
     try {
       await new Promise<void>((resolve, reject) => {
-        const child = spawn('open', ['-a', found.bundle, open.path], { stdio: 'ignore' });
+        const child = spawn('open', ['-a', found.bundle, target], { stdio: 'ignore' });
         child.on('error', reject);
         child.on('exit', (code) =>
           code === 0 ? resolve() : reject(new Error(`open exited with ${String(code)}`)),
@@ -1186,6 +1442,169 @@ function register(): void {
     } catch (cause) {
       return fail(couldNotOpenEditor(found.name, cause));
     }
+  });
+
+  handle<readonly SavedVersion[]>(CHANNEL.saveVersion, async (_event, args) => {
+    const [name] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    try {
+      await open.held.timeline.snapshot({
+        boundary: 'user-asked',
+        by: 'you',
+        name: typeof name === 'string' && name.trim() !== '' ? name.trim() : undefined,
+        evenIfNothingChanged: true,
+      });
+      return done(await versionsOf(open.held));
+    } catch (cause) {
+      const raw = cause instanceof Error ? cause.message : String(cause);
+      return fail(plainTrouble(raw, detailsOf(cause)));
+    }
+  });
+
+  handle<{ looks: readonly Look[]; says: string }>(CHANNEL.checkWidths, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_TO_SHOW);
+    let ready;
+    try {
+      ready = await makeAndServe({ folder: open.path, says: () => undefined });
+    } catch (cause) {
+      return fail(couldNotShow(cause));
+    }
+    if (ready.kind !== 'showing') return done({ looks: [], says: ready.question });
+    try {
+      const looks = await lookAtEveryWidth(ready.serving.address);
+      return done({ looks, says: readsWell(looks).says });
+    } finally {
+      await ready.serving.stop().catch(() => undefined);
+    }
+  });
+
+  handle<string | null>(CHANNEL.shareReview, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const versions = await versionsOf(open.held);
+    const changes: Shown[] = versions.slice(0, 12).map((version) => ({
+      title: version.title,
+      when: version.at,
+      says: '',
+      before: null,
+      after: null,
+    }));
+    const review: Review = {
+      project: open.name,
+      made: Date.now(),
+      changes,
+      spent: null,
+    };
+    const safe = safeToShare(review);
+    if (!safe.ok) {
+      return fail({ what: 'I have not made that page.', because: safe.because, actionLabel: 'Got it' });
+    }
+    const where = await dialog.showSaveDialog(mainWindow ?? undefined!, {
+      defaultPath: join(app.getPath('desktop'), `${open.name} — what changed.html`),
+      filters: [{ name: 'Web page', extensions: ['html'] }],
+    });
+    if (where.canceled || where.filePath === undefined) return done(null);
+    try {
+      await writeFile(where.filePath, reviewPage(review), 'utf8');
+      shell.showItemInFolder(where.filePath);
+      return done(where.filePath);
+    } catch (cause) {
+      const raw = cause instanceof Error ? cause.message : String(cause);
+      return fail(plainTrouble(raw, detailsOf(cause)));
+    }
+  });
+
+  handle<OpenedProject>(CHANNEL.openConversation, async (_event, args) => {
+    const [path] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const held = open.held;
+    // The old session goes first: two sessions writing one project's transcripts
+    // is the race `opening` exists to prevent, and this is the same hazard.
+    held.session?.dispose();
+    held.session = null;
+    // The ledger belongs to the sitting, not to the conversation, so it stays.
+    try {
+      held.session = await createSession({
+        projectRoot: open.path,
+        onEvent: forwardTo(open.path, held),
+        timeline: held.timeline,
+        model: (await preferences()).all().model,
+        ...(typeof path === 'string' && path !== ''
+          ? { sessionPath: path }
+          : { sessionDir: sessionsFolder() }),
+      });
+    } catch (cause) {
+      const chain = detailsOf(cause);
+      return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
+    }
+    return done({ path: open.path, name: open.name, history: held.session.history });
+  });
+
+  /** One shelf per run. Building it reads settings off disk, and the screen it
+   *  feeds is opened over and over. */
+  let shelf: Awaited<ReturnType<typeof openShelf>> | null = null;
+  const openShelf = async () => {
+    const where = workspaces.current?.path ?? app.getPath('home');
+    return packageShelf(await packageHost(await defaultAgentDir(), where));
+  };
+  const theShelf = async () => (shelf ??= await openShelf());
+
+  handle<readonly Pack[]>(CHANNEL.packages, async (_event, args) => {
+    const [term] = args;
+    try {
+      const asked = typeof term === 'string' ? term.trim() : '';
+      const found = await (await theShelf())[asked === '' ? 'mine' : 'browse'](asked);
+      return done(found);
+    } catch (cause) {
+      const raw = cause instanceof Error ? cause.message : String(cause);
+      return fail(plainTrouble(raw, detailsOf(cause)));
+    }
+  });
+
+  handle<readonly Pack[]>(CHANNEL.addPackage, async (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
+    const shelved = await theShelf();
+    const added = await shelved.add(id);
+    if (!added.ok) {
+      return fail({ what: 'I could not add that.', because: added.why, actionLabel: 'Got it' });
+    }
+    return done(await shelved.mine());
+  });
+
+  handle<readonly Pack[]>(CHANNEL.removePackage, async (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
+    const shelved = await theShelf();
+    await shelved.remove(id);
+    return done(await shelved.mine());
+  });
+
+  handle<string>(CHANNEL.explainPackage, async (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
+    const open = workspaces.current;
+    const agent = open?.held.session ?? null;
+    if (agent === null) {
+      return done(
+        'Open a project first and I will read this one and tell you what it does.',
+      );
+    }
+    const found = (await (await theShelf()).mine()).find((one) => one.id === id) ?? null;
+    if (found === null) return done(WARNING);
+    // Asked and answered inside the conversation, because that is where the
+    // model already is. The window shows it beside the row it asked about.
+    await agent.prompt(askAbout(found));
+    return done('Asked — the answer is in the conversation.');
+  });
+
+  handle<readonly Conversation[]>(CHANNEL.conversations, async () => {
+    const open = workspaces.current;
+    if (open === null) return done([]);
+    return done(await listConversations(open.path, sessionsFolder()));
   });
 
   handle<null>(CHANNEL.revealFolder, async () => {
@@ -1205,7 +1624,14 @@ function register(): void {
     return done(null);
   });
 
-  handle<ShowOutcome>(CHANNEL.show, async () => {
+  handle<readonly Page[]>(CHANNEL.pages, async () => {
+    const open = workspaces.current;
+    if (open === null) return done([]);
+    return done(pagesIn(await filesUnder(open.path)));
+  });
+
+  handle<ShowOutcome>(CHANNEL.show, async (_event, args) => {
+    const [at, point] = args;
     const open = workspaces.current;
     if (open === null) return fail(NOTHING_TO_SHOW);
 
@@ -1215,14 +1641,24 @@ function register(): void {
     open.held.serving = null;
 
     try {
-      const outcome = await makeAndServe({ folder: open.path, says: tell });
+      const outcome = await makeAndServe({
+        folder: open.path,
+        says: tell,
+        // Every serving can be pointed at; the page only listens once the
+        // address says so, which is what the button does.
+        onPointed: (pointed: Pointed) => {
+          if (mainWindow === null || mainWindow.isDestroyed()) return;
+          mainWindow.webContents.send(CHANNEL.pointed, describePointed(pointed));
+        },
+      });
       if (outcome.kind === 'unsure') return done({ kind: 'unsure', question: outcome.question });
       open.held.serving = outcome.serving;
       // Their own browser, not a window of ours. It is the one they already
       // trust, it is where their client will open the link we send later, and
       // the alternative is us drawing somebody else's HTML inside the same app
       // that holds their folder open.
-      await shell.openExternal(outcome.serving.address);
+      const address = atPage(outcome.serving.address, at);
+      await shell.openExternal(point === true ? `${address}#graphe-point` : address);
       return done({ kind: 'showing', name: open.name });
     } catch (cause) {
       return fail(couldNotShow(cause));
@@ -1230,7 +1666,7 @@ function register(): void {
   });
 
   handle<null>(CHANNEL.prompt, async (_event, args) => {
-    const [text, attachments] = args;
+    const [text, attachments, ways] = args;
     if (typeof text !== 'string' || text.trim() === '') return done(null);
     const open = workspaces.current;
     const agent = open?.held.session ?? null;
@@ -1240,7 +1676,9 @@ function register(): void {
     // src/diff/summary.ts.
     open.held.looking.instruction = text;
     try {
-      await agent.prompt(text, imageCards(attachments));
+      const lookFirst =
+        ways !== null && typeof ways === 'object' && (ways as PromptOptions).lookFirst === true;
+      await agent.prompt(text, imageCards(attachments), { lookFirst });
       return done(null);
     } catch (cause) {
       // The adapter has already relayed this as an `error` event, worded by the

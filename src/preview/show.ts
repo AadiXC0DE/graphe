@@ -29,6 +29,7 @@ import { delimiter, join, resolve } from 'node:path';
 
 import { showWords, type ShowProgress } from '../lib/ipc';
 import { COULD_NOT_FIND_IT, readTheFolder, type Look, type Manifest } from './detect';
+import type { Pointed } from './point';
 import { serveFolder, type Serving } from './serve';
 
 /** Something that stopped us, with the raw text kept for the disclosure. */
@@ -65,6 +66,8 @@ export type ShowOptions = {
   /** How long to wait for one step. Long enough for a cold project, short enough
    *  that a wedged one does not hold the button down forever. */
   patience?: number;
+  /** Told about the element somebody clicked in the preview. */
+  onPointed?: (pointed: Pointed) => void;
 };
 
 const PATIENCE = 6 * 60_000;
@@ -188,13 +191,14 @@ async function whereItLanded(
 export async function makeAndServe(options: ShowOptions): Promise<ShowResult> {
   const folder = resolve(options.folder);
   const patience = options.patience ?? PATIENCE;
+  const ways = { onPointed: options.onPointed };
   const recipe = readTheFolder(await lookAt(folder));
 
   if (recipe.kind === 'unsure') return { kind: 'unsure', question: recipe.question };
 
   if (recipe.kind === 'as-is') {
     options.says({ says: showSays.puttingTogether, done: false });
-    const serving = await serveFolder(folder);
+    const serving = await serveFolder(folder, ways);
     options.says({ says: showSays.ready, done: true });
     return { kind: 'showing', serving };
   }
@@ -210,7 +214,7 @@ export async function makeAndServe(options: ShowOptions): Promise<ShowResult> {
   const made = await whereItLanded(folder, recipe.outputs);
   if (made === null) return { kind: 'unsure', question: COULD_NOT_FIND_IT };
 
-  const serving = await serveFolder(made);
+  const serving = await serveFolder(made, ways);
   options.says({ says: showSays.ready, done: true });
   return { kind: 'showing', serving };
 }

@@ -41,6 +41,7 @@
 import { BrowserWindow, nativeImage, type NativeImage } from 'electron';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 
+import { overflowing, saysOverflow, WIDTHS, type Look, type Width } from '../design/widths';
 import { makeAndServe } from '../preview/show';
 import { comparePictures, realSize, type Bitmap, type ChangedArea } from './regions';
 import { shotFile, shotsFolder } from './shots';
@@ -114,14 +115,32 @@ export async function readPicture(file: string): Promise<string | null> {
 /* -------------------------------------------------------------------------- */
 
 function waitFor<T>(work: Promise<T>, patience: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     work.catch(() => null),
-    new Promise<null>((give) => setTimeout(() => give(null), patience)),
-  ]);
+    new Promise<null>((give) => {
+      timer = setTimeout(() => give(null), patience);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 function rest(howLong: number): Promise<void> {
   return new Promise((wake) => setTimeout(wake, howLong));
+}
+
+type Size = { width: number; height: number };
+
+type Photographed = {
+  image: NativeImage;
+  /** How wide the page turned out to be, or null when it could not be measured. */
+  contentWidth: number | null;
+};
+
+/** One finite number off the object the page handed back. */
+function measured(reading: unknown, key: string): number | null {
+  if (typeof reading !== 'object' || reading === null) return null;
+  const found = (reading as Record<string, unknown>)[key];
+  return typeof found === 'number' && Number.isFinite(found) ? found : null;
 }
 
 /**
@@ -135,12 +154,17 @@ function rest(howLong: number): Promise<void> {
  * their site being broken by us. A partition of its own keeps our policy on our
  * window and off theirs. It is in memory rather than persisted, so nothing from
  * their site is written to disk.
+ *
+ * `size` defaults to the desktop viewport; the three widths pass their own.
  */
-async function photograph(address: string): Promise<NativeImage | null> {
+async function photograph(
+  address: string,
+  size: Size = VIEWPORT,
+): Promise<Photographed | null> {
   const window = new BrowserWindow({
     show: false,
-    width: VIEWPORT.width,
-    height: VIEWPORT.height,
+    width: size.width,
+    height: size.height,
     useContentSize: true,
     webPreferences: {
       offscreen: true,
@@ -172,29 +196,32 @@ async function photograph(address: string): Promise<NativeImage | null> {
 
     // As tall as the page, within reason. A screenshot of the first screenful
     // is a screenshot of the header, and almost nothing anybody asks for is in
-    // the header.
-    const tall = await waitFor(
+    // the header. How wide the page came out is asked in the same breath,
+    // because it can only be known while it is still loaded.
+    const reading = await waitFor(
       window.webContents.executeJavaScript(
         `(() => { const d = document.documentElement, b = document.body;
-          return Math.max(d.scrollHeight, d.offsetHeight, b ? b.scrollHeight : 0, ${VIEWPORT.height}); })()`,
+          return {
+            tall: Math.max(d.scrollHeight, d.offsetHeight, b ? b.scrollHeight : 0, ${size.height}),
+            wide: d.scrollWidth,
+          }; })()`,
         true,
       ) as Promise<unknown>,
       4000,
     );
+    const tall = measured(reading, 'tall');
     const height =
-      typeof tall === 'number' && Number.isFinite(tall)
-        ? Math.min(TALLEST, Math.max(VIEWPORT.height, Math.round(tall)))
-        : VIEWPORT.height;
+      tall === null ? size.height : Math.min(TALLEST, Math.max(size.height, Math.round(tall)));
 
-    if (height !== VIEWPORT.height) {
-      window.setContentSize(VIEWPORT.width, height);
+    if (height !== size.height) {
+      window.setContentSize(size.width, height);
       // A resize is a relayout, and a relayout is a repaint. Let it land.
       await rest(SETTLE);
     }
 
     const image = await waitFor(window.webContents.capturePage(), 8000);
     if (image === null || image.isEmpty()) return null;
-    return image;
+    return { image, contentWidth: measured(reading, 'wide') };
   } catch {
     return null;
   } finally {
@@ -236,8 +263,9 @@ export async function capture(request: CaptureRequest): Promise<Captured | null>
     if (ready.kind !== 'showing') return null;
     stop = () => ready.serving.stop();
 
-    const image = await photograph(ready.serving.address);
-    if (image === null) return null;
+    const taken = await photograph(ready.serving.address);
+    if (taken === null) return null;
+    const image = taken.image;
 
     const file = shotFile(request.folder, request.id);
     await mkdir(shotsFolder(request.folder), { recursive: true });
@@ -256,6 +284,46 @@ export async function capture(request: CaptureRequest): Promise<Captured | null>
   } finally {
     await stop?.().catch(() => {});
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* The same page, three times                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** One width, photographed and measured. Failure is this width's own: it comes
+ *  back as a `Look` with no picture rather than as a thrown error, so the two
+ *  that did come out are still worth showing. */
+async function lookAt(address: string, size: Width): Promise<Look> {
+  const named = { id: size.id, name: size.name, width: size.width };
+  try {
+    const taken = await photograph(address, { width: size.width, height: size.height });
+    if (taken === null) return { ...named, shot: null, trouble: null };
+
+    const wide = taken.contentWidth;
+    return {
+      ...named,
+      shot: pictureAsDataUri(taken.image.toPNG()),
+      trouble:
+        wide !== null && overflowing(size.width, wide)
+          ? saysOverflow(size.name, wide - size.width)
+          : null,
+    };
+  } catch {
+    return { ...named, shot: null, trouble: null };
+  }
+}
+
+/**
+ * The same address at all three widths.
+ *
+ * One window at a time rather than three at once: each is somebody else's site
+ * rendering offscreen, and holding three of them open to save a second is the
+ * kind of saving that shows up as a fan.
+ */
+export async function lookAtEveryWidth(address: string): Promise<readonly Look[]> {
+  const looks: Look[] = [];
+  for (const size of WIDTHS) looks.push(await lookAt(address, size));
+  return looks;
 }
 
 /** A picture as it is on disk, read back into pixels and a thumbnail. Used for

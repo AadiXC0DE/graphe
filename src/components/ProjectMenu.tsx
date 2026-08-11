@@ -21,6 +21,8 @@ type Props = {
   onPreview: () => void;
   /** Open the connect screen, where the account and the model are chosen. */
   onAccount: () => void;
+  /** Open the screen where more can be added to Graphe. */
+  onAddMore: () => void;
 
   showMe: boolean;
   onShowMe: (on: boolean) => void;
@@ -70,6 +72,7 @@ export default function ProjectMenu({
   onRevealFolder,
   onPreview,
   onAccount,
+  onAddMore,
   showMe,
   onShowMe,
 }: Props) {
@@ -104,6 +107,9 @@ export default function ProjectMenu({
       )}
 
       <div className="projectmenu__hatches">
+        <button type="button" className="projectmenu__hatch" onClick={onAddMore}>
+          Add more to Graphe
+        </button>
         <button type="button" className="projectmenu__hatch" onClick={onAccount}>
           Account &amp; model
         </button>

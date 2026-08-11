@@ -92,6 +92,13 @@ export default function Versions({
         </div>
       )}
 
+      {versions.length === 0 ? (
+        <p className="rail__none">
+          Nothing saved yet. The first time I change something I will save where
+          you were, so you can always come back to it.
+        </p>
+      ) : null}
+
       <ul className="version-list rail__list">
         {versions.map((version) => (
           <VersionRow
@@ -119,11 +126,15 @@ export default function Versions({
         )}
       </ul>
 
+      {/* Folded away. Two paragraphs of explanation left open under an empty
+          timeline were the loudest thing in the panel, which is the opposite of
+          what a footnote is for. */}
       {showMe ? (
-        <div className="rail__real">
+        <details className="rail__real">
+          <summary>How versions work</summary>
           <p>{behind.versions}</p>
           <p>{behind.putBack}</p>
-        </div>
+        </details>
       ) : null}
     </aside>
   );

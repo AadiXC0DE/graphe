@@ -1,0 +1,218 @@
+/* Helpers, one card each.
+
+   Work that happens off to one side is the easiest thing in an agent to lose
+   track of, so nothing here is truncated: the whole of what a helper was asked
+   wraps, and the card grows. The only moving part is the dot on a card that is
+   still going. */
+
+.helpers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.helpers__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.helpers__heading {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.helpers__count {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.helpers__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.helpers__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  animation: helpers-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes helpers-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Done is not gone: the card stays as the record, one step back from the one
+   still working. */
+.helpers__card--done,
+.helpers__card--failed {
+  background: none;
+}
+
+.helpers__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.helpers__state {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  min-width: 0;
+}
+
+.helpers__statename {
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.helpers__card--running .helpers__statename {
+  color: var(--accent-ink);
+}
+
+/* The one thing that means "still going", and the only thing here that moves. */
+.helpers__pulse {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: translateY(-1px);
+  animation: helpers-pulse 1.6s var(--ease-in-out-cubic) infinite;
+}
+
+@keyframes helpers-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.helpers__mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  color: var(--text-faint);
+  transform: translateY(1px);
+}
+
+/* Tabular, so a second ticking over does not shuffle the line. */
+.helpers__time {
+  flex: none;
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.helpers__asked {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The whole sentence, wrapped. A helper's job cut off at one line is a helper
+   you cannot judge. */
+.helpers__task {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.helpers__saying {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+.helpers__card--done .helpers__task,
+.helpers__card--failed .helpers__task {
+  color: var(--text-muted);
+}
+
+.helpers__clear {
+  align-self: flex-start;
+  margin-top: var(--space-1);
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  margin-left: calc(var(--space-2) * -1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.helpers__clear:active {
+  transform: scale(0.97);
+}
+
+.helpers__clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .helpers__clear:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .helpers__card {
+    animation: none;
+  }
+
+  .helpers__pulse {
+    animation: none;
+  }
+
+  .helpers__clear:active {
+    transform: none;
+  }
+}

@@ -133,3 +133,76 @@
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   The things people ask for again and again
+   Buttons rather than a menu: a designer should be able to see what this can be
+   asked for without opening anything. Ours and theirs read differently, because
+   a recipe somebody wrote is theirs and should look like it.
+   --------------------------------------------------------------------------- */
+
+.welcome__recipes {
+  margin-top: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.welcome__recipesname {
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.welcome__chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.welcome__chip {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.welcome__chip:active {
+  transform: scale(0.97);
+}
+
+.welcome__chip--yours {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.welcome__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .welcome__chip:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome__chip:active {
+    transform: none;
+  }
+}

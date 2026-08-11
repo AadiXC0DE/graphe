@@ -107,6 +107,20 @@ export type AgentEvent =
   | { type: 'needs-confirmation'; call: ToolCall; verdict: Extract<Verdict, { kind: 'confirm' }> }
   | { type: 'error'; message: string }
   /**
+   * Something the person said in an earlier sitting.
+   *
+   * The live stream never produces this: user turns are written straight to the
+   * desk by the window, which is the one place that has the words as they were
+   * typed (BACKLOG B1.1). It exists only for rehydration — when a project opens
+   * and a saved conversation is read back, the shell replays it through the same
+   * events the live stream uses, and the person's own messages have to travel
+   * that same road or the thread would come back half-there.
+   */
+  | { type: 'user-said'; text: string }
+  /** Looking around before touching anything, and what it came back with. */
+  | { type: 'planning' }
+  | { type: 'planned'; steps: readonly string[]; caveats: readonly string[] }
+  /**
    * Money that has just been spent, already priced.
    *
    * The unit a model is billed in never appears in this union, and never

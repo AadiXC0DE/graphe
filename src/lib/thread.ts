@@ -13,6 +13,7 @@ import type { ActivityState } from '../components/ActivityLine';
 import type { MessageAuthor } from '../components/Message';
 import type { AgentEvent } from '../agent/types';
 import type { Prompt } from '../cost/phrasing';
+import { PLAN_WORDS } from '../agent/plan';
 import { describeCall } from './describe';
 import { realWords } from './showme';
 import type { Decision, Trouble } from './ipc';
@@ -80,6 +81,23 @@ export type Turn =
    * `did`-shaped thing rather than a message because it is something happening
    * with a beginning and an end — the spinner is honest, and it stops.
    */
+  /**
+   * "Here's what I'd do." The steps, and the two answers.
+   *
+   * Shaped like `estimate` because it does the same job: it holds what somebody
+   * asked for until they say go ahead. The difference is what it is protecting
+   * them from — not the cost, but forty files changed before anybody agreed.
+   */
+  | {
+      kind: 'plan';
+      id: string;
+      /** Their own words, held until they answer. */
+      text: string;
+      steps: readonly string[];
+      caveats: readonly string[];
+      /** Null while the question is still open. */
+      answered: 'went-ahead' | 'changing' | null;
+    }
   | { kind: 'tidying'; id: string; state: ActivityState }
   | { kind: 'trouble'; id: string; trouble: Trouble };
 
@@ -152,6 +170,25 @@ export function withTrouble(turns: readonly Turn[], trouble: Trouble): readonly 
 }
 
 export const STOPPED_PART_WAY = 'I stopped part way through.';
+
+/** The looking-around pass has no tool call behind it, so it borrows one id.
+ *  Nothing else may use it. */
+const LOOKING = 'graphe:looking';
+
+/** Hold what somebody asked for while they read the plan for it. */
+export function planned(
+  text: string,
+  proposal: { steps: readonly string[]; caveats: readonly string[] },
+): Turn {
+  return {
+    kind: 'plan',
+    id: newId(),
+    text,
+    steps: proposal.steps,
+    caveats: proposal.caveats,
+    answered: null,
+  };
+}
 
 export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly Turn[] {
   switch (event.type) {
@@ -239,6 +276,49 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
         because: event.message,
         actionLabel: 'Got it',
       });
+
+    // The person's own words, replayed when a saved conversation comes back
+    // (BACKLOG B1.1). During a live sitting the window writes these itself and
+    // the shell never sends them; here they arrive as ordinary events, so a
+    // rehydrated thread folds the same way a live one does.
+    case 'user-said':
+      return [...turns, said('you', event.text)];
+
+    // Looking around before touching anything, said once and closed off by
+    // whatever the pass came back with.
+    case 'planning': {
+      const already = turns.some((turn) => turn.kind === 'did' && turn.callId === LOOKING);
+      return already
+        ? turns
+        : [
+            ...turns,
+            {
+              kind: 'did',
+              id: newId(),
+              callId: LOOKING,
+              state: 'running',
+              label: PLAN_WORDS.working,
+            },
+          ];
+    }
+
+    case 'planned': {
+      const closed = closeActivity(turns, LOOKING, 'done');
+      // Nothing proposed is not a plan to approve — whatever it did say is
+      // already in the thread above this.
+      if (event.steps.length === 0) return closed;
+      return [
+        ...closed,
+        {
+          kind: 'plan',
+          id: newId(),
+          text: '',
+          steps: event.steps,
+          caveats: event.caveats,
+          answered: null,
+        },
+      ];
+    }
 
     case 'tidying': {
       // Once. Pi can retry its own summarisation, and each attempt announces

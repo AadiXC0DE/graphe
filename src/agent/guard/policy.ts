@@ -783,7 +783,7 @@ function judgeSegmentPaths(tokens: Token[], ctx: GuardFacts): Judgement {
 const UNKNOWN_COMMAND = (): Judgement =>
   ask(
     'Run an instruction I do not fully recognise?',
-    "I can see roughly what it is meant to do, but not well enough to promise it is safe. You can see the exact wording under technical details.",
+    'I can see roughly what it is meant to do, but not well enough to promise it is safe.',
     'If you are not sure, say no and tell me in your own words what you want instead.',
   );
 
@@ -1491,11 +1491,11 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     const text = `${collectText(input)}\n${JSON.stringify(input)}`;
     if (findSecret(text) !== null || findKnownSecret(text, ctx)) {
       return deny(
-        "This copy of your session still has one of your private keys in it. I've stopped it. I can share it with the keys taken out instead.",
+        "This copy of our conversation still has one of your private keys in it. I've stopped it. I can share it with the keys taken out instead.",
       );
     }
     return ask(
-      'Share a copy of this session?',
+      'Share a copy of this conversation?',
       'It includes what you asked for and what I did about it.',
       'Your keys and passwords are taken out before it leaves your machine.',
       { mutates: false },

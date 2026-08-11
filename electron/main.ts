@@ -88,11 +88,11 @@ import {
   whatMoved,
 } from '../src/diff/capture';
 import { filesWrittenBy } from '../src/diff/changed';
-import { landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
+import { KEEP, landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
 import type { Bitmap } from '../src/diff/regions';
 import { tellWhatHappened } from '../src/diff/summary';
 import { inDesignWords, readChanges, NOTHING_TO_SAY, type Edit } from '../src/design/words';
-import { PreferenceFile } from '../src/projects/preferences';
+import { keeping, PreferenceFile } from '../src/projects/preferences';
 import { Recents } from '../src/projects/recents';
 import { Workspaces } from '../src/projects/workspaces';
 import { findEditor, type Editor } from '../src/shell/editors';
@@ -525,6 +525,9 @@ type Looking = {
   again: boolean;
   /** Change id → the two files behind it, for `visualFrames`. */
   frames: Map<string, { before: string; after: string }>;
+  /** Version id → what the project looked like at it, small, ready to draw.
+   *  Small pictures rather than paths so the rail never waits on a disk. */
+  pictures: Map<string, string>;
   counter: number;
 };
 
@@ -539,8 +542,21 @@ function nothingSeenYet(): Looking {
     busy: false,
     again: false,
     frames: new Map(),
+    pictures: new Map(),
     counter: 0,
   };
+}
+
+/** File a picture under the version it shows, oldest let go once there are more
+ *  than the folder itself keeps. Same ceiling as the pictures on disk, so the
+ *  rail never claims to remember more than there is. */
+function rememberPicture(looking: Looking, versionId: string, picture: string): void {
+  looking.pictures.delete(versionId);
+  looking.pictures.set(versionId, picture);
+  for (const oldest of looking.pictures.keys()) {
+    if (looking.pictures.size <= KEEP) break;
+    looking.pictures.delete(oldest);
+  }
 }
 
 type Held = {
@@ -788,6 +804,11 @@ async function look(project: string, held: Held): Promise<void> {
     const shelved = landed(looking.shots, taken.picture);
     looking.shots = [...shelved.kept];
     void forget(shelved.forget.map((one) => one.file));
+
+    // The picture is of the project as it now stands, which is the version it
+    // now stands at. That is the only moment the two are known to match.
+    const at = await timeline.currentVersion().catch(() => null);
+    if (at !== null) rememberPicture(looking, at.id, taken.thumbnail);
 
     // The older half. Usually still in hand from last time; read back off the
     // disk only when it is not, which is the case where the project was opened,
@@ -1409,12 +1430,33 @@ function register(): void {
     }
   });
 
+  /** What each version looked like. Empty is a real answer: a project nothing
+   *  has been photographed in yet has no pictures, and the rail says so by
+   *  drawing words instead. */
+  handle<Readonly<Record<string, string>>>(CHANNEL.versionPictures, () => {
+    const open = workspaces.current;
+    return Promise.resolve(done(open === null ? {} : Object.fromEntries(open.held.looking.pictures)));
+  });
+
   handle<Preferences>(CHANNEL.preferences, async () => done((await preferences()).all()));
 
   handle<Preferences>(CHANNEL.setShowMe, async (_event, args) => {
     const [on] = args;
     if (typeof on !== 'boolean') return done((await preferences()).all());
     return done(await (await preferences()).change({ showMe: on }));
+  });
+
+  /** Against the project in front, so the window never has to name a folder to
+   *  keep something in it. Nothing open means nothing to keep, said by leaving
+   *  the preferences as they were. */
+  handle<Preferences>(CHANNEL.keepVersion, async (_event, args) => {
+    const [versionId, keep] = args;
+    const prefs = await preferences();
+    const open = workspaces.current;
+    if (open === null || typeof versionId !== 'string' || typeof keep !== 'boolean') {
+      return done(prefs.all());
+    }
+    return done(await prefs.change({ kept: keeping(prefs.all().kept, open.path, versionId, keep) }));
   });
 
   handle<Hatches>(CHANNEL.hatches, async () => done({ editor: (await editor())?.name ?? null }));

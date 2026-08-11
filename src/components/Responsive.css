@@ -1,8 +1,10 @@
-/* The three widths, side by side.
+/* Every size, in one row.
 
-   Equal columns rather than true relative sizes: the phone shot next to the
-   desktop one at real scale is a stamp beside a poster, and the point is to
-   read all three. The number under each says how wide it really is. */
+   Frames of equal height rather than true relative sizes: the phone shot next
+   to the desktop one at real scale is a stamp beside a poster, and the point is
+   to read all of them. The number under each says how wide it really is. In a
+   panel too narrow to hold them the row scrolls sideways rather than stacking,
+   so it stays one row and the comparison survives. */
 
 .widths {
   display: flex;
@@ -22,10 +24,14 @@
 .widths__shots {
   list-style: none;
   margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-3);
+  /* Room for the focus ring and the pressed scale, which would otherwise be
+     clipped by the scroller. */
+  padding: 2px;
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
   animation: widths-arrives var(--dur-large) var(--ease-out-quart) both;
 }
 
@@ -41,50 +47,112 @@
 }
 
 .widths__one {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  flex: 1 0 128px;
   min-width: 0;
+  max-width: 220px;
+  scroll-snap-align: start;
+  display: flex;
 }
 
-.widths__figure {
-  margin: 0;
+.widths__card {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  width: 100%;
   min-width: 0;
+  padding: var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.widths__card--live:active {
+  transform: scale(0.98);
+}
+
+.widths__card--live:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The size being worked at. Tinted and outlined, never colour alone: the same
+   card is the one carrying "Working at this size". */
+.widths__card--here {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .widths__card--live:not(.widths__card--here):hover {
+    background: var(--bg-sunken);
+    border-color: var(--border);
+  }
+}
+
+.widths__frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 148px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  overflow: hidden;
 }
 
 /* Contained and topped: a tall phone shot is read from the top down, and
    cropping the head off it is cropping the answer. */
 .widths__shot {
+  display: block;
   width: 100%;
-  max-height: 280px;
+  height: 100%;
   object-fit: contain;
   object-position: top;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
 }
 
 .widths__missing {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 100%;
-  aspect-ratio: 3 / 4;
-  max-height: 280px;
-  padding: var(--space-3);
-  border: 1px dashed var(--border-strong);
+  height: 100%;
   border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--bg-sunken),
+    var(--bg-sunken) 6px,
+    var(--bg) 6px,
+    var(--bg) 12px
+  );
 }
 
-.widths__missingsays {
-  margin: 0;
+/* On the picture, in the corner it belongs to. */
+.widths__flag {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+  max-width: calc(100% - var(--space-2));
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
   font-size: var(--text-2xs);
-  line-height: 1.45;
-  text-align: center;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widths__flag--trouble {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.widths__flag--missing {
+  background: var(--bg-raised);
   color: var(--text-faint);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
 .widths__caption {
@@ -111,9 +179,9 @@
 }
 
 .widths__trouble {
-  margin: 0;
-  font-size: var(--text-xs);
-  line-height: 1.5;
+  display: block;
+  font-size: var(--text-2xs);
+  line-height: 1.45;
   color: var(--text-muted);
 }
 
@@ -164,18 +232,13 @@
   }
 }
 
-/* Three columns of a phone shot inside a narrow panel is three slivers. */
-@media (max-width: 720px) {
-  .widths__shots {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .widths__shots {
     animation: none;
+    scroll-behavior: auto;
   }
 
+  .widths__card--live:active,
   .widths__ask:active {
     transform: none;
   }

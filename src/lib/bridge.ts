@@ -22,6 +22,7 @@
 
 import type { AgentEvent } from '../agent/types';
 import { pagesIn, type Page } from '../preview/pages';
+import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
 import { money } from '../cost/money';
 import {
@@ -201,6 +202,20 @@ function previewVersions(path: string): SavedVersion[] {
   }));
 }
 
+/**
+ * Which of the made-up versions have a picture, and which do not.
+ *
+ * Deliberately not all of them. The rail's two most interesting states only
+ * exist when the pictures are uneven: a version with none falls back to its own
+ * title, and two in a row that look identical are what "only when it changed"
+ * is for. Indexes not listed here have no picture, which is the honest answer
+ * rather than a stand-in.
+ */
+const PREVIEW_PICTURES: Readonly<Record<string, Readonly<Record<number, boolean>>>> = {
+  '/Users/you/Sites/paper-street': { 0: true, 1: false, 2: false, 3: true },
+  '/Users/you/Sites/atlas-studio': { 0: true },
+};
+
 /* -------------------------------------------------------------------------- */
 /* A before and after, for a tab with no folder behind it                      */
 /* -------------------------------------------------------------------------- */
@@ -285,7 +300,7 @@ function previewBridge(): Bridge {
 
   /** The preview's own copy of what a person has chosen. Real state, so the
    *  switch in the project menu can be turned on and its effect looked at. */
-  let preferred: Preferences = { showMe: false, model: null };
+  let preferred: Preferences = { showMe: false, model: null, kept: {} };
 
   const send = (event: AgentEvent): void => {
     for (const listener of listeners) listener({ project: openPath, event });
@@ -475,6 +490,19 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(named));
     },
 
+    /** Drawn rather than photographed, like the before-and-after above: a
+     *  browser tab has no folder to point a camera at, and a rail with no
+     *  pictures in it is the one state nobody could review. */
+    versionPictures(): Promise<Result<Readonly<Record<string, string>>>> {
+      if (openPath === null) return Promise.resolve(done({}));
+      const which = PREVIEW_PICTURES[openPath] ?? {};
+      const pictures: Record<string, string> = {};
+      for (const [index, moved] of Object.entries(which)) {
+        pictures[`${openPath}#${index}`] = samplePage(moved);
+      }
+      return Promise.resolve(done(pictures));
+    },
+
     /** Remembered for as long as the tab is open, and no longer. A browser tab
      *  has nowhere of its own to keep a preference, and writing one into
      *  somebody's browser storage from a preview would be a surprise. */
@@ -484,6 +512,12 @@ function previewBridge(): Bridge {
 
     setShowMe(on: boolean): Promise<Result<Preferences>> {
       preferred = { ...preferred, showMe: on };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    keepVersion(versionId: string, keep: boolean): Promise<Result<Preferences>> {
+      const project = openPath ?? '';
+      preferred = { ...preferred, kept: keeping(preferred.kept, project, versionId, keep) };
       return Promise.resolve(done({ ...preferred }));
     },
 
@@ -818,8 +852,10 @@ function connect(): Bridge {
     versions: () => api.versions(),
     putBack: (versionId) => api.putBack(versionId),
     nameVersion: (versionId, name) => api.nameVersion(versionId, name),
+    versionPictures: () => api.versionPictures(),
     preferences: () => api.preferences(),
     setShowMe: (on) => api.setShowMe(on),
+    keepVersion: (versionId, keep) => api.keepVersion(versionId, keep),
     hatches: () => api.hatches(),
     openInEditor: (file) => api.openInEditor(file),
     saveVersion: (name) => api.saveVersion(name),

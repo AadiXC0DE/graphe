@@ -299,18 +299,26 @@ export function lightness(colour: Colour): number {
 
 type Lab = { L: number; a: number; b: number };
 
-/** D65, the white the sRGB screen is measured against. */
-const WHITE_X = 0.95047;
-const WHITE_Z = 1.08883;
-
+/**
+ * Oklab, used for judging how near two colours are and whether they are the
+ * same colour. The older Lab swings a blue's hue by thirty degrees on the way
+ * from pale to deep, which would tell us a palette's own two blues are
+ * unrelated; this one holds a hue steady as the lightness moves.
+ */
 function labOf(colour: Rgb): Lab {
   const r = linear(colour.r);
   const g = linear(colour.g);
   const b = linear(colour.b);
-  const x = bend((0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / WHITE_X);
-  const y = bend(0.2126 * r + 0.7152 * g + 0.0722 * b);
-  const z = bend((0.0193339 * r + 0.119192 * g + 0.9503041 * b) / WHITE_Z);
-  return { L: 116 * y - 16, a: 500 * (x - y), b: 200 * (y - z) };
+
+  const long = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const middle = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const short = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+
+  return {
+    L: 0.2104542553 * long + 0.793617785 * middle - 0.0040720468 * short,
+    a: 1.9779984951 * long - 2.428592205 * middle + 0.4505937099 * short,
+    b: 0.0259040371 * long + 0.7827717662 * middle - 0.808675766 * short,
+  };
 }
 
 function apart(one: Lab, other: Lab): number {
@@ -318,7 +326,7 @@ function apart(one: Lab, other: Lab): number {
 }
 
 /** Below this the eye calls it grey, and its hue is noise rather than a choice. */
-const GREY = 6;
+const GREY = 0.02;
 
 /** Past this much of a turn round the wheel, a replacement has stopped being
  *  the same colour and started being a different one, however well it reads. */
@@ -561,10 +569,15 @@ export function suggest(
   const mine = fromScale(facing, ground, needs, options.scale ?? []);
   if (mine !== null) return mine;
 
-  // Away from the background, which is the only direction that gains anything.
-  const up = luminance(facing) > luminance(ground);
-  const found = moved(facing, ground, needs, up) ?? moved(facing, ground, needs, !up);
-  if (found === null) return null;
+  // Usually only one way gains anything; when a colour sits close to its own
+  // background both do, and the shorter move is the one to offer.
+  const here = lightness(facing);
+  const ends = [moved(facing, ground, needs, true), moved(facing, ground, needs, false)]
+    .filter((one): one is Rgb => one !== null)
+    .sort((one, other) => Math.abs(lightness(one) - here) - Math.abs(lightness(other) - here));
+
+  const found = ends[0];
+  if (found === undefined) return null;
 
   return {
     colour: hexOf(found),
@@ -626,17 +639,25 @@ export function saysPair(reading: Reading, fix?: Fix | null): string {
   // that it disappears into it. Same failure, opposite word.
   const pale = reading.onLight;
   const way = fix?.direction ?? (pale ? 'darker' : 'lighter');
-  if (reading.onlyBig) return `Fine for a headline, but too ${pale ? 'pale' : 'dark'} at this size.`;
+  const steps = fix?.steps ?? 0;
+  const move =
+    steps === 1
+      ? `a step ${way}`
+      : steps >= 2 && steps < STEPS.length
+        ? `about ${STEPS[steps]} ${way}`
+        : null;
+
+  if (reading.onlyBig) {
+    const size = `Fine for a headline, but too ${pale ? 'pale' : 'dark'} at this size`;
+    return move === null ? `${size}.` : `${size} — ${move} would do it.`;
+  }
 
   const trouble = pale
     ? 'Too pale to read on this background'
     : 'Too dark to read on this background';
 
-  const steps = fix?.steps ?? 0;
   if (steps === 1) return `Nearly there — a step ${way} would do it.`;
-  if (steps >= 2 && steps < STEPS.length) {
-    return `${trouble} — about ${STEPS[steps]} ${way} would do it.`;
-  }
+  if (move !== null) return `${trouble} — ${move} would do it.`;
   if (steps >= STEPS.length) return `${trouble} — it needs to be much ${way}.`;
   return `${trouble}.`;
 }

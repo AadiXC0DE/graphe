@@ -236,6 +236,10 @@ export type Preferences = {
   showMe: boolean;
   /** The model chosen to work with, or null for "whatever is available". */
   model: ModelChoice | null;
+  /** Versions somebody chose to keep at the top of the rail, by project folder.
+   *  Keyed by folder because keeping is about one project — two folders sharing
+   *  a shelf would put somebody else's afternoon at the top of yours. */
+  kept: Readonly<Record<string, readonly string[]>>;
 };
 
 /** How the next message should be handled. Both default off; the window turns
@@ -517,6 +521,8 @@ export const CHANNEL = {
   pages: 'graphe:pages',
   preferences: 'graphe:preferences',
   setShowMe: 'graphe:set-show-me',
+  keepVersion: 'graphe:keep-version',
+  versionPictures: 'graphe:version-pictures',
   hatches: 'graphe:hatches',
   openInEditor: 'graphe:open-in-editor',
   revealFolder: 'graphe:reveal-folder',
@@ -588,12 +594,19 @@ export type GrapheApi = {
   putBack(versionId: string): Promise<Result<PutBack>>;
   /** Give a version a name of the user's own. */
   nameVersion(versionId: string, name: string): Promise<Result<readonly SavedVersion[]>>;
+  /** What each version of the open project looked like, by id, as data URIs. A
+   *  version with no picture is simply absent — never a stand-in. */
+  versionPictures(): Promise<Result<Readonly<Record<string, string>>>>;
 
   /** What this person has chosen, as remembered on this computer. */
   preferences(): Promise<Result<Preferences>>;
   /** Turn "Show me" on or off. Returns the whole set, so the window never has
    *  to reason about what it did not ask about. */
   setShowMe(on: boolean): Promise<Result<Preferences>>;
+  /** Keep a version at the top of the rail, or stop keeping it. Against the
+   *  project in front, and returns the whole set for the same reason
+   *  `setShowMe` does. */
+  keepVersion(versionId: string, keep: boolean): Promise<Result<Preferences>>;
 
   /** What the escape hatches can offer here — which editor, if any. */
   hatches(): Promise<Result<Hatches>>;

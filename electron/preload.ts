@@ -152,8 +152,21 @@ const api: GrapheApi = {
     >;
   },
 
+  versionPictures(): Promise<Result<Readonly<Record<string, string>>>> {
+    return ipcRenderer.invoke(CHANNEL.versionPictures) as Promise<
+      Result<Readonly<Record<string, string>>>
+    >;
+  },
+
   preferences(): Promise<Result<Preferences>> {
     return ipcRenderer.invoke(CHANNEL.preferences) as Promise<Result<Preferences>>;
+  },
+
+  keepVersion(versionId: string, keep: boolean): Promise<Result<Preferences>> {
+    if (typeof versionId !== 'string' || versionId.trim() === '' || typeof keep !== 'boolean') {
+      return Promise.resolve(refuse<Preferences>('I could not tell which version you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.keepVersion, versionId, keep) as Promise<Result<Preferences>>;
   },
 
   setShowMe(on: boolean): Promise<Result<Preferences>> {

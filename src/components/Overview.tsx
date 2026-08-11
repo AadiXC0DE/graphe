@@ -26,6 +26,10 @@ export type OverviewView = {
   research: readonly ResearchEntry[];
   references: readonly Reference[];
   versions: readonly SavedVersion[];
+  /** What each version looked like, by id. Absent ids have no picture. */
+  pictures: Readonly<Record<string, string>>;
+  /** The versions this project's owner chose to keep at the top. */
+  kept: readonly string[];
   putBack: PutBack | null;
   spent: SpendView | null;
   busy: boolean;
@@ -45,6 +49,8 @@ type Props = {
   view: OverviewView;
   onPutBack: (versionId: string) => void;
   onName: (versionId: string, name: string) => void;
+  /** Keep a version at the top of the rail, or stop keeping it. */
+  onKeep: (versionId: string, keep: boolean) => void;
   onDismissPutBack: () => void;
   onShowSplit: () => void;
   /** Open one changed file where the person actually edits things. */
@@ -88,6 +94,7 @@ export default function Overview({
   view,
   onPutBack,
   onName,
+  onKeep,
   onDismissPutBack,
   onShowSplit,
   onOpenFile,
@@ -96,7 +103,8 @@ export default function Overview({
   onShare,
   onNudge,
 }: Props) {
-  const { now, git, research, references, versions, putBack, spent, busy, showMe } = view;
+  const { now, git, research, references, versions, pictures, kept, putBack, spent, busy, showMe } =
+    view;
   const { looks, looksSay, checkingWidths, artifacts, swatches, styles } = view;
 
   const shownResearch = research.slice(-WINDOW);
@@ -279,9 +287,12 @@ export default function Overview({
       <div className="overview__timeline">
         <Versions
           versions={versions}
+          pictures={pictures}
+          kept={kept}
           putBack={putBack}
           onPutBack={onPutBack}
           onName={onName}
+          onKeep={onKeep}
           onDismissPutBack={onDismissPutBack}
           busy={busy}
           showMe={showMe}

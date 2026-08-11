@@ -1,0 +1,241 @@
+/* Ask for anything.
+
+   A bar over the window rather than a screen: it wears the app's own palette,
+   because by the time somebody opens this they are already inside the product
+   and a second look would read as a second product.
+
+   It sits above the middle. Centred exactly, the list grows downward from the
+   middle of the display and the field walks up the screen as you type — so the
+   one thing you are looking at is the one thing that will not hold still. */
+
+.askanything {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(12vh, var(--space-6)) var(--space-5) var(--space-5);
+}
+
+.askanything__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  background: rgb(0 0 0 / 0.36);
+  cursor: default;
+  animation: askanything-backdrop var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes askanything-backdrop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.askanything__panel {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: min(520px, calc(100vh - 20vh));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  animation: askanything-panel var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes askanything-panel {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ------------------------------------------------------------------ the line */
+
+.askanything__field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  padding: 0 var(--space-4);
+  min-height: 52px;
+  border-bottom: 1px solid var(--border);
+}
+
+.askanything__mark {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.askanything__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-base);
+  letter-spacing: -0.005em;
+}
+
+.askanything__input::placeholder {
+  color: var(--text-faint);
+}
+
+/* The panel's own edge is the focus ring here — there is nothing else in the
+   bar to take focus, so a second ring inside it would only be noise. */
+.askanything__input:focus,
+.askanything__input:focus-visible {
+  outline: none;
+}
+
+/* ------------------------------------------------------------------ the rows */
+
+.askanything__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.askanything__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 42px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: default;
+  /* Colour only. This list moves under the cursor constantly, and anything that
+     travels would be the loudest thing in the window. */
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.askanything__row--lit {
+  background: var(--bg-sunken);
+}
+
+.askanything__text {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.askanything__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.askanything__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.askanything__kind {
+  flex: none;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The sentence. It is the one row that is not somewhere to go, so it is the one
+   row that carries the accent — and it is always there. */
+.askanything__row--say .askanything__label {
+  color: var(--accent-ink);
+}
+
+.askanything__row--say .askanything__kind {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.askanything__blank {
+  margin: 0;
+  padding: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------------ the foot */
+
+.askanything__foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 34px;
+  padding: 0 var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.askanything__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.askanything__hint--last {
+  margin-left: auto;
+}
+
+.askanything__key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .askanything__row:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .askanything__backdrop,
+  .askanything__panel {
+    animation: none;
+  }
+}

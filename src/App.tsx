@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import type { Attachment } from "./components/Attachments";
@@ -18,6 +18,8 @@ import ThinkingWith from "./components/ThinkingWith";
 import VisualDiff from "./components/VisualDiff";
 import Welcome from "./components/Welcome";
 import Gallery from "./gallery/Gallery";
+import AskAnything from "./components/AskAnything";
+import type { Found, Things } from "./lib/anything";
 import type { Task } from "./cost/estimate";
 import {
   longConversation,
@@ -198,6 +200,9 @@ function Conversation() {
   /** The screens of the project in front, for the rail. Asked for once when a
    *  folder opens — pages are a fact about the project, not about the sitting. */
   const [pages, setPages] = useState<readonly Page[]>([]);
+  /** The one bar that reaches everything. Openable by hand as well as by key —
+   *  a shortcut nobody is told about is a feature nobody has. */
+  const [asking, setAsking] = useState(false);
   /** The conversations this project has had, and which one is on screen. */
   const [conversations, setConversations] = useState<readonly Conversation[]>([]);
   const [inConversation, setInConversation] = useState<string | null>(null);
@@ -1262,6 +1267,42 @@ function Conversation() {
     }
   }, [desks.current, say, troubleHere, refreshOverview]);
 
+  /* Everything the bar can reach. Held still between renders so the search does
+     not re-run on every keystroke elsewhere. */
+  const reachable: Things = useMemo(
+    () => ({
+      projects: recent ?? [],
+      conversations,
+      pages,
+      versions: desk?.versions ?? [],
+    }),
+    [recent, conversations, pages, desk?.versions],
+  );
+
+  const pick = useCallback(
+    (found: Found) => {
+      switch (found.kind) {
+        case "project":
+          void open(found.project.path);
+          return;
+        case "conversation":
+          void swapConversation(found.conversation.path);
+          return;
+        case "page":
+          void seeIt(found.page.route);
+          return;
+        // Going back is snapshotted first and is itself undoable, which is what
+        // makes it safe to reach from here rather than only from the rail.
+        case "version":
+          void putBack(found.version.id);
+          return;
+        case "say":
+          setDraft(found.say);
+      }
+    },
+    [open, swapConversation, seeIt, putBack],
+  );
+
   /* ------------------------------------------------------------------- draw */
 
   // The first screen is a single centred conversation. Nothing else.
@@ -1330,6 +1371,18 @@ function Conversation() {
             </button>
           )}
 
+          {/* The way into the bar for anyone who was never told about ⌘K. */}
+          {desk === null ? null : (
+            <button
+              type="button"
+              className="topbar__ask"
+              onClick={() => setAsking(true)}
+              title="Find a project, a page, a saved moment — or just say something"
+            >
+              Ask for anything
+            </button>
+          )}
+
           {/* Only where the composer is not: with a project open the chip lives
               in the composer's own row, and two of them saying the same thing
               would be one too many. */}
@@ -1388,6 +1441,13 @@ function Conversation() {
           </button>
         </div>
       ) : null}
+
+      <AskAnything
+        things={reachable}
+        open={asking}
+        onOpenChange={setAsking}
+        onPick={pick}
+      />
 
       {shelved ? (
         <Sidebar

@@ -446,6 +446,28 @@
   transform: translateY(-50%);
 }
 
+/* Sits beside the project's name, quieter than it. The bar it opens is the one
+   place that reaches everything, so the way in is never further than here. */
+.topbar__ask {
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  line-height: 26px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) {
+  .topbar__ask:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
+}
+
 .topbar__name--quiet {
   color: var(--text-faint);
 }

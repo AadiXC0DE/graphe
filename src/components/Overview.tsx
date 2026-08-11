@@ -1,4 +1,6 @@
+import { useMemo, useState } from 'react';
 import CostMeter from './CostMeter';
+import Drift from './Drift';
 import Helpers from './Helpers';
 import Responsive from './Responsive';
 import Styles from './Styles';
@@ -14,6 +16,7 @@ import type {
   StyleToken,
   Swatch,
 } from '../lib/ipc';
+import { findDrift } from '../design/drift';
 import type { NowView, Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
 import './Overview.css';
@@ -42,7 +45,7 @@ export type OverviewView = {
   artifacts: readonly Artifact[];
   swatches: readonly Swatch[];
   /** This project's own tokens, and where they live. */
-  styles: { file: string; tokens: readonly StyleToken[] } | null;
+  styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
 };
 
 type Props = {
@@ -63,11 +66,24 @@ type Props = {
   onShare: () => void;
   /** Change one design token directly. */
   onNudge: (name: string, value: string) => void;
+  /** Put one of the project's own values back where something close to it was
+   *  written instead. */
+  onUseYours?: (finding: { use: string; line: number; wrote: string }) => void;
 };
 
 /** How many rows a band holds before it says "and more". The panel is a summary
  *  of what the work looked like; the thread is the archive. */
 const WINDOW = 6;
+
+type TabId = 'work' | 'look' | 'moments';
+
+/** Three questions, in the order they get asked: what is happening, how does it
+ *  look, and what can I go back to. */
+const TABS: readonly { id: TabId; name: string }[] = [
+  { id: 'work', name: 'Work' },
+  { id: 'look', name: 'Look' },
+  { id: 'moments', name: 'Moments' },
+];
 
 /** The last part of a path is what people call the file. The rest is filing. */
 function leaf(path: string): string {
@@ -102,10 +118,26 @@ export default function Overview({
   onCheckWidths,
   onShare,
   onNudge,
+  onUseYours,
 }: Props) {
   const { now, git, research, references, versions, pictures, kept, putBack, spent, busy, showMe } =
     view;
   const { looks, looksSay, checkingWidths, artifacts, swatches, styles } = view;
+
+  /* Which band of the panel is in front. Bands used to stack into one column
+     that only got longer; now each has a home and nothing is buried. */
+  const [tab, setTab] = useState<TabId>('work');
+
+  /* Worked out here rather than sent over the wire: the values and the file are
+     already in hand, and the answer changes whenever either does. */
+  const drifted = useMemo(
+    () => (styles === null ? [] : findDrift(styles.text, styles.tokens)),
+    [styles],
+  );
+
+  /* A dot on the tab, not a number: the count matters once you are looking, and
+     before that it is only worth knowing there is something. */
+  const trouble = drifted.length;
 
   const shownResearch = research.slice(-WINDOW);
   const moreResearch = research.length - shownResearch.length;
@@ -115,6 +147,36 @@ export default function Overview({
 
   return (
     <aside className="overview" aria-label="What is going on">
+      <div className="overview__tabs" role="tablist" aria-label="What to look at">
+        {TABS.map((one) => (
+          <button
+            key={one.id}
+            type="button"
+            role="tab"
+            id={`overview-tab-${one.id}`}
+            aria-controls={`overview-panel-${one.id}`}
+            aria-selected={tab === one.id}
+            tabIndex={tab === one.id ? 0 : -1}
+            className={`overview__tab ${tab === one.id ? 'overview__tab--here' : ''}`}
+            onClick={() => setTab(one.id)}
+            onKeyDown={(event) => {
+              const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+              if (step === 0) return;
+              event.preventDefault();
+              const at = TABS.findIndex((other) => other.id === tab);
+              const next = TABS[(at + step + TABS.length) % TABS.length];
+              if (next !== undefined) setTab(next.id);
+            }}
+          >
+            {one.name}
+            {one.id === 'look' && trouble > 0 ? (
+              <span className="overview__tabmark" aria-hidden="true" />
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      <div role="tabpanel" id="overview-panel-work" aria-labelledby="overview-tab-work" hidden={tab !== 'work'}>
       {/* Only while something is running. A permanent band that says "nothing"
           is a band that has taught you to stop looking at it. */}
       {busy && (now.step !== null || now.helpers.length > 0) ? (
@@ -272,6 +334,9 @@ export default function Overview({
         </section>
       )}
 
+      </div>
+
+      <div role="tabpanel" id="overview-panel-look" aria-labelledby="overview-tab-look" hidden={tab !== 'look'}>
       {styles === null ? null : (
         <section className="overview__block">
           <h2 className="overview__title">Styles</h2>
@@ -284,6 +349,21 @@ export default function Overview({
         <Responsive looks={looks} says={looksSay} busy={checkingWidths} onCheck={onCheckWidths} />
       </section>
 
+
+      {drifted.length === 0 ? null : (
+        <section className="overview__block">
+          <Drift
+            findings={drifted}
+            where={styles?.file ?? ''}
+            detail={showMe}
+            {...(onUseYours === undefined ? {} : { onUse: onUseYours })}
+          />
+        </section>
+      )}
+
+      </div>
+
+      <div role="tabpanel" id="overview-panel-moments" aria-labelledby="overview-tab-moments" hidden={tab !== 'moments'}>
       <div className="overview__timeline">
         <Versions
           versions={versions}
@@ -297,6 +377,8 @@ export default function Overview({
           busy={busy}
           showMe={showMe}
         />
+      </div>
+
       </div>
 
       <div className="overview__foot">

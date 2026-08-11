@@ -950,8 +950,14 @@ const TOKEN_FILES = [
  */
 async function styleTokens(
   root: string,
-): Promise<{ file: string; tokens: readonly import('../src/lib/ipc').StyleToken[] } | null> {
-  let best: { file: string; tokens: readonly import('../src/lib/ipc').StyleToken[] } | null = null;
+): Promise<
+  { file: string; tokens: readonly import('../src/lib/ipc').StyleToken[]; text: string } | null
+> {
+  let best: {
+    file: string;
+    tokens: readonly import('../src/lib/ipc').StyleToken[];
+    text: string;
+  } | null = null;
   for (const candidate of TOKEN_FILES) {
     const css = await readFile(join(root, candidate), 'utf8').catch(() => null);
     if (css === null) continue;
@@ -959,7 +965,7 @@ async function styleTokens(
     if (found.length === 0) continue;
     const withSteps = found.map((one) => ({ ...one, steps: steps(one, found) }));
     if (best === null || withSteps.length > best.tokens.length) {
-      best = { file: candidate, tokens: withSteps };
+      best = { file: candidate, tokens: withSteps, text: css };
     }
   }
   return best;

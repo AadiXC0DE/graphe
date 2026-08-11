@@ -405,7 +405,9 @@ export type Overview = {
   /** Named colours out of a palette file the agent wrote, for real swatches. */
   swatches: readonly Swatch[];
   /** This project's design tokens, and the file they live in. */
-  styles: { file: string; tokens: readonly StyleToken[] } | null;
+  /** `text` is the stylesheet as written, so what drifted from these values can
+   *  be worked out without reading the file twice. */
+  styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
 };
 
 /** One thing a turn produced that a designer would look at. */

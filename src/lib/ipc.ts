@@ -60,6 +60,9 @@ export type OpenedProject = {
    *  project opened again comes back as the desk it was — not as an
    *  introduction (BACKLOG B1.1). Empty when nothing was ever said. */
   history: readonly AgentEvent[];
+  /** Which conversation is on screen, by its own path. Null when this one has
+   *  not been written down yet. The shelf marks the row that matches. */
+  conversation: string | null;
 };
 
 /**
@@ -463,6 +466,23 @@ export const showWords = {
   puttingTogether: 'Putting your site together…',
   ready: 'Ready',
 } as const;
+
+/** When moving between conversations cannot happen. Both are reasons, not
+ *  refusals: the thing asked for is still there once the reason has passed. */
+export const swapWords = {
+  busy: {
+    what: 'Let me finish this thought first.',
+    because:
+      'I am part-way through answering. Moving to another conversation now would lose it — stop me if you would rather go anyway.',
+    actionLabel: 'Got it',
+  },
+  unreadable: {
+    what: 'I could not read that conversation back.',
+    because:
+      'It was written down, but nothing came back when I opened it. It may have been changed by something else while it was away.',
+    actionLabel: 'Got it',
+  },
+} as const satisfies Record<string, Trouble>;
 
 /**
  * One event, and which project it belongs to.

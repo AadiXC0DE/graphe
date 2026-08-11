@@ -309,6 +309,9 @@ export type GrapheSession = {
    *  made it — an earlier sitting read back so the window can show it again
    *  (BACKLOG B1.1). Empty when this is a brand-new conversation. */
   readonly history: readonly AgentEvent[];
+  /** Where this session is being written, so the window can mark which row in
+   *  the shelf is the one on screen. Null when nothing is being kept. */
+  readonly conversation: string | null;
 };
 
 type Pi = typeof import('@earendil-works/pi-coding-agent');
@@ -1027,6 +1030,12 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     // the conversation as it stands, not as it was when the session was built.
     get history(): readonly AgentEvent[] {
       return eventsFromEntries(manager.buildContextEntries());
+    },
+
+    // Read on demand: `continueRecent` picks the file when the session starts,
+    // and a new conversation has none until its first write.
+    get conversation(): string | null {
+      return manager.getSessionFile() ?? null;
     },
   };
 }

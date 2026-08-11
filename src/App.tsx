@@ -30,6 +30,7 @@ import { bridge } from "./lib/bridge";
 import { quote, smallerFirst } from "./lib/estimating";
 import {
   showWords,
+  swapWords,
   type ConnectStep,
   type ConnectionState,
   type Decision,
@@ -631,6 +632,9 @@ function Conversation() {
 
       setSwitching(false);
       setPickerTrouble(null);
+      // Which conversation this landed in. Without it nothing in the shelf is
+      // marked, and pressing the row you are already in looks like a dead button.
+      setInConversation(opened.value.conversation);
       setDesks((current) => {
         const next = openDesk(current, opened.value);
         const desk = next.byPath[opened.value.path];
@@ -674,26 +678,38 @@ function Conversation() {
    */
   const swapConversation = useCallback(
     async (path: string | null) => {
+      // Already here. Silent, because pressing the row you are on is a person
+      // checking where they are, not asking for anything.
+      if (path !== null && path === inConversation) return;
+      // Mid-answer. Swapping disposes the session underneath, so the turn on its
+      // way would be lost — said out loud rather than ignored.
+      if (busy) {
+        troubleHere(swapWords.busy);
+        return;
+      }
       const opened = await bridge.openConversation(path);
       if (!opened.ok) {
         troubleHere(opened.trouble);
         return;
       }
-      setInConversation(path);
-      setDesks((current) =>
-        changeDesk(current, opened.value.path, (one) => ({
-          ...one,
-          turns: opened.value.history.reduce(
-            (turns, event) => applyEvent(turns, event),
-            [] as readonly Turn[],
-          ),
-        })),
+      const turns = opened.value.history.reduce(
+        (sofar, event) => applyEvent(sofar, event),
+        [] as readonly Turn[],
       );
+      // A conversation that was written down but reads back as nothing is a
+      // fault, not an empty conversation. Blanking the desk would look like the
+      // conversation had been lost, so the desk stays and the reason is said.
+      if (opened.value.history.length > 0 && turns.length === 0) {
+        troubleHere(swapWords.unreadable);
+        return;
+      }
+      setInConversation(opened.value.conversation);
+      setDesks((current) => changeDesk(current, opened.value.path, (one) => ({ ...one, turns })));
       void bridge.conversations().then((answer) => {
         if (answer.ok) setConversations(answer.value);
       });
     },
-    [troubleHere],
+    [busy, inConversation, troubleHere],
   );
 
   const browse = useCallback(async () => {
@@ -1219,7 +1235,11 @@ function Conversation() {
       }
       if (answer.value.kind === "unsure") {
         setProgress(null);
+        // The question lands in the thread, so the thread is where to be looking.
+        // Pressing a button in the shelf and being answered off-screen is the
+        // same as not being answered at all.
         say(answer.value.question);
+        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
         return;
       }
       // "Ready" gets a beat on screen. A browser window opening on its own is
@@ -1229,8 +1249,16 @@ function Conversation() {
       // The overview keeps the address of what was just served, so the pill can
       // take you back to it all evening.
       void refreshOverview(desks.current);
-    } catch {
+    } catch (cause) {
+      // Never silent. A progress line that clears on its own is indistinguishable
+      // from a preview that opened behind the window.
       setProgress(null);
+      troubleHere({
+        what: 'I could not put your site together.',
+        because: 'Something stopped part-way through, and it did not say what.',
+        actionLabel: 'Got it',
+        details: cause instanceof Error ? cause.message : String(cause),
+      });
     }
   }, [desks.current, say, troubleHere, refreshOverview]);
 
@@ -1346,7 +1374,8 @@ function Conversation() {
 
       {/* The preview pill floats over the right edge — near the words about the
           work, not the housekeeping of the top bar. Disabled while a serving is
-          on the way, so it cannot be asked twice. */}
+          on the way, so it cannot be asked twice. One button: pointing lives on
+          the page it points at, not in a second pill saying almost the same. */}
       {pillShown ? (
         <div className="previewpill__pair">
           <button
@@ -1356,17 +1385,6 @@ function Conversation() {
             disabled={busy || (progress !== null && !progress.done)}
           >
             {pillLabel}
-          </button>
-          {/* The whole point of building this on top of somebody's own project:
-              stop describing where, and go and click it. */}
-          <button
-            type="button"
-            className="previewpill previewpill--point"
-            onClick={() => void seeIt(undefined, true)}
-            disabled={busy || (progress !== null && !progress.done)}
-            title="Open the preview and click the thing you mean"
-          >
-            Point at something
           </button>
         </div>
       ) : null}

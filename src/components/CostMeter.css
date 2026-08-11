@@ -75,6 +75,72 @@
   color: var(--text);
 }
 
+/* The stretch the figure covers, offered as words rather than a control to
+   learn. Present only once there is more than one sitting to compare. */
+.cost-meter__spans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.cost-meter__span {
+  padding: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border-bottom: 1px solid transparent;
+}
+
+.cost-meter__span[aria-pressed='true'] {
+  color: var(--text);
+  border-bottom-color: var(--border-strong);
+}
+
+.cost-meter__span:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cost-meter__span:hover {
+    color: var(--text);
+  }
+}
+
+.cost-meter__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* Nine months is a year of glances; past that it is a report, not a corner. */
+  max-height: 11rem;
+  overflow-y: auto;
+}
+
+.cost-meter__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.cost-meter__item-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.cost-meter__aside {
+  margin: 0;
+  max-width: 26ch;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
 .cost-meter__details {
   align-self: flex-start;
   position: relative;

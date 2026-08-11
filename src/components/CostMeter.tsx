@@ -1,8 +1,14 @@
+import { useState } from 'react';
+
 import type { Money } from '../agent/types';
 import { checkLimit, type SpendLimit } from '../cost/limits';
 import { formatMoney } from '../cost/money';
-import { limitNudge, meter } from '../cost/phrasing';
+import { asSummary, forProject, type OverTime, type Split } from '../cost/overtime';
+import { limitNudge, meter, sessionSummary } from '../cost/phrasing';
 import './CostMeter.css';
+
+/** Which stretch the figure covers. */
+export type Span = 'today' | 'project' | 'months';
 
 type Props = {
   /** What has been spent in the period the meter is reporting on. */
@@ -15,7 +21,21 @@ type Props = {
   corner?: boolean;
   /** BCP 47 tag; left off, the host's own locale formats the amount. */
   locale?: string;
+  /** Longer than one sitting: what each folder and each month came to. Given
+   *  this, the meter offers those stretches beside today's figure. */
+  history?: OverTime;
+  /** The folder open right now, so "this project" means the right one. */
+  project?: string;
+  /** Drive the stretch from outside. Left off, the meter remembers its own. */
+  span?: Span;
+  onSpan?: (span: Span) => void;
 };
+
+const SPANS: readonly { span: Span; word: string }[] = [
+  { span: 'today', word: 'Today' },
+  { span: 'project', word: 'This project' },
+  { span: 'months', word: 'Each month' },
+];
 
 /** The small, still number in the corner.
  *
@@ -26,25 +46,59 @@ type Props = {
  *
  * Every word comes from src/cost/phrasing.ts, which is the file the language
  * audit sweeps. Money is the only unit shown, ever. */
-export default function CostMeter({ spent, limit, onDetails, corner, locale }: Props) {
+export default function CostMeter({
+  spent,
+  limit,
+  onDetails,
+  corner,
+  locale,
+  history,
+  project,
+  span,
+  onSpan,
+}: Props) {
+  const [held, hold] = useState<Span>('today');
+  const chosen = span ?? held;
+
   const status = limit ? checkLimit(limit, spent) : null;
   const state = status?.state ?? 'ok';
   const near = state === 'nudge' || state === 'stop';
 
-  const amount = formatMoney(spent, { locale });
   const ceiling = limit ? formatMoney(limit.ceiling, { locale }) : null;
   // Clamped for display: past the ceiling the rule is full, not overflowing.
   const filled = status ? Math.max(0, Math.min(1, status.fraction)) : 0;
 
+  const totals = history?.main ?? null;
+  const here = totals ? (project ? forProject(totals, project) : (totals.byProject[0] ?? null)) : null;
+  const months = totals?.byMonth ?? [];
+  const thisMonth = months.find((one) => one.current) ?? months[0] ?? null;
+
+  const offer = totals !== null;
+  const showing = offer ? chosen : 'today';
+
+  const head =
+    showing === 'project'
+      ? { label: here?.name ?? 'This project', figure: here?.total ?? null }
+      : showing === 'months'
+        ? { label: thisMonth?.name ?? 'This month', figure: thisMonth?.total ?? null }
+        : { label: 'Today', figure: spent };
+
+  const amount = head.figure ? formatMoney(head.figure, { locale }) : null;
+  const todayAmount = formatMoney(spent, { locale });
+
   return (
     <aside
       className={`cost-meter cost-meter--${state} ${corner ? 'cost-meter--corner' : ''}`}
-      aria-label={meter.screenReaderLabel(spent, { locale })}
+      aria-label={
+        showing === 'today'
+          ? meter.screenReaderLabel(spent, { locale })
+          : `Spent, ${head.label.toLowerCase()}: ${amount ?? 'nothing yet'}`
+      }
     >
       <div className="cost-meter__row">
-        <span className="cost-meter__label">Today</span>
+        <span className="cost-meter__label">{head.label}</span>
         <span className="cost-meter__value" aria-hidden="true">
-          {amount}
+          {amount ?? '—'}
         </span>
       </div>
 
@@ -52,7 +106,7 @@ export default function CostMeter({ spent, limit, onDetails, corner, locale }: P
         <div
           className="cost-meter__rule"
           role="img"
-          aria-label={`${amount} of the ${ceiling} you set`}
+          aria-label={`${todayAmount} of the ${ceiling} you set`}
         >
           <span className="cost-meter__fill" style={{ width: `${filled * 100}%` }} />
         </div>
@@ -66,6 +120,43 @@ export default function CostMeter({ spent, limit, onDetails, corner, locale }: P
         </p>
       ) : null}
 
+      {offer ? (
+        <>
+          <div className="cost-meter__spans" role="group" aria-label="What the figure covers">
+            {SPANS.map(({ span: one, word }) => (
+              <button
+                key={one}
+                type="button"
+                className="cost-meter__span"
+                aria-pressed={showing === one}
+                onClick={() => {
+                  hold(one);
+                  onSpan?.(one);
+                }}
+              >
+                {word}
+              </button>
+            ))}
+          </div>
+
+          {showing === 'project' ? <Where split={here} locale={locale} /> : null}
+          {showing === 'months' ? (
+            <ul className="cost-meter__list">
+              {months.map((month) => (
+                <li key={month.key} className="cost-meter__item">
+                  <span className="cost-meter__item-name">{month.name}</span>
+                  <span className="cost-meter__item-value">
+                    {formatMoney(month.total, { locale })}
+                  </span>
+                </li>
+              ))}
+              {months.length === 0 ? <li className="cost-meter__aside">Nothing yet.</li> : null}
+            </ul>
+          ) : null}
+          {showing !== 'today' ? <Elsewhere history={history} locale={locale} /> : null}
+        </>
+      ) : null}
+
       {onDetails ? (
         <button type="button" className="cost-meter__details" onClick={onDetails}>
           {meter.detailsLink}
@@ -73,4 +164,32 @@ export default function CostMeter({ spent, limit, onDetails, corner, locale }: P
       ) : null}
     </aside>
   );
+}
+
+/** The split, in the same words the end of a sitting uses. */
+function Where({ split, locale }: { split: Split | null; locale?: string }) {
+  if (split === null || split.entryCount === 0) {
+    return <p className="cost-meter__aside">Nothing spent here yet.</p>;
+  }
+  const said = sessionSummary(asSummary(split), { locale });
+  return (
+    <p className="cost-meter__aside">
+      {said.work}
+      <br />
+      {said.retry}
+    </p>
+  );
+}
+
+/** Money in another currency is never folded into the figure above, so it says
+ *  so out loud rather than going missing. */
+function Elsewhere({ history, locale }: { history?: OverTime; locale?: string }) {
+  const others = (history?.currencies ?? []).slice(1);
+  if (others.length === 0) return null;
+  const amounts = others.map((one) => formatMoney(one.overall.total, { locale }));
+  const said =
+    amounts.length === 1
+      ? amounts[0]
+      : `${amounts.slice(0, -1).join(', ')} and ${amounts[amounts.length - 1]}`;
+  return <p className="cost-meter__aside">Also {said}, kept apart — it isn’t the same money.</p>;
 }

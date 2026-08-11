@@ -233,17 +233,17 @@ export default function Files({
 
       {rows.length === 0 ? (
         <p className="files__none">
-          {nothing
+          {nothing || all
             ? 'Nothing here yet.'
             : only
               ? 'Nothing has changed in this one yet.'
-              : 'Nothing to show.'}
+              : 'Nothing here but the working files this project keeps for itself.'}
         </p>
       ) : (
         <div
           className="files__tree"
           role="tree"
-          aria-label="Everything in this project"
+          aria-label="Files and folders"
           ref={treeRef}
           onKeyDown={onKeyDown}
         >

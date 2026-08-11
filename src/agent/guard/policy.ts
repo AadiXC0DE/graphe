@@ -207,7 +207,14 @@ const WEB_TOOLS = new Set(['websearch', 'searchweb', 'googlesearch', 'ddgsearch'
 const TASK_TOOLS = new Set(['task', 'subagent', 'delegate', 'handoff']);
 const PUBLISH_TOOLS = new Set(['deploy', 'publish', 'release', 'ship']);
 const SESSION_EXPORT_TOOLS = new Set(['export', 'exportsession', 'share', 'sharesession', 'sendlog', 'uploadlogs']);
-/** Our own design tools. Read-only by construction, so they stay silent. */
+/** Our own design tools. Read-only by construction, so they stay silent.
+ *
+ *  The second group is the reading half of the tools somebody's other design
+ *  work brings with it. Naming them is not a relaxation: a connection the user
+ *  added deliberately would otherwise ask permission on every single read, and
+ *  a question asked forty times is a question nobody reads by the fortieth.
+ *  Only the reading half is here — anything that writes stays unknown, and
+ *  unknown still asks. */
 const DESIGN_READ_TOOLS = new Set([
   'figmaread',
   'readfigma',
@@ -218,6 +225,16 @@ const DESIGN_READ_TOOLS = new Set([
   'getdesigntokens',
   'listroutes',
   'inspectelement',
+  'getdesigncontext',
+  'getscreenshot',
+  'getmetadata',
+  'getvariabledefs',
+  'getcodeconnectmap',
+  'getfigjam',
+  'searchdesignsystem',
+  'getlibraries',
+  'browsersnapshot',
+  'browserconsolemessages',
 ]);
 /** Anything that sounds like it is reaching for the Guard's own switches. */
 const GUARD_SWITCH = /(permission|policy|guard|approval|approve|allowlist|whitelist|yolo|autorun|bypass|unsafe|disablesafety)/;

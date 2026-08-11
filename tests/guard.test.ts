@@ -1192,3 +1192,45 @@ describe('P-02 none of the tools Pi ships falls through the floor', () => {
     }
   });
 });
+
+describe('G-03 the reading half of a connection somebody added', () => {
+  // A connection the user added deliberately reads constantly. Asking on every
+  // read trains people to press yes without looking, which is the failure the
+  // Guard exists to prevent.
+  const reads = [
+    'get_design_context',
+    'get_screenshot',
+    'get_metadata',
+    'get_variable_defs',
+    'get_figjam',
+    'search_design_system',
+    'browser_snapshot',
+  ];
+
+  for (const name of reads) {
+    it(`lets ${name} through without a question`, () => {
+      expect(kindOf(call(name, { fileKey: 'abc' }))).toBe('allow');
+    });
+
+    it(`${name} changes nothing, so "ask me first" stays out of its way`, () => {
+      const asked: GuardFacts = { projectRoot: ROOT, askBeforeEveryChange: true };
+      expect(changesAnything(call(name, { fileKey: 'abc' }), asked)).toBe(false);
+    });
+  }
+
+  // The floor is unchanged for anything that writes. These are the names a
+  // connection brings alongside the readers, and none of them may be silent.
+  const writes = [
+    'create_new_file',
+    'edit_design',
+    'upload_assets',
+    'send_code_connect_mappings',
+    'export_video',
+  ];
+
+  for (const name of writes) {
+    it(`still asks before ${name}`, () => {
+      expect(kindOf(call(name, { fileKey: 'abc' }))).not.toBe('allow');
+    });
+  }
+});

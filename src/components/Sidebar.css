@@ -332,3 +332,163 @@
     background: var(--bg-sunken);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Finding one, and naming a new one
+   Both are the same small field: one narrows a long column, the other takes a
+   name for something that does not exist yet.
+   --------------------------------------------------------------------------- */
+
+.shelf__find {
+  -webkit-app-region: no-drag;
+  width: calc(100% - var(--space-4));
+  min-height: 28px;
+  margin: 0 var(--space-2) var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-xs);
+}
+
+.shelf__find::placeholder {
+  color: var(--text-faint);
+}
+
+.shelf__find:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.shelf__naming {
+  display: block;
+}
+
+/* The day a conversation was had, as a line you read past rather than one you
+   stop at. */
+.shelf__day + .shelf__day {
+  margin-top: var(--space-2);
+}
+
+.shelf__daylabel {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-1);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   A page row that says how it is doing
+   The picture carries the recognition, the marks on the right carry the state,
+   and both are absent by default so a row with nothing to add is the plain row
+   it always was.
+   --------------------------------------------------------------------------- */
+
+.shelf__page {
+  position: relative;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.shelf__pagewords {
+  display: flex;
+  flex-direction: column;
+  align-items: baseline;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.shelf__shot {
+  flex: none;
+  width: 30px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  object-fit: cover;
+  object-position: top center;
+}
+
+.shelf__shot--none {
+  background: var(--bg-sunken);
+}
+
+.shelf__marks {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.shelf__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+/* The one the preview is pointed at. */
+.shelf__dot--live {
+  background: var(--accent);
+}
+
+/* It moved in the newest version. */
+.shelf__dot--moved {
+  border: 1px solid var(--border-control);
+}
+
+.shelf__count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* The marks in words, for anyone reading the rail rather than looking at it. */
+.shelf__says {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   What the project is made of
+   --------------------------------------------------------------------------- */
+
+.shelf__part {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 28px;
+}
+
+.shelf__part:disabled {
+  cursor: default;
+}
+
+.shelf__uses {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .shelf__part:disabled:hover {
+    background: none;
+  }
+}

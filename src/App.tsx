@@ -207,12 +207,15 @@ function Conversation() {
   /** The conversations this project has had, and which one is on screen. */
   const [conversations, setConversations] = useState<readonly Conversation[]>([]);
   const [inConversation, setInConversation] = useState<string | null>(null);
-  /** The three widths, once somebody has asked for them. */
+  /** Every size the project designs at, once somebody has asked for them. */
   const [looks, setLooks] = useState<{ looks: readonly Look[]; says: string }>({
     looks: [],
     says: '',
   });
   const [checkingWidths, setCheckingWidths] = useState(false);
+  /** The size being worked at. It lasts as long as the window does: it is what
+   *  somebody is looking at now, not a setting about the project. */
+  const [workingAt, setWorkingAt] = useState<string | null>(null);
   /** The screen where more can be added to Graphe, and what it is showing. */
   const [addMore, setAddMore] = useState(false);
   const [packs, setPacks] = useState<readonly Pack[]>([]);
@@ -1226,6 +1229,19 @@ function Conversation() {
     );
   }, []);
 
+  /** One value moved, from wherever the panel offered it: a slider, or a colour
+   *  nobody could read against the one underneath it. */
+  const nudge = useCallback((name: string, value: string) => {
+    void bridge.nudgeToken(name, value).then((answer) => {
+      const path = desks.current;
+      if (!answer.ok || path === null) return;
+      setDesks((current) =>
+        changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
+      );
+      void refreshOverview(path);
+    });
+  }, [desks.current, refreshOverview]);
+
   /* ------------------------------------------------------------------ money */
 
   /**
@@ -1625,6 +1641,7 @@ function Conversation() {
             looks: looks.looks,
             looksSay: looks.says,
             checkingWidths,
+            workingAt,
             artifacts: desk.overview?.artifacts ?? [],
             swatches: desk.overview?.swatches ?? [],
             styles: desk.overview?.styles ?? null,
@@ -1644,17 +1661,10 @@ function Conversation() {
               })
               .finally(() => setCheckingWidths(false));
           }}
+          onWorkAt={(look) => setWorkingAt((was) => (was === look.id ? null : look.id))}
           onShare={() => void bridge.shareReview()}
-          onNudge={(name, value) => {
-            void bridge.nudgeToken(name, value).then((answer) => {
-              const path = desks.current;
-              if (!answer.ok || path === null) return;
-              setDesks((current) =>
-                changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
-              );
-              void refreshOverview(path);
-            });
-          }}
+          onNudge={nudge}
+          onFixColour={nudge}
           onSave={() => {
             void bridge.saveVersion().then((answer) => {
               if (!answer.ok) return;

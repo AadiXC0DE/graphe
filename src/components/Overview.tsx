@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import CostMeter from './CostMeter';
 import Drift from './Drift';
 import Helpers from './Helpers';
+import Legible from './Legible';
 import Responsive from './Responsive';
 import Styles from './Styles';
 import Swatches from './Swatches';
@@ -17,6 +18,8 @@ import type {
   Swatch,
 } from '../lib/ipc';
 import { findDrift } from '../design/drift';
+import { findTrouble } from '../design/legibility';
+import { pairsToCheck, paletteFrom } from '../design/pairs';
 import type { NowView, Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
 import './Overview.css';
@@ -37,10 +40,12 @@ export type OverviewView = {
   spent: SpendView | null;
   busy: boolean;
   showMe: boolean;
-  /** The three widths, once somebody has asked. */
+  /** Every size the project designs at, once somebody has asked. */
   looks: readonly Look[];
   looksSay: string;
   checkingWidths: boolean;
+  /** The size being worked at, when one has been chosen. */
+  workingAt?: string | null;
   /** Things the last turn made that are worth looking at. */
   artifacts: readonly Artifact[];
   swatches: readonly Swatch[];
@@ -60,12 +65,16 @@ type Props = {
   onOpenFile: (path: string) => void;
   /** Keep where the project stands right now, so it can be come back to. */
   onSave: () => void;
-  /** Photograph the project at three widths. */
+  /** Photograph the project at every size it designs at. */
   onCheckWidths: () => void;
+  /** Say which of those sizes the work is being done at. */
+  onWorkAt?: (look: Look) => void;
   /** Write a page of what changed, for somebody who is not you. */
   onShare: () => void;
   /** Change one design token directly. */
   onNudge: (name: string, value: string) => void;
+  /** Move the colour behind a pairing nobody can read to one they can. */
+  onFixColour?: (name: string, value: string) => void;
   /** Put one of the project's own values back where something close to it was
    *  written instead. */
   onUseYours?: (finding: { use: string; line: number; wrote: string }) => void;
@@ -116,13 +125,15 @@ export default function Overview({
   onOpenFile,
   onSave,
   onCheckWidths,
+  onWorkAt,
   onShare,
   onNudge,
+  onFixColour,
   onUseYours,
 }: Props) {
   const { now, git, research, references, versions, pictures, kept, putBack, spent, busy, showMe } =
     view;
-  const { looks, looksSay, checkingWidths, artifacts, swatches, styles } = view;
+  const { looks, looksSay, checkingWidths, workingAt, artifacts, swatches, styles } = view;
 
   /* Which band of the panel is in front. Bands used to stack into one column
      that only got longer; now each has a home and nothing is buried. */
@@ -135,9 +146,29 @@ export default function Overview({
     [styles],
   );
 
+  /* Which of this project's own colours cannot be read on which of its own
+     surfaces. Only the tokens are paired, because only a token can be moved
+     from here; the swatches still count as colours a repair may come out of. */
+  const unreadable = useMemo(() => {
+    if (styles === null) return { findings: [], moves: new Map<string, string>() };
+    const pairs = pairsToCheck(styles.tokens);
+    return {
+      findings: findTrouble(
+        pairs.map((one) => one.spot),
+        paletteFrom([...styles.tokens, ...swatches]),
+      ),
+      moves: new Map(pairs.map((one) => [one.spot.id, one.front.name])),
+    };
+  }, [styles, swatches]);
+
+  /* The row whose colour is on its way to being changed. Cleared the moment new
+     values arrive, which is what finishing looks like from here. */
+  const [fixing, setFixing] = useState<string | null>(null);
+  useEffect(() => setFixing(null), [styles]);
+
   /* A dot on the tab, not a number: the count matters once you are looking, and
      before that it is only worth knowing there is something. */
-  const trouble = drifted.length;
+  const trouble = drifted.length + unreadable.findings.length;
 
   const shownResearch = research.slice(-WINDOW);
   const moreResearch = research.length - shownResearch.length;
@@ -344,9 +375,39 @@ export default function Overview({
         </section>
       )}
 
+      {/* Only when something in the palette cannot be read. An empty list here
+          would say everything reads fine, which is a different claim from
+          having found nothing to check. */}
+      {unreadable.findings.length === 0 ? null : (
+        <section className="overview__block">
+          <Legible
+            findings={unreadable.findings}
+            fixing={fixing}
+            showMe={showMe}
+            {...(onFixColour === undefined
+              ? {}
+              : {
+                  onFix: (finding) => {
+                    const token = unreadable.moves.get(finding.id);
+                    if (token === undefined || finding.fix === null) return;
+                    setFixing(finding.id);
+                    onFixColour(token, finding.fix.colour);
+                  },
+                })}
+          />
+        </section>
+      )}
+
       <section className="overview__block">
         <h2 className="overview__title">On a phone</h2>
-        <Responsive looks={looks} says={looksSay} busy={checkingWidths} onCheck={onCheckWidths} />
+        <Responsive
+          looks={looks}
+          says={looksSay}
+          busy={checkingWidths}
+          onCheck={onCheckWidths}
+          workingAt={workingAt ?? null}
+          {...(onWorkAt === undefined ? {} : { onWorkAt })}
+        />
       </section>
 
 

@@ -1,4 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { everything } from '../agent/pi/packages';
+import {
+  REACHABLE,
+  describeStart,
+  readReach,
+  reachesMatching,
+  type Reach,
+  type Typed,
+} from '../agent/pi/reach';
 import './AddMore.css';
 
 /** One thing that can be added. Declared here rather than imported so this
@@ -43,6 +52,21 @@ export const SAYS = {
     prompts: 'Ready-made things to ask for',
     mixed: 'A bit of each of those',
   },
+  filterAll: 'Everything',
+  filterReach: 'Your other tools',
+  filterAdditions: 'Ways of working',
+  reachHeading: 'Your other tools',
+  reachNote:
+    'Let me look at the places your work already lives, so I build from the real thing.',
+  noReaches: 'None of these matches that.',
+  exact: 'Show me how it starts',
+  byHand: 'Add one of your own',
+  handName: 'Name',
+  handWhat: 'What it lets you do',
+  handWhere: 'Where to find it',
+  handWhereHint: 'The address it answers on, or the program that starts it.',
+  handValues: 'Values it needs, one per line, as NAME=value',
+  handAdd: 'Add it',
 } as const;
 
 type Props = {
@@ -59,10 +83,26 @@ type Props = {
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
   onExplain: (id: string) => void;
+  /** The other half of the shelf: the places somebody's work already lives.
+   *  Ours by default, ticked and extended by whatever has been added. */
+  reaches?: readonly Reach[];
+  /** Which of those is being turned on or off this moment. */
+  connecting?: string | null;
+  /** Given one of ours by name. Without it that half of the shelf stays down,
+   *  because a row nobody can press is worse than a row that is not there. */
+  onConnect?: (id: string) => void;
+  onDisconnect?: (id: string) => void;
+  /** A form somebody filled in themselves. Checked here first, so the sentence
+   *  saying what is wrong arrives before anything is asked to keep it. */
+  onConnectByHand?: (typed: Typed) => void;
 };
 
 const FOCUSABLE =
-  'button:not([disabled]), input:not([disabled]), [href], select, textarea, [tabindex]:not([tabindex="-1"])';
+  'button:not([disabled]), input:not([disabled]), [href], select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+
+const NOTHING_TYPED = { name: '', what: '', where: '', values: '' };
+
+type Showing = 'all' | 'reach' | 'additions';
 
 /** How long a typed word waits before it becomes a search. */
 const SETTLE = 250;
@@ -88,13 +128,22 @@ export default function AddMore({
   onAdd,
   onRemove,
   onExplain,
+  reaches = REACHABLE,
+  connecting = null,
+  onConnect,
+  onDisconnect,
+  onConnectByHand,
 }: Props) {
   const [term, setTerm] = useState('');
+  const [showing, setShowing] = useState<Showing>('all');
   const panel = useRef<HTMLDivElement>(null);
   const returnTo = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (open) setTerm('');
+    if (open) {
+      setTerm('');
+      setShowing('all');
+    }
   }, [open]);
 
   // Focus goes into the panel and comes back to wherever it was.
@@ -122,15 +171,26 @@ export default function AddMore({
     return () => clearTimeout(timer);
   }, [open, term, onSearch]);
 
-  const [vouched, rest] = useMemo(() => {
-    const ours = packs.filter((pack) => pack.curated);
-    const theirs = packs.filter((pack) => !pack.curated);
-    return [ours, theirs] as const;
-  }, [packs]);
+  // One ordering for both kinds, then split into the bands they are drawn in.
+  const [found, vouched, rest] = useMemo(() => {
+    const shelf = everything(packs, reachesMatching(reaches, term));
+    const ours: Pack[] = [];
+    const theirs: Pack[] = [];
+    const outward: Reach[] = [];
+    for (const one of shelf) {
+      if (one.sort === 'reach') outward.push(one.reach);
+      else if (one.addition.curated) ours.push(one.addition);
+      else theirs.push(one.addition);
+    }
+    return [outward, ours, theirs] as const;
+  }, [packs, reaches, term]);
 
   if (!open) return null;
 
   const searching = term.trim() !== '';
+  const canReach = onConnect !== undefined;
+  const showReach = canReach && showing !== 'additions';
+  const showAdditions = showing !== 'reach';
 
   return (
     <div
@@ -180,8 +240,54 @@ export default function AddMore({
           />
         </div>
 
+        {canReach ? (
+          <div className="addmore__filters" role="group" aria-label={SAYS.title}>
+            {(
+              [
+                ['all', SAYS.filterAll],
+                ['reach', SAYS.filterReach],
+                ['additions', SAYS.filterAdditions],
+              ] as const
+            ).map(([which, label]) => (
+              <button
+                key={which}
+                type="button"
+                className={`addmore__chip ${showing === which ? 'addmore__chip--on' : ''}`}
+                aria-pressed={showing === which}
+                onClick={() => setShowing(which)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <div className="addmore__body">
-          {packs.length === 0 ? (
+          {showReach ? (
+            <section className="addmore__group" aria-label={SAYS.reachHeading}>
+              <h3 className="addmore__grouphead">{SAYS.reachHeading}</h3>
+              <p className="addmore__groupnote">{SAYS.reachNote}</p>
+              <p className="addmore__groupnote">{warning}</p>
+              {found.length === 0 ? (
+                <p className="addmore__quiet">{SAYS.noReaches}</p>
+              ) : (
+                found.map((reach) => (
+                  <ReachRow
+                    key={reach.id}
+                    reach={reach}
+                    busy={connecting}
+                    onConnect={onConnect}
+                    onDisconnect={onDisconnect}
+                  />
+                ))
+              )}
+              {onConnectByHand === undefined ? null : (
+                <ByHand known={reaches} onAdd={onConnectByHand} />
+              )}
+            </section>
+          ) : null}
+
+          {!showAdditions ? null : packs.length === 0 ? (
             <p className="addmore__quiet">{searching ? SAYS.noMatches : SAYS.emptyCatalogue}</p>
           ) : (
             <>
@@ -312,6 +418,127 @@ function Row({
         <p className="addmore__explanation">{explanation}</p>
       )}
     </div>
+  );
+}
+
+/** One place Graphe can reach: what it lets you do, one press, and the exact
+ *  thing that starts it one click under that. */
+function ReachRow({
+  reach,
+  busy,
+  onConnect,
+  onDisconnect,
+}: {
+  reach: Reach;
+  busy: string | null;
+  onConnect: (id: string) => void;
+  onDisconnect: ((id: string) => void) | undefined;
+}) {
+  const working = busy === reach.id;
+
+  return (
+    <div className="addmore__row">
+      <div className="addmore__rowtop">
+        <div className="addmore__text">
+          <span className="addmore__name">{reach.name}</span>
+          <span className="addmore__summary">{reach.what}</span>
+        </div>
+        <button
+          type="button"
+          className={`addmore__action ${reach.added ? 'addmore__action--off' : ''}`}
+          onClick={() => (reach.added ? onDisconnect?.(reach.id) : onConnect(reach.id))}
+          disabled={busy !== null || (reach.added && onDisconnect === undefined)}
+        >
+          {working
+            ? reach.added
+              ? SAYS.removing
+              : SAYS.adding
+            : reach.added
+              ? SAYS.remove
+              : SAYS.add}
+        </button>
+      </div>
+
+      <div className="addmore__meta">
+        {reach.needs === null ? null : <span className="addmore__needs">{reach.needs}</span>}
+        {reach.added ? <span className="addmore__on">{SAYS.added}</span> : null}
+      </div>
+
+      {/* The technical truth, one click away and never in the way. */}
+      <details className="addmore__exact">
+        <summary className="addmore__exactsummary">{SAYS.exact}</summary>
+        <dl className="addmore__exactlist">
+          {describeStart(reach.start).map((line) => (
+            <div className="addmore__exactrow" key={line.label}>
+              <dt className="addmore__exactlabel">{line.label}</dt>
+              <dd className="addmore__exactvalue">{line.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
+    </div>
+  );
+}
+
+/** For somebody who has one of their own. Everything typed is read here first,
+ *  so a mistake comes back as a sentence rather than as a failure later. */
+function ByHand({ known, onAdd }: { known: readonly Reach[]; onAdd: (typed: Typed) => void }) {
+  const [form, setForm] = useState(NOTHING_TYPED);
+  const [why, setWhy] = useState<string | null>(null);
+
+  const field = (key: keyof typeof NOTHING_TYPED) => (
+    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => setForm({ ...form, [key]: event.target.value });
+
+  return (
+    <details className="addmore__hand">
+      <summary className="addmore__exactsummary">{SAYS.byHand}</summary>
+
+      <label className="addmore__label">
+        {SAYS.handName}
+        <input className="addmore__field" type="text" value={form.name} onChange={field('name')} />
+      </label>
+
+      <label className="addmore__label">
+        {SAYS.handWhat}
+        <input className="addmore__field" type="text" value={form.what} onChange={field('what')} />
+      </label>
+
+      <label className="addmore__label">
+        {SAYS.handWhere}
+        <input className="addmore__field" type="text" value={form.where} onChange={field('where')} />
+        <span className="addmore__hint">{SAYS.handWhereHint}</span>
+      </label>
+
+      <label className="addmore__label">
+        {SAYS.handValues}
+        <textarea
+          className="addmore__field addmore__field--tall"
+          rows={2}
+          value={form.values}
+          onChange={field('values')}
+        />
+      </label>
+
+      {why === null ? null : <p className="addmore__trouble">{why}</p>}
+
+      <button
+        type="button"
+        className="addmore__action"
+        onClick={() => {
+          const read = readReach(form, known);
+          if (!read.ok) {
+            setWhy(read.why);
+            return;
+          }
+          setWhy(null);
+          setForm(NOTHING_TYPED);
+          onAdd(form);
+        }}
+      >
+        {SAYS.handAdd}
+      </button>
+    </details>
   );
 }
 

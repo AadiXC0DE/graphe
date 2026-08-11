@@ -440,6 +440,16 @@ function previewBridge(): Bridge {
             { name: '--radius-md', value: '10px', kind: 'radius', line: 49, steps: ['4px', '6px', '10px', '14px'] },
             { name: '--accent', value: '#b8492c', kind: 'colour', line: 95, steps: [] },
           ],
+          // Two near-misses on purpose, so the drift band has something to say
+          // in the preview: a hair off the accent, and a hair off --space-4.
+          text: [
+            ':root {',
+            '  --space-4: 16px;',
+            '  --radius-md: 10px;',
+            '  --accent: #b8492c;',
+            '}',
+            '.hero__cta { background: #bd4b2f; padding: 15px; }',
+          ].join('\n'),
         },
       }),
     );

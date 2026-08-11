@@ -909,7 +909,8 @@ export default function Gallery() {
                       { name: '--space-4', value: '16px', kind: 'space' as const, line: 42, steps: ['8px', '12px', '16px', '24px'] },
                       { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 95, steps: [] },
                     ],
-                  },
+                    text: ':root { --accent: #b8492c; }',
+        },
                 }}
                 onPutBack={noop}
                 onName={noop}

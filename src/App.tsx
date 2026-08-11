@@ -51,6 +51,7 @@ import {
   type VisualChange,
 } from "./lib/ipc";
 import { usePrefersReducedMotion } from "./lib/motion";
+import { keeping } from "./projects/kept";
 import { behind } from "./lib/showme";
 import {
   changeCurrent,
@@ -245,6 +246,7 @@ function Conversation() {
   const [preferences, setPreferences] = useState<Preferences>({
     showMe: false,
     model: null,
+    kept: {},
   });
   const [editor, setEditor] = useState<string | null>(null);
 
@@ -432,6 +434,12 @@ function Conversation() {
    * now.
    */
   const [changes, setChanges] = useState<Record<string, readonly Pinned[]>>({});
+  /** What each version looked like, per project. Asked for whenever the
+   *  timeline is, and never per row: the rail draws a card for every moment of
+   *  the afternoon and reading a picture inside one would be a disk on hover. */
+  const [versionPictures, setVersionPictures] = useState<
+    Readonly<Record<string, Readonly<Record<string, string>>>>
+  >({});
   /** Read inside the listener below, which is subscribed once and must not be
    *  torn down and rebuilt every time somebody says something. */
   const desksNow = useRef(desks);
@@ -575,7 +583,13 @@ function Conversation() {
    *  back — the shell answers about whatever is current, so a switch mid-flight
    *  would otherwise write one project's history onto another's desk. */
   const refreshVersions = useCallback(async (path: string) => {
-    const answer = await bridge.versions();
+    const [answer, seen] = await Promise.all([bridge.versions(), bridge.versionPictures()]);
+    // The pictures are answered about whatever project is in front of the
+    // shell, exactly as the timeline is, so they stand on the same guard: a
+    // switch mid-flight must not file one project's pictures under another.
+    if (seen.ok && desksNow.current.current === path) {
+      setVersionPictures((current) => ({ ...current, [path]: seen.value }));
+    }
     if (!answer.ok) return;
     setDesks((current) =>
       current.current === path
@@ -1194,6 +1208,18 @@ function Conversation() {
     [desks.current, troubleHere],
   );
 
+  /** Keeping is instant on screen and confirmed underneath, like "Show me":
+   *  the mark in the corner of a card must land on the click, and the answer
+   *  from the shell is what survives if the write did not. */
+  const keepVersion = useCallback((versionId: string, keep: boolean) => {
+    const path = desks.current;
+    if (path === null) return;
+    setPreferences((was) => ({ ...was, kept: keeping(was.kept, path, versionId, keep) }));
+    void bridge.keepVersion(versionId, keep).then((answer) => {
+      if (answer.ok) setPreferences(answer.value);
+    });
+  }, [desks.current]);
+
   const dismissPutBack = useCallback(() => {
     setDesks((current) =>
       changeCurrent(current, (one) => ({ ...one, putBack: null })),
@@ -1590,6 +1616,8 @@ function Conversation() {
             research,
             references: desk.references,
             versions: desk.versions,
+            pictures: versionPictures[desk.path] ?? {},
+            kept: preferences.kept[desk.path] ?? [],
             putBack: desk.putBack,
             spent: desk.spent,
             busy,
@@ -1603,6 +1631,7 @@ function Conversation() {
           }}
           onPutBack={(versionId) => void putBack(versionId)}
           onName={(versionId, name) => void nameVersion(versionId, name)}
+          onKeep={keepVersion}
           onDismissPutBack={dismissPutBack}
           onShowSplit={showSplit}
           onOpenFile={(file) => void bridge.openInEditor(file)}

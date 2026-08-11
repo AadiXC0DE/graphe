@@ -21,6 +21,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
 import type { ModelChoice } from '../lib/ipc';
+import { asKept, sameKept, type Kept } from './kept';
+
+export { keeping, type Kept } from './kept';
 
 /** Everything a person can change about the app itself. */
 export type Preferences = {
@@ -41,9 +44,18 @@ export type Preferences = {
    * full list so a choice is never more than one click away.
    */
   model: ModelChoice | null;
+  /**
+   * Versions somebody chose to keep at the top of the rail, by project folder.
+   *
+   * A view preference rather than history: keeping one changes what the rail
+   * shows first and nothing about the project, so it belongs here rather than
+   * in the timeline. Keyed by folder, because two projects sharing a shelf
+   * would put yesterday's other job at the top of today's.
+   */
+  kept: Kept;
 };
 
-export const defaultPreferences: Preferences = { showMe: false, model: null };
+export const defaultPreferences: Preferences = { showMe: false, model: null, kept: {} };
 
 type Stored = { version: 1; preferences: Preferences };
 
@@ -66,6 +78,7 @@ function asPreferences(value: unknown): Preferences {
             modelId: (model as Record<string, unknown>)['modelId'] as string,
           }
         : null,
+    kept: asKept(record['kept']),
   };
 }
 
@@ -93,7 +106,8 @@ export class PreferenceFile {
     const unchanged =
       next.showMe === this.#preferences.showMe &&
       next.model?.providerId === this.#preferences.model?.providerId &&
-      next.model?.modelId === this.#preferences.model?.modelId;
+      next.model?.modelId === this.#preferences.model?.modelId &&
+      sameKept(next.kept, this.#preferences.kept);
     if (unchanged) return this.all();
     this.#preferences = next;
     await this.#write();

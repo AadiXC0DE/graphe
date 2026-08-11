@@ -887,6 +887,8 @@ export default function Gallery() {
                   research: RESEARCH,
                   references: REFERENCES,
                   versions: TIMELINE,
+                  pictures: {},
+                  kept: [],
                   putBack: JUST_PUT_BACK,
                   spent: SPENT,
                   busy: true,
@@ -911,6 +913,7 @@ export default function Gallery() {
                 }}
                 onPutBack={noop}
                 onName={noop}
+                onKeep={noop}
                 onDismissPutBack={noop}
                 onShowSplit={noop}
                 onOpenFile={noop}

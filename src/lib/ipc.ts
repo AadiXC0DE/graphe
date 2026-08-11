@@ -13,6 +13,9 @@
  */
 
 import type { AgentEvent, Money } from '../agent/types';
+import type { Page } from '../preview/pages';
+
+export type { Page };
 
 /** Yes or no, from a person. Same two answers the Guard accepts, and no third. */
 export type Decision = 'yes' | 'no';
@@ -52,6 +55,11 @@ export type OpenedProject = {
   path: string;
   /** The folder's own name, which is what people call their project. */
   name: string;
+  /** The conversation this project left behind, replayed as events. The window
+   *  folds them through the same reducer it runs live events through, so a
+   *  project opened again comes back as the desk it was — not as an
+   *  introduction (BACKLOG B1.1). Empty when nothing was ever said. */
+  history: readonly AgentEvent[];
 };
 
 /**
@@ -126,6 +134,39 @@ export type ShowOutcome =
   | { kind: 'showing'; name: string }
   | { kind: 'unsure'; question: string };
 
+/** One conversation this project has had. */
+export type Conversation = {
+  id: string;
+  path: string;
+  title: string;
+  at: number;
+  messages: number;
+};
+
+/** One thing that can be added to Graphe. */
+export type Pack = {
+  id: string;
+  name: string;
+  kind: 'extension' | 'skill' | 'prompts' | 'mixed';
+  summary: string;
+  downloads: number | null;
+  version: string | null;
+  installed: boolean;
+  curated: boolean;
+};
+
+/** One width the page was photographed at. */
+export type Look = {
+  id: string;
+  name: string;
+  width: number;
+  shot: string | null;
+  trouble: string | null;
+};
+
+/** How the window is sitting on screen. */
+export type WindowState = { fullScreen: boolean };
+
 /** A sentence about how it is going, and whether that is the last one. Never a
  *  percentage and never a log line — "Never a spinner without a sentence". */
 export type ShowProgress = { says: string; done: boolean };
@@ -154,6 +195,9 @@ export type VisualChange = {
   at: number;
   /** One line, past tense: "Made the header sticky". */
   headline: string;
+  /** The same change said in design's own words — "Spacing on three cards,
+   *  from 16 to 24". Null when nothing in the diff reads that way. */
+  inDesignWords: string | null;
   /** Where it landed: "Two areas changed, near the top." Null when the picture
    *  has nothing useful to add. */
   where: string | null;
@@ -191,6 +235,13 @@ export type Preferences = {
   model: ModelChoice | null;
 };
 
+/** How the next message should be handled. Both default off; the window turns
+ *  the first on by itself when a request looks big enough to be worth a plan. */
+export type PromptOptions = {
+  /** Look around and propose, changing nothing, before anything is touched. */
+  lookFirst?: boolean;
+};
+
 /** One model, named by the provider it belongs to and its own id. Both ids are
  *  the provider's own — the window stores them and never invents them. */
 export type ModelChoice = { providerId: string; modelId: string };
@@ -212,6 +263,11 @@ export type ModelOption = {
   label: string;
   /** True when the current account can actually use it. */
   available: boolean;
+  /** Dollars per million tokens, as the provider quotes them. Null when the
+   *  provider does not say — free and unpriced are different claims. */
+  rates: { input: number; output: number } | null;
+  /** How much it can hold at once, in tokens. Null when unstated. */
+  contextWindow: number | null;
 };
 
 /** Everything the window knows about one provider: how to connect to it, and
@@ -337,6 +393,39 @@ export type Overview = {
    * nothing.
    */
   preview: string | null;
+  /** Things the last turn made that are worth looking at rather than reading. */
+  artifacts: readonly Artifact[];
+  /** Named colours out of a palette file the agent wrote, for real swatches. */
+  swatches: readonly Swatch[];
+  /** This project's design tokens, and the file they live in. */
+  styles: { file: string; tokens: readonly StyleToken[] } | null;
+};
+
+/** One thing a turn produced that a designer would look at. */
+export type Artifact = {
+  path: string;
+  name: string;
+  kind: 'image' | 'palette' | 'words' | 'data' | 'vector';
+  note: string;
+};
+
+export type Swatch = { name: string; value: string };
+
+/** One custom property in the project's own token file. */
+export type StyleToken = {
+  name: string;
+  value: string;
+  kind: 'colour' | 'space' | 'size' | 'radius' | 'shadow' | 'other';
+  line: number;
+  /** The values a slider should snap to, derived from the file's own scale. */
+  steps: readonly string[];
+};
+
+/** One file that differs from the last saved version. */
+export type ChangedFile = {
+  /** Relative to the project folder, as the folder spells it. */
+  path: string;
+  kind: 'changed' | 'new';
 };
 
 /** One reading of the folder's saved state, at the moment it was asked for. */
@@ -351,6 +440,9 @@ export type GitSnapshot = {
   staged: number;
   /** Files the folder holds that history knows nothing about. */
   untracked: number;
+  /** Which files, by name, up to a limit. The panel names them rather than
+   *  counting them: "3 files changed" is a number, `pricing.tsx` is a place. */
+  files: readonly ChangedFile[];
   /** Saved work owned by this machine and not yet in the shared copy. */
   ahead: number;
   /** Saved work owned by the shared copy and not yet on this machine. */
@@ -400,11 +492,24 @@ export const CHANNEL = {
   nameVersion: 'graphe:name-version',
   show: 'graphe:show',
   showProgress: 'graphe:show-progress',
+  windowState: 'graphe:window-state',
+  pointed: 'graphe:pointed',
+  pages: 'graphe:pages',
   preferences: 'graphe:preferences',
   setShowMe: 'graphe:set-show-me',
   hatches: 'graphe:hatches',
   openInEditor: 'graphe:open-in-editor',
   revealFolder: 'graphe:reveal-folder',
+  saveVersion: 'graphe:save-version',
+  nudgeToken: 'graphe:nudge-token',
+  shareReview: 'graphe:share-review',
+  checkWidths: 'graphe:check-widths',
+  conversations: 'graphe:conversations',
+  openConversation: 'graphe:open-conversation',
+  packages: 'graphe:packages',
+  addPackage: 'graphe:add-package',
+  removePackage: 'graphe:remove-package',
+  explainPackage: 'graphe:explain-package',
   visualChange: 'graphe:visual-change',
   visualFrames: 'graphe:visual-frames',
   connection: 'graphe:connection',
@@ -434,7 +539,11 @@ export type GrapheApi = {
   openProject(path: string): Promise<Result<OpenedProject>>;
   /** Say something to the agent, with any pictures that go with it. Resolves
    *  when it has finished responding. */
-  prompt(text: string, attachments?: readonly PromptAttachment[]): Promise<Result<null>>;
+  prompt(
+    text: string,
+    attachments?: readonly PromptAttachment[],
+    options?: PromptOptions,
+  ): Promise<Result<null>>;
   /** Stop what it is doing. Open questions are answered no. */
   stop(): Promise<Result<null>>;
   /** Answer a question the Guard asked. False when there was no such question. */
@@ -468,14 +577,47 @@ export type GrapheApi = {
 
   /** What the escape hatches can offer here — which editor, if any. */
   hatches(): Promise<Result<Hatches>>;
-  /** Open the project folder in the editor `hatches` named. */
-  openInEditor(): Promise<Result<null>>;
+  /** Open the project in the editor `hatches` named, or one file inside it. */
+  openInEditor(file?: string): Promise<Result<null>>;
+  /** Save a version of the project right now, named by the person if they
+   *  bothered. Returns the timeline as it now stands. */
+  saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>>;
   /** Show the project folder in the Finder. Always available: every project is
    *  an ordinary folder, and this is the one hatch that cannot fail to exist. */
   revealFolder(): Promise<Result<null>>;
 
-  /** Make the project, then open the made thing in their own browser. */
-  show(): Promise<Result<ShowOutcome>>;
+  /** Make the project, then open the made thing in their own browser. `at` opens
+   *  one page of it rather than its front door. */
+  show(at?: string, point?: boolean): Promise<Result<ShowOutcome>>;
+  /** Somebody clicked an element in the live preview. */
+  onPointed(listener: (said: string) => void): () => void;
+  /** The screens this project has, for the rail. Empty when the shape of the
+   *  folder is not one we recognise — a guess would send people nowhere. */
+  pages(): Promise<Result<readonly Page[]>>;
+  /** How the window is sitting. Full screen takes the traffic lights away, so
+   *  the layout stops reserving room for them. */
+  onWindowState(listener: (state: WindowState) => void): () => void;
+
+  /** Write a read-only page of what changed, for somebody who is not you.
+   *  Returns where it was written, or null when the save was cancelled. */
+  shareReview(): Promise<Result<string | null>>;
+  /** Photograph the project at phone, tablet and desktop width. */
+  checkWidths(): Promise<Result<{ looks: readonly Look[]; says: string }>>;
+
+  /** The conversations this project has had, newest first. */
+  conversations(): Promise<Result<readonly Conversation[]>>;
+  /** Open one of them, or start a fresh one when given null. Comes back with
+   *  the conversation replayed as events, the same as opening a project. */
+  openConversation(path: string | null): Promise<Result<OpenedProject>>;
+
+  /** What can be added to Graphe. A search term looks past the ones we ship. */
+  packages(term?: string): Promise<Result<readonly Pack[]>>;
+  addPackage(id: string): Promise<Result<readonly Pack[]>>;
+  removePackage(id: string): Promise<Result<readonly Pack[]>>;
+  /** Two plain sentences on what one does, written by the model. */
+  explainPackage(id: string): Promise<Result<string>>;
+  /** Change one design token and save the result as a version. */
+  nudgeToken(name: string, value: string): Promise<Result<readonly SavedVersion[]>>;
   /** Follow along while that happens. Returns the function that stops. */
   onShowProgress(listener: (progress: ShowProgress) => void): () => void;
 

@@ -46,6 +46,8 @@ export type VisualDiffProps = {
   headline: string;
   /** Where it landed: "Two areas changed, near the top." */
   where?: string | null;
+  /** The same change in design's own words. Shown under the headline. */
+  inDesignWords?: string | null;
   /** What moved, as fractions of the picture. Empty is a real answer. */
   areas: readonly ChangedArea[];
   /** Small pictures, already in hand. Drawn immediately, at any size. */
@@ -211,6 +213,7 @@ function Lifted({ picture, areas }: { picture: string; areas: readonly ChangedAr
 export default function VisualDiff({
   headline,
   where,
+  inDesignWords,
   areas,
   beforeThumb,
   afterThumb,
@@ -321,6 +324,11 @@ export default function VisualDiff({
         </span>
         <span className="vdiff__said">
           <span className="vdiff__headline">{headline}</span>
+          {/* Design's own words first when we have them — "spacing on three
+              cards" tells a designer more than where on the page it moved. */}
+          {inDesignWords === null || inDesignWords === undefined ? null : (
+            <span className="vdiff__design">{inDesignWords}</span>
+          )}
           {where === null || where === undefined ? null : (
             <span className="vdiff__where">{where}</span>
           )}

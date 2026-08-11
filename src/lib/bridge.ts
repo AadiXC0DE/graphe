@@ -21,6 +21,7 @@
  */
 
 import type { AgentEvent } from '../agent/types';
+import { pagesIn, type Page } from '../preview/pages';
 import { Ledger } from '../cost/ledger';
 import { money } from '../cost/money';
 import {
@@ -28,6 +29,7 @@ import {
   type AgentNotice,
   type ConnectOutcome,
   type ConnectStep,
+  type Conversation,
   type ConnectionState,
   type Decision,
   type FoundAccount,
@@ -35,7 +37,9 @@ import {
   type Hatches,
   type ModelChoice,
   type OpenedProject,
+  type Look,
   type Overview,
+  type Pack,
   type Preferences,
   type PromptAttachment,
   type ProviderMethod,
@@ -133,6 +137,14 @@ const PREVIEW_SPEND: readonly { minor: number; label: string; reason: 'work' | '
   ];
 
 const PREVIEW_CURRENCY = 'USD';
+
+/** A few things somebody could add, so the screen can be seen in a browser. */
+const PREVIEW_PACKS: readonly Pack[] = [
+  { id: 'pi-web-access', name: 'Web access', kind: 'extension', summary: 'Read pages on the web while working.', downloads: 222_000, version: '1.4.0', installed: true, curated: true },
+  { id: 'pi-lens', name: 'Lens', kind: 'extension', summary: 'Tells the agent when code it wrote does not compile.', downloads: 40_900, version: '2.1.0', installed: false, curated: true },
+  { id: 'pi-subagents', name: 'Helpers', kind: 'mixed', summary: 'Send parts of a job to helpers working at once.', downloads: 214_000, version: '3.0.1', installed: false, curated: true },
+  { id: 'pi-schedule', name: 'Schedule', kind: 'skill', summary: 'Run something on a timer.', downloads: 9_100, version: '0.4.2', installed: false, curated: false },
+];
 
 /* -------------------------------------------------------------------------- */
 /* Two projects and their versions, so the picker and the rail have something  */
@@ -251,6 +263,7 @@ const PREVIEW_CHANGE: VisualChange = {
   id: 'preview-change',
   at: started,
   headline: 'Moved the button down and used your brand blue',
+  inDesignWords: 'Spacing on three cards, from 16 to 24.',
   where: 'One area changed, near the top on the left.',
   areas: [{ x: 0.045, y: 0.305, width: 0.155, height: 0.08 }],
   beforeThumb: samplePage(false),
@@ -335,7 +348,9 @@ function previewBridge(): Bridge {
       setTimeout(() => {
         for (const one of looking) one({ project: path, change: PREVIEW_CHANGE });
       }, 500);
-      return Promise.resolve(done({ path, name }));
+      // No saved conversation in a browser tab — there is no disk. The window
+      // therefore greets the folder the way it greets a new one (B1.1).
+      return Promise.resolve(done({ path, name, history: [] }));
     },
 
     async prompt(
@@ -377,8 +392,40 @@ function previewBridge(): Bridge {
   overview(): Promise<Result<Overview>> {
     return Promise.resolve(
       done({
-        git: { branch: 'main', dirty: true, unstaged: 2, staged: 1, untracked: 1, ahead: 0, behind: 2 },
+        git: {
+          branch: 'main',
+          dirty: true,
+          unstaged: 2,
+          staged: 1,
+          untracked: 1,
+          ahead: 0,
+          behind: 2,
+          files: [
+            { path: 'src/components/Hero.tsx', kind: 'changed' },
+            { path: 'src/styles/tokens.css', kind: 'changed' },
+            { path: 'src/pages/pricing.tsx', kind: 'changed' },
+            { path: 'public/hero-bg.svg', kind: 'new' },
+          ],
+        },
         preview: null,
+        artifacts: [
+          { path: 'public/hero-bg.svg', name: 'hero-bg.svg', kind: 'vector', note: 'SVG · a drawing' },
+          { path: 'src/styles/palette.css', name: 'palette.css', kind: 'palette', note: 'your colour tokens' },
+        ],
+        swatches: [
+          { name: 'brand', value: '#b8492c' },
+          { name: 'ink', value: '#1a1a19' },
+          { name: 'paper', value: '#fbfbfa' },
+          { name: 'edge', value: '#e4e4e1' },
+        ],
+        styles: {
+          file: 'src/styles/tokens.css',
+          tokens: [
+            { name: '--space-4', value: '16px', kind: 'space', line: 42, steps: ['4px', '8px', '12px', '16px', '24px', '32px'] },
+            { name: '--radius-md', value: '10px', kind: 'radius', line: 49, steps: ['4px', '6px', '10px', '14px'] },
+            { name: '--accent', value: '#b8492c', kind: 'colour', line: 95, steps: [] },
+          ],
+        },
       }),
     );
   },
@@ -455,6 +502,25 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(null));
     },
 
+    nudgeToken(): Promise<Result<readonly SavedVersion[]>> {
+      const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
+      return Promise.resolve(done(previewVersions(path)));
+    },
+
+    saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>> {
+      const saved: SavedVersion = {
+        id: `v-${String(Date.now())}`,
+        at: Date.now(),
+        title: name === undefined || name.trim() === '' ? 'Saved where you were' : name.trim(),
+        by: 'you',
+        named: name !== undefined && name.trim() !== '',
+        current: true,
+      };
+      const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
+      const already = previewVersions(path).map((one) => ({ ...one, current: false }));
+      return Promise.resolve(done([saved, ...already]));
+    },
+
     revealFolder(): Promise<Result<null>> {
       send({
         type: 'error',
@@ -477,6 +543,96 @@ function previewBridge(): Bridge {
         question:
           'This is Graphe running in a browser tab, so there is no folder underneath and nothing for me to get ready. Open the desktop app and this button will show you your own site.',
       });
+    },
+
+    /** A folder somebody made up, with the shape of a real one, so the rail's
+     *  Pages band can be seen and reviewed in a browser tab. */
+    pages(): Promise<Result<readonly Page[]>> {
+      return Promise.resolve(
+        done(
+          pagesIn([
+            'src/app/page.tsx',
+            'src/app/about/page.tsx',
+            'src/app/pricing/page.tsx',
+            'src/app/(marketing)/case-studies/page.tsx',
+            'src/app/work/[slug]/page.tsx',
+            'src/components/Hero.tsx',
+          ]),
+        ),
+      );
+    },
+
+    /** A browser tab is never full screen in the sense that matters here — it
+     *  has no traffic lights to make room for. */
+    onWindowState(): () => void {
+      return () => {};
+    },
+
+    /** Nothing is being served behind a browser tab, so nothing can be
+     *  pointed at. */
+    onPointed(): () => void {
+      return () => {};
+    },
+
+    shareReview(): Promise<Result<string | null>> {
+      send({
+        type: 'error',
+        message:
+          'This is Graphe running in a browser tab, so there is nothing on disk to make a page out of. In the app this writes a page you can send to somebody.',
+      });
+      return Promise.resolve(done(null));
+    },
+
+    checkWidths(): Promise<Result<{ looks: readonly Look[]; says: string }>> {
+      return Promise.resolve(
+        done({
+          looks: [
+            { id: 'phone', name: 'Phone', width: 390, shot: null, trouble: null },
+            { id: 'tablet', name: 'Tablet', width: 834, shot: null, trouble: null },
+            { id: 'desktop', name: 'Desktop', width: 1440, shot: null, trouble: null },
+          ],
+          says: 'There is no folder underneath a browser tab, so there is nothing to photograph.',
+        }),
+      );
+    },
+
+    conversations(): Promise<Result<readonly Conversation[]>> {
+      return Promise.resolve(
+        done([
+          { id: 'c1', path: 'a', title: 'Make the pricing page work on a phone', at: started - 4 * MINUTE, messages: 12 },
+          { id: 'c2', path: 'b', title: 'Rebuild the hero from the Figma frame', at: started - 3 * HOUR, messages: 31 },
+          { id: 'c3', path: 'c', title: 'Yesterday afternoon', at: started - 26 * HOUR, messages: 6 },
+        ]),
+      );
+    },
+
+    openConversation(): Promise<Result<OpenedProject>> {
+      const first = PREVIEW_PROJECTS[0];
+      return Promise.resolve(
+        done({ path: first?.path ?? '', name: first?.name ?? '', history: [] }),
+      );
+    },
+
+    packages(): Promise<Result<readonly Pack[]>> {
+      return Promise.resolve(done(PREVIEW_PACKS));
+    },
+
+    addPackage(id: string): Promise<Result<readonly Pack[]>> {
+      return Promise.resolve(
+        done(PREVIEW_PACKS.map((one) => (one.id === id ? { ...one, installed: true } : one))),
+      );
+    },
+
+    removePackage(id: string): Promise<Result<readonly Pack[]>> {
+      return Promise.resolve(
+        done(PREVIEW_PACKS.map((one) => (one.id === id ? { ...one, installed: false } : one))),
+      );
+    },
+
+    explainPackage(): Promise<Result<string>> {
+      return Promise.resolve(
+        done('It lets Graphe read pages on the web while it works, so it can check something rather than guess at it.'),
+      );
     },
 
     onShowProgress(listener: (progress: ShowProgress) => void): () => void {
@@ -605,9 +761,9 @@ const PREVIEW_CONNECTION: ConnectionState = {
       connected: true,
       available: true,
       models: [
-        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: true },
-        { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', available: true },
-        { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', available: true },
+        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000 },
+        { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', available: true, rates: { input: 5, output: 25 }, contextWindow: 200000 },
+        { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', available: true, rates: { input: 1, output: 5 }, contextWindow: 200000 },
       ],
     },
     {
@@ -619,8 +775,8 @@ const PREVIEW_CONNECTION: ConnectionState = {
       connected: false,
       available: false,
       models: [
-        { id: 'gpt-5', label: 'GPT-5', available: false },
-        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: false },
+        { id: 'gpt-5', label: 'GPT-5', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 400000 },
+        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: false, rates: { input: 0.25, output: 2 }, contextWindow: 400000 },
       ],
     },
     {
@@ -632,9 +788,9 @@ const PREVIEW_CONNECTION: ConnectionState = {
       connected: false,
       available: false,
       models: [
-        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: false },
-        { id: 'deepseek-v3.1', label: 'DeepSeek V3.1', available: false },
-        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', available: false },
+        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: false, rates: { input: 3, output: 15 }, contextWindow: 1000000 },
+        { id: 'deepseek-v3.1', label: 'DeepSeek V3.1', available: false, rates: { input: 0.435, output: 0.87 }, contextWindow: 1000000 },
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 1048576 },
       ],
     },
   ],
@@ -665,9 +821,22 @@ function connect(): Bridge {
     preferences: () => api.preferences(),
     setShowMe: (on) => api.setShowMe(on),
     hatches: () => api.hatches(),
-    openInEditor: () => api.openInEditor(),
+    openInEditor: (file) => api.openInEditor(file),
+    saveVersion: (name) => api.saveVersion(name),
     revealFolder: () => api.revealFolder(),
-    show: () => api.show(),
+    show: (at, point) => api.show(at, point),
+    onPointed: (listener) => api.onPointed(listener),
+    pages: () => api.pages(),
+    shareReview: () => api.shareReview(),
+    checkWidths: () => api.checkWidths(),
+    conversations: () => api.conversations(),
+    openConversation: (path) => api.openConversation(path),
+    packages: (term) => api.packages(term),
+    nudgeToken: (name, value) => api.nudgeToken(name, value),
+    addPackage: (id) => api.addPackage(id),
+    removePackage: (id) => api.removePackage(id),
+    explainPackage: (id) => api.explainPackage(id),
+    onWindowState: (listener) => api.onWindowState(listener),
     onShowProgress: (listener) => api.onShowProgress(listener),
     onEvent: (listener) => api.onEvent(listener),
     visualFrames: (changeId) => api.visualFrames(changeId),

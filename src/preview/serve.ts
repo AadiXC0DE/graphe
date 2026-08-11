@@ -15,7 +15,9 @@
  *   exactly how a link inside the site becomes a file in somebody's home.
  * - Answer anything but this machine. It binds to the loopback address, so
  *   nothing on the café wifi can reach it even while it is running.
- * - Answer anything but a read. Anything other than GET or HEAD is refused.
+ * - Answer anything but a read. Anything other than GET or HEAD is refused,
+ *   apart from one path that takes a click back from the page and never reaches
+ *   the folder at all.
  * - Live longer than it is looked at. The shell stops it when the project
  *   changes or the app quits.
  *
@@ -24,9 +26,11 @@
  */
 
 import { createReadStream } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
+
+import { injectPointer, POINT_PATH, type Pointed, type Rect } from './point';
 
 /** A site being looked at right now. */
 export type Serving = {
@@ -36,7 +40,15 @@ export type Serving = {
   readonly address: string;
   /** The folder being read from. */
   readonly folder: string;
+  /** Whether a click on the page has somewhere to go. */
+  readonly pointing: boolean;
   stop(): Promise<void>;
+};
+
+/** What a caller can ask for beyond the files themselves. */
+export type ServeOptions = {
+  /** Told about the one element somebody clicked in the preview. */
+  onPointed?: (pointed: Pointed) => void;
 };
 
 /** Enough of them to cover a site a designer would make. Anything unrecognised
@@ -138,25 +150,175 @@ function refuse(response: ServerResponse, code: number, says: string): void {
   response.end(`${says}\n`);
 }
 
-async function answer(
-  folder: string,
+/* -------------------------------------------------------------------------- */
+/* The one path that takes something in                                        */
+/* -------------------------------------------------------------------------- */
+
+/** A description of one element is a few hundred bytes. This is the only route
+ *  that reads a request body, so it reads as little as it can. */
+const POINTED_MAX = 8 * 1024;
+
+function asRect(value: unknown): Rect | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const from = value as Record<string, unknown>;
+  for (const side of ['x', 'y', 'width', 'height'] as const) {
+    if (!Number.isFinite(from[side])) return null;
+  }
+  return {
+    x: from['x'] as number,
+    y: from['y'] as number,
+    width: from['width'] as number,
+    height: from['height'] as number,
+  };
+}
+
+function asPlace(value: unknown): NonNullable<Pointed['place']> | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const from = value as Record<string, unknown>;
+  if (!Number.isFinite(from['nth']) || !Number.isFinite(from['of'])) return null;
+  const within = from['within'];
+  if (within !== undefined && typeof within !== 'string') return null;
+  const place: NonNullable<Pointed['place']> = {
+    nth: from['nth'] as number,
+    of: from['of'] as number,
+  };
+  if (typeof within === 'string') place.within = within;
+  return place;
+}
+
+/** Checked rather than trusted, and rebuilt rather than passed through. Whatever
+ *  arrives here came off a page we did not write. */
+function asPointed(value: unknown): Pointed | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const from = value as Record<string, unknown>;
+
+  const selector = from['selector'];
+  const label = from['label'];
+  const kind = from['kind'];
+  if (typeof selector !== 'string' || selector === '') return null;
+  if (typeof label !== 'string') return null;
+  if (kind !== undefined && typeof kind !== 'string') return null;
+
+  const rect = asRect(from['rect']);
+  if (rect === null) return null;
+
+  const pointed: Pointed = { selector, label, rect };
+  if (typeof kind === 'string') pointed.kind = kind;
+
+  if (from['place'] !== undefined) {
+    const place = asPlace(from['place']);
+    if (place === null) return null;
+    pointed.place = place;
+  }
+  return pointed;
+}
+
+/** The click, or null. Read to the end even once it is too big, so an oversized
+ *  body gets an answer rather than a dropped connection. */
+async function readPointed(request: IncomingMessage): Promise<Pointed | null> {
+  const pieces: Buffer[] = [];
+  let size = 0;
+  let overflowed = false;
+
+  for await (const piece of request) {
+    const chunk = piece as Buffer;
+    size += chunk.length;
+    if (size > POINTED_MAX) {
+      overflowed = true;
+      pieces.length = 0;
+      continue;
+    }
+    pieces.push(chunk);
+  }
+  if (overflowed) return null;
+
+  try {
+    return asPointed(JSON.parse(Buffer.concat(pieces).toString('utf8')));
+  } catch {
+    return null;
+  }
+}
+
+async function answerPoint(
   request: IncomingMessage,
   response: ServerResponse,
+  onPointed: ((pointed: Pointed) => void) | null,
 ): Promise<void> {
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
+  if (request.method !== 'POST') {
     refuse(response, 405, NOT_HERE);
     return;
   }
 
+  const pointed = await readPointed(request);
+  if (pointed === null) {
+    refuse(response, 400, NOT_HERE);
+    return;
+  }
+
+  onPointed?.(pointed);
+  response.writeHead(204, { 'cache-control': 'no-store' });
+  response.end();
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reading files out                                                           */
+/* -------------------------------------------------------------------------- */
+
+function isPage(file: string): boolean {
+  const kind = extname(file).toLowerCase();
+  return kind === '.html' || kind === '.htm';
+}
+
+/** A page gets the pointer script, so clicking on it can mean something. The
+ *  script changes the length, so a page is read whole rather than streamed;
+ *  everything else goes out untouched. */
+async function sendPage(
+  file: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const page = injectPointer(await readFile(file, 'utf8'));
+  response.writeHead(200, {
+    'content-type': typeOf(file),
+    'content-length': String(Buffer.byteLength(page)),
+    'cache-control': 'no-store',
+  });
+  if (request.method === 'HEAD') response.end();
+  else response.end(page);
+}
+
+async function answer(
+  folder: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+  onPointed: ((pointed: Pointed) => void) | null,
+): Promise<void> {
   const requested = pathOf(request.url);
   if (requested === null) {
     refuse(response, 400, NOT_HERE);
     return;
   }
 
+  // Before the read-only refusal below, and before anything looks at the folder:
+  // this path is ours, so it is never resolved against a file.
+  if (requested === POINT_PATH) {
+    await answerPoint(request, response, onPointed);
+    return;
+  }
+
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    refuse(response, 405, NOT_HERE);
+    return;
+  }
+
   const file = await resolveRequest(folder, requested);
   if (file === null) {
     refuse(response, 404, NOT_HERE);
+    return;
+  }
+
+  if (isPage(file)) {
+    await sendPage(file, request, response);
     return;
   }
 
@@ -191,11 +353,12 @@ function addressOf(server: Server): string {
  * The port is whatever is free — asking for a particular one buys nothing and
  * costs a collision with whatever the designer already has running.
  */
-export async function serveFolder(folder: string): Promise<Serving> {
+export async function serveFolder(folder: string, options?: ServeOptions): Promise<Serving> {
   const root = await realpath(resolve(folder));
+  const onPointed = options?.onPointed ?? null;
 
   const server = createServer((request, response) => {
-    void answer(root, request, response).catch(() => {
+    void answer(root, request, response, onPointed).catch(() => {
       if (!response.headersSent) refuse(response, 500, NOT_HERE);
       else response.destroy();
     });
@@ -216,6 +379,7 @@ export async function serveFolder(folder: string): Promise<Serving> {
   return {
     address: addressOf(server),
     folder: root,
+    pointing: onPointed !== null,
     stop(): Promise<void> {
       return new Promise<void>((stopped) => {
         server.closeAllConnections?.();

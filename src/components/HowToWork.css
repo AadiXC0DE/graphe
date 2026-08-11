@@ -1,0 +1,137 @@
+/* Whether to look before touching anything. Same weight as the model chip
+   beside it: both are things that change what pressing send does, and neither
+   is louder than the box they sit under. */
+
+.ways {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.ways__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 180px;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.ways__chip:active {
+  transform: scale(0.97);
+}
+
+.ways__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (hover: hover) {
+  .ways__chip:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
+}
+
+/* Upward, because the chip is at the bottom of the window. */
+.ways__menu {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 6;
+  width: 280px;
+  max-width: calc(100vw - var(--space-5));
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  transform-origin: bottom left;
+  animation: ways-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes ways-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.ways__option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--text-muted);
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* Reserved whether or not there is a tick in it, so choosing does not shuffle
+   every row sideways. */
+.ways__tick {
+  display: grid;
+  place-items: center;
+  width: 10px;
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--accent-ink);
+}
+
+.ways__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ways__name {
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.ways__note {
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.ways__option--chosen .ways__name {
+  font-weight: 500;
+}
+
+.ways__option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .ways__option:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ways__menu {
+    animation: none;
+  }
+
+  .ways__chip:active {
+    transform: none;
+  }
+}

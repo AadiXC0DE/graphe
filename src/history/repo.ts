@@ -109,6 +109,7 @@ export const historyProblems = {
   goBackFailed: 'I couldn’t put your project back to that version, so I’ve left it as it was.',
   outsideProject: 'That file lives outside your project, so it isn’t part of its history.',
   listFailed: 'I couldn’t read your project’s version history.',
+  tryFailed: 'I couldn’t set up a separate copy to try that in, so I’ve left your project alone.',
 } as const;
 
 /** A failure the user might see. `message` is the sentence; `details` is the raw
@@ -393,6 +394,45 @@ export class ProjectHistory {
     const id = await this.snapshot(message, { evenIfNothingChanged: true });
     if (!id) throw new HistoryError(historyProblems.goBackFailed);
     return id;
+  }
+
+  /* ------------------------------------------------- separate copies to try in */
+
+  /**
+   * A second working copy of this project, sharing its history.
+   *
+   * Detached on purpose: an attempt is a place to try something, not a branch
+   * anybody names, and a detached copy leaves nothing to tidy up afterwards but
+   * the folder itself. Anything saved in it is an ordinary version of this
+   * project, reachable by id, which is what lets a good attempt be adopted with
+   * the same call that puts an old version back.
+   */
+  async addWorkspace(at: string, from = 'HEAD'): Promise<void> {
+    await this.ensureReady();
+    if (!path.isAbsolute(at)) throw new TypeError(`Expected an absolute folder, got "${at}"`);
+    const made = await this.attempt(['worktree', 'add', '--detach', at, from]);
+    if (made.code !== 0) throw new HistoryError(historyProblems.tryFailed, detailsOf(made));
+  }
+
+  /** Let one go, whatever state it was left in. */
+  async removeWorkspace(at: string): Promise<void> {
+    await this.ensureReady();
+    await this.attempt(['worktree', 'remove', '--force', at]);
+    await this.attempt(['worktree', 'prune']);
+  }
+
+  /** Where the copies of this project currently are, the main one excluded. */
+  async workspaces(): Promise<string[]> {
+    await this.ensureReady();
+    const listed = await this.attempt(['worktree', 'list', '--porcelain']);
+    if (listed.code !== 0) return [];
+    const folders: string[] = [];
+    for (const line of listed.stdout.split('\n')) {
+      if (!line.startsWith('worktree ')) continue;
+      const where = path.resolve(line.slice('worktree '.length).trim());
+      if (where !== this.root) folders.push(where);
+    }
+    return folders;
   }
 
   /* ------------------------------------------------------------- internals */

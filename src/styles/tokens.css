@@ -56,10 +56,12 @@
      conversation slides under the rail". A number with a warning attached to it
      is a number that wants to be a token. */
   --topbar-height: 38px;
-  /* The reading measure. 680px at --text-base is about 66 characters, which is
-     inside the 60–75 that prose wants; it deliberately does not grow with the
-     window, because a wider line is a worse line. */
+  /* The reading measure. 680px at --text-base is about 66 characters, inside the
+     60–75 that prose wants. It steps once past 1400px rather than growing with
+     the window: 760 is still ~73 characters, and on a display that size the
+     alternative is a ribbon of text with 800px of nothing beside it. */
   --thread-width: 680px;
+  --thread-width-wide: 760px;
   --rail-width: 328px;
   /* Under about 1100px the rail has to give room back to the conversation. */
   --rail-width-tight: 276px;

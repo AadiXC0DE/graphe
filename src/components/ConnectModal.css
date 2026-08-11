@@ -119,6 +119,7 @@
 
 .connectmodal__body {
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   padding: var(--space-3) var(--space-5) var(--space-4);
   display: flex;

@@ -15,7 +15,12 @@
  * when a sitting settles.
  */
 
-import type { GitSnapshot } from './ipc';
+import type { ChangedFile, GitSnapshot } from './ipc';
+
+/** How many names the snapshot carries. The panel shows a handful and says how
+ *  many more there are; a build that touched four hundred files should not send
+ *  four hundred strings across for nobody to read. */
+const NAMES = 40;
 
 /** The branch header, e.g. `# branch.head main`. Missing on a repository with
  *  no commits yet — which is what `branch: null` means. */
@@ -25,29 +30,41 @@ const BRANCH = /^# branch\.head (.*)$/m;
  *  the other side knows about, which is the common case. */
 const AHEAD_BEHIND = /^# branch\.ab \+(\d+) -(\d+)$/m;
 
-/** A file git does not know about at all. Global, because it is counted with
- *  `matchAll`. */
-const UNTRACKED = /^\? /gm;
-
 export function parseGitStatus(raw: string): GitSnapshot {
   const branch = BRANCH.exec(raw)?.[1] ?? null;
   const branchAb = AHEAD_BEHIND.exec(raw);
 
   let unstaged = 0;
   let staged = 0;
+  let untracked = 0;
+  const files: ChangedFile[] = [];
   for (const line of raw.split('\n')) {
-    // Only the `1 <XY> ...` entries have the two letters that say which side
-    // changed: first is the index half, second the worktree half.
-    const slots = /^1 ([^ ]{2}) [^ ]/.exec(line);
-    if (slots === null || slots[1] === undefined) continue;
-    const index = slots[1][0];
-    const worktree = slots[1][1];
-    // A dot means unchanged on that side — git's own escape from the false "clean".
-    if (worktree !== '.') unstaged += 1;
-    if (index !== '.') staged += 1;
+    // `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>`. The two letters say which
+    // side changed — index half first, worktree half second — and a dot means
+    // unchanged on that side. The path is taken by position rather than by
+    // pattern, because a filename may contain spaces.
+    if (line.startsWith('1 ')) {
+      const parts = line.split(' ');
+      const slots = parts[1];
+      if (slots === undefined || slots.length !== 2) continue;
+      const index = slots[0];
+      const worktree = slots[1];
+      if (worktree !== '.') unstaged += 1;
+      if (index !== '.') staged += 1;
+      if (index === '.' && worktree === '.') continue;
+      const path = parts.slice(8).join(' ');
+      if (path !== '' && files.length < NAMES) {
+        files.push({ path, kind: index === 'A' || worktree === 'A' ? 'new' : 'changed' });
+      }
+      continue;
+    }
+    if (line.startsWith('? ')) {
+      untracked += 1;
+      const path = line.slice(2);
+      if (path !== '' && files.length < NAMES) files.push({ path, kind: 'new' });
+    }
   }
 
-  const untracked = [...raw.matchAll(UNTRACKED)].length;
   const dirty = staged > 0 || unstaged > 0 || untracked > 0;
 
   return {
@@ -56,6 +73,7 @@ export function parseGitStatus(raw: string): GitSnapshot {
     unstaged,
     staged,
     untracked,
+    files,
     ahead: branchAb === null ? 0 : Number(branchAb[1] ?? 0),
     behind: branchAb === null ? 0 : Number(branchAb[2] ?? 0),
   };

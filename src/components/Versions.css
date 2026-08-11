@@ -273,10 +273,42 @@
   overflow-wrap: anywhere;
 }
 
+.rail__real > summary {
+  cursor: default;
+  list-style: none;
+  padding: var(--space-1) 0;
+  color: var(--text-faint);
+}
+
+.rail__real > summary::-webkit-details-marker {
+  display: none;
+}
+
+.rail__real > summary::before {
+  content: '›';
+  display: inline-block;
+  width: 1em;
+  transition: transform var(--dur-micro) var(--ease-hover);
+}
+
+.rail__real[open] > summary::before {
+  transform: rotate(90deg);
+}
+
 .rail__real p {
-  margin: 0 0 var(--space-2);
+  margin: var(--space-2) 0 0;
 }
 
 .rail__real p:last-child {
   margin-bottom: 0;
+}
+
+/* Before there is any history. A heading with nothing under it reads as broken;
+   one quiet sentence reads as "not yet". */
+.rail__none {
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-faint);
 }

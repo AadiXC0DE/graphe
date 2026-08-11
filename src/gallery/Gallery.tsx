@@ -21,6 +21,7 @@ import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
 import { biggerJob, estimateNote, longConversation } from '../cost/phrasing';
 import type { Estimate } from '../cost/estimate';
+import { pagesIn } from '../preview/pages';
 import { behind, realWords } from '../lib/showme';
 import './Gallery.css';
 
@@ -148,6 +149,15 @@ const REMEMBERED: readonly RecentProject[] = [
   },
 ];
 
+/** The screens of a project with the shape of a real one. */
+const GALLERY_PAGES = pagesIn([
+  'src/app/page.tsx',
+  'src/app/about/page.tsx',
+  'src/app/pricing/page.tsx',
+  'src/app/(marketing)/case-studies/page.tsx',
+  'src/app/work/[slug]/page.tsx',
+]);
+
 const TIMELINE: readonly SavedVersion[] = [
   {
     id: 'v5',
@@ -229,7 +239,13 @@ const GIT_DIRTY = {
   untracked: 1,
   ahead: 0,
   behind: 0,
-};
+  files: [
+    { path: 'src/components/Hero.tsx', kind: 'changed' },
+    { path: 'src/styles/tokens.css', kind: 'changed' },
+    { path: 'src/pages/pricing.tsx', kind: 'changed' },
+    { path: 'public/hero-bg.svg', kind: 'new' },
+  ],
+} as const;
 
 const RESEARCH: readonly ResearchEntry[] = [
   { id: 'r1', query: 'css clamp() fluid type best practices', state: 'done' },
@@ -281,8 +297,8 @@ const CONNECT_STATE: ConnectionState = {
       connected: true,
       available: true,
       models: [
-        { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5', available: true },
-        { id: 'claude-opus-4-5', label: 'Opus 4.5', available: false },
+        { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000 },
+        { id: 'claude-opus-4-5', label: 'Opus 4.5', available: false, rates: { input: 5, output: 25 }, contextWindow: 200000 },
       ],
     },
     {
@@ -294,8 +310,8 @@ const CONNECT_STATE: ConnectionState = {
       connected: false,
       available: false,
       models: [
-        { id: 'gpt-5', label: 'GPT-5', available: true },
-        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: true },
+        { id: 'gpt-5', label: 'GPT-5', available: true, rates: { input: 1.25, output: 10 }, contextWindow: 400000 },
+        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: true, rates: { input: 0.25, output: 2 }, contextWindow: 400000 },
       ],
     },
     {
@@ -306,7 +322,7 @@ const CONNECT_STATE: ConnectionState = {
       apiKeyLabel: 'OpenCode Go API key',
       connected: false,
       available: false,
-      models: [{ id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', available: true }],
+      models: [{ id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', available: true, rates: { input: 0.14, output: 0.28 }, contextWindow: 1000000 }],
     },
     {
       providerId: 'google',
@@ -317,8 +333,8 @@ const CONNECT_STATE: ConnectionState = {
       connected: false,
       available: false,
       models: [
-        { id: 'gemini-3', label: 'Gemini 3', available: true },
-        { id: 'gemini-3-flash', label: 'Gemini 3 Flash', available: true },
+        { id: 'gemini-3', label: 'Gemini 3', available: true, rates: { input: 2, output: 12 }, contextWindow: 1048576 },
+        { id: 'gemini-3-flash', label: 'Gemini 3 Flash', available: true, rates: { input: 0.5, output: 3 }, contextWindow: 1048576 },
       ],
     },
   ],
@@ -538,6 +554,7 @@ export default function Gallery() {
                 onRevealFolder={noop}
                 onPreview={noop}
                 onAccount={noop}
+                onAddMore={noop}
                 showMe={showMe}
                 onShowMe={setShowMe}
               />
@@ -791,8 +808,14 @@ export default function Gallery() {
                 projects={REMEMBERED}
                 openPath="/Users/you/Sites/paper-street"
                 onOpen={noop}
-                onForget={noop}
                 onBrowse={noop}
+                pages={GALLERY_PAGES}
+                onOpenPage={noop}
+                pinned={REFERENCES}
+                conversations={[]}
+                openConversation={null}
+                onOpenConversation={noop}
+                onNewConversation={noop}
                 open
                 onToggle={noop}
               />
@@ -800,8 +823,14 @@ export default function Gallery() {
                 projects={REMEMBERED}
                 openPath="/Users/you/Sites/paper-street"
                 onOpen={noop}
-                onForget={noop}
                 onBrowse={noop}
+                pages={GALLERY_PAGES}
+                onOpenPage={noop}
+                pinned={REFERENCES}
+                conversations={[]}
+                openConversation={null}
+                onOpenConversation={noop}
+                onNewConversation={noop}
                 open={false}
                 onToggle={noop}
               />
@@ -840,16 +869,55 @@ export default function Gallery() {
           >
             <div className="gallery__overview">
               <Overview
-                git={GIT_DIRTY}
-                research={RESEARCH}
-                references={REFERENCES}
-                versions={TIMELINE}
-                putBack={JUST_PUT_BACK}
+                view={{
+                  now: {
+                    step: { label: 'Changing pricing.tsx', detail: 'the second card' },
+                    helpers: [
+                      {
+                        id: 'h1',
+                        task: 'check the contrast on every button',
+                        saying: 'Reading Button.tsx',
+                        state: 'running' as const,
+                        startedAt: NOW - 40_000,
+                      },
+                    ],
+                    filesRead: 14,
+                  },
+                  git: GIT_DIRTY,
+                  research: RESEARCH,
+                  references: REFERENCES,
+                  versions: TIMELINE,
+                  putBack: JUST_PUT_BACK,
+                  spent: SPENT,
+                  busy: true,
+                  showMe: false,
+                  looks: [],
+                  looksSay: '',
+                  checkingWidths: false,
+                  artifacts: [
+                    { path: 'public/hero-bg.svg', name: 'hero-bg.svg', kind: 'vector' as const, note: 'SVG · a drawing' },
+                  ],
+                  swatches: [
+                    { name: 'brand', value: '#b8492c' },
+                    { name: 'ink', value: '#1a1a19' },
+                  ],
+                  styles: {
+                    file: 'src/styles/tokens.css',
+                    tokens: [
+                      { name: '--space-4', value: '16px', kind: 'space' as const, line: 42, steps: ['8px', '12px', '16px', '24px'] },
+                      { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 95, steps: [] },
+                    ],
+                  },
+                }}
                 onPutBack={noop}
                 onName={noop}
                 onDismissPutBack={noop}
-                spent={SPENT}
                 onShowSplit={noop}
+                onOpenFile={noop}
+                onSave={noop}
+                onCheckWidths={noop}
+                onShare={noop}
+                onNudge={noop}
               />
             </div>
             <p className="gallery__caption">

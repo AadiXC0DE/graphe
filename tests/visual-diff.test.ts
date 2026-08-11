@@ -1,4 +1,4 @@
-/** The before-and-after — BACKLOG F2.
+/** The before-and-after.
  *
  * Everything tested here is the part that decides *what is shown*, which is the
  * part that fails quietly. A screenshot that does not get taken is visible
@@ -6,19 +6,100 @@
  * or an outline drawn around a bit of the page that did not move, looks
  * completely convincing and is a lie about somebody's own work.
  *
- * The capture itself is not here, and deliberately so: it is a browser window
- * and a build of somebody's project, and a test of it would be a test of
- * Electron. What is here is every decision made either side of it.
+ * Rendering is not tested here and cannot be — it is Chromium. The windows are
+ * stood in for, so what is tested is the bookkeeping around them: how many are
+ * opened, that each one is closed, and what a page's own measurements are
+ * turned into.
  */
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { saysOverflow, WIDTHS } from '../src/design/widths';
+import { lookAtEveryWidth } from '../src/diff/capture';
 import { filesWrittenBy } from '../src/diff/changed';
 import { couldBeSeen, KEEP, landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
 import { comparePictures, realSize, type Bitmap, type ChangedArea } from '../src/diff/regions';
 import { shotFile, shotName, shotsFolder } from '../src/diff/shots';
 import { hasSettled, stepSpring } from '../src/diff/spring';
 import { tellWhatHappened, whereItLanded } from '../src/diff/summary';
+
+/* -------------------------------------------------------------------------- */
+/* A window nobody has to open                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** What each window does, and what it did. `page` is set per test and is asked
+ *  the size the window was made at, so a single width can be made to fail. */
+const bench = vi.hoisted(() => {
+  type Page = {
+    loads: boolean;
+    /** Null when the page cannot be measured at all. */
+    reading: { tall: number; wide: number } | null;
+    captures: boolean;
+  };
+
+  return {
+    page: (width: number, height: number): Page => ({
+      loads: true,
+      reading: { tall: height, wide: width },
+      captures: true,
+    }),
+    opened: [] as { width: number; height: number; destroyed: boolean }[],
+  };
+});
+
+vi.mock('electron', () => {
+  const image = (empty: boolean) => ({
+    isEmpty: () => empty,
+    toPNG: () => Buffer.from('png'),
+    getSize: () => ({ width: 0, height: 0 }),
+    getBitmap: () => Buffer.alloc(0),
+  });
+
+  class Stand {
+    private readonly waiting: Record<string, () => void> = {};
+    private readonly page;
+    readonly opened;
+    readonly webContents;
+
+    constructor(options: { width: number; height: number }) {
+      this.page = bench.page(options.width, options.height);
+      this.opened = { width: options.width, height: options.height, destroyed: false };
+      bench.opened.push(this.opened);
+
+      const { waiting, page } = this;
+      this.webContents = {
+        once: (event: string, run: () => void) => {
+          waiting[event] = run;
+        },
+        executeJavaScript: () =>
+          page.reading === null
+            ? Promise.reject(new Error('nothing to measure'))
+            : Promise.resolve(page.reading),
+        capturePage: () => Promise.resolve(image(!page.captures)),
+      };
+    }
+
+    loadURL(): Promise<void> {
+      queueMicrotask(() => this.waiting[this.page.loads ? 'did-finish-load' : 'did-fail-load']?.());
+      return Promise.resolve();
+    }
+
+    setContentSize(width: number, height: number): void {
+      this.opened.width = width;
+      this.opened.height = height;
+    }
+
+    isDestroyed(): boolean {
+      return this.opened.destroyed;
+    }
+
+    destroy(): void {
+      this.opened.destroyed = true;
+    }
+  }
+
+  return { BrowserWindow: Stand, nativeImage: { createFromPath: () => image(true) } };
+});
 
 /* -------------------------------------------------------------------------- */
 /* Making pictures to compare                                                  */
@@ -461,10 +542,96 @@ describe('V-06 keeping the pictures out of the project', () => {
 });
 
 /* ========================================================================== */
-/* V-07 the handle                                                             */
+/* V-07 the same page at three widths                                          */
 /* ========================================================================== */
 
-describe('V-07 the spring under the wipe handle', () => {
+describe('V-07 photographing every width', () => {
+  beforeEach(() => {
+    bench.opened = [];
+    bench.page = (width, height) => ({
+      loads: true,
+      reading: { tall: height, wide: width },
+      captures: true,
+    });
+  });
+
+  it('takes one picture per width, at the size that width is', async () => {
+    const looks = await lookAtEveryWidth('http://127.0.0.1:4321/');
+
+    expect(looks).toHaveLength(WIDTHS.length);
+    expect(looks.map((one) => one.id)).toEqual(WIDTHS.map((one) => one.id));
+    expect(looks.map((one) => one.width)).toEqual(WIDTHS.map((one) => one.width));
+    for (const look of looks) {
+      expect(look.shot).toMatch(/^data:image\/png;base64,/);
+      expect(look.trouble).toBeNull();
+    }
+
+    expect(bench.opened.map((one) => one.width)).toEqual(WIDTHS.map((one) => one.width));
+  });
+
+  it('loses only the width that failed', async () => {
+    const tablet = WIDTHS[1]?.width;
+    bench.page = (width, height) => ({
+      loads: width !== tablet,
+      reading: { tall: height, wide: width },
+      captures: true,
+    });
+
+    const looks = await lookAtEveryWidth('http://127.0.0.1:4321/');
+
+    expect(looks).toHaveLength(3);
+    expect(looks[0]?.shot).not.toBeNull();
+    expect(looks[1]?.shot).toBeNull();
+    expect(looks[2]?.shot).not.toBeNull();
+  });
+
+  it('closes every window it opened, including the one that went wrong', async () => {
+    const phone = WIDTHS[0]?.width;
+    bench.page = (width, height) => ({
+      loads: true,
+      reading: { tall: height, wide: width },
+      captures: width !== phone,
+    });
+
+    await lookAtEveryWidth('http://127.0.0.1:4321/');
+
+    expect(bench.opened).toHaveLength(3);
+    expect(bench.opened.every((one) => one.destroyed)).toBe(true);
+  });
+
+  it('turns a page wider than the screen into something worth saying', async () => {
+    const phone = WIDTHS[0];
+    bench.page = (width, height) => ({
+      loads: true,
+      reading: { tall: height, wide: width === phone?.width ? width + 40 : width },
+      captures: true,
+    });
+
+    const looks = await lookAtEveryWidth('http://127.0.0.1:4321/');
+
+    expect(looks[0]?.trouble).toBe(saysOverflow(phone?.name ?? '', 40));
+    expect(looks[0]?.shot).not.toBeNull();
+    expect(looks[1]?.trouble).toBeNull();
+    expect(looks[2]?.trouble).toBeNull();
+  });
+
+  it('says nothing about a width it could not measure', async () => {
+    bench.page = () => ({ loads: true, reading: null, captures: true });
+
+    const looks = await lookAtEveryWidth('http://127.0.0.1:4321/');
+
+    for (const look of looks) {
+      expect(look.shot).not.toBeNull();
+      expect(look.trouble).toBeNull();
+    }
+  });
+});
+
+/* ========================================================================== */
+/* V-08 the handle                                                             */
+/* ========================================================================== */
+
+describe('V-08 the spring under the wipe handle', () => {
   it('arrives, and then stops', () => {
     let state = { position: 0, velocity: 0 };
     for (let frame = 0; frame < 120; frame += 1) {

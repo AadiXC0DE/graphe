@@ -31,7 +31,7 @@ import type { Task, TaskObservation } from '../cost/estimate';
 import type { AgentNotice, Overview, PutBack, SavedVersion } from './ipc';
 import { applySpend, type SpendView } from './spend';
 import { applyEvent, type Turn } from './thread';
-import { WEB_SEARCH_LABEL } from './describe';
+import { TASK_LABEL, WEB_SEARCH_LABEL } from './describe';
 
 /** One thing the agent was given to work from — a screenshot it was sent, or a
  *  design file its link named. Recorded in the overview the moment it is sent,
@@ -53,6 +53,25 @@ export type ResearchEntry = {
   /** What it searched for, as it said it. */
   query: string;
   state: 'running' | 'done' | 'failed';
+};
+
+/** What is happening this second: the step in flight, and any helpers still
+ *  working. Derived from the thread, like the research log. */
+export type NowView = {
+  /** The step the agent is on, in the words the thread uses for it. */
+  step: { label: string; detail?: string } | null;
+  /** Every helper this conversation sent off, oldest first — the ones still
+   *  working and the ones that came back. */
+  helpers: readonly {
+    id: string;
+    task: string;
+    saying: string | null;
+    state: 'running' | 'done' | 'failed';
+    startedAt: number;
+  }[];
+  /** How many files this conversation has opened. Rarely interesting on its
+   *  own; it is what makes a bill make sense. */
+  filesRead: number;
 };
 
 /** Everything the window knows about one project. */
@@ -247,6 +266,38 @@ export function closeDesk(desks: Desks, path: string): Desks {
  * query for every search (`describe.ts` put them there); this only picks those
  * turns out and presents them as the overview needs them.
  */
+/**
+ * What is going on right now, read off the thread.
+ *
+ * Same reasoning as `researchLog`: the turns are the one copy of the truth, and
+ * a second list kept in step is a second list that drifts. The last running step
+ * is the one being drawn — earlier ones have finished — and a helper counts as
+ * out until its own line closes.
+ */
+export function nowDoing(turns: readonly Turn[], at: number = Date.now()): NowView {
+  let step: NowView['step'] = null;
+  const helpers: NowView['helpers'][number][] = [];
+  let filesRead = 0;
+  for (const turn of turns) {
+    if (turn.kind !== 'did') continue;
+    if (turn.label.startsWith('Reading') && turn.state !== 'failed') filesRead += 1;
+    // A helper stays on the board once it has come back. What it was asked and
+    // what it found are the most interesting things in the whole sitting, and
+    // they should not vanish the moment it finishes.
+    if (turn.label === TASK_LABEL) {
+      helpers.push({
+        id: turn.id,
+        task: turn.detail ?? '',
+        saying: turn.state === 'running' ? (turn.detail ?? null) : null,
+        state: turn.state === 'running' ? 'running' : turn.state === 'failed' ? 'failed' : 'done',
+        startedAt: at,
+      });
+    }
+    if (turn.state === 'running') step = { label: turn.label, detail: turn.detail };
+  }
+  return { step, helpers, filesRead };
+}
+
 export function researchLog(turns: readonly Turn[]): readonly ResearchEntry[] {
   return turns.flatMap((turn): ResearchEntry[] => {
     if (turn.kind !== 'did' || turn.state === undefined) return [];

@@ -14,6 +14,7 @@ import * as path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { likelyOutputs, readTheFolder, helperFor } from '../src/preview/detect';
+import { POINT_PATH, POINTER_MARK, type Pointed } from '../src/preview/point';
 import { serveFolder } from '../src/preview/serve';
 import { lookAt } from '../src/preview/show';
 import { ago, agoInSentence, clockTime } from '../src/lib/when';
@@ -333,5 +334,148 @@ describe('S-03 saying when', () => {
     expect(clockTime(new Date(2026, 7, 10, 18, 12))).toBe('6:12pm');
     expect(clockTime(new Date(2026, 7, 10, 0, 4))).toBe('12:04am');
     expect(clockTime(new Date(2026, 7, 10, 12, 0))).toBe('12:00pm');
+  });
+});
+
+/* ========================================================================== */
+/* S-04 clicking the thing you mean                                            */
+/* ========================================================================== */
+
+describe('S-04 pointing at what is on the page', () => {
+  const page = '<!doctype html><html><body><h1>Paper Street</h1></body></html>';
+  const script = 'console.log("</body>")\n';
+  const styles = 'h1 { color: red }\n';
+
+  const clicked: Pointed = {
+    selector: 'main.hero > h1:nth-of-type(1)',
+    label: 'Paper Street',
+    kind: 'heading',
+    rect: { x: 24, y: 96, width: 320, height: 48 },
+    place: { nth: 1, of: 2, within: 'hero' },
+  };
+
+  async function aSite(): Promise<string> {
+    const folder = await newFolder();
+    await put(folder, 'index.html', page);
+    await put(folder, 'styles.css', styles);
+    await put(folder, 'app.js', script);
+    return folder;
+  }
+
+  const post = (address: string, body: string): Promise<Response> =>
+    fetch(`${address}${POINT_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+
+  it('hands a click back to whoever armed it', async () => {
+    const heard: Pointed[] = [];
+    const serving = await serveFolder(await aSite(), { onPointed: (one) => heard.push(one) });
+    try {
+      expect(serving.pointing).toBe(true);
+
+      const answered = await post(serving.address, JSON.stringify(clicked));
+      expect(answered.status).toBe(204);
+      expect(answered.headers.get('cache-control')).toBe('no-store');
+      expect(heard).toEqual([clicked]);
+    } finally {
+      await serving.stop();
+    }
+  });
+
+  it('refuses anything that is not one element somebody clicked', async () => {
+    const heard: Pointed[] = [];
+    const serving = await serveFolder(await aSite(), { onPointed: (one) => heard.push(one) });
+    try {
+      for (const body of [
+        'not json at all',
+        '',
+        'null',
+        '[]',
+        '"pointed"',
+        JSON.stringify({ selector: 'h1', label: 'Paper Street' }),
+        JSON.stringify({ ...clicked, selector: 12 }),
+        JSON.stringify({ ...clicked, selector: '' }),
+        JSON.stringify({ ...clicked, rect: { x: 0, y: 0, width: 'wide', height: 1 } }),
+        JSON.stringify({ ...clicked, rect: { x: 0, y: 0, width: 1 } }),
+        JSON.stringify({ ...clicked, place: 'in the hero' }),
+        JSON.stringify({ ...clicked, place: { nth: 1, of: 2, within: { a: 1 } } }),
+        // Longer than a description of an element could ever be.
+        JSON.stringify({ ...clicked, label: 'x'.repeat(64 * 1024) }),
+      ]) {
+        const refused = await post(serving.address, body);
+        expect(refused.status, body.slice(0, 48)).toBe(400);
+      }
+      expect(heard).toEqual([]);
+    } finally {
+      await serving.stop();
+    }
+  });
+
+  it('never lets that path be a file, or be read', async () => {
+    const folder = await aSite();
+    // A folder of the designer's own that happens to sit where our path is.
+    await put(folder, `${POINT_PATH}.html`, '<h1>hunter2</h1>');
+
+    const serving = await serveFolder(folder, { onPointed: () => {} });
+    try {
+      for (const method of ['GET', 'HEAD', 'PUT', 'DELETE']) {
+        const refused = await fetch(`${serving.address}${POINT_PATH}`, { method });
+        expect(refused.status, method).toBe(405);
+        expect(await refused.text()).not.toContain('hunter2');
+      }
+    } finally {
+      await serving.stop();
+    }
+  });
+
+  it('gives a page the script once, and counts the bytes it actually sends', async () => {
+    const serving = await serveFolder(await aSite(), { onPointed: () => {} });
+    try {
+      const home = await fetch(`${serving.address}/`);
+      const html = await home.text();
+
+      expect(home.headers.get('content-type')).toBe('text/html; charset=utf-8');
+      expect(html).toContain('Paper Street');
+      expect(html.split(POINTER_MARK).length - 1).toBe(1);
+      // The injection changes the length, so the header cannot come from `stat`.
+      expect(home.headers.get('content-length')).toBe(String(Buffer.byteLength(html)));
+      expect(Buffer.byteLength(html)).toBeGreaterThan(Buffer.byteLength(page));
+
+      const asked = await fetch(`${serving.address}/`, { method: 'HEAD' });
+      expect(asked.headers.get('content-length')).toBe(String(Buffer.byteLength(html)));
+    } finally {
+      await serving.stop();
+    }
+  });
+
+  it('leaves everything that is not a page exactly as it was', async () => {
+    const serving = await serveFolder(await aSite(), { onPointed: () => {} });
+    try {
+      for (const [file, contents] of [
+        ['/styles.css', styles],
+        ['/app.js', script],
+      ] as const) {
+        const sent = await fetch(`${serving.address}${file}`);
+        expect(await sent.text(), file).toBe(contents);
+        expect(sent.headers.get('content-length'), file).toBe(String(Buffer.byteLength(contents)));
+      }
+    } finally {
+      await serving.stop();
+    }
+  });
+
+  it('says whether a click has anywhere to go', async () => {
+    const serving = await serveFolder(await aSite());
+    try {
+      expect(serving.pointing).toBe(false);
+      // Still on the page — it is inert until something switches it on — and a
+      // click nobody is waiting for is answered rather than refused.
+      expect(await (await fetch(`${serving.address}/`)).text()).toContain(POINTER_MARK);
+      expect((await post(serving.address, JSON.stringify(clicked))).status).toBe(204);
+    } finally {
+      await serving.stop();
+    }
   });
 });

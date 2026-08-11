@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ConnectionState, ModelChoice } from '../lib/ipc';
+import { byTier, tierNames } from '../lib/modeltiers';
 import './ThinkingWith.css';
 
 type Props = {
@@ -10,6 +11,9 @@ type Props = {
   /** Open the full connect screen — the way to add an account, as opposed to
    *  picking between the ones already here. */
   onConnect: () => void;
+  /** Quieter, for the strip along the top where it sits beside the project's
+   *  name rather than inside the composer. */
+  bare?: boolean;
 };
 
 /** What one row of the list needs, flattened out of the provider tree. */
@@ -18,6 +22,7 @@ type Offer = {
   providerName: string;
   modelId: string;
   label: string;
+  rates: { input: number; output: number } | null;
 };
 
 /**
@@ -29,7 +34,7 @@ type Offer = {
  * The list holds only models that can be used right now; a menu of things that
  * will fail is not a menu.
  */
-export default function ThinkingWith({ state, onSelect, onConnect }: Props) {
+export default function ThinkingWith({ state, onSelect, onConnect, bare }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const root = useRef<HTMLDivElement>(null);
@@ -47,6 +52,7 @@ export default function ThinkingWith({ state, onSelect, onConnect }: Props) {
           providerName: provider.name,
           modelId: model.id,
           label: model.label,
+          rates: model.rates,
         });
       }
     }
@@ -99,14 +105,16 @@ export default function ThinkingWith({ state, onSelect, onConnect }: Props) {
      dead end standing where the one useful action should be. */
   const nothingConnected = offers.length === 0;
 
+  /* Nothing chosen names the one that will actually answer rather than
+     shrugging: connecting picks a model, so there is always a real answer to
+     give, and "Any available model" was a label for a state that used to break
+     sending. */
   const label = nothingConnected
     ? 'Connect a model'
-    : current !== null
-      ? current.label
-      : 'Any available model';
+    : (current?.label ?? offers[0]?.label ?? 'Choose a model');
 
   return (
-    <div className="thinking" ref={root}>
+    <div className={`thinking ${bare === true ? 'thinking--bare' : ''}`} ref={root}>
       <button
         type="button"
         className={`thinking__chip ${nothingConnected ? 'thinking__chip--none' : ''}`}
@@ -117,7 +125,7 @@ export default function ThinkingWith({ state, onSelect, onConnect }: Props) {
           nothingConnected
             ? 'No account is connected yet'
             : current === null
-              ? 'No particular model chosen — whichever the account offers'
+              ? 'Nothing chosen yet — this is the one that will answer'
               : `${current.providerName} · ${current.label}`
         }
       >
@@ -156,10 +164,15 @@ export default function ThinkingWith({ state, onSelect, onConnect }: Props) {
             {shown.length === 0 ? (
               <p className="thinking__empty">Nothing here matches that.</p>
             ) : (
-              group(shown).map(([providerName, models]) => (
-                <section className="thinking__group" key={providerName}>
-                  <h4 className="thinking__groupname">{providerName}</h4>
-                  {models.map((one) => {
+              sections(shown).map((section) => (
+                <section className="thinking__group" key={section.key}>
+                  <h4 className="thinking__groupname">
+                    {section.name}
+                    {section.note === undefined ? null : (
+                      <span className="thinking__groupnote">{section.note}</span>
+                    )}
+                  </h4>
+                  {section.models.map((one) => {
                     const isChosen =
                       chosen !== null &&
                       chosen.providerId === one.providerId &&
@@ -189,7 +202,14 @@ export default function ThinkingWith({ state, onSelect, onConnect }: Props) {
                             </svg>
                           ) : null}
                         </span>
-                        <span className="thinking__optionlabel">{one.label}</span>
+                        <span className="thinking__optiontext">
+                          <span className="thinking__optionlabel">{one.label}</span>
+                          {/* The raw id stays visible, so somebody who knows
+                              exactly which one they want can still see it. */}
+                          <span className="thinking__optionid">
+                            {one.providerName} · {one.modelId}
+                          </span>
+                        </span>
                       </button>
                     );
                   })}
@@ -214,14 +234,27 @@ export default function ThinkingWith({ state, onSelect, onConnect }: Props) {
   );
 }
 
-/** Back into provider order for drawing, keeping the shell's ordering so this
- *  list and the connect screen agree. */
-function group(offers: readonly Offer[]): [string, Offer[]][] {
+type Section = { key: string; name: string; note?: string; models: Offer[] };
+
+/**
+ * How the list is broken up: by what a model is *for* when the prices say
+ * something useful, and by provider when they do not.
+ */
+function sections(offers: readonly Offer[]): Section[] {
+  const tiers = byTier(offers);
+  if (tiers !== null) {
+    return tiers.map(([tier, models]) => ({
+      key: tier,
+      name: tierNames[tier].name,
+      note: tierNames[tier].note,
+      models,
+    }));
+  }
   const byProvider = new Map<string, Offer[]>();
   for (const one of offers) {
     const already = byProvider.get(one.providerName);
     if (already === undefined) byProvider.set(one.providerName, [one]);
     else already.push(one);
   }
-  return [...byProvider.entries()];
+  return [...byProvider.entries()].map(([name, models]) => ({ key: name, name, models }));
 }

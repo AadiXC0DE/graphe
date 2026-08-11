@@ -6,17 +6,23 @@
  * who does gets the actual command, the actual path, the actual git operation —
  * not a friendlier paraphrase of one.
  *
- * ## This is the one place jargon is allowed
+ * ## This is the one place jargon is allowed, and only half of it
  *
  * Everywhere else in the product, `commit`, `bash`, `--reset` and `node_modules`
- * are banned words (CONTRIBUTING.md). Here they are the entire point. Somebody
- * who has switched this on is asking what the machinery is called so they can
- * search for it, type it themselves, or check our working. Softening it would
- * make the feature useless and slightly patronising at the same time.
+ * are banned words (CONTRIBUTING.md). In `realWords` below they are the entire
+ * point: somebody who has switched this on is asking what the machinery is
+ * called so they can search for it, type it themselves, or check our working.
+ * Softening a path or a command would make the feature useless and slightly
+ * patronising at the same time. Those strings are deliberately exempt from the
+ * language sweep, and they live in this file — one file, easy to find — so that
+ * the exemption has an obvious boundary rather than leaking into the interface.
  *
- * So the strings below are deliberately exempt from the language sweep, and they
- * live in this file — one file, easy to find — so that the exemption has an
- * obvious boundary rather than leaking into the rest of the interface.
+ * The `behind` sentences are **not** covered by that exemption, and used to be.
+ * BACKLOG A3: *Show me may name what was touched, never how the machinery
+ * works.* A path, a filename, a command that was run — fine. A sentence teaching
+ * a git concept, a compaction strategy or a billing pipeline — cut, and replaced
+ * with the record of what actually happened, which is the question "show me" was
+ * asked in order to answer.
  *
  * ## What it is not
  *
@@ -142,20 +148,24 @@ export function realWords(call: ToolCall): string {
  * sentence is wrong and should change with it.
  */
 export const behind = {
-  /** Under the version rail. */
+  /** Under the version rail. What the sentence is allowed to say is what
+   *  happened, not how it is stored: a designer asking "where does this live?"
+   *  wants the record, and a developer would rather read the code than a
+   *  glossary (BACKLOG A3). */
   versions:
-    'Every version is a commit in a git repository inside your project folder. Nothing is stored anywhere else, and nothing is sent anywhere.',
+    'Every saved moment lives in a folder inside your project, next to the files it captured. Nothing is stored anywhere else, and nothing is sent anywhere.',
   /** Under the "put back" control. */
   putBack:
-    'Putting back runs git read-tree -u --reset onto that commit and then commits the result, so the history is added to rather than rewritten — which is why going back can itself be undone.',
+    'Putting back restores the project to that saved moment. It is kept as its own moment, so it can be undone too.',
   /** Beside a version somebody named. */
-  naming: 'A name you type is stored as a git note on the commit, not in its message.',
+  naming:
+    'A name you type is kept with that saved moment — nothing else about the moment changes.',
   /** In the corner, beside the money. */
   spend:
-    'Priced from the usage your provider reports for each request, converted at the moment it is read. Graphe takes no cut and never sees the number.',
+    'Counted from what your account was actually charged, converted at the moment it is read. Graphe takes no cut and never sees the number.',
   /** When a long conversation is tidied. */
   tidying:
-    'This is the agent runtime’s own context compaction: the earlier turns are summarised into one entry and the recent ones are kept verbatim. The full transcript stays on disk.',
+    'I shortened my own notes on the earlier part of this conversation so it stays quick. Every word either of us said is still above, to scroll back through.',
 } as const;
 
 /** The switch itself, and what it promises. */

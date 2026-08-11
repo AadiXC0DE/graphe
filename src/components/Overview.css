@@ -19,6 +19,7 @@
   background: var(--bg);
   border-left: 1px solid var(--border);
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
 
   /* The rail's old arrival, once, and only once: this panel appears the first
@@ -35,9 +36,10 @@
   }
 }
 
-/* Room for the traffic lights, which sit over the whole window. */
-[data-shell='desktop'] .overview__block:first-child {
-  padding-top: var(--space-7);
+/* Nothing sits above this panel — no strip, and no traffic lights on this side
+   of the window — so it starts at the glass with only its own breathing room. */
+.overview {
+  padding-top: var(--space-3);
 }
 
 .overview__block {
@@ -55,44 +57,147 @@
   color: var(--text-faint);
 }
 
-/* ---------------------------------------------------------------------------
-   Git
-   The branch in the machine's own letters — a branch is a name, and a name
-   is the one thing here that is not a translation — and the state in the
-   words a designer would use: saved, not saved.
-   --------------------------------------------------------------------------- */
-
-.overview__git-empty {
+/* The one line a band says when it has nothing to say. Quieter than any row it
+   would otherwise hold, so a panel of them recedes rather than nagging. */
+.overview__quiet {
   margin: 0;
   font-size: var(--text-sm);
   line-height: 1.5;
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
-.overview__gitline {
+/* ---------------------------------------------------------------------------
+   Now
+   What is happening this second. Present only while something is running.
+   --------------------------------------------------------------------------- */
+
+.overview__step,
+.overview__helper {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
   margin: 0;
+  min-width: 0;
+}
+
+.overview__helper {
+  margin-top: var(--space-2);
+  padding-left: calc(6px + var(--space-2));
+}
+
+.overview__pulse {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: translateY(-1px);
+  animation: overview-pulse 1.6s var(--ease-in-out-cubic) infinite;
+}
+
+/* The one moving thing in the panel, and it moves because it is the one thing
+   that means "still going". */
+@keyframes overview-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.overview__steptext,
+.overview__helper {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.overview__steplabel,
+.overview__helpername {
   font-size: var(--text-sm);
-}
-
-.overview__branch {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
   color: var(--text);
-  white-space: nowrap;
-}
-
-.overview__gitstate {
-  color: var(--text-muted);
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.overview__gitsub {
-  margin: var(--space-1) 0 0;
+.overview__stepdetail,
+.overview__helpertask {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Changes
+   Files by name, because a name is a place and a count is not.
+   --------------------------------------------------------------------------- */
+
+.overview__files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.overview__file {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.overview__filetext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.overview__filename {
+  font-size: var(--text-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview__filewhere {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* The end of a path is the useful end. */
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.overview__filenew {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px var(--space-2);
+}
+
+/* The branch, under Show me and nowhere else. */
+.overview__real {
+  margin: var(--space-3) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.overview__read {
+  margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
   color: var(--text-faint);
 }
@@ -216,6 +321,15 @@
    becomes the panel's section heading.
    --------------------------------------------------------------------------- */
 
+/* The timeline takes the leftover height, so a tall window fills with the best
+   thing in the panel rather than stopping short above a void. */
+.overview__timeline {
+  flex: 0 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .overview .rail {
   position: static;
   width: auto;
@@ -253,7 +367,7 @@
   box-shadow: none;
   background: var(--bg);
   padding: var(--space-3) var(--space-4) var(--space-4);
-  margin: auto 0 0;
+  margin: 0;
 }
 
 @media (max-width: 1100px) {
@@ -272,4 +386,97 @@
   .overview {
     animation: none;
   }
+}
+/* A changed file is a place you can go, not a line of type. */
+.overview__file {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  margin-left: calc(var(--space-2) * -1);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.overview__file:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .overview__file:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+/* The band's own action. One per band at most — a panel of buttons is a
+   toolbar, and this is not one. */
+.overview__do {
+  margin-top: var(--space-3);
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.overview__do:active {
+  transform: scale(0.97);
+}
+
+.overview__do:disabled {
+  opacity: 0.5;
+}
+
+.overview__do:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .overview__do:not(:disabled):hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overview__do:active {
+    transform: none;
+  }
+}
+
+/* The panel's own foot, above the meter. */
+.overview__foot {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.overview__foot .overview__do {
+  margin-top: 0;
+  width: 100%;
+}
+
+/* The money stays on the glass however long the panel gets — it is the one
+   thing in here that should never need looking for. Everything else, the way to
+   hand the work on included, scrolls with the rest. */
+.overview .cost-meter--corner {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--bg);
+}
+
+.overview__foot {
+  margin-top: auto;
 }

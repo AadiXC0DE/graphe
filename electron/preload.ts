@@ -29,15 +29,21 @@ import {
   type ModelChoice,
   type OpenedProject,
   type Overview,
+  type Page,
   type Preferences,
   type PromptAttachment,
+  type PromptOptions,
   type ProviderMethod,
   type PutBack,
   type RecentProject,
+  type Conversation,
+  type Look,
+  type Pack,
   type Result,
   type SavedVersion,
   type ShowOutcome,
   type ShowProgress,
+  type WindowState,
   type VisualFrames,
   type VisualNotice,
 } from '../src/lib/ipc';
@@ -67,7 +73,11 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.openProject, path) as Promise<Result<OpenedProject>>;
   },
 
-  prompt(text: string, attachments?: readonly PromptAttachment[]): Promise<Result<null>> {
+  prompt(
+    text: string,
+    attachments?: readonly PromptAttachment[],
+    options?: PromptOptions,
+  ): Promise<Result<null>> {
     if (typeof text !== 'string' || text.trim() === '') {
       return Promise.resolve(refuse<null>('There was nothing to send.'));
     }
@@ -84,7 +94,8 @@ const api: GrapheApi = {
               typeof one.bytes === 'string' &&
               one.bytes !== '',
           );
-    return ipcRenderer.invoke(CHANNEL.prompt, text, clean) as Promise<Result<null>>;
+    const ways: PromptOptions = { lookFirst: options?.lookFirst === true };
+    return ipcRenderer.invoke(CHANNEL.prompt, text, clean, ways) as Promise<Result<null>>;
   },
 
   stop(): Promise<Result<null>> {
@@ -156,16 +167,102 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.hatches) as Promise<Result<Hatches>>;
   },
 
-  openInEditor(): Promise<Result<null>> {
-    return ipcRenderer.invoke(CHANNEL.openInEditor) as Promise<Result<null>>;
+  openInEditor(file?: string): Promise<Result<null>> {
+    const one = typeof file === 'string' && file.trim() !== '' ? file : undefined;
+    return ipcRenderer.invoke(CHANNEL.openInEditor, one) as Promise<Result<null>>;
+  },
+
+  saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>> {
+    const chosen = typeof name === 'string' ? name : undefined;
+    return ipcRenderer.invoke(CHANNEL.saveVersion, chosen) as Promise<
+      Result<readonly SavedVersion[]>
+    >;
   },
 
   revealFolder(): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.revealFolder) as Promise<Result<null>>;
   },
 
-  show(): Promise<Result<ShowOutcome>> {
-    return ipcRenderer.invoke(CHANNEL.show) as Promise<Result<ShowOutcome>>;
+  show(at?: string, point?: boolean): Promise<Result<ShowOutcome>> {
+    return ipcRenderer.invoke(CHANNEL.show, at, point === true) as Promise<Result<ShowOutcome>>;
+  },
+
+  onPointed(listener: (said: string) => void): () => void {
+    const forward = (_source: IpcRendererEvent, said: string): void => {
+      listener(said);
+    };
+    ipcRenderer.on(CHANNEL.pointed, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.pointed, forward);
+    };
+  },
+
+  pages(): Promise<Result<readonly Page[]>> {
+    return ipcRenderer.invoke(CHANNEL.pages) as Promise<Result<readonly Page[]>>;
+  },
+
+  shareReview(): Promise<Result<string | null>> {
+    return ipcRenderer.invoke(CHANNEL.shareReview) as Promise<Result<string | null>>;
+  },
+
+  checkWidths(): Promise<Result<{ looks: readonly Look[]; says: string }>> {
+    return ipcRenderer.invoke(CHANNEL.checkWidths) as Promise<
+      Result<{ looks: readonly Look[]; says: string }>
+    >;
+  },
+
+  conversations(): Promise<Result<readonly Conversation[]>> {
+    return ipcRenderer.invoke(CHANNEL.conversations) as Promise<Result<readonly Conversation[]>>;
+  },
+
+  openConversation(path: string | null): Promise<Result<OpenedProject>> {
+    const one = typeof path === 'string' && path.trim() !== '' ? path : null;
+    return ipcRenderer.invoke(CHANNEL.openConversation, one) as Promise<Result<OpenedProject>>;
+  },
+
+  packages(term?: string): Promise<Result<readonly Pack[]>> {
+    const asked = typeof term === 'string' ? term : undefined;
+    return ipcRenderer.invoke(CHANNEL.packages, asked) as Promise<Result<readonly Pack[]>>;
+  },
+
+  addPackage(id: string): Promise<Result<readonly Pack[]>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<readonly Pack[]>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.addPackage, id) as Promise<Result<readonly Pack[]>>;
+  },
+
+  removePackage(id: string): Promise<Result<readonly Pack[]>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<readonly Pack[]>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.removePackage, id) as Promise<Result<readonly Pack[]>>;
+  },
+
+  explainPackage(id: string): Promise<Result<string>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<string>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.explainPackage, id) as Promise<Result<string>>;
+  },
+
+  nudgeToken(name: string, value: string): Promise<Result<readonly SavedVersion[]>> {
+    if (typeof name !== 'string' || name === '' || typeof value !== 'string') {
+      return Promise.resolve(refuse<readonly SavedVersion[]>('I could not tell what to change.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.nudgeToken, name, value) as Promise<
+      Result<readonly SavedVersion[]>
+    >;
+  },
+
+  onWindowState(listener: (state: WindowState) => void): () => void {
+    const forward = (_source: IpcRendererEvent, state: WindowState): void => {
+      listener(state);
+    };
+    ipcRenderer.on(CHANNEL.windowState, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.windowState, forward);
+    };
   },
 
   onShowProgress(listener: (progress: ShowProgress) => void): () => void {

@@ -1,0 +1,362 @@
+/* Adding more to Graphe.
+
+   A modal over the window, but unlike the connect screen it wears the app's own
+   palette: by the time somebody is here they are inside the product, and a
+   second dark room would read as a second product. Everything is a token. */
+
+.addmore {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+}
+
+.addmore__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  background: rgb(0 0 0 / 0.42);
+  cursor: default;
+  animation: addmore-backdrop var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes addmore-backdrop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.addmore__panel {
+  position: relative;
+  width: min(540px, 100%);
+  max-height: min(700px, calc(100vh - var(--space-7)));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  animation: addmore-panel var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes addmore-panel {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.addmore__head {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.addmore__titlewrap {
+  min-width: 0;
+}
+
+.addmore__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.addmore__sub {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.addmore__close {
+  flex: none;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.addmore__search {
+  padding: var(--space-3) var(--space-5) 0;
+}
+
+.addmore__field {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-family: inherit;
+}
+
+.addmore__field::placeholder {
+  color: var(--text-faint);
+}
+
+.addmore__field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.addmore__body {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* ---------------------------------------------------------------------------
+   The two groups
+   Ours first and said to be ours; everything else under a heading that says
+   whose it is. The line under that heading is a sentence, not an alarm.
+   --------------------------------------------------------------------------- */
+
+.addmore__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.addmore__grouphead {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.addmore__groupnote {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.addmore__quiet {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   One row
+   Name, one sentence, one action. The explanation opens underneath, in place.
+   --------------------------------------------------------------------------- */
+
+.addmore__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.addmore__rowtop {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.addmore__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.addmore__name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.addmore__summary {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.addmore__action {
+  flex: none;
+  margin-left: auto;
+  min-height: 32px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* Taking something off is not the thing this screen is for, so it is quiet. */
+.addmore__action--off {
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.addmore__action:active {
+  transform: scale(0.97);
+}
+
+.addmore__action:disabled {
+  opacity: 0.45;
+}
+
+.addmore__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.addmore__on {
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.addmore__explain {
+  align-self: flex-start;
+  min-height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent-ink);
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.addmore__waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.addmore__spin {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: addmore-spin 0.9s linear infinite;
+}
+
+@keyframes addmore-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.addmore__explanation {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.addmore__foot {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  padding: var(--space-2) var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.addmore__hint {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.addmore__action:focus-visible,
+.addmore__explain:focus-visible,
+.addmore__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .addmore__close:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
+
+  .addmore__action:not(:disabled):hover {
+    background: color-mix(in srgb, var(--accent) 88%, var(--text));
+  }
+
+  .addmore__action--off:not(:disabled):hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+
+  .addmore__explain:hover {
+    color: var(--text);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .addmore__backdrop,
+  .addmore__panel {
+    animation: none;
+  }
+
+  .addmore__spin {
+    animation-duration: 1.4s;
+  }
+}

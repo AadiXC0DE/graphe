@@ -8,7 +8,10 @@
 
 .shelf {
   position: fixed;
-  top: var(--topbar-height);
+  /* The glass, not below the strip. A mac sidebar runs the whole height of the
+     window and the traffic lights sit over its top corner — the strip belongs
+     to the content beside it. */
+  top: 0;
   left: 0;
   bottom: 0;
   z-index: 2;
@@ -19,6 +22,9 @@
   background: var(--bg);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  /* Reserved, so the rows do not reflow narrower the first time the list grows
+     past the window. */
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
 
@@ -133,10 +139,101 @@
   -webkit-app-region: no-drag;
 }
 
-/* The strip is the window's drag handle and the shelf sits under it, so the
-   shelf's own top corners do not need to dodge the traffic lights. */
+/* ---------------------------------------------------------------------------
+   The bands under the projects
+   Screens first, because a designer's index of a project is its pages and not
+   its folders. Each band appears only when it has something in it.
+   --------------------------------------------------------------------------- */
+
+.shelf__band {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.shelf__band .shelf__caption {
+  display: block;
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.shelf__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.shelf__row {
+  -webkit-app-region: no-drag;
+  display: flex;
+  flex-direction: column;
+  align-items: baseline;
+  gap: 1px;
+  width: 100%;
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.shelf__rowname {
+  max-width: 100%;
+  font-size: var(--text-sm);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf__rowsub {
+  max-width: 100%;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.shelf__pin {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+}
+
+.shelf__thumb {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.shelf__thumb--none {
+  background: var(--bg-sunken);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .shelf__row:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+/* Room at the top of the list for the traffic lights that sit over it. In full
+   screen macOS takes them away and the room goes back to the projects. */
 [data-shell='desktop'] .shelf {
-  top: calc(var(--topbar-height) + var(--space-1));
+  padding-top: var(--space-6);
+}
+
+[data-full='yes'] .shelf {
+  padding-top: var(--space-2);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -161,4 +258,77 @@
 .shelf__mark:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+/* The name of the folder in front, as the rail's own heading. */
+.shelf__caption {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Somewhere to go, rather than something to read. */
+.shelf__row--quiet .shelf__rowname {
+  color: var(--text-faint);
+}
+
+.shelf__rowname--gone {
+  color: var(--text-faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--border-strong);
+}
+
+/* A band with something to do in its corner. */
+.shelf__bandtop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-2) var(--space-2) var(--space-3);
+}
+
+.shelf__bandtop .shelf__caption {
+  padding: 0;
+}
+
+.shelf__new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  -webkit-app-region: no-drag;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.shelf__new:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.shelf__none {
+  margin: 0;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* The one you are in. */
+.shelf__row--here {
+  background: var(--bg-sunken);
+}
+
+.shelf__row--here .shelf__rowname {
+  color: var(--text);
+  font-weight: 500;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .shelf__new:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
 }

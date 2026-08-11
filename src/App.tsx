@@ -20,6 +20,7 @@ import Welcome from "./components/Welcome";
 import Gallery from "./gallery/Gallery";
 import AskAnything from "./components/AskAnything";
 import type { Found, Things } from "./lib/anything";
+import type { ShelfPage } from "./lib/shelf";
 import type { Task } from "./cost/estimate";
 import {
   longConversation,
@@ -201,6 +202,8 @@ function Conversation() {
   /** The screens of the project in front, for the rail. Asked for once when a
    *  folder opens — pages are a fact about the project, not about the sitting. */
   const [pages, setPages] = useState<readonly Page[]>([]);
+  /** Which page the preview is currently showing, so the shelf can mark it. */
+  const [showingPage, setShowingPage] = useState<string | null>(null);
   /** The one bar that reaches everything. Openable by hand as well as by key —
    *  a shortcut nobody is told about is a feature nobody has. */
   const [asking, setAsking] = useState(false);
@@ -1292,6 +1295,8 @@ function Conversation() {
       // "Ready" gets a beat on screen. A browser window opening on its own is
       // startling without a sentence somewhere saying it was meant to.
       setProgress({ says: showWords.ready, done: true });
+      // Which page is in front of them now, so the shelf can mark it.
+      setShowingPage(at ?? null);
       window.setTimeout(() => setProgress(null), 1400);
       // The overview keeps the address of what was just served, so the pill can
       // take you back to it all evening.
@@ -1308,6 +1313,17 @@ function Conversation() {
       });
     }
   }, [desks.current, say, troubleHere, refreshOverview]);
+
+  /* The shelf's pages, with what is known about each one. Nothing here is asked
+     for separately — it is all already on the desk. */
+  const shelfPages: readonly ShelfPage[] = useMemo(
+    () =>
+      pages.map((page) => ({
+        ...page,
+        ...(showingPage === page.route ? { showing: true } : {}),
+      })),
+    [pages, showingPage],
+  );
 
   /* Everything the bar can reach. Held still between renders so the search does
      not re-run on every keystroke elsewhere. */
@@ -1497,8 +1513,9 @@ function Conversation() {
           openPath={desks.current}
           onOpen={(project) => void open(project.path)}
           onBrowse={() => void browse()}
-          pages={pages}
+          pages={shelfPages}
           onOpenPage={(page) => void seeIt(page.route)}
+          onAddPage={(name) => void send(`Add a page called ${name}.`)}
           pinned={desk?.references ?? []}
           conversations={conversations}
           openConversation={inConversation}

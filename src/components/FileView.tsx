@@ -53,7 +53,14 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
   const language = languageOf(ending);
   const label = languageLabel(ending);
 
-  const lines = useMemo(() => (text === null ? [] : text.split('\n')), [text]);
+  /* A file ending in a newline is not a file with an empty last line, and
+     numbering one would be a row nobody wrote. */
+  const lines = useMemo(() => {
+    if (text === null) return [];
+    const split = text.split('\n');
+    if (split.length > 1 && split[split.length - 1] === '') split.pop();
+    return split;
+  }, [text]);
   const shown = useMemo(() => lines.slice(0, cap), [lines, cap]);
   const code = useMemo(() => shown.join('\n'), [shown]);
 

@@ -52,6 +52,7 @@ export const SAYS = {
     prompts: 'Ready-made things to ask for',
     mixed: 'A bit of each of those',
   },
+  filterLabel: 'Show',
   filterAll: 'Everything',
   filterReach: 'Your other tools',
   filterAdditions: 'Ways of working',
@@ -241,7 +242,7 @@ export default function AddMore({
         </div>
 
         {canReach ? (
-          <div className="addmore__filters" role="group" aria-label={SAYS.title}>
+          <div className="addmore__filters" role="group" aria-label={SAYS.filterLabel}>
             {(
               [
                 ['all', SAYS.filterAll],

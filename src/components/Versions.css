@@ -81,6 +81,370 @@
 
 .rail__list {
   max-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ---------------------------------------------------------------------------
+   What the timeline is showing
+   Most versions change a file and nothing anybody can see. In a rail made of
+   pictures those are noise, so they start folded and the chip says so.
+   --------------------------------------------------------------------------- */
+
+.rail__band {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0 var(--space-1) var(--space-2);
+}
+
+.rail__only {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.rail__onlydot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* On is a fill and a dot, not a colour alone. */
+.rail__only[aria-pressed='true'] {
+  color: var(--accent-ink);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: var(--accent-soft);
+}
+
+.rail__only[aria-pressed='true'] .rail__onlydot {
+  background: var(--accent);
+}
+
+.rail__only:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rail__folded {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   A day at a time
+   --------------------------------------------------------------------------- */
+
+.daygroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+}
+
+.daygroup__head {
+  margin: 0;
+  font: inherit;
+  font-weight: 500;
+}
+
+.daygroup__fold {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 32px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  text-align: left;
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.daygroup__fold:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.daygroup__chev {
+  flex: none;
+  width: 8px;
+  line-height: 1;
+  transition: transform var(--dur-micro) var(--ease-hover);
+}
+
+.daygroup__fold[aria-expanded='true'] .daygroup__chev {
+  transform: rotate(90deg);
+}
+
+.daygroup__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daygroup__count {
+  flex: none;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.daygroup--kept .daygroup__fold {
+  color: var(--accent-ink);
+}
+
+/* "Earlier today (12)". Never two hundred cards at once: a day shows a handful
+   and offers the rest, once, in the day's own words. */
+.daygroup__more {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.daygroup__more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ---------------------------------------------------------------------------
+   The pictures
+   A grid of stills scans in a second; a column of rows does not. The picture is
+   the object and the words under it are the caption, so the eye can do the
+   looking and the reading is optional.
+   --------------------------------------------------------------------------- */
+
+.moments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: var(--space-2);
+}
+
+.moment {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  /* Colour only. A card that lifts or grows turns a grid of forty into weather,
+     and any hesitation here makes people afraid to explore. */
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.moment__open {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+.moment__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.moment__still {
+  position: relative;
+  display: grid;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  transition: border-color var(--dur-micro) var(--ease-hover);
+}
+
+/* Anchored to the top: a page is recognised by its header, not its footer. */
+.moment__shot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+/* No picture yet. A grey frame with three bars in it is a skeleton screen that
+   never finished loading, so the tile carries the words instead. */
+.moment__words {
+  padding: var(--space-2);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  color: var(--text-muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow-wrap: anywhere;
+}
+
+.moment__caption {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 2px;
+}
+
+.moment__title {
+  font-size: var(--text-xs);
+  line-height: 1.3;
+  color: var(--text);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.moment__when {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.moment__time {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --accent-ink, not --accent: accent on --accent-soft is 4.39:1 in the light
+   theme, which is under AA for text this small. */
+.moment__badge {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: var(--text-2xs);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  white-space: nowrap;
+}
+
+/* The one on screen: a tinted card, an accent edge on its picture and a badge,
+   so it is never colour alone that says so. */
+.moment--current {
+  background: var(--bg-raised);
+}
+
+.moment--current .moment__still {
+  border-color: var(--accent);
+}
+
+.moment--naming {
+  background: var(--bg-raised);
+}
+
+/* Small enough to sit on a thumbnail without covering it; the target around it
+   is not — ::after pushes the hit area out to a comfortable 40px. */
+.moment__keep {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-raised) 86%, transparent);
+  backdrop-filter: blur(8px);
+  color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.moment__keep::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+.moment__keep svg {
+  width: 13px;
+  height: 13px;
+}
+
+.moment__keep[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.moment__keep:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Permanently there rather than materialising on hover: a control that only
+   exists under a pointer does not exist for a keyboard. It is simply quiet. */
+.moment__back {
+  min-height: 32px;
+  margin: 0 var(--space-1) var(--space-1);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.moment__back:active {
+  transform: scale(0.97);
+}
+
+.moment__back:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.moment__back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  color: var(--text);
+}
+
+/* The name field, across the whole grid rather than squeezed into one column. */
+.moments__naming {
+  grid-column: 1 / -1;
+  padding: var(--space-1) var(--space-1) var(--space-2);
 }
 
 /* ---------------------------------------------------------------------------
@@ -163,10 +527,6 @@
    Naming a version
    --------------------------------------------------------------------------- */
 
-.rail__naming {
-  padding: var(--space-2) var(--space-2) var(--space-3);
-}
-
 .naming {
   display: flex;
   flex-direction: column;
@@ -234,8 +594,39 @@
 
 @media (hover: hover) and (pointer: fine) {
   .rail__undo:hover:not(:disabled),
-  .naming__save:hover:not(:disabled) {
+  .naming__save:hover:not(:disabled),
+  .daygroup__fold:hover,
+  .daygroup__more:hover,
+  .moment__back:hover:not(:disabled),
+  .rail__only:hover {
     color: var(--text);
+  }
+
+  .daygroup__more:hover,
+  .moment__back:hover:not(:disabled),
+  .rail__only:hover {
+    border-color: var(--border-strong);
+  }
+
+  .moment:hover {
+    background: var(--bg-raised);
+  }
+
+  .moment:hover .moment__still {
+    border-color: var(--border-strong);
+  }
+
+  .moment--current:hover .moment__still {
+    border-color: var(--accent);
+  }
+
+  .moment__keep:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+
+  .moment__keep[aria-pressed='true']:hover {
+    color: var(--accent-ink);
   }
 
   .naming__field:hover {
@@ -254,8 +645,13 @@
   }
 
   .rail__undo:active,
-  .naming__save:active {
+  .naming__save:active,
+  .moment__back:active {
     transform: none;
+  }
+
+  .daygroup__chev {
+    transition: none;
   }
 }
 

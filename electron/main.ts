@@ -101,7 +101,7 @@ import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/pack
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
 import { lookAtEveryWidth } from '../src/diff/capture';
-import { readsWell, type Look } from '../src/design/widths';
+import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
 
 import type { Serving } from '../src/preview/serve';
@@ -971,6 +971,42 @@ async function styleTokens(
   return best;
 }
 
+/** Folders a project keeps its stylesheets in, looked in one level down. */
+const STYLE_FOLDERS = ['src/styles', 'styles', 'src/css', 'css', 'app', 'src'];
+
+/** Enough to find the sizes a project designs at, few enough that asking costs
+ *  nothing. A project with more stylesheets than this has them in a folder. */
+const MOST_SHEETS = 16;
+
+/**
+ * The project's stylesheets, as text.
+ *
+ * The token files first, because a project that names its sizes anywhere names
+ * them there, then whatever else is sitting in its style folders. Bounded on
+ * purpose: this runs before every look, and a folder of somebody else's build
+ * output is not worth reading.
+ */
+async function styleSheets(root: string): Promise<readonly string[]> {
+  const names = [...TOKEN_FILES];
+  for (const folder of STYLE_FOLDERS) {
+    const inside = await readdir(join(root, folder)).catch(() => [] as string[]);
+    for (const name of inside) {
+      if (name.toLowerCase().endsWith('.css')) names.push(`${folder}/${name}`);
+    }
+  }
+
+  const texts: string[] = [];
+  const read = new Set<string>();
+  for (const name of names) {
+    if (texts.length >= MOST_SHEETS) break;
+    if (read.has(name)) continue;
+    read.add(name);
+    const css = await readFile(join(root, name), 'utf8').catch(() => null);
+    if (css !== null) texts.push(css);
+  }
+  return texts;
+}
+
 /** Where every project's conversations are kept. */
 function sessionsFolder(): string {
   return join(app.getPath('userData'), 'sessions');
@@ -1531,7 +1567,10 @@ function register(): void {
     }
     if (ready.kind !== 'showing') return done({ looks: [], says: ready.question });
     try {
-      const looks = await lookAtEveryWidth(ready.serving.address);
+      // The sizes this project designs at, out of its own stylesheets. Three
+      // sizes it has never written a line about answer somebody else's question.
+      const sizes = sizesFor(await styleSheets(open.path));
+      const looks = await lookAtEveryWidth(ready.serving.address, sizes);
       return done({ looks, says: readsWell(looks).says });
     } finally {
       await ready.serving.stop().catch(() => undefined);

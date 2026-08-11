@@ -128,6 +128,39 @@
   outline-offset: 1px;
 }
 
+/* ---------------------------------------------------------------------------
+   The two halves
+   Both kinds sit in one list; this only narrows it. Sitting under the search
+   field because that is where the hand already is when it wants fewer rows.
+   --------------------------------------------------------------------------- */
+
+.addmore__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5) 0;
+}
+
+.addmore__chip {
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.addmore__chip--on {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
 .addmore__body {
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -310,6 +343,100 @@
   color: var(--text);
 }
 
+/* ---------------------------------------------------------------------------
+   What it can reach
+   The row reads as a sentence; the real address, program and words sit folded
+   underneath it, in the one typeface where an exact string is readable.
+   --------------------------------------------------------------------------- */
+
+.addmore__needs {
+  color: var(--text-faint);
+}
+
+.addmore__exact,
+.addmore__hand {
+  font-size: var(--text-xs);
+}
+
+.addmore__exactsummary {
+  display: inline-block;
+  color: var(--accent-ink);
+  cursor: default;
+  list-style: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.addmore__exactsummary::-webkit-details-marker {
+  display: none;
+}
+
+.addmore__exactlist {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.addmore__exactrow {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.addmore__exactlabel {
+  flex: none;
+  min-width: 72px;
+  color: var(--text-faint);
+}
+
+.addmore__exactvalue {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--text);
+}
+
+/* One of your own. Folded away, because most people never open it. */
+
+.addmore__hand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.addmore__label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-muted);
+}
+
+.addmore__field--tall {
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+}
+
+.addmore__hand .addmore__action {
+  align-self: flex-start;
+  margin-left: 0;
+}
+
+.addmore__trouble {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+}
+
 .addmore__foot {
   display: flex;
   align-items: center;
@@ -325,6 +452,8 @@
 
 .addmore__action:focus-visible,
 .addmore__explain:focus-visible,
+.addmore__chip:focus-visible,
+.addmore__exactsummary:focus-visible,
 .addmore__close:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -345,7 +474,13 @@
     color: var(--text);
   }
 
-  .addmore__explain:hover {
+  .addmore__explain:hover,
+  .addmore__exactsummary:hover {
+    color: var(--text);
+  }
+
+  .addmore__chip:not(.addmore__chip--on):hover {
+    border-color: var(--border-strong);
     color: var(--text);
   }
 }

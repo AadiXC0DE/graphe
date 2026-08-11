@@ -41,7 +41,7 @@
 import { BrowserWindow, nativeImage, type NativeImage } from 'electron';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 
-import { overflowing, saysOverflow, WIDTHS, type Look, type Width } from '../design/widths';
+import { saysHowItHolds, WIDTHS, type Look, type Width } from '../design/widths';
 import { makeAndServe } from '../preview/show';
 import { comparePictures, realSize, type Bitmap, type ChangedArea } from './regions';
 import { shotFile, shotsFolder } from './shots';
@@ -313,10 +313,10 @@ async function lookAt(address: string, size: Width): Promise<Look> {
     return {
       ...named,
       shot: pictureAsDataUri(taken.image.toPNG()),
-      trouble:
-        wide !== null && overflowing(size.width, wide)
-          ? saysOverflow(size.name, wide - size.width)
-          : null,
+      // A hair over the edge and a layout that has never met this width are both
+      // sideways scroll, and reading the same about them is how a real fault
+      // gets ignored.
+      trouble: wide === null ? null : saysHowItHolds(size.name, size.width, wide),
     };
   } catch {
     return { ...named, shot: null, trouble: null };
@@ -324,15 +324,19 @@ async function lookAt(address: string, size: Width): Promise<Look> {
 }
 
 /**
- * The same address at all three widths.
+ * The same address at every size worth looking at.
  *
- * One window at a time rather than three at once: each is somebody else's site
- * rendering offscreen, and holding three of them open to save a second is the
- * kind of saving that shows up as a fan.
+ * The sizes are the project's own where it has said what they are, and the
+ * three defaults where it has not. One window at a time rather than all of them
+ * at once: each is somebody else's site rendering offscreen, and holding four
+ * open to save a second is the kind of saving that shows up as a fan.
  */
-export async function lookAtEveryWidth(address: string): Promise<readonly Look[]> {
+export async function lookAtEveryWidth(
+  address: string,
+  sizes: readonly Width[] = WIDTHS,
+): Promise<readonly Look[]> {
   const looks: Look[] = [];
-  for (const size of WIDTHS) looks.push(await lookAt(address, size));
+  for (const size of sizes) looks.push(await lookAt(address, size));
   return looks;
 }
 

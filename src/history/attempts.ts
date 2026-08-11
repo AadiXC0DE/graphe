@@ -8,12 +8,16 @@
  *
  * The words here never say so. An attempt is "a try"; keeping one is "use this
  * one"; the rest go away.
+ *
+ * The same copy carries `Workbench` at the foot of the file, where the pieces
+ * are not two goes at one change but several separate ones at once.
  */
 
 import path from 'node:path';
 import { mkdir, rm } from 'node:fs/promises';
 
 import { ProjectHistory, HistoryError, historyProblems } from './repo';
+import { AT_A_TIME, nextUp, roomLeft, type WorkState } from '../work/board';
 
 /** One try, and where it is being made. */
 export type Attempt = {
@@ -174,4 +178,224 @@ export class Tries {
       force: true,
     });
   }
+}
+
+/* ========================================================================== */
+/* Several things at once                                                      */
+/* ========================================================================== */
+
+/** One piece of work on the board. */
+export type PieceOfWork = {
+  id: string;
+  /** One sentence: what this piece of work is doing. */
+  doing: string;
+  state: WorkState;
+  /** Its own copy of the project. Null until its turn comes, and again once it
+   *  has been let go. */
+  folder: string | null;
+  /** What it ended at, once it has finished. */
+  version: string | null;
+  /** A picture of the result, when there is one. */
+  picture: string | null;
+  /** When it was asked for, epoch ms. */
+  at: number;
+  /** Why it stopped, in a sentence somebody can read. */
+  trouble: string | null;
+};
+
+/** Where one piece of work's copy lives: its own folder inside the room, so
+ *  letting one go never reaches anything but that one. */
+export function folderForWork(under: string, id: string): string {
+  return path.join(under, safeName(id));
+}
+
+/**
+ * A board of separate pieces of work, each in its own copy of the project.
+ *
+ * The caller runs whatever it likes inside each `folder`. This owns how many go
+ * at once, who is next when a slot frees up, which copy belongs to which piece
+ * of work, and — the part that has to be right — that letting one go can only
+ * ever remove that one's copy.
+ */
+export class Workbench {
+  private readonly history: ProjectHistory;
+  private readonly under: string;
+  private readonly most: number;
+  private readonly work: PieceOfWork[] = [];
+  private asked = 0;
+
+  constructor(options: {
+    history: ProjectHistory;
+    /** Somewhere outside the project to keep the copies. */
+    under: string;
+    /** How many go side by side. Never more than the module's own bound. */
+    atOnce?: number;
+  }) {
+    this.history = options.history;
+    this.under = options.under;
+    this.most = Math.max(1, Math.min(AT_A_TIME, options.atOnce ?? AT_A_TIME));
+  }
+
+  get pieces(): readonly PieceOfWork[] {
+    return this.work;
+  }
+
+  /** How many go side by side here. */
+  get atOnce(): number {
+    return this.most;
+  }
+
+  /** How many could start right now. Zero means the next one asked for waits. */
+  get roomLeft(): number {
+    return roomLeft(this.work, this.most);
+  }
+
+  /** Ask for another piece of work. Past the cap it waits its turn rather than
+   *  being refused — nobody's request is ever thrown away. */
+  ask(doing: string, options: { id?: string; at?: number } = {}): PieceOfWork {
+    this.asked += 1;
+    const piece: PieceOfWork = {
+      id: this.freeId(options.id ?? `work-${String(this.asked)}`),
+      doing: doing.trim(),
+      state: 'waiting',
+      folder: null,
+      version: null,
+      picture: null,
+      at: options.at ?? Date.now(),
+      trouble: null,
+    };
+    this.work.push(piece);
+    return piece;
+  }
+
+  /**
+   * Start as many waiting pieces as there is room for, and hand back the ones
+   * that just began. Called again whenever a slot frees up.
+   *
+   * The project must have nothing unsaved, for the same reason a set of tries
+   * does: a piece of work starts from a version, and starting from a
+   * half-finished state would make keeping one mean losing that work.
+   */
+  async begin(): Promise<readonly PieceOfWork[]> {
+    const wanted = nextUp(this.work, this.most);
+    if (wanted.length === 0) return [];
+
+    if (await this.history.hasUnsavedChanges()) {
+      throw new HistoryError(historyProblems.unsavedFirst);
+    }
+    const from = await this.history.currentVersion();
+    if (from === null) throw new HistoryError(historyProblems.tryFailed);
+
+    const began: PieceOfWork[] = [];
+    for (const piece of wanted) {
+      const folder = folderForWork(this.under, piece.id);
+      try {
+        await mkdir(path.dirname(folder), { recursive: true });
+        await this.history.addWorkspace(folder, from);
+      } catch (cause) {
+        // One copy failing is that piece's problem and not the board's — the
+        // others carry on, and this one says so rather than disappearing.
+        piece.state = 'failed';
+        piece.trouble = cause instanceof HistoryError ? cause.message : historyProblems.tryFailed;
+        continue;
+      }
+      piece.folder = folder;
+      piece.state = 'running';
+      began.push(piece);
+    }
+    return began;
+  }
+
+  /** What one piece of work ended at, saved inside its own copy. Null when it
+   *  changed nothing, which is a real answer and not a failure. */
+  async settle(id: string, title: string): Promise<string | null> {
+    const piece = this.find(id);
+    if (piece === undefined || piece.folder === null) return null;
+    const inside = new ProjectHistory(piece.folder);
+    const version = await inside.snapshot(title);
+    piece.version = version;
+    piece.state = 'done';
+    return version;
+  }
+
+  /** It did not work. The copy stays until somebody throws it away, so whatever
+   *  it did get to is still there to look at. */
+  stopped(id: string, trouble: string): void {
+    const piece = this.find(id);
+    if (piece === undefined) return;
+    piece.state = 'failed';
+    piece.trouble = trouble;
+  }
+
+  /** What this one's result looks like. */
+  showPicture(id: string, picture: string): void {
+    const piece = this.find(id);
+    if (piece === undefined) return;
+    piece.picture = picture;
+  }
+
+  /**
+   * Keep one, and put the project's files where that piece of work left them.
+   *
+   * `restoreTo` again, so this is a version like any other and undoable like any
+   * other. The rest of the board carries on: they were never alternatives to
+   * this one, they were other work.
+   */
+  async keep(id: string, title: string): Promise<string | null> {
+    const piece = this.find(id);
+    if (piece === undefined || piece.version === null) return null;
+    const version = await this.history.restoreTo(piece.version, title);
+    await this.drop(id);
+    return version;
+  }
+
+  /** Let one go, whatever state it was in. Safe to call twice. */
+  async drop(id: string): Promise<void> {
+    const at = this.work.findIndex((one) => one.id === id);
+    if (at < 0) return;
+    const [piece] = this.work.splice(at, 1);
+    if (piece !== undefined) await this.letGo(piece);
+  }
+
+  /** Clear the board. The project is left exactly as it was. */
+  async clear(): Promise<void> {
+    const all = this.work.splice(0, this.work.length);
+    for (const piece of all) await this.letGo(piece);
+  }
+
+  private find(id: string): PieceOfWork | undefined {
+    return this.work.find((one) => one.id === id);
+  }
+
+  private freeId(wanted: string): string {
+    const clean = safeName(wanted);
+    if (this.find(clean) === undefined) return clean;
+    return `${clean}-${String(this.asked)}`;
+  }
+
+  /** The one dangerous moment in the file, kept in one place: a copy is only
+   *  ever removed from inside the room we made it in, so nothing here can reach
+   *  the folder somebody is looking at. */
+  private async letGo(piece: PieceOfWork): Promise<void> {
+    const folder = piece.folder;
+    piece.folder = null;
+    if (folder === null || !insideRoom(this.under, folder)) return;
+    await this.history.removeWorkspace(folder);
+    await rm(folder, { recursive: true, force: true });
+  }
+}
+
+function safeName(id: string): string {
+  const clean = id
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return clean.length > 0 ? clean : 'work';
+}
+
+function insideRoom(under: string, folder: string): boolean {
+  const relative = path.relative(path.resolve(under), path.resolve(folder));
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 }

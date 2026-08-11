@@ -9,6 +9,23 @@
  * spawn a process by accident.
  */
 
+import { REACHABLE, type Reach } from './reach';
+
+export {
+  REACHABLE,
+  SAID,
+  describeStart,
+  reachShelf,
+  reachesMatching,
+  readReach,
+  readStored,
+  readValues,
+  toKept,
+  whereOf,
+  withAdded,
+} from './reach';
+export type { Kept, Reach, ReachShelf, ReachStore, Read, Start, Typed } from './reach';
+
 /* -------------------------------------------------------------------------- */
 /* One addition                                                                */
 /* -------------------------------------------------------------------------- */
@@ -230,6 +247,32 @@ function idOfSource(source: string): string {
   // Only a trailing version marker. The leading one belongs to a scope.
   const version = spec.lastIndexOf('@');
   return version > 0 ? spec.slice(0, version) : spec;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Both kinds, one shelf                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** One row of the shelf, whichever kind it is. Two shapes rather than one with
+ *  optional halves, so nothing can be drawn without knowing which it is. */
+export type Addable =
+  | { sort: 'reach'; id: string; reach: Reach }
+  | { sort: 'addition'; id: string; addition: Pack };
+
+/**
+ * The whole shelf in the order it is offered.
+ *
+ * What Graphe can reach comes first: it is what people arrive here looking for,
+ * and it is the half that is about their own work rather than about Graphe.
+ */
+export function everything(
+  packs: readonly Pack[],
+  reaches: readonly Reach[] = REACHABLE,
+): readonly Addable[] {
+  return [
+    ...reaches.map((reach) => ({ sort: 'reach' as const, id: reach.id, reach })),
+    ...packs.map((addition) => ({ sort: 'addition' as const, id: addition.id, addition })),
+  ];
 }
 
 /* -------------------------------------------------------------------------- */

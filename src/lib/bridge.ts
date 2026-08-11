@@ -439,6 +439,12 @@ function previewBridge(): Bridge {
             { name: '--space-4', value: '16px', kind: 'space', line: 42, steps: ['4px', '8px', '12px', '16px', '24px', '32px'] },
             { name: '--radius-md', value: '10px', kind: 'radius', line: 49, steps: ['4px', '6px', '10px', '14px'] },
             { name: '--accent', value: '#b8492c', kind: 'colour', line: 95, steps: [] },
+            // Named the way a project names things, so the readability band has
+            // real pairings: the muted grey is too pale on either surface.
+            { name: '--text', value: '#1a1a19', kind: 'colour', line: 96, steps: [] },
+            { name: '--text-muted', value: '#a3a3a0', kind: 'colour', line: 97, steps: [] },
+            { name: '--bg', value: '#fbfbfa', kind: 'colour', line: 98, steps: [] },
+            { name: '--bg-sunken', value: '#f1f1ee', kind: 'colour', line: 99, steps: [] },
           ],
           // Two near-misses on purpose, so the drift band has something to say
           // in the preview: a hair off the accent, and a hair off --space-4.
@@ -630,9 +636,12 @@ function previewBridge(): Bridge {
     checkWidths(): Promise<Result<{ looks: readonly Look[]; says: string }>> {
       return Promise.resolve(
         done({
+          // The sizes a project like this one designs at rather than three
+          // stock ones, which is what the app finds in its stylesheets.
           looks: [
             { id: 'phone', name: 'Phone', width: 390, shot: null, trouble: null },
-            { id: 'tablet', name: 'Tablet', width: 834, shot: null, trouble: null },
+            { id: 'tablet', name: 'Tablet', width: 768, shot: null, trouble: null },
+            { id: 'laptop', name: 'Laptop', width: 1024, shot: null, trouble: null },
             { id: 'desktop', name: 'Desktop', width: 1440, shot: null, trouble: null },
           ],
           says: 'There is no folder underneath a browser tab, so there is nothing to photograph.',

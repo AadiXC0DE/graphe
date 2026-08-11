@@ -908,6 +908,9 @@ export default function Gallery() {
                     tokens: [
                       { name: '--space-4', value: '16px', kind: 'space' as const, line: 42, steps: ['8px', '12px', '16px', '24px'] },
                       { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 95, steps: [] },
+                      { name: '--text', value: '#1a1a19', kind: 'colour' as const, line: 96, steps: [] },
+                      { name: '--text-muted', value: '#a3a3a0', kind: 'colour' as const, line: 97, steps: [] },
+                      { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 98, steps: [] },
                     ],
                     text: ':root { --accent: #b8492c; }',
         },

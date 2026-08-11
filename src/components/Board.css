@@ -1,0 +1,309 @@
+/* Several pieces of work at once, as a sheet of results.
+
+   The whole card is its picture. Everything we could say about the machinery —
+   how far along it is, how long it has been, how many are queued behind it — is
+   one quiet line, one size down, under the picture. A card that leads with its
+   state is a progress list with photographs pasted on.
+
+   Nothing here animates on arrival. Cards land while somebody is reading the
+   card beside them, and a sheet that reflows every time one finishes is a sheet
+   nobody can compare anything in. The one exception is the hairline on a card
+   that is still going, below. */
+
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.board__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.board__summary {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.board__note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ bands */
+
+.board__band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.board__band-name {
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Cells sized so three fit a rail-less panel and one fits a narrow window,
+   without a breakpoint per width. */
+.board__sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board__cell {
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------- one card */
+
+.work {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+}
+
+.work--done {
+  border-color: var(--border-strong);
+}
+
+/* The picture, or the sentence standing in for it. Same shape either way, so a
+   card finishing does not shove its neighbours around. */
+.work__frame {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.work__picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.work__open {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.work__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* No picture yet. There is something true to say — what this one is doing — so
+   it is said here, at the size a heading would be, instead of a grey rectangle
+   impersonating a picture that does not exist. */
+.work__instead {
+  margin: 0;
+  height: 100%;
+  padding: var(--space-4);
+  display: flex;
+  align-items: flex-end;
+  font-size: var(--text-base);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--text-muted);
+}
+
+.work--failed .work__instead {
+  color: var(--text-faint);
+}
+
+.work__said {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-3) var(--space-2);
+}
+
+.work__doing {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text);
+  /* Two lines, then it is cut. A sentence is a sentence, not a paragraph. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.work__state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.work__when {
+  color: var(--text-faint);
+}
+
+.work__when::before {
+  content: '·';
+  margin-right: var(--space-2);
+}
+
+/* The dot carries no meaning on its own — the words beside it say the state —
+   so it is tone only, and never the sole difference between two cards. */
+.work__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.work--running .work__dot {
+  background: var(--accent);
+}
+
+.work--done .work__dot {
+  background: var(--text-muted);
+}
+
+.work__trouble {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------- controls */
+
+.work__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: auto;
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+.work__keep,
+.work__drop {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.work__keep {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.work__drop {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.work__keep:active,
+.work__drop:active {
+  transform: scale(0.97);
+}
+
+.work__keep:focus-visible,
+.work__drop:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .work__drop:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+
+  .work__keep:hover {
+    background: color-mix(in srgb, var(--accent) 88%, var(--text));
+  }
+}
+
+/* --------------------------------------------------------------- still going */
+
+/* One hairline along the top of a card that has not finished. It is the only
+   motion on the sheet, it says "this one is not the final picture", and it is
+   slow enough to read as breathing rather than as a spinner asking to be
+   watched. */
+.work--running::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 70%, transparent),
+    transparent
+  );
+  animation: board-sweep 2.4s var(--ease-in-out-cubic) infinite;
+}
+
+@keyframes board-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Asked for less movement: the line is simply there, at rest. Still visible,
+   because it is the only thing separating a card that is going from one that is
+   waiting on a sheet where the pictures are the point. */
+@media (prefers-reduced-motion: reduce) {
+  .work--running::before {
+    animation: none;
+    background: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+
+  .work__keep:active,
+  .work__drop:active {
+    transform: none;
+  }
+}

@@ -1,0 +1,184 @@
+/* Everything in this project.
+
+   A panel of two hundred rows is furniture, not an event, so nothing here
+   arrives with a movement. The only transitions are hover, press and the
+   twisty, which are the three the frequency rule in notes/strategy/UI-DESIGN.md
+   allows. */
+
+.files {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.files__band {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0 var(--space-1) var(--space-3);
+}
+
+/* The same chip as the version rail's, because it is the same idea: one press,
+   one thing shown or not shown. */
+.files__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.files__chipdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* On is a fill and a dot, never a colour on its own. */
+.files__chip[aria-pressed='true'] {
+  color: var(--accent-ink);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: var(--accent-soft);
+}
+
+.files__chip[aria-pressed='true'] .files__chipdot {
+  background: var(--accent);
+}
+
+.files__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.files__tree {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.files__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 28px;
+  padding-block: 2px;
+  padding-inline-end: var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: default;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.files__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.files__row--here {
+  background: var(--bg-sunken);
+}
+
+.files__row--here .files__name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* Always the same width, folder or file, so the names line up in a column
+   rather than stepping in and out by one glyph. */
+.files__twist {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+  transition: transform var(--dur-micro) var(--ease-in-out-cubic);
+}
+
+.files__twist--open {
+  transform: rotate(90deg);
+}
+
+.files__name {
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.files__name--folder {
+  color: var(--text);
+}
+
+/* Changed is a mark and a word — the word is only for a screen reader, but it
+   is there, so nothing about this row depends on seeing the colour. */
+.files__moved {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.files__meta {
+  margin-inline-start: auto;
+  padding-inline-start: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.files__none {
+  margin: 0;
+  padding: var(--space-2) var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.files__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .files__row:hover {
+    background: var(--bg-sunken);
+  }
+
+  .files__chip:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+
+  .files__chip[aria-pressed='true']:hover {
+    color: var(--accent-ink);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .files__twist {
+    transition: none;
+  }
+}

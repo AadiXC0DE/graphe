@@ -20,7 +20,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import type { ModelChoice } from '../lib/ipc';
+import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { asTrusted, sameTrusted, type Trusted } from './carried';
 import { asKept, sameKept, type Kept } from './kept';
 
@@ -45,6 +45,10 @@ export type Preferences = {
    * full list so a choice is never more than one click away.
    */
   model: ModelChoice | null;
+  /** How much time each model should take before it answers. The map is keyed
+   * by its provider and model id because different models support different
+   * choices. */
+  thinking: Readonly<Record<string, ThinkingLevel>>;
   /**
    * Versions somebody chose to keep at the top of the rail, by project folder.
    *
@@ -88,6 +92,7 @@ export type Preferences = {
 export const defaultPreferences: Preferences = {
   showMe: false,
   model: null,
+  thinking: {},
   kept: {},
   trusted: {},
   showFiles: false,
@@ -103,6 +108,16 @@ function asPreferences(value: unknown): Preferences {
   const record = raw as Record<string, unknown>;
   const showMe = record['showMe'];
   const model = record['model'];
+  const rawThinking = record['thinking'];
+  const thinking: Record<string, ThinkingLevel> = {};
+  const levels = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+  if (typeof rawThinking === 'object' && rawThinking !== null && !Array.isArray(rawThinking)) {
+    for (const [key, level] of Object.entries(rawThinking)) {
+      if (typeof level === 'string' && levels.has(level as ThinkingLevel)) {
+        thinking[key] = level as ThinkingLevel;
+      }
+    }
+  }
   return {
     showMe: showMe === true,
     model:
@@ -115,11 +130,21 @@ function asPreferences(value: unknown): Preferences {
             modelId: (model as Record<string, unknown>)['modelId'] as string,
           }
         : null,
+    thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
     showFiles: record['showFiles'] === true,
     holdBack: record['holdBack'] === true,
   };
+}
+
+function sameThinking(
+  left: Readonly<Record<string, ThinkingLevel>>,
+  right: Readonly<Record<string, ThinkingLevel>>,
+): boolean {
+  const leftEntries = Object.entries(left);
+  if (leftEntries.length !== Object.keys(right).length) return false;
+  return leftEntries.every(([key, level]) => right[key] === level);
 }
 
 export class PreferenceFile {
@@ -149,6 +174,7 @@ export class PreferenceFile {
       next.holdBack === this.#preferences.holdBack &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
+      sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted);
     if (unchanged) return this.all();

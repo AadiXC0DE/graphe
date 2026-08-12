@@ -314,3 +314,67 @@
     transition-delay: 0s !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Finding one, and the rest of a long shelf
+   Every row here is a live demonstration, so a project with hundreds of them is
+   drawn a screenful at a time rather than all at once.
+   --------------------------------------------------------------------------- */
+
+.motion__find {
+  width: 100%;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-xs);
+}
+
+.motion__find::placeholder {
+  color: var(--text-faint);
+}
+
+.motion__find:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.motion__more {
+  align-self: flex-start;
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.motion__more:active {
+  transform: scale(0.97);
+}
+
+.motion__more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .motion__more:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion__more:active {
+    transform: none;
+  }
+}

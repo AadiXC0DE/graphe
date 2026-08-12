@@ -1,0 +1,303 @@
+/* The history drawn as lines, with one moment open beside it.
+
+   The list and the drawing behind it are one object: the SVG is positioned at
+   the top-left of the rows and every row is exactly --row tall, so a dot lands
+   on the row it belongs to whatever the title in it says. */
+
+.graph {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  align-items: start;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5) var(--space-6);
+}
+
+/* Measured against the surface rather than the window: this is also drawn in
+   the gallery, in a box narrower than the screen it is in. */
+@container (max-width: 900px) {
+  .graph {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.graph__lines {
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.graph__rows {
+  position: relative;
+}
+
+.graph__svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.graph__none {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+.graph__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.graph__row {
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.graph__row--here {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+.graph__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .graph__row:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+.graph__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A name somebody put on this moment. Monospace, because that is what it is. */
+.graph__ref {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.graph__badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--text-2xs);
+}
+
+.graph__who,
+.graph__when,
+.graph__id {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+/* Pushed to the right-hand end, in the order a terminal would print them. */
+.graph__who {
+  margin-left: auto;
+}
+
+/* Narrow enough that the title would be the thing to give way. It is the only
+   part of a row nobody can do without, so the rest goes instead. */
+@container (max-width: 520px) {
+  .graph__who,
+  .graph__when {
+    display: none;
+  }
+}
+
+.graph__id {
+  min-width: 56px;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.graph__more {
+  margin-top: var(--space-3);
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   One moment, whole
+   -------------------------------------------------------------------------- */
+
+.graph__about {
+  position: sticky;
+  top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+}
+
+.graph__shot {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  object-fit: cover;
+  object-position: top center;
+  max-height: 160px;
+}
+
+.graph__abouttitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.graph__aboutwhen {
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.graph__facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--space-3);
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-2xs);
+}
+
+.graph__facts dt {
+  color: var(--text-faint);
+}
+
+.graph__facts dd {
+  margin: 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.graph__mono {
+  font-family: var(--font-mono);
+}
+
+.graph__note {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.graph__do {
+  margin-top: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--accent-ink);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.graph__do:active {
+  transform: scale(0.98);
+}
+
+.graph__do:disabled {
+  opacity: 0.55;
+}
+
+.graph__now {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.graph__files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.graph__file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 24px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.graph__filename {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+
+.graph__filenew {
+  flex: none;
+  color: var(--text-faint);
+  font-family: var(--font-ui);
+}
+
+.graph__more:focus-visible,
+.graph__do:focus-visible,
+.graph__file:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .graph__more:hover,
+  .graph__file:hover {
+    color: var(--text);
+  }
+
+  .graph__do:hover {
+    background: var(--accent-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph__do:active {
+    transform: none;
+  }
+}

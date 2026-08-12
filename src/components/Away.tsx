@@ -88,8 +88,9 @@ export default function Away({
   onForgetRepeat,
 }: AwayProps) {
   const [doing, setDoing] = useState('');
-  /* The form for something asked for over and over, which is folded away until
-     somebody wants it. The band is about work first. */
+  /* Both forms are folded until somebody wants one. The band is about what is
+     running; a pair of empty boxes above that is a pair of empty boxes. */
+  const [starting, setStarting] = useState(false);
   const [asking, setAsking] = useState(false);
   const [repeatDoing, setRepeatDoing] = useState('');
   const [every, setEvery] = useState<EveryKind>('day');
@@ -104,6 +105,7 @@ export default function Away({
     const text = doing.trim();
     if (text === '') return;
     setDoing('');
+    setStarting(false);
     onKeepGoing(text);
   };
 
@@ -116,8 +118,50 @@ export default function Away({
   };
 
   return (
-    <section className="away" aria-label="What happens while you are away">
-      <h2 className="away__title">While you’re away</h2>
+    <section className="away" aria-label="Background work">
+      <div className="away__top">
+        <h2 className="away__title">Background work</h2>
+        <button
+          type="button"
+          className="away__new"
+          aria-expanded={starting}
+          onClick={() => setStarting((was) => !was)}
+        >
+          {awayWords.keepGoing}
+        </button>
+      </div>
+
+      {/* Where the hand already is: one box, and it carries on without you. */}
+      {starting ? (
+        <div className="away__ask">
+          <textarea
+            id="away-doing"
+            className="away__box"
+            rows={2}
+            autoFocus
+            value={doing}
+            placeholder={standingWords.example}
+            aria-label={awayWords.keepGoing}
+            disabled={busy}
+            onChange={(event) => setDoing(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                send();
+              }
+            }}
+          />
+          <p className="away__hint">{awayWords.keepGoingHint}</p>
+          <button
+            type="button"
+            className="away__do away__do--first"
+            onClick={send}
+            disabled={busy || doing.trim() === ''}
+          >
+            {awayWords.start}
+          </button>
+        </div>
+      ) : null}
 
       {away?.sinceYouWere === null || away?.sinceYouWere === undefined ? null : (
         <p className="away__since" role="status">
@@ -166,7 +210,9 @@ export default function Away({
       )}
 
       {pieces.length === 0 ? (
-        <p className="away__quiet">{awayWords.nothing}</p>
+        <p className="away__quiet">
+          {awayWords.nothing} {awayWords.what}
+        </p>
       ) : (
         <Board
           pieces={pieces}
@@ -181,41 +227,20 @@ export default function Away({
         <p className="away__spent">{`${formatMoney(away.spent)} so far`}</p>
       )}
 
-      {/* Where the hand already is: one box, and it carries on without you. */}
-      <div className="away__ask">
-        <label className="away__label" htmlFor="away-doing">
-          {awayWords.keepGoing}
-        </label>
-        <textarea
-          id="away-doing"
-          className="away__box"
-          rows={2}
-          value={doing}
-          placeholder={standingWords.example}
-          disabled={busy}
-          onChange={(event) => setDoing(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              send();
-            }
-          }}
-        />
-        <p className="away__hint">{awayWords.keepGoingHint}</p>
-        <button
-          type="button"
-          className="away__do away__do--first"
-          onClick={send}
-          disabled={busy || doing.trim() === ''}
-        >
-          Get on with it
-        </button>
-      </div>
-
       {/* The same thing, on a rhythm. Behind the same control rather than in a
           settings screen somewhere else. */}
       <div className="away__over">
-        <h3 className="away__subtitle">{standingWords.title}</h3>
+        <div className="away__top">
+          <h3 className="away__subtitle">{standingWords.title}</h3>
+          <button
+            type="button"
+            className="away__new"
+            aria-expanded={asking}
+            onClick={() => setAsking((was) => !was)}
+          >
+            {standingWords.label}
+          </button>
+        </div>
         {repeats.length === 0 ? (
           <p className="away__quiet">{standingWords.none}</p>
         ) : (
@@ -250,15 +275,6 @@ export default function Away({
             ))}
           </ul>
         )}
-
-        <button
-          type="button"
-          className="away__quietdo away__alone"
-          aria-expanded={asking}
-          onClick={() => setAsking((was) => !was)}
-        >
-          {standingWords.label}
-        </button>
 
         {asking ? (
           <div className="away__form">

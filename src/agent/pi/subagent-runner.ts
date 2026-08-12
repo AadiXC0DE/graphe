@@ -23,11 +23,21 @@
  * argued out.
  */
 
+import { join } from 'node:path';
+
 import { patchWorkerThreads } from './node-shim';
 
 patchWorkerThreads();
 
-type Job = { task: string; cwd?: string; agentDir?: string };
+type Job = {
+  task: string;
+  cwd?: string;
+  agentDir?: string;
+  /** Who to think with. Without it Pi falls back to its own settings, which in
+   *  this app nobody has ever written — and a session with no model answers
+   *  nothing at all, which is what a helper saying nothing looked like. */
+  model?: { providerId: string; modelId: string } | null;
+};
 
 /** The one channel out. Only JSON lines ever leave, so a parent that reads by
  *  line never has to guess which parts are report and which are noise. The
@@ -65,6 +75,16 @@ function readJob(): Promise<Job> {
 const DECLINED =
   'This could not be done by a helper: helpers cannot ask questions or change anything. Report what you found and let the main agent decide.';
 
+/** No account reached the child. Said as a failure rather than an empty answer:
+ *  the parent turns this into the tool's error text, so the model reads it and
+ *  says something true instead of reporting a finding it never made. */
+const NO_MODEL =
+  'The helper had nothing to think with — no account reached it. Nothing was looked at.';
+
+/** A helper that ran and said nothing is not a helper that found nothing. */
+const SAID_NOTHING =
+  'The helper finished without saying anything. Nothing was found, and nothing was changed.';
+
 /** The only tools this process may run at all — a second lock on the `tools:`
  *  list below, so anything a resource or a Pi upgrade registers is blocked by
  *  name rather than allowed by omission. */
@@ -83,12 +103,31 @@ async function main(): Promise<number> {
   const agentDir = job.agentDir ?? '';
   const facts = { projectRoot: cwd };
 
+  try {
+    return await work(job, cwd, agentDir, facts);
+  } catch (cause) {
+    // Everything below used to sit outside a try: a package that would not load
+    // or a resource folder that would not read exited mute, and the parent could
+    // only guess from whatever the last line of stderr happened to be.
+    report({ type: 'done', outcome: { ok: false, error: messageOf(cause) } });
+    return 1;
+  }
+}
+
+async function work(
+  job: Job,
+  cwd: string,
+  agentDir: string,
+  facts: { projectRoot: string },
+): Promise<number> {
+
   // Everything Pi and the policy modules take to load is done before any
   // question can be answered, so the child either has all of it or fails with a
   // single sentence. The Pi load is the same dynamic import the adapter uses —
   // nothing of Pi exists in this process until a job actually arrives.
   const pi = await import('@earendil-works/pi-coding-agent');
   const { websearchTool, webfetchTool } = await import('./tools.ts');
+  const helperTools = [websearchTool, webfetchTool];
   const { EventRelay } = await import('./events.ts');
   const { evaluate, changesAnything } = await import('../guard/policy.ts');
 
@@ -117,6 +156,35 @@ async function main(): Promise<number> {
   // The helper's Guard is a resource-layer hook rather than a session option:
   // extension factories plug into the resource loader, exactly as the main
   // session wires them.
+  /* The same credentials the window signed in with, read from the same two
+     files. Without this the child builds a runtime against the default agent
+     folder, which in a packaged app is not where the account lives. */
+  const runtime = await pi.ModelRuntime.create(
+    agentDir === ''
+      ? {}
+      : { authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') },
+  );
+
+  const chosen = job.model ?? null;
+  const model =
+    chosen === null
+      ? runtime.getAvailableSnapshot()[0]
+      : (runtime.getModel(chosen.providerId, chosen.modelId) ?? runtime.getAvailableSnapshot()[0]);
+
+  // Said rather than survived. A helper with nothing to think with used to
+  // finish quietly with an empty answer, which read as "it worked and found
+  // nothing" — the most expensive possible way to be wrong.
+  if (model === undefined) {
+    report({
+      type: 'done',
+      outcome: {
+        ok: false,
+        error: NO_MODEL,
+      },
+    });
+    return 1;
+  }
+
   const loader = new pi.DefaultResourceLoader({
     cwd,
     agentDir,
@@ -155,7 +223,8 @@ async function main(): Promise<number> {
     }
     if (event.type === 'error') finish({ ok: false, error: event.message });
     if (event.type === 'settled') {
-      finish({ ok: true, text: spoken.trim() });
+      const said = spoken.trim();
+      finish(said === '' ? { ok: false, error: SAID_NOTHING } : { ok: true, text: said });
     }
   });
 
@@ -164,8 +233,14 @@ async function main(): Promise<number> {
       cwd,
       agentDir,
       // The read-only built-ins, by name — no shell, no edits, no writes.
-      tools: ['read', 'ls', 'grep', 'find'],
-      customTools: [websearchTool, webfetchTool],
+      // Naming `tools` at all makes it an absolute allowlist that custom tools
+      // are filtered through too, so the two web tools have to be in it or they
+      // are registered and immediately dropped — which is how a helper sent to
+      // research something ended up able to read local files and nothing else.
+      tools: ['read', 'ls', 'grep', 'find', ...helperTools.map((tool) => tool.name)],
+      customTools: helperTools,
+      modelRuntime: runtime,
+      model,
       sessionManager: pi.SessionManager.inMemory(cwd),
       settingsManager: pi.SettingsManager.create(cwd, agentDir),
       resourceLoader: loader,
@@ -178,7 +253,10 @@ async function main(): Promise<number> {
     // A run that was refused outright can resolve with no `settled` to follow.
     // Give the event a beat to land, then answer with whatever did.
     await new Promise((wake) => setTimeout(wake, 250));
-    if (!finished) finish({ ok: true, text: spoken.trim() });
+    if (!finished) {
+      const said = spoken.trim();
+      finish(said === '' ? { ok: false, error: SAID_NOTHING } : { ok: true, text: said });
+    }
     unsubscribe();
   } catch (cause) {
     finish({ ok: false, error: messageOf(cause) });
@@ -191,10 +269,29 @@ function messageOf(cause: unknown): string {
   return cause instanceof Error && cause.message !== '' ? cause.message : 'The helper stopped before it finished.';
 }
 
-void main().then((code) => {
-  // The report has been written by the time main resolves; give the pipe a
-  // moment to drain before the process goes.
-  setTimeout(() => process.exit(code), 50);
-}, () => {
-  process.exit(1);
-});
+void main().then(leave, () => leave(1));
+
+/**
+ * Wait for the report to actually reach the parent.
+ *
+ * `process.exit` throws away whatever is still sitting in the pipe, and stdout
+ * to a pipe is asynchronous — so a fifty-millisecond timer was a hope, not a
+ * guarantee. A helper's answer is one long JSON line, which is exactly the
+ * shape that gets cut in half: the parent could not parse it, kept nothing, and
+ * reported a helper that had finished without saying anything.
+ *
+ * Setting `exitCode` and letting the loop empty is the version that cannot lose
+ * the answer. The timer stays as a backstop for a pipe nobody is reading.
+ */
+function leave(code: number): void {
+  process.exitCode = code;
+  const give = setTimeout(() => process.exit(code), 5000);
+  give.unref();
+  if (process.stdout.writableLength === 0) {
+    clearTimeout(give);
+    return;
+  }
+  process.stdout.once('drain', () => {
+    clearTimeout(give);
+  });
+}

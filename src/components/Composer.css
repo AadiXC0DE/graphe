@@ -47,6 +47,29 @@
   padding: var(--space-1) var(--space-2) 0;
 }
 
+/* One height for everything in the row.
+
+   Each of these sets its own, and three components agreeing on a number by
+   coincidence is three components that stop agreeing the moment one of them is
+   edited. The row owns the rhythm, so the row says it once. */
+.composer__row .ways__chip,
+.composer__row .asking__chip,
+.composer__row .thinking__chip,
+.composer__row .room__tidy {
+  min-height: 26px;
+}
+
+/* Each chip sits in its own wrapper so its menu has something to hang from.
+   Left as blocks those wrappers get a line box, and a line box is a pixel taller
+   when the chip inside it starts with an inline <svg> than when it starts with a
+   dot — which is exactly how three chips on one row ended up on two baselines. */
+.composer__row .ways,
+.composer__row .asking,
+.composer__row .thinking {
+  display: flex;
+  align-items: center;
+}
+
 .composer__hint {
   flex: 1;
   min-width: 0;

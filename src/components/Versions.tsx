@@ -28,6 +28,9 @@ type Props = {
    *  long as it is on screen. */
   kept?: readonly string[];
   onKeep?: (versionId: string, keep: boolean) => void;
+  /** Somebody above is already saying what this is, so it does not say it
+   *  again. */
+  bare?: boolean;
 };
 
 /**
@@ -79,6 +82,7 @@ export default function Versions({
   pictures,
   kept,
   onKeep,
+  bare,
 }: Props) {
   /** The card whose name is being written. Clicking a card means "this one",
    *  and naming is the one thing there is to do with that. */
@@ -119,7 +123,7 @@ export default function Versions({
 
   return (
     <aside className="rail" aria-label="Versions of your project">
-      <h2 className="rail__title">Versions</h2>
+      {bare === true ? null : <h2 className="rail__title">Versions</h2>}
 
       {putBack === null ? null : (
         <div className="rail__putback" role="status">

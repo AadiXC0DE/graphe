@@ -288,9 +288,12 @@ export function nowDoing(turns: readonly Turn[], at: number = Date.now()): NowVi
       helpers.push({
         id: turn.id,
         task: turn.detail ?? '',
-        saying: turn.state === 'running' ? (turn.detail ?? null) : null,
+        // Whatever it has said, running or finished. It used to be blanked the
+        // moment a helper came back, so every finished helper on the board read
+        // as one that had found nothing.
+        saying: turn.progress ?? null,
         state: turn.state === 'running' ? 'running' : turn.state === 'failed' ? 'failed' : 'done',
-        startedAt: at,
+        startedAt: turn.at ?? at,
       });
     }
     if (turn.state === 'running') step = { label: turn.label, detail: turn.detail };

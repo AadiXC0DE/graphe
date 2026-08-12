@@ -1234,3 +1234,46 @@ describe('G-03 the reading half of a connection somebody added', () => {
     });
   }
 });
+
+/* ========================================================================== */
+/* S-14 the questions turned off, and what survives that                       */
+/* ========================================================================== */
+
+describe('S-14 somebody who has asked not to be interrupted', () => {
+  const quiet: GuardFacts = { projectRoot: ROOT, stopAsking: true };
+
+  it('stops asking about the ordinary things it would have asked about', () => {
+    // Every one of these is a `confirm` with the switch off.
+    expect(kindOf(call('web_search', { query: 'css grid subgrid' }))).toBe('confirm');
+    expect(kindOf(call('web_search', { query: 'css grid subgrid' }), quiet)).toBe('allow');
+  });
+
+  it('still refuses everything it refuses', () => {
+    expect(kindOf(bash('rm -rf /'), quiet)).toBe('deny');
+    expect(kindOf(bash('cat ~/.ssh/id_rsa'), quiet)).toBe('deny');
+    expect(kindOf(call('write', { path: '../../../etc/hosts', content: 'x' }), quiet)).toBe('deny');
+  });
+
+  it('still saves a restore point wherever one was going to be saved', () => {
+    // The question goes; the way back does not. This is the whole reason the
+    // switch is safe enough to offer.
+    const sweep = call('bash', { command: 'find . -name "*.tsx" -exec sed -i "" s/a/b/ {} +' });
+    expect(requiresSnapshot(sweep, ctx)).toBe(true);
+    expect(requiresSnapshot(sweep, quiet)).toBe(true);
+    expect(kindOf(sweep, ctx)).toBe('confirm');
+    expect(kindOf(sweep, quiet)).toBe('snapshot-first');
+  });
+
+  it('leaves reads exactly as they were', () => {
+    expect(kindOf(call('read', { path: 'src/App.tsx' }), quiet)).toBe('allow');
+    expect(changesAnything(call('read', { path: 'src/App.tsx' }), quiet)).toBe(false);
+  });
+
+  /* Said out loud, about this project, in the conversation. A switch in a
+     toolbar does not get to overrule it — that is the Replit failure again. */
+  it('never overrules "ask me before you change anything"', () => {
+    const both: GuardFacts = { projectRoot: ROOT, stopAsking: true, askBeforeEveryChange: true };
+    expect(kindOf(call('write', { path: 'src/App.tsx', content: 'x' }), both)).toBe('confirm');
+    expect(kindOf(bash('npm install left-pad'), both)).toBe('confirm');
+  });
+});

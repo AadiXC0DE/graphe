@@ -350,10 +350,14 @@ describe('P-03 desks, in the window', () => {
   it('keeps each timeline to its own project', () => {
     const version = (id: string): SavedVersion => ({
       id,
+      shortId: id.slice(0, 7),
       at: 1000,
       title: id,
       by: 'graphe',
       named: false,
+      parents: [],
+      refs: [],
+      wentBackTo: null,
       current: true,
     });
 

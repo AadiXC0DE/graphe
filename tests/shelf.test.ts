@@ -1,27 +1,9 @@
-/** The shelf's arithmetic: what a page row has to say, what a typed word keeps,
- *  which day a conversation falls under, and the order the parts come out in. */
+/** The shelf's arithmetic: what a typed word keeps, and which day a
+ *  conversation falls under. */
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  byDay,
-  cleanPageName,
-  markOf,
-  matching,
-  needsDayLabels,
-  needsSearch,
-  partsInOrder,
-  SEARCH_APPEARS_AT,
-  type Part,
-  type ShelfPage,
-} from '../src/lib/shelf';
-
-const page = (extra: Partial<ShelfPage> = {}): ShelfPage => ({
-  route: '/pricing',
-  file: 'src/pages/pricing.tsx',
-  name: 'Pricing',
-  ...extra,
-});
+import { byDay, matching, needsDayLabels, needsSearch, SEARCH_APPEARS_AT } from '../src/lib/shelf';
 
 /** Midday, so a test never straddles a midnight. */
 const NOON = new Date(2026, 7, 12, 12, 0, 0).getTime();
@@ -32,80 +14,6 @@ const said = (title: string, at: number) => {
   counter += 1;
   return { id: `c${counter}`, path: `/c/${counter}`, title, at, messages: 2 };
 };
-
-/* ========================================================================== */
-/* What a page row says about itself                                           */
-/* ========================================================================== */
-
-describe('what a page row has to show', () => {
-  it('shows nothing extra when it was told nothing extra', () => {
-    expect(markOf(page())).toEqual({
-      showing: false,
-      changed: false,
-      problems: 0,
-      says: null,
-    });
-  });
-
-  it('marks the one the preview is pointed at', () => {
-    const mark = markOf(page({ showing: true }));
-    expect(mark.showing).toBe(true);
-    expect(mark.says).toBe('Open in the preview');
-  });
-
-  it('marks one that moved in the newest version', () => {
-    expect(markOf(page({ changed: true })).says).toBe('Changed in the newest version');
-  });
-
-  it('counts one thing to fix as one thing, not one things', () => {
-    expect(markOf(page({ problems: 1 })).says).toBe('1 thing to fix');
-    expect(markOf(page({ problems: 4 })).says).toBe('4 things to fix');
-  });
-
-  it('says all of it, in the order the row draws it', () => {
-    expect(markOf(page({ showing: true, changed: true, problems: 2 })).says).toBe(
-      'Open in the preview, Changed in the newest version, 2 things to fix',
-    );
-  });
-
-  it('treats no problems and nonsense problems the same way', () => {
-    expect(markOf(page({ problems: 0 })).problems).toBe(0);
-    expect(markOf(page({ problems: -3 })).problems).toBe(0);
-    expect(markOf(page({ problems: Number.NaN })).problems).toBe(0);
-    expect(markOf(page({ problems: 2.7 })).problems).toBe(2);
-    expect(markOf(page({ problems: 0 })).says).toBeNull();
-  });
-});
-
-/* ========================================================================== */
-/* Naming a page that does not exist yet                                       */
-/* ========================================================================== */
-
-describe('the name somebody types for a new page', () => {
-  it('keeps what they meant and drops the rest', () => {
-    expect(cleanPageName('  About us  ')).toBe('About us');
-    expect(cleanPageName('About    us')).toBe('About us');
-    expect(cleanPageName('About\nus')).toBe('About us');
-  });
-
-  it('reads a typed address as the name inside it', () => {
-    expect(cleanPageName('/pricing')).toBe('pricing');
-    expect(cleanPageName('///pricing///')).toBe('pricing');
-    expect(cleanPageName('\\pricing')).toBe('pricing');
-    expect(cleanPageName('blog/first-post')).toBe('blog/first-post');
-  });
-
-  it('is nothing when they typed nothing worth asking for', () => {
-    expect(cleanPageName('')).toBeNull();
-    expect(cleanPageName('   ')).toBeNull();
-    expect(cleanPageName('/')).toBeNull();
-    expect(cleanPageName(' / / ')).toBeNull();
-  });
-
-  it('will not take a paragraph as a name', () => {
-    expect(cleanPageName('x'.repeat(200))).toHaveLength(60);
-  });
-});
 
 /* ========================================================================== */
 /* When the field for finding one appears                                      */
@@ -217,46 +125,5 @@ describe('conversations, a day at a time', () => {
   it('does not label a day when there is only the one', () => {
     expect(needsDayLabels(byDay([said('a', NOON), said('b', NOON)], NOON))).toBe(false);
     expect(needsDayLabels(byDay([said('a', NOON), said('b', NOON - DAY)], NOON))).toBe(true);
-  });
-});
-
-/* ========================================================================== */
-/* What the project is made of                                                 */
-/* ========================================================================== */
-
-describe('the pieces a project is built from', () => {
-  const parts: readonly Part[] = [
-    { id: 'card', name: 'Card', uses: 4 },
-    { id: 'button', name: 'Button', uses: 12 },
-    { id: 'field', name: 'Text field' },
-    { id: 'badge', name: 'Badge', uses: 4 },
-  ];
-
-  it('has nothing to draw when there is nothing there', () => {
-    expect(partsInOrder([])).toEqual([]);
-  });
-
-  it('puts the most used first, then settles ties by name', () => {
-    expect(partsInOrder(parts).map((one) => one.name)).toEqual([
-      'Button',
-      'Badge',
-      'Card',
-      'Text field',
-    ]);
-  });
-
-  it('draws one row per piece however many times it was handed over', () => {
-    const twice = [...parts, { id: 'card', name: 'Card again', uses: 99 }];
-    const order = partsInOrder(twice);
-    expect(order).toHaveLength(4);
-    expect(order.map((one) => one.name)).not.toContain('Card again');
-  });
-
-  it('leaves a piece nobody counted at the bottom rather than guessing', () => {
-    const order = partsInOrder([
-      { id: 'field', name: 'Text field' },
-      { id: 'button', name: 'Button', uses: 1 },
-    ]);
-    expect(order.map((one) => one.name)).toEqual(['Button', 'Text field']);
   });
 });

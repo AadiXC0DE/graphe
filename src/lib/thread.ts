@@ -34,8 +34,17 @@ export type Turn =
       id: string;
       callId: string;
       state: ActivityState;
+      /** When it began, epoch ms. A helper's card counts up from this; without
+       *  it every helper on the board claimed to have started this second. */
+      at?: number;
       label: string;
       detail?: string;
+      /** What the step has said for itself while running — a helper's findings
+       *  as they arrive. Kept apart from `detail`, which is what it was asked:
+       *  overwriting one with the other loses the question the moment the first
+       *  answer arrives, and a helper with no question beside it is a card
+       *  nobody can read. */
+      progress?: string;
       /** The real command, path or operation behind this step. Recorded on
        *  every turn and shown only when "Show me" is on — see the note on
        *  `real` below. */
@@ -217,6 +226,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
           id: newId(),
           callId: event.call.id,
           state: 'running',
+          at: Date.now(),
           label: described.label,
           detail: described.detail,
           // Recorded whether or not "Show me" is on, so that turning it on
@@ -231,7 +241,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
     case 'tool-progress':
       return turns.map((turn) =>
         turn.kind === 'did' && turn.callId === event.id && turn.state === 'running'
-          ? { ...turn, detail: event.text }
+          ? { ...turn, progress: event.text }
           : turn,
       );
 

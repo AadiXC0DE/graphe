@@ -90,6 +90,45 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: var(--space-2);
+}
+
+/* The mark is the way back; everything under the line is somewhere to go. */
+.shelf__thinline {
+  width: 22px;
+  height: 1px;
+  background: var(--border);
+}
+
+.shelf__act {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  color: var(--text-faint);
+  -webkit-app-region: no-drag;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* 44px of hit area under a 38px control, as the mark above it does. */
+.shelf__act::after {
+  content: '';
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  top: 50%;
+  height: 44px;
+  transform: translateY(-50%);
+}
+
+.shelf__act:active {
+  transform: scale(0.97);
 }
 
 .shelf__mark {
@@ -245,17 +284,24 @@
   .shelf__mark:hover {
     background: var(--accent-soft);
   }
+
+  .shelf__act:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .shelf__collapse:active,
-  .shelf__mark:active {
+  .shelf__mark:active,
+  .shelf__act:active {
     transform: none;
   }
 }
 
 .shelf__collapse:focus-visible,
-.shelf__mark:focus-visible {
+.shelf__mark:focus-visible,
+.shelf__act:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -334,9 +380,9 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Finding one, and naming a new one
-   Both are the same small field: one narrows a long column, the other takes a
-   name for something that does not exist yet.
+   Finding one
+   A long column of names needs narrowing; a short one does not, so the field
+   only appears once there is a column to narrow.
    --------------------------------------------------------------------------- */
 
 .shelf__find {
@@ -362,8 +408,61 @@
   outline-offset: -1px;
 }
 
-.shelf__naming {
-  display: block;
+/* ---------------------------------------------------------------------------
+   The foot
+   The shelf is the scroller, so the last row has to be stuck to it or a long
+   list carries it off the bottom of the window.
+   --------------------------------------------------------------------------- */
+
+.shelf__foot {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  padding-top: var(--space-3);
+  background: var(--bg);
+}
+
+/* Sticky stops at the shelf's own bottom padding, so that strip is painted too
+   — otherwise the list shows through beneath the row. */
+.shelf__foot::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--space-3);
+  background: var(--bg);
+}
+
+/* The list ends rather than stops. */
+.shelf__foot::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: var(--space-4);
+  background: linear-gradient(to top, var(--bg), transparent);
+  pointer-events: none;
+}
+
+.shelf__more {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.shelf__moremark {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-faint);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .shelf__more:hover .shelf__rowname,
+  .shelf__more:hover .shelf__moremark {
+    color: var(--text);
+  }
 }
 
 /* The day a conversation was had, as a line you read past rather than one you
@@ -378,117 +477,4 @@
   font-size: var(--text-2xs);
   font-weight: 500;
   color: var(--text-faint);
-}
-
-/* ---------------------------------------------------------------------------
-   A page row that says how it is doing
-   The picture carries the recognition, the marks on the right carry the state,
-   and both are absent by default so a row with nothing to add is the plain row
-   it always was.
-   --------------------------------------------------------------------------- */
-
-.shelf__page {
-  position: relative;
-  flex-direction: row;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.shelf__pagewords {
-  display: flex;
-  flex-direction: column;
-  align-items: baseline;
-  gap: 1px;
-  min-width: 0;
-  flex: 1;
-}
-
-.shelf__shot {
-  flex: none;
-  width: 30px;
-  height: 22px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
-  object-fit: cover;
-  object-position: top center;
-}
-
-.shelf__shot--none {
-  background: var(--bg-sunken);
-}
-
-.shelf__marks {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.shelf__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-/* The one the preview is pointed at. */
-.shelf__dot--live {
-  background: var(--accent);
-}
-
-/* It moved in the newest version. */
-.shelf__dot--moved {
-  border: 1px solid var(--border-control);
-}
-
-.shelf__count {
-  min-width: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-  font-size: var(--text-2xs);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-/* The marks in words, for anyone reading the rail rather than looking at it. */
-.shelf__says {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-/* ---------------------------------------------------------------------------
-   What the project is made of
-   --------------------------------------------------------------------------- */
-
-.shelf__part {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-height: 28px;
-}
-
-.shelf__part:disabled {
-  cursor: default;
-}
-
-.shelf__uses {
-  flex: none;
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .shelf__part:disabled:hover {
-    background: none;
-  }
 }

@@ -339,3 +339,28 @@
   top: auto;
   right: auto;
 }
+
+/* The two surfaces that take the whole window, taken out of it.
+   In the app they are fixed between the shelf and the overview; here they sit
+   in the flow at a readable height so both can be looked at beside everything
+   else they have to agree with. */
+.gallery__sheet {
+  position: relative;
+  height: 660px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.gallery__sheet .sheet {
+  position: absolute;
+  inset: 0;
+  left: 0;
+  right: 0;
+  animation: none;
+}
+
+/* No traffic lights to clear in a box on a page. */
+.gallery__sheet .sheet__top {
+  padding-top: var(--space-4);
+}

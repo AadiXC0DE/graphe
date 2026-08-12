@@ -21,8 +21,10 @@
   text-align: center;
 }
 
+/* Close under the title — the question and the answer to "how do I answer it"
+   are one thing. The gap under it is the one that separates groups. */
 .welcome__sub {
-  margin: 0 0 var(--space-6);
+  margin: 0 0 var(--space-5);
   color: var(--text-muted);
   font-size: var(--text-base);
   line-height: 1.5;
@@ -107,7 +109,9 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
-  margin: var(--space-4) 0 0;
+  /* A wider gap than the one between the groups above, so this reads as an
+     aside rather than as a fourth thing to choose from. */
+  margin: var(--space-6) 0 0;
   /* The list's own row padding, so the paperclip sits under the first letter of
      the examples rather than under their border. */
   padding: 0 var(--space-2) 0 var(--space-3);

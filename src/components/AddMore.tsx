@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { everything } from '../agent/pi/packages';
+import type { CarriedExtension } from '../lib/ipc';
 import {
   REACHABLE,
   describeStart,
@@ -68,6 +69,10 @@ export const SAYS = {
   handWhereHint: 'The address it answers on, or the program that starts it.',
   handValues: 'Values it needs, one per line, as NAME=value',
   handAdd: 'Add it',
+  carriedHeading: 'Came with this project',
+  carriedNote:
+    'You did not choose these — they came down with the project. Everything else Graphe does is checked as it goes; these run as part of Graphe itself, so they stay off until you turn one on.',
+  carriedRestart: 'Turning one on starts a fresh conversation in this project, so it can be loaded.',
 } as const;
 
 type Props = {
@@ -96,6 +101,10 @@ type Props = {
   /** A form somebody filled in themselves. Checked here first, so the sentence
    *  saying what is wrong arrives before anything is asked to keep it. */
   onConnectByHand?: (typed: Typed) => void;
+  /** What the open project brought with it. Nobody went looking for these, so
+   *  they are a decision rather than a shelf, and they are not searched. */
+  carried?: readonly CarriedExtension[];
+  onTrustCarried?: (id: string, trust: boolean) => void;
 };
 
 const FOCUSABLE =
@@ -134,6 +143,8 @@ export default function AddMore({
   onConnect,
   onDisconnect,
   onConnectByHand,
+  carried = [],
+  onTrustCarried,
 }: Props) {
   const [term, setTerm] = useState('');
   const [showing, setShowing] = useState<Showing>('all');
@@ -264,6 +275,29 @@ export default function AddMore({
         ) : null}
 
         <div className="addmore__body">
+          {/* First, because it is about the project in front of you — searching
+              for something to add is a general errand and can wait. */}
+          {carried.length === 0 ? null : (
+            <section className="addmore__carried" aria-label={SAYS.carriedHeading}>
+              <h3 className="addmore__grouphead">{SAYS.carriedHeading}</h3>
+              <p className="addmore__groupnote">{SAYS.carriedNote}</p>
+              <p className="addmore__carriedhint">{SAYS.carriedRestart}</p>
+              {carried.map((one) => (
+                <label className="addmore__switch" key={one.id}>
+                  <input
+                    type="checkbox"
+                    checked={one.trusted}
+                    onChange={(event) => onTrustCarried?.(one.id, event.target.checked)}
+                  />
+                  <span className="addmore__switchtext">
+                    <span className="addmore__switchlabel">{one.name}</span>
+                    <span className="addmore__where">{one.where}</span>
+                  </span>
+                </label>
+              ))}
+            </section>
+          )}
+
           {showReach ? (
             <section className="addmore__group" aria-label={SAYS.reachHeading}>
               <h3 className="addmore__grouphead">{SAYS.reachHeading}</h3>

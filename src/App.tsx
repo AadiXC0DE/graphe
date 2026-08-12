@@ -6,6 +6,8 @@ import Composer from "./components/Composer";
 import ConfirmChange from "./components/ConfirmChange";
 import ConnectModal from "./components/ConnectModal";
 import CostMeter from "./components/CostMeter";
+import DesignView, { type DesignPart } from "./components/DesignView";
+import HistoryView from "./components/HistoryView";
 import ErrorCard from "./components/ErrorCard";
 import Files from "./components/Files";
 import FileView from "./components/FileView";
@@ -23,7 +25,6 @@ import Welcome from "./components/Welcome";
 import Gallery from "./gallery/Gallery";
 import AskAnything from "./components/AskAnything";
 import type { Found, Things } from "./lib/anything";
-import type { ShelfPage } from "./lib/shelf";
 import type { Task } from "./cost/estimate";
 import {
   longConversation,
@@ -32,12 +33,15 @@ import {
 } from "./cost/phrasing";
 import { sizeUp } from "./cost/sizing";
 import { worthPlanning } from "./agent/plan";
+import { asResearch, researchWords } from "./agent/research";
+import { readDesign } from "./design/reading";
 import { bridge } from "./lib/bridge";
 import { quote, smallerFirst } from "./lib/estimating";
 import {
   showWords,
   swapWords,
   type Away as AwayState,
+  type CarriedExtension,
   type EveryKind,
   type ConnectStep,
   type ConnectionState,
@@ -57,6 +61,7 @@ import {
   type ProviderMethod,
   type RecentProject,
   type Result,
+  type Room as RoomState,
   type ShowProgress,
   type Trouble,
   type VisualChange,
@@ -213,11 +218,10 @@ function Conversation() {
   const [recent, setRecent] = useState<readonly RecentProject[] | null>(null);
   /** True while the picker is hanging under the project's name as a switcher. */
   const [switching, setSwitching] = useState(false);
-  /** The screens of the project in front, for the rail. Asked for once when a
-   *  folder opens — pages are a fact about the project, not about the sitting. */
+  /** The screens of the project in front, so the bar can open any of them.
+   *  Asked for once when a folder opens — pages are a fact about the project,
+   *  not about the sitting. */
   const [pages, setPages] = useState<readonly Page[]>([]);
-  /** Which page the preview is currently showing, so the shelf can mark it. */
-  const [showingPage, setShowingPage] = useState<string | null>(null);
   /** The one bar that reaches everything. Openable by hand as well as by key —
    *  a shortcut nobody is told about is a feature nobody has. */
   const [asking, setAsking] = useState(false);
@@ -236,13 +240,19 @@ function Conversation() {
   /** The screen where more can be added to Graphe, and what it is showing. */
   const [addMore, setAddMore] = useState(false);
   const [packs, setPacks] = useState<readonly Pack[]>([]);
+  /** What the open project brought with it, and which of those are loaded. Read
+   *  when the screen opens: it changes only when a session is built. */
+  const [carried, setCarried] = useState<readonly CarriedExtension[]>([]);
   const [packBusy, setPackBusy] = useState<string | null>(null);
   const [explaining, setExplaining] = useState<string | null>(null);
   const [explanations, setExplanations] = useState<Readonly<Record<string, string>>>({});
   /** Whether a message gets a looking-around pass before anything is touched.
    *  `auto` decides from the sentence, which is what almost everybody wants;
    *  the other two are for somebody who has an opinion about this one. */
-  const [plans, setPlans] = useState<'auto' | 'always' | 'never'>('auto');
+  const [plans, setPlans] = useState<'auto' | 'always' | 'never' | 'research'>('auto');
+  /** Whether the sentence about how long research takes has been said. Once per
+   *  sitting: a warning repeated every time is a warning nobody reads. */
+  const saidSlower = useRef(false);
   /** What was asked for while a plan is being made, so approving it can send
    *  the same sentence rather than a reconstruction of it. */
   const asked = useRef<string>("");
@@ -337,6 +347,20 @@ function Conversation() {
       if (answer.ok) setDiscovered(answer.value);
     });
   }, [refreshConnection]);
+
+  /** Reached from the shelf and from the project's name, so it lives here
+   *  rather than at either call site. */
+  const openAddMore = useCallback(() => {
+    setSwitching(false);
+    setAddMore(true);
+    void bridge.packages().then((answer) => {
+      if (answer.ok) setPacks(answer.value);
+    });
+    void bridge.carried().then((answer) => {
+      if (answer.ok) setCarried(answer.value);
+    });
+  }, []);
+
 
   /** Bring an account opencode or Codex saved over into this app's own store.
    *  The shell does the moving; here is only the waiting and the telling. */
@@ -471,7 +495,24 @@ function Conversation() {
    *  it is a thing people flip all the time and it costs nothing to reset. */
   const [shelfOpen, setShelfOpen] = useState(true);
 
+  /** Which band of the design view is open, or null when it is not. Both of the
+   *  surfaces that take the whole width live here rather than inside a panel:
+   *  they cover the conversation, and the conversation belongs to this file. */
+  const [designAt, setDesignAt] = useState<DesignPart | null>(null);
+  const [graphOpen, setGraphOpen] = useState(false);
+  /** The pairing whose colour is on its way to being changed. Cleared the
+   *  moment new values arrive, which is what finishing looks like from here. */
+  const [fixing, setFixing] = useState<string | null>(null);
+
   const [busy, setBusy] = useState(false);
+  /** How full the conversation on screen is, and whether it is being shortened
+   *  right now. Asked for rather than counted here: the number is the model's
+   *  own reckoning, and only the shell can see it. */
+  const [room, setRoom] = useState<RoomState | null>(null);
+  const [tidying, setTidying] = useState(false);
+  /** Whether the Guard is stopping to ask. Never remembered across launches:
+   *  the shell holds it on the session, and a new session asks again. */
+  const [quiet, setQuietHere] = useState(false);
   /** What "See it" is up to, in its own words. Null when it is not up to
    *  anything. */
   const [progress, setProgress] = useState<ShowProgress | null>(null);
@@ -598,6 +639,19 @@ function Conversation() {
     );
   }, [refreshConnection]);
 
+  /** Saying yes to one of a project's own extensions builds the session again,
+   *  which is the only moment extensions are decided. The shell answers with the
+   *  list as it stands afterwards. */
+  const trustCarried = useCallback(
+    (id: string, trust: boolean) => {
+      void bridge.trustCarried(id, trust).then((answer) => {
+        if (answer.ok) setCarried(answer.value);
+        else troubleHere(answer.trouble);
+      });
+    },
+    [troubleHere],
+  );
+
   /* ---------------------------------------------------------------- versions */
 
   /** Ask for the timeline of the project in front, and put it on that desk.
@@ -622,6 +676,39 @@ function Conversation() {
         : current,
     );
   }, []);
+
+  /** How full the conversation on screen is. Asked for after anything that
+   *  could change it, and never on a timer. */
+  /** Anything that puts a conversation on screen puts the conversation on
+   *  screen. The two full-width surfaces cover it, so asking for a different
+   *  one while the design view is up would otherwise change something nobody
+   *  can see. */
+  const toChat = useCallback(() => {
+    setDesignAt(null);
+    setGraphOpen(false);
+  }, []);
+
+  /** Optimistic on screen, confirmed underneath — the same bargain "Show me"
+   *  makes: the chip has to change on the click, and the shell's answer is what
+   *  survives if the switch did not take. */
+  const setQuiet = useCallback((on: boolean) => {
+    setQuietHere(on);
+    void bridge.stopAsking(on).then((answer) => {
+      if (answer.ok) setQuietHere(answer.value);
+    });
+  }, []);
+
+  const refreshRoom = useCallback(() => {
+    void bridge.room().then((answer) => {
+      if (answer.ok) setRoom(answer.value);
+    });
+  }, []);
+
+  /* How much a conversation can hold is the model's own number, so the ring is
+     read again whenever somebody changes model. */
+  useEffect(() => {
+    refreshRoom();
+  }, [connection?.chosen, refreshRoom]);
 
   /** Ask for the git state of the project in front, for the overview. Applied
    *  only if it is still the one in front by the time the answer comes back —
@@ -720,6 +807,9 @@ function Conversation() {
 
       setSwitching(false);
       setPickerTrouble(null);
+      toChat();
+      // A new session asks again, whatever the last one had been told.
+      setQuietHere(false);
       // A file of the folder we were in is not a file of this one.
       setReading(null);
       // Which conversation this landed in. Without it nothing in the shelf is
@@ -744,6 +834,7 @@ function Conversation() {
 
       void refreshVersions(opened.value.path);
       void refreshOverview(opened.value.path);
+      refreshRoom();
       void bridge.pages().then((answer) => {
         if (answer.ok) setPages(answer.value);
       });
@@ -754,7 +845,7 @@ function Conversation() {
         if (answer.ok) setRecent(answer.value);
       });
     },
-    [desks.current, refreshVersions, refreshOverview, troubleHere],
+    [desks.current, refreshVersions, refreshOverview, toChat, troubleHere],
   );
   openRef.current = open;
 
@@ -769,8 +860,17 @@ function Conversation() {
   const swapConversation = useCallback(
     async (path: string | null) => {
       // Already here. Silent, because pressing the row you are on is a person
-      // checking where they are, not asking for anything.
+      // checking where they are, not asking for anything. A conversation
+      // nothing has been said in yet is the same case: "new" from an empty
+      // screen would swap it for another empty screen.
       if (path !== null && path === inConversation) return;
+      if (path === null && (desk?.turns.length ?? 0) === 0) {
+        // Already looking at an empty one. Still worth getting out of the way
+        // of it, since that is what was pressed.
+        toChat();
+        return;
+      }
+      toChat();
       // Mid-answer. Swapping disposes the session underneath, so the turn on its
       // way would be lost — said out loud rather than ignored.
       if (busy) {
@@ -795,11 +895,14 @@ function Conversation() {
       }
       setInConversation(opened.value.conversation);
       setDesks((current) => changeDesk(current, opened.value.path, (one) => ({ ...one, turns })));
+      refreshRoom();
+      // A new session asks again, whatever the last one had been told.
+      setQuietHere(false);
       void bridge.conversations().then((answer) => {
         if (answer.ok) setConversations(answer.value);
       });
     },
-    [busy, inConversation, troubleHere],
+    [busy, inConversation, desk?.turns.length, toChat, troubleHere],
   );
 
   const browse = useCallback(async () => {
@@ -876,9 +979,18 @@ function Conversation() {
           void refreshVersions(notice.project);
           void refreshOverview(notice.project);
           void refreshFiles(notice.project);
+          refreshRoom();
+        }
+        // Pi tidies on its own as well as when asked, and the ring says the
+        // same thing either way — from where somebody is sitting it is one
+        // event.
+        if (notice.event.type === "tidying") setTidying(true);
+        if (notice.event.type === "tidied") {
+          setTidying(false);
+          refreshRoom();
         }
       }),
-    [refreshVersions, refreshOverview, refreshFiles],
+    [refreshVersions, refreshOverview, refreshFiles, refreshRoom],
   );
 
   useEffect(() => bridge.onShowProgress(setProgress), []);
@@ -918,6 +1030,21 @@ function Conversation() {
   const halt = useCallback(() => {
     void bridge.stop();
   }, []);
+
+
+  /** Shorten the conversation now rather than waiting for it to fill up. The
+   *  narration is Pi's own, arriving through the ordinary event stream, so
+   *  there is nothing to say here. */
+  const tidyNow = useCallback(() => {
+    setTidying(true);
+    void bridge
+      .tidyNow()
+      .then((answer) => {
+        if (answer.ok) setRoom(answer.value);
+        else troubleHere(answer.trouble);
+      })
+      .finally(() => setTidying(false));
+  }, [troubleHere]);
 
   /* ------------------------------------------------- the way out, and the words */
 
@@ -977,6 +1104,11 @@ function Conversation() {
       if (event.key === "o") {
         event.preventDefault();
         void browse();
+        return;
+      }
+      if (event.key === "d" && desk !== null) {
+        event.preventDefault();
+        setDesignAt((was) => (was === null ? "styles" : null));
         return;
       }
       if (event.key === "b" && desk !== null) {
@@ -1153,6 +1285,18 @@ function Conversation() {
         return;
       }
 
+      // Research goes out with its method in front of it and no looking-around
+      // pass: the brief already says to look, and at more than this turn.
+      if (plans === 'research') {
+        // Said once a sitting, before the wait rather than after it.
+        if (!saidSlower.current) {
+          saidSlower.current = true;
+          say(researchWords.slower);
+        }
+        await deliver(asResearch(text), priced.task, { lookFirst: false });
+        return;
+      }
+
       // A big-sounding request looks around before it touches anything, unless
       // somebody has said otherwise for this message. It is not a mode people
       // switch on: the failure designers fear most is forty files changed
@@ -1161,7 +1305,7 @@ function Conversation() {
       if (lookFirst) asked.current = text;
       await deliver(text, priced.task, { lookFirst });
     },
-    [deliver, desks, open, plans],
+    [deliver, desks, open, plans, say],
   );
 
   /**
@@ -1616,6 +1760,16 @@ function Conversation() {
     [desks.current, refreshOverview],
   );
 
+  /** What the project's own stylesheet says about itself: how it moves, what
+   *  was written by hand, what cannot be read. One reading, shared by the panel
+   *  that counts it and the view that draws it. */
+  const design = useMemo(
+    () => readDesign(desk?.overview?.styles ?? null, desk?.overview?.swatches ?? []),
+    [desk?.overview?.styles, desk?.overview?.swatches],
+  );
+
+  useEffect(() => setFixing(null), [desk?.overview?.styles]);
+
   /* ------------------------------------------------------------------ money */
 
   /**
@@ -1666,8 +1820,6 @@ function Conversation() {
       // "Ready" gets a beat on screen. A browser window opening on its own is
       // startling without a sentence somewhere saying it was meant to.
       setProgress({ says: showWords.ready, done: true });
-      // Which page is in front of them now, so the shelf can mark it.
-      setShowingPage(at ?? null);
       window.setTimeout(() => setProgress(null), 1400);
       // The overview keeps the address of what was just served, so the pill can
       // take you back to it all evening.
@@ -1684,17 +1836,6 @@ function Conversation() {
       });
     }
   }, [desks.current, say, troubleHere, refreshOverview]);
-
-  /* The shelf's pages, with what is known about each one. Nothing here is asked
-     for separately — it is all already on the desk. */
-  const shelfPages: readonly ShelfPage[] = useMemo(
-    () =>
-      pages.map((page) => ({
-        ...page,
-        ...(showingPage === page.route ? { showing: true } : {}),
-      })),
-    [pages, showingPage],
-  );
 
   /* Everything the bar can reach. Held still between renders so the search does
      not re-run on every keystroke elsewhere. */
@@ -1847,13 +1988,7 @@ function Conversation() {
                 onShowFiles={changeShowFiles}
                 onPreview={() => void seeIt()}
                 onAccount={openConnect}
-                onAddMore={() => {
-                  setSwitching(false);
-                  setAddMore(true);
-                  void bridge.packages().then((answer) => {
-                    if (answer.ok) setPacks(answer.value);
-                  });
-                }}
+                onAddMore={openAddMore}
               />
             </div>
           ) : null}
@@ -1890,9 +2025,6 @@ function Conversation() {
           openPath={desks.current}
           onOpen={(project) => void open(project.path)}
           onBrowse={() => void browse()}
-          pages={shelfPages}
-          onOpenPage={(page) => void seeIt(page.route)}
-          onAddPage={(name) => void send(`Add a page called ${name}.`)}
           pinned={desk?.references ?? []}
           conversations={conversations}
           openConversation={inConversation}
@@ -1900,6 +2032,10 @@ function Conversation() {
           onNewConversation={() => void swapConversation(null)}
           open={shelfOpen}
           onToggle={() => setShelfOpen((was) => !was)}
+          onAsk={() => setAsking(true)}
+          onDesign={() => setDesignAt("styles")}
+          onHistory={() => setGraphOpen(true)}
+          onAddMore={openAddMore}
         />
       ) : null}
 
@@ -2022,6 +2158,11 @@ function Conversation() {
               draft={draft}
               attachments={attachments}
               connection={connection}
+              room={room}
+              tidying={tidying}
+              onTidy={tidyNow}
+              quiet={quiet}
+              onQuiet={setQuiet}
               plans={plans}
               onPlans={setPlans}
               onSelectModel={selectModel}
@@ -2056,15 +2197,11 @@ function Conversation() {
             spent: desk.spent,
             busy,
             showMe: preferences.showMe,
-            looks: looks.looks,
-            looksSay: looks.says,
-            checkingWidths,
-            workingAt,
             artifacts: desk.overview?.artifacts ?? [],
             swatches: desk.overview?.swatches ?? [],
             styles: desk.overview?.styles ?? null,
+            reading: design,
             inStep,
-            lookingAtFigma,
             landing,
             going,
             landed,
@@ -2078,33 +2215,14 @@ function Conversation() {
           onDismissPutBack={dismissPutBack}
           onShowSplit={showSplit}
           onOpenFile={(file) => void bridge.openInEditor(file)}
-          onCheckWidths={() => {
-            setCheckingWidths(true);
-            void bridge
-              .checkWidths()
-              .then((answer) => {
-                if (answer.ok) setLooks(answer.value);
-              })
-              .finally(() => setCheckingWidths(false));
-          }}
-          onWorkAt={(look) => setWorkingAt((was) => (was === look.id ? null : look.id))}
+          onOpenDesign={setDesignAt}
+          onOpenGraph={() => setGraphOpen(true)}
           onShare={() => void bridge.shareReview()}
           onHoldBack={changeHoldBack}
           onDecide={decideOnWork}
           onHandOver={handToDeveloper}
           onPutOnline={putItOnline}
           onOpenLink={(address) => void bridge.openLink(address)}
-          onNudge={nudge}
-          onNudgeMotion={nudgeMotion}
-          onFixColour={nudge}
-          onFollowDesign={(address) => askFigma(() => bridge.followDesign(address))}
-          onLookAgain={() => askFigma(() => bridge.lookAgain())}
-          onCaughtUp={() => askFigma(() => bridge.caughtUp())}
-          onStopFollowing={() => askFigma(() => bridge.stopFollowing())}
-          /* The one thing on this panel that is a request rather than a
-             reading: what moved goes to the conversation as the sentence that
-             would bring the work back in step. */
-          onBuildIn={(move: Move) => void send(move.asks)}
           onKeepGoing={keepGoing}
           onKeepAway={keepAway}
           onDropAway={dropAway}
@@ -2122,6 +2240,72 @@ function Conversation() {
               );
             });
           }}
+        />
+      ) : null}
+
+      {/* Everything about how the project looks, and everywhere it has been.
+          Both take the room between the shelf and the panel, because both were
+          unreadable in a 328px column. */}
+      {designAt !== null && desk !== null ? (
+        <DesignView
+          at={designAt}
+          data={{
+            styles: desk.overview?.styles ?? null,
+            motion: design.motion,
+            drifted: design.drifted,
+            unreadable: design.unreadable,
+            fixing,
+            looks: looks.looks,
+            looksSay: looks.says,
+            checkingWidths,
+            workingAt,
+            inStep,
+            lookingAtFigma,
+            busy,
+            showMe: preferences.showMe,
+          }}
+          onClose={() => setDesignAt(null)}
+          onNudge={nudge}
+          onNudgeMotion={nudgeMotion}
+          onFixColour={(finding) => {
+            const token = design.repairs.get(finding.id);
+            if (token === undefined || finding.fix === null) return;
+            setFixing(finding.id);
+            nudge(token, finding.fix.colour);
+          }}
+          onCheckWidths={() => {
+            setCheckingWidths(true);
+            void bridge
+              .checkWidths()
+              .then((answer) => {
+                if (answer.ok) setLooks(answer.value);
+              })
+              .finally(() => setCheckingWidths(false));
+          }}
+          onWorkAt={(look) => setWorkingAt((was) => (was === look.id ? null : look.id))}
+          onFollowDesign={(address) => askFigma(() => bridge.followDesign(address))}
+          onLookAgain={() => askFigma(() => bridge.lookAgain())}
+          onCaughtUp={() => askFigma(() => bridge.caughtUp())}
+          onStopFollowing={() => askFigma(() => bridge.stopFollowing())}
+          /* The one thing here that is a request rather than a reading: what
+             moved goes to the conversation as the sentence that would bring the
+             work back in step. */
+          onBuildIn={(move: Move) => {
+            setDesignAt(null);
+            void send(move.asks);
+          }}
+        />
+      ) : null}
+
+      {graphOpen && desk !== null ? (
+        <HistoryView
+          versions={desk.versions}
+          pictures={versionPictures[desk.path] ?? {}}
+          git={desk.overview?.git ?? null}
+          busy={busy}
+          onClose={() => setGraphOpen(false)}
+          onPutBack={(versionId) => void putBack(versionId)}
+          onOpenFile={(file) => void bridge.openInEditor(file)}
         />
       ) : null}
 
@@ -2168,6 +2352,8 @@ function Conversation() {
             })
             .finally(() => setPackBusy(null));
         }}
+        carried={carried}
+        onTrustCarried={trustCarried}
         onExplain={(id) => {
           setExplaining(id);
           void bridge
@@ -2262,7 +2448,7 @@ function Turnstile({
         <ActivityLine
           state={turn.state}
           label={turn.label}
-          detail={turn.detail}
+          detail={turn.progress ?? turn.detail}
           real={showMe ? turn.real : undefined}
         />
       );

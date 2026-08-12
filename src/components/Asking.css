@@ -1,0 +1,247 @@
+/* Whether the Guard stops to ask. Same weight as the planning chip and the
+   model beside it — all three change what pressing send does — except in the
+   one state that has to be visible from across the room. */
+
+.asking {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.asking__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 180px;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.asking__chip:active {
+  transform: scale(0.97);
+}
+
+/* Not asking. Loud on purpose and permanently: somebody who turned this on and
+   forgot is the failure the whole confirmation system exists to prevent, so the
+   only acceptable cost of the switch is a chip you cannot stop noticing. */
+.asking--quiet .asking__chip {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.asking__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asking__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .asking__chip:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
+
+  .asking--quiet .asking__chip:hover {
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+  }
+}
+
+/* Upward, because the chip is at the bottom of the window. */
+.asking__menu {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 6;
+  width: 300px;
+  max-width: calc(100vw - var(--space-5));
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  transform-origin: bottom left;
+  animation: asking-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes asking-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.asking__option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--text-muted);
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* Reserved whether or not there is a tick in it, so choosing does not shuffle
+   every row sideways. */
+.asking__tick {
+  display: grid;
+  place-items: center;
+  width: 10px;
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--accent-ink);
+}
+
+.asking__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.asking__name {
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.asking__note {
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.asking__option--chosen .asking__name {
+  font-weight: 500;
+}
+
+.asking__option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .asking__option:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The one thing that is asked before it is allowed
+   Calm rather than alarming — UI-DESIGN.md: colour carries severity, motion
+   stays gentle. It is the same panel, with paragraphs instead of rows.
+   --------------------------------------------------------------------------- */
+
+.asking__menu--warning {
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.asking__warntitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.asking__warn {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.asking__until {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.asking__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+/* The quieter of the two carries the weight, the way every other pair of
+   answers in this app does: the option that changes nothing is the plain one. */
+.asking__go {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.asking__quiet {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--accent-ink);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.asking__go:active,
+.asking__quiet:active {
+  transform: scale(0.97);
+}
+
+.asking__go:focus-visible,
+.asking__quiet:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .asking__go:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+
+  .asking__quiet:hover {
+    background: var(--accent-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asking__menu {
+    animation: none;
+  }
+
+  .asking__chip:active,
+  .asking__go:active,
+  .asking__quiet:active {
+    transform: none;
+  }
+}

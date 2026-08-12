@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { researchWords } from '../agent/research';
 import './HowToWork.css';
 
-export type Plans = 'auto' | 'always' | 'never';
+export type Plans = 'auto' | 'always' | 'never' | 'research';
 
 type Props = {
   plans: Plans;
@@ -34,6 +35,12 @@ const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[
     chip: 'Straight in',
     name: 'Never plan',
     note: 'Gets on with it. You can still put anything back afterwards.',
+  },
+  {
+    id: 'research',
+    chip: researchWords.chip,
+    name: researchWords.name,
+    note: researchWords.note,
   },
 ];
 

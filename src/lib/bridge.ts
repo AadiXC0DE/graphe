@@ -64,7 +64,9 @@ import {
   type ProviderMethod,
   type PutBack,
   type RecentProject,
+  type CarriedExtension,
   type Result,
+  type Room,
   type SavedVersion,
   type ShowOutcome,
   type ShowProgress,
@@ -191,32 +193,73 @@ const PREVIEW_PROJECTS: readonly { path: string; name: string; ago: number; spen
     { path: '/Users/you/Sites/field-notes', name: 'field-notes', ago: 5 * 24 * HOUR, spent: null },
   ];
 
-type PreviewVersion = { title: string; ago: number; by: 'you' | 'graphe'; named?: boolean };
+type PreviewVersion = {
+  title: string;
+  ago: number;
+  by: 'you' | 'graphe';
+  named?: boolean;
+  /** Which of the others this one came after, by position in the list. Left
+   *  off, it came after the one below it — a straight line. Two of them is a
+   *  join, which is the state the graph exists to draw. */
+  after?: readonly number[];
+  /** Names pointing at it. */
+  refs?: readonly string[];
+};
 
 const PREVIEW_VERSIONS: Readonly<Record<string, readonly PreviewVersion[]>> = {
   '/Users/you/Sites/paper-street': [
-    { title: 'Hero rebuilt from your Figma frame', ago: 2 * MINUTE, by: 'graphe' },
-    { title: 'Spacing matched to your scale', ago: 18 * MINUTE, by: 'graphe' },
+    {
+      title: 'Hero rebuilt from your Figma frame',
+      ago: 2 * MINUTE,
+      by: 'graphe',
+      after: [1, 2],
+      refs: ['main'],
+    },
+    { title: 'Spacing matched to your scale', ago: 18 * MINUTE, by: 'graphe', after: [3] },
+    {
+      title: 'Tried a wider grid',
+      ago: 40 * MINUTE,
+      by: 'graphe',
+      after: [4],
+      refs: ['wider-grid'],
+    },
     { title: 'before I broke the nav', ago: 55 * MINUTE, by: 'you', named: true },
     { title: 'Cards moved onto the grid', ago: 3 * HOUR, by: 'graphe' },
-    { title: 'First pass at the landing page', ago: 26 * HOUR, by: 'graphe' },
+    { title: 'First pass at the landing page', ago: 26 * HOUR, by: 'graphe', after: [] },
   ],
   '/Users/you/Sites/atlas-studio': [
-    { title: 'Made the header sticky', ago: 26 * HOUR, by: 'graphe' },
-    { title: 'Added the case study page', ago: 2 * 24 * HOUR, by: 'graphe' },
+    { title: 'Made the header sticky', ago: 26 * HOUR, by: 'graphe', refs: ['main'] },
+    { title: 'Added the case study page', ago: 2 * 24 * HOUR, by: 'graphe', after: [] },
   ],
-  '/Users/you/Sites/field-notes': [{ title: 'Started the project', ago: 5 * 24 * HOUR, by: 'you' }],
+  '/Users/you/Sites/field-notes': [
+    { title: 'Started the project', ago: 5 * 24 * HOUR, by: 'you', refs: ['main'], after: [] },
+  ],
 };
+
+/** Something that looks like the short id a terminal would print. Made up, but
+ *  made up the same way every launch. */
+function previewShortId(path: string, index: number): string {
+  let hash = 2166136261;
+  for (const letter of `${path}#${String(index)}`) {
+    hash = Math.imul(hash ^ letter.charCodeAt(0), 16777619) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0').slice(0, 7);
+}
 
 function previewVersions(path: string): SavedVersion[] {
   const list = PREVIEW_VERSIONS[path] ?? [];
+  const idOf = (index: number): string => `${path}#${String(index)}`;
   return list.map((one, index) => ({
-    id: `${path}#${index}`,
+    id: idOf(index),
+    shortId: previewShortId(path, index),
     at: started - one.ago,
     title: one.title,
     by: one.by,
     named: one.named ?? false,
     current: index === 0,
+    parents: (one.after ?? (index + 1 < list.length ? [index + 1] : [])).map(idOf),
+    refs: one.refs ?? [],
+    wentBackTo: null,
   }));
 }
 
@@ -230,7 +273,7 @@ function previewVersions(path: string): SavedVersion[] {
  * rather than a stand-in.
  */
 const PREVIEW_PICTURES: Readonly<Record<string, Readonly<Record<number, boolean>>>> = {
-  '/Users/you/Sites/paper-street': { 0: true, 1: false, 2: false, 3: true },
+  '/Users/you/Sites/paper-street': { 0: true, 1: false, 3: false, 4: true },
   '/Users/you/Sites/atlas-studio': { 0: true },
 };
 
@@ -477,6 +520,24 @@ function previewBridge(): Bridge {
    *  the shell stamps its own — the window's routing is then exercised here
    *  rather than only in the app. */
   let openPath: string | null = null;
+  /** Grows as the conversation does, so the ring beside the box moves and the
+   *  tidy button has something to undo. */
+  let previewRoom: Room = { used: 36_000, total: 200_000, part: 0.18 };
+  let previewQuiet = false;
+  let previewCarried: readonly CarriedExtension[] = [
+    {
+      id: 'storybook-tools@1a2b3c4d5e6f7a8b',
+      name: 'storybook-tools',
+      where: '.pi/extensions/storybook-tools/index.ts',
+      trusted: false,
+    },
+    {
+      id: 'house-lint@9f8e7d6c5b4a3210',
+      name: 'house-lint',
+      where: '.pi/extensions/house-lint/index.ts',
+      trusted: true,
+    },
+  ];
 
   /** The preview's own copy of what a person has chosen. Real state, so the
    *  switch in the project menu can be turned on and its effect looked at. */
@@ -566,6 +627,11 @@ function previewBridge(): Bridge {
         send({ type: 'message-delta', text: piece });
       }
       send({ type: 'message-end' });
+      // A conversation fills up as it goes, so the ring beside the box moves
+      // the way it would in the app rather than sitting at one figure.
+      const used = Math.min(previewRoom.total, previewRoom.used + 21_000);
+      previewRoom = { used, total: previewRoom.total, part: used / previewRoom.total };
+      send({ type: 'settled' });
       return done(null);
     },
 
@@ -666,11 +732,15 @@ function previewBridge(): Bridge {
       // Going back is itself a version, exactly as it is in the app.
       const wentBack: SavedVersion = {
         id: `${openPath}#back-${list.length}`,
+        shortId: previewShortId(openPath, list.length),
         at: Date.now(),
         title: `Went back to “${target.title}”`,
         by: 'you',
         named: false,
         current: true,
+        parents: list[0] === undefined ? [] : [list[0].id],
+        refs: ['main'],
+        wentBackTo: target.id,
       };
       const next = [wentBack, ...list.map((one) => ({ ...one, current: false }))];
       versions.set(openPath, next);
@@ -777,17 +847,60 @@ function previewBridge(): Bridge {
     },
 
 
+    /** A conversation that grows the way a real one does, so the ring beside
+     *  the box has something to draw and the tidy button something to do. */
+    room(): Promise<Result<Room | null>> {
+      return Promise.resolve(done(previewRoom));
+    },
+
+    tidyNow(): Promise<Result<Room | null>> {
+      send({ type: 'tidying' });
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          previewRoom = {
+            used: Math.round(previewRoom.total * 0.18),
+            total: previewRoom.total,
+            part: 0.18,
+          };
+          send({ type: 'tidied', ok: true });
+          resolve(done(previewRoom));
+        }, 1400);
+      });
+    },
+
+    /** Two, so the band has something to draw: one somebody has said yes to
+     *  and one they have not. */
+    carried(): Promise<Result<readonly CarriedExtension[]>> {
+      return Promise.resolve(done(previewCarried));
+    },
+
+    trustCarried(id: string, trust: boolean): Promise<Result<readonly CarriedExtension[]>> {
+      previewCarried = previewCarried.map((one) =>
+        one.id === id ? { ...one, trusted: trust } : one,
+      );
+      return Promise.resolve(done(previewCarried));
+    },
+
+    stopAsking(on: boolean): Promise<Result<boolean>> {
+      previewQuiet = on;
+      return Promise.resolve(done(previewQuiet));
+    },
+
     saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>> {
+      const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
+      const already = previewVersions(path).map((one) => ({ ...one, current: false }));
       const saved: SavedVersion = {
         id: `v-${String(Date.now())}`,
+        shortId: previewShortId(path, already.length),
         at: Date.now(),
         title: name === undefined || name.trim() === '' ? 'Saved where you were' : name.trim(),
         by: 'you',
         named: name !== undefined && name.trim() !== '',
         current: true,
+        parents: already[0] === undefined ? [] : [already[0].id],
+        refs: ['main'],
+        wentBackTo: null,
       };
-      const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
-      const already = previewVersions(path).map((one) => ({ ...one, current: false }));
       return Promise.resolve(done([saved, ...already]));
     },
 
@@ -879,10 +992,18 @@ function previewBridge(): Bridge {
       );
     },
 
-    openConversation(): Promise<Result<OpenedProject>> {
-      const first = PREVIEW_PROJECTS[0];
+    /** Whichever project is in front, never the first one in the list: a
+     *  conversation opened onto another project's desk is the bug this whole
+     *  path exists to avoid. */
+    openConversation(path: string | null): Promise<Result<OpenedProject>> {
+      const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
       return Promise.resolve(
-        done({ path: first?.path ?? '', name: first?.name ?? '', history: [], conversation: null }),
+        done({
+          path: here?.path ?? '',
+          name: here?.name ?? '',
+          history: [],
+          conversation: path,
+        }),
       );
     },
 
@@ -1331,6 +1452,11 @@ function connect(): Bridge {
     hatches: () => api.hatches(),
     openInEditor: (file) => api.openInEditor(file),
     saveVersion: (name) => api.saveVersion(name),
+    room: () => api.room(),
+    tidyNow: () => api.tidyNow(),
+    stopAsking: (on) => api.stopAsking(on),
+    carried: () => api.carried(),
+    trustCarried: (id, trust) => api.trustCarried(id, trust),
     revealFolder: () => api.revealFolder(),
     show: (at, point) => api.show(at, point),
     onPointed: (listener) => api.onPointed(listener),

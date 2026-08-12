@@ -135,20 +135,11 @@
   justify-content: flex-start;
 }
 
-/* Empty state centres vertically; once there is a thread it starts at the top.
-   On the first screen the sentence and the box you answer it in are one
-   object, so they are centred as one. */
-.app--empty .app__column {
-  justify-content: center;
-  padding-bottom: var(--space-7);
-}
-
-/* An auto margin beats `justify-content` for the free space, so the thread has
-   to give it up here or the first screen would bottom-align instead of centre.
-   Today the two never coexist — App.tsx draws the welcome instead of an empty
-   thread — and this is what keeps that a CSS fact rather than a JSX one. */
-.app--empty .thread {
-  margin-top: 0;
+/* The first screen lays out like every other one — composer on the glass,
+   content above it. All this state owes is room under the strip, so the welcome
+   reads as placed rather than pinned to the top edge. */
+.app--empty .welcome {
+  margin-top: calc(var(--space-8) + var(--space-5));
 }
 
 .thread {

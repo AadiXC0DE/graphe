@@ -50,7 +50,10 @@ import {
   type FoundAccount as FoundOnDisk,
 } from './importers';
 
+import { readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
+
+import { idFor } from '../../projects/carried';
 
 /** Yes or no, from a person. There is deliberately no third answer: no "always",
  *  no "for this session", no "don't ask again". Confirmation fatigue is what
@@ -258,6 +261,10 @@ export type CreateSessionOptions = {
    *  is a conversation continued, not one started again (BACKLOG B1.1). When
    *  neither this nor `sessionPath` is given, nothing is ever written. */
   sessionDir?: string;
+  /** Start a conversation rather than carrying the last one on. Only means
+   *  anything alongside `sessionDir`: without somewhere to write, every session
+   *  is already a fresh one. */
+  fresh?: boolean;
   /** A Figma credential, when one has been connected. Given, the agent can read
    *  the frames and values behind a Figma link instead of the link's text. */
   figmaToken?: string;
@@ -273,6 +280,9 @@ export type CreateSessionOptions = {
    *  id is Pi's own — resolved inside this file, where the model objects
    *  live, and never heard of outside it. */
   model?: { providerId: string; modelId: string } | null;
+  /** Whether one of the extensions this folder carries has been said yes to.
+   *  Left out, none of them are: a folder's own code never loads by default. */
+  trusts?: (id: string) => boolean;
 };
 
 /**
@@ -291,6 +301,16 @@ export type CreateSessionOptions = {
  * into a file of its own. Tidying a long conversation up is taken but not
  * offered — it happens by itself, after a reply, and nothing has to ask for it.
  */
+/** How full a conversation is, in the model's own units. */
+export type Room = {
+  /** Roughly how much of the window this conversation takes. */
+  used: number;
+  /** How much the model can hold at once. */
+  total: number;
+  /** The two above as a fraction, 0 to 1. */
+  part: number;
+};
+
 export type GrapheSession = {
   /** Say something to the agent. Resolves when it has finished responding.
    *  Pictures travel with the message; omitted when there are none. */
@@ -311,6 +331,22 @@ export type GrapheSession = {
   dispose(): void;
   /** Answer a `needs-confirmation`. False if there was no such question. */
   answer(callId: string, decision: Decision): boolean;
+  /** How much of what the model can hold at once this conversation is using.
+   *  Null before the model has answered once, and for a moment after a tidy —
+   *  the count comes from the model's own reckoning, not ours. */
+  readonly room: Room | null;
+  /** Shorten the conversation now, rather than waiting for it to fill up. False
+   *  when there is nothing to shorten or one is already going. */
+  tidyNow(): Promise<boolean>;
+  /** Stop asking before things the Guard would otherwise check, for as long as
+   *  this session lives. Restore points and outright refusals are unaffected —
+   *  see `stopAsking` in the Guard's own facts. */
+  stopAsking(on: boolean): void;
+  /** Whether it is currently not asking. */
+  readonly quiet: boolean;
+  /** The extensions this folder brought with it, and which of them loaded.
+   *  Empty for a project that carries none, which is almost all of them. */
+  readonly carried: readonly Carried[];
   /** Calls waiting on a person right now, oldest first. */
   readonly awaitingAnswer: readonly string[];
   /** The conversation this session started with, as the events that would have
@@ -458,6 +494,22 @@ function runtimeFor(agentDir: string): Promise<PiRuntime> {
   return pending;
 }
 
+/**
+ * Something a helper can think with when nobody has chosen anything.
+ *
+ * `getAvailableSnapshot` is what the runtime already knows, with no network
+ * behind it — the child cannot ask a person to sign in, so a guess that costs a
+ * round trip is a guess worth not making.
+ */
+function firstUsable(runtime: PiRuntime): { providerId: string; modelId: string } | null {
+  try {
+    const one = runtime.getAvailableSnapshot()[0];
+    return one === undefined ? null : { providerId: one.provider, modelId: one.id };
+  } catch {
+    return null;
+  }
+}
+
 /** Everything the window can know about who can think for it, read through
  *  one call. Nothing here throws for a provider in a bad state — each is read
  *  defensively and reported as it actually is, because a provider the runtime
@@ -527,31 +579,69 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
   return summaries;
 }
 
+/** One extension that came down with the folder somebody opened. */
+export type Carried = { id: string; name: string; where: string; trusted: boolean };
+
+/** What the fingerprint is taken of. A file we cannot read is not a file we can
+ *  recognise again, so it gets no id and is never loaded. */
+function sourceOf(where: string): string {
+  try {
+    return readFileSync(where, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+/** The name to put in front of somebody: the folder the extension lives in,
+ *  which is what its author called it. */
+function nameOfExtension(root: string, where: string): string {
+  const inside = where.startsWith(root) ? where.slice(root.length) : where;
+  const parts = inside.split(sep).filter((part) => part !== '');
+  // `.pi/extensions/storybook/index.ts` is called storybook, not index.ts.
+  const last = parts[parts.length - 1] ?? inside;
+  const parent = parts[parts.length - 2];
+  return /^index\./.test(last) && parent !== undefined ? parent : last.replace(/\.[^.]+$/, '');
+}
+
 /**
- * Keep the extensions somebody deliberately added; drop the ones a folder
- * brought with it.
+ * Keep the extensions somebody deliberately added, and the ones they have since
+ * said yes to; drop the rest of what a folder brought with it.
  *
- * An extension is arbitrary code running in the same process as the agent, so
- * "it was in the repository I opened" is not consent. Anything resolving inside
- * the project is left out, which is the same line `trustProject` draws for
- * skills and recipes. What the person installed themselves lives under their own
- * agent directory and loads normally.
+ * An extension is arbitrary code running in the same process as the agent — the
+ * Guard never sees it, because the Guard reviews tool calls and this is the
+ * thing that registers them. So "it was in the repository I opened" is not
+ * consent, and the answer is asked for per extension rather than per folder:
+ * the id carries a fingerprint of the code, so a yes stops covering it the
+ * moment it is edited.
  *
- * The Guard is unaffected either way: it is registered as a factory here, and a
- * tool an extension registers under a name the Guard does not know falls to the
- * deny-by-default floor rather than through it.
+ * Whatever is dropped is written down rather than discarded, because an
+ * extension that silently does not load is a bug nobody can see.
  */
-function onlyTheirs(projectRoot: string) {
+function theirsAndTrusted(
+  projectRoot: string,
+  trusts: (id: string) => boolean,
+  seen: (carried: readonly Carried[]) => void,
+) {
   const root = projectRoot.endsWith(sep) ? projectRoot : projectRoot + sep;
   return <T extends { extensions: readonly { resolvedPath?: string; path?: string }[] }>(
     base: T,
-  ): T => ({
-    ...base,
-    extensions: base.extensions.filter((one) => {
+  ): T => {
+    const carried: Carried[] = [];
+    const kept = base.extensions.filter((one) => {
       const where = one.resolvedPath ?? one.path ?? '';
-      return where !== '' && !where.startsWith(root);
-    }),
-  });
+      if (where === '') return false;
+      if (!where.startsWith(root)) return true;
+
+      const name = nameOfExtension(root, where);
+      const id = idFor(name, sourceOf(where));
+      if (id === '') return false;
+      const trusted = trusts(id);
+      carried.push({ id, name, where: where.slice(root.length), trusted });
+      return trusted;
+    });
+    seen(carried);
+    return { ...base, extensions: kept };
+  };
 }
 
 /** Every conversation this folder has had. Never throws: a folder with no
@@ -831,6 +921,8 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
   const agentDir = options.agentDir ?? (await defaultAgentDir());
   const runtime = await runtimeFor(agentDir);
+  /** Filled while the loader runs, which is before anything below can read it. */
+  let carried: readonly Carried[] = [];
   const loader = new pi.DefaultResourceLoader({
     cwd: options.projectRoot,
     agentDir,
@@ -839,7 +931,13 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     // installed into the session, so it is the one place a rule like that can
     // be enforced — see `onlyTheirs` for what it keeps.
     noExtensions: false,
-    extensionsOverride: onlyTheirs(options.projectRoot),
+    extensionsOverride: theirsAndTrusted(
+      options.projectRoot,
+      options.trusts ?? (() => false),
+      (found) => {
+        carried = found;
+      },
+    ),
     noThemes: true,
     extensionFactories: [
       {
@@ -864,8 +962,6 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   // no discovery, no third-party injection point, no name collision with
   // something a plugin registered. The Guard still sees every one of their
   // calls, because they are ordinary tool calls like any other.
-  const customTools = grapheTools(agentDir, options.figmaToken);
-
   // The chosen model, resolved here where the model objects live. A choice
   // that no longer exists — the provider removed it, or the ids changed — is
   // simply no choice: Pi falls back to whatever the account makes available
@@ -876,6 +972,15 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       ? undefined
       : runtime.getModel(chosen.providerId, chosen.modelId) ?? undefined;
 
+  // A helper thinks with whatever this session thinks with. Resolved here and
+  // handed over, because the child has no settings of its own to fall back on.
+  const forHelpers =
+    model === undefined
+      ? firstUsable(runtime)
+      : { providerId: model.provider, modelId: model.id };
+
+  const customTools = grapheTools(agentDir, options.figmaToken, forHelpers);
+
   /* Our own ids rather than Pi's `Model`, so no Pi shape leaves this file. */
   let inUse: { providerId: string; modelId: string } | null =
     model === undefined || chosen === null || chosen === undefined ? null : chosen;
@@ -884,12 +989,16 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   // side of a resumed conversation needs the same manager that will keep
   // writing to it. `continueRecent` resumes the newest session for this folder,
   // or starts one when there is none yet — so "open the project again" is the
-  // whole of B1.1, and nothing else has to decide anything.
+  // whole of B1.1, and nothing else has to decide anything. `create` is the one
+  // case that must not do that: somebody asking for a new conversation and being
+  // handed the last one back is a button that does nothing.
   const manager =
     options.sessionPath === undefined
       ? options.sessionDir === undefined
         ? pi.SessionManager.inMemory(options.projectRoot)
-        : pi.SessionManager.continueRecent(options.projectRoot, options.sessionDir)
+        : options.fresh === true
+          ? pi.SessionManager.create(options.projectRoot, options.sessionDir)
+          : pi.SessionManager.continueRecent(options.projectRoot, options.sessionDir)
       : pi.SessionManager.open(options.sessionPath);
 
   let session;
@@ -952,6 +1061,22 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   const early = {
     ...pi.DEFAULT_COMPACTION_SETTINGS,
     reserveTokens: pi.DEFAULT_COMPACTION_SETTINGS.reserveTokens * 2,
+  };
+
+  /** Read through the same small hole the automatic tidy reads through: a Pi
+   *  upgrade that moves this costs a meter, not a session. */
+  const roomNow = (): Room | null => {
+    try {
+      const usage = session.getContextUsage();
+      if (usage === undefined || usage.tokens === null || usage.contextWindow <= 0) return null;
+      return {
+        used: usage.tokens,
+        total: usage.contextWindow,
+        part: Math.min(1, Math.max(0, usage.tokens / usage.contextWindow)),
+      };
+    } catch {
+      return null;
+    }
   };
 
   const tidyIfItHasGrownLong = async (): Promise<void> => {
@@ -1074,6 +1199,43 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
     get awaitingAnswer(): readonly string[] {
       return confirmations.pending;
+    },
+
+    get room(): Room | null {
+      return roomNow();
+    },
+
+    /**
+     * The same tidying the session does for itself, asked for by hand.
+     *
+     * Pi's own compaction and nothing else — no prompt of ours, no summariser
+     * of ours. The window hears about it through Pi's `compaction_start`, which
+     * the relay already translates, so there is nothing to announce here.
+     */
+    /* Mutated rather than rebuilt: the interceptor reads these facts on every
+       call, so the switch takes effect on the next tool call and not on the
+       next session. */
+    stopAsking(on: boolean): void {
+      facts.stopAsking = on;
+    },
+
+    get quiet(): boolean {
+      return facts.stopAsking === true;
+    },
+
+    get carried(): readonly Carried[] {
+      return carried;
+    },
+
+    async tidyNow(): Promise<boolean> {
+      if (closed) return false;
+      try {
+        if (session.isCompacting) return false;
+        await session.compact();
+        return true;
+      } catch {
+        return false;
+      }
     },
 
     // Read when asked, not once at the top: a window reloading mid-sitting needs

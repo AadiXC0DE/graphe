@@ -22,7 +22,7 @@ const mine = (name: string, prompt = 'Do the thing.'): Recipe => ({
 describe('the set we ship with', () => {
   it('is a short row of real sentences', () => {
     expect(STARTERS.length).toBeGreaterThanOrEqual(5);
-    expect(STARTERS.length).toBeLessThanOrEqual(6);
+    expect(STARTERS.length).toBeLessThanOrEqual(8);
     for (const recipe of STARTERS) {
       expect(recipe.from).toBe('graphe');
       expect(recipe.name.length).toBeGreaterThan(0);
@@ -257,7 +257,7 @@ describe('what reaches the row of buttons', () => {
     const ours = [mine('Mine')];
     merge(ours);
     expect(ours).toHaveLength(1);
-    expect(STARTERS).toHaveLength(6);
+    expect(STARTERS).toHaveLength(8);
   });
 });
 

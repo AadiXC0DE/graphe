@@ -8,9 +8,11 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import Attachments, { type Attachment } from './Attachments';
+import Asking from './Asking';
 import HowToWork, { type Plans } from './HowToWork';
+import Room from './Room';
 import ThinkingWith from './ThinkingWith';
-import type { ConnectionState, ModelChoice } from '../lib/ipc';
+import type { ConnectionState, ModelChoice, Room as RoomState } from '../lib/ipc';
 import {
   NOT_DRAGGING,
   carriesSomething,
@@ -73,6 +75,16 @@ type Props = {
   /** Whether to offer to listen. On by default, and only ever shown where this
    *  computer can actually do it. */
   outLoud?: boolean;
+  /** How full this conversation is, for the ring in the row. Null before the
+   *  model has answered once. */
+  room?: RoomState | null;
+  /** True while it is being shortened. */
+  tidying?: boolean;
+  /** Shorten it now, by hand. */
+  onTidy?: () => void;
+  /** True while the Guard is not stopping to ask. */
+  quiet?: boolean;
+  onQuiet?: (quiet: boolean) => void;
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -128,6 +140,11 @@ export default function Composer({
   onConnect,
   anywhere = true,
   outLoud = true,
+  room,
+  tidying,
+  onTidy,
+  quiet,
+  onQuiet,
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -504,6 +521,8 @@ export default function Composer({
           <HowToWork plans={plans} onPlans={onPlans} />
         )}
 
+        {onQuiet === undefined ? null : <Asking quiet={quiet === true} onQuiet={onQuiet} />}
+
         {onSelectModel === undefined || onConnect === undefined ? null : (
           <ThinkingWith
             state={connection ?? null}
@@ -512,19 +531,27 @@ export default function Composer({
           />
         )}
 
-        {/* One line, one job. It used to repeat the placeholder back at you in
-            smaller grey type — two strings saying the same thing, in the one
-            place the composer has to teach something. Now it says the thing the
-            placeholder cannot: how to send, and how not to. Once there is
-            anything in the box it goes quiet (see Composer.css), because a hint
-            you have already acted on is furniture. */}
+        {/* Only when there is something to say. What used to live here was a
+            line teaching Enter and Shift+Enter — a sentence everybody has read
+            once and nobody needs on screen forever. The room the conversation
+            has left is worth that space; nothing is. */}
         <span className={`composer__hint ${listening ? 'composer__hint--loud' : ''}`}>
           {listening
             ? SAYING.listening
             : attachments.length > 0
               ? 'I can see this — say what you want changed.'
-              : 'Enter to send · Shift + Enter for a new line'}
+              : ''}
         </span>
+
+        {/* How full the conversation is, and the one thing to do about it. On
+            the right-hand end, beside Send: it belongs to the message about to
+            be written, not to the housekeeping on the left. */}
+        <Room
+          room={room ?? null}
+          tidying={tidying === true}
+          busy={busy}
+          {...(onTidy === undefined ? {} : { onTidy })}
+        />
 
         {/* The same button in two states (BACKLOG A1): an arrow that sends, or a
             square that stops. They swap in place so the layout does not jump

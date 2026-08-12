@@ -58,6 +58,19 @@ export type GuardFacts = GuardContext & {
    * on, every change asks first. This is the exact Replit failure (S-02).
    */
   askBeforeEveryChange?: boolean;
+  /**
+   * The user turned the questions off for this sitting.
+   *
+   * It stops the Guard *asking*. It does not stop the Guard: a denial is still
+   * a denial — wiping a disk, reaching outside the project, reading somebody's
+   * keys — and every restore point that would have been taken is still taken.
+   * So the worst this can cost is one undo, which is the only version of this
+   * switch worth shipping.
+   *
+   * Outranked by `askBeforeEveryChange`: that one was said out loud, about this
+   * project, and a switch in a toolbar does not get to overrule it.
+   */
+  stopAsking?: boolean;
   /** Rows currently in each table, so a confirmation can name a real number. */
   rowCounts?: Readonly<Record<string, number>>;
   /** The user's real secret values, so we can spot one being pasted somewhere public. */
@@ -1552,8 +1565,29 @@ function applyStandingInstruction(judgement: Judgement, ctx: GuardFacts): Judgem
   };
 }
 
+/**
+ * The questions turned off, and nothing else with them.
+ *
+ * A confirmation becomes a restore point where one was warranted and silence
+ * where one was not. Denials are untouched, and `snapshot` survives whatever
+ * happens to the verdict — the runtime reads it separately, so approval never
+ * costs somebody their way back and neither does this.
+ */
+function withoutQuestions(judgement: Judgement, ctx: GuardFacts): Judgement {
+  if (ctx.stopAsking !== true) return judgement;
+  if (ctx.askBeforeEveryChange === true) return judgement;
+  if (judgement.verdict.kind !== 'confirm') return judgement;
+  return {
+    verdict: judgement.snapshot
+      ? { kind: 'snapshot-first', reason: judgement.verdict.question }
+      : { kind: 'allow' },
+    snapshot: judgement.snapshot,
+    mutates: judgement.mutates,
+  };
+}
+
 function judge(call: ToolCall, ctx: GuardFacts): Judgement {
-  return applyStandingInstruction(judgeCall(call, ctx), ctx);
+  return withoutQuestions(applyStandingInstruction(judgeCall(call, ctx), ctx), ctx);
 }
 
 /**

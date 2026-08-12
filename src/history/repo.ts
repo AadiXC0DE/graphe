@@ -91,6 +91,10 @@ export type StoredVersion = {
   label: string | null;
   authorName: string;
   authorEmail: string;
+  /** What this one came after — two of them where two lines of work joined. */
+  parents: readonly string[];
+  /** The names pointing at it, tidied: `main`, `HEAD`, a line somebody made. */
+  refs: readonly string[];
 };
 
 export type UnsavedChange = { path: string; kind: ChangeKind };
@@ -625,7 +629,8 @@ export class ProjectHistory {
 
 type Attempt = { code: number; stdout: string; stderr: string };
 
-const LOG_FORMAT = ['%H', '%at', '%an', '%ae', '%B', '%N'].join(FIELD) + RECORD;
+const LOG_FORMAT =
+  ['%H', '%at', '%an', '%ae', '%B', '%N', '%P', '%D'].join(FIELD) + RECORD;
 
 function detailsOf(attempt: Attempt): string {
   return [attempt.stderr, attempt.stdout].filter((part) => part.trim().length > 0).join('\n');
@@ -643,6 +648,21 @@ function assertVersionId(versionId: string): string {
   return id;
 }
 
+/** The names git prints against a commit, as names worth showing. `HEAD -> x`
+ *  is two facts written as one, and our own bookkeeping refs are not names
+ *  anybody put there. */
+function readRefs(decoration: string): readonly string[] {
+  const found: string[] = [];
+  for (const raw of decoration.split(',')) {
+    const one = raw.trim();
+    if (one === '') continue;
+    const name = one.startsWith('HEAD -> ') ? one.slice(8).trim() : one;
+    if (name.startsWith('refs/graphe/') || name.startsWith('graphe/')) continue;
+    if (!found.includes(name)) found.push(name);
+  }
+  return found;
+}
+
 function parseVersions(output: string): StoredVersion[] {
   const versions: StoredVersion[] = [];
   for (const raw of output.split(RECORD)) {
@@ -650,7 +670,16 @@ function parseVersions(output: string): StoredVersion[] {
     if (!record.trim()) continue;
 
     const fields = record.split(FIELD);
-    const [id = '', at = '', authorName = '', authorEmail = '', body = '', label = ''] = fields;
+    const [
+      id = '',
+      at = '',
+      authorName = '',
+      authorEmail = '',
+      body = '',
+      label = '',
+      parents = '',
+      refs = '',
+    ] = fields;
     if (!VERSION_ID.test(id)) continue;
 
     const seconds = Number.parseInt(at, 10);
@@ -666,6 +695,8 @@ function parseVersions(output: string): StoredVersion[] {
       label: label.trim() || null,
       authorName,
       authorEmail,
+      parents: parents.split(' ').filter((one) => VERSION_ID.test(one)),
+      refs: readRefs(refs),
     });
   }
   return versions;

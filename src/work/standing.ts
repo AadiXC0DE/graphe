@@ -37,17 +37,17 @@ export type Standing = {
 export const MOST_STANDING = 6;
 
 export const standingWords = {
-  label: 'Ask for something again and again',
-  title: 'Over and over',
-  hint: 'Something worth doing again and again — I do it on my own and tell you what came of it.',
+  label: 'Add a schedule',
+  title: 'On a schedule',
+  hint: 'Something worth doing again and again. It runs on its own and tells you what came of it.',
   example: 'Check the site still builds and tell me if it doesn’t',
-  add: 'Ask for it',
-  stop: 'Stop this',
-  start: 'Start it again',
-  remove: 'Forget it',
-  stopped: 'Stopped',
-  none: 'Nothing happens on its own yet.',
-  full: 'That is as many as I can do properly for one project. Stop one and ask again.',
+  add: 'Add it',
+  stop: 'Pause',
+  start: 'Resume',
+  remove: 'Remove',
+  stopped: 'Paused',
+  none: 'Nothing is scheduled.',
+  full: 'That is as many as I can do properly for one project. Pause one and add again.',
   never: 'Not run yet',
 } as const;
 

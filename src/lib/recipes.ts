@@ -25,8 +25,29 @@ export type Recipe = {
  */
 export const STARTERS: readonly Recipe[] = [
   {
+    id: 'from-figma',
+    name: 'Build it from Figma',
+    prompt:
+      'Take the Figma frame I have given you and build it with the components and values this project already has. Where the frame uses something we have no equivalent for, tell me rather than inventing one.',
+    from: 'graphe',
+  },
+  {
+    id: 'send-helpers',
+    name: 'Send in a team',
+    prompt:
+      'Split this across several helpers working at the same time — one per page or area. Each one reports what it found before anything is changed, and I decide what gets fixed.',
+    from: 'graphe',
+  },
+  {
+    id: 'duplicates',
+    name: 'Find the duplicates',
+    prompt:
+      'Find everywhere this project builds something by hand that it already has a component for, list them with where they are, and change nothing until I say which ones to replace.',
+    from: 'graphe',
+  },
+  {
     id: 'phone',
-    name: 'Make it work on a phone',
+    name: 'Fix it on a phone',
     prompt:
       'Go through this page at phone width and fix what breaks — anything overflowing, text that has gone too small to read, and controls sitting too close together to tap.',
     from: 'graphe',
@@ -40,30 +61,23 @@ export const STARTERS: readonly Recipe[] = [
   },
   {
     id: 'brand-colours',
-    name: 'Match my brand colours',
+    name: 'Match my colours',
     prompt:
       'Replace the one-off colours on this page with the ones from our palette, and tell me about anything that has no equivalent rather than guessing at it.',
-    from: 'graphe',
-  },
-  {
-    id: 'spacing',
-    name: 'Tidy the spacing',
-    prompt:
-      'Find everything on this page that sits off our spacing scale and bring it back onto the nearest step.',
     from: 'graphe',
   },
   {
     id: 'states',
     name: 'Fill in the missing states',
     prompt:
-      'Give every button, link and field on this page the hover, focus and disabled treatment the rest of the work already has.',
+      'Give every button, link and field on this page the hover, focus, loading and disabled treatment the rest of the work already has, and show me the ones that had none.',
     from: 'graphe',
   },
   {
-    id: 'type-scale',
-    name: 'Put the type on one scale',
+    id: 'slow',
+    name: 'Find what makes it slow',
     prompt:
-      'Pull the headings and body text on this page onto a single type scale, and show me what changed size.',
+      'Load this page, measure what actually takes the time, and tell me the three worst offenders with what each one would cost to fix. Change nothing yet.',
     from: 'graphe',
   },
 ];

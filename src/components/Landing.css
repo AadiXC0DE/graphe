@@ -55,6 +55,18 @@
   line-height: 1.45;
 }
 
+/* The real tool and the real artefact, under the plain sentence rather than
+   instead of it. Monospace and one step smaller: it reads as a note about the
+   machinery, which is what it is, and the eye can skip it in one move. */
+.landing__runs {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+  opacity: 0.85;
+}
+
 .landing__why {
   color: var(--text-muted);
 }

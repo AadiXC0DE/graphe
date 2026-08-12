@@ -40,8 +40,8 @@ import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
-import { eventsFromEntries } from './history';
-import { readConversations, type Conversation } from './conversations';
+import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
+import { namedAs, readConversations, type Conversation } from './conversations';
 import { grapheTools } from './tools';
 import {
   collectAccounts,
@@ -278,10 +278,18 @@ export type CreateSessionOptions = {
 /**
  * A running agent, in our vocabulary.
  *
- * Deliberately small. Pi's `AgentSession` has model cycling, thinking levels,
- * compaction, tree navigation, steering and forking on it; none of that is a
- * concept a designer has, and every one of them we expose is a Pi API we have
- * agreed to keep working through the next breaking change.
+ * Deliberately small: every method here is a Pi API we have agreed to keep
+ * working through their next breaking change, so the test is whether a designer
+ * has the concept, not whether Pi has the call.
+ *
+ * Taken, because they are things people already do to a conversation: saying
+ * something, choosing who answers, stopping, naming it, going back to a moment
+ * in it to try a different direction, and marking a moment to find again.
+ *
+ * Left, because they are settings on a mechanism rather than intentions: model
+ * cycling, thinking levels, steering, and lifting a stretch of conversation out
+ * into a file of its own. Tidying a long conversation up is taken but not
+ * offered — it happens by itself, after a reply, and nothing has to ask for it.
  */
 export type GrapheSession = {
   /** Say something to the agent. Resolves when it has finished responding.
@@ -312,6 +320,30 @@ export type GrapheSession = {
   /** Where this session is being written, so the window can mark which row in
    *  the shelf is the one on screen. Null when nothing is being kept. */
   readonly conversation: string | null;
+  /** The name this conversation was given, or null while it is still known by
+   *  the words it opened with. */
+  readonly name: string | null;
+  /** Name this conversation, so it keeps that name in the shelf. False when
+   *  there is nothing in the name, or nowhere to keep it. */
+  rename(name: string): boolean;
+  /** The moments this conversation could be taken back to — each of the things
+   *  the person said, oldest first, with any mark left on it. */
+  readonly moments: readonly Moment[];
+  /**
+   * Go back to one of those moments and carry on from there in a different
+   * direction. Resolves with the words said then, so they can be said
+   * differently, and null when that moment cannot be returned to — an unknown
+   * one, or a reply still arriving.
+   *
+   * The conversation is what moves. The files in the project are left exactly
+   * as they are; taking those back is `src/history/attempts.ts`, and the two are
+   * separate on purpose — a person can rethink what they asked for without
+   * throwing away the work, and throw away the work without rethinking.
+   */
+  tryAnotherDirection(momentId: string): Promise<string | null>;
+  /** Write something against a moment so it can be found again. Empty text
+   *  takes the mark off. False when there is no such moment. */
+  mark(momentId: string, note: string): boolean;
 };
 
 type Pi = typeof import('@earendil-works/pi-coding-agent');
@@ -536,7 +568,7 @@ export async function listConversations(
   }
 }
 
-export type { Conversation };
+export type { Conversation, Moment };
 
 /**
  * The things that can be added to Graphe, and the two verbs that change them.
@@ -939,6 +971,24 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     }
   };
 
+  /** Read through one hole apiece, because a conversation that will not list
+   *  its moments is a feature missing, not a session broken. */
+  const markOf = (id: string): string | null => {
+    try {
+      return manager.getLabel(id) ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const momentsNow = (): readonly Moment[] => {
+    try {
+      return momentsFromEntries(manager.buildContextEntries(), markOf);
+    } catch {
+      return [];
+    }
+  };
+
   return {
     async prompt(
       text: string,
@@ -1036,6 +1086,58 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     // and a new conversation has none until its first write.
     get conversation(): string | null {
       return manager.getSessionFile() ?? null;
+    },
+
+    get name(): string | null {
+      try {
+        return namedAs(session.sessionName);
+      } catch {
+        return null;
+      }
+    },
+
+    rename(name: string): boolean {
+      if (closed) return false;
+      const kept = namedAs(name);
+      if (kept === null) return false;
+      try {
+        session.setSessionName(kept);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    get moments(): readonly Moment[] {
+      return momentsNow();
+    },
+
+    async tryAnotherDirection(momentId: string): Promise<string | null> {
+      if (closed) return null;
+      // Checked against the conversation as it stands first, so an id from
+      // somewhere else is an answer rather than a throw from underneath.
+      const moment = momentToReturnTo(momentsNow(), momentId);
+      if (moment === null) return null;
+      try {
+        // Pi rewinds to just before the chosen message and hands its words back
+        // for the composer, which is exactly "say that again, differently".
+        const back = await session.navigateTree(momentId);
+        return back.cancelled ? null : back.editorText ?? moment.said;
+      } catch {
+        // Mid-reply is the ordinary case here, and it is a no, not a failure.
+        return null;
+      }
+    },
+
+    mark(momentId: string, note: string): boolean {
+      if (closed) return false;
+      if (momentToReturnTo(momentsNow(), momentId) === null) return false;
+      try {
+        manager.appendLabelChange(momentId, namedAs(note) ?? undefined);
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }

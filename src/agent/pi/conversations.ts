@@ -55,6 +55,23 @@ export function titleOf(firstMessage: string, at: number): string {
   return /[\p{L}\p{N}]/u.test(said) ? shortened(said) : ago(at);
 }
 
+/** A name somebody typed, ready to keep — or null when there is nothing in it.
+ *  One line, however many they pressed return on. */
+export function namedAs(text: unknown): string | null {
+  if (typeof text !== 'string') return null;
+  const kept = text.replace(/\s+/g, ' ').trim();
+  return kept === '' ? null : kept;
+}
+
+/** What to call a conversation once somebody has had a say: the name they chose,
+ *  and only failing that the guess from their opening words. A name that is all
+ *  markup or all punctuation is not a name, so the guess still gets its turn. */
+export function nameOf(chosen: unknown, firstMessage: string, at: number): string {
+  const given = namedAs(chosen);
+  const said = given === null ? '' : withoutMarkup(given).replace(/\s+/g, ' ').trim();
+  return /[\p{L}\p{N}]/u.test(said) ? shortened(said) : titleOf(firstMessage, at);
+}
+
 type Fields = Readonly<Record<string, unknown>>;
 
 function fieldsOf(value: unknown): Fields | null {
@@ -100,7 +117,7 @@ function conversationOf(info: unknown): Conversation | null {
   return {
     id,
     path,
-    title: titleOf(typeof first === 'string' ? first : '', at),
+    title: nameOf(source['name'], typeof first === 'string' ? first : '', at),
     at,
     messages,
   };

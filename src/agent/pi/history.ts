@@ -1,4 +1,5 @@
-/** A saved conversation, read back as the events the window draws.
+/** A saved conversation, read back as the events the window draws — and as the
+ *  moments it can be taken back to.
  *
  * Pi's session entries translated into the same AgentEvents the live stream
  * uses, so the window can fold them through `applyEvent`. Same rules as
@@ -34,6 +35,13 @@ function flagAt(source: Fields, key: string): boolean | null {
 
 function nestedAt(source: Fields, key: string): Fields | null {
   return fieldsOf(source[key]);
+}
+
+function momentAt(source: Fields): number | null {
+  const value = source['timestamp'];
+  if (typeof value !== 'string') return null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 /** The words of a user message, whether it was stored as one string or as
@@ -135,4 +143,44 @@ export function eventsFromEntries(entries: readonly unknown[]): readonly AgentEv
   }
   for (const id of open) events.push({ type: 'tool-end', id, ok: false });
   return events;
+}
+
+/** One thing the person said, and so one place the conversation can be taken
+ *  back to. `at` is null when the record does not say when it happened, which is
+ *  a missing caption rather than a reason to lose the moment. */
+export type Moment = {
+  id: string;
+  said: string;
+  at: number | null;
+  mark: string | null;
+};
+
+/** The things the person said, oldest first. A message that was pictures only
+ *  is left out for the same reason it is left out of a replay: there is nothing
+ *  to show for it. `markOf` supplies whatever was written against a moment. */
+export function momentsFromEntries(
+  entries: readonly unknown[],
+  markOf: (id: string) => string | null = () => null,
+): readonly Moment[] {
+  const moments: Moment[] = [];
+  for (const entry of entries) {
+    const source = fieldsOf(entry);
+    if (source === null || textAt(source, 'type') !== 'message') continue;
+    const id = textAt(source, 'id');
+    const message = nestedAt(source, 'message');
+    if (id === null || message === null || textAt(message, 'role') !== 'user') continue;
+    const said = userWords(message);
+    if (said === null) continue;
+    moments.push({ id, said, at: momentAt(source), mark: markOf(id) });
+  }
+  return moments;
+}
+
+/** Which moment a request refers to, checked against the conversation as it
+ *  stands. Anything else — a stale id, a moment from a direction already left
+ *  behind — is nowhere to go back to, and is answered here rather than by
+ *  letting the machinery underneath throw. */
+export function momentToReturnTo(moments: readonly Moment[], id: unknown): Moment | null {
+  if (typeof id !== 'string' || id === '') return null;
+  return moments.find((moment) => moment.id === id) ?? null;
 }

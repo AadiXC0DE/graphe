@@ -29,6 +29,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Notification,
   session,
   shell,
   type IpcMainInvokeEvent,
@@ -69,6 +70,10 @@ import {
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
+  type Away,
+  type AwayPiece,
+  type EveryKind,
+  type Repeating,
   type ConnectOutcome,
   type ConnectStep,
   type ConnectionState,
@@ -118,7 +123,22 @@ import { readTokens, steps, writeToken } from '../src/design/tokens';
 import { lookAtEveryWidth } from '../src/diff/capture';
 import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
-import { HeldWork, holdWords } from '../src/history/attempts';
+import { HeldWork, holdWords, Workbench, type PieceOfWork } from '../src/history/attempts';
+import { AT_A_TIME } from '../src/work/board';
+import { saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
+import {
+  addStanding,
+  dueNow,
+  ranStanding,
+  saysStanding,
+  standingFor,
+  switchStanding,
+  withoutProject,
+  withoutStanding,
+  type Standing,
+} from '../src/work/standing';
+import type { Repeat, TimeOfDay, Weekday } from '../src/work/schedule';
+import { StandingFile } from '../src/projects/standing';
 import { HandoverError, handToDeveloper, whatIsHere, type Change } from '../src/share/developer';
 import { handoverWords } from '../src/share/handover';
 import { OnlineError, putOnline, whatIsHereForOnline } from '../src/share/publish';
@@ -497,7 +517,9 @@ function createWindow(): void {
   win.webContents.on('did-finish-load', sayHowItSits);
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
-    closeSession();
+    // Only when there is nothing left going. A run holding a copy of somebody's
+    // project open must not lose its session because a window was shut.
+    if (!mustStayUp()) closeSession();
   });
 
   void load(win);
@@ -1462,6 +1484,476 @@ function atPage(address: string, at: unknown): string {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Work that carries on without you                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * ## The whole shape of it
+ *
+ * Nothing here runs in a data centre. Every piece of work is a copy of the
+ * project on this disk, made by the same `Workbench` the board already uses, and
+ * the only thing that ever leaves the machine is the model call that was always
+ * going to. What comes back is what a designer can read: a picture, a sentence
+ * and what it cost, filed on the contact sheet with a way to keep it or let it
+ * go.
+ *
+ * ## The rule that matters
+ *
+ * A run with nobody watching cannot answer its own questions. `Unattended` holds
+ * them, and the only thing that resolves one is a person pressing a button — see
+ * src/work/unattended.ts, where that is one small class with one guarded exit.
+ * When a run stops on a question it says so, on the board and on screen, and it
+ * waits for however long that takes.
+ */
+
+/** Where copies of a project live while work carries on in them. Per project,
+ *  so letting one project's work go can never reach another's. */
+function awayFolder(path: string): string {
+  const named = basename(path).replace(/[^a-zA-Z0-9-]+/g, '-').slice(0, 24) || 'project';
+  let stamp = 0;
+  for (const character of path) stamp = (stamp * 31 + character.charCodeAt(0)) >>> 0;
+  return join(app.getPath('temp'), 'graphe-away', `${named}-${stamp.toString(36)}`);
+}
+
+/** One piece of work in flight, and the questions it has left standing. */
+type Run = {
+  /** Nothing in here answers a question. It only remembers them. */
+  held: Unattended;
+  session: GrapheSession | null;
+  /** What it said, kept for the sentence beside its picture. */
+  said: string;
+};
+
+/** Everything one project has going whether or not anybody is looking. Kept
+ *  apart from `workspaces` on purpose: a repeat coming round for a project that
+ *  is not in front must not quietly change which project is in front. */
+type AwayDesk = {
+  path: string;
+  name: string;
+  history: ProjectHistory;
+  bench: Workbench;
+  runs: Map<string, Run>;
+  spend: SpendRecorder;
+  /** True once something has landed that nobody has been shown yet. */
+  unseen: boolean;
+  /** True while copies are being made. Two runs finishing at the same moment
+   *  would otherwise both look at the queue before either had taken from it,
+   *  and the piece at the front would be started twice. */
+  starting: boolean;
+  /** A slot freed up while that was happening. Look again when it ends, or the
+   *  piece at the front of the queue waits for a turn that never comes. */
+  again: boolean;
+};
+
+const awayDesks = new Map<string, AwayDesk>();
+
+function deskFor(path: string, name: string): AwayDesk {
+  const already = awayDesks.get(path);
+  if (already !== undefined) return already;
+  const history = new ProjectHistory(path);
+  const desk: AwayDesk = {
+    path,
+    name,
+    history,
+    bench: new Workbench({ history, under: awayFolder(path), atOnce: AT_A_TIME }),
+    runs: new Map(),
+    spend: new SpendRecorder(),
+    unseen: false,
+    starting: false,
+    again: false,
+  };
+  awayDesks.set(path, desk);
+  return desk;
+}
+
+/** The list of repeats, mirrored here so drawing the panel never waits on a
+ *  disk. The file is the truth; this is the copy the window is told about. */
+let standingNow: readonly Standing[] = [];
+let standingPromise: Promise<StandingFile> | null = null;
+
+function standingFile(): Promise<StandingFile> {
+  standingPromise ??= StandingFile.open(join(app.getPath('userData'), 'standing.json')).then(
+    (file) => {
+      standingNow = file.all();
+      return file;
+    },
+  );
+  return standingPromise;
+}
+
+async function changeStanding(
+  change: (all: readonly Standing[]) => readonly Standing[],
+): Promise<void> {
+  const file = await standingFile();
+  standingNow = await file.change(change);
+  watchTheClock();
+}
+
+/** One line about what a piece of work did, out of what it actually said. */
+function saidBriefly(text: string): string | null {
+  const one = text.replace(/\s+/g, ' ').trim();
+  if (one === '') return null;
+  const stop = one.search(/[.!?](\s|$)/);
+  const sentence = stop === -1 ? one : one.slice(0, stop + 1);
+  return sentence.length > 160 ? `${sentence.slice(0, 159)}…` : sentence;
+}
+
+function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
+  return desk.bench.pieces.map((piece) => {
+    const run = desk.runs.get(piece.id);
+    const asked = run?.held.first ?? null;
+    return {
+      id: piece.id,
+      doing: piece.doing,
+      state: piece.state,
+      at: piece.at,
+      picture: piece.picture,
+      says: saidBriefly(run?.said ?? ''),
+      trouble: piece.trouble,
+      question:
+        asked === null
+          ? null
+          : {
+              callId: asked.callId,
+              question: asked.question,
+              detail: asked.detail,
+              consequence: asked.consequence,
+            },
+    };
+  });
+}
+
+function awayRepeats(path: string, now: number): readonly Repeating[] {
+  return standingFor(standingNow, path).map((one) => {
+    const said = saysStanding(one, now);
+    return {
+      id: one.id,
+      doing: one.doing,
+      says: said.says,
+      next: said.next,
+      on: one.on,
+      lastSaid: one.lastSaid,
+    };
+  });
+}
+
+/** Everything this project has going, as the window draws it. */
+function awayNow(path: string): Away {
+  const repeats = awayRepeats(path, Date.now());
+  const desk = awayDesks.get(path);
+  if (desk === undefined) {
+    return { pieces: [], repeats, atOnce: AT_A_TIME, spent: null, sinceYouWere: null };
+  }
+  const pieces = awayPieces(desk);
+  return {
+    pieces,
+    repeats,
+    atOnce: desk.bench.atOnce,
+    spent: desk.spend.ledger?.total() ?? null,
+    sinceYouWere: desk.unseen ? saysWhileAway(pieces) : null,
+  };
+}
+
+function pushAway(path: string): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.awayChanged, { project: path, away: awayNow(path) });
+}
+
+/* ------------------------------------------------------------ being told */
+
+/** Bring the window back, making one if it has been closed. Somebody already
+ *  looking at it is left alone — taking focus from a person mid-sentence is not
+ *  bringing them to anything. */
+function showTheWindow(): void {
+  if (mainWindow !== null && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+  createWindow();
+}
+
+/** There is a window to be answered in. Made only when there is not. */
+function makeSureThereIsAWindow(): void {
+  if (mainWindow !== null && !mainWindow.isDestroyed()) return;
+  createWindow();
+}
+
+/** One sentence on somebody's screen. Pressing it brings them back to the thing
+ *  it is about. Silent where the system has no way to show one. */
+function tellThem(title: string, body: string, path: string): void {
+  if (!Notification.isSupported()) return;
+  try {
+    const notice = new Notification({ title, body });
+    notice.on('click', () => {
+      showTheWindow();
+      pushAway(path);
+    });
+    notice.show();
+  } catch {
+    // A machine that will not show one is not a reason to stop the work.
+  }
+}
+
+/* ------------------------------------------------------------- doing one */
+
+/**
+ * One piece of work, from its own copy of the project to its picture.
+ *
+ * The session is in memory only: an unattended run has no business writing into
+ * the conversation somebody left open, and nothing it says belongs in a
+ * transcript they did not ask for.
+ */
+async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
+  const folder = piece.folder;
+  if (folder === null) return;
+
+  let session: GrapheSession | null = null;
+  // The one way this run can ever be answered, and it takes the decision as an
+  // argument. `Unattended` never calls it of its own accord.
+  const held = new Unattended((callId, decision) => session?.answer(callId, decision) ?? false);
+  const run: Run = { held, session: null, said: '' };
+  desk.runs.set(piece.id, run);
+
+  const hear = (event: AgentEvent): void => {
+    held.heard(event, Date.now());
+    if (event.type === 'message-delta') run.said = `${run.said}${event.text}`.slice(0, 2000);
+
+    let moved = false;
+    if (event.type === 'needs-confirmation') {
+      piece.state = 'needs-you';
+      desk.unseen = true;
+      moved = true;
+      // A question needs a person, and a person needs a window. Made if there
+      // is none; never pulled in front of one somebody is already using.
+      makeSureThereIsAWindow();
+      const notice = saysNotice(desk.name, { doing: piece.doing, state: 'needs-you' });
+      tellThem(notice.title, notice.body, desk.path);
+    }
+    if ((event.type === 'tool-start' || event.type === 'blocked') && piece.state === 'needs-you') {
+      if (!held.isWaiting) {
+        piece.state = 'running';
+        moved = true;
+      }
+    }
+
+    for (const also of desk.spend.observe(event)) {
+      if (also.type === 'spend-summary') {
+        void recents().then((list) => list.recordSpend(desk.path, also.summary.total));
+      }
+    }
+    if (moved || event.type === 'error' || event.type === 'settled') pushAway(desk.path);
+  };
+
+  try {
+    session = await createSession({
+      projectRoot: folder,
+      onEvent: hear,
+      timeline: await Timeline.open(folder),
+      model: (await preferences()).all().model,
+    });
+    run.session = session;
+    await session.prompt(piece.doing);
+    await desk.bench.settle(piece.id, saysHeldWork(piece.doing));
+  } catch (cause) {
+    const raw = cause instanceof Error ? cause.message : String(cause);
+    desk.bench.stopped(piece.id, plainMessage(raw));
+  } finally {
+    // Whatever happened, nothing is left parked on a question nobody can reach.
+    // Turned down, never up: the run ending is not a person saying yes.
+    held.stop();
+    session?.dispose();
+    run.session = null;
+  }
+
+  // What it made, as a picture. Quiet when it cannot be taken — a project that
+  // will not build is what half of these runs are about.
+  try {
+    const taken = await capture({ folder, id: `away-${piece.id}` });
+    if (taken !== null) desk.bench.showPicture(piece.id, taken.thumbnail);
+  } catch {
+    // The sentence is still true without it.
+  }
+
+  // Only if it is still on the board. One somebody stopped on their way past
+  // does not get a notice saying it landed.
+  const landed = desk.bench.pieces.find((one) => one.id === piece.id);
+  if (landed !== undefined) {
+    desk.unseen = true;
+    const notice = saysNotice(
+      desk.name,
+      { doing: landed.doing, state: landed.state },
+      saidBriefly(run.said),
+    );
+    tellThem(notice.title, notice.body, desk.path);
+  }
+  pushAway(desk.path);
+
+  await runWhatCan(desk);
+  quitIfNothingIsLeft();
+}
+
+/** Start as many as there is room for. Called when one is asked for and again
+ *  whenever one finishes. */
+async function runWhatCan(desk: AwayDesk): Promise<void> {
+  if (desk.starting) {
+    desk.again = true;
+    return;
+  }
+  desk.starting = true;
+  let began: readonly PieceOfWork[];
+  try {
+    // Work starts from a version. Anything unfinished becomes one first,
+    // silently and without a question, exactly as going back does.
+    if (await desk.history.hasUnsavedChanges()) {
+      await desk.history.snapshot('Saved before working on its own');
+    }
+    began = await desk.bench.begin();
+  } catch (cause) {
+    const why = cause instanceof Error ? cause.message : String(cause);
+    for (const piece of desk.bench.pieces) {
+      if (piece.state === 'waiting') desk.bench.stopped(piece.id, plainMessage(why));
+    }
+    pushAway(desk.path);
+    return;
+  } finally {
+    desk.starting = false;
+  }
+  if (began.length > 0) pushAway(desk.path);
+  for (const piece of began) void runOne(desk, piece);
+  if (desk.again) {
+    desk.again = false;
+    await runWhatCan(desk);
+  }
+}
+
+/** Ask for a piece of work that carries on whether or not anybody is looking. */
+async function keepGoing(path: string, name: string, doing: string): Promise<void> {
+  const desk = deskFor(path, name);
+  desk.bench.ask(doing);
+  pushAway(path);
+  await runWhatCan(desk);
+}
+
+/* ------------------------------------------------------- over and over */
+
+/** Often enough that a morning is not missed by much, seldom enough that a
+ *  laptop's battery never notices. */
+const LOOK_EVERY = 30_000;
+
+let clock: ReturnType<typeof setInterval> | null = null;
+
+function watchTheClock(): void {
+  if (clock !== null) return;
+  if (!standingNow.some((one) => one.on)) return;
+  clock = setInterval(() => void whatIsDue(), LOOK_EVERY);
+  void whatIsDue();
+}
+
+function stopWatchingTheClock(): void {
+  if (clock === null) return;
+  clearInterval(clock);
+  clock = null;
+}
+
+/** True while one round is being worked out, so a slow project cannot have two
+ *  rounds asking for the same thing twice. */
+let looking = false;
+
+async function whatIsDue(): Promise<void> {
+  if (looking) return;
+  looking = true;
+  try {
+    const file = await standingFile();
+    const now = Date.now();
+    for (const one of dueNow(file.all(), now)) {
+      // Written down before anything happens. A machine that loses power
+      // half-way through must come back to a repeat that has been done, not one
+      // that looks overdue and runs a second time.
+      standingNow = await file.change((all) => ranStanding(all, one.id, { at: now }));
+      const name = basename(one.project) === '' ? one.project : basename(one.project);
+      await keepGoing(one.project, name, one.doing);
+    }
+  } catch {
+    // A round that could not be worked out is a round missed, and the next one
+    // is thirty seconds away.
+  } finally {
+    looking = false;
+  }
+}
+
+/* ------------------------------------------------------------- the end */
+
+/** True while something is actually in flight. One stopped on a question is
+ *  deliberately not counted: it is not going anywhere, and the window it needs
+ *  has already been opened for it. */
+function stillGoing(): boolean {
+  for (const desk of awayDesks.values()) {
+    if (desk.bench.pieces.some((one) => one.state === 'running' || one.state === 'waiting')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether the app has a reason to outlive its window.
+ *
+ * Work in flight, always: closing the window is not the same as changing your
+ * mind, and stopping a run half-way leaves a copy of somebody's project behind
+ * with nothing to show for it.
+ *
+ * A repeat waiting for its morning, only on macOS, where closing the window has
+ * never meant quitting and the app is visibly still there in the Dock. Anywhere
+ * else, closing the last window means done — the repeats pick up the next time
+ * it is opened, and one missed morning is done once rather than counted up.
+ * Nobody is left with a process they cannot see and cannot end.
+ */
+function mustStayUp(): boolean {
+  if (stillGoing()) return true;
+  return process.platform === 'darwin' && standingNow.some((one) => one.on);
+}
+
+/** Called when a piece of work finishes. With no window and nothing left to do,
+ *  the app lets itself go rather than sitting there invisibly. */
+function quitIfNothingIsLeft(): void {
+  if (mainWindow !== null && !mainWindow.isDestroyed()) return;
+  if (mustStayUp()) return;
+  closeSession();
+  if (process.platform !== 'darwin') app.quit();
+}
+
+/** What the window asked for, as a rhythm. Null when it is not one of the four,
+ *  which is a stale window rather than something to say a sentence about. */
+function asRepeat(every: unknown, at: unknown, on: unknown): Repeat | null {
+  const known: readonly EveryKind[] = ['day', 'weekday', 'week', 'month'];
+  if (typeof every !== 'string' || !known.includes(every as EveryKind)) return null;
+  if (typeof at !== 'object' || at === null) return null;
+  const time = at as Record<string, unknown>;
+  if (typeof time['hour'] !== 'number' || typeof time['minute'] !== 'number') return null;
+  const when: TimeOfDay = { hour: time['hour'], minute: time['minute'] };
+  const which = typeof on === 'number' ? on : 1;
+  if (every === 'week') return { every: 'week', on: which as Weekday, at: when };
+  if (every === 'month') return { every: 'month', on: which, at: when };
+  return { every: every as 'day' | 'weekday', at: when };
+}
+
+/** Everything in flight, let go. Every question still standing is turned down —
+ *  which changes nothing, because a question is asked before the thing happens. */
+function stopEverythingAway(): void {
+  stopWatchingTheClock();
+  for (const desk of awayDesks.values()) {
+    for (const run of desk.runs.values()) {
+      run.held.stop();
+      void run.session?.stop();
+      run.session?.dispose();
+      run.session = null;
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* The six verbs                                                               */
 /* -------------------------------------------------------------------------- */
 
@@ -1663,6 +2155,19 @@ function register(): void {
       // Ours, though, goes. Somebody who has just said "I am done with this
       // project" should not be left holding a folder of our screenshots of it.
       await forgetEverything(resolve(path));
+      // And nothing of theirs goes on happening on its own for a project they
+      // have just put down.
+      const desk = awayDesks.get(resolve(path));
+      if (desk !== undefined) {
+        for (const run of desk.runs.values()) {
+          run.held.stop();
+          run.session?.dispose();
+        }
+        await desk.bench.clear().catch(() => undefined);
+        awayDesks.delete(resolve(path));
+      }
+      await changeStanding((all) => withoutProject(all, resolve(path)));
+      if (!standingNow.some((one) => one.on)) stopWatchingTheClock();
     }
     return done(await rememberedProjects());
   });
@@ -2061,6 +2566,142 @@ function register(): void {
     }
   });
 
+  /* ------------------------------------------- while you are not looking */
+
+  handle<Away>(CHANNEL.away, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    // Read before answering, so the first ask of a launch is not told there are
+    // no repeats when there are.
+    await standingFile().catch(() => null);
+    // Asking is coming back to it, so whatever was waiting has now been seen.
+    const answer = awayNow(open.path);
+    const desk = awayDesks.get(open.path);
+    if (desk !== undefined) desk.unseen = false;
+    return done(answer);
+  });
+
+  handle<Away>(CHANNEL.keepGoing, async (_event, args) => {
+    const [text] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof text !== 'string' || text.trim() === '') return done(awayNow(open.path));
+    await keepGoing(open.path, open.name, text);
+    return done(awayNow(open.path));
+  });
+
+  handle<Away>(CHANNEL.stopAway, async (_event, args) => {
+    const [id] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const desk = awayDesks.get(open.path);
+    if (desk === undefined || typeof id !== 'string') return done(awayNow(open.path));
+    const run = desk.runs.get(id);
+    // Turned down rather than left hanging, and only ever down.
+    run?.held.stop();
+    void run?.session?.stop();
+    run?.session?.dispose();
+    desk.runs.delete(id);
+    await desk.bench.drop(id);
+    await runWhatCan(desk);
+    return done(awayNow(open.path));
+  });
+
+  handle<Away>(CHANNEL.keepAway, async (_event, args) => {
+    const [id] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const desk = awayDesks.get(open.path);
+    if (desk === undefined || typeof id !== 'string') return done(awayNow(open.path));
+    const piece = desk.bench.pieces.find((one) => one.id === id);
+    if (piece === undefined) return done(awayNow(open.path));
+    try {
+      // Anything unfinished in the folder becomes a version first, the same way
+      // going back does, so keeping this can never write over it.
+      await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
+      await desk.bench.keep(id, saysHeldWork(piece.doing));
+      desk.runs.delete(id);
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+    return done(awayNow(open.path));
+  });
+
+  /**
+   * A person answering a question one of those runs stopped on.
+   *
+   * The only door. Everything else about an unattended run either records a
+   * question or turns it down; nothing else can say yes, and this cannot say
+   * yes without a person having pressed the button that sends it.
+   */
+  handle<Away>(CHANNEL.answerAway, async (_event, args) => {
+    const [id, callId, decision] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (
+      typeof id !== 'string' ||
+      typeof callId !== 'string' ||
+      (decision !== 'yes' && decision !== 'no')
+    ) {
+      return done(awayNow(open.path));
+    }
+    const desk = awayDesks.get(open.path);
+    const run = desk?.runs.get(id);
+    const piece = desk?.bench.pieces.find((one) => one.id === id);
+    if (run === undefined || desk === undefined || piece === undefined) {
+      return done(awayNow(open.path));
+    }
+    run.held.answer(callId, decision as Decision);
+    if (!run.held.isWaiting && piece.state === 'needs-you') piece.state = 'running';
+    return done(awayNow(open.path));
+  });
+
+  handle<Away>(CHANNEL.addRepeat, async (_event, args) => {
+    const [doing, every, at, on] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const repeat = asRepeat(every, at, on);
+    if (typeof doing !== 'string' || doing.trim() === '' || repeat === null) {
+      return done(awayNow(open.path));
+    }
+    let because: string | null = null;
+    await changeStanding((all) => {
+      const asked = addStanding(all, {
+        id: `every-${Date.now().toString(36)}`,
+        project: open.path,
+        doing,
+        repeat,
+        at: Date.now(),
+      });
+      because = asked.because;
+      return asked.all;
+    });
+    if (because !== null) {
+      return fail({ what: 'I did not add that.', because, actionLabel: 'Got it' });
+    }
+    return done(awayNow(open.path));
+  });
+
+  handle<Away>(CHANNEL.switchRepeat, async (_event, args) => {
+    const [id, on] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id === 'string' && typeof on === 'boolean') {
+      await changeStanding((all) => switchStanding(all, id, on));
+      if (!standingNow.some((one) => one.on)) stopWatchingTheClock();
+    }
+    return done(awayNow(open.path));
+  });
+
+  handle<Away>(CHANNEL.forgetRepeat, async (_event, args) => {
+    const [id] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id === 'string') await changeStanding((all) => withoutStanding(all, id));
+    if (!standingNow.some((one) => one.on)) stopWatchingTheClock();
+    return done(awayNow(open.path));
+  });
+
   handle<OpenedProject>(CHANNEL.openConversation, async (_event, args) => {
     const [path] = args;
     const open = workspaces.current;
@@ -2452,19 +3093,42 @@ if (!app.requestSingleInstanceLock()) {
   // contents that ever exists, not only the one we remembered to wire up.
   app.on('web-contents-created', (_event, contents) => guardNavigation(contents));
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     applyContentPolicy();
     register();
     createWindow();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
+    // What somebody asked for over and over, picked up where it left off. One
+    // that came round while this was shut is done once — see whenNext.
+    await standingFile().catch(() => null);
+    watchTheClock();
   });
 
+  /**
+   * The last window has gone.
+   *
+   * Work that was asked to carry on carries on: closing the window is not the
+   * same as changing your mind, and stopping a run half-way would leave a copy
+   * of somebody's project behind with nothing to show for it. When it lands they
+   * are told, and pressing that brings the window back.
+   *
+   * Nothing here is ever an app you cannot end. Quitting is never prevented,
+   * anywhere; and off macOS, where a windowless app is not a thing people
+   * expect, the moment the work is done the app lets itself go.
+   */
   app.on('window-all-closed', () => {
+    if (mustStayUp()) return;
     closeSession();
     if (process.platform !== 'darwin') app.quit();
   });
 
-  app.on('before-quit', () => closeSession());
+  // Quitting is allowed at any moment, and this is what it costs: anything
+  // still waiting on an answer is turned down, which changes nothing, because a
+  // question is always asked before the thing it is about happens.
+  app.on('before-quit', () => {
+    stopEverythingAway();
+    closeSession();
+  });
 }

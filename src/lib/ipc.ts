@@ -15,8 +15,9 @@
 import type { AgentEvent, Money } from '../agent/types';
 import type { FileEntry } from '../files/tree';
 import type { Page } from '../preview/pages';
+import type { WorkState } from '../work/board';
 
-export type { FileEntry, Page };
+export type { FileEntry, Page, WorkState };
 
 /** Yes or no, from a person. Same two answers the Guard accepts, and no third. */
 export type Decision = 'yes' | 'no';
@@ -326,6 +327,85 @@ export type Decided = {
   letIn: boolean;
   undoTo: string | null;
 };
+
+/* -------------------------------------------------------------------------- */
+/* Work that carries on without you                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A question one of those pieces of work stopped on.
+ *
+ * Nothing answers it but a person. It travels to the window exactly as the Guard
+ * wrote it, and the window's two buttons are the only things that can resolve
+ * it — see src/work/unattended.ts, which is where that rule is kept.
+ */
+export type AwayQuestion = {
+  /** Hand this back to `answerAway` with the person's answer. */
+  callId: string;
+  question: string;
+  detail: string | null;
+  consequence: string | null;
+};
+
+/** One piece of work carrying on in its own copy of the project. */
+export type AwayPiece = {
+  id: string;
+  /** What it was asked to do, in the person's own words. */
+  doing: string;
+  state: WorkState;
+  /** Epoch ms. */
+  at: number;
+  /** What its result looks like, small, once there is one. */
+  picture: string | null;
+  /** What it did, in a sentence. Null while there is nothing true to say. */
+  says: string | null;
+  /** Why it stopped, when it did not work. */
+  trouble: string | null;
+  /** What it is waiting to be told, or null. */
+  question: AwayQuestion | null;
+};
+
+/** One thing asked for over and over, as the window draws it. Nothing here says
+ *  how the timing works — only what it does and when it happens next. */
+export type Repeating = {
+  id: string;
+  doing: string;
+  /** "Every day at 7:00am". */
+  says: string;
+  /** "Tomorrow at 7:00am", or that it has been stopped. */
+  next: string;
+  on: boolean;
+  /** What came of the last one, or null when it has not happened yet. */
+  lastSaid: string | null;
+};
+
+/**
+ * Everything that happens whether or not somebody is looking.
+ *
+ * Asked for by the window and pushed at it whenever it changes, because the
+ * interesting case is precisely the one where the window was not there when it
+ * did.
+ */
+export type Away = {
+  pieces: readonly AwayPiece[];
+  repeats: readonly Repeating[];
+  /** How many go side by side. */
+  atOnce: number;
+  /** What all of it has cost so far, or null when nothing has been spent. */
+  spent: Money | null;
+  /** The one line over it when somebody comes back to it. Null when there is
+   *  nothing worth saying. */
+  sinceYouWere: string | null;
+};
+
+/** How often a thing asked for over and over happens. The window offers four,
+ *  named after what somebody would say rather than after a rule. */
+export type EveryKind = 'day' | 'weekday' | 'week' | 'month';
+
+/** What is going on, and which project it belongs to. Same envelope, and same
+ *  reason for it, as `AgentNotice`: a run can land for a folder somebody has
+ *  switched away from, and it must not be drawn under another folder's name. */
+export type AwayNotice = { project: string; away: Away };
 
 /** How the next message should be handled. Both default off; the window turns
  *  the first on by itself when a request looks big enough to be worth a plan. */
@@ -643,6 +723,15 @@ export const CHANNEL = {
   decideOnWork: 'graphe:decide-on-work',
   handToDeveloper: 'graphe:hand-to-developer',
   putOnline: 'graphe:put-online',
+  away: 'graphe:away',
+  keepGoing: 'graphe:keep-going',
+  stopAway: 'graphe:stop-away',
+  keepAway: 'graphe:keep-away',
+  answerAway: 'graphe:answer-away',
+  addRepeat: 'graphe:add-repeat',
+  switchRepeat: 'graphe:switch-repeat',
+  forgetRepeat: 'graphe:forget-repeat',
+  awayChanged: 'graphe:away-changed',
 } as const;
 
 /**
@@ -817,4 +906,39 @@ export type GrapheApi = {
   /** Put the finished project on the internet. Same rule about `confirmed`,
    *  and the same reason for it. */
   putOnline(confirmed: boolean): Promise<Result<WentOnline>>;
+
+  /* ---------------------------------------------- while you are not looking */
+
+  /** Everything happening for this project whether or not the window is open. */
+  away(): Promise<Result<Away>>;
+  /** Start a piece of work that carries on with the window closed. It runs in
+   *  its own copy, so the folder on screen is untouched until it is kept. */
+  keepGoing(text: string): Promise<Result<Away>>;
+  /** Stop one, or let its result go. Same door for both, because what it means
+   *  depends only on whether it had finished. */
+  stopAway(id: string): Promise<Result<Away>>;
+  /** Take one's result into the project. A version like any other, so it can be
+   *  put back like any other. */
+  keepAway(id: string): Promise<Result<Away>>;
+  /**
+   * Answer the question one of them stopped on.
+   *
+   * The only thing on this bridge that can resolve one. Nothing on the other
+   * side ever answers its own — a run with nobody watching stops and waits.
+   */
+  answerAway(id: string, callId: string, decision: Decision): Promise<Result<Away>>;
+  /** Ask for something over and over: what to do, how often, and at what time. */
+  addRepeat(
+    doing: string,
+    every: EveryKind,
+    at: { hour: number; minute: number },
+    on?: number,
+  ): Promise<Result<Away>>;
+  /** Stop one happening, or start it again. What was typed is kept either way. */
+  switchRepeat(id: string, on: boolean): Promise<Result<Away>>;
+  /** Forget one entirely. */
+  forgetRepeat(id: string): Promise<Result<Away>>;
+  /** Follow along while any of that changes, including while the window was
+   *  away and has just come back. Returns the function that stops listening. */
+  onAway(listener: (notice: AwayNotice) => void): () => void;
 };

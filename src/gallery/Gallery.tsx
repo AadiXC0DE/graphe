@@ -9,6 +9,7 @@ import ErrorCard from '../components/ErrorCard';
 import Files from '../components/Files';
 import FileView from '../components/FileView';
 import Message from '../components/Message';
+import Away from '../components/Away';
 import Landing from '../components/Landing';
 import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
@@ -21,6 +22,7 @@ import type {
   ConnectionState,
   FileEntry,
   FoundAccount,
+  Away as AwayState,
   Landing as LandingState,
   PutBack,
   RecentProject,
@@ -110,6 +112,28 @@ const SCREENSHOT = `data:image/svg+xml,${encodeURIComponent(
     '<rect x="6" y="9" width="34" height="7" rx="2" fill="#b8492c"/>' +
     '<rect x="6" y="22" width="24" height="4" rx="2" fill="#cdc6bd"/>' +
     '<rect x="6" y="31" width="30" height="4" rx="2" fill="#cdc6bd"/>' +
+    '</svg>',
+)}`;
+
+/** A page, drawn, for the cards whose whole point is that the result is a
+ *  picture. Same reason as the one above: the gallery has to render with nothing
+ *  behind it, and there is no folder here to photograph. */
+const PAGE_SHOT = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="260" height="180">' +
+    '<rect width="260" height="180" fill="#ffffff"/>' +
+    '<rect width="260" height="18" fill="#fbfbfa"/>' +
+    '<rect y="17" width="260" height="1" fill="#e4e4e1"/>' +
+    '<rect x="14" y="6" width="26" height="5" rx="2" fill="#1a1a19"/>' +
+    '<rect x="200" y="7" width="18" height="3" rx="1.5" fill="#9a9a93"/>' +
+    '<rect x="226" y="7" width="18" height="3" rx="1.5" fill="#9a9a93"/>' +
+    '<rect x="14" y="38" width="120" height="9" rx="3" fill="#1a1a19"/>' +
+    '<rect x="14" y="54" width="88" height="9" rx="3" fill="#1a1a19"/>' +
+    '<rect x="14" y="74" width="104" height="4" rx="2" fill="#9a9a93"/>' +
+    '<rect x="14" y="90" width="52" height="14" rx="4" fill="#b8492c"/>' +
+    '<rect x="152" y="34" width="96" height="70" rx="5" fill="#f2f2f0"/>' +
+    '<rect x="14" y="120" width="70" height="44" rx="5" fill="#fbfbfa" stroke="#e4e4e1"/>' +
+    '<rect x="94" y="120" width="70" height="44" rx="5" fill="#fbfbfa" stroke="#e4e4e1"/>' +
+    '<rect x="174" y="120" width="70" height="44" rx="5" fill="#fbfbfa" stroke="#e4e4e1"/>' +
     '</svg>',
 )}`;
 
@@ -273,6 +297,69 @@ const LANDING: LandingState = {
   handOverSays: 'Everything needed is here.',
   canPutOnline: true,
   onlineSays: 'Everything needed is here.',
+};
+
+/**
+ * Work that carried on without anybody, in the three states that look nothing
+ * alike: one stopped on a question it will not answer for itself, one finished
+ * with a picture of what it made, and one still going.
+ *
+ * The first is the one worth drawing. It is the only thing on the panel that
+ * cannot move without a person, and it is the whole safety story of leaving the
+ * window shut: a run with nobody watching stops rather than deciding.
+ */
+const AWAY: AwayState = {
+  pieces: [
+    {
+      id: 'away-1',
+      doing: 'Add the pricing table to the home page',
+      state: 'needs-you',
+      at: NOW - 4 * 60_000,
+      picture: null,
+      says: 'I need one more thing before I can carry on.',
+      trouble: null,
+      question: {
+        callId: 'call-1',
+        question: 'Add “stripe” to your project?',
+        detail:
+          'This comes from the internet, and pieces like this are allowed to run their own setup steps the moment they arrive.',
+        consequence: 'That setup can read and change files in your project.',
+      },
+    },
+    {
+      id: 'away-2',
+      doing: 'Check the site still builds',
+      state: 'done',
+      at: NOW - 22 * 60_000,
+      picture: PAGE_SHOT,
+      says: 'It builds, and nothing looks different from yesterday.',
+      trouble: null,
+      question: null,
+    },
+    {
+      id: 'away-3',
+      doing: 'Match the case study page to the new spacing',
+      state: 'running',
+      at: NOW - 60_000,
+      picture: null,
+      says: null,
+      trouble: null,
+      question: null,
+    },
+  ],
+  repeats: [
+    {
+      id: 'every-1',
+      doing: 'Check the site still builds and tell me if it doesn’t',
+      says: 'Every day at 7:00am',
+      next: 'Tomorrow at 7:00am',
+      on: true,
+      lastSaid: 'It builds.',
+    },
+  ],
+  atOnce: 4,
+  spent: { minor: 37, currency: 'USD' },
+  sinceYouWere: 'One thing waiting on you, one thing ready to look at, one thing still going.',
 };
 
 const RESEARCH: readonly ResearchEntry[] = [
@@ -1047,6 +1134,8 @@ export default function Gallery() {
                   going: null,
                   landed: null,
                   decided: null,
+                  away: AWAY,
+                  clock: NOW,
                 }}
                 onPutBack={noop}
                 onName={noop}
@@ -1063,6 +1152,13 @@ export default function Gallery() {
                 onPutOnline={noop}
                 onOpenLink={noop}
                 onNudge={noop}
+                onKeepGoing={noop}
+                onKeepAway={noop}
+                onDropAway={noop}
+                onAnswerAway={noop}
+                onAddRepeat={noop}
+                onSwitchRepeat={noop}
+                onForgetRepeat={noop}
               />
             </div>
             <p className="gallery__caption">
@@ -1070,6 +1166,32 @@ export default function Gallery() {
               mono, because names are not translated. A search that worked leaves nothing but its
               question; only a failure says “stopped”. The meter docks into the foot, the way it
               docked into the foot of the rail.
+            </p>
+          </Section>
+
+          <Section
+            title="While you’re away"
+            note="Work carries on with the window closed, on this machine — nothing is sent anywhere to be built. What comes back is a picture, a sentence and what it cost, on the same contact sheet the board already draws. A run that hits a question stops there and waits: nothing answers its own, ever, and that card is the loudest thing in the band because it is the only thing here that cannot move without a person."
+          >
+            <div className="gallery__overview">
+              <Away
+                away={AWAY}
+                now={NOW}
+                busy={false}
+                onKeepGoing={noop}
+                onKeep={noop}
+                onDrop={noop}
+                onAnswer={noop}
+                onAddRepeat={noop}
+                onSwitchRepeat={noop}
+                onForgetRepeat={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              The question first, whole, in the Guard's own words. Under it the sheet, then one box
+              that gets on with something whether or not this window stays open, then the things
+              asked for over and over — each with when it happens next and a way to stop it. Nothing
+              runs here that a person cannot see and end.
             </p>
           </Section>
 

@@ -21,6 +21,13 @@
  */
 
 import type { AgentEvent } from '../agent/types';
+import {
+  findMoved,
+  nameOfDesign,
+  saysInStep,
+  NOTHING_FOLLOWED,
+  type Design,
+} from '../design/moved';
 import { pagesIn, type Page } from '../preview/pages';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
@@ -46,6 +53,7 @@ import {
   type FoundAccount,
   type GrapheApi,
   type Hatches,
+  type InStep,
   type ModelChoice,
   type OpenedProject,
   type Look,
@@ -461,6 +469,10 @@ function previewBridge(): Bridge {
    *  open, so the band can be pressed rather than only looked at. */
   let atWork: Away = previewAway();
 
+  /** What the tab is keeping in step with. Nothing, until somebody pastes
+   *  something into the band. */
+  let figmaHere: InStep = NOT_FOLLOWING;
+
   /** Whatever project the tab has open. Every event is stamped with it, the way
    *  the shell stamps its own — the window's routing is then exercised here
    *  rather than only in the app. */
@@ -759,6 +771,11 @@ function previewBridge(): Bridge {
       const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
       return Promise.resolve(done(previewVersions(path)));
     },
+    nudgeMotion(): Promise<Result<readonly SavedVersion[]>> {
+      const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
+      return Promise.resolve(done(previewVersions(path)));
+    },
+
 
     saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>> {
       const saved: SavedVersion = {
@@ -1141,6 +1158,77 @@ function previewBridge(): Bridge {
     onAway(): () => void {
       return () => {};
     },
+
+    inStep(): Promise<Result<InStep>> {
+      return Promise.resolve(done(figmaHere));
+    },
+
+    /* A browser tab has no account to read a real file with, so the invented
+       project follows an invented file. The findings under it are not invented:
+       they are what the comparison makes of the two readings below. */
+    followDesign(address: string): Promise<Result<InStep>> {
+      figmaHere = inStepPreview(address);
+      return Promise.resolve(done(figmaHere));
+    },
+
+    lookAgain(): Promise<Result<InStep>> {
+      return Promise.resolve(done(figmaHere));
+    },
+
+    caughtUp(): Promise<Result<InStep>> {
+      figmaHere = {
+        ...figmaHere,
+        moved: [],
+        says: saysInStep(figmaHere.following?.name ?? 'that file', []),
+      };
+      return Promise.resolve(done(figmaHere));
+    },
+
+    stopFollowing(): Promise<Result<InStep>> {
+      figmaHere = NOT_FOLLOWING;
+      return Promise.resolve(done(figmaHere));
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Staying in step, in a browser tab                                           */
+/* -------------------------------------------------------------------------- */
+
+const NOT_FOLLOWING: InStep = {
+  following: null,
+  moved: [],
+  says: NOTHING_FOLLOWED,
+  trouble: null,
+};
+
+/** The header as it was built, and the header as somebody left it on Tuesday. */
+const PREVIEW_BUILT: Design = {
+  frames: [{ id: '1:23', name: 'Header', width: 1440, height: 96 }],
+  values: {
+    colors: { 'color-brand-primary': '#b8492c', 'color-ink': '#1a1a19' },
+    spacing: { 'space-gutter': '24px' },
+    text: { 'font-family-heading': 'Söhne' },
+  },
+};
+
+const PREVIEW_NOW: Design = {
+  frames: [{ id: '1:23', name: 'Header', width: 1440, height: 128 }],
+  values: {
+    colors: { 'color-brand-primary': '#8f3620', 'color-ink': '#1a1a19' },
+    spacing: { 'space-gutter': '32px' },
+    text: { 'font-family-heading': 'Söhne' },
+  },
+};
+
+function inStepPreview(address: string): InStep {
+  const name = nameOfDesign(address, PREVIEW_NOW.frames);
+  const moved = findMoved(PREVIEW_BUILT, PREVIEW_NOW, { name });
+  return {
+    following: { id: 'preview', name, url: address.trim(), readAt: Date.now() },
+    moved,
+    says: saysInStep(name, moved),
+    trouble: null,
   };
 }
 
@@ -1253,6 +1341,7 @@ function connect(): Bridge {
     openConversation: (path) => api.openConversation(path),
     packages: (term) => api.packages(term),
     nudgeToken: (name, value) => api.nudgeToken(name, value),
+    nudgeMotion: (places, change) => api.nudgeMotion(places, change),
     addPackage: (id) => api.addPackage(id),
     removePackage: (id) => api.removePackage(id),
     explainPackage: (id) => api.explainPackage(id),
@@ -1285,6 +1374,11 @@ function connect(): Bridge {
     switchRepeat: (id, on) => api.switchRepeat(id, on),
     forgetRepeat: (id) => api.forgetRepeat(id),
     onAway: (listener) => api.onAway(listener),
+    inStep: () => api.inStep(),
+    followDesign: (address) => api.followDesign(address),
+    lookAgain: () => api.lookAgain(),
+    caughtUp: () => api.caughtUp(),
+    stopFollowing: () => api.stopFollowing(),
   };
 }
 

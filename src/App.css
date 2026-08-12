@@ -795,6 +795,59 @@ p {
   right: auto;
 }
 
+/* ---------------------------------------------------------------------------
+   Dropping something on the app
+   The whole window takes it, so the whole window answers: it dims a little and
+   one line appears in the middle of it. No dashed rectangle, nothing that
+   bounces, and nothing to aim at — people drag at the picture they are talking
+   about, not at a box at the bottom of the screen.
+   --------------------------------------------------------------------------- */
+
+.anywhere {
+  position: fixed;
+  inset: 0;
+  /* Over everything, including the panels and the connect sheet. */
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-ui) var(--ease-out-quart);
+}
+
+.anywhere--on {
+  opacity: 1;
+}
+
+.anywhere__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-5) var(--space-6);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--accent);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.anywhere__what {
+  font-size: var(--text-base);
+  color: var(--text);
+}
+
+.anywhere__note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anywhere {
+    transition: none;
+  }
+}
+
 /* The quieter of the pair: the same shape, none of the colour. */
 .previewpill--point {
   border-color: var(--border);

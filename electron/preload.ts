@@ -37,6 +37,7 @@ import {
   type ModelChoice,
   type OpenedProject,
   type Overview,
+  type InStep,
   type Page,
   type Preferences,
   type PromptAttachment,
@@ -293,6 +294,15 @@ const api: GrapheApi = {
       Result<readonly SavedVersion[]>
     >;
   },
+  nudgeMotion(places: readonly unknown[], change: unknown): Promise<Result<readonly SavedVersion[]>> {
+    if (!Array.isArray(places) || typeof change !== 'object' || change === null) {
+      return Promise.resolve(refuse('I could not change that.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.nudgeMotion, places, change) as Promise<
+      Result<readonly SavedVersion[]>
+    >;
+  },
+
 
   onWindowState(listener: (state: WindowState) => void): () => void {
     const forward = (_source: IpcRendererEvent, state: WindowState): void => {
@@ -550,6 +560,29 @@ const api: GrapheApi = {
     return () => {
       ipcRenderer.off(CHANNEL.awayChanged, forward);
     };
+  },
+
+  inStep(): Promise<Result<InStep>> {
+    return ipcRenderer.invoke(CHANNEL.inStep) as Promise<Result<InStep>>;
+  },
+
+  followDesign(address: string): Promise<Result<InStep>> {
+    if (typeof address !== 'string' || address.trim() === '') {
+      return Promise.resolve(refuse<InStep>('There was no address to follow.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.followDesign, address) as Promise<Result<InStep>>;
+  },
+
+  lookAgain(): Promise<Result<InStep>> {
+    return ipcRenderer.invoke(CHANNEL.lookAgain) as Promise<Result<InStep>>;
+  },
+
+  caughtUp(): Promise<Result<InStep>> {
+    return ipcRenderer.invoke(CHANNEL.caughtUp) as Promise<Result<InStep>>;
+  },
+
+  stopFollowing(): Promise<Result<InStep>> {
+    return ipcRenderer.invoke(CHANNEL.stopFollowing) as Promise<Result<InStep>>;
   },
 };
 

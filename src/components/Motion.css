@@ -1,0 +1,316 @@
+/* How it moves.
+
+   Movement is the one part of an interface that cannot be reviewed by reading
+   it, so every row here performs itself and draws its own curve. The little
+   square is the point: it is doing exactly what the project does, at the length
+   and shape currently under the hand. */
+
+.motion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.motion__none,
+.motion__still {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------------ shelves */
+
+.motion__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.motion__band {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-1) 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.motion__caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  border-left: 5px solid currentColor;
+  opacity: 0.7;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.motion__band--open .motion__caret {
+  transform: rotate(90deg) translateX(1px);
+}
+
+.motion__shelf {
+  flex: 1;
+  min-width: 0;
+}
+
+.motion__count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.motion__body {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ---------------------------------------------------------------- one move */
+
+.motion__one {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.motion__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.motion__what {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.motion__place {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.motion__value {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -------------------------------------------------------- watching it move */
+
+.motion__show {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.motion__stage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 46px;
+  padding: 0 var(--space-2);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.motion__stage:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.motion__cue {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* The square is the demonstration. Only the properties it might be asked to
+   move are listed, so nothing else can drift while it plays. */
+.motion__thing {
+  flex: none;
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  transition-property: opacity, transform, background-color, border-radius;
+}
+
+.motion__thing[data-shows='fade'][data-playing='yes'] {
+  opacity: 0.1;
+}
+
+.motion__thing[data-shows='movement'][data-playing='yes'] {
+  transform: translateX(56px);
+}
+
+.motion__thing[data-shows='colour'][data-playing='yes'] {
+  background: var(--accent-soft);
+}
+
+.motion__thing[data-shows='size'][data-playing='yes'] {
+  transform: scale(1.7);
+  border-radius: 50%;
+}
+
+.motion__thing[data-shows='everything'][data-playing='yes'],
+.motion__thing[data-shows='other'][data-playing='yes'],
+.motion__thing[data-shows='sequence'][data-playing='yes'] {
+  transform: translateX(48px) scale(1.3);
+  background: var(--accent-soft);
+  opacity: 0.65;
+}
+
+/* ------------------------------------------------------------------- curve */
+
+.motion__graph {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  overflow: visible;
+}
+
+.motion__even {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.motion__curve {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ------------------------------------------------------------------ knobs */
+
+.motion__row {
+  display: grid;
+  grid-template-columns: minmax(0, 7.5em) 1fr;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.motion__label {
+  min-width: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.motion__slider {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.motion__feel,
+.motion__exact {
+  width: 100%;
+  min-width: 0;
+  padding: 2px var(--space-1);
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+}
+
+/* The numbers, for anybody who would rather type them than feel for them. */
+.motion__exact {
+  font-family: var(--font-mono);
+}
+
+.motion__says,
+.motion__meta,
+.motion__note,
+.motion__from {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.motion__meta {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.motion__note {
+  color: var(--accent-ink);
+}
+
+.motion__note--all {
+  margin-bottom: var(--space-1);
+}
+
+.motion__band:focus-visible,
+.motion__stage:focus-visible,
+.motion__slider:focus-visible,
+.motion__feel:focus-visible,
+.motion__exact:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .motion__band:hover {
+    color: var(--text);
+  }
+
+  .motion__stage:hover:not(:disabled) {
+    border-color: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion__caret {
+    transition: none;
+  }
+
+  /* Ours, not theirs: the demonstration holds still and the curve says what it
+     would have done. */
+  .motion__thing {
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+  }
+}

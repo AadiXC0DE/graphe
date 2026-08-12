@@ -147,3 +147,113 @@ export function figmaLink(text: string): FigmaLink | null {
 
   return { url: trimmed, name, what };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Being dropped on                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** How many things can arrive in one gesture. Somebody dragging a whole export
+ *  folder in means "look at my work", not "read three hundred files". */
+export const MAX_AT_ONCE = 12;
+
+/** Whether a drag is worth lighting the window up for.
+ *
+ *  Files and links only. Plain dragged text is left alone: moving a word from
+ *  one box to another is not an attempt to attach anything, and a screen that
+ *  dims for it is a screen that dims at nothing. */
+export function carriesSomething(types: readonly string[] | null | undefined): boolean {
+  if (!Array.isArray(types)) return false;
+  return types.some((one) => one === 'Files' || one === 'text/uri-list');
+}
+
+/** One thing that may come in, already sorted into what it is. */
+export type Taken<F extends FileFacts = FileFacts> = {
+  file: F;
+  kind: 'image' | 'document';
+};
+
+/** What was dropped, once the parts that cannot come in are set aside. */
+export type Landed<F extends FileFacts = FileFacts> = {
+  taken: readonly Taken<F>[];
+  link: FigmaLink | null;
+  /** The one sentence to show, or nothing to say. */
+  because: string | null;
+};
+
+export type Dropped<F extends FileFacts = FileFacts> = {
+  files?: readonly F[] | null;
+  /** Whatever text came with the drag: a link, most of the time. */
+  text?: string | null;
+} | null | undefined;
+
+function looksLikeAFile(one: unknown): boolean {
+  if (one === null || typeof one !== 'object') return false;
+  const facts = one as Partial<FileFacts>;
+  return typeof facts.name === 'string' && typeof facts.size === 'number';
+}
+
+/**
+ * Reading a dropped payload.
+ *
+ * The window accepts a drop anywhere, which means it also has to answer for
+ * everything that can be dragged onto a screen — a folder, a browser tab, a
+ * half-finished download, a drag that arrives carrying nothing at all. Every
+ * one of those ends in a sentence rather than in silence, because a picture
+ * that vanishes on landing reads as a bug in the app and not as a limit.
+ */
+export function readDropped<F extends FileFacts>(payload: Dropped<F>): Landed<F> {
+  const given: readonly F[] = Array.isArray(payload?.files)
+    ? payload.files.filter((one): one is F => looksLikeAFile(one))
+    : [];
+  const text = typeof payload?.text === 'string' ? payload.text : '';
+
+  if (given.length > 0) {
+    const taken: Taken<F>[] = [];
+    let because: string | null = null;
+
+    for (const file of given.slice(0, MAX_AT_ONCE)) {
+      const verdict = checkFile(file);
+      if (verdict.ok) taken.push({ file, kind: verdict.kind });
+      else because ??= verdict.because;
+    }
+
+    if (given.length > MAX_AT_ONCE) {
+      because ??= `I took the first ${MAX_AT_ONCE} — that is as many as I can look at in one go.`;
+    }
+
+    return { taken, link: null, because };
+  }
+
+  const link = figmaLink(text);
+  if (link !== null) return { taken: [], link, because: null };
+
+  return {
+    taken: [],
+    link: null,
+    because:
+      text.trim() === ''
+        ? 'Nothing came through with that. A picture, a PDF or a Figma link will work.'
+        : 'That link is not one I recognise yet. A picture, a PDF or a Figma link will work.',
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The drag counter                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** Dragging over a window fires enter and leave for every child the pointer
+ *  crosses. Counting depth instead of trusting the last event is the whole
+ *  difference between one calm state and a screen that strobes. */
+export const NOT_DRAGGING = 0;
+
+export function deeper(depth: number): number {
+  return Math.max(NOT_DRAGGING, Number.isFinite(depth) ? depth : NOT_DRAGGING) + 1;
+}
+
+export function shallower(depth: number): number {
+  return Math.max(NOT_DRAGGING, (Number.isFinite(depth) ? depth : NOT_DRAGGING) - 1);
+}
+
+export function dragging(depth: number): boolean {
+  return Number.isFinite(depth) && depth > NOT_DRAGGING;
+}

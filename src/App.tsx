@@ -46,14 +46,17 @@ import {
   type FoundAccount,
   type ModelChoice,
   type Conversation,
+  type InStep as InStepState,
   type Landing as LandingState,
   type Look,
+  type Move,
   type Pack,
   type Page,
   type Preferences,
   type PromptAttachment,
   type ProviderMethod,
   type RecentProject,
+  type Result,
   type ShowProgress,
   type Trouble,
   type VisualChange,
@@ -1345,6 +1348,41 @@ function Conversation() {
     refreshLanding();
   }, [desks.current, refreshLanding]);
 
+  /**
+   * The Figma file this project is kept in step with.
+   *
+   * Asked for when a project comes to the front and looked at again on demand.
+   * Never on a timer: reading somebody's Figma file on a schedule they did not
+   * ask for is somebody else's product.
+   */
+  const [inStep, setInStep] = useState<InStepState | null>(null);
+  const [lookingAtFigma, setLookingAtFigma] = useState(false);
+
+  useEffect(() => {
+    if (desks.current === null) {
+      setInStep(null);
+      return;
+    }
+    void bridge.inStep().then((answer) => {
+      setInStep(answer.ok ? answer.value : null);
+    });
+  }, [desks.current]);
+
+  /** Every one of these answers with the whole of it, so the band never has to
+   *  work out what changed about itself. */
+  const askFigma = useCallback(
+    (ask: () => Promise<Result<InStepState>>) => {
+      setLookingAtFigma(true);
+      void ask()
+        .then((answer) => {
+          if (answer.ok) setInStep(answer.value);
+          else troubleHere(answer.trouble);
+        })
+        .finally(() => setLookingAtFigma(false));
+    },
+    [troubleHere],
+  );
+
   const changeHoldBack = useCallback(
     (on: boolean) => {
       setPreferences((was) => ({ ...was, holdBack: on }));
@@ -1561,6 +1599,22 @@ function Conversation() {
       void refreshOverview(path);
     });
   }, [desks.current, refreshOverview]);
+
+  /* Same bargain as a colour: arithmetic on the file, one saved moment, no
+     question put to a model. */
+  const nudgeMotion = useCallback(
+    (move: { places: readonly unknown[] }, change: unknown) => {
+      void bridge.nudgeMotion(move.places, change).then((answer) => {
+        const path = desks.current;
+        if (!answer.ok || path === null) return;
+        setDesks((current) =>
+          changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
+        );
+        void refreshOverview(path);
+      });
+    },
+    [desks.current, refreshOverview],
+  );
 
   /* ------------------------------------------------------------------ money */
 
@@ -2009,6 +2063,8 @@ function Conversation() {
             artifacts: desk.overview?.artifacts ?? [],
             swatches: desk.overview?.swatches ?? [],
             styles: desk.overview?.styles ?? null,
+            inStep,
+            lookingAtFigma,
             landing,
             going,
             landed,
@@ -2039,7 +2095,16 @@ function Conversation() {
           onPutOnline={putItOnline}
           onOpenLink={(address) => void bridge.openLink(address)}
           onNudge={nudge}
+          onNudgeMotion={nudgeMotion}
           onFixColour={nudge}
+          onFollowDesign={(address) => askFigma(() => bridge.followDesign(address))}
+          onLookAgain={() => askFigma(() => bridge.lookAgain())}
+          onCaughtUp={() => askFigma(() => bridge.caughtUp())}
+          onStopFollowing={() => askFigma(() => bridge.stopFollowing())}
+          /* The one thing on this panel that is a request rather than a
+             reading: what moved goes to the conversation as the sentence that
+             would bring the work back in step. */
+          onBuildIn={(move: Move) => void send(move.asks)}
           onKeepGoing={keepGoing}
           onKeepAway={keepAway}
           onDropAway={dropAway}

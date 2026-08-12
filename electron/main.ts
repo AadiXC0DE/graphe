@@ -82,6 +82,7 @@ import {
   type GitSnapshot,
   type HandedOver,
   type Hatches,
+  type InStep,
   type Landing,
   type OpenedProject,
   type WentOnline,
@@ -120,6 +121,11 @@ import { pagesIn, type Page } from '../src/preview/pages';
 import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
+import { writeMotionAll } from '../src/motion/read';
+import { createReader, parseFigmaUrl } from '../src/design/figma';
+import { follow, throughFigma, type ReadDesign } from '../src/design/follow';
+import { findMoved, saysInStep, NOTHING_FOLLOWED, type Held as HeldDesign } from '../src/design/moved';
+import { FollowedFile } from '../src/projects/followed';
 import { lookAtEveryWidth } from '../src/diff/capture';
 import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
@@ -458,6 +464,27 @@ function applyContentPolicy(): void {
       },
     });
   });
+}
+
+/**
+ * What the window is allowed to ask this computer for.
+ *
+ * Only the microphone, and only because saying a change out loud is easier than
+ * writing one. Everything else — camera, location, notifications from the page,
+ * anything added to the web platform after this was written — is refused
+ * without being asked about, which is the reason the list in
+ * electron-builder.yml was pinned in the first place: nothing acquires
+ * something quietly by turning up as a dependency.
+ */
+function applyPermissionPolicy(): void {
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, decide) => {
+    decide(permission === 'media');
+  });
+  // Asked for by anything that checks before requesting, and answered the same
+  // way — two answers that disagree is how a control ends up dead on press.
+  session.defaultSession.setPermissionCheckHandler(
+    (_contents, permission) => permission === 'media',
+  );
 }
 
 /** The dev server may not be listening yet — `npm run app` starts Vite and
@@ -2135,6 +2162,72 @@ function abandonPrompts(): void {
   pendingPrompts.clear();
 }
 
+/* -------------------------------------------------------------------------- */
+/* Staying in step with Figma                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Which Figma file each project follows. Opened on demand, for the same
+ *  reason `recents` is: `app.getPath` cannot be asked before the app is ready. */
+let followedPromise: Promise<FollowedFile> | null = null;
+
+function followed(): Promise<FollowedFile> {
+  followedPromise ??= FollowedFile.open(join(app.getPath('userData'), 'followed.json'));
+  return followedPromise;
+}
+
+/**
+ * What a reading of a Figma file is made with, or null when there is nothing to
+ * make one with.
+ *
+ * The shelf's Figma entry is the way in for everybody else; until that
+ * connection can be asked for a file from here, an environment value is the one
+ * hand-hold somebody who knows their way around has. Null is answered honestly
+ * rather than papered over — an invented finding about somebody's design is
+ * worse than no finding at all.
+ */
+function figmaReading(): ReadDesign | null {
+  const credential = (process.env['FIGMA_TOKEN'] ?? process.env['FIGMA_ACCESS_TOKEN'] ?? '').trim();
+  return credential === '' ? null : throughFigma(createReader({ token: credential }));
+}
+
+const NO_FIGMA: Trouble = {
+  what: 'I have no way into Figma yet.',
+  because:
+    'Nothing on this computer is connected to Figma, so there is no file for me to open. Connect Figma and point me at it again.',
+  actionLabel: 'Got it',
+};
+
+/** Whatever went wrong asking Figma, said as it was said. Those sentences are
+ *  already written for the person who pasted the link. */
+function figmaTrouble(cause: unknown): Trouble {
+  const said = cause instanceof Error ? cause.message.trim() : '';
+  return {
+    what: said === '' ? 'I could not read that Figma file.' : said,
+    because: 'Nothing here has changed, so it is worth trying again once that is sorted.',
+    actionLabel: 'Got it',
+  };
+}
+
+function saidBy(cause: unknown): string {
+  const said = cause instanceof Error ? cause.message.trim() : '';
+  return said === '' ? 'I could not read that Figma file.' : said;
+}
+
+/** The whole band, worked out from what is kept. The comparison itself is pure
+ *  and lives in src/design/moved.ts. */
+function inStepOf(held: HeldDesign | null, trouble: string | null = null): InStep {
+  if (held === null) {
+    return { following: null, moved: [], says: NOTHING_FOLLOWED, trouble };
+  }
+  const moved = findMoved(held.design, held.latest, { name: held.name });
+  return {
+    following: { id: held.id, name: held.name, url: held.url, readAt: held.readAt },
+    moved,
+    says: saysInStep(held.name, moved),
+    trouble,
+  };
+}
+
 function register(): void {
   handle<OpenedProject>(CHANNEL.openProject, async (_event, args) => {
     const [path] = args;
@@ -2166,6 +2259,7 @@ function register(): void {
         await desk.bench.clear().catch(() => undefined);
         awayDesks.delete(resolve(path));
       }
+      await (await followed()).forget(resolve(path));
       await changeStanding((all) => withoutProject(all, resolve(path)));
       if (!standingNow.some((one) => one.on)) stopWatchingTheClock();
     }
@@ -2215,6 +2309,29 @@ function register(): void {
     try {
       const css = await readFile(where, 'utf8');
       const next = writeToken(css, name, value);
+      if (next === css) return done(await versionsOf(open.held));
+      await writeFile(where, next, 'utf8');
+      await open.held.timeline.snapshot({ boundary: 'user-asked', by: 'you' });
+      return done(await versionsOf(open.held));
+    } catch (cause) {
+      const raw = cause instanceof Error ? cause.message : String(cause);
+      return fail(plainTrouble(raw, detailsOf(cause)));
+    }
+  });
+
+  handle<readonly SavedVersion[]>(CHANNEL.nudgeMotion, async (_event, args) => {
+    const [places, change] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (!Array.isArray(places) || typeof change !== 'object' || change === null) {
+      return fail(NOTHING_OPEN);
+    }
+    const styles = await styleTokens(open.path);
+    if (styles === null) return fail(NOTHING_OPEN);
+    const where = join(open.path, styles.file);
+    try {
+      const css = await readFile(where, 'utf8');
+      const next = writeMotionAll(css, places as Parameters<typeof writeMotionAll>[1], change as Parameters<typeof writeMotionAll>[2]);
       if (next === css) return done(await versionsOf(open.held));
       await writeFile(where, next, 'utf8');
       await open.held.timeline.snapshot({ boundary: 'user-asked', by: 'you' });
@@ -2743,6 +2860,79 @@ function register(): void {
   };
   const theShelf = async () => (shelf ??= await openShelf());
 
+  handle<InStep>(CHANNEL.inStep, async () => {
+    const open = workspaces.current;
+    if (open === null) return done(inStepOf(null));
+    return done(inStepOf((await followed()).for(open.path)));
+  });
+
+  handle<InStep>(CHANNEL.followDesign, async (_event, args) => {
+    const [address] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof address !== 'string' || address.trim() === '') return fail(NOTHING_OPEN);
+
+    const read = figmaReading();
+    if (read === null) return fail(NO_FIGMA);
+
+    try {
+      const following = await follow(address, read);
+      // What is there when somebody points at it is what the work is built
+      // from. Everything after this is measured against this moment.
+      const held: HeldDesign = {
+        id: following.fileKey,
+        name: following.name,
+        url: following.url,
+        fileKey: following.fileKey,
+        design: following.design,
+        latest: following.design,
+        readAt: Date.now(),
+      };
+      return done(inStepOf(await (await followed()).keep(open.path, held)));
+    } catch (cause) {
+      return fail(figmaTrouble(cause));
+    }
+  });
+
+  handle<InStep>(CHANNEL.lookAgain, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const file = await followed();
+    const held = file.for(open.path);
+    if (held === null) return done(inStepOf(null));
+
+    const read = figmaReading();
+    if (read === null) return done(inStepOf(held, NO_FIGMA.because));
+
+    try {
+      const latest = await read({
+        fileKey: held.fileKey,
+        nodeId: parseFigmaUrl(held.url)?.nodeId ?? null,
+      });
+      const next: HeldDesign = { ...held, latest, readAt: Date.now() };
+      return done(inStepOf(await file.keep(open.path, next)));
+    } catch (cause) {
+      // The band is already on screen and can say why the look did not happen.
+      return done(inStepOf(held, saidBy(cause)));
+    }
+  });
+
+  handle<InStep>(CHANNEL.caughtUp, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const file = await followed();
+    const held = file.for(open.path);
+    if (held === null) return done(inStepOf(null));
+    return done(inStepOf(await file.keep(open.path, { ...held, design: held.latest })));
+  });
+
+  handle<InStep>(CHANNEL.stopFollowing, async () => {
+    const open = workspaces.current;
+    if (open === null) return done(inStepOf(null));
+    await (await followed()).forget(open.path);
+    return done(inStepOf(null));
+  });
+
   handle<readonly Pack[]>(CHANNEL.packages, async (_event, args) => {
     const [term] = args;
     try {
@@ -3095,6 +3285,7 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(async () => {
     applyContentPolicy();
+    applyPermissionPolicy();
     register();
     createWindow();
     app.on('activate', () => {

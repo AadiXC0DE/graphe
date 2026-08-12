@@ -14,6 +14,7 @@ import {
   boardWords,
   groupWork,
   howManyGoing,
+  howManyInFlight,
   isFull,
   nextUp,
   orderWork,
@@ -283,6 +284,59 @@ describe('B-05 what a card says about itself', () => {
       'process',
     ]) {
       expect(everything).not.toContain(banned);
+    }
+  });
+});
+
+/* ========================================================================== */
+/* B-06 one that stopped for a person                                          */
+/* ========================================================================== */
+
+describe('B-06 work that is waiting on you', () => {
+  it('gets a band of its own, at the top, because it is the thing to do next', () => {
+    const board = [
+      piece('done', 'done', 1),
+      piece('going', 'running', 2),
+      piece('asks', 'needs-you', 3),
+      piece('queued', 'waiting', 4),
+    ];
+    expect(bandOf('needs-you')).toBe('needs-you');
+    expect(ids(orderWork(board))).toEqual(['asks', 'going', 'queued', 'done']);
+    expect(groupWork(board)[0]?.label).toBe('Needs you');
+  });
+
+  it('is neither going nor finished, and says so', () => {
+    expect(saysState('needs-you')).toBe(boardWords.needsYou);
+    expect(saysDrop('needs-you')).toBe(boardWords.stop);
+  });
+
+  it('is counted first in the line over the sheet', () => {
+    const board = [piece('a', 'needs-you', 1), piece('b', 'running', 2)];
+    expect(saysBoard(board)).toBe('One waiting on you, one going.');
+  });
+
+  it('still holds its place, so nothing else starts over the top of it', () => {
+    const board = [
+      piece('a', 'needs-you', 1),
+      piece('b', 'running', 2),
+      piece('c', 'waiting', 3),
+    ];
+    // Not "going" — it is stopped — but it has not let go of anything either.
+    expect(howManyGoing(board)).toBe(1);
+    expect(howManyInFlight(board)).toBe(2);
+    expect(roomLeft(board, 2)).toBe(0);
+    expect(isFull(board, 2)).toBe(true);
+    expect(nextUp(board, 2)).toEqual([]);
+  });
+
+  it('is never offered a turn of its own again', () => {
+    expect(nextUp([piece('a', 'needs-you', 1)], 4)).toEqual([]);
+  });
+
+  it('never says what it really stopped on', () => {
+    const said = [saysState('needs-you'), boardWords.needsYou, 'Needs you'].join(' ').toLowerCase();
+    for (const banned of ['confirmation', 'permission', 'guard', 'policy', 'prompt']) {
+      expect(said).not.toContain(banned);
     }
   });
 });

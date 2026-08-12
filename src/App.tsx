@@ -37,6 +37,8 @@ import { quote, smallerFirst } from "./lib/estimating";
 import {
   showWords,
   swapWords,
+  type Away as AwayState,
+  type EveryKind,
   type ConnectStep,
   type ConnectionState,
   type Decision,
@@ -1422,6 +1424,131 @@ function Conversation() {
       });
   }, [refreshLanding, troubleHere]);
 
+  /* ------------------------------------------- while you are not looking */
+
+  /**
+   * What is happening for each project whether or not this window is open.
+   *
+   * Kept per folder, for the same reason the pictures and the files are: a run
+   * can land for a project somebody has just switched away from, and it must
+   * never be drawn under another folder's name.
+   */
+  const [away, setAway] = useState<Readonly<Record<string, AwayState>>>({});
+  const awayHere = desks.current === null ? null : (away[desks.current] ?? null);
+
+  /* The board says how long ago each thing was, so the window needs a clock of
+     its own. Half a minute is finer than anything it draws. */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  const refreshAway = useCallback(async (path: string) => {
+    const answer = await bridge.away();
+    if (!answer.ok || desksNow.current.current !== path) return;
+    setAway((current) => ({ ...current, [path]: answer.value }));
+  }, []);
+
+  useEffect(() => {
+    const path = desks.current;
+    if (path === null) return;
+    void refreshAway(path);
+  }, [desks.current, refreshAway]);
+
+  /* Pushed at the window whenever something lands, including the first moment
+     after it has been away and come back. Subscribed once. */
+  useEffect(
+    () =>
+      bridge.onAway((notice) => {
+        setAway((current) => ({ ...current, [notice.project]: notice.away }));
+        setNow(Date.now());
+      }),
+    [],
+  );
+
+  /** Everything the band can do comes back with the whole state, so the window
+   *  never has to work out what its own press did. */
+  const afterAway = useCallback((path: string) => {
+    return (answer: { ok: true; value: AwayState } | { ok: false; trouble: Trouble }) => {
+      if (!answer.ok) {
+        troubleHere(answer.trouble);
+        return;
+      }
+      setAway((current) => ({ ...current, [path]: answer.value }));
+    };
+  }, [troubleHere]);
+
+  const keepGoing = useCallback(
+    (text: string) => {
+      const path = desks.current;
+      if (path === null) return;
+      void bridge.keepGoing(text).then(afterAway(path));
+    },
+    [desks.current, afterAway],
+  );
+
+  const keepAway = useCallback(
+    (id: string) => {
+      const path = desks.current;
+      if (path === null) return;
+      void bridge.keepAway(id).then((answer) => {
+        afterAway(path)(answer);
+        // Keeping one is a version like any other, and the rail has to say so.
+        void refreshVersions(path);
+        void refreshOverview(path);
+      });
+    },
+    [desks.current, afterAway, refreshVersions, refreshOverview],
+  );
+
+  const dropAway = useCallback(
+    (id: string) => {
+      const path = desks.current;
+      if (path === null) return;
+      void bridge.stopAway(id).then(afterAway(path));
+    },
+    [desks.current, afterAway],
+  );
+
+  /** The one press that can answer a question a run stopped on. Nothing else in
+   *  this window, and nothing at all on the other side, can. */
+  const answerAway = useCallback(
+    (id: string, callId: string, decision: Decision) => {
+      const path = desks.current;
+      if (path === null) return;
+      void bridge.answerAway(id, callId, decision).then(afterAway(path));
+    },
+    [desks.current, afterAway],
+  );
+
+  const addRepeat = useCallback(
+    (doing: string, every: EveryKind, at: { hour: number; minute: number }, on?: number) => {
+      const path = desks.current;
+      if (path === null) return;
+      void bridge.addRepeat(doing, every, at, on).then(afterAway(path));
+    },
+    [desks.current, afterAway],
+  );
+
+  const switchRepeat = useCallback(
+    (id: string, on: boolean) => {
+      const path = desks.current;
+      if (path === null) return;
+      void bridge.switchRepeat(id, on).then(afterAway(path));
+    },
+    [desks.current, afterAway],
+  );
+
+  const forgetRepeat = useCallback(
+    (id: string) => {
+      const path = desks.current;
+      if (path === null) return;
+      void bridge.forgetRepeat(id).then(afterAway(path));
+    },
+    [desks.current, afterAway],
+  );
+
   /** One value moved, from wherever the panel offered it: a slider, or a colour
    *  nobody could read against the one underneath it. */
   const nudge = useCallback((name: string, value: string) => {
@@ -1886,6 +2013,8 @@ function Conversation() {
             going,
             landed,
             decided,
+            away: awayHere,
+            clock: now,
           }}
           onPutBack={(versionId) => void putBack(versionId)}
           onName={(versionId, name) => void nameVersion(versionId, name)}
@@ -1911,6 +2040,13 @@ function Conversation() {
           onOpenLink={(address) => void bridge.openLink(address)}
           onNudge={nudge}
           onFixColour={nudge}
+          onKeepGoing={keepGoing}
+          onKeepAway={keepAway}
+          onDropAway={dropAway}
+          onAnswerAway={answerAway}
+          onAddRepeat={addRepeat}
+          onSwitchRepeat={switchRepeat}
+          onForgetRepeat={forgetRepeat}
           onSave={() => {
             void bridge.saveVersion().then((answer) => {
               if (!answer.ok) return;

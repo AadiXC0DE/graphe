@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import Away from './Away';
 import CostMeter from './CostMeter';
 import Drift from './Drift';
 import Helpers from './Helpers';
@@ -10,7 +11,10 @@ import Swatches from './Swatches';
 import Versions from './Versions';
 import type {
   Artifact,
+  Away as AwayState,
   ChangedFile,
+  Decision,
+  EveryKind,
   GitSnapshot,
   Landing as LandingState,
   Look,
@@ -62,6 +66,11 @@ export type OverviewView = {
   landed: Outcome;
   /** What was just decided about work that was waiting, and how to undo it. */
   decided: { letIn: boolean; undoTo: string } | null;
+  /** What is happening whether or not this window is open. Null until the shell
+   *  has answered. */
+  away: AwayState | null;
+  /** Now, epoch ms, so the board draws the same twice. */
+  clock: number;
 };
 
 type Props = {
@@ -99,6 +108,25 @@ type Props = {
   /** Put one of the project's own values back where something close to it was
    *  written instead. */
   onUseYours?: (finding: { use: string; line: number; wrote: string }) => void;
+
+  /* ---------------------------------------------- while you are not looking */
+
+  /** Get on with something whether or not this window stays open. */
+  onKeepGoing: (text: string) => void;
+  /** Take one of those results into the project. */
+  onKeepAway: (id: string) => void;
+  /** Stop one, or let its result go. */
+  onDropAway: (id: string) => void;
+  /** Answer the question one of them stopped on. */
+  onAnswerAway: (id: string, callId: string, decision: Decision) => void;
+  onAddRepeat: (
+    doing: string,
+    every: EveryKind,
+    at: { hour: number; minute: number },
+    on?: number,
+  ) => void;
+  onSwitchRepeat: (id: string, on: boolean) => void;
+  onForgetRepeat: (id: string) => void;
 };
 
 /** How many rows a band holds before it says "and more". The panel is a summary
@@ -156,6 +184,13 @@ export default function Overview({
   onNudge,
   onFixColour,
   onUseYours,
+  onKeepGoing,
+  onKeepAway,
+  onDropAway,
+  onAnswerAway,
+  onAddRepeat,
+  onSwitchRepeat,
+  onForgetRepeat,
 }: Props) {
   const { now, git, research, references, versions, pictures, kept, putBack, spent, busy, showMe } =
     view;
@@ -195,6 +230,9 @@ export default function Overview({
   /* A dot on the tab, not a number: the count matters once you are looking, and
      before that it is only worth knowing there is something. */
   const trouble = drifted.length + unreadable.findings.length;
+  /* The same dot on Work, for the one thing on this panel that cannot move
+     without a person: something that carried on and then stopped to ask. */
+  const asking = (view.away?.pieces ?? []).some((one) => one.question !== null);
 
   const shownResearch = research.slice(-WINDOW);
   const moreResearch = research.length - shownResearch.length;
@@ -226,7 +264,7 @@ export default function Overview({
             }}
           >
             {one.name}
-            {one.id === 'look' && trouble > 0 ? (
+            {(one.id === 'look' && trouble > 0) || (one.id === 'work' && asking) ? (
               <span className="overview__tabmark" aria-hidden="true" />
             ) : null}
           </button>
@@ -390,6 +428,21 @@ export default function Overview({
           {swatches.length === 0 ? null : <Swatches swatches={swatches} />}
         </section>
       )}
+
+      <section className="overview__block">
+        <Away
+          away={view.away}
+          now={view.clock}
+          busy={busy}
+          onKeepGoing={onKeepGoing}
+          onKeep={onKeepAway}
+          onDrop={onDropAway}
+          onAnswer={onAnswerAway}
+          onAddRepeat={onAddRepeat}
+          onSwitchRepeat={onSwitchRepeat}
+          onForgetRepeat={onForgetRepeat}
+        />
+      </section>
 
       </div>
 

@@ -19,6 +19,9 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import {
   CHANNEL,
   type AgentNotice,
+  type Away,
+  type AwayNotice,
+  type EveryKind,
   type ConnectOutcome,
   type ConnectStep,
   type ConnectionState,
@@ -458,6 +461,95 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<WentOnline>('Nothing has left this computer.'));
     }
     return ipcRenderer.invoke(CHANNEL.putOnline, true) as Promise<Result<WentOnline>>;
+  },
+
+  /* ---------------------------------------------- while you are not looking */
+
+  away(): Promise<Result<Away>> {
+    return ipcRenderer.invoke(CHANNEL.away) as Promise<Result<Away>>;
+  },
+
+  keepGoing(text: string): Promise<Result<Away>> {
+    if (typeof text !== 'string' || text.trim() === '') {
+      return Promise.resolve(refuse<Away>('There was nothing to get on with.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.keepGoing, text) as Promise<Result<Away>>;
+  },
+
+  stopAway(id: string): Promise<Result<Away>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<Away>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.stopAway, id) as Promise<Result<Away>>;
+  },
+
+  keepAway(id: string): Promise<Result<Away>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<Away>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.keepAway, id) as Promise<Result<Away>>;
+  },
+
+  /* The one call that resolves a question a run stopped on. Checked here as
+     well as on the other side: a decision that is not one of the two answers
+     never reaches the wire, and there is no third answer to send. */
+  answerAway(id: string, callId: string, decision: Decision): Promise<Result<Away>> {
+    if (
+      typeof id !== 'string' ||
+      id.trim() === '' ||
+      typeof callId !== 'string' ||
+      callId.trim() === '' ||
+      !isDecision(decision)
+    ) {
+      return Promise.resolve(refuse<Away>('I could not tell which question that answered.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.answerAway, id, callId, decision) as Promise<Result<Away>>;
+  },
+
+  addRepeat(
+    doing: string,
+    every: EveryKind,
+    at: { hour: number; minute: number },
+    on?: number,
+  ): Promise<Result<Away>> {
+    const known = every === 'day' || every === 'weekday' || every === 'week' || every === 'month';
+    if (
+      typeof doing !== 'string' ||
+      doing.trim() === '' ||
+      !known ||
+      typeof at !== 'object' ||
+      at === null ||
+      typeof at.hour !== 'number' ||
+      typeof at.minute !== 'number'
+    ) {
+      return Promise.resolve(refuse<Away>('I could not tell what to do, or when.'));
+    }
+    const which = typeof on === 'number' ? on : undefined;
+    return ipcRenderer.invoke(CHANNEL.addRepeat, doing, every, at, which) as Promise<Result<Away>>;
+  },
+
+  switchRepeat(id: string, on: boolean): Promise<Result<Away>> {
+    if (typeof id !== 'string' || id.trim() === '' || typeof on !== 'boolean') {
+      return Promise.resolve(refuse<Away>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.switchRepeat, id, on) as Promise<Result<Away>>;
+  },
+
+  forgetRepeat(id: string): Promise<Result<Away>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<Away>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.forgetRepeat, id) as Promise<Result<Away>>;
+  },
+
+  onAway(listener: (notice: AwayNotice) => void): () => void {
+    const forward = (_source: IpcRendererEvent, notice: AwayNotice): void => {
+      listener(notice);
+    };
+    ipcRenderer.on(CHANNEL.awayChanged, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.awayChanged, forward);
+    };
   },
 };
 

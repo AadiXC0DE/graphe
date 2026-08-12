@@ -1,0 +1,241 @@
+/* Work that carries on without anybody.
+
+   Quiet furniture until something has happened, with one exception: a run that
+   stopped for a person is the loudest thing on the panel, because it is the
+   only thing here that cannot move without them. */
+
+.away {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) 0 0;
+}
+
+.away__title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.away__subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.away__since {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  letter-spacing: -0.01em;
+}
+
+.away__quiet,
+.away__hint,
+.away__detail {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.away__spent {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------- something to answer */
+
+.away__asked {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+}
+
+.away__doing {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.away__question {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.away__why {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+/* --------------------------------------------------------------- pressing */
+
+.away__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.away__do,
+.away__quietdo {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.away__do:hover:not(:disabled),
+.away__quietdo:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.away__do--first {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-raised);
+  font-weight: 550;
+  justify-self: start;
+}
+
+.away__do--first:hover:not(:disabled) {
+  border-color: var(--accent-ink);
+}
+
+.away__quietdo {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.away__alone {
+  margin-top: var(--space-1);
+  justify-self: start;
+}
+
+.away__do:disabled,
+.away__quietdo:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ----------------------------------------------------------- asking for it */
+
+.away__ask,
+.away__form {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.away__over {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.away__label {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 550;
+}
+
+.away__box {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.away__box:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.away__pick {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+/* ------------------------------------------------------------ over and over */
+
+.away__repeats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.away__repeat {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+/* Stopped, and looking it. Nothing is hidden — it is still there to start
+   again, which is the whole reason stopping does not throw it away. */
+.away__repeat--off {
+  opacity: 0.6;
+}
+
+.away__when {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.away__next {
+  color: var(--text-faint);
+}
+
+/* The rhythm and when it next comes round are two facts, and a gap alone reads
+   as one sentence running into another. */
+.away__next::before {
+  content: '·';
+  margin-right: var(--space-2);
+}

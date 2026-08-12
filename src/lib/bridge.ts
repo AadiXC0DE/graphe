@@ -25,9 +25,14 @@ import { pagesIn, type Page } from '../preview/pages';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
 import { money } from '../cost/money';
+import { nextRun, saysNext, saysRepeat, type Repeat } from '../work/schedule';
 import {
   showWords,
   type AgentNotice,
+  type Away,
+  type AwayPiece,
+  type EveryKind,
+  type Repeating,
   type ConnectOutcome,
   type ConnectStep,
   type Conversation,
@@ -380,11 +385,81 @@ const PREVIEW_CHANGE: VisualChange = {
   height: 820,
 };
 
+/**
+ * Work carrying on without anybody, for a tab where nothing carries on at all.
+ *
+ * Three pieces on purpose, because the three states that matter look completely
+ * different: one stopped on a question it will not answer for itself, one
+ * finished with a picture of what it made, and one still going. A browser tab
+ * would otherwise only ever draw the empty one.
+ */
+function previewAway(): Away {
+  const pieces: readonly AwayPiece[] = [
+    {
+      id: 'away-1',
+      doing: 'Add the pricing table to the home page',
+      state: 'needs-you',
+      at: started - 4 * MINUTE,
+      picture: null,
+      says: 'I need one more thing before I can carry on.',
+      trouble: null,
+      question: {
+        callId: 'call-1',
+        question: 'Add “stripe” to your project?',
+        detail:
+          'This comes from the internet, and pieces like this are allowed to run their own setup steps the moment they arrive.',
+        consequence: 'That setup can read and change files in your project.',
+      },
+    },
+    {
+      id: 'away-2',
+      doing: 'Check the site still builds',
+      state: 'done',
+      at: started - 22 * MINUTE,
+      picture: samplePage(true),
+      says: 'It builds, and nothing looks different from yesterday.',
+      trouble: null,
+      question: null,
+    },
+    {
+      id: 'away-3',
+      doing: 'Match the case study page to the new spacing',
+      state: 'running',
+      at: started - MINUTE,
+      picture: null,
+      says: null,
+      trouble: null,
+      question: null,
+    },
+  ];
+  const repeats: readonly Repeating[] = [
+    {
+      id: 'every-1',
+      doing: 'Check the site still builds and tell me if it doesn’t',
+      says: 'Every day at 7:00am',
+      next: 'Tomorrow at 7:00am',
+      on: true,
+      lastSaid: 'It builds.',
+    },
+  ];
+  return {
+    pieces,
+    repeats,
+    atOnce: 4,
+    spent: money(37, PREVIEW_CURRENCY),
+    sinceYouWere: 'One thing waiting on you, one thing ready to look at, one thing still going.',
+  };
+}
+
 function previewBridge(): Bridge {
   const listeners = new Set<(notice: AgentNotice) => void>();
   const watching = new Set<(progress: ShowProgress) => void>();
   const looking = new Set<(notice: VisualNotice) => void>();
   const connecting = new Set<(step: ConnectStep) => void>();
+
+  /** What is going on without anybody. Real state, for as long as the tab is
+   *  open, so the band can be pressed rather than only looked at. */
+  let atWork: Away = previewAway();
 
   /** Whatever project the tab has open. Every event is stamped with it, the way
    *  the shell stamps its own — the window's routing is then exercised here
@@ -960,6 +1035,112 @@ function previewBridge(): Bridge {
     putOnline(_confirmed: boolean): Promise<Result<WentOnline>> {
       return Promise.resolve(done({ address: null, pages: 0, says: PREVIEW_LANDING, steps: [] }));
     },
+
+    /* Real state for as long as the tab is open: pressing the buttons moves the
+       board, so what a person does to one of these can actually be looked at. */
+    away(): Promise<Result<Away>> {
+      return Promise.resolve(done(atWork));
+    },
+
+    keepGoing(text: string): Promise<Result<Away>> {
+      atWork = {
+        ...atWork,
+        pieces: [
+          {
+            id: `away-${String(atWork.pieces.length + 1)}`,
+            doing: text,
+            state: 'running',
+            at: Date.now(),
+            picture: null,
+            says: null,
+            trouble: null,
+            question: null,
+          },
+          ...atWork.pieces,
+        ],
+      };
+      return Promise.resolve(done(atWork));
+    },
+
+    stopAway(id: string): Promise<Result<Away>> {
+      atWork = { ...atWork, pieces: atWork.pieces.filter((one) => one.id !== id) };
+      return Promise.resolve(done(atWork));
+    },
+
+    keepAway(id: string): Promise<Result<Away>> {
+      atWork = { ...atWork, pieces: atWork.pieces.filter((one) => one.id !== id) };
+      return Promise.resolve(done(atWork));
+    },
+
+    /* The same rule a browser tab can still demonstrate: nothing answers itself,
+       and answering moves that one on. */
+    answerAway(id: string, _callId: string, decision: Decision): Promise<Result<Away>> {
+      atWork = {
+        ...atWork,
+        pieces: atWork.pieces.map((one) =>
+          one.id !== id
+            ? one
+            : {
+                ...one,
+                question: null,
+                state: decision === 'yes' ? 'running' : 'done',
+                says:
+                  decision === 'yes'
+                    ? 'Carrying on now.'
+                    : 'You said no, so I left it and carried on without it.',
+              },
+        ),
+      };
+      return Promise.resolve(done(atWork));
+    },
+
+    addRepeat(
+      doing: string,
+      every: EveryKind,
+      at: { hour: number; minute: number },
+      on?: number,
+    ): Promise<Result<Away>> {
+      const repeat: Repeat =
+        every === 'week'
+          ? { every, on: ((on ?? 1) % 7) as 0 | 1 | 2 | 3 | 4 | 5 | 6, at }
+          : every === 'month'
+            ? { every, on: on ?? 1, at }
+            : { every, at };
+      atWork = {
+        ...atWork,
+        repeats: [
+          ...atWork.repeats,
+          {
+            id: `every-${String(atWork.repeats.length + 1)}`,
+            doing,
+            says: saysRepeat(repeat),
+            next: saysNext(nextRun(repeat, Date.now()), Date.now()),
+            on: true,
+            lastSaid: null,
+          },
+        ],
+      };
+      return Promise.resolve(done(atWork));
+    },
+
+    switchRepeat(id: string, on: boolean): Promise<Result<Away>> {
+      atWork = {
+        ...atWork,
+        repeats: atWork.repeats.map((one) => (one.id === id ? { ...one, on } : one)),
+      };
+      return Promise.resolve(done(atWork));
+    },
+
+    forgetRepeat(id: string): Promise<Result<Away>> {
+      atWork = { ...atWork, repeats: atWork.repeats.filter((one) => one.id !== id) };
+      return Promise.resolve(done(atWork));
+    },
+
+    /* Nothing lands on its own behind a browser tab, so nothing is ever pushed
+       at the window here. It asks, and it is answered. */
+    onAway(): () => void {
+      return () => {};
+    },
   };
 }
 
@@ -1095,6 +1276,15 @@ function connect(): Bridge {
     decideOnWork: (letIn) => api.decideOnWork(letIn),
     handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
     putOnline: (confirmed) => api.putOnline(confirmed),
+    away: () => api.away(),
+    keepGoing: (text) => api.keepGoing(text),
+    stopAway: (id) => api.stopAway(id),
+    keepAway: (id) => api.keepAway(id),
+    answerAway: (id, callId, decision) => api.answerAway(id, callId, decision),
+    addRepeat: (doing, every, at, on) => api.addRepeat(doing, every, at, on),
+    switchRepeat: (id, on) => api.switchRepeat(id, on),
+    forgetRepeat: (id) => api.forgetRepeat(id),
+    onAway: (listener) => api.onAway(listener),
   };
 }
 

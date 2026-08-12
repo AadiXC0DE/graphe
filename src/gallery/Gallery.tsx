@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import ActivityLine from '../components/ActivityLine';
+import AddMore, { type Pack } from '../components/AddMore';
 import type { Attachment } from '../components/Attachments';
 import Composer from '../components/Composer';
 import ConfirmChange from '../components/ConfirmChange';
@@ -14,12 +15,15 @@ import InStep from '../components/InStep';
 import Landing from '../components/Landing';
 import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
+import DesignView from '../components/DesignView';
+import HistoryView from '../components/HistoryView';
 import Overview from '../components/Overview';
 import Sidebar from '../components/Sidebar';
 import VersionRow from '../components/VersionRow';
 import Versions from '../components/Versions';
 import Welcome from '../components/Welcome';
 import type {
+  CarriedExtension,
   ConnectionState,
   FileEntry,
   FoundAccount,
@@ -36,7 +40,9 @@ import { money } from '../cost/money';
 import { biggerJob, estimateNote, longConversation } from '../cost/phrasing';
 import type { Estimate } from '../cost/estimate';
 import { findMoved, saysInStep, type Design } from '../design/moved';
-import { pagesIn } from '../preview/pages';
+import { readDesign } from '../design/reading';
+import { findDrift } from '../design/drift';
+import { readMotion } from '../motion/read';
 import { behind, realWords } from '../lib/showme';
 import './Gallery.css';
 
@@ -186,47 +192,128 @@ const REMEMBERED: readonly RecentProject[] = [
   },
 ];
 
-/** The screens of a project with the shape of a real one. */
-const GALLERY_PAGES = pagesIn([
-  'src/app/page.tsx',
-  'src/app/about/page.tsx',
-  'src/app/pricing/page.tsx',
-  'src/app/(marketing)/case-studies/page.tsx',
-  'src/app/work/[slug]/page.tsx',
-]);
+/** A stylesheet with enough in it that every band of the design view has
+ *  something real to say: values to move, movement to watch, and two near-misses
+ *  written by hand. */
+const STYLESHEET = `:root {
+  --accent: #b8492c;
+  --text: #1a1a19;
+  --text-muted: #a3a3a0;
+  --bg: #fbfbfa;
+  --space-3: 12px;
+  --space-4: 16px;
+  --radius-md: 10px;
+  --dur-ui: 200ms;
+}
+
+.card {
+  padding: 15px;
+  border-radius: var(--radius-md);
+  transition: transform 200ms cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+.card:hover {
+  transform: translateY(-2px);
+}
+
+.badge {
+  background: #b8492d;
+  transition: opacity 140ms ease;
+}
+`;
+
+const STYLES = {
+  file: 'src/styles/tokens.css',
+  text: STYLESHEET,
+  tokens: [
+    { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 2, steps: [] },
+    { name: '--text', value: '#1a1a19', kind: 'colour' as const, line: 3, steps: [] },
+    { name: '--text-muted', value: '#a3a3a0', kind: 'colour' as const, line: 4, steps: [] },
+    { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 5, steps: [] },
+    {
+      name: '--space-3',
+      value: '12px',
+      kind: 'space' as const,
+      line: 6,
+      steps: ['8px', '12px', '16px', '24px'],
+    },
+    {
+      name: '--space-4',
+      value: '16px',
+      kind: 'space' as const,
+      line: 7,
+      steps: ['8px', '12px', '16px', '24px'],
+    },
+    {
+      name: '--radius-md',
+      value: '10px',
+      kind: 'radius' as const,
+      line: 8,
+      steps: ['6px', '10px', '14px'],
+    },
+  ],
+};
 
 const TIMELINE: readonly SavedVersion[] = [
   {
     id: 'v5',
+    shortId: '9c1f4ad',
     at: NOW - 2 * MINUTE,
     title: 'Went back to “before I broke the nav”',
     by: 'you',
     named: false,
     current: true,
+    parents: ['v4'],
+    refs: ['main'],
+    wentBackTo: 'v3',
   },
   {
     id: 'v4',
+    shortId: '2b70e19',
     at: NOW - 9 * MINUTE,
     title: 'Hero rebuilt from your Figma frame',
     by: 'graphe',
     named: false,
     current: false,
+    parents: ['v3', 'v2b'],
+    refs: [],
+    wentBackTo: null,
+  },
+  {
+    id: 'v2b',
+    shortId: 'e04d773',
+    at: NOW - 40 * MINUTE,
+    title: 'Tried a wider grid',
+    by: 'graphe',
+    named: false,
+    current: false,
+    parents: ['v2'],
+    refs: ['wider-grid'],
+    wentBackTo: null,
   },
   {
     id: 'v3',
+    shortId: '55aa018',
     at: NOW - 55 * MINUTE,
     title: 'before I broke the nav',
     by: 'you',
     named: true,
     current: false,
+    parents: ['v2'],
+    refs: [],
+    wentBackTo: null,
   },
   {
     id: 'v2',
+    shortId: '7f3c2d1',
     at: NOW - 3 * HOUR,
     title: 'Cards moved onto the grid',
     by: 'graphe',
     named: false,
     current: false,
+    parents: [],
+    refs: [],
+    wentBackTo: null,
   },
 ];
 
@@ -236,22 +323,41 @@ const TIMELINE: readonly SavedVersion[] = [
 const AWKWARD: readonly SavedVersion[] = [
   {
     id: 'a1',
+    shortId: 'd11e900',
     at: NOW - 4 * MINUTE,
     title:
       'Went back to “before I broke the nav on the pricing page and then broke it again on mobile”',
     by: 'you',
     named: true,
     current: true,
+    parents: ['a2'],
+    refs: ['main'],
+    wentBackTo: 'a3',
   },
   {
     id: 'a2',
+    shortId: '6ba0c47',
     at: NOW - 3 * HOUR,
     title: 'Rebuilt the whole marketing site from the Figma library, including every component',
     by: 'graphe',
     named: false,
     current: false,
+    parents: ['a3'],
+    refs: [],
+    wentBackTo: null,
   },
-  { id: 'a3', at: NOW - 26 * HOUR, title: 'wip', by: 'you', named: true, current: false },
+  {
+    id: 'a3',
+    shortId: '0f82b5e',
+    at: NOW - 26 * HOUR,
+    title: 'wip',
+    by: 'you',
+    named: true,
+    current: false,
+    parents: [],
+    refs: [],
+    wentBackTo: null,
+  },
 ];
 
 const JUST_PUT_BACK: PutBack = {
@@ -499,6 +605,53 @@ const FOUND_ACCOUNTS: readonly FoundAccount[] = [
   { providerId: 'openai', name: 'OpenAI', kind: 'sign-in', source: 'codex' },
 ];
 
+/** Enough of the shelf for the band above it to have something to sit on: one
+ *  of ours, already added, and one of somebody else's. */
+const PACKS: readonly Pack[] = [
+  {
+    id: '@graphe/figma',
+    name: 'Figma',
+    kind: 'extension',
+    summary: 'Build from a frame you link, keeping to the spacing scale you already use.',
+    downloads: 24_000,
+    version: '1.4.0',
+    installed: true,
+    curated: true,
+  },
+  {
+    id: 'pi-page-weight',
+    name: 'pi-page-weight',
+    kind: 'skill',
+    summary: 'Reads a page for the things that make it slow to open, before it goes out.',
+    downloads: 1_840,
+    version: '0.6.2',
+    installed: false,
+    curated: false,
+  },
+];
+
+const VOUCHED_FOR: Readonly<Record<string, string>> = {
+  '@graphe/figma': 'Lets it build from a Figma frame you paste in.',
+};
+
+/** Two that came down with a clone rather than being chosen: one answered yes
+ *  already, one never answered, and a path long enough to prove the row breaks
+ *  rather than pushing the panel wider. */
+const CARRIED: readonly CarriedExtension[] = [
+  {
+    id: 'brand-check-4f21c9',
+    name: 'Brand check',
+    where: '.pi/extensions/brand-check.js',
+    trusted: true,
+  },
+  {
+    id: 'preview-deploy-9ab30e',
+    name: 'Preview deploy',
+    where: '.pi/extensions/vendor/@acme-design-systems/preview-deploy/dist/node/index.mjs',
+    trusted: false,
+  },
+];
+
 /** A project with folders inside folders and three files moved in the version
  *  being looked at, so the tree has both of the things it draws. */
 const PROJECT_FILES: readonly FileEntry[] = [
@@ -579,6 +732,10 @@ export default function Gallery() {
   /** Live for the same reason: the connect screen is a moment, not a picture,
    *  and the closest thing to the moment is opening and closing it. */
   const [connectOpen, setConnectOpen] = useState(false);
+  /** Live, and the switches move: the band is a decision somebody makes one row
+   *  at a time, and a picture of it cannot be reviewed as one. */
+  const [addMoreOpen, setAddMoreOpen] = useState(false);
+  const [carried, setCarried] = useState(CARRIED);
   /** What the first screen put in the box, so the two can be reviewed as the one
    *  gesture they are rather than as two components that happen to be near each
    *  other. */
@@ -847,6 +1004,22 @@ export default function Gallery() {
           </Section>
 
           <Section
+            title="Adding more, and what the project brought with it"
+            note="Two different things on one screen, in the order somebody meets them. The band at the top is about the folder in front of you: extensions that arrived with it, which nobody chose and which run as part of Graphe rather than being checked as they go. Searching for something to add is the general errand, so it waits below."
+          >
+            <button type="button" className="gallery__live" onClick={() => setAddMoreOpen(true)}>
+              Open the add-more screen
+            </button>
+            <p className="gallery__caption">
+              The switches are real — turn one on and off. Each row is the name, the file it loads
+              set as a path, and one switch; the second path is long enough to break over two lines
+              rather than push the panel wider. The line about starting a fresh conversation sits
+              above the switches, once, because the cost of saying yes should be read before the
+              hand gets to the control rather than repeated beside every one of them.
+            </p>
+          </Section>
+
+          <Section
             title="A long conversation, tidied"
             note="One sentence, said once, in the place it happened. Behind it is the agent runtime’s own tidying — we do not summarise anything ourselves."
           >
@@ -929,6 +1102,8 @@ export default function Gallery() {
                 connection={CONNECT_STATE}
                 onSelectModel={noop}
                 onConnect={noop}
+                room={{ used: 128_000, total: 200_000, part: 0.64 }}
+                onTidy={noop}
               />
             </div>
             <p className="gallery__caption">
@@ -1064,8 +1239,6 @@ export default function Gallery() {
                 openPath="/Users/you/Sites/paper-street"
                 onOpen={noop}
                 onBrowse={noop}
-                pages={GALLERY_PAGES}
-                onOpenPage={noop}
                 pinned={REFERENCES}
                 conversations={[]}
                 openConversation={null}
@@ -1079,8 +1252,6 @@ export default function Gallery() {
                 openPath="/Users/you/Sites/paper-street"
                 onOpen={noop}
                 onBrowse={noop}
-                pages={GALLERY_PAGES}
-                onOpenPage={noop}
                 pinned={REFERENCES}
                 conversations={[]}
                 openConversation={null}
@@ -1148,9 +1319,6 @@ export default function Gallery() {
                   spent: SPENT,
                   busy: true,
                   showMe: false,
-                  looks: [],
-                  looksSay: '',
-                  checkingWidths: false,
                   artifacts: [
                     { path: 'public/hero-bg.svg', name: 'hero-bg.svg', kind: 'vector' as const, note: 'SVG · a drawing' },
                   ],
@@ -1168,9 +1336,9 @@ export default function Gallery() {
                       { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 98, steps: [] },
                     ],
                     text: ':root { --accent: #b8492c; }',
-        },
+                  },
+                  reading: readDesign(null),
                   inStep: IN_STEP,
-                  lookingAtFigma: false,
                   landing: LANDING,
                   going: null,
                   landed: null,
@@ -1185,19 +1353,14 @@ export default function Gallery() {
                 onShowSplit={noop}
                 onOpenFile={noop}
                 onSave={noop}
-                onCheckWidths={noop}
+                onOpenDesign={noop}
+                onOpenGraph={noop}
                 onShare={noop}
                 onHoldBack={noop}
                 onDecide={noop}
                 onHandOver={noop}
                 onPutOnline={noop}
                 onOpenLink={noop}
-                onNudge={noop}
-                onFollowDesign={noop}
-                onLookAgain={noop}
-                onBuildIn={noop}
-                onCaughtUp={noop}
-                onStopFollowing={noop}
                 onKeepGoing={noop}
                 onKeepAway={noop}
                 onDropAway={noop}
@@ -1239,7 +1402,7 @@ export default function Gallery() {
           </Section>
 
           <Section
-            title="While you’re away"
+            title="Background work"
             note="Work carries on with the window closed, on this machine — nothing is sent anywhere to be built. What comes back is a picture, a sentence and what it cost, on the same contact sheet the board already draws. A run that hits a question stops there and waits: nothing answers its own, ever, and that card is the loudest thing in the band because it is the only thing here that cannot move without a person."
           >
             <div className="gallery__overview">
@@ -1265,7 +1428,7 @@ export default function Gallery() {
           </Section>
 
           <Section
-            title="When it’s ready"
+            title="Ship it"
             note="The foot of the overview, and the only place in the app where anything can leave this computer. Work checked in a copy sits in the accent until somebody answers it; both answers are undoable, so neither button is the dangerous one. The two that can send anywhere never do it on one press — each opens its own confirmation first, in the same sentences the shell would use."
           >
             <div className="gallery__overview">
@@ -1333,6 +1496,69 @@ vite v6.0.5 building for production...
           </Section>
 
           <Section
+            title="Design"
+            note="Everything about how the project looks, over the conversation rather than squeezed into a 328px column. A grid, so a palette is a palette and a hundred movements are a list you can find something in. ⌘D opens it; Esc leaves."
+          >
+            <div className="gallery__sheet">
+              <DesignView
+                at="styles"
+                data={{
+                  styles: STYLES,
+                  motion: readMotion(STYLESHEET),
+                  drifted: findDrift(STYLESHEET, STYLES.tokens),
+                  unreadable: readDesign(STYLES).unreadable,
+                  fixing: null,
+                  looks: [],
+                  looksSay: '',
+                  checkingWidths: false,
+                  workingAt: null,
+                  inStep: IN_STEP,
+                  lookingAtFigma: false,
+                  busy: false,
+                  showMe: false,
+                }}
+                onClose={noop}
+                onNudge={noop}
+                onNudgeMotion={noop}
+                onFixColour={noop}
+                onCheckWidths={noop}
+                onWorkAt={noop}
+                onFollowDesign={noop}
+                onLookAgain={noop}
+                onBuildIn={noop}
+                onCaughtUp={noop}
+                onStopFollowing={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              Each band keeps its own empty state rather than disappearing, so pressing a chip
+              never lands on nothing. The two long ones — every movement, every near-miss — draw a
+              screenful and offer the rest, because each row here is a live demonstration.
+            </p>
+          </Section>
+
+          <Section
+            title="History, as lines"
+            note="The rail beside the conversation says what the project looked like then. This says how the work actually ran: what came after what, where two goes at the same thing were tried side by side, and where they came back together. Every row carries the short id, so anybody who wants to go and do something with it elsewhere can."
+          >
+            <div className="gallery__sheet">
+              <HistoryView
+                versions={TIMELINE}
+                pictures={{}}
+                git={GIT_DIRTY}
+                onClose={noop}
+                onPutBack={noop}
+                onOpenFile={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              The lines are one drawing behind the rows rather than a fragment per row — a line
+              runs between two rows and belongs to neither. The column beside it is the row you
+              have chosen, whole: who, when, what it came after, and what has moved since.
+            </p>
+          </Section>
+
+          <Section
             title="The very first launch"
             note="Nothing remembered is a different screen, not the same screen with an empty list in the middle of it. “Where were we?” over nothing is the app asking a question it already knows the answer to."
           >
@@ -1396,6 +1622,25 @@ vite v6.0.5 building for production...
         onImport={noop}
         onSelect={noop}
         onDisconnect={noop}
+      />
+
+      <AddMore
+        open={addMoreOpen}
+        packs={PACKS}
+        vouchedFor={VOUCHED_FOR}
+        busy={null}
+        warning="Made by people we do not know. Ask what one does before you add it."
+        explaining={null}
+        explanations={{}}
+        onClose={() => setAddMoreOpen(false)}
+        onSearch={noop}
+        onAdd={noop}
+        onRemove={noop}
+        onExplain={noop}
+        carried={carried}
+        onTrustCarried={(id, trust) =>
+          setCarried((was) => was.map((one) => (one.id === id ? { ...one, trusted: trust } : one)))
+        }
       />
     </main>
   );

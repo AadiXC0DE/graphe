@@ -92,6 +92,8 @@ import {
   type PutBack,
   type RecentProject,
   type Result,
+  type CarriedExtension,
+  type Room,
   type SavedVersion,
   type ShowOutcome,
   type ShowProgress,
@@ -113,6 +115,7 @@ import { KEEP, landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
 import type { Bitmap } from '../src/diff/regions';
 import { tellWhatHappened } from '../src/diff/summary';
 import { inDesignWords, readChanges, NOTHING_TO_SAY, type Edit } from '../src/design/words';
+import { isTrusted, trusting } from '../src/projects/carried';
 import { keeping, PreferenceFile } from '../src/projects/preferences';
 import { Recents } from '../src/projects/recents';
 import { Workspaces } from '../src/projects/workspaces';
@@ -734,15 +737,26 @@ async function rememberedProjects(): Promise<readonly RecentProject[]> {
   );
 }
 
+/** Which of a project's own extensions somebody has said yes to. Read at the
+ *  moment a session is built, so a decision taken a minute ago counts. */
+async function trustsIn(path: string): Promise<(id: string) => boolean> {
+  const { trusted } = (await preferences()).all();
+  return (id: string) => isTrusted(trusted, path, id);
+}
+
 /** What the window is told about a version. */
 function asSaved(version: Version, currentId: string | null): SavedVersion {
   return {
     id: version.id,
+    shortId: version.shortId,
     at: version.at,
     title: version.title,
     by: version.by,
     named: version.named,
     current: version.id === currentId,
+    parents: version.parents,
+    refs: version.refs,
+    wentBackTo: version.wentBackTo,
   };
 }
 
@@ -1350,6 +1364,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
       onEvent: forwardTo(path, held),
       timeline,
       model: (await preferences()).all().model,
+      trusts: await trustsIn(path),
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Opening a project again resumes its most recent
@@ -2480,6 +2495,79 @@ function register(): void {
     }
   });
 
+  /** How full the conversation is. Null rather than a failure when there is no
+   *  session yet or the model has not answered once — the ring simply has
+   *  nothing to draw, which is not something to put a card in front of. */
+  handle<Room | null>(CHANNEL.room, async () => {
+    return done(workspaces.current?.held.session?.room ?? null);
+  });
+
+  /** Shorten it now. The window hears about the tidying itself through the
+   *  ordinary event stream; this answers with the room there is afterwards. */
+  handle<Room | null>(CHANNEL.tidyNow, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const session = open.held.session;
+    if (session === null || session === undefined) return done(null);
+    await session.tidyNow();
+    return done(session.room);
+  });
+
+  /** Stop asking, or start again. Session-scoped on purpose: it is not written
+   *  down anywhere, so a window opened tomorrow asks again. */
+  handle<boolean>(CHANNEL.stopAsking, async (_event, args) => {
+    const [on] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
+    open.held.session?.stopAsking(on);
+    return done(open.held.session?.quiet === true);
+  });
+
+  /** What the open project brought with it. Read off the session that is
+   *  already running: the list is worked out while its extensions load, so
+   *  there is nothing here to go and look up. */
+  handle<readonly CarriedExtension[]>(CHANNEL.carried, async () => {
+    return done(workspaces.current?.held.session?.carried ?? []);
+  });
+
+  /**
+   * Say yes to one of them, or take it back.
+   *
+   * Extensions are decided when a session is built, so the session is built
+   * again — the conversation on screen is reopened by its own path, which is
+   * the same door "start a new conversation" goes through. Without that the
+   * switch would be a promise about the next time somebody opened the folder.
+   */
+  handle<readonly CarriedExtension[]>(CHANNEL.trustCarried, async (_event, args) => {
+    const [id, trust] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || id === '' || typeof trust !== 'boolean') return fail(NOTHING_OPEN);
+
+    const file = await preferences();
+    await file.change({ trusted: trusting(file.all().trusted, open.path, id, trust) });
+
+    const held = open.held;
+    const carryOn = held.session?.conversation ?? null;
+    held.session?.dispose();
+    held.session = null;
+    try {
+      held.session = await createSession({
+        projectRoot: open.path,
+        onEvent: forwardTo(open.path, held),
+        timeline: held.timeline,
+        model: file.all().model,
+        trusts: await trustsIn(open.path),
+        ...(carryOn === null ? { sessionDir: sessionsFolder() } : { sessionPath: carryOn }),
+      });
+    } catch (cause) {
+      const chain = detailsOf(cause);
+      return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
+    }
+    return done(held.session.carried);
+  });
+
   handle<readonly SavedVersion[]>(CHANNEL.saveVersion, async (_event, args) => {
     const [name] = args;
     const open = workspaces.current;
@@ -2835,9 +2923,12 @@ function register(): void {
         onEvent: forwardTo(open.path, held),
         timeline: held.timeline,
         model: (await preferences()).all().model,
+        // No path is somebody pressing "new" — a conversation started, not the
+        // last one carried on, which is what opening the project already does.
+        trusts: await trustsIn(open.path),
         ...(typeof path === 'string' && path !== ''
           ? { sessionPath: path }
-          : { sessionDir: sessionsFolder() }),
+          : { sessionDir: sessionsFolder(), fresh: true }),
       });
     } catch (cause) {
       const chain = detailsOf(cause);

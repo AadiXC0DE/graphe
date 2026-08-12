@@ -49,6 +49,8 @@ import {
   type Look,
   type Pack,
   type Result,
+  type CarriedExtension,
+  type Room,
   type SavedVersion,
   type ShowOutcome,
   type ShowProgress,
@@ -217,6 +219,32 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.saveVersion, chosen) as Promise<
       Result<readonly SavedVersion[]>
     >;
+  },
+
+  room(): Promise<Result<Room | null>> {
+    return ipcRenderer.invoke(CHANNEL.room) as Promise<Result<Room | null>>;
+  },
+
+  tidyNow(): Promise<Result<Room | null>> {
+    return ipcRenderer.invoke(CHANNEL.tidyNow) as Promise<Result<Room | null>>;
+  },
+
+  carried(): Promise<Result<readonly CarriedExtension[]>> {
+    return ipcRenderer.invoke(CHANNEL.carried) as Promise<Result<readonly CarriedExtension[]>>;
+  },
+
+  trustCarried(id: string, trust: boolean): Promise<Result<readonly CarriedExtension[]>> {
+    if (typeof id !== 'string' || id.trim() === '' || typeof trust !== 'boolean') {
+      return Promise.resolve(refuse<readonly CarriedExtension[]>('That is not one of them.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.trustCarried, id, trust) as Promise<
+      Result<readonly CarriedExtension[]>
+    >;
+  },
+
+  stopAsking(on: boolean): Promise<Result<boolean>> {
+    if (typeof on !== 'boolean') return Promise.resolve(refuse<boolean>('That is not a yes or a no.'));
+    return ipcRenderer.invoke(CHANNEL.stopAsking, on) as Promise<Result<boolean>>;
   },
 
   revealFolder(): Promise<Result<null>> {

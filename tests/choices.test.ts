@@ -155,7 +155,14 @@ describe('D1 — the real name of what just happened', () => {
       await preferences.change({ showMe: true });
       expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
         version: 1,
-        preferences: { showMe: true, model: null, kept: {}, showFiles: false, holdBack: false },
+        preferences: {
+          showMe: true,
+          model: null,
+          kept: {},
+          trusted: {},
+          showFiles: false,
+          holdBack: false,
+        },
       });
     });
   });

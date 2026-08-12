@@ -207,6 +207,69 @@
 }
 
 /* ---------------------------------------------------------------------------
+   What came with the project
+   Not a shelf: nobody went looking for these, so it wears an enclosure rather
+   than the bare heading the searched lists use, and it never sits under a filter.
+   --------------------------------------------------------------------------- */
+
+.addmore__carried {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+
+/* Above the switches, because the cost of saying yes should be read before the
+   hand gets there. */
+.addmore__carriedhint {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.addmore__switch {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.addmore__switch input {
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.addmore__switchtext {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.addmore__switchlabel {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* A real path, so it is set like one and allowed to break anywhere. */
+.addmore__where {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
    One row
    Name, one sentence, one action. The explanation opens underneath, in place.
    --------------------------------------------------------------------------- */
@@ -451,6 +514,7 @@
 }
 
 .addmore__action:focus-visible,
+.addmore__switch input:focus-visible,
 .addmore__explain:focus-visible,
 .addmore__chip:focus-visible,
 .addmore__exactsummary:focus-visible,
@@ -482,6 +546,10 @@
   .addmore__chip:not(.addmore__chip--on):hover {
     border-color: var(--border-strong);
     color: var(--text);
+  }
+
+  .addmore__switch:hover {
+    border-color: var(--border-strong);
   }
 }
 

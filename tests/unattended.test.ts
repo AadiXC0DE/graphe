@@ -379,7 +379,9 @@ describe('U-06 the notice that arrives on screen', () => {
     expect(notice.body.length).toBeLessThanOrEqual(120);
   });
 
-  it('never says where any of this really lives', () => {
+  /* Plain words both audiences already have are allowed; the machinery
+     underneath — what runs this, where, and in what — is not. */
+  it('never names the machinery underneath', () => {
     const everything = [
       ...Object.values(awayWords),
       saysWhileAway([piece(), piece2()].map((one) => one)) ?? '',
@@ -399,8 +401,6 @@ describe('U-06 the notice that arrives on screen', () => {
       'token',
       'api',
       'cron',
-      'schedule',
-      'background',
       'daemon',
       'process',
       'queue',

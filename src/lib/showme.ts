@@ -184,6 +184,23 @@ export const behind = {
     'I shortened my own notes on the earlier part of this conversation so it stays quick. Every word either of us said is still above, to scroll back through.',
 } as const;
 
+/**
+ * What the three things at the foot of the panel actually run.
+ *
+ * The exemption in this file's header, used as intended: these name the real
+ * tool and the real artefact, because "puts the work where your team picks it
+ * up" is true and still leaves a developer with no idea whether that means a
+ * branch, an email or a zip file. One quiet line each, under the plain sentence
+ * rather than instead of it.
+ */
+export const reallyRuns = {
+  handOver:
+    'Runs gh: makes a branch off your work, pushes it, and opens a pull request with the write-up and the pictures in it.',
+  online:
+    'Runs vercel — fetched with npx if this computer has not got it — and gives you back the address it returns.',
+  page: 'Writes one .html file wherever you choose. Nothing is uploaded and nothing is installed.',
+} as const;
+
 /** The switch itself, and what it promises. */
 export const showMeCopy = {
   label: 'Show me what you’re doing',

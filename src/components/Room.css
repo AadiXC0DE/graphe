@@ -1,0 +1,276 @@
+/* How full the conversation is, in the composer's own row.
+
+   Furniture, by the frequency rule: it changes after every single turn, so it
+   never animates on its way to a new value. The one exception is the tidy
+   itself, which is a rare, slow thing somebody asked for and is allowed to say
+   so — see .room__ring--going. */
+
+.room {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.room__ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  cursor: default;
+}
+
+.room__ring:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 999px;
+}
+
+.room__ring svg {
+  /* Twelve o'clock, filling clockwise, which is the direction a gauge fills. */
+  transform: rotate(-90deg);
+}
+
+.room__track {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 2;
+}
+
+.room__used {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* ---------------------------------------------------------------------------
+   The numbers, on hover and on focus
+   The ring shows a proportion and nothing else; this is where the figures live.
+
+   The gap between ring and card is padding on the wrapper rather than an offset,
+   so the pointer can travel up into the card without leaving the ring — which is
+   what lets the mark inside it be hovered at all.
+   --------------------------------------------------------------------------- */
+
+.room__tip {
+  position: absolute;
+  bottom: 100%;
+  /* Anchored to its right edge, not centred: the ring sits against the panel on
+     the window's right, and a centred card ran under it. */
+  right: -6px;
+  z-index: 8;
+  padding-bottom: var(--space-2);
+  width: max-content;
+  pointer-events: none;
+  opacity: 0;
+  /* A popover grows out of what opened it, so the origin is the ring below. */
+  transform-origin: 100% 100%;
+  transform: scale(0.97);
+  transition:
+    opacity var(--dur-exit) var(--ease-out-quart),
+    transform var(--dur-exit) var(--ease-out-quart);
+}
+
+.room__tipcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  text-align: left;
+  /* The one part of the tip that takes the pointer, so the mark inside it can
+     be hovered. The padding above it stays transparent to clicks. */
+  pointer-events: auto;
+}
+
+.room__ring:focus-visible .room__tip {
+  opacity: 1;
+  transform: scale(1);
+  transition-duration: var(--dur-ui);
+}
+
+/* Long enough that brushing past the ring on the way to the button never
+   flashes it; nothing on the way out, because leaving is an answer already. */
+@media (hover: hover) and (pointer: fine) {
+  .room__ring:hover .room__tip {
+    opacity: 1;
+    transform: scale(1);
+    transition-duration: var(--dur-ui);
+    transition-delay: 400ms;
+  }
+}
+
+.room__tipcount {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.room__tipfraction {
+  color: var(--text);
+}
+
+.room__tippart {
+  color: var(--text-muted);
+}
+
+/* What a context window is, for the one person in ten who has not met one.
+   Behind a mark rather than printed under the numbers every time: three lines
+   of explanation on a tooltip somebody opens forty times a day is three lines
+   they learn to look past. */
+.room__why {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  font-size: 9px;
+  font-style: italic;
+  line-height: 1;
+  color: var(--text-faint);
+  cursor: help;
+}
+
+.room__whatis {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  right: -8px;
+  width: 232px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-2xs);
+  font-style: normal;
+  line-height: 1.45;
+  color: var(--text-muted);
+  text-wrap: pretty;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 100% 100%;
+  transform: scale(0.97);
+  transition:
+    opacity var(--dur-exit) var(--ease-out-quart),
+    transform var(--dur-exit) var(--ease-out-quart);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .room__why:hover .room__whatis {
+    opacity: 1;
+    transform: scale(1);
+    transition-duration: var(--dur-ui);
+  }
+
+  .room__why:hover {
+    color: var(--text);
+    border-color: var(--text-faint);
+  }
+}
+
+.room__tipwhat {
+  max-width: 232px;
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-faint);
+  text-wrap: pretty;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room__tip,
+  .room__whatis {
+    transform: none;
+  }
+
+  .room__ring:hover .room__tip,
+  .room__ring:focus-visible .room__tip,
+  .room__why:hover .room__whatis {
+    transform: none;
+  }
+}
+
+/* Nearly full. Colour is not carrying this alone — the button beside it says
+   the same thing in words, and the numbers on the ring say it again. */
+.room[data-tight='yes'] .room__used {
+  stroke: var(--accent);
+}
+
+.room[data-tight='yes'] .room__tidy {
+  color: var(--accent-ink);
+}
+
+.room__tidy {
+  min-height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.room__tidy:disabled {
+  opacity: 0.55;
+}
+
+.room__tidy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .room__tidy:not(:disabled):hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+/* Tidying: the one moment this is allowed to move.
+
+   A ring that empties and fills would be a progress bar lying about progress —
+   nothing here knows how long a tidy takes. Instead the whole ring turns, at a
+   constant speed, which is the one honest shape for "something is happening and
+   I cannot tell you how far along it is". `linear` is the exception UI-DESIGN.md
+   allows for genuinely constant motion. */
+.room__ring--going svg {
+  animation: room-turning 900ms linear infinite;
+}
+
+.room__ring--going .room__used {
+  stroke: var(--accent);
+  stroke-dasharray: 12 26 !important;
+}
+
+@keyframes room-turning {
+  from {
+    transform: rotate(-90deg);
+  }
+  to {
+    transform: rotate(270deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room__ring--going svg {
+    animation: none;
+  }
+
+  /* Still unmistakably "working", without anything moving. */
+  .room__ring--going .room__used {
+    stroke-dasharray: 38 0 !important;
+    opacity: 0.5;
+  }
+}

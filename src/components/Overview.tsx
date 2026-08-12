@@ -1,16 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Away from './Away';
 import CostMeter from './CostMeter';
-import Drift from './Drift';
-import Motion from './Motion';
+import { SAYS as DESIGN, type DesignPart } from './DesignView';
 import Helpers from './Helpers';
-import InStep from './InStep';
+import History from './History';
 import Landing, { type Outcome } from './Landing';
-import Legible from './Legible';
-import Responsive from './Responsive';
-import Styles from './Styles';
 import Swatches from './Swatches';
-import Versions from './Versions';
 import type {
   Artifact,
   Away as AwayState,
@@ -20,17 +15,12 @@ import type {
   GitSnapshot,
   InStep as InStepState,
   Landing as LandingState,
-  Look,
-  Move,
   PutBack,
   SavedVersion,
   StyleToken,
   Swatch,
 } from '../lib/ipc';
-import { findDrift } from '../design/drift';
-import { readMotion } from '../motion/read';
-import { findTrouble } from '../design/legibility';
-import { pairsToCheck, paletteFrom } from '../design/pairs';
+import type { DesignReading } from '../design/reading';
 import type { NowView, Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
 import './Overview.css';
@@ -51,22 +41,17 @@ export type OverviewView = {
   spent: SpendView | null;
   busy: boolean;
   showMe: boolean;
-  /** Every size the project designs at, once somebody has asked. */
-  looks: readonly Look[];
-  looksSay: string;
-  checkingWidths: boolean;
-  /** The size being worked at, when one has been chosen. */
-  workingAt?: string | null;
   /** Things the last turn made that are worth looking at. */
   artifacts: readonly Artifact[];
   swatches: readonly Swatch[];
   /** This project's own tokens, and where they live. */
   styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
+  /** What the stylesheet says about itself, read once and shared with the
+   *  design view rather than worked out twice. */
+  reading: DesignReading;
   /** The Figma file this project is kept in step with, and what has moved on in
    *  it. Null until the shell has answered. */
   inStep: InStepState | null;
-  /** True while that file is being read. */
-  lookingAtFigma: boolean;
   /** What can be done with the work now it exists. Null until the shell has
    *  answered, so the band does not flash on the way in. */
   landing: LandingState | null;
@@ -95,10 +80,10 @@ type Props = {
   onOpenFile: (path: string) => void;
   /** Keep where the project stands right now, so it can be come back to. */
   onSave: () => void;
-  /** Photograph the project at every size it designs at. */
-  onCheckWidths: () => void;
-  /** Say which of those sizes the work is being done at. */
-  onWorkAt?: (look: Look) => void;
+  /** Open everything about how the project looks, at one of its bands. */
+  onOpenDesign: (part: DesignPart) => void;
+  /** Open the whole history, drawn as lines. */
+  onOpenGraph: () => void;
   /** Write a page of what changed, for somebody who is not you. */
   onShare: () => void;
   /** Check work in a copy before it reaches the files, or stop. */
@@ -111,28 +96,6 @@ type Props = {
   onPutOnline: () => void;
   /** Open an address in the person's own browser. */
   onOpenLink: (address: string) => void;
-  /** Change one design token directly. */
-  onNudge: (name: string, value: string) => void;
-  /** Move the colour behind a pairing nobody can read to one they can. */
-  onFixColour?: (name: string, value: string) => void;
-  /** Change how long something takes, or how it starts and stops. */
-  onNudgeMotion?: (move: import('../motion/read').Move, change: import('../motion/read').Change) => void;
-  /** Put one of the project's own values back where something close to it was
-   *  written instead. */
-  onUseYours?: (finding: { use: string; line: number; wrote: string }) => void;
-
-  /* ------------------------------------------------ staying in step with Figma */
-
-  /** Keep this project in step with the file behind a pasted Figma address. */
-  onFollowDesign: (address: string) => void;
-  /** Read that file again. */
-  onLookAgain: () => void;
-  /** Bring the work into step with one thing that moved. */
-  onBuildIn: (move: Move) => void;
-  /** The work matches Figma now. */
-  onCaughtUp: () => void;
-  /** Stop following it. */
-  onStopFollowing: () => void;
 
   /* ---------------------------------------------- while you are not looking */
 
@@ -158,15 +121,48 @@ type Props = {
  *  of what the work looked like; the thread is the archive. */
 const WINDOW = 6;
 
-type TabId = 'work' | 'look' | 'moments';
+type TabId = 'work' | 'look' | 'history';
 
 /** Three questions, in the order they get asked: what is happening, how does it
  *  look, and what can I go back to. */
 const TABS: readonly { id: TabId; name: string }[] = [
   { id: 'work', name: 'Work' },
   { id: 'look', name: 'Look' },
-  { id: 'moments', name: 'Moments' },
+  { id: 'history', name: 'History' },
 ];
+
+/** The bands of the design view, as rows you can come at them through. Each
+ *  says what it holds, because a list of six nouns down a panel is a list
+ *  nobody presses. */
+const LOOKS: readonly { id: DesignPart; note: string; trouble?: boolean }[] = [
+  { id: 'styles', note: 'Colour, type, spacing — move any of them' },
+  { id: 'motion', note: 'How long things take, and how they start and stop' },
+  { id: 'drift', note: 'Written by hand, a hair off one of yours', trouble: true },
+  { id: 'legible', note: 'Pairings nobody can read', trouble: true },
+  { id: 'widths', note: 'The same page at every size' },
+  { id: 'figma', note: 'What has moved on in the file you follow', trouble: true },
+];
+
+const DESIGN_PARTS = DESIGN.parts;
+
+/** How much is in each band. Null where a number would say nothing — nobody has
+ *  asked for the pictures yet, or there is no file being followed. */
+type Counts = { styles: number; motion: number; drift: number; legible: number; figma: number };
+
+function countable(view: OverviewView): Counts {
+  return {
+    styles: view.styles?.tokens.length ?? 0,
+    motion: view.reading.motion?.moves.length ?? 0,
+    drift: view.reading.drifted.length,
+    legible: view.reading.unreadable.length,
+    figma: view.inStep?.moved.length ?? 0,
+  };
+}
+
+function countOf(part: DesignPart, counts: Counts): number | null {
+  if (part === 'widths') return null;
+  return counts[part];
+}
 
 /** The last part of a path is what people call the file. The rest is filing. */
 function leaf(path: string): string {
@@ -198,23 +194,14 @@ export default function Overview({
   onShowSplit,
   onOpenFile,
   onSave,
-  onCheckWidths,
-  onWorkAt,
+  onOpenDesign,
+  onOpenGraph,
   onShare,
   onHoldBack,
   onDecide,
   onHandOver,
   onPutOnline,
   onOpenLink,
-  onNudge,
-  onNudgeMotion,
-  onFixColour,
-  onUseYours,
-  onFollowDesign,
-  onLookAgain,
-  onBuildIn,
-  onCaughtUp,
-  onStopFollowing,
   onKeepGoing,
   onKeepAway,
   onDropAway,
@@ -225,50 +212,16 @@ export default function Overview({
 }: Props) {
   const { now, git, research, references, versions, pictures, kept, putBack, spent, busy, showMe } =
     view;
-  const { looks, looksSay, checkingWidths, workingAt, artifacts, swatches, styles } = view;
+  const { artifacts, swatches } = view;
 
   /* Which band of the panel is in front. Bands used to stack into one column
      that only got longer; now each has a home and nothing is buried. */
   const [tab, setTab] = useState<TabId>('work');
 
-  /* Worked out here rather than sent over the wire: the values and the file are
-     already in hand, and the answer changes whenever either does. */
-  /* How the project moves, read from the same stylesheet everything else here
-     comes from. Nudging a length or a curve is arithmetic, not a question for a
-     model — see Styles for the same bargain. */
-  const moves = useMemo(
-    () => (styles === null ? null : readMotion(styles.text)),
-    [styles],
-  );
-
-  const drifted = useMemo(
-    () => (styles === null ? [] : findDrift(styles.text, styles.tokens)),
-    [styles],
-  );
-
-  /* Which of this project's own colours cannot be read on which of its own
-     surfaces. Only the tokens are paired, because only a token can be moved
-     from here; the swatches still count as colours a repair may come out of. */
-  const unreadable = useMemo(() => {
-    if (styles === null) return { findings: [], moves: new Map<string, string>() };
-    const pairs = pairsToCheck(styles.tokens);
-    return {
-      findings: findTrouble(
-        pairs.map((one) => one.spot),
-        paletteFrom([...styles.tokens, ...swatches]),
-      ),
-      moves: new Map(pairs.map((one) => [one.spot.id, one.front.name])),
-    };
-  }, [styles, swatches]);
-
-  /* The row whose colour is on its way to being changed. Cleared the moment new
-     values arrive, which is what finishing looks like from here. */
-  const [fixing, setFixing] = useState<string | null>(null);
-  useEffect(() => setFixing(null), [styles]);
-
   /* A dot on the tab, not a number: the count matters once you are looking, and
      before that it is only worth knowing there is something. */
-  const trouble = drifted.length + unreadable.findings.length + (view.inStep?.moved.length ?? 0);
+  const look = useMemo(() => countable(view), [view]);
+  const trouble = look.drift + look.legible + look.figma;
   /* The same dot on Work, for the one thing on this panel that cannot move
      without a person: something that carried on and then stopped to ask. */
   const asking = (view.away?.pieces ?? []).some((one) => one.question !== null);
@@ -486,90 +439,48 @@ export default function Overview({
       </div>
 
       <div role="tabpanel" id="overview-panel-look" aria-labelledby="overview-tab-look" hidden={tab !== 'look'}>
-      {/* First in the tab, and always here. Everything else in this panel is a
-          reading of the project; this is the one thing that can change while
-          nobody is looking, and it has to be findable before it has anything
-          to say. */}
-      {view.inStep === null ? null : (
-        <section className="overview__block">
-          <InStep
-            state={view.inStep}
-            busy={view.lookingAtFigma}
-            detail={showMe}
-            onFollow={onFollowDesign}
-            onLookAgain={onLookAgain}
-            onBuildIn={onBuildIn}
-            onCaughtUp={onCaughtUp}
-            onStop={onStopFollowing}
-          />
-        </section>
-      )}
-
-      {styles === null ? null : (
-        <section className="overview__block">
-          <h2 className="overview__title">Styles</h2>
-          <Styles tokens={styles.tokens} file={styles.file} onNudge={onNudge} busy={busy} />
-        </section>
-      )}
-
-      {/* Only when something in the palette cannot be read. An empty list here
-          would say everything reads fine, which is a different claim from
-          having found nothing to check. */}
-      {unreadable.findings.length === 0 ? null : (
-        <section className="overview__block">
-          <Legible
-            findings={unreadable.findings}
-            fixing={fixing}
-            showMe={showMe}
-            {...(onFixColour === undefined
-              ? {}
-              : {
-                  onFix: (finding) => {
-                    const token = unreadable.moves.get(finding.id);
-                    if (token === undefined || finding.fix === null) return;
-                    setFixing(finding.id);
-                    onFixColour(token, finding.fix.colour);
-                  },
-                })}
-          />
-        </section>
-      )}
-
+      {/* A way in rather than the thing itself. All of this used to stack up in
+          a 328px column: a palette four squares to a row, and a list of every
+          movement in the project underneath it. It opens over the work now,
+          with the width to be read. */}
       <section className="overview__block">
-        <h2 className="overview__title">On a phone</h2>
-        <Responsive
-          looks={looks}
-          says={looksSay}
-          busy={checkingWidths}
-          onCheck={onCheckWidths}
-          workingAt={workingAt ?? null}
-          {...(onWorkAt === undefined ? {} : { onWorkAt })}
-        />
+        <h2 className="overview__title">How it looks</h2>
+        <ul className="overview__ways">
+          {LOOKS.map((one) => {
+            const found = countOf(one.id, look);
+            return (
+              <li key={one.id}>
+                <button
+                  type="button"
+                  className="overview__way"
+                  onClick={() => onOpenDesign(one.id)}
+                >
+                  <span className="overview__waytext">
+                    <span className="overview__wayname">{DESIGN_PARTS[one.id]}</span>
+                    <span className="overview__waynote">{one.note}</span>
+                  </span>
+                  {found === null || found === 0 ? null : (
+                    <span
+                      className={`overview__waycount ${one.trouble && found > 0 ? 'overview__waycount--wrong' : ''}`}
+                    >
+                      {found}
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <button type="button" className="overview__do" onClick={() => onOpenDesign('styles')}>
+          Open it
+          <kbd className="overview__key">⌘D</kbd>
+        </button>
       </section>
-
-
-      {moves === null || moves.moves.length === 0 || onNudgeMotion === undefined ? null : (
-        <section className="overview__block">
-          <Motion motion={moves} file={styles?.file ?? ''} onNudge={onNudgeMotion} busy={busy} />
-        </section>
-      )}
-
-      {drifted.length === 0 ? null : (
-        <section className="overview__block">
-          <Drift
-            findings={drifted}
-            where={styles?.file ?? ''}
-            detail={showMe}
-            {...(onUseYours === undefined ? {} : { onUse: onUseYours })}
-          />
-        </section>
-      )}
-
       </div>
 
-      <div role="tabpanel" id="overview-panel-moments" aria-labelledby="overview-tab-moments" hidden={tab !== 'moments'}>
+      <div role="tabpanel" id="overview-panel-history" aria-labelledby="overview-tab-history" hidden={tab !== 'history'}>
       <div className="overview__timeline">
-        <Versions
+        <History
           versions={versions}
           pictures={pictures}
           kept={kept}
@@ -578,8 +489,10 @@ export default function Overview({
           onName={onName}
           onKeep={onKeep}
           onDismissPutBack={onDismissPutBack}
+          onOpenGraph={onOpenGraph}
           busy={busy}
           showMe={showMe}
+          git={git}
         />
       </div>
 

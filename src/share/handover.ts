@@ -37,8 +37,8 @@ export type Handover = {
  *  can be read whole and swept. */
 export const handoverWords = {
   /** The control itself. */
-  label: 'Hand this to a developer',
-  hint: 'Writes up what changed — the pictures and the plain description — and puts the work somewhere your team can pick it up.',
+  label: 'Send it for review',
+  hint: 'Puts the work, the pictures and a written summary of what changed where your team picks it up.',
   /** Said before anything leaves. */
   aboutTo:
     'This is the only part of Graphe that sends anything off this computer. Your work, the pictures of it and the description below go to the place your team already keeps this project.',
@@ -49,7 +49,7 @@ export const handoverWords = {
   sentWithoutWriteUp:
     'The work is over with your team and they can pick it up. I could not put the write-up alongside it, so that part is still only here.',
   nothingToHandOver:
-    'There is nothing here to hand over yet. Ask me for a change first, and this will have something to send.',
+    'There is nothing to send yet. Ask me for a change first, and this will have something to send.',
   couldNotSend: 'I could not send it, so nothing has left this computer.',
   /** The picture problem, said honestly rather than shipped broken. */
   picturesTravel:

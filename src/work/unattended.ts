@@ -39,10 +39,15 @@ export const awayWords = {
   no: 'No, leave it',
   /** When a piece of work was let go with a question still open. */
   turnedDown: 'I stopped rather than deciding for you, and then this was let go.',
-  nothing: 'Nothing has been left running.',
-  keepGoing: 'Keep going without me',
+  nothing: 'Nothing is running.',
+  keepGoing: 'Set something running',
   keepGoingHint:
     'I carry on with this in a copy of your project, even if you close the window. Whatever it makes is waiting for you, as a picture, when you come back.',
+  /** The press that starts one. */
+  start: 'Start it',
+  /** Under the heading, once, so nobody has to press something to find out
+   *  what it does. */
+  what: 'Work that carries on in a copy of your project, whether or not this window stays open.',
 } as const;
 
 const NUMBERS = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];

@@ -9,8 +9,8 @@
 /** Every sentence this feature can put in front of somebody. */
 export const holdWords = {
   /** The control, in the panel band where the rest of landing lives. */
-  label: 'Check my work before it lands',
-  hint: 'I do the work in a copy of your project and show it to you. Nothing reaches your files until you say yes.',
+  label: 'Work in a copy, and ask me first',
+  hint: 'Off: I change your files as I go, and every change is one undo away. On: I work in a copy and show you the result — your own files are not touched until you say yes.',
   making: 'Working on it in a copy of your project. Your own files are untouched.',
   waiting: 'This is finished and waiting for you. Nothing has reached your project yet.',
   approve: 'Let it in',

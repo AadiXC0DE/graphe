@@ -10,9 +10,9 @@ import './Welcome.css';
  *
  * Exported so the gallery shows the same three the app does. */
 export const firstMoves: readonly string[] = [
-  'Build this Figma frame as a real page, keeping our spacing scale',
-  'Make the pricing section work properly on a phone',
-  'Find everything on the homepage that sits off the grid',
+  'Build this Figma frame with the components we already have',
+  'Send a helper into every page, tell me what breaks, then fix the worst three',
+  'Find everywhere we rebuilt something this project already has',
 ];
 
 type Props = {
@@ -55,6 +55,10 @@ type Props = {
  * should be still.
  */
 export default function Welcome({ onUse, examples = firstMoves, recipes = STARTERS }: Props) {
+  /* Six is as many as the first screen can hold before the band stops reading as
+     a few suggestions and starts reading as a menu to get through. */
+  const shown = recipes.slice(0, 6);
+
   return (
     <div className="welcome">
       <h1 className="welcome__title">What do you want to make?</h1>
@@ -65,7 +69,7 @@ export default function Welcome({ onUse, examples = firstMoves, recipes = STARTE
       <p className="welcome__sub">
         {examples.length === 0
           ? 'Describe it in a sentence.'
-          : 'Describe it in a sentence. Press one of these to start from it.'}
+          : 'Describe it, or start from one of these.'}
       </p>
 
       {examples.length === 0 ? null : (
@@ -104,11 +108,11 @@ export default function Welcome({ onUse, examples = firstMoves, recipes = STARTE
       {/* The things people ask for again and again, as buttons. Pressing one
           fills the box rather than sending it — the same rule the examples
           above follow, for the same reason. */}
-      {recipes.length === 0 ? null : (
+      {shown.length === 0 ? null : (
         <div className="welcome__recipes">
           <span className="welcome__recipesname">Or something you ask for often</span>
           <ul className="welcome__chips" aria-label="Things to ask for">
-            {recipes.map((recipe) => (
+            {shown.map((recipe) => (
               <li key={recipe.id}>
                 <button
                   type="button"

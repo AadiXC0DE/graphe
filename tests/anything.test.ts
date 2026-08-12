@@ -36,11 +36,15 @@ function page(name: string, route: string, file = `src/pages${route}.tsx`): Page
 function version(title: string, minutesAgo: number, current = false): SavedVersion {
   return {
     id: `v-${title}`,
+    shortId: 'aaa1111',
     at: NOW - minutesAgo * MINUTE,
     title,
     by: 'graphe',
     named: false,
     current,
+    parents: [],
+    refs: [],
+    wentBackTo: null,
   };
 }
 

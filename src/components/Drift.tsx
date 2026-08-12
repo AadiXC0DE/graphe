@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Finding } from '../design/drift';
 import { saysAll } from '../design/drift';
 import './Drift.css';
@@ -14,12 +15,17 @@ type Props = {
 
 /** Every word this component can put on screen, in one place. */
 export const SAYS = {
-  heading: 'Not quite yours',
+  heading: 'Not from your styles',
+  hint: 'Written into the file by hand, a hair off one of your own values.',
   use: 'Use yours',
   wrote: 'Written here',
   yours: 'Yours',
+  more: (count: number): string => `Show ${String(count)} more`,
   at: (line: number) => `line ${String(line)}`,
 } as const;
+
+/** How many are drawn before the rest are offered. */
+const AT_ONCE = 20;
 
 /** The written value and the project's own, touching, so the eye does the
  *  comparing. Two swatches with a gap between them is two colours; two swatches
@@ -58,7 +64,11 @@ function Pair({ finding }: { finding: Finding }) {
  * convincing seen than described. One press puts the project's value back.
  */
 export default function Drift({ findings, where, onUse, detail = false }: Props) {
+  const [room, setRoom] = useState(AT_ONCE);
   if (findings.length === 0) return null;
+
+  const drawn = findings.slice(0, room);
+  const rest = findings.length - drawn.length;
 
   return (
     <section className="drift" aria-label={SAYS.heading}>
@@ -68,7 +78,7 @@ export default function Drift({ findings, where, onUse, detail = false }: Props)
       </header>
 
       <ul className="drift__list">
-        {findings.map((finding) => (
+        {drawn.map((finding) => (
           <li key={finding.id} className={`drift__row drift__row--${finding.confidence}`}>
             <Pair finding={finding} />
 
@@ -96,6 +106,12 @@ export default function Drift({ findings, where, onUse, detail = false }: Props)
           </li>
         ))}
       </ul>
+
+      {rest > 0 ? (
+        <button type="button" className="drift__more" onClick={() => setRoom(room + AT_ONCE)}>
+          {SAYS.more(Math.min(rest, AT_ONCE))}
+        </button>
+      ) : null}
     </section>
   );
 }

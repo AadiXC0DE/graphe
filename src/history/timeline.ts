@@ -50,6 +50,8 @@ export { HistoryError } from './repo';
  *  is the moment they want back. */
 export type Version = {
   id: string;
+  /** The same id, short enough to read out or paste into a terminal. */
+  shortId: string;
   /** Milliseconds since the epoch. */
   at: number;
   /** Plain language, one line: "Made the header sticky". */
@@ -65,6 +67,10 @@ export type Version = {
   boundary: Boundary | null;
   /** Set when this version exists because someone went back to an older one. */
   wentBackTo: string | null;
+  /** What this one came after. Two of them is where two lines of work joined. */
+  parents: readonly string[];
+  /** The names pointing at it, if any. */
+  refs: readonly string[];
 };
 
 export type SnapshotRequest = {
@@ -252,10 +258,13 @@ const BOUNDARIES = new Set<string>(Object.keys(boundaryTitles));
  *  history readable in the timeline from the first second (FEATURES.md 7.5). */
 function asVersion(stored: {
   id: string;
+  shortId?: string;
   at: number;
   title: string;
   body: string;
   label: string | null;
+  parents?: readonly string[];
+  refs?: readonly string[];
 }): Version {
   const marks = marksIn(stored.body);
   const ours = marks.size > 0;
@@ -264,6 +273,9 @@ function asVersion(stored: {
 
   return {
     id: stored.id,
+    shortId: stored.shortId ?? stored.id.slice(0, 7),
+    parents: stored.parents ?? [],
+    refs: stored.refs ?? [],
     at: stored.at,
     title: stored.label ?? stored.title,
     by: marks.get('by') === 'graphe' ? 'graphe' : 'you',

@@ -637,6 +637,71 @@ describe('the interception point', () => {
     }
   }, 30_000);
 
+  /* Reopening a project carries the last conversation on; pressing "new" must
+     not. Both go through the same call, so the two have to be told apart here
+     rather than in a window nobody can test. */
+  it('carries the last conversation on, unless a new one was asked for', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'graphe-project-'));
+    const agentDir = mkdtempSync(join(tmpdir(), 'graphe-agent-'));
+    const sessionDir = mkdtempSync(join(tmpdir(), 'graphe-sessions-'));
+    try {
+      // A conversation with something in it. Pi writes the file once there is
+      // an answer in it, so both halves of an exchange go in.
+      const first = await createSession({ projectRoot, agentDir, sessionDir, onEvent: () => {} });
+      first.dispose();
+
+      // Written through Pi's own manager, because nothing here can reach a
+      // model to produce a real exchange.
+      const pi = await import('@earendil-works/pi-coding-agent');
+      const manager = pi.SessionManager.continueRecent(projectRoot, sessionDir);
+      manager.appendMessage({
+        role: 'user',
+        content: [{ type: 'text', text: 'Hello' }],
+        timestamp: Date.now(),
+      });
+      // Pi writes the file when an answer arrives, not when a question does,
+      // so both halves have to go in for there to be anything to resume.
+      manager.appendMessage({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Working on it.' }],
+        api: 'anthropic-messages',
+        provider: 'anthropic',
+        model: 'test',
+        stopReason: 'stop',
+        timestamp: Date.now(),
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+      });
+      expect(readdirSync(sessionDir)).toHaveLength(1);
+
+      const carried = await createSession({ projectRoot, agentDir, sessionDir, onEvent: () => {} });
+      expect(carried.conversation).toBe(manager.getSessionFile());
+      expect(carried.history.length).toBeGreaterThan(0);
+      carried.dispose();
+
+      const started = await createSession({
+        projectRoot,
+        agentDir,
+        sessionDir,
+        fresh: true,
+        onEvent: () => {},
+      });
+      expect(started.conversation).not.toBe(manager.getSessionFile());
+      expect(started.history).toEqual([]);
+      started.dispose();
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(agentDir, { recursive: true, force: true });
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it('is not what the tool wrappers do, whatever their names suggest', () => {
     const wrapper = readFileSync(join(sdk, 'dist/core/extensions/wrapper.js'), 'utf8');
     expect(wrapper).toContain('Tool call and tool result interception is handled by AgentSession');

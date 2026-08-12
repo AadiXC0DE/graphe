@@ -288,7 +288,10 @@ describe('T-04 what a row says', () => {
     );
   });
 
-  it('never says where any of this really lives', () => {
+  /* Plain words a designer and a developer both already have — "schedule",
+     "pause" — are allowed. What stays out is the machinery underneath: what
+     runs it, where it runs, and what it runs in. */
+  it('never names the machinery underneath', () => {
     const everything = [
       ...Object.values(standingWords),
       saysStanding(one(), local(2026, 6, 9, 12, 0)).says,
@@ -299,10 +302,6 @@ describe('T-04 what a row says', () => {
 
     for (const banned of [
       'cron',
-      'schedule',
-      'timer',
-      'job',
-      'background',
       'daemon',
       'process',
       'queue',

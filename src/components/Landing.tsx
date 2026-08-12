@@ -3,7 +3,7 @@ import type { HandedOver, Landing as LandingState, WentOnline } from '../lib/ipc
 import { holdWords } from '../share/holding';
 import { handoverWords } from '../share/handover';
 import { onlineWords } from '../share/online';
-import { behind, realSteps } from '../lib/showme';
+import { behind, reallyRuns, realSteps } from '../lib/showme';
 import './Landing.css';
 
 /** What came of the last thing that left, or tried to. */
@@ -40,12 +40,14 @@ const SENDING = {
   developer: {
     label: handoverWords.label,
     hint: handoverWords.hint,
+    runs: reallyRuns.handOver,
     warning: handoverWords.aboutTo,
-    yes: 'Yes, hand it over',
+    yes: 'Yes, send it',
   },
   online: {
     label: onlineWords.label,
     hint: onlineWords.hint,
+    runs: reallyRuns.online,
     warning: `${onlineWords.aboutTo} ${onlineWords.andSo}`,
     yes: onlineWords.confirm,
   },
@@ -97,8 +99,8 @@ export default function Landing({
   };
 
   return (
-    <section className="landing" aria-label="When it’s ready">
-      <h2 className="landing__title">When it’s ready</h2>
+    <section className="landing" aria-label="Ship it">
+      <h2 className="landing__title">Ship it</h2>
 
       {/* The switch, where the hand already is rather than in a settings
           screen. Everything it changes is described right under it. */}
@@ -174,6 +176,7 @@ export default function Landing({
               {going === which ? (which === 'online' ? onlineWords.working : handoverWords.working) : words.label}
             </button>
             <p className="landing__hint">{words.hint}</p>
+            <p className="landing__runs">{words.runs}</p>
             {can === false && why !== undefined ? <p className="landing__why">{why}</p> : null}
             {open ? (
               <div className="landing__confirm">
@@ -221,9 +224,23 @@ export default function Landing({
         </div>
       )}
 
-      <button type="button" className="landing__quietdo landing__alone" onClick={onShare} disabled={busy}>
-        Send this to someone
-      </button>
+      {/* The third way out, and the only one that reaches nobody: one file on
+          this computer that anybody can open. */}
+      <div className="landing__thing">
+        <button
+          type="button"
+          className="landing__quietdo landing__alone"
+          onClick={onShare}
+          disabled={busy}
+        >
+          Save a page of what changed
+        </button>
+        <p className="landing__hint">
+          Every before-and-after with a sentence beside it, in one file you send yourself. It
+          opens without the internet.
+        </p>
+        <p className="landing__runs">{reallyRuns.page}</p>
+      </div>
 
       {showMe ? <p className="landing__switchhint">{behind.landing}</p> : null}
     </section>

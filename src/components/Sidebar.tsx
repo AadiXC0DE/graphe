@@ -2,17 +2,7 @@ import { useMemo, useState } from 'react';
 import type { Conversation, RecentProject } from '../lib/ipc';
 import { ago } from '../lib/when';
 import type { Reference } from '../lib/projects';
-import {
-  byDay,
-  cleanPageName,
-  markOf,
-  matching,
-  needsDayLabels,
-  needsSearch,
-  partsInOrder,
-  type Part,
-  type ShelfPage,
-} from '../lib/shelf';
+import { byDay, matching, needsDayLabels, needsSearch } from '../lib/shelf';
 import './Sidebar.css';
 
 type Props = {
@@ -20,22 +10,8 @@ type Props = {
   openPath: string | null;
   onOpen: (project: RecentProject) => void;
   onBrowse: () => void;
-  /** The screens the open project has. Empty when its shape is not one we
-   *  recognise, in which case the band does not appear. Anything extra a page
-   *  carries — a picture, whether it is the one on screen, whether it moved,
-   *  what is wrong with it — is drawn when it is there and skipped when it is
-   *  not. */
-  pages: readonly ShelfPage[];
-  /** Open the live preview at one of them. */
-  onOpenPage: (page: ShelfPage) => void;
-  /** Ask for a screen that does not exist yet, by the name it should have. */
-  onAddPage?: (name: string) => void;
   /** What the agent has been given to work from, this sitting. */
   pinned: readonly Reference[];
-  /** The pieces this project is built from. The band stays away until there
-   *  are some. */
-  parts?: readonly Part[];
-  onOpenPart?: (part: Part) => void;
   /** The conversations this project has had, newest first. */
   conversations: readonly Conversation[];
   /** Which one is on screen, by its own path. */
@@ -46,20 +22,29 @@ type Props = {
    *  thing as pressing the mark, and the two are one control. */
   open: boolean;
   onToggle: () => void;
+  /** The three things the strip can still reach when it is folded. Each one is
+   *  left out of the strip when it has nowhere to go. */
+  onAsk?: () => void;
+  onDesign?: () => void;
+  onHistory?: () => void;
+  /** Where more can be added. Down here as well as under the project's name,
+   *  because nobody finds it in a menu they never open. */
+  onAddMore?: () => void;
   /** The clock, so a test of the day headings means something. */
   now?: number;
 };
 
 /**
- * The shelf: what this project is, down the left.
+ * The shelf: which project, and everything said in it.
  *
- * Its heading is the folder you are in, and everything under it is about that
- * folder — the screens it has, what the agent was given to work from — with the
- * way to another project as one quiet row rather than a list of everywhere this
- * machine has ever been.
+ * Chat is how the work happens, so the shelf is the conversations and the way
+ * to another folder, and nothing else. Anything about the project itself — what
+ * it is made of, what it looks like, where it has been — lives in the panel on
+ * the right, which is where somebody goes to look rather than to navigate.
  *
- * It collapses to a strip holding only the mark, so a small window can give the
- * conversation everything. No animation either way: toggling a sidebar is a
+ * It collapses to a strip, so a small window can give the conversation
+ * everything. Folded it keeps the mark and the few things worth reaching
+ * without unfolding first. No animation either way: toggling a sidebar is a
  * thing people do constantly.
  */
 export default function Sidebar({
@@ -67,23 +52,20 @@ export default function Sidebar({
   openPath,
   onOpen,
   onBrowse,
-  pages,
-  onOpenPage,
-  onAddPage,
   pinned,
-  parts,
-  onOpenPart,
   conversations,
   openConversation,
   onOpenConversation,
   onNewConversation,
   open,
   onToggle,
+  onAsk,
+  onDesign,
+  onHistory,
+  onAddMore,
   now,
 }: Props) {
   const [term, setTerm] = useState('');
-  const [naming, setNaming] = useState(false);
-  const [newName, setNewName] = useState('');
 
   const searchable = needsSearch(conversations.length);
   const found = useMemo(
@@ -92,15 +74,6 @@ export default function Sidebar({
   );
   const days = useMemo(() => byDay(found, now ?? Date.now()), [found, now]);
   const labelled = needsDayLabels(days);
-
-  const pieces = useMemo(() => partsInOrder(parts ?? []), [parts]);
-
-  function askForPage() {
-    const name = cleanPageName(newName);
-    if (name !== null) onAddPage?.(name);
-    setNewName('');
-    setNaming(false);
-  }
 
   return (
     <aside className={`shelf ${open ? '' : 'shelf--closed'}`} aria-label="Projects">
@@ -225,128 +198,6 @@ export default function Sidebar({
             )}
           </section>
 
-          {pages.length === 0 && onAddPage === undefined ? null : (
-            <section className="shelf__band">
-              <div className="shelf__bandtop">
-                <h2 className="shelf__caption">Pages</h2>
-                {onAddPage === undefined ? null : (
-                  <button
-                    type="button"
-                    className="shelf__new"
-                    onClick={() => setNaming(true)}
-                    title="Add a page to this project"
-                    aria-label="Add a page"
-                  >
-                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <path
-                        d="M8 3.5v9M3.5 8h9"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </button>
-                )}
-              </div>
-              {naming ? (
-                <form
-                  className="shelf__naming"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    askForPage();
-                  }}
-                >
-                  <input
-                    className="shelf__find"
-                    autoFocus
-                    value={newName}
-                    onChange={(event) => setNewName(event.target.value)}
-                    onBlur={askForPage}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Escape') return;
-                      setNewName('');
-                      setNaming(false);
-                    }}
-                    placeholder="What should it be called?"
-                    aria-label="What the new page should be called"
-                  />
-                </form>
-              ) : null}
-              {pages.length === 0 ? (
-                <p className="shelf__none">No pages here yet.</p>
-              ) : (
-                <ul className="shelf__list">
-                  {pages.map((page) => {
-                    const mark = markOf(page);
-                    return (
-                      <li key={page.route}>
-                        <button
-                          type="button"
-                          className={`shelf__row shelf__page ${mark.showing ? 'shelf__row--here' : ''}`}
-                          onClick={() => onOpenPage(page)}
-                          title={
-                            mark.says === null
-                              ? `Open ${page.route} in your browser`
-                              : `Open ${page.route} in your browser — ${mark.says.toLowerCase()}`
-                          }
-                        >
-                          {page.picture === undefined ? (
-                            <span className="shelf__shot shelf__shot--none" aria-hidden="true" />
-                          ) : (
-                            <img className="shelf__shot" src={page.picture} alt="" />
-                          )}
-                          <span className="shelf__pagewords">
-                            <span className="shelf__rowname">{page.name}</span>
-                            <span className="shelf__rowsub">{page.route}</span>
-                          </span>
-                          <span className="shelf__marks">
-                            {mark.problems === 0 ? null : (
-                              <span className="shelf__count">{mark.problems}</span>
-                            )}
-                            {mark.showing ? (
-                              <span className="shelf__dot shelf__dot--live" aria-hidden="true" />
-                            ) : mark.changed ? (
-                              <span className="shelf__dot shelf__dot--moved" aria-hidden="true" />
-                            ) : null}
-                          </span>
-                          {mark.says === null ? null : (
-                            <span className="shelf__says">{mark.says}</span>
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
-          )}
-
-          {/* The pieces the project is made of, in the words somebody would use
-              asking for a change to one. */}
-          {pieces.length === 0 ? null : (
-            <section className="shelf__band">
-              <h2 className="shelf__caption">Made of</h2>
-              <ul className="shelf__list shelf__parts">
-                {pieces.map((part) => (
-                  <li key={part.id}>
-                    <button
-                      type="button"
-                      className="shelf__row shelf__part"
-                      onClick={() => onOpenPart?.(part)}
-                      disabled={onOpenPart === undefined}
-                      title={part.file ?? part.name}
-                    >
-                      <span className="shelf__rowname">{part.name}</span>
-                      {part.uses === undefined || part.uses <= 0 ? null : (
-                        <span className="shelf__uses">{part.uses}</span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
           {pinned.length === 0 ? null : (
             <section className="shelf__band">
               <h2 className="shelf__caption">Working from</h2>
@@ -364,6 +215,40 @@ export default function Sidebar({
               </ul>
             </section>
           )}
+
+          {/* The last row and never a band: it sits under the work rather than
+              beside it, and stays put while the conversations scroll. */}
+          {onAddMore === undefined ? null : (
+            <div className="shelf__foot">
+              <button
+                type="button"
+                className="shelf__row shelf__row--quiet shelf__more"
+                onClick={onAddMore}
+                title="Give Graphe new things it can do for you"
+              >
+                <span className="shelf__moremark" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <rect
+                      x="2.5"
+                      y="2.5"
+                      width="11"
+                      height="11"
+                      rx="3.25"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    />
+                    <path
+                      d="M8 5.75v4.5M5.75 8h4.5"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </span>
+                <span className="shelf__rowname">Add more to Graphe</span>
+              </button>
+            </div>
+          )}
         </>
       ) : (
         <div className="shelf__thin">
@@ -376,6 +261,114 @@ export default function Sidebar({
           >
             <span className="shelf__markdot" aria-hidden="true" />
           </button>
+          <span className="shelf__thinline" aria-hidden="true" />
+          <button
+            type="button"
+            className="shelf__act"
+            onClick={onNewConversation}
+            title="Start a new conversation in this project"
+            aria-label="Start a new conversation"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M8 3.5v9M3.5 8h9"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+          {onAsk === undefined ? null : (
+            <button
+              type="button"
+              className="shelf__act"
+              onClick={onAsk}
+              title="Find anything — ⌘K"
+              aria-label="Find anything"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle
+                  cx="7"
+                  cy="7"
+                  r="4.25"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="m10.25 10.25 3 3"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
+          {onDesign === undefined ? null : (
+            <button
+              type="button"
+              className="shelf__act"
+              onClick={onDesign}
+              title="Colour, type and spacing — ⌘D"
+              aria-label="How this project looks"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M8 2.25c2 2.2 3.75 4.25 3.75 6.25a3.75 3.75 0 1 1-7.5 0c0-2 1.75-4.05 3.75-6.25Z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
+          {onHistory === undefined ? null : (
+            <button
+              type="button"
+              className="shelf__act"
+              onClick={onHistory}
+              title="Every moment, and what came after what"
+              aria-label="Where this project has been"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="5" cy="3.75" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="5" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="11" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+                <path
+                  d="M5 5.25v5.5M5 7.75h3.5A2.5 2.5 0 0 1 11 10.25v.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
+          {onAddMore === undefined ? null : (
+            <button
+              type="button"
+              className="shelf__act"
+              onClick={onAddMore}
+              title="Give Graphe new things it can do for you"
+              aria-label="Add more to Graphe"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect
+                  x="2.5"
+                  y="2.5"
+                  width="11"
+                  height="11"
+                  rx="3.25"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="M8 5.75v4.5M5.75 8h4.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
         </div>
       )}
     </aside>

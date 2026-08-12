@@ -88,6 +88,19 @@ export type RecentProject = {
 };
 
 /**
+ * How much of what the model can hold at once this conversation is using.
+ *
+ * The window draws it as a ring beside the box. Everything here is the model's
+ * own reckoning read back through Pi — nothing is counted on this side.
+ */
+export type Room = {
+  used: number;
+  total: number;
+  /** The two above as a fraction, 0 to 1. */
+  part: number;
+};
+
+/**
  * One entry in the version timeline, as the window draws it.
  *
  * Deliberately not `history/timeline`'s own `Version`. That type belongs to a
@@ -96,6 +109,9 @@ export type RecentProject = {
  */
 export type SavedVersion = {
   id: string;
+  /** The same id, short. What a terminal, a review page or a colleague calls
+   *  this moment — shown where somebody has asked for that much detail. */
+  shortId: string;
   /** Epoch ms. The window turns it into "4 minutes ago" itself. */
   at: number;
   /** Plain language, one line: "Made the header sticky". */
@@ -107,6 +123,13 @@ export type SavedVersion = {
   /** The version the project currently looks like. Exactly one, once there is
    *  anything saved at all. */
   current: boolean;
+  /** What this moment came after. Two of them is where two lines of work
+   *  joined, which is the one thing a straight list cannot draw. */
+  parents: readonly string[];
+  /** The names pointing at this moment, if any. */
+  refs: readonly string[];
+  /** Set when this moment exists because somebody went back to an older one. */
+  wentBackTo: string | null;
 };
 
 /**
@@ -147,6 +170,27 @@ export type Conversation = {
   title: string;
   at: number;
   messages: number;
+};
+
+/**
+ * An extension that arrived with the folder somebody opened.
+ *
+ * Extensions are not tool calls: they are code loaded into the same process as
+ * the agent, so the Guard never sees them. One somebody installed themselves is
+ * something they went and chose; one that came down with a clone is something
+ * they have never seen. Those are different facts, so they are different lists.
+ */
+export type CarriedExtension = {
+  /** Stable across launches: the name, and what the file it loads looks like.
+   *  Change the code and this changes with it, which is what makes a yes
+   *  answered in January stop covering what lands in March. */
+  id: string;
+  name: string;
+  /** Where it lives, relative to the project. Shown, because "which file" is
+   *  most of what somebody needs to decide. */
+  where: string;
+  /** Whether it is being loaded. */
+  trusted: boolean;
 };
 
 /** One thing that can be added to Graphe. */
@@ -726,6 +770,11 @@ export const CHANNEL = {
   openInEditor: 'graphe:open-in-editor',
   revealFolder: 'graphe:reveal-folder',
   saveVersion: 'graphe:save-version',
+  room: 'graphe:room',
+  carried: 'graphe:carried',
+  trustCarried: 'graphe:trust-carried',
+  stopAsking: 'graphe:stop-asking',
+  tidyNow: 'graphe:tidy-now',
   nudgeToken: 'graphe:nudge-token',
   nudgeMotion: 'graphe:nudge-motion',
   shareReview: 'graphe:share-review',
@@ -847,6 +896,17 @@ export type GrapheApi = {
   /** Save a version of the project right now, named by the person if they
    *  bothered. Returns the timeline as it now stands. */
   saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>>;
+  /** How full this conversation is. Null before the model has answered once. */
+  room(): Promise<Result<Room | null>>;
+  /** Shorten it now. Answers with the room there is afterwards. */
+  tidyNow(): Promise<Result<Room | null>>;
+  /** Stop checking before things that would otherwise be asked about, or start
+   *  again. Answers with what is true afterwards. */
+  stopAsking(on: boolean): Promise<Result<boolean>>;
+  /** What the open project carries, and whether each one is being loaded. */
+  carried(): Promise<Result<readonly CarriedExtension[]>>;
+  /** Start loading one of them, or stop. Answers with the list as it stands. */
+  trustCarried(id: string, trust: boolean): Promise<Result<readonly CarriedExtension[]>>;
   /** Show the project folder in the Finder. Always available: every project is
    *  an ordinary folder, and this is the one hatch that cannot fail to exist. */
   revealFolder(): Promise<Result<null>>;

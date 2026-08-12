@@ -362,6 +362,12 @@ const PROGRESS_EVERY_MS = 400;
 
 type TaskParams = { task: string; cwd?: string };
 
+/** Who the helper thinks with. The child has no window, no settings of its own
+ *  and no way to ask, so the model the person chose has to travel with the job
+ *  — without it Pi falls back to whatever its own settings say, which in this
+ *  app is nothing, and the helper answers with silence. */
+export type HelperModel = { providerId: string; modelId: string } | null;
+
 /** A missing helper otherwise arrives as ENOENT on the child's error event,
  *  which reads exactly like a helper that crashed. Under vitest this module is
  *  the TypeScript source, so the built child really is not next door. */
@@ -386,7 +392,7 @@ function lastLine(text: string): string | null {
  *  Pi with the finished text. The `signal` is Pi's own abort signal — pressing
  *  Stop in the window kills the helper too. */
 function runSubagent(
-  job: TaskParams & { agentDir: string },
+  job: TaskParams & { agentDir: string; model: HelperModel },
   signal: AbortSignal | undefined,
   onProgress: (text: string) => void,
 ): Promise<SubagentOutcome> {
@@ -449,6 +455,19 @@ function runSubagent(
 
     child.on('error', () => finish({ ok: false, error: 'I could not start the helper.' }));
     child.on('close', (code) => {
+      // Whatever is still in the buffer is a line the child wrote without a
+      // newline after it. Read before giving up: on a long answer that last
+      // line is the answer.
+      const rest = buffer.trim();
+      buffer = '';
+      if (rest !== '') {
+        try {
+          const received = JSON.parse(rest) as SubagentLine;
+          if (received.type === 'done') finish(received.outcome);
+        } catch {
+          // Half a line is nothing we can use, and the close below says so.
+        }
+      }
       // A child that went away without reporting has lost its answer.
       if (!done) {
         const said = lastLine(noise);
@@ -472,7 +491,7 @@ function runSubagent(
   });
 }
 
-export const taskTool = (agentDir: string): ToolDefinition => ({
+export const taskTool = (agentDir: string, model: HelperModel = null): ToolDefinition => ({
   name: 'task',
   label: 'Task',
   description:
@@ -487,7 +506,10 @@ export const taskTool = (agentDir: string): ToolDefinition => ({
     task: Type.String({ description: 'The piece of work for the helper, in plain words.', minLength: 1 }),
     cwd: Type.Optional(Type.String({ description: 'The folder the helper should work in. Defaults to the project folder.' })),
   }),
-  executionMode: 'sequential',
+  /* Helpers are the one tool worth running side by side: each is its own
+     process with its own context, and the whole reason to send three is that
+     they work at once. Sequential turned "send in a team" into a queue. */
+  executionMode: 'parallel',
   execute: async (
     _callId: string,
     params: TaskParams,
@@ -501,7 +523,7 @@ export const taskTool = (agentDir: string): ToolDefinition => ({
     // only way anything a custom tool learns mid-run can reach the session.
     let progress = '';
     let sentAt = 0;
-    const outcome = await runSubagent({ ...params, agentDir }, signal, (text) => {
+    const outcome = await runSubagent({ ...params, agentDir, model }, signal, (text) => {
       progress += text;
       const now = Date.now();
       if (now - sentAt < PROGRESS_EVERY_MS) return;
@@ -509,6 +531,10 @@ export const taskTool = (agentDir: string): ToolDefinition => ({
       onUpdate?.({ content: [{ type: 'text', text: progress }], details: {} });
     });
     if (!outcome.ok) throw new Error(outcome.error);
+    // One last update with the whole of it. The throttle above means the final
+    // few hundred milliseconds of a helper's answer would otherwise never reach
+    // the window, which is the difference between a finding and half of one.
+    onUpdate?.({ content: [{ type: 'text', text: outcome.text }], details: {} });
     return { content: [{ type: 'text', text: outcome.text }], details: {} };
   },
 });
@@ -616,8 +642,12 @@ export const figmaReadTool = (token: string): ToolDefinition => ({
  * answer "no account is connected" is worse than no tool, because it spends a
  * turn teaching the model something the prompt could have said for nothing.
  */
-export const grapheTools = (agentDir: string, figmaToken?: string | null): ToolDefinition[] => {
-  const tools = [websearchTool, webfetchTool, taskTool(agentDir)];
+export const grapheTools = (
+  agentDir: string,
+  figmaToken?: string | null,
+  model: HelperModel = null,
+): ToolDefinition[] => {
+  const tools = [websearchTool, webfetchTool, taskTool(agentDir, model)];
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));
   return tools;

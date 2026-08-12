@@ -21,6 +21,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
 import type { ModelChoice } from '../lib/ipc';
+import { asTrusted, sameTrusted, type Trusted } from './carried';
 import { asKept, sameKept, type Kept } from './kept';
 
 export { keeping, type Kept } from './kept';
@@ -54,6 +55,17 @@ export type Preferences = {
    */
   kept: Kept;
   /**
+   * Extensions a project brought with it that somebody has said yes to, by
+   * project folder.
+   *
+   * Nothing is trusted by default: an extension is code loaded into the agent's
+   * own process, and cloning a repository is not choosing to run what is in it.
+   * The id carries a fingerprint of the code, so a yes stops covering it as
+   * soon as it changes — which is the whole reason this is not one flag per
+   * folder.
+   */
+  trusted: Trusted;
+  /**
    * Show everything the project holds, beside the conversation.
    *
    * Off by default for the same reason `showMe` is: every other tool of this
@@ -77,6 +89,7 @@ export const defaultPreferences: Preferences = {
   showMe: false,
   model: null,
   kept: {},
+  trusted: {},
   showFiles: false,
   holdBack: false,
 };
@@ -103,6 +116,7 @@ function asPreferences(value: unknown): Preferences {
           }
         : null,
     kept: asKept(record['kept']),
+    trusted: asTrusted(record['trusted']),
     showFiles: record['showFiles'] === true,
     holdBack: record['holdBack'] === true,
   };
@@ -135,7 +149,8 @@ export class PreferenceFile {
       next.holdBack === this.#preferences.holdBack &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
-      sameKept(next.kept, this.#preferences.kept);
+      sameKept(next.kept, this.#preferences.kept) &&
+      sameTrusted(next.trusted, this.#preferences.trusted);
     if (unchanged) return this.all();
     this.#preferences = next;
     await this.#write();

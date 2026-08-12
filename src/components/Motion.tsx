@@ -34,9 +34,20 @@ type Props = {
   busy?: boolean;
 };
 
+/** How many of one kind are drawn before the rest are offered. Each row carries
+ *  a demonstration, a curve and four controls, so a project with hundreds would
+ *  otherwise mount thousands of live elements nobody has looked at. */
+const AT_ONCE = 24;
+
+/** Past this many in one shelf, finding one by eye stops working. */
+const FIND_APPEARS_AT = 12;
+
 export const SAYS = {
   heading: 'How it moves',
   none: 'Nothing in this project moves yet.',
+  find: 'Find one',
+  more: (count: number): string => `Show ${String(count)} more`,
+  nothingFound: 'Nothing here matches that.',
   where: (name: string): string => `From ${name}`,
   play: 'Watch it',
   howLong: 'How long',
@@ -65,11 +76,30 @@ const REST = 320;
  * both the length and the shape move under the hand without asking anybody.
  */
 export default function Motion({ motion, file, onNudge, busy }: Props) {
-  const groups = useMemo(() => groupMoves(motion.moves), [motion.moves]);
+  const all = useMemo(() => groupMoves(motion.moves), [motion.moves]);
   const notes = useMemo(() => judgeMotion(motion), [motion]);
   const [shut, setShut] = useState<ReadonlySet<MotionKind>>(() => new Set(SHUT_AT_FIRST));
+  const [term, setTerm] = useState('');
+  /** How many of each shelf are drawn. Grows when somebody asks for more. */
+  const [showing, setShowing] = useState<Readonly<Record<string, number>>>({});
   const still = usePrefersReducedMotion();
   const base = useId();
+
+  const findable = motion.moves.length > FIND_APPEARS_AT;
+  const groups = useMemo(() => {
+    const wanted = term.trim().toLowerCase();
+    if (wanted === '') return all;
+    return all
+      .map((group) => ({
+        ...group,
+        moves: group.moves.filter((move) =>
+          `${sayWhat(move)} ${move.places.map((place) => place.selector).join(' ')}`
+            .toLowerCase()
+            .includes(wanted),
+        ),
+      }))
+      .filter((group) => group.moves.length > 0);
+  }, [all, term]);
 
   const perMove = useMemo(() => {
     const found = new Map<string, Note[]>();
@@ -82,7 +112,7 @@ export default function Motion({ motion, file, onNudge, busy }: Props) {
     return found;
   }, [notes]);
 
-  if (groups.length === 0) return <p className="motion__none">{SAYS.none}</p>;
+  if (all.length === 0) return <p className="motion__none">{SAYS.none}</p>;
 
   const overall = notes.filter((note) => note.move === null);
 
@@ -103,9 +133,30 @@ export default function Motion({ motion, file, onNudge, busy }: Props) {
         </p>
       ))}
 
+      {/* The field waits until a column of these is too long to read at a
+          glance; before that it is one more thing in the way. */}
+      {findable ? (
+        <input
+          className="motion__find"
+          type="search"
+          value={term}
+          placeholder={SAYS.find}
+          aria-label={SAYS.find}
+          onChange={(event) => setTerm(event.target.value)}
+        />
+      ) : null}
+
+      {groups.length === 0 ? <p className="motion__none">{SAYS.nothingFound}</p> : null}
+
       {groups.map((group) => {
         const open = !shut.has(group.id);
         const panel = `${base}-${group.id}`;
+        /* Only what has been asked for is mounted. Each row is a live
+           demonstration, so drawing the tail of a long shelf costs real
+           frames for something nobody has scrolled to. */
+        const room = showing[group.id] ?? AT_ONCE;
+        const drawn = group.moves.slice(0, room);
+        const rest = group.moves.length - drawn.length;
         return (
           <section className="motion__group" key={group.id}>
             <button
@@ -121,7 +172,7 @@ export default function Motion({ motion, file, onNudge, busy }: Props) {
             </button>
 
             <ul className="motion__body" id={panel} hidden={!open}>
-              {group.moves.map((move) => (
+              {drawn.map((move) => (
                 <One
                   key={move.id}
                   move={move}
@@ -133,6 +184,16 @@ export default function Motion({ motion, file, onNudge, busy }: Props) {
                 />
               ))}
             </ul>
+
+            {open && rest > 0 ? (
+              <button
+                type="button"
+                className="motion__more"
+                onClick={() => setShowing({ ...showing, [group.id]: room + AT_ONCE })}
+              >
+                {SAYS.more(Math.min(rest, AT_ONCE))}
+              </button>
+            ) : null}
           </section>
         );
       })}

@@ -283,6 +283,9 @@ export type Preferences = {
   showMe: boolean;
   /** The model chosen to work with, or null for "whatever is available". */
   model: ModelChoice | null;
+  /** How much time each chosen model should take before answering. Kept per
+   *  provider/model pair because the names and available choices differ. */
+  thinking: Readonly<Record<string, ThinkingLevel>>;
   /** Versions somebody chose to keep at the top of the rail, by project folder.
    *  Keyed by folder because keeping is about one project — two folders sharing
    *  a shelf would put somebody else's afternoon at the top of yours. */
@@ -463,6 +466,15 @@ export type PromptOptions = {
  *  the provider's own — the window stores them and never invents them. */
 export type ModelChoice = { providerId: string; modelId: string };
 
+/** The common names Pi uses for a model's supported reasoning depth. */
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** Make a model-specific preference key without treating two providers' ids as
+ *  interchangeable. */
+export function modelKey(choice: ModelChoice): string {
+  return `${choice.providerId}/${choice.modelId}`;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Connecting an account                                                       */
 /* -------------------------------------------------------------------------- */
@@ -485,6 +497,8 @@ export type ModelOption = {
   rates: { input: number; output: number } | null;
   /** How much it can hold at once, in tokens. Null when unstated. */
   contextWindow: number | null;
+  /** The only depths this exact model accepts. Absent for older shell data. */
+  thinking?: readonly ThinkingLevel[];
 };
 
 /** Everything the window knows about one provider: how to connect to it, and
@@ -515,6 +529,8 @@ export type ConnectionState = {
   providers: readonly ProviderAuth[];
   /** The model chosen to work with, or null for "whatever is available". */
   chosen: ModelChoice | null;
+  /** The depth remembered for the selected model. */
+  chosenThinking: ThinkingLevel;
 };
 
 /** One moment of connecting, sent to the window as it happens. A connection
@@ -974,6 +990,8 @@ export type GrapheApi = {
   disconnect(providerId: string): Promise<Result<null>>;
   /** Choose which model to work with. Returns the whole set of preferences. */
   selectModel(choice: ModelChoice): Promise<Result<Preferences>>;
+  /** Let this exact model take more or less time before it answers. */
+  setThinking(choice: ModelChoice, level: ThinkingLevel): Promise<Result<Preferences>>;
   /** Follow along with a connection while it happens. Returns the function
    *  that stops listening. */
   onConnectStep(listener: (step: ConnectStep) => void): () => void;

@@ -54,6 +54,7 @@ import { readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
 import { idFor } from '../../projects/carried';
+import type { ThinkingLevel } from '../../lib/ipc';
 
 /** Yes or no, from a person. There is deliberately no third answer: no "always",
  *  no "for this session", no "don't ask again". Confirmation fatigue is what
@@ -280,6 +281,9 @@ export type CreateSessionOptions = {
    *  id is Pi's own — resolved inside this file, where the model objects
    *  live, and never heard of outside it. */
   model?: { providerId: string; modelId: string } | null;
+  /** The selected model's remembered depth. Pi clamps it again, so a stale
+   *  choice can never be sent to a model that does not support it. */
+  thinking?: ThinkingLevel;
   /** Whether one of the extensions this folder carries has been said yes to.
    *  Left out, none of them are: a folder's own code never loads by default. */
   trusts?: (id: string) => boolean;
@@ -325,6 +329,13 @@ export type GrapheSession = {
   useModel(choice: { providerId: string; modelId: string } | null): Promise<boolean>;
   /** Which model is answering, or null for "whatever the account offers". */
   readonly model: { providerId: string; modelId: string } | null;
+  /** How much time this model is taking before it answers. */
+  readonly thinking: ThinkingLevel;
+  /** The levels this exact model supports, in its own capability map. */
+  readonly thinkingLevels: readonly ThinkingLevel[];
+  /** Change the depth for this conversation. The model clamps unsupported
+   *  choices, and the resulting level is returned. */
+  setThinking(level: ThinkingLevel): ThinkingLevel;
   /** Stop what it is doing now. Open questions are answered no. */
   stop(): Promise<void>;
   /** Finish with this session. Safe to call twice. */
@@ -428,6 +439,7 @@ export type ModelSummary = {
   available: boolean;
   rates: { input: number; output: number } | null;
   contextWindow: number | null;
+  thinking: readonly ThinkingLevel[];
 };
 
 /** The app's own copy of Pi's auth interaction. The shapes match on purpose —
@@ -534,6 +546,7 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
         available: false,
         rates: ratesOf(model),
         contextWindow: typeof model.contextWindow === 'number' ? model.contextWindow : null,
+        thinking: thinkingLevelsOf(model),
       }));
     } catch {
       // Unreadable providers are not offered at all.
@@ -693,6 +706,27 @@ export async function packageHost(agentDir: string, projectRoot: string) {
 
 /** Read defensively: a provider that quotes nothing gets null rather than a
  *  zero, because free and unpriced are not the same claim. */
+const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+/** Pi keeps this capability on the model. Reading it here means Codex and
+ * every custom provider get their own real set instead of a guessed one. */
+function thinkingLevelsOf(model: { reasoning?: unknown; thinkingLevelMap?: unknown }): readonly ThinkingLevel[] {
+  const map = model.thinkingLevelMap;
+  if (map !== null && typeof map === 'object' && !Array.isArray(map)) {
+    const values = map as Record<string, unknown>;
+    return THINKING_LEVELS.filter((level) => values[level] !== null);
+  }
+  return model.reasoning === true ? ['off', 'minimal', 'low', 'medium', 'high'] : ['off'];
+}
+
 function ratesOf(model: { cost?: unknown }): { input: number; output: number } | null {
   const cost = model.cost;
   if (cost === null || typeof cost !== 'object') return null;
@@ -1015,6 +1049,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         customTools,
         modelRuntime: runtime,
         model,
+        ...(options.thinking === undefined ? {} : { thinkingLevel: options.thinking }),
         sessionManager: manager,
       })
     ).session;
@@ -1178,6 +1213,24 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
     get model(): { providerId: string; modelId: string } | null {
       return inUse;
+    },
+
+    get thinking(): ThinkingLevel {
+      return session.thinkingLevel as ThinkingLevel;
+    },
+
+    get thinkingLevels(): readonly ThinkingLevel[] {
+      try {
+        return session.getAvailableThinkingLevels() as ThinkingLevel[];
+      } catch {
+        return ['off'];
+      }
+    },
+
+    setThinking(level: ThinkingLevel): ThinkingLevel {
+      if (closed) return session.thinkingLevel as ThinkingLevel;
+      session.setThinkingLevel(level);
+      return session.thinkingLevel as ThinkingLevel;
     },
 
     async stop(): Promise<void> {

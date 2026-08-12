@@ -7,6 +7,8 @@ import ConfirmChange from "./components/ConfirmChange";
 import ConnectModal from "./components/ConnectModal";
 import CostMeter from "./components/CostMeter";
 import ErrorCard from "./components/ErrorCard";
+import Files from "./components/Files";
+import FileView from "./components/FileView";
 import Message from "./components/Message";
 import Overview from "./components/Overview";
 import PlanCard from "./components/PlanCard";
@@ -37,6 +39,7 @@ import {
   type ConnectStep,
   type ConnectionState,
   type Decision,
+  type FileEntry,
   type FoundAccount,
   type ModelChoice,
   type Conversation,
@@ -147,6 +150,10 @@ function pictureBytes(file: File): Promise<string | null> {
  *  before anything had been said, which only happens on a first launch. */
 type Pinned = { change: VisualChange; after: string | null };
 
+/** One file, open. `text` is null while it is on its way; `trouble` is the one
+ *  sentence saying why it cannot be shown at all. */
+type Reading = { path: string; text: string | null; trouble: string | null };
+
 /**
  * Sort the pictures into the turns they belong under.
  *
@@ -253,6 +260,7 @@ function Conversation() {
     showMe: false,
     model: null,
     kept: {},
+    showFiles: false,
   });
   const [editor, setEditor] = useState<string | null>(null);
 
@@ -623,6 +631,53 @@ function Conversation() {
     );
   }, []);
 
+  /* ------------------------------------------ everything in this project */
+
+  /** Everything each project holds, by folder — kept apart for the same reason
+   *  the pictures are: one project's files must never be drawn under another's
+   *  name. */
+  const [files, setFiles] = useState<Readonly<Record<string, readonly FileEntry[]>>>({});
+  /** The file being read, if somebody has opened one. Null while it is on its
+   *  way is the state `FileView` draws as "Opening it…". */
+  const [reading, setReading] = useState<Reading | null>(null);
+
+  /** Read inside the callbacks below, which must not be rebuilt every time a
+   *  preference changes. */
+  const wantsFiles = useRef(preferences.showFiles);
+  wantsFiles.current = preferences.showFiles;
+
+  /** The same guard the timeline stands on: the shell answers about whatever is
+   *  in front of it, so a switch mid-flight must not file one project's files
+   *  under another. */
+  const refreshFiles = useCallback(async (path: string) => {
+    if (!wantsFiles.current) return;
+    const answer = await bridge.projectFiles();
+    if (!answer.ok || desksNow.current.current !== path) return;
+    setFiles((current) => ({ ...current, [path]: answer.value }));
+  }, []);
+
+  const readFile = useCallback((path: string) => {
+    setReading({ path, text: null, trouble: null });
+    void bridge.fileText(path).then((answer) => {
+      setReading((current) =>
+        current === null || current.path !== path
+          ? current
+          : answer.ok
+            ? { path, text: answer.value, trouble: null }
+            : { path, text: null, trouble: answer.trouble.because },
+      );
+    });
+  }, []);
+
+  /* Asked for once per project, the first time there is something to draw it
+     in. Nothing is read while the panel is off, so a person who never opens it
+     never pays for a folder being walked. */
+  useEffect(() => {
+    const path = desks.current;
+    if (!preferences.showFiles || path === null || files[path] !== undefined) return;
+    void refreshFiles(path);
+  }, [preferences.showFiles, desks.current, files, refreshFiles]);
+
   /* ------------------------------------------------------------- the folder */
 
   const open = useCallback(
@@ -657,6 +712,8 @@ function Conversation() {
 
       setSwitching(false);
       setPickerTrouble(null);
+      // A file of the folder we were in is not a file of this one.
+      setReading(null);
       // Which conversation this landed in. Without it nothing in the shelf is
       // marked, and pressing the row you are already in looks like a dead button.
       setInConversation(opened.value.conversation);
@@ -760,6 +817,12 @@ function Conversation() {
       delete next[project.path];
       return next;
     });
+    setFiles((current) => {
+      if (current[project.path] === undefined) return current;
+      const next = { ...current };
+      delete next[project.path];
+      return next;
+    });
     const answer = await bridge.forgetProject(project.path);
     if (answer.ok) setRecent(answer.value);
   }, []);
@@ -804,9 +867,10 @@ function Conversation() {
         if (notice.event.type === "settled" && notice.project !== null) {
           void refreshVersions(notice.project);
           void refreshOverview(notice.project);
+          void refreshFiles(notice.project);
         }
       }),
-    [refreshVersions, refreshOverview],
+    [refreshVersions, refreshOverview, refreshFiles],
   );
 
   useEffect(() => bridge.onShowProgress(setProgress), []);
@@ -854,6 +918,19 @@ function Conversation() {
   const changeShowMe = useCallback((on: boolean) => {
     setPreferences((was) => ({ ...was, showMe: on }));
     void bridge.setShowMe(on).then((answer) => {
+      if (answer.ok) setPreferences(answer.value);
+    });
+  }, []);
+
+  /** Sticky the same way, and the menu closes on the way out: what was asked
+   *  for is about to appear beside the conversation. Closing it puts the file
+   *  that was open away with it. */
+  const changeShowFiles = useCallback((on: boolean) => {
+    setSwitching(false);
+    setPreferences((was) => ({ ...was, showFiles: on }));
+    wantsFiles.current = on;
+    if (!on) setReading(null);
+    void bridge.setShowFiles(on).then((answer) => {
       if (answer.ok) setPreferences(answer.value);
     });
   }, []);
@@ -1393,9 +1470,13 @@ function Conversation() {
   const pillShown = desk !== null && (previewUrl !== null || progress !== null);
   const pillLabel = progress !== null ? progress.says : PREVIEW;
 
+  // The one region nobody is given: it is here because somebody went and asked
+  // for it, and it stays until they say otherwise.
+  const filesShown = desk !== null && preferences.showFiles;
+
   return (
     <main
-      className={`app ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""}`}
+      className={`app ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesShown ? "app--files" : ""}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -1468,6 +1549,8 @@ function Conversation() {
                 onRevealFolder={revealFolder}
                 showMe={preferences.showMe}
                 onShowMe={changeShowMe}
+                showFiles={preferences.showFiles}
+                onShowFiles={changeShowFiles}
                 onPreview={() => void seeIt()}
                 onAccount={openConnect}
                 onAddMore={() => {
@@ -1526,7 +1609,31 @@ function Conversation() {
         />
       ) : null}
 
+      {filesShown && desk !== null ? (
+        <aside className="filespanel">
+          <h2 className="filespanel__title">Everything in this project</h2>
+          <Files
+            files={files[desk.path] ?? []}
+            selected={reading?.path ?? null}
+            onSelect={readFile}
+          />
+        </aside>
+      ) : null}
+
       <div className="app__column" ref={contentRef}>
+        {/* The file sits where the reading happens rather than squeezed into
+            the panel: a column of code is prose-width, not sidebar-width. */}
+        {filesShown && reading !== null ? (
+          <div className="app__file">
+            <FileView
+              path={reading.path}
+              text={reading.text}
+              trouble={reading.trouble}
+              onClose={() => setReading(null)}
+            />
+          </div>
+        ) : null}
+
         {picking ? (
           <ProjectPicker
             projects={recent ?? []}

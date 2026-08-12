@@ -197,6 +197,194 @@ export function merge(
   return kept;
 }
 
+/* ------------------------------------------------- sending a set to somebody */
+
+/** One file somebody can read, send, and read back. */
+const SET_HEADING = '# Recipes';
+
+/** A file this size is not a set of recipes, whatever it says it is. */
+const MOST_LETTERS = 400_000;
+/** Past this it is somebody's whole archive, not a set worth sharing. */
+const MOST_IN_A_SET = 200;
+const MOST_NAME = 80;
+const MOST_PROMPT = 8000;
+
+function tidyName(name: string): string {
+  return name.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, MOST_NAME);
+}
+
+/** A heading inside somebody's own words would read as the next recipe, so it
+ *  goes out marked and comes back unmarked. */
+function guardHeadings(prompt: string): string {
+  return prompt.replace(/^(#{1,6} )/gm, '\\$1');
+}
+
+function unguardHeadings(prompt: string): string {
+  return prompt.replace(/^\\(#{1,6} )/gm, '$1');
+}
+
+/**
+ * A set as one file: a heading each, the words underneath.
+ *
+ * Readable on its own, so somebody can look at what they are about to send and
+ * edit it in any text editor before they do.
+ */
+export function writeSet(recipes: readonly Recipe[], options: { title?: string } = {}): string {
+  const parts: string[] = [options.title ? `# ${tidyName(options.title)}` : SET_HEADING];
+  for (const recipe of recipes) {
+    const name = tidyName(recipe.name);
+    const prompt = recipe.prompt.trim();
+    if (name === '' || prompt === '') continue;
+    parts.push(`## ${name}`, guardHeadings(prompt));
+  }
+  return `${parts.join('\n\n')}\n`;
+}
+
+export type Opened =
+  | {
+      ok: true;
+      recipes: readonly Recipe[];
+      /** One line for the person who just opened it. */
+      note: string;
+    }
+  | { ok: false; problem: string };
+
+/** Splits into headings and the words under each, and nothing else. */
+function sections(text: string): { name: string; body: string }[] {
+  const found: { name: string; body: string }[] = [];
+  let open: { name: string; lines: string[] } | null = null;
+
+  for (const line of text.split(/\r?\n/)) {
+    const heading = /^##[ \t]+(.*)$/.exec(line);
+    if (heading !== null) {
+      if (open !== null) found.push({ name: open.name, body: open.lines.join('\n') });
+      open = { name: heading[1] ?? '', lines: [] };
+      continue;
+    }
+    if (open !== null) open.lines.push(line);
+  }
+  if (open !== null) found.push({ name: open.name, body: open.lines.join('\n') });
+  return found;
+}
+
+function numbered(name: string, taken: Set<string>): string {
+  let next = 2;
+  while (taken.has(sameName(`${name} (${next})`))) next += 1;
+  return `${name} (${next})`;
+}
+
+function saysOpened(added: number, renamed: number, first: string): string {
+  const came =
+    added === 1 ? `“${first}” came in.` : `${added} recipes came in.`;
+  if (renamed === 0) return came;
+  if (renamed === 1) {
+    return `${came} One of them shared a name with something you already had, so it came in with a number after it.`;
+  }
+  return `${came} ${renamed} of them shared names with ones you already had, so they came in with numbers after them.`;
+}
+
+/**
+ * A set somebody sent, read back.
+ *
+ * Nothing in the file is trusted: it decides names and words, never where
+ * anything is written. A file that makes no sense comes back as a sentence
+ * somebody can act on rather than as a failure.
+ */
+export function readSet(text: unknown, existing: readonly Recipe[] = []): Opened {
+  if (typeof text !== 'string' || text.trim() === '') {
+    return { ok: false, problem: 'There’s nothing in that file.' };
+  }
+  if (text.length > MOST_LETTERS) {
+    return { ok: false, problem: 'That file is too big to be a set of recipes.' };
+  }
+
+  const found = sections(text.replace(/^\uFEFF/, ''));
+  if (found.length === 0) {
+    return {
+      ok: false,
+      problem: 'I couldn’t find any recipes in that file. Each one needs a heading with its name.',
+    };
+  }
+  if (found.length > MOST_IN_A_SET) {
+    return { ok: false, problem: 'That file holds more recipes than I can take in one go.' };
+  }
+
+  const taken = new Set(existing.map((recipe) => sameName(recipe.name)));
+  const ids = new Set(existing.map((recipe) => recipe.id));
+  const recipes: Recipe[] = [];
+  let renamed = 0;
+
+  for (const section of found) {
+    const wanted = tidyName(section.name);
+    const prompt = unguardHeadings(section.body).trim().slice(0, MOST_PROMPT);
+    if (wanted === '' || prompt === '') continue;
+
+    let name = wanted;
+    if (taken.has(sameName(name))) {
+      name = numbered(wanted, taken);
+      renamed += 1;
+    }
+    taken.add(sameName(name));
+
+    let id = `yours:${slugify(name)}`;
+    let next = 2;
+    while (ids.has(id)) {
+      id = `yours:${slugify(name)}-${next}`;
+      next += 1;
+    }
+    ids.add(id);
+
+    recipes.push({ id, name, prompt, from: 'yours' });
+  }
+
+  if (recipes.length === 0) {
+    return {
+      ok: false,
+      problem: 'I couldn’t find any recipes in that file. Each one needs a heading and some words under it.',
+    };
+  }
+
+  return { ok: true, recipes, note: saysOpened(recipes.length, renamed, recipes[0]?.name ?? '') };
+}
+
+/** Names Windows will not give a file, whatever the person called the recipe. */
+const RESERVED = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+/**
+ * What one recipe is called on disk.
+ *
+ * Built from the name rather than taken from the file, so a set that arrived
+ * with `../` in it can only ever name a file, never a place.
+ */
+export function fileNameFor(name: string): string {
+  const slug = slugify(tidyName(name)).slice(0, 60).replace(/^-+|-+$/g, '');
+  const safe = slug === '' ? 'recipe' : slug;
+  return `${RESERVED.test(safe) ? `recipe-${safe}` : safe}.md`;
+}
+
+/** A set as files to write, each one readable back as a recipe. Names are made
+ *  unique here so writing them cannot lose one silently. */
+export function filesFor(recipes: readonly Recipe[]): readonly { file: string; contents: string }[] {
+  const taken = new Set<string>();
+  const out: { file: string; contents: string }[] = [];
+
+  for (const recipe of recipes) {
+    const name = tidyName(recipe.name);
+    const prompt = recipe.prompt.trim();
+    if (name === '' || prompt === '') continue;
+
+    let file = fileNameFor(name);
+    let next = 2;
+    while (taken.has(file.toLowerCase())) {
+      file = `${fileNameFor(name).replace(/\.md$/, '')}-${next}.md`;
+      next += 1;
+    }
+    taken.add(file.toLowerCase());
+    out.push({ file, contents: `---\nname: ${name}\n---\n\n${prompt}\n` });
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------ what to look at */
 
 /** Where a recipe or a skill was found. */

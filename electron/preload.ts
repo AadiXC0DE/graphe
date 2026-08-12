@@ -23,6 +23,7 @@ import {
   type ConnectStep,
   type ConnectionState,
   type Decision,
+  type FileEntry,
   type FoundAccount,
   type GrapheApi,
   type Hatches,
@@ -174,6 +175,24 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
     }
     return ipcRenderer.invoke(CHANNEL.setShowMe, on) as Promise<Result<Preferences>>;
+  },
+
+  setShowFiles(on: boolean): Promise<Result<Preferences>> {
+    if (typeof on !== 'boolean') {
+      return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setShowFiles, on) as Promise<Result<Preferences>>;
+  },
+
+  projectFiles(): Promise<Result<readonly FileEntry[]>> {
+    return ipcRenderer.invoke(CHANNEL.projectFiles) as Promise<Result<readonly FileEntry[]>>;
+  },
+
+  fileText(path: string): Promise<Result<string>> {
+    if (typeof path !== 'string' || path.trim() === '') {
+      return Promise.resolve(refuse<string>('I could not tell which file you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.fileText, path) as Promise<Result<string>>;
   },
 
   hatches(): Promise<Result<Hatches>> {

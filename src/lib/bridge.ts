@@ -33,6 +33,7 @@ import {
   type Conversation,
   type ConnectionState,
   type Decision,
+  type FileEntry,
   type FoundAccount,
   type GrapheApi,
   type Hatches,
@@ -217,6 +218,94 @@ const PREVIEW_PICTURES: Readonly<Record<string, Readonly<Record<number, boolean>
 };
 
 /* -------------------------------------------------------------------------- */
+/* A project's own files, for a tab with no project behind it                  */
+/* -------------------------------------------------------------------------- */
+
+/** What this made-up project has changed since its last version. Written once
+ *  and used twice — by the overview and by the file panel — because the two
+ *  disagreeing about which files moved is exactly the sort of thing nobody
+ *  notices until it is on a screenshot. */
+const PREVIEW_CHANGED: readonly string[] = [
+  'src/components/Hero.tsx',
+  'src/styles/tokens.css',
+  'src/pages/pricing.tsx',
+  'public/hero-bg.svg',
+];
+
+/**
+ * Everything the made-up project holds.
+ *
+ * Enough of it to be a real tree: folders inside folders, a couple of things
+ * beginning with a dot and a lock file nobody wrote, so "Every file" has
+ * something to reveal rather than being a chip that does nothing here.
+ */
+const PREVIEW_FILES: readonly FileEntry[] = [
+  { path: 'README.md', size: 2_310 },
+  { path: 'package.json', size: 1_842 },
+  { path: 'package-lock.json', size: 214_006 },
+  { path: '.gitignore', size: 128 },
+  { path: '.prettierrc', size: 64 },
+  { path: 'public/hero-bg.svg', size: 4_820 },
+  { path: 'public/favicon.ico', size: 15_086 },
+  { path: 'public/fonts/soehne-buch.woff2', size: 41_204 },
+  { path: 'src/app/page.tsx', size: 3_140 },
+  { path: 'src/app/about/page.tsx', size: 1_980 },
+  { path: 'src/app/pricing/page.tsx', size: 2_640 },
+  { path: 'src/app/(marketing)/case-studies/page.tsx', size: 3_912 },
+  { path: 'src/app/work/[slug]/page.tsx', size: 2_204 },
+  { path: 'src/components/Hero.tsx', size: 1_664 },
+  { path: 'src/components/Nav.tsx', size: 1_120 },
+  { path: 'src/components/Footer.tsx', size: 890 },
+  { path: 'src/pages/pricing.tsx', size: 2_512 },
+  { path: 'src/styles/tokens.css', size: 3_408 },
+  { path: 'src/styles/palette.css', size: 1_206 },
+].map((one) => (PREVIEW_CHANGED.includes(one.path) ? { ...one, changed: true } : one));
+
+/** A few of them, written out, so opening one shows a file rather than a
+ *  sentence about there not being one. */
+const PREVIEW_TEXT: Readonly<Record<string, string>> = {
+  'src/components/Hero.tsx': `import './Hero.css';
+
+type Props = {
+  title: string;
+  blurb: string;
+};
+
+export default function Hero({ title, blurb }: Props) {
+  return (
+    <section className="hero">
+      <h1 className="hero__title">{title}</h1>
+      <p className="hero__blurb">{blurb}</p>
+      <a className="hero__cta" href="/pricing">
+        See what it costs
+      </a>
+    </section>
+  );
+}
+`,
+  'src/styles/tokens.css': `:root {
+  --space-4: 16px;
+  --radius-md: 10px;
+  --accent: #b8492c;
+  --text: #1a1a19;
+  --bg: #fbfbfa;
+}
+
+.hero__cta {
+  background: #bd4b2f;
+  padding: 15px;
+}
+`,
+  'README.md': `# paper-street
+
+A small site, made in Graphe.
+
+Everything in here is ordinary: a folder of pages, a folder of components and
+one stylesheet holding the values the rest of it borrows from.
+`,
+};
+
+/* -------------------------------------------------------------------------- */
 /* A before and after, for a tab with no folder behind it                      */
 /* -------------------------------------------------------------------------- */
 
@@ -300,7 +389,10 @@ function previewBridge(): Bridge {
 
   /** The preview's own copy of what a person has chosen. Real state, so the
    *  switch in the project menu can be turned on and its effect looked at. */
-  let preferred: Preferences = { showMe: false, model: null, kept: {} };
+  /** `showFiles` starts on here and nowhere else, for the same reason the
+   *  version rail has versions: a region that has to be asked for is a region
+   *  a browser tab would never draw, and one nobody could look at. */
+  let preferred: Preferences = { showMe: false, model: null, kept: {}, showFiles: true };
 
   const send = (event: AgentEvent): void => {
     for (const listener of listeners) listener({ project: openPath, event });
@@ -415,12 +507,10 @@ function previewBridge(): Bridge {
           untracked: 1,
           ahead: 0,
           behind: 2,
-          files: [
-            { path: 'src/components/Hero.tsx', kind: 'changed' },
-            { path: 'src/styles/tokens.css', kind: 'changed' },
-            { path: 'src/pages/pricing.tsx', kind: 'changed' },
-            { path: 'public/hero-bg.svg', kind: 'new' },
-          ],
+          files: PREVIEW_CHANGED.map((path) => ({
+            path,
+            kind: path.startsWith('public/') ? ('new' as const) : ('changed' as const),
+          })),
         },
         preview: null,
         artifacts: [
@@ -529,6 +619,34 @@ function previewBridge(): Bridge {
     setShowMe(on: boolean): Promise<Result<Preferences>> {
       preferred = { ...preferred, showMe: on };
       return Promise.resolve(done({ ...preferred }));
+    },
+
+    setShowFiles(on: boolean): Promise<Result<Preferences>> {
+      preferred = { ...preferred, showFiles: on };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    /** A whole project, made up, so the panel can be opened and reviewed in a
+     *  browser tab — folders inside folders, and the same files the overview
+     *  says have moved. */
+    projectFiles(): Promise<Result<readonly FileEntry[]>> {
+      return Promise.resolve(done(PREVIEW_FILES));
+    },
+
+    /** Three of them are written out; the rest say so rather than inventing a
+     *  file somebody might believe. */
+    fileText(path: string): Promise<Result<string>> {
+      const text = PREVIEW_TEXT[path];
+      if (text !== undefined) return Promise.resolve(done(text));
+      return Promise.resolve({
+        ok: false,
+        trouble: {
+          what: 'I could not open that file.',
+          because:
+            'This is Graphe running in a browser tab, so there is no folder underneath and only a few of these have anything in them.',
+          actionLabel: 'Got it',
+        },
+      });
     },
 
     keepVersion(versionId: string, keep: boolean): Promise<Result<Preferences>> {
@@ -875,6 +993,9 @@ function connect(): Bridge {
     preferences: () => api.preferences(),
     setShowMe: (on) => api.setShowMe(on),
     keepVersion: (versionId, keep) => api.keepVersion(versionId, keep),
+    setShowFiles: (on) => api.setShowFiles(on),
+    projectFiles: () => api.projectFiles(),
+    fileText: (path) => api.fileText(path),
     hatches: () => api.hatches(),
     openInEditor: (file) => api.openInEditor(file),
     saveVersion: (name) => api.saveVersion(name),

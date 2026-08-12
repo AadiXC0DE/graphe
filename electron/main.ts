@@ -34,7 +34,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
@@ -58,10 +58,20 @@ import type { AgentEvent, ImageCard } from '../src/agent/types';
 import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline, type Version } from '../src/history/timeline';
 import {
+  cannotOpen,
+  everythingIn,
+  looksBinary,
+  markChanged,
+  tooBig,
+  type Found,
+} from '../src/files/listing';
+import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
+import {
   CHANNEL,
   type ConnectOutcome,
   type ConnectStep,
   type ConnectionState,
+  type FileEntry,
   type GitSnapshot,
   type Hatches,
   type OpenedProject,
@@ -1170,6 +1180,61 @@ async function filesUnder(root: string): Promise<string[]> {
   return found;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Everything in this project                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** One folder, read. Anything that will not open is an empty answer: a project
+ *  with one locked folder in it still has the rest of itself. */
+async function insideFolder(where: string): Promise<readonly Found[]> {
+  let entries;
+  try {
+    entries = await readdir(where, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const found: Found[] = [];
+  for (const entry of entries) {
+    // A link can point anywhere, and following one is how a walk leaves the
+    // folder it was given.
+    if (entry.isSymbolicLink()) continue;
+    if (entry.isDirectory()) {
+      found.push({ name: entry.name, kind: 'folder', size: 0 });
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const size = (await stat(join(where, entry.name)).catch(() => null))?.size ?? 0;
+    found.push({ name: entry.name, kind: 'file', size });
+  }
+  return found;
+}
+
+/** Where a file the window asked for really is, or why it is not somewhere we
+ *  will read from. Checked as written and again as resolved, so a link out of
+ *  the project is refused rather than followed. */
+async function fileInProject(
+  root: string,
+  asked: string,
+): Promise<{ full: string; because?: undefined } | { full?: undefined; because: string }> {
+  const check = containsPath(root, asked);
+  if (!check.inside || check.resolved === null) {
+    return { because: check.reason ?? cannotOpen.outside };
+  }
+  if (isCredentialPath(check.resolved)) return { because: cannotOpen.secret };
+  const [real, realRoot] = await Promise.all([
+    realpath(check.resolved).catch(() => null),
+    realpath(root).catch(() => root),
+  ]);
+  if (real === null) return { because: cannotOpen.gone };
+  if (!containsPath(realRoot, real).inside) return { because: cannotOpen.outside };
+  return { full: real };
+}
+
+/** A file that cannot be shown. One sentence, and nothing about machinery. */
+function cannotShowFile(because: string): Trouble {
+  return { what: 'I could not open that file.', because, actionLabel: 'Got it' };
+}
+
 /** One path inside a project, or null when it tries to leave. */
 function inside(root: string, file: string): string | null {
   const full = resolve(root, file);
@@ -1486,6 +1551,47 @@ function register(): void {
     const [on] = args;
     if (typeof on !== 'boolean') return done((await preferences()).all());
     return done(await (await preferences()).change({ showMe: on }));
+  });
+
+  handle<Preferences>(CHANNEL.setShowFiles, async (_event, args) => {
+    const [on] = args;
+    if (typeof on !== 'boolean') return done((await preferences()).all());
+    return done(await (await preferences()).change({ showFiles: on }));
+  });
+
+  /** Everything the project holds. Nothing open is an empty list rather than a
+   *  failure: the panel simply has nothing to draw. */
+  handle<readonly FileEntry[]>(CHANNEL.projectFiles, async () => {
+    const open = workspaces.current;
+    if (open === null) return done([]);
+    const [walked, git] = await Promise.all([
+      everythingIn(open.path, insideFolder),
+      readGitStatus(open.path),
+    ]);
+    return done(markChanged(walked.files, git?.files ?? []));
+  });
+
+  /** One file, to read. Everything that could go wrong here — a location
+   *  outside the folder, a file that is bytes rather than words, one too big
+   *  for a screen — comes back as a sentence instead of as content. */
+  handle<string>(CHANNEL.fileText, async (_event, args) => {
+    const [path] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof path !== 'string' || path.trim() === '') {
+      return fail(cannotShowFile(cannotOpen.gone));
+    }
+    const where = await fileInProject(open.path, path);
+    if (where.full === undefined) return fail(cannotShowFile(where.because));
+
+    const found = await stat(where.full).catch(() => null);
+    if (found === null || !found.isFile()) return fail(cannotShowFile(cannotOpen.gone));
+    if (tooBig(found.size)) return fail(cannotShowFile(cannotOpen.tooBig));
+
+    const bytes = await readFile(where.full).catch(() => null);
+    if (bytes === null) return fail(cannotShowFile(cannotOpen.gone));
+    if (looksBinary(bytes)) return fail(cannotShowFile(cannotOpen.notText));
+    return done(bytes.toString('utf8'));
   });
 
   /** Against the project in front, so the window never has to name a folder to

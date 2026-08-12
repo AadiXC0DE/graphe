@@ -26,6 +26,12 @@ type Props = {
 
   showMe: boolean;
   onShowMe: (on: boolean) => void;
+
+  /** Whether everything the project holds is on screen beside the
+   *  conversation. Stays as it was left, so this is a state and not an
+   *  action. */
+  showFiles: boolean;
+  onShowFiles: (on: boolean) => void;
 };
 
 /**
@@ -75,6 +81,8 @@ export default function ProjectMenu({
   onAddMore,
   showMe,
   onShowMe,
+  showFiles,
+  onShowFiles,
 }: Props) {
   return (
     <div className="projectmenu">
@@ -102,6 +110,29 @@ export default function ProjectMenu({
           )}
           <button type="button" className="projectmenu__hatch" onClick={onRevealFolder}>
             Show the folder
+          </button>
+          {/* A state rather than a place to go: it stays as it is left, so the
+              row says which way it is. */}
+          <button
+            type="button"
+            className="projectmenu__hatch projectmenu__hatch--state"
+            aria-pressed={showFiles}
+            onClick={() => onShowFiles(!showFiles)}
+          >
+            Everything in this project
+            <span className="projectmenu__mark" aria-hidden="true">
+              {showFiles ? (
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                  <path
+                    d="m3.5 8.5 3 3 6-7"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              ) : null}
+            </span>
           </button>
         </div>
       )}

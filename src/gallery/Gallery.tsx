@@ -9,6 +9,7 @@ import ErrorCard from '../components/ErrorCard';
 import Files from '../components/Files';
 import FileView from '../components/FileView';
 import Message from '../components/Message';
+import Landing from '../components/Landing';
 import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
 import Overview from '../components/Overview';
@@ -20,6 +21,7 @@ import type {
   ConnectionState,
   FileEntry,
   FoundAccount,
+  Landing as LandingState,
   PutBack,
   RecentProject,
   SavedVersion,
@@ -255,6 +257,23 @@ const GIT_DIRTY = {
     { path: 'public/hero-bg.svg', kind: 'new' },
   ],
 } as const;
+
+/** A piece of work finished and waiting to be looked at, with both of the
+ *  things that can send anywhere reachable. The state worth drawing, because it
+ *  is the one where every press in the band means something. */
+const LANDING: LandingState = {
+  waiting: {
+    id: 'held-1',
+    doing: 'make the pricing cards breathe a bit more',
+    state: 'waiting',
+    at: NOW - 90_000,
+  },
+  holdBack: true,
+  canHandOver: true,
+  handOverSays: 'Everything needed is here.',
+  canPutOnline: true,
+  onlineSays: 'Everything needed is here.',
+};
 
 const RESEARCH: readonly ResearchEntry[] = [
   { id: 'r1', query: 'css clamp() fluid type best practices', state: 'done' },
@@ -1024,6 +1043,10 @@ export default function Gallery() {
                     ],
                     text: ':root { --accent: #b8492c; }',
         },
+                  landing: LANDING,
+                  going: null,
+                  landed: null,
+                  decided: null,
                 }}
                 onPutBack={noop}
                 onName={noop}
@@ -1034,6 +1057,11 @@ export default function Gallery() {
                 onSave={noop}
                 onCheckWidths={noop}
                 onShare={noop}
+                onHoldBack={noop}
+                onDecide={noop}
+                onHandOver={noop}
+                onPutOnline={noop}
+                onOpenLink={noop}
                 onNudge={noop}
               />
             </div>
@@ -1042,6 +1070,34 @@ export default function Gallery() {
               mono, because names are not translated. A search that worked leaves nothing but its
               question; only a failure says “stopped”. The meter docks into the foot, the way it
               docked into the foot of the rail.
+            </p>
+          </Section>
+
+          <Section
+            title="When it’s ready"
+            note="The foot of the overview, and the only place in the app where anything can leave this computer. Work checked in a copy sits in the accent until somebody answers it; both answers are undoable, so neither button is the dangerous one. The two that can send anywhere never do it on one press — each opens its own confirmation first, in the same sentences the shell would use."
+          >
+            <div className="gallery__overview">
+              <Landing
+                state={LANDING}
+                busy={false}
+                showMe={false}
+                going={null}
+                outcome={null}
+                decided={null}
+                onHoldBack={noop}
+                onDecide={noop}
+                onUndo={noop}
+                onHandOver={noop}
+                onPutOnline={noop}
+                onShare={noop}
+                onOpenLink={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              Nothing here is named after how it works. "Check my work before it lands" rather than
+              anything about copies; "Let it in" and "Set it aside" rather than approve and reject.
+              What is waiting says what it was asked for, in the person's own words.
             </p>
           </Section>
 

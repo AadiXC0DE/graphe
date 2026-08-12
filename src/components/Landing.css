@@ -1,0 +1,211 @@
+/* The band that answers "what now?". Quiet furniture until something is
+   waiting; the two things that can send anywhere never look like the things
+   that cannot. */
+
+.landing {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) 0 0;
+}
+
+.landing__title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------ the switch */
+
+.landing__switch {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.landing__switch input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.landing__switch input:disabled {
+  cursor: not-allowed;
+}
+
+.landing__switchtext {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.landing__switchlabel {
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.landing__switchhint,
+.landing__hint,
+.landing__why {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.landing__why {
+  color: var(--text-muted);
+}
+
+/* -------------------------------------------------------- work that waits */
+
+.landing__waiting {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+}
+
+.landing__doing {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.landing__says {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.landing__done {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* --------------------------------------------------------------- pressing */
+
+.landing__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.landing__thing {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.landing__do,
+.landing__quietdo {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.landing__do:hover:not(:disabled),
+.landing__quietdo:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.landing__do--first {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-raised);
+  font-weight: 550;
+}
+
+.landing__do--first:hover:not(:disabled) {
+  border-color: var(--accent-ink);
+}
+
+.landing__quietdo {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.landing__alone {
+  margin-top: var(--space-1);
+  justify-self: start;
+}
+
+.landing__do:disabled,
+.landing__quietdo:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The confirmation. Deliberately louder than the button that opened it: this
+   is the one moment in the app where something leaves the machine. */
+.landing__confirm {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+
+.landing__warning {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------- afterwards */
+
+.landing__outcome {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.landing__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+/* The real commands, only when somebody asked to see them. */
+.landing__real {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  color: var(--text-faint);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: var(--text-2xs);
+  overflow-wrap: anywhere;
+}

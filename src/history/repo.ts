@@ -110,6 +110,9 @@ export const historyProblems = {
   outsideProject: 'That file lives outside your project, so it isn’t part of its history.',
   listFailed: 'I couldn’t read your project’s version history.',
   tryFailed: 'I couldn’t set up a separate copy to try that in, so I’ve left your project alone.',
+  holdFailed: 'I couldn’t keep that work aside, so I’ve left your project alone.',
+  nameTaken: 'Your project already has work under that name, so I’ve left it alone.',
+  sendFailed: 'I couldn’t send that on, so nothing has left this computer.',
 } as const;
 
 /** A failure the user might see. `message` is the sentence; `details` is the raw
@@ -165,6 +168,17 @@ const FORCED_SETTINGS = [
 ];
 
 const VERSION_ID = /^[0-9a-f]{4,40}$/;
+
+/** Where work kept aside is pointed at from, well out of the way of anything a
+ *  person or another tool would ever look at. */
+const KEPT_UNDER = 'refs/graphe/kept';
+
+function keptAt(id: string): string {
+  return `${KEPT_UNDER}/${id}`;
+}
+
+/** What the shared copy of a project is called, everywhere. */
+const SHARED = 'origin';
 
 /** Field and record separators for reading history back. Control characters,
  *  because a title, a name or a filename can contain anything else. */
@@ -435,6 +449,93 @@ export class ProjectHistory {
     return folders;
   }
 
+  /* ---------------------------------------------- work kept aside, and sent */
+
+  /**
+   * Keep a version reachable after the copy it was made in has gone.
+   *
+   * Work made in a separate copy is an ordinary version, but only while
+   * something points at it — let the copy go and it becomes an id nobody can
+   * follow. This is what makes turning work down undoable: the version is still
+   * there afterwards, so bringing it back is the same call as putting any old
+   * version back.
+   */
+  async hold(versionId: string): Promise<void> {
+    const id = await this.resolve(versionId);
+    const kept = await this.attempt(['update-ref', keptAt(id), id]);
+    if (kept.code !== 0) throw new HistoryError(historyProblems.holdFailed, detailsOf(kept));
+  }
+
+  /** Stop keeping one aside. Nothing is removed — the version stays exactly
+   *  where it was, which is the whole point of the previous method. */
+  async release(versionId: string): Promise<void> {
+    await this.ensureReady();
+    const id = assertVersionId(versionId);
+    await this.attempt(['update-ref', '-d', keptAt(id)]);
+  }
+
+  /** Every version being kept aside, newest first. */
+  async holding(): Promise<string[]> {
+    await this.ensureReady();
+    const listed = await this.attempt(['for-each-ref', '--format=%(objectname)', KEPT_UNDER]);
+    if (listed.code !== 0) return [];
+    return listed.stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => VERSION_ID.test(line));
+  }
+
+  /**
+   * Give a version a name of its own, so somebody else can find the work.
+   *
+   * Refuses a name that is already in use rather than moving it. Nothing in
+   * this file overwrites anything anybody else made, and a name is the one
+   * thing here that somebody else might have chosen.
+   */
+  async nameLine(name: string, versionId: string): Promise<void> {
+    const id = await this.resolve(versionId);
+    if (await this.lineExists(name)) throw new HistoryError(historyProblems.nameTaken);
+    const made = await this.attempt(['branch', '--no-track', name, id]);
+    if (made.code !== 0) throw new HistoryError(historyProblems.holdFailed, detailsOf(made));
+  }
+
+  async lineExists(name: string): Promise<boolean> {
+    await this.ensureReady();
+    const found = await this.attempt(['rev-parse', '--quiet', '--verify', `refs/heads/${name}`]);
+    return found.code === 0 && found.stdout.trim().length > 0;
+  }
+
+  /** Let a name go. The versions under it are untouched. */
+  async dropLine(name: string): Promise<void> {
+    await this.ensureReady();
+    await this.attempt(['branch', '--delete', '--force', name]);
+  }
+
+  /** Where this project is kept as well as here, or null when it is only here. */
+  async sharedCopy(): Promise<string | null> {
+    await this.ensureReady();
+    const found = await this.attempt(['remote', 'get-url', SHARED]);
+    const address = found.stdout.trim();
+    return found.code === 0 && address !== '' ? address : null;
+  }
+
+  /**
+   * Send one named piece of work to the shared copy.
+   *
+   * The one call in this file that runs with the machine's own configuration
+   * rather than ours: sending work needs whatever this computer uses to prove
+   * who you are, and pointing that at the null device — right for every
+   * automatic save — would make this fail on every project that is kept
+   * anywhere. Never forced, and only ever a name we made.
+   */
+  async sendLine(name: string): Promise<void> {
+    await this.ensureReady();
+    const sent = await this.attempt(['push', '--set-upstream', SHARED, `${name}:${name}`], {
+      theirSettings: true,
+    });
+    if (sent.code !== 0) throw new HistoryError(historyProblems.sendFailed, detailsOf(sent));
+  }
+
   /* ------------------------------------------------------------- internals */
 
   private async ensureReady(): Promise<void> {
@@ -454,13 +555,16 @@ export class ProjectHistory {
 
   /** One invocation. Never throws for a non-zero exit — the callers decide what
    *  a failure means, and several of them mean "no", not "broken". */
-  private async attempt(args: readonly string[]): Promise<Attempt> {
+  private async attempt(
+    args: readonly string[],
+    options: { theirSettings?: boolean } = {},
+  ): Promise<Attempt> {
     const settings = FORCED_SETTINGS.flatMap((setting) => ['-c', setting]);
     const full = ['-C', this.root, ...settings, ...args];
     try {
       const { stdout, stderr } = await run(this.tool, full, {
         cwd: this.root,
-        env: this.environment(),
+        env: this.environment(options.theirSettings === true),
         maxBuffer: 64 * 1024 * 1024,
         windowsHide: true,
       });
@@ -485,20 +589,27 @@ export class ProjectHistory {
     }
   }
 
-  private environment(): NodeJS.ProcessEnv {
+  /** `theirSettings` is only ever true for sending work somewhere shared, where
+   *  this computer's own way of proving who you are is the whole point. */
+  private environment(theirSettings = false): NodeJS.ProcessEnv {
+    const ours = theirSettings
+      ? {}
+      : {
+          // Nothing outside this folder gets a vote in how a snapshot is taken.
+          GIT_CONFIG_GLOBAL: devNull,
+          GIT_CONFIG_SYSTEM: devNull,
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_ASKPASS: '',
+        };
     return {
       ...process.env,
       GIT_AUTHOR_NAME: this.identity.name,
       GIT_AUTHOR_EMAIL: this.identity.email,
       GIT_COMMITTER_NAME: this.identity.name,
       GIT_COMMITTER_EMAIL: this.identity.email,
-      // Nothing outside this folder gets a vote in how a snapshot is taken.
-      GIT_CONFIG_GLOBAL: devNull,
-      GIT_CONFIG_SYSTEM: devNull,
-      GIT_CONFIG_NOSYSTEM: '1',
+      ...ours,
       // Never sit waiting on a prompt nobody will ever see.
       GIT_TERMINAL_PROMPT: '0',
-      GIT_ASKPASS: '',
       LC_ALL: 'C',
       // Inherited pointers from an outer invocation would aim us at the wrong
       // folder entirely. This is the one that would be catastrophic.

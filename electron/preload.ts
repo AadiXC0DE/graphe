@@ -22,7 +22,11 @@ import {
   type ConnectOutcome,
   type ConnectStep,
   type ConnectionState,
+  type Decided,
   type Decision,
+  type HandedOver,
+  type Landing,
+  type WentOnline,
   type FileEntry,
   type FoundAccount,
   type GrapheApi,
@@ -420,6 +424,40 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<null>('I could not open that link.'));
     }
     return ipcRenderer.invoke(CHANNEL.openLink, url) as Promise<Result<null>>;
+  },
+
+  landing(): Promise<Result<Landing>> {
+    return ipcRenderer.invoke(CHANNEL.landing) as Promise<Result<Landing>>;
+  },
+
+  setHoldBack(on: boolean): Promise<Result<Preferences>> {
+    if (typeof on !== 'boolean') {
+      return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setHoldBack, on) as Promise<Result<Preferences>>;
+  },
+
+  decideOnWork(letIn: boolean): Promise<Result<Decided>> {
+    if (typeof letIn !== 'boolean') {
+      return Promise.resolve(refuse<Decided>('I could not tell what you decided.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.decideOnWork, letIn) as Promise<Result<Decided>>;
+  },
+
+  /* The two that can send something off this computer. Both refuse anything but
+     an explicit `true`, so a call that arrives without one cannot be a press. */
+  handToDeveloper(confirmed: boolean): Promise<Result<HandedOver>> {
+    if (confirmed !== true) {
+      return Promise.resolve(refuse<HandedOver>('Nothing has left this computer.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.handToDeveloper, true) as Promise<Result<HandedOver>>;
+  },
+
+  putOnline(confirmed: boolean): Promise<Result<WentOnline>> {
+    if (confirmed !== true) {
+      return Promise.resolve(refuse<WentOnline>('Nothing has left this computer.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.putOnline, true) as Promise<Result<WentOnline>>;
   },
 };
 

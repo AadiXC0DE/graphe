@@ -135,6 +135,18 @@ export function realWords(call: ToolCall): string {
   }
 }
 
+/**
+ * The real steps behind work leaving this computer.
+ *
+ * Under the same exemption as `realWords`, and here for the same reason: the
+ * boundary of the exemption is this file. Somebody who has switched "Show me"
+ * on and just handed work to a developer is asking exactly one question — what
+ * would I have typed — and a paraphrase of a command is no answer to it.
+ */
+export function realSteps(steps: readonly string[]): string[] {
+  return steps.map(trimmed).filter((step) => step !== '');
+}
+
 /* -------------------------------------------------------------------------- */
 /* The standing explanations                                                   */
 /* -------------------------------------------------------------------------- */
@@ -163,6 +175,10 @@ export const behind = {
   /** In the corner, beside the money. */
   spend:
     'Counted from what your account was actually charged, converted at the moment it is read. Graphe takes no cut and never sees the number.',
+  /** Under the band where work goes somewhere. Says what happened to it, not
+   *  how any of it is carried. */
+  landing:
+    'Work you have checked is kept in your project the same way every other saved moment is, so letting it in or turning it down are both undoable. Nothing goes anywhere else until you press one of the two below.',
   /** When a long conversation is tidied. */
   tidying:
     'I shortened my own notes on the earlier part of this conversation so it stays quick. Every word either of us said is still above, to scroll back through.',

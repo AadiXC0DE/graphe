@@ -246,6 +246,85 @@ export type Preferences = {
    *  somebody who did not ask for one is the thing this product exists not to
    *  do. */
   showFiles: boolean;
+  /** Do the work in a copy first and show it, rather than letting it reach the
+   *  files straight away. Off by default and sticky once asked for. */
+  holdBack: boolean;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Landing it                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One piece of work that has not reached the project yet.
+ *
+ * `state` is the whole of it: being made, finished and waiting, let in, or set
+ * aside. Nothing here says where the copy is — that is the shell's business and
+ * the window has no use for a folder it cannot open.
+ */
+export type WaitingWork = {
+  id: string;
+  /** What it was asked to do, in the person's own words. */
+  doing: string;
+  state: 'making' | 'waiting' | 'in' | 'aside' | 'nothing';
+  /** Epoch ms. */
+  at: number;
+};
+
+/**
+ * What can be done with this project's work right now.
+ *
+ * Every `can` here was found out by looking rather than assumed, and every
+ * `false` has a sentence beside it saying what is missing. The window draws the
+ * sentence; it never invents one.
+ */
+export type Landing = {
+  /** Work waiting to be looked at, or null when nothing is. */
+  waiting: WaitingWork | null;
+  /** True when new work is checked before it lands. */
+  holdBack: boolean;
+  /** Can the work go all the way to where the team keeps this project? */
+  canHandOver: boolean;
+  handOverSays: string;
+  /** Can this project go online from this computer? */
+  canPutOnline: boolean;
+  onlineSays: string;
+};
+
+/** How handing work over went. */
+export type HandedOver = {
+  /** True when it reached where the team works. */
+  sent: boolean;
+  /** What this piece of work is called there. Shown only under "Show me". */
+  name: string;
+  /** Where somebody can go and look at it. */
+  address: string | null;
+  says: string;
+  /** The real commands, for "Show me" and nowhere else. */
+  steps: readonly string[];
+};
+
+/** How putting it online went. */
+export type WentOnline = {
+  address: string | null;
+  pages: number;
+  says: string;
+  steps: readonly string[];
+};
+
+/**
+ * What came of deciding about work that was waiting.
+ *
+ * Both answers are undoable through the same door: `undoTo` is a version, and
+ * `putBack` takes versions. Having let work in, it is the moment before; having
+ * set work aside, it is the work itself. `letIn` says which, so the window can
+ * offer "Undo" or "Bring it back" without knowing why they differ.
+ */
+export type Decided = {
+  landing: Landing;
+  versions: readonly SavedVersion[];
+  letIn: boolean;
+  undoTo: string | null;
 };
 
 /** How the next message should be handled. Both default off; the window turns
@@ -559,6 +638,11 @@ export const CHANNEL = {
   discoveredAccounts: 'graphe:discovered-accounts',
   importAccount: 'graphe:import-account',
   openLink: 'graphe:open-link',
+  landing: 'graphe:landing',
+  setHoldBack: 'graphe:set-hold-back',
+  decideOnWork: 'graphe:decide-on-work',
+  handToDeveloper: 'graphe:hand-to-developer',
+  putOnline: 'graphe:put-online',
 } as const;
 
 /**
@@ -714,4 +798,23 @@ export type GrapheApi = {
   importAccount(account: FoundAccount): Promise<Result<null>>;
   /** Open a link in the person's own browser, never inside this window. */
   openLink(url: string): Promise<Result<null>>;
+
+  /** What can be done with this project's work, and what is waiting. */
+  landing(): Promise<Result<Landing>>;
+  /** Check new work in a copy before it reaches the files. Sticky. */
+  setHoldBack(on: boolean): Promise<Result<Preferences>>;
+  /** Let the work that is waiting in, or set it aside. Both are undoable —
+   *  letting it in through `putBack`, setting it aside by deciding again. */
+  decideOnWork(letIn: boolean): Promise<Result<Decided>>;
+
+  /**
+   * Write up what changed and put the work where a developer picks it up.
+   *
+   * Nothing leaves this computer unless `confirmed` is true, and the window
+   * only passes true from a press that has already said what will happen.
+   */
+  handToDeveloper(confirmed: boolean): Promise<Result<HandedOver>>;
+  /** Put the finished project on the internet. Same rule about `confirmed`,
+   *  and the same reason for it. */
+  putOnline(confirmed: boolean): Promise<Result<WentOnline>>;
 };

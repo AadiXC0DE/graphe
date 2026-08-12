@@ -6,6 +6,8 @@ import ConfirmChange from '../components/ConfirmChange';
 import ConnectModal from '../components/ConnectModal';
 import CostMeter from '../components/CostMeter';
 import ErrorCard from '../components/ErrorCard';
+import Files from '../components/Files';
+import FileView from '../components/FileView';
 import Message from '../components/Message';
 import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
@@ -14,7 +16,14 @@ import Sidebar from '../components/Sidebar';
 import VersionRow from '../components/VersionRow';
 import Versions from '../components/Versions';
 import Welcome from '../components/Welcome';
-import type { ConnectionState, FoundAccount, PutBack, RecentProject, SavedVersion } from '../lib/ipc';
+import type {
+  ConnectionState,
+  FileEntry,
+  FoundAccount,
+  PutBack,
+  RecentProject,
+  SavedVersion,
+} from '../lib/ipc';
 import type { Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
 import { createLimit } from '../cost/limits';
@@ -347,6 +356,59 @@ const FOUND_ACCOUNTS: readonly FoundAccount[] = [
   { providerId: 'openai', name: 'OpenAI', kind: 'sign-in', source: 'codex' },
 ];
 
+/** A project with folders inside folders and three files moved in the version
+ *  being looked at, so the tree has both of the things it draws. */
+const PROJECT_FILES: readonly FileEntry[] = [
+  { path: 'README.md', size: 2_310 },
+  { path: 'package.json', size: 1_842 },
+  { path: 'package-lock.json', size: 214_006 },
+  { path: '.gitignore', size: 128 },
+  { path: 'public/hero-bg.svg', size: 4_820, changed: true },
+  { path: 'public/favicon.ico', size: 15_086 },
+  { path: 'src/app/page.tsx', size: 3_140 },
+  { path: 'src/app/pricing/page.tsx', size: 2_640 },
+  { path: 'src/components/Hero.tsx', size: 1_664, changed: true },
+  { path: 'src/components/Nav.tsx', size: 1_120 },
+  { path: 'src/components/Footer.tsx', size: 890 },
+  { path: 'src/styles/tokens.css', size: 3_408, changed: true },
+  { path: 'src/styles/palette.css', size: 1_206 },
+];
+
+const FILE_TEXT: Readonly<Record<string, string>> = {
+  'src/components/Hero.tsx': `import './Hero.css';
+
+type Props = {
+  title: string;
+  blurb: string;
+};
+
+export default function Hero({ title, blurb }: Props) {
+  return (
+    <section className="hero">
+      <h1 className="hero__title">{title}</h1>
+      <p className="hero__blurb">{blurb}</p>
+      <a className="hero__cta" href="/pricing">
+        See what it costs
+      </a>
+    </section>
+  );
+}
+`,
+  'src/styles/tokens.css': `:root {
+  --space-4: 16px;
+  --radius-md: 10px;
+  --accent: #b8492c;
+  --text: #1a1a19;
+  --bg: #fbfbfa;
+}
+
+.hero__cta {
+  background: #bd4b2f;
+  padding: 15px;
+}
+`,
+};
+
 function Section({ title, note, children }: { title: string; note: string; children: ReactNode }) {
   return (
     <section className="gsection">
@@ -367,6 +429,10 @@ export default function Gallery() {
   /** Live, so the switch can be turned on here and the sections below it change
    *  — which is the only way to review "quiet and secondary" as a claim. */
   const [showMe, setShowMe] = useState(false);
+  /** Live too: the row in the menu and the panel it opens are one gesture, and
+   *  the only way to review that is to press it. */
+  const [showFiles, setShowFiles] = useState(true);
+  const [openFile, setOpenFile] = useState<string | null>('src/components/Hero.tsx');
   /** Live for the same reason: the connect screen is a moment, not a picture,
    *  and the closest thing to the moment is opening and closing it. */
   const [connectOpen, setConnectOpen] = useState(false);
@@ -557,6 +623,8 @@ export default function Gallery() {
                 onAddMore={noop}
                 showMe={showMe}
                 onShowMe={setShowMe}
+                showFiles={showFiles}
+                onShowFiles={setShowFiles}
               />
             </div>
             <p className="gallery__caption">
@@ -566,6 +634,48 @@ export default function Gallery() {
               a product that makes that hard has quietly become a walled garden. What the button
               says is whatever editor the machine actually has; with none installed there is one
               row here, not a button that opens nothing.
+            </p>
+          </Section>
+
+          <Section
+            title="Everything in this project"
+            note="The escape hatch that makes this credible to somebody technical without turning it into a tool for them. It is the one region nobody is given: it appears because it was asked for, in the same menu as the folder and the editor, and it stays until it is turned off again."
+          >
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 264px) minmax(0, 1fr)',
+                gap: 'var(--space-4)',
+                alignItems: 'start',
+              }}
+            >
+              <div style={{ display: 'grid', height: '320px' }}>
+                <Files
+                  files={PROJECT_FILES}
+                  selected={openFile}
+                  onSelect={setOpenFile}
+                />
+              </div>
+              <div style={{ display: 'grid', maxHeight: '320px' }}>
+                <FileView
+                  path={openFile ?? 'src/components/Hero.tsx'}
+                  text={FILE_TEXT[openFile ?? ''] ?? null}
+                  trouble={
+                    openFile !== null && FILE_TEXT[openFile] === undefined
+                      ? 'This one is not text, so there is nothing to read here.'
+                      : null
+                  }
+                  onClose={noop}
+                />
+              </div>
+            </div>
+            <p className="gallery__caption">
+              It opens on what changed, with everything else folded away, because a version is the
+              one thing a file tree cannot know about — and the chips that change that sit in the
+              panel's own band rather than in a settings screen. “Every file” is the way back to the
+              whole folder, machinery and all, for somebody who came to check our working. Nothing
+              here can be edited: the way to change a file is to ask for the change, and a box that
+              looked editable and was not would be a worse lie than no box at all.
             </p>
           </Section>
 

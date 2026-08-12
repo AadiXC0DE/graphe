@@ -38,6 +38,27 @@
     background-color var(--dur-micro) var(--ease-hover);
 }
 
+/* The one hatch that is a state. The tick carries it; the colour only agrees. */
+.projectmenu__hatch--state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.projectmenu__hatch--state[aria-pressed='true'] {
+  color: var(--text);
+}
+
+.projectmenu__mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  color: var(--accent);
+}
+
 @media (hover: hover) and (pointer: fine) {
   .projectmenu__hatch:hover {
     color: var(--text);

@@ -13,9 +13,10 @@
  */
 
 import type { AgentEvent, Money } from '../agent/types';
+import type { FileEntry } from '../files/tree';
 import type { Page } from '../preview/pages';
 
-export type { Page };
+export type { FileEntry, Page };
 
 /** Yes or no, from a person. Same two answers the Guard accepts, and no third. */
 export type Decision = 'yes' | 'no';
@@ -240,6 +241,11 @@ export type Preferences = {
    *  Keyed by folder because keeping is about one project — two folders sharing
    *  a shelf would put somebody else's afternoon at the top of yours. */
   kept: Readonly<Record<string, readonly string[]>>;
+  /** Show everything the project holds, alongside the conversation. Off by
+   *  default and sticky once asked for, like `showMe`: opening a file tree on
+   *  somebody who did not ask for one is the thing this product exists not to
+   *  do. */
+  showFiles: boolean;
 };
 
 /** How the next message should be handled. Both default off; the window turns
@@ -523,6 +529,9 @@ export const CHANNEL = {
   pages: 'graphe:pages',
   preferences: 'graphe:preferences',
   setShowMe: 'graphe:set-show-me',
+  setShowFiles: 'graphe:set-show-files',
+  projectFiles: 'graphe:project-files',
+  fileText: 'graphe:file-text',
   keepVersion: 'graphe:keep-version',
   versionPictures: 'graphe:version-pictures',
   hatches: 'graphe:hatches',
@@ -609,6 +618,19 @@ export type GrapheApi = {
    *  project in front, and returns the whole set for the same reason
    *  `setShowMe` does. */
   keepVersion(versionId: string, keep: boolean): Promise<Result<Preferences>>;
+  /** Show everything the project holds, or stop showing it. Sticky, like
+   *  "Show me". */
+  setShowFiles(on: boolean): Promise<Result<Preferences>>;
+
+  /** Everything the open project holds, with each file's size and whether this
+   *  version touched it. Empty — never a failure — when nothing is open. The
+   *  walk is bounded, so a folder of somebody else's machinery costs a moment
+   *  rather than the window. */
+  projectFiles(): Promise<Result<readonly FileEntry[]>>;
+  /** One file of the open project, as text. A location outside the project, a
+   *  file too big to read, or one that is not text comes back as a sentence
+   *  rather than as bytes. */
+  fileText(path: string): Promise<Result<string>>;
 
   /** What the escape hatches can offer here — which editor, if any. */
   hatches(): Promise<Result<Hatches>>;

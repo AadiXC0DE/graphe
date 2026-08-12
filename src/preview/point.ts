@@ -9,8 +9,17 @@
  * the tests run, so what the page decides and what we assert cannot drift.
  */
 
+import { copyable, WORTH_COPYING, type Copyable, type TidyOptions } from './copyable';
+
 /** Where an element sits on the page, in page pixels. */
 export type Rect = { x: number; y: number; width: number; height: number };
+
+/** What the element is made of, for handing somebody its code. Gathered on a
+ *  click and not on every movement of the cursor — it is not free. */
+export type PointedSource = {
+  html: string;
+  styles: Record<string, string>;
+};
 
 /** One element somebody clicked. */
 export type Pointed = {
@@ -21,6 +30,8 @@ export type Pointed = {
   kind?: string;
   /** Which one of how many, and what it sits inside. */
   place?: { nth: number; of: number; within?: string };
+  /** Present on a click, absent while the cursor is only passing over. */
+  source?: PointedSource;
 };
 
 /** An element described flatly, so the naming can be judged without a browser.
@@ -346,6 +357,14 @@ export function describePointed(pointed: Pointed): string {
   return PURE.describePointed(pointed);
 }
 
+/** The same click, as code somebody can paste. Null when the click did not
+ *  bring the element along with it. */
+export function copyOf(pointed: Pointed, options: TidyOptions = {}): Copyable | null {
+  const source = pointed.source;
+  if (source === undefined) return null;
+  return copyable({ html: source.html, styles: source.styles }, options);
+}
+
 /* -------------------------------------------------------------------------- */
 /* The script that runs on their page                                          */
 /* -------------------------------------------------------------------------- */
@@ -362,6 +381,7 @@ function pointerScript(): string {
   if (window.__graphePointer) return;
 
   var G = (${String(judgement)})();
+  var WORTH = ${JSON.stringify(WORTH_COPYING)};
   var ACCENT = '${ACCENT}';
   var ASK = '${ASK}';
   var PICKING = '${PICKING}';
@@ -419,7 +439,24 @@ function pointerScript(): string {
     };
   }
 
-  function pointedFrom(el) {
+  /* The element as it stands, for putting on somebody's clipboard. Only the
+     values worth carrying across are read; everything a browser resolves is
+     hundreds of properties and unreadable pasted. */
+  function materialOf(el) {
+    var styles = {};
+    try {
+      var resolved = window.getComputedStyle ? window.getComputedStyle(el) : null;
+      if (resolved) {
+        for (var i = 0; i < WORTH.length; i++) {
+          var value = resolved.getPropertyValue(WORTH[i]);
+          if (value) styles[WORTH[i]] = String(value).trim();
+        }
+      }
+    } catch (e) {}
+    return { html: el.outerHTML || '', styles: styles };
+  }
+
+  function pointedFrom(el, whole) {
     var facts = factsOf(el);
     var words = wordsOf(el);
     var r = el.getBoundingClientRect();
@@ -431,7 +468,7 @@ function pointerScript(): string {
     var place = { nth: Array.prototype.indexOf.call(kin, el) + 1, of: kin.length };
     var within = facts ? G.whereIn(facts) : null;
     if (within) place.within = within;
-    return {
+    var pointed = {
       selector: facts ? G.stableSelector(facts) : el.tagName.toLowerCase(),
       label: G.labelFor(words),
       kind: G.kindOf(words),
@@ -443,6 +480,8 @@ function pointerScript(): string {
       },
       place: place
     };
+    if (whole) pointed.source = materialOf(el);
+    return pointed;
   }
 
   function frame() {
@@ -529,7 +568,7 @@ function pointerScript(): string {
     var el = event.target;
     if (!el || el.nodeType !== 1 || ours(el)) return;
     swallow(event);
-    send(pointedFrom(el));
+    send(pointedFrom(el, true));
     stop();
   }
 

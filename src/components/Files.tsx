@@ -25,7 +25,8 @@ type Props = {
   /** Left off, the panel decides: on while there is something changed to show. */
   onlyChanged?: boolean;
   onOnlyChanged?: (only: boolean) => void;
-  /** Include the working files a project keeps for itself. Off by default. */
+  /** Include the dotted names and lock files a project keeps for itself. The
+   *  big folders are never walked at all, so they are not what this reveals. */
   everything?: boolean;
   onEverything?: (everything: boolean) => void;
 };
@@ -224,7 +225,7 @@ export default function Files({
           className="files__chip"
           aria-pressed={all}
           onClick={() => setAll(!all)}
-          title="Include the working files a project keeps for itself"
+          title="Include the dotted names and lock files a project keeps for itself"
         >
           <span className="files__chipdot" aria-hidden="true" />
           Every file

@@ -53,9 +53,23 @@ export type Preferences = {
    * would put yesterday's other job at the top of today's.
    */
   kept: Kept;
+  /**
+   * Show everything the project holds, beside the conversation.
+   *
+   * Off by default for the same reason `showMe` is: every other tool of this
+   * kind opens on a file tree, and that is precisely what makes them unusable
+   * on the first morning. Sticky once somebody asks for it, because somebody
+   * who asked once is asking for good.
+   */
+  showFiles: boolean;
 };
 
-export const defaultPreferences: Preferences = { showMe: false, model: null, kept: {} };
+export const defaultPreferences: Preferences = {
+  showMe: false,
+  model: null,
+  kept: {},
+  showFiles: false,
+};
 
 type Stored = { version: 1; preferences: Preferences };
 
@@ -79,6 +93,7 @@ function asPreferences(value: unknown): Preferences {
           }
         : null,
     kept: asKept(record['kept']),
+    showFiles: record['showFiles'] === true,
   };
 }
 
@@ -105,6 +120,7 @@ export class PreferenceFile {
     const next: Preferences = { ...this.#preferences, ...some };
     const unchanged =
       next.showMe === this.#preferences.showMe &&
+      next.showFiles === this.#preferences.showFiles &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
       sameKept(next.kept, this.#preferences.kept);

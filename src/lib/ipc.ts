@@ -13,11 +13,12 @@
  */
 
 import type { AgentEvent, Money } from '../agent/types';
+import type { Move } from '../design/moved';
 import type { FileEntry } from '../files/tree';
 import type { Page } from '../preview/pages';
 import type { WorkState } from '../work/board';
 
-export type { FileEntry, Page, WorkState };
+export type { FileEntry, Move, Page, WorkState };
 
 /** Yes or no, from a person. Same two answers the Guard accepts, and no third. */
 export type Decision = 'yes' | 'no';
@@ -595,6 +596,34 @@ export type StyleToken = {
   steps: readonly string[];
 };
 
+/* -------------------------------------------------------------------------- */
+/* Staying in step with Figma                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The Figma file this project is kept in step with, and what has moved on in it
+ * since the work was built from it.
+ *
+ * `following` is null when no file has been pointed at yet, which is the honest
+ * empty state rather than a failure. `moved` empty means the two agree.
+ */
+export type InStep = {
+  following: {
+    id: string;
+    /** What it is called on screen — the frame, or the file. */
+    name: string;
+    /** The address, so it can be opened where it lives. */
+    url: string;
+    /** Epoch ms, when it was last looked at. */
+    readAt: number;
+  } | null;
+  moved: readonly Move[];
+  /** The one line above the list. */
+  says: string;
+  /** Why the last look could not happen, or null. Already a sentence. */
+  trouble: string | null;
+};
+
 /** One file that differs from the last saved version. */
 export type ChangedFile = {
   /** Relative to the project folder, as the folder spells it. */
@@ -698,6 +727,7 @@ export const CHANNEL = {
   revealFolder: 'graphe:reveal-folder',
   saveVersion: 'graphe:save-version',
   nudgeToken: 'graphe:nudge-token',
+  nudgeMotion: 'graphe:nudge-motion',
   shareReview: 'graphe:share-review',
   checkWidths: 'graphe:check-widths',
   conversations: 'graphe:conversations',
@@ -732,6 +762,11 @@ export const CHANNEL = {
   switchRepeat: 'graphe:switch-repeat',
   forgetRepeat: 'graphe:forget-repeat',
   awayChanged: 'graphe:away-changed',
+  inStep: 'graphe:in-step',
+  followDesign: 'graphe:follow-design',
+  lookAgain: 'graphe:look-again',
+  caughtUp: 'graphe:caught-up',
+  stopFollowing: 'graphe:stop-following',
 } as const;
 
 /**
@@ -848,6 +883,9 @@ export type GrapheApi = {
   explainPackage(id: string): Promise<Result<string>>;
   /** Change one design token and save the result as a version. */
   nudgeToken(name: string, value: string): Promise<Result<readonly SavedVersion[]>>;
+  /** Change how long something takes, or how it starts and stops. The places
+   *  and the change are the shapes `src/motion/read.ts` hands out. */
+  nudgeMotion(places: readonly unknown[], change: unknown): Promise<Result<readonly SavedVersion[]>>;
   /** Follow along while that happens. Returns the function that stops. */
   onShowProgress(listener: (progress: ShowProgress) => void): () => void;
 
@@ -941,4 +979,21 @@ export type GrapheApi = {
   /** Follow along while any of that changes, including while the window was
    *  away and has just come back. Returns the function that stops listening. */
   onAway(listener: (notice: AwayNotice) => void): () => void;
+
+  /* ----------------------------------------------- staying in step with Figma */
+
+  /** What this project is keeping in step with, and what has moved on since the
+   *  work was built from it. Nothing followed is an empty answer, not a
+   *  failure. */
+  inStep(): Promise<Result<InStep>>;
+  /** Keep this project in step with the Figma file behind a pasted address.
+   *  What is read now becomes what the work was built from. */
+  followDesign(address: string): Promise<Result<InStep>>;
+  /** Read the file again and say what differs. */
+  lookAgain(): Promise<Result<InStep>>;
+  /** Take what is in Figma now as what the work was built from, once the work
+   *  has caught up with it. */
+  caughtUp(): Promise<Result<InStep>>;
+  /** Stop following it. Nothing in Figma is touched. */
+  stopFollowing(): Promise<Result<InStep>>;
 };

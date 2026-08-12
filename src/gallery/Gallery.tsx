@@ -10,6 +10,7 @@ import Files from '../components/Files';
 import FileView from '../components/FileView';
 import Message from '../components/Message';
 import Away from '../components/Away';
+import InStep from '../components/InStep';
 import Landing from '../components/Landing';
 import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
@@ -34,6 +35,7 @@ import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
 import { biggerJob, estimateNote, longConversation } from '../cost/phrasing';
 import type { Estimate } from '../cost/estimate';
+import { findMoved, saysInStep, type Design } from '../design/moved';
 import { pagesIn } from '../preview/pages';
 import { behind, realWords } from '../lib/showme';
 import './Gallery.css';
@@ -281,6 +283,41 @@ const GIT_DIRTY = {
     { path: 'public/hero-bg.svg', kind: 'new' },
   ],
 } as const;
+
+/** A header as it was built from, and the same header after somebody spent a
+ *  Tuesday on it. The findings under it are not written here: they are what the
+ *  comparison makes of these two. */
+const BUILT_FROM: Design = {
+  frames: [{ id: '1:23', name: 'Header', width: 1440, height: 96 }],
+  values: {
+    colors: { 'color-brand-primary': '#b8492c', 'color-ink': '#1a1a19' },
+    spacing: { 'space-gutter': '24px' },
+    text: { 'font-family-heading': 'Söhne' },
+  },
+};
+
+const IN_FIGMA_NOW: Design = {
+  frames: [{ id: '1:23', name: 'Header', width: 1440, height: 128 }],
+  values: {
+    colors: { 'color-brand-primary': '#8f3620', 'color-ink': '#1a1a19' },
+    spacing: { 'space-gutter': '32px' },
+    text: { 'font-family-heading': 'Söhne' },
+  },
+};
+
+const MOVED = findMoved(BUILT_FROM, IN_FIGMA_NOW, { name: 'Header' });
+
+const IN_STEP = {
+  following: {
+    id: '8Kx2ABcd',
+    name: 'Header',
+    url: 'https://www.figma.com/design/8Kx2ABcd/Landing-v4?node-id=1-23',
+    readAt: NOW - 4 * 60_000,
+  },
+  moved: MOVED,
+  says: saysInStep('Header', MOVED),
+  trouble: null,
+};
 
 /** A piece of work finished and waiting to be looked at, with both of the
  *  things that can send anywhere reachable. The state worth drawing, because it
@@ -883,6 +920,8 @@ export default function Gallery() {
           >
             <div className="composer-sample">
               <Composer
+                anywhere={false}
+                outLoud={false}
                 onSend={noop}
                 attachments={attached}
                 onAttachmentsChange={setAttached}
@@ -1130,6 +1169,8 @@ export default function Gallery() {
                     ],
                     text: ':root { --accent: #b8492c; }',
         },
+                  inStep: IN_STEP,
+                  lookingAtFigma: false,
                   landing: LANDING,
                   going: null,
                   landed: null,
@@ -1152,6 +1193,11 @@ export default function Gallery() {
                 onPutOnline={noop}
                 onOpenLink={noop}
                 onNudge={noop}
+                onFollowDesign={noop}
+                onLookAgain={noop}
+                onBuildIn={noop}
+                onCaughtUp={noop}
+                onStopFollowing={noop}
                 onKeepGoing={noop}
                 onKeepAway={noop}
                 onDropAway={noop}
@@ -1166,6 +1212,29 @@ export default function Gallery() {
               mono, because names are not translated. A search that worked leaves nothing but its
               question; only a failure says “stopped”. The meter docks into the foot, the way it
               docked into the foot of the rail.
+            </p>
+          </Section>
+
+          <Section
+            title="In step with Figma"
+            note="Every other tool reads a Figma file once, on the way in, and never looks again — the design moves on a Tuesday and nobody finds out until somebody opens the site and winces. This band holds what was read and says, in design's own words, what differs now. Each row carries the one press that puts the work back in step."
+          >
+            <div className="gallery__overview">
+              <InStep
+                state={IN_STEP}
+                detail
+                onFollow={noop}
+                onLookAgain={noop}
+                onBuildIn={noop}
+                onCaughtUp={noop}
+                onStop={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              The two colours meet along one seam, the way the near-miss rows meet: a shade you
+              cannot see is exactly when the sentence has to do the work. Nothing here is read on a
+              timer — a tool that opens somebody's Figma file every ten minutes without being asked
+              is a different product.
             </p>
           </Section>
 

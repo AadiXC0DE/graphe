@@ -103,9 +103,15 @@ mac:
         - arm64
         - x64
   extendInfo:
-    # No microphone, no camera, no location. Said explicitly so that a future
-    # dependency cannot quietly acquire one.
-    NSMicrophoneUsageDescription: false
+    # The microphone is offered because saying a change out loud is easier than
+    # writing one, and only ever after a press. Nothing is recorded and nothing
+    # is sent anywhere — the words are turned into text by the system and land
+    # in the box for editing.
+    #
+    # Every other request is refused outright in electron/main.ts, so the reason
+    # this list was pinned in the first place still holds: no dependency can
+    # quietly acquire anything, including the microphone this string names.
+    NSMicrophoneUsageDescription: Graphe listens only while you hold the button, so you can say a change instead of typing it.
     NSCameraUsageDescription: false
 
 dmg:

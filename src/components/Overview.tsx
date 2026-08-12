@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import Away from './Away';
 import CostMeter from './CostMeter';
 import Drift from './Drift';
+import Motion from './Motion';
 import Helpers from './Helpers';
+import InStep from './InStep';
 import Landing, { type Outcome } from './Landing';
 import Legible from './Legible';
 import Responsive from './Responsive';
@@ -16,14 +18,17 @@ import type {
   Decision,
   EveryKind,
   GitSnapshot,
+  InStep as InStepState,
   Landing as LandingState,
   Look,
+  Move,
   PutBack,
   SavedVersion,
   StyleToken,
   Swatch,
 } from '../lib/ipc';
 import { findDrift } from '../design/drift';
+import { readMotion } from '../motion/read';
 import { findTrouble } from '../design/legibility';
 import { pairsToCheck, paletteFrom } from '../design/pairs';
 import type { NowView, Reference, ResearchEntry } from '../lib/projects';
@@ -57,6 +62,11 @@ export type OverviewView = {
   swatches: readonly Swatch[];
   /** This project's own tokens, and where they live. */
   styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
+  /** The Figma file this project is kept in step with, and what has moved on in
+   *  it. Null until the shell has answered. */
+  inStep: InStepState | null;
+  /** True while that file is being read. */
+  lookingAtFigma: boolean;
   /** What can be done with the work now it exists. Null until the shell has
    *  answered, so the band does not flash on the way in. */
   landing: LandingState | null;
@@ -105,9 +115,24 @@ type Props = {
   onNudge: (name: string, value: string) => void;
   /** Move the colour behind a pairing nobody can read to one they can. */
   onFixColour?: (name: string, value: string) => void;
+  /** Change how long something takes, or how it starts and stops. */
+  onNudgeMotion?: (move: import('../motion/read').Move, change: import('../motion/read').Change) => void;
   /** Put one of the project's own values back where something close to it was
    *  written instead. */
   onUseYours?: (finding: { use: string; line: number; wrote: string }) => void;
+
+  /* ------------------------------------------------ staying in step with Figma */
+
+  /** Keep this project in step with the file behind a pasted Figma address. */
+  onFollowDesign: (address: string) => void;
+  /** Read that file again. */
+  onLookAgain: () => void;
+  /** Bring the work into step with one thing that moved. */
+  onBuildIn: (move: Move) => void;
+  /** The work matches Figma now. */
+  onCaughtUp: () => void;
+  /** Stop following it. */
+  onStopFollowing: () => void;
 
   /* ---------------------------------------------- while you are not looking */
 
@@ -182,8 +207,14 @@ export default function Overview({
   onPutOnline,
   onOpenLink,
   onNudge,
+  onNudgeMotion,
   onFixColour,
   onUseYours,
+  onFollowDesign,
+  onLookAgain,
+  onBuildIn,
+  onCaughtUp,
+  onStopFollowing,
   onKeepGoing,
   onKeepAway,
   onDropAway,
@@ -202,6 +233,14 @@ export default function Overview({
 
   /* Worked out here rather than sent over the wire: the values and the file are
      already in hand, and the answer changes whenever either does. */
+  /* How the project moves, read from the same stylesheet everything else here
+     comes from. Nudging a length or a curve is arithmetic, not a question for a
+     model — see Styles for the same bargain. */
+  const moves = useMemo(
+    () => (styles === null ? null : readMotion(styles.text)),
+    [styles],
+  );
+
   const drifted = useMemo(
     () => (styles === null ? [] : findDrift(styles.text, styles.tokens)),
     [styles],
@@ -229,7 +268,7 @@ export default function Overview({
 
   /* A dot on the tab, not a number: the count matters once you are looking, and
      before that it is only worth knowing there is something. */
-  const trouble = drifted.length + unreadable.findings.length;
+  const trouble = drifted.length + unreadable.findings.length + (view.inStep?.moved.length ?? 0);
   /* The same dot on Work, for the one thing on this panel that cannot move
      without a person: something that carried on and then stopped to ask. */
   const asking = (view.away?.pieces ?? []).some((one) => one.question !== null);
@@ -447,6 +486,25 @@ export default function Overview({
       </div>
 
       <div role="tabpanel" id="overview-panel-look" aria-labelledby="overview-tab-look" hidden={tab !== 'look'}>
+      {/* First in the tab, and always here. Everything else in this panel is a
+          reading of the project; this is the one thing that can change while
+          nobody is looking, and it has to be findable before it has anything
+          to say. */}
+      {view.inStep === null ? null : (
+        <section className="overview__block">
+          <InStep
+            state={view.inStep}
+            busy={view.lookingAtFigma}
+            detail={showMe}
+            onFollow={onFollowDesign}
+            onLookAgain={onLookAgain}
+            onBuildIn={onBuildIn}
+            onCaughtUp={onCaughtUp}
+            onStop={onStopFollowing}
+          />
+        </section>
+      )}
+
       {styles === null ? null : (
         <section className="overview__block">
           <h2 className="overview__title">Styles</h2>
@@ -489,6 +547,12 @@ export default function Overview({
         />
       </section>
 
+
+      {moves === null || moves.moves.length === 0 || onNudgeMotion === undefined ? null : (
+        <section className="overview__block">
+          <Motion motion={moves} file={styles?.file ?? ''} onNudge={onNudgeMotion} busy={busy} />
+        </section>
+      )}
 
       {drifted.length === 0 ? null : (
         <section className="overview__block">

@@ -4,14 +4,36 @@ import {
   useRef,
   useState,
   type ClipboardEvent,
-  type DragEvent,
   type KeyboardEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import Attachments, { type Attachment } from './Attachments';
 import HowToWork, { type Plans } from './HowToWork';
 import ThinkingWith from './ThinkingWith';
 import type { ConnectionState, ModelChoice } from '../lib/ipc';
-import { checkFile, extensionOf, figmaLink, readableSize } from '../lib/attachments';
+import {
+  NOT_DRAGGING,
+  carriesSomething,
+  deeper,
+  dragging,
+  extensionOf,
+  figmaLink,
+  readDropped,
+  readableSize,
+  shallower,
+} from '../lib/attachments';
+import {
+  SAYING,
+  around,
+  canSay,
+  earsIn,
+  fold,
+  gather,
+  readSaid,
+  wordsFor,
+  type Around,
+  type Listening,
+} from '../lib/saying';
 import './Composer.css';
 
 type Props = {
@@ -45,6 +67,12 @@ type Props = {
   onPlans?: (plans: Plans) => void;
   onSelectModel?: (choice: ModelChoice) => void;
   onConnect?: () => void;
+  /** Whether a drop anywhere in the window lands here. On by default: people
+   *  drag at the picture they are talking about, not at a box. */
+  anywhere?: boolean;
+  /** Whether to offer to listen. On by default, and only ever shown where this
+   *  computer can actually do it. */
+  outLoud?: boolean;
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -58,14 +86,26 @@ function newId(): string {
   return `attachment-${counter}`;
 }
 
+/* Only the composer that mounted last answers a drop on the window: two of them
+   listening would attach the same picture twice. */
+const answering: symbol[] = [];
+
+// Grow with content rather than scrolling a fixed box.
+function resize(el: HTMLTextAreaElement | null): void {
+  if (el === null) return;
+  el.style.height = 'auto';
+  el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+}
+
 /**
  * The one thing on the first screen.
  *
  * It takes a Figma link, a screenshot or a photo of a sketch, which is what its
- * own hint has always claimed and what, until now, it could not do. Four ways
+ * own hint has always claimed and what, until now, it could not do. Five ways
  * in, because people reach for different ones and none of them is obscure:
- * drag a file onto it, paste a screenshot straight out of the clipboard, paste
- * a Figma URL, or press the paperclip and pick something.
+ * drop something anywhere on the window, paste a screenshot straight out of the
+ * clipboard, paste a Figma URL, press the paperclip and pick something, or say
+ * out loud what you want changed.
  *
  * A pasted Figma link becomes a link chip rather than a file, because it is a
  * place and not a copy — and because turning your URL into text you then have
@@ -86,9 +126,14 @@ export default function Composer({
   onPlans,
   onSelectModel,
   onConnect,
+  anywhere = true,
+  outLoud = true,
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
+  /* Asked once, and again only if listening turns out not to work here. A
+     control that is visible and does nothing is worse than no control. */
+  const [canListen, setCanListen] = useState(() => canSay(globalThis));
   /** Why the last thing was turned away. One sentence, and never the user's
    *  fault. Cleared as soon as anything else happens. */
   const [refused, setRefused] = useState<string | null>(null);
@@ -98,7 +143,7 @@ export default function Composer({
   /* Drag events fire for every child element the pointer crosses, so a depth
      count is the difference between a calm drop state and one that flickers on
      and off as the cursor moves over the placeholder text. */
-  const depth = useRef(0);
+  const depth = useRef(NOT_DRAGGING);
 
   const attachedRef = useRef(attachments);
   attachedRef.current = attachments;
@@ -110,22 +155,6 @@ export default function Composer({
     [onAttachmentsChange],
   );
 
-  /* Dropping a file on a window that is not expecting one makes the browser
-     open it — in a desktop app, that replaces the interface with a photograph
-     and there is no back button. Nothing outside the composer accepts a drop,
-     so everything outside the composer refuses one. */
-  useEffect(() => {
-    const swallow = (event: globalThis.DragEvent) => {
-      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
-    };
-    window.addEventListener('dragover', swallow);
-    window.addEventListener('drop', swallow);
-    return () => {
-      window.removeEventListener('dragover', swallow);
-      window.removeEventListener('drop', swallow);
-    };
-  }, []);
-
   /* Seeded from outside, with the cursor left at the end of it so the next
      keystroke continues the sentence rather than landing in the middle of it. */
   useEffect(() => {
@@ -135,37 +164,42 @@ export default function Composer({
     if (field === null) return;
     field.focus();
     field.setSelectionRange(draft.length, draft.length);
-    field.style.height = 'auto';
-    field.style.height = `${Math.min(field.scrollHeight, 220)}px`;
+    resize(field);
   }, [draft]);
+
+  /** Everything that arrives — dropped, pasted or picked — comes through here,
+   *  so all three answer to the same rules and say the same sentences. */
+  const land = useCallback(
+    (payload: { files?: readonly File[]; text?: string }) => {
+      const landed = readDropped<File>(payload);
+      const added: Attachment[] = landed.taken.map(({ file, kind }) => ({
+        id: newId(),
+        kind,
+        name: file.name,
+        note: [extensionOf(file.name).toUpperCase(), readableSize(file.size)]
+          .filter(Boolean)
+          .join(' · '),
+        preview: kind === 'image' ? URL.createObjectURL(file) : undefined,
+        file,
+      }));
+
+      const link = landed.link;
+      if (link !== null && !attachedRef.current.some((item) => item.url === link.url)) {
+        added.push({ id: newId(), kind: 'figma', name: link.name, note: link.what, url: link.url });
+      }
+
+      setRefused(landed.because);
+      if (added.length > 0) change([...attachedRef.current, ...added]);
+    },
+    [change],
+  );
 
   const take = useCallback(
     (files: readonly File[]) => {
       if (files.length === 0) return;
-      const added: Attachment[] = [];
-      let turnedAway: string | null = null;
-
-      for (const file of files) {
-        const verdict = checkFile({ name: file.name, type: file.type, size: file.size });
-        if (!verdict.ok) {
-          turnedAway ??= verdict.because;
-          continue;
-        }
-        const extension = extensionOf(file.name);
-        added.push({
-          id: newId(),
-          kind: verdict.kind,
-          name: file.name,
-          note: [extension.toUpperCase(), readableSize(file.size)].filter(Boolean).join(' · '),
-          preview: verdict.kind === 'image' ? URL.createObjectURL(file) : undefined,
-          file,
-        });
-      }
-
-      setRefused(turnedAway);
-      if (added.length > 0) change([...attachedRef.current, ...added]);
+      land({ files });
     },
-    [change],
+    [land],
   );
 
   const takeLink = useCallback(
@@ -196,6 +230,7 @@ export default function Composer({
   const submit = () => {
     const text = value.trim();
     if (!text || busy) return;
+    ears.current?.stop();
     onSend(text);
     setValue('');
     setRefused(null);
@@ -203,6 +238,11 @@ export default function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape' && listening) {
+      e.preventDefault();
+      stopListening();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       submit();
@@ -222,56 +262,168 @@ export default function Composer({
     if (takeLink(e.clipboardData.getData('text/plain'))) e.preventDefault();
   };
 
-  const carriesFiles = (e: DragEvent) => e.dataTransfer.types.includes('Files');
+  /**
+   * The whole window is the target.
+   *
+   * People drag at the thing they are talking about — the picture, the panel,
+   * the screen they want changed — and not at a box six hundred pixels below
+   * it. So anywhere counts, and the window says so plainly for as long as
+   * something is being carried over it.
+   *
+   * It also has to be here rather than nowhere: dropping a file on a window
+   * that is not expecting one makes the browser open it, and in a desktop app
+   * that is the interface replaced by a photograph with no way back.
+   */
+  useEffect(() => {
+    if (!anywhere) return;
 
-  const onDragEnter = (e: DragEvent) => {
-    if (!carriesFiles(e) && !e.dataTransfer.types.includes('text/uri-list')) return;
-    e.preventDefault();
-    depth.current += 1;
-    setDropping(true);
-  };
+    const mine = Symbol('composer');
+    answering.push(mine);
+    const ours = () => answering[answering.length - 1] === mine;
 
-  const onDragOver = (e: DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-  };
+    const show = () => {
+      if (ours()) setDropping(dragging(depth.current));
+    };
+    const clear = () => {
+      depth.current = NOT_DRAGGING;
+      show();
+    };
+    const carried = (event: globalThis.DragEvent) =>
+      carriesSomething(Array.from(event.dataTransfer?.types ?? []));
 
-  const onDragLeave = () => {
-    depth.current = Math.max(0, depth.current - 1);
-    if (depth.current === 0) setDropping(false);
-  };
+    const enter = (event: globalThis.DragEvent) => {
+      if (!carried(event)) return;
+      event.preventDefault();
+      depth.current = deeper(depth.current);
+      show();
+    };
 
-  const onDrop = (e: DragEvent) => {
-    e.preventDefault();
-    depth.current = 0;
-    setDropping(false);
+    const over = (event: globalThis.DragEvent) => {
+      if (!carried(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'copy';
+    };
 
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      take(files);
-    } else {
-      const dragged = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
-      if (!takeLink(dragged) && dragged.trim() !== '') {
-        setRefused('That link is not one I recognise yet. A Figma link or a file will work.');
-      }
+    const leave = () => {
+      depth.current = shallower(depth.current);
+      show();
+    };
+
+    const drop = (event: globalThis.DragEvent) => {
+      // A dragged word landing in the box is ordinary editing; leave it alone.
+      if (!carried(event)) return;
+      event.preventDefault();
+      clear();
+      if (!ours()) return;
+
+      const carrying = event.dataTransfer;
+      const dragged =
+        carrying === null ? '' : carrying.getData('text/uri-list') || carrying.getData('text/plain');
+      land({ files: Array.from(carrying?.files ?? []), text: dragged });
+      areaRef.current?.focus();
+    };
+
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragover', over);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('dragend', clear);
+    window.addEventListener('drop', drop);
+    // A drag carried off to another app and released there never comes back.
+    window.addEventListener('blur', clear);
+
+    return () => {
+      const at = answering.lastIndexOf(mine);
+      if (at !== -1) answering.splice(at, 1);
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('dragend', clear);
+      window.removeEventListener('drop', drop);
+      window.removeEventListener('blur', clear);
+    };
+  }, [anywhere, land]);
+
+  /**
+   * Saying it instead of typing it.
+   *
+   * A change to how something looks is easier said than written — "warmer, and
+   * give the whole thing more air" is one breath. The listening is the
+   * browser's own, on this machine; what it hears lands in the box as ordinary
+   * text with the cursor after it, and waits there to be read and edited.
+   * Nothing goes anywhere until somebody presses send.
+   */
+  const ears = useRef<Listening | null>(null);
+  const place = useRef<Around>({ before: '', after: '' });
+  const [listening, setListening] = useState(false);
+  const [caret, setCaret] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (caret === null) return;
+    const field = areaRef.current;
+    if (field === null) return;
+    field.setSelectionRange(caret, caret);
+    resize(field);
+    setCaret(null);
+  }, [caret]);
+
+  useEffect(
+    () => () => {
+      ears.current?.abort();
+      ears.current = null;
+    },
+    [],
+  );
+
+  const stopListening = useCallback(() => {
+    ears.current?.stop();
+    setListening(false);
+  }, []);
+
+  const listen = () => {
+    if (listening) {
+      stopListening();
+      return;
     }
-    areaRef.current?.focus();
-  };
 
-  // Grow with content rather than scrolling a fixed box.
-  const resize = (el: HTMLTextAreaElement) => {
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+    const Ears = earsIn(globalThis);
+    if (Ears === null) {
+      setCanListen(false);
+      return;
+    }
+
+    const field = areaRef.current;
+    place.current = around(value, field?.selectionStart, field?.selectionEnd);
+
+    const listener = new Ears();
+    listener.continuous = true;
+    listener.interimResults = true;
+    listener.lang = navigator?.language ?? 'en-US';
+    listener.onresult = (event) => {
+      const { text, caret: at } = fold(place.current, gather(readSaid(event)));
+      setValue(text);
+      setCaret(at);
+    };
+    listener.onerror = (event) => {
+      const { because, keepOffering } = wordsFor(event?.error);
+      if (because !== null) setRefused(because);
+      if (!keepOffering) setCanListen(false);
+      setListening(false);
+    };
+    listener.onend = () => setListening(false);
+
+    ears.current = listener;
+    setRefused(null);
+    setListening(true);
+    try {
+      listener.start();
+    } catch {
+      // Already going. Nothing to say about it.
+    }
+    field?.focus();
   };
 
   return (
-    <div
-      className={`composer ${dropping ? 'composer--dropping' : ''}`}
-      onDragEnter={onDragEnter}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-    >
+    <div className={`composer ${dropping ? 'composer--dropping' : ''}`}>
       <Attachments items={attachments} onRemove={remove} />
 
       <textarea
@@ -282,6 +434,9 @@ export default function Composer({
         autoFocus={autoFocus}
         placeholder={placeholder ?? 'Describe what you want — or paste a screenshot of it'}
         onChange={(e) => {
+          // Typing is taking over: stop listening rather than let the next
+          // thing heard land on top of what was just written.
+          if (listening) stopListening();
           setValue(e.target.value);
           resize(e.target);
         }}
@@ -308,6 +463,43 @@ export default function Composer({
           </svg>
         </button>
 
+        {/* Beside the paperclip, because it is the same kind of offer: another
+            way of getting what is in your head into the box. Absent entirely
+            where this computer cannot listen. */}
+        {!outLoud || !canListen ? null : (
+          <button
+            type="button"
+            className={`composer__say ${listening ? 'composer__say--on' : ''}`}
+            onClick={listen}
+            aria-label={listening ? SAYING.stop : SAYING.start}
+            aria-pressed={listening}
+          >
+            {listening ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="8" cy="8" r="3.5" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect
+                  x="6"
+                  y="1.75"
+                  width="4"
+                  height="7.5"
+                  rx="2"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.25"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
+          </button>
+        )}
+
         {plans === undefined || onPlans === undefined ? null : (
           <HowToWork plans={plans} onPlans={onPlans} />
         )}
@@ -326,10 +518,12 @@ export default function Composer({
             placeholder cannot: how to send, and how not to. Once there is
             anything in the box it goes quiet (see Composer.css), because a hint
             you have already acted on is furniture. */}
-        <span className="composer__hint">
-          {attachments.length > 0
-            ? 'I can see this — say what you want changed.'
-            : 'Enter to send · Shift + Enter for a new line'}
+        <span className={`composer__hint ${listening ? 'composer__hint--loud' : ''}`}>
+          {listening
+            ? SAYING.listening
+            : attachments.length > 0
+              ? 'I can see this — say what you want changed.'
+              : 'Enter to send · Shift + Enter for a new line'}
         </span>
 
         {/* The same button in two states (BACKLOG A1): an arrow that sends, or a
@@ -401,12 +595,22 @@ export default function Composer({
         }}
       />
 
-      {/* Calm: the box it is already in becomes the target, rather than a
-          dashed rectangle appearing to say what a rectangle already said.
-          Nothing moves, nothing bounces. */}
-      <div className="composer__drop" aria-hidden="true">
-        <span className="composer__droptext">Drop it here</span>
-      </div>
+      {/* Calm: the app dims a little and one line appears in the middle of it.
+          No dashed rectangle, nothing that bounces, and one state for the whole
+          window rather than a target that has to be aimed at. It goes over
+          everything, so it goes at the end of the document rather than inside a
+          box that something else might sit on top of. */}
+      {!anywhere || typeof document === 'undefined'
+        ? null
+        : createPortal(
+            <div className={`anywhere ${dropping ? 'anywhere--on' : ''}`} aria-hidden="true">
+              <div className="anywhere__card">
+                <span className="anywhere__what">Drop it anywhere</span>
+                <span className="anywhere__note">A picture, a PDF, or a Figma link</span>
+              </div>
+            </div>,
+            document.body,
+          )}
     </div>
   );
 }

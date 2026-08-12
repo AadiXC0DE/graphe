@@ -129,34 +129,97 @@
 
 /* ---------------------------------------------------------------------------
    Being dropped on
-   The box that is already there becomes the target. No dashed border, nothing
-   that bounces, nothing that grows: a dashed rectangle drawn inside a solid one
-   is a second frame saying what the first frame already said.
+   The whole window is the target now (see .anywhere in App.css), so all that is
+   left here is the box quietly lighting up to say where the thing will land.
+   No dashed border, nothing that bounces, nothing that grows.
    --------------------------------------------------------------------------- */
 
 .composer--dropping {
   border-color: var(--accent);
 }
 
-.composer__drop {
-  position: absolute;
-  inset: 0;
+/* ---------------------------------------------------------------------------
+   Saying it out loud
+   --------------------------------------------------------------------------- */
+
+.composer__say {
+  position: relative;
   display: grid;
   place-items: center;
-  border-radius: inherit;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* 44px hit area without changing the visual size */
+.composer__say::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.composer__say:active {
+  transform: scale(0.97);
+}
+
+.composer__say:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .composer__say:hover {
+    color: var(--text);
+  }
+}
+
+/* On. The one place in the composer allowed a repeating animation, because it
+   is the only state that is doing something while you sit there — and a
+   listening indicator that does not move is indistinguishable from a button
+   somebody left coloured in. It stops the moment listening does. */
+.composer__say--on {
+  color: var(--accent);
   background: var(--accent-soft);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur-ui) var(--ease-out-quart);
 }
 
-.composer--dropping .composer__drop {
-  opacity: 1;
+.composer__say--on::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid var(--accent);
+  animation: say-listening 1.8s var(--ease-in-out-cubic) infinite;
 }
 
-.composer__droptext {
-  font-size: var(--text-sm);
-  /* On --accent-soft, which is what this overlay is painted in. */
+@keyframes say-listening {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+/* While listening the hint is the only thing saying so, and by then there are
+   words in the box — which is exactly when the hint normally goes quiet. The
+   selector matches the rule that hides it, or it would lose to it. */
+.composer__hint--loud,
+.composer:not(:has(.composer__input:placeholder-shown)):not(:has(.chip))
+  .composer__hint--loud {
+  visibility: visible;
   color: var(--accent-ink);
 }
 
@@ -216,17 +279,24 @@
 /* Every animation ships with its counterpart. No exceptions, including the
    press on the send button and the fade of the drop state. */
 @media (prefers-reduced-motion: reduce) {
-  .composer,
-  .composer__drop {
+  .composer {
     transition: none;
   }
 
   .composer__send:not(:disabled):active,
-  .composer__attach:active {
+  .composer__attach:active,
+  .composer__say:active {
     transform: none;
   }
 
-  .composer__attach {
+  .composer__attach,
+  .composer__say {
     transition: color var(--dur-micro) var(--ease-hover);
+  }
+
+  /* The ring stops; the colour stays, so the state is still legible. */
+  .composer__say--on::before {
+    animation: none;
+    opacity: 1;
   }
 }

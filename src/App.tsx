@@ -10,6 +10,7 @@ import ErrorCard from "./components/ErrorCard";
 import Files from "./components/Files";
 import FileView from "./components/FileView";
 import Message from "./components/Message";
+import type { Outcome } from "./components/Landing";
 import Overview from "./components/Overview";
 import PlanCard from "./components/PlanCard";
 import AddMore from "./components/AddMore";
@@ -43,6 +44,7 @@ import {
   type FoundAccount,
   type ModelChoice,
   type Conversation,
+  type Landing as LandingState,
   type Look,
   type Pack,
   type Page,
@@ -261,6 +263,7 @@ function Conversation() {
     model: null,
     kept: {},
     showFiles: false,
+    holdBack: false,
   });
   const [editor, setEditor] = useState<string | null>(null);
 
@@ -1309,6 +1312,116 @@ function Conversation() {
     );
   }, []);
 
+  /* ---------------------------------------------------------- landing it */
+
+  /**
+   * What can be done with the work now that it exists.
+   *
+   * Asked for rather than assumed, and asked for again after anything that
+   * could change the answer — connecting an account, handing work over,
+   * switching project. The shell remembers the expensive parts of the answer
+   * for a few minutes, so asking often is cheap.
+   */
+  const [landing, setLanding] = useState<LandingState | null>(null);
+  const [going, setGoing] = useState<"developer" | "online" | null>(null);
+  const [landed, setLanded] = useState<Outcome>(null);
+  const [decided, setDecided] = useState<{ letIn: boolean; undoTo: string } | null>(null);
+
+  const refreshLanding = useCallback(() => {
+    void bridge.landing().then((answer) => {
+      setLanding(answer.ok ? answer.value : null);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (desks.current === null) {
+      setLanding(null);
+      return;
+    }
+    setLanded(null);
+    setDecided(null);
+    refreshLanding();
+  }, [desks.current, refreshLanding]);
+
+  const changeHoldBack = useCallback(
+    (on: boolean) => {
+      setPreferences((was) => ({ ...was, holdBack: on }));
+      setLanding((was) => (was === null ? was : { ...was, holdBack: on }));
+      void bridge.setHoldBack(on).then((answer) => {
+        if (answer.ok) setPreferences(answer.value);
+        refreshLanding();
+      });
+    },
+    [refreshLanding],
+  );
+
+  const decideOnWork = useCallback(
+    (letIn: boolean) => {
+      const path = desks.current;
+      if (path === null) return;
+      setBusy(true);
+      void bridge
+        .decideOnWork(letIn)
+        .then((answer) => {
+          if (!answer.ok) {
+            troubleHere(answer.trouble);
+            return;
+          }
+          setLanding(answer.value.landing);
+          setDecided(
+            answer.value.undoTo === null
+              ? null
+              : { letIn: answer.value.letIn, undoTo: answer.value.undoTo },
+          );
+          setDesks((current) =>
+            changeDesk(current, path, (one) => ({ ...one, versions: answer.value.versions })),
+          );
+          void refreshOverview(path);
+        })
+        .finally(() => setBusy(false));
+    },
+    [desks.current, refreshOverview, troubleHere],
+  );
+
+  /** The two that can send something off this computer. Both are only ever
+   *  called from the band's own confirmation, which has already said what is
+   *  about to happen — this is the press, not the offer. */
+  const handToDeveloper = useCallback(() => {
+    setGoing("developer");
+    setLanded(null);
+    void bridge
+      .handToDeveloper(true)
+      .then((answer) => {
+        if (!answer.ok) {
+          troubleHere(answer.trouble);
+          return;
+        }
+        setLanded({ kind: "handed", handed: answer.value });
+      })
+      .finally(() => {
+        setGoing(null);
+        refreshLanding();
+      });
+  }, [refreshLanding, troubleHere]);
+
+  const putItOnline = useCallback(() => {
+    setGoing("online");
+    setLanded(null);
+    void bridge
+      .putOnline(true)
+      .then((answer) => {
+        if (!answer.ok) {
+          troubleHere(answer.trouble);
+          return;
+        }
+        setLanded({ kind: "online", went: answer.value });
+      })
+      .finally(() => {
+        setGoing(null);
+        refreshLanding();
+      });
+  }, [refreshLanding, troubleHere]);
+
   /** One value moved, from wherever the panel offered it: a slider, or a colour
    *  nobody could read against the one underneath it. */
   const nudge = useCallback((name: string, value: string) => {
@@ -1769,6 +1882,10 @@ function Conversation() {
             artifacts: desk.overview?.artifacts ?? [],
             swatches: desk.overview?.swatches ?? [],
             styles: desk.overview?.styles ?? null,
+            landing,
+            going,
+            landed,
+            decided,
           }}
           onPutBack={(versionId) => void putBack(versionId)}
           onName={(versionId, name) => void nameVersion(versionId, name)}
@@ -1787,6 +1904,11 @@ function Conversation() {
           }}
           onWorkAt={(look) => setWorkingAt((was) => (was === look.id ? null : look.id))}
           onShare={() => void bridge.shareReview()}
+          onHoldBack={changeHoldBack}
+          onDecide={decideOnWork}
+          onHandOver={handToDeveloper}
+          onPutOnline={putItOnline}
+          onOpenLink={(address) => void bridge.openLink(address)}
           onNudge={nudge}
           onFixColour={nudge}
           onSave={() => {

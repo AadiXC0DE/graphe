@@ -32,8 +32,12 @@ import {
   type ConnectStep,
   type Conversation,
   type ConnectionState,
+  type Decided,
   type Decision,
   type FileEntry,
+  type HandedOver,
+  type Landing,
+  type WentOnline,
   type FoundAccount,
   type GrapheApi,
   type Hatches,
@@ -392,7 +396,13 @@ function previewBridge(): Bridge {
   /** `showFiles` starts on here and nowhere else, for the same reason the
    *  version rail has versions: a region that has to be asked for is a region
    *  a browser tab would never draw, and one nobody could look at. */
-  let preferred: Preferences = { showMe: false, model: null, kept: {}, showFiles: true };
+  let preferred: Preferences = {
+    showMe: false,
+    model: null,
+    kept: {},
+    showFiles: true,
+    holdBack: false,
+  };
 
   const send = (event: AgentEvent): void => {
     for (const listener of listeners) listener({ project: openPath, event });
@@ -901,8 +911,61 @@ function previewBridge(): Bridge {
     openLink(_url: string): Promise<Result<null>> {
       return Promise.resolve(done(null));
     },
+
+    /* Landing work somewhere needs a folder, a computer and somebody's account.
+       A browser tab has none of the three, so the band draws itself and says
+       exactly why each thing is out of reach rather than pretending. */
+    landing(): Promise<Result<Landing>> {
+      return Promise.resolve(
+        done({
+          waiting: null,
+          holdBack: preferred.holdBack,
+          canHandOver: false,
+          handOverSays: PREVIEW_LANDING,
+          canPutOnline: false,
+          onlineSays: PREVIEW_LANDING,
+        }),
+      );
+    },
+
+    setHoldBack(on: boolean): Promise<Result<Preferences>> {
+      preferred = { ...preferred, holdBack: on };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    decideOnWork(letIn: boolean): Promise<Result<Decided>> {
+      return Promise.resolve(
+        done({
+          landing: {
+            waiting: null,
+            holdBack: preferred.holdBack,
+            canHandOver: false,
+            handOverSays: PREVIEW_LANDING,
+            canPutOnline: false,
+            onlineSays: PREVIEW_LANDING,
+          },
+          versions: [],
+          letIn,
+          undoTo: null,
+        }),
+      );
+    },
+
+    handToDeveloper(_confirmed: boolean): Promise<Result<HandedOver>> {
+      return Promise.resolve(
+        done({ sent: false, name: '', address: null, says: PREVIEW_LANDING, steps: [] }),
+      );
+    },
+
+    putOnline(_confirmed: boolean): Promise<Result<WentOnline>> {
+      return Promise.resolve(done({ address: null, pages: 0, says: PREVIEW_LANDING, steps: [] }));
+    },
   };
 }
+
+/** What a browser tab can honestly say about landing work anywhere. */
+const PREVIEW_LANDING =
+  'This is Graphe in a browser tab, so there is no project folder here to send anywhere.';
 
 /** Nothing to go back to. Only reachable in the preview, where a person can
  *  press the button before anything has been opened. */
@@ -1027,6 +1090,11 @@ function connect(): Bridge {
     discoveredAccounts: () => api.discoveredAccounts(),
     importAccount: (account) => api.importAccount(account),
     openLink: (url) => api.openLink(url),
+    landing: () => api.landing(),
+    setHoldBack: (on) => api.setHoldBack(on),
+    decideOnWork: (letIn) => api.decideOnWork(letIn),
+    handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
+    putOnline: (confirmed) => api.putOnline(confirmed),
   };
 }
 

@@ -57,6 +57,7 @@ import {
 import type { AgentEvent, ImageCard } from '../src/agent/types';
 import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline, type Version } from '../src/history/timeline';
+import { ProjectHistory } from '../src/history/repo';
 import {
   cannotOpen,
   everythingIn,
@@ -71,10 +72,14 @@ import {
   type ConnectOutcome,
   type ConnectStep,
   type ConnectionState,
+  type Decided,
   type FileEntry,
   type GitSnapshot,
+  type HandedOver,
   type Hatches,
+  type Landing,
   type OpenedProject,
+  type WentOnline,
   type Overview,
   type Preferences,
   type PromptOptions,
@@ -113,6 +118,12 @@ import { readTokens, steps, writeToken } from '../src/design/tokens';
 import { lookAtEveryWidth } from '../src/diff/capture';
 import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
+import { HeldWork, holdWords } from '../src/history/attempts';
+import { HandoverError, handToDeveloper, whatIsHere, type Change } from '../src/share/developer';
+import { handoverWords } from '../src/share/handover';
+import { OnlineError, putOnline, whatIsHereForOnline } from '../src/share/publish';
+import { onlineWords } from '../src/share/online';
+import { canPutOnline, canSendItOn } from '../src/share/tools';
 
 import type { Serving } from '../src/preview/serve';
 import { makeAndServe, ShowError, showSays } from '../src/preview/show';
@@ -535,6 +546,10 @@ type Looking = {
   again: boolean;
   /** Change id → the two files behind it, for `visualFrames`. */
   frames: Map<string, { before: string; after: string }>;
+  /** The same changes in the words already written beside them, kept so handing
+   *  the work to somebody else does not have to describe it a second time in a
+   *  second voice. */
+  told: Map<string, Change>;
   /** Version id → what the project looked like at it, small, ready to draw.
    *  Small pictures rather than paths so the rail never waits on a disk. */
   pictures: Map<string, string>;
@@ -552,10 +567,15 @@ function nothingSeenYet(): Looking {
     busy: false,
     again: false,
     frames: new Map(),
+    told: new Map(),
     pictures: new Map(),
     counter: 0,
   };
 }
+
+/** As many changes as a person will read in one sitting before approving them.
+ *  Past this it is an archive, and nobody approves an archive. */
+const TOLD = 12;
 
 /** File a picture under the version it shows, oldest let go once there are more
  *  than the folder itself keeps. Same ceiling as the pictures on disk, so the
@@ -579,12 +599,20 @@ type Held = {
   serving: Serving | null;
   /** The before-and-after (BACKLOG F2). */
   looking: Looking;
+  /** Work being checked before it reaches the files, or null when none is. */
+  waiting: HeldWork | null;
+  /** True while something is being sent off this computer, so a second press
+   *  cannot start a second one. */
+  sending: boolean;
 };
 
 const workspaces = new Workspaces<Held>({
   close: (held) => {
     held.session?.dispose();
     void held.serving?.stop();
+    // The copy goes; whatever it made stays reachable, so closing a project
+    // while something waits in it cannot be how somebody loses work.
+    void held.waiting?.release();
   },
 });
 
@@ -854,11 +882,27 @@ async function look(project: string, held: Held): Promise<void> {
 
     looking.frames.set(id, { before: before.file, after: taken.picture.file });
 
+    const said = await saidInDesignWords(timeline, project, changed);
+    // The same words the strip shows, kept for whoever this work is handed to.
+    // Two descriptions of one change is how somebody starts wondering which is
+    // true, so there is only ever the one.
+    looking.told.set(id, {
+      title: told.headline,
+      says: said ?? told.headline,
+      where: told.where,
+      before: before.file,
+      after: taken.picture.file,
+    });
+    for (const oldest of looking.told.keys()) {
+      if (looking.told.size <= TOLD) break;
+      looking.told.delete(oldest);
+    }
+
     showChange(project, {
       id,
       at: taken.picture.at,
       headline: told.headline,
-      inDesignWords: await saidInDesignWords(timeline, project, changed),
+      inDesignWords: said,
       where: told.where,
       areas: moved.areas,
       beforeThumb,
@@ -937,6 +981,174 @@ function forwardTo(path: string, held: Held): (event: AgentEvent) => void {
       }
     }
   };
+}
+
+/**
+ * The same relay, for work being checked in a copy of the project.
+ *
+ * Everything reaches the conversation exactly as it would, and everything spent
+ * is counted exactly as it would be. What is left out is the picture: the
+ * change is in the copy, and photographing the folder on screen would produce a
+ * before and after of a project nothing has happened to.
+ */
+function forwardHeld(path: string, held: Held): (event: AgentEvent) => void {
+  return (event) => {
+    const said: AgentEvent =
+      event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
+    send(path, said);
+    for (const also of held.spend.observe(said)) {
+      send(path, also);
+      if (also.type === 'spend-summary') {
+        void recents().then((list) => list.recordSpend(path, also.summary.total));
+      }
+    }
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Landing it                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Where copies of a project live while work is being checked in them. Outside
+ *  the project, so nothing they write can appear in the folder on screen. */
+function workFolder(): string {
+  return join(app.getPath('temp'), 'graphe-work');
+}
+
+/** One line for the version a held piece of work ends at. Their own words, so
+ *  the timeline reads the same whether work was checked first or not. */
+function saysHeldWork(doing: string): string {
+  const one = doing.replace(/\s+/g, ' ').trim();
+  return one === '' ? holdWords.label : one.length > 72 ? `${one.slice(0, 71)}…` : one;
+}
+
+/**
+ * What this computer can reach, remembered for a while.
+ *
+ * Finding out means running two or three helpers and, for one of them, asking
+ * an account over the network. That is fine once; it is not fine every time a
+ * panel redraws. None of these answers change in the middle of an afternoon.
+ */
+type Reach = { at: number; canHandOver: boolean; handOverSays: string; canPutOnline: boolean; onlineSays: string };
+
+const reached = new Map<string, Reach>();
+const STILL_TRUE = 5 * 60_000;
+
+async function whatCanBeReached(folder: string): Promise<Reach> {
+  const already = reached.get(folder);
+  if (already !== undefined && Date.now() - already.at < STILL_TRUE) return already;
+
+  const [found, online, shared] = await Promise.all([
+    whatIsHere(folder).catch(() => ({ helper: false, signedIn: false, home: null, theProjectItself: null })),
+    whatIsHereForOnline(folder).catch(() => ({ helper: false, signedIn: false })),
+    new ProjectHistory(folder).sharedCopy().catch(() => null),
+  ]);
+  const send = canSendItOn({ ...found, home: shared === null ? null : found.home });
+  const up = canPutOnline(online);
+  const fresh: Reach = {
+    at: Date.now(),
+    canHandOver: send.all,
+    handOverSays: send.says,
+    canPutOnline: up.all,
+    onlineSays: up.says,
+  };
+  reached.set(folder, fresh);
+  return fresh;
+}
+
+async function landingNow(folder: string, held: Held): Promise<Landing> {
+  const chosen = (await preferences()).all();
+  const reach = await whatCanBeReached(folder);
+  return {
+    waiting: held.waiting === null ? null : { ...held.waiting.waiting },
+    holdBack: chosen.holdBack,
+    canHandOver: reach.canHandOver,
+    handOverSays: reach.handOverSays,
+    canPutOnline: reach.canPutOnline,
+    onlineSays: reach.onlineSays,
+  };
+}
+
+/**
+ * Do this piece of work in a copy, and leave it waiting.
+ *
+ * The conversation is unbroken — every event goes to the same place it always
+ * does — and the folder on screen is untouched throughout. What the work made
+ * is an ordinary version of the project, kept reachable, so both answers to it
+ * are undoable.
+ */
+async function checkItFirst(
+  open: { path: string; name: string; held: Held },
+  text: string,
+  cards: readonly ImageCard[] | undefined,
+  lookFirst: boolean,
+): Promise<Result<null>> {
+  const held = open.held;
+  const history = new ProjectHistory(open.path);
+
+  // Work starts from a version. Anything unfinished becomes one first, silently
+  // and without a question, exactly as going back does.
+  await held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
+
+  let waiting: HeldWork;
+  try {
+    waiting = await HeldWork.start({
+      history,
+      under: workFolder(),
+      id: `held-${Date.now().toString(36)}`,
+      doing: text,
+    });
+  } catch (cause) {
+    return fail(historyTrouble(cause));
+  }
+  held.waiting = waiting;
+
+  let inside: GrapheSession | null = null;
+  try {
+    inside = await createSession({
+      projectRoot: waiting.folder,
+      onEvent: forwardHeld(open.path, held),
+      timeline: await Timeline.open(waiting.folder),
+      model: (await preferences()).all().model,
+      sessionDir: sessionsFolder(),
+    });
+    await inside.prompt(text, cards, { lookFirst });
+  } catch (cause) {
+    inside?.dispose();
+    await waiting.release().catch(() => undefined);
+    held.waiting = null;
+    const raw = cause instanceof Error ? cause.message : String(cause);
+    return fail(plainTrouble(raw, detailsOf(cause)));
+  }
+  inside.dispose();
+
+  try {
+    await waiting.settle(saysHeldWork(text));
+  } catch (cause) {
+    await waiting.release().catch(() => undefined);
+    held.waiting = null;
+    return fail(historyTrouble(cause));
+  }
+  if (waiting.waiting.version === null) held.waiting = null;
+  return done(null);
+}
+
+/**
+ * What this project's work looks like, for whoever it is handed to.
+ *
+ * The pictures and the sentences beside them, exactly as the person has already
+ * seen them. A project that cannot be photographed falls back to the version
+ * titles, which is less but is still theirs and still plain.
+ */
+async function whatChanged(open: { name: string; held: Held }): Promise<readonly Change[]> {
+  const told = [...open.held.looking.told.values()];
+  if (told.length > 0) return told.slice(-6);
+
+  const versions = await versionsOf(open.held).catch(() => []);
+  return versions
+    .slice(0, 6)
+    .reverse()
+    .map((one) => ({ title: one.title, says: '', where: null, before: null, after: null }));
 }
 
 /** The likeliest places a project keeps its own design tokens. */
@@ -1075,6 +1287,8 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     session: null,
     serving: null,
     looking: nothingSeenYet(),
+    waiting: null,
+    sending: false,
   };
 
   // A folder opened with nothing chosen is the first-run case, and Pi will not
@@ -1719,6 +1933,134 @@ function register(): void {
     }
   });
 
+  /* ------------------------------------------------------------ landing it */
+
+  handle<Landing>(CHANNEL.landing, async () => {
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    return done(await landingNow(open.path, open.held));
+  });
+
+  handle<Preferences>(CHANNEL.setHoldBack, async (_event, args) => {
+    const [on] = args;
+    if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
+    return done(await (await preferences()).change({ holdBack: on }));
+  });
+
+  handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
+    const [letIn] = args;
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    const waiting = open.held.waiting;
+
+    const asItStands = async (undoTo: string | null): Promise<Decided> => ({
+      landing: await landingNow(open.path, open.held),
+      versions: await versionsOf(open.held).catch(() => []),
+      letIn: letIn === true,
+      undoTo,
+    });
+
+    if (waiting === null || waiting.waiting.version === null) {
+      return done(await asItStands(null));
+    }
+
+    if (letIn !== true) {
+      // Nothing moves. The work is kept reachable rather than thrown away, so
+      // "bring it back" is the ordinary put-back and nothing special.
+      const version = waiting.setAside();
+      open.held.waiting = null;
+      return done(await asItStands(version));
+    }
+
+    try {
+      // Anything unfinished in the folder becomes a version first, the same way
+      // going back does, so letting work in can never write over it.
+      await open.held.timeline.snapshot({ boundary: 'turn-ended' });
+      const outcome = await waiting.approve(saysHeldWork(waiting.waiting.doing));
+      open.held.waiting = null;
+      return done(await asItStands(outcome?.undoTo ?? null));
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  /** Composed once: both of the verbs below are the only two in this file that
+   *  can put something on the internet, and they refuse identically. */
+  const notPressed: Trouble = {
+    what: 'Nothing has left this computer.',
+    because: 'This only ever happens from a press, and I did not get one.',
+    actionLabel: 'Got it',
+  };
+  const alreadyGoing: Trouble = {
+    what: 'I am already sending something.',
+    because: 'Let this one finish and then ask again.',
+    actionLabel: 'Got it',
+  };
+
+  handle<HandedOver>(CHANNEL.handToDeveloper, async (_event, args) => {
+    const [confirmed] = args;
+    if (confirmed !== true) return fail(notPressed);
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (open.held.sending) return fail(alreadyGoing);
+
+    open.held.sending = true;
+    try {
+      const changes = await whatChanged(open);
+      const newest = await open.held.timeline.currentVersion().catch(() => null);
+      const handed = await handToDeveloper({
+        history: new ProjectHistory(open.path),
+        folder: open.path,
+        name: open.name,
+        under: workFolder(),
+        title: newest?.title ?? changes[changes.length - 1]?.title ?? open.name,
+        changes,
+        at: Date.now(),
+      });
+      // What this computer can reach may well have changed by doing it.
+      reached.delete(open.path);
+      return done(handed);
+    } catch (cause) {
+      if (cause instanceof HandoverError) {
+        return fail({
+          what: handoverWords.couldNotSend,
+          because: cause.message,
+          actionLabel: 'Got it',
+          ...(cause.details.trim() === '' ? {} : { details: cause.details }),
+        });
+      }
+      return fail(historyTrouble(cause));
+    } finally {
+      open.held.sending = false;
+    }
+  });
+
+  handle<WentOnline>(CHANNEL.putOnline, async (_event, args) => {
+    const [confirmed] = args;
+    if (confirmed !== true) return fail(notPressed);
+    const open = workspaces.current;
+    if (open === null) return fail(NOTHING_OPEN);
+    if (open.held.sending) return fail(alreadyGoing);
+
+    open.held.sending = true;
+    try {
+      return done(await putOnline({ folder: open.path, says: tell }));
+    } catch (cause) {
+      if (cause instanceof OnlineError) {
+        return fail({
+          what: onlineWords.couldNotPut,
+          because: cause.message,
+          actionLabel: 'Got it',
+          ...(cause.details.trim() === '' ? {} : { details: cause.details }),
+        });
+      }
+      return fail(couldNotShow(cause));
+    } finally {
+      open.held.sending = false;
+      tell({ says: showSays.ready, done: true });
+    }
+  });
+
   handle<OpenedProject>(CHANNEL.openConversation, async (_event, args) => {
     const [path] = args;
     const open = workspaces.current;
@@ -1886,6 +2228,11 @@ function register(): void {
     try {
       const lookFirst =
         ways !== null && typeof ways === 'object' && (ways as PromptOptions).lookFirst === true;
+      // Checked first, when they have asked for that and nothing is already
+      // waiting. Two pieces of work waiting at once is a decision nobody made.
+      if ((await preferences()).all().holdBack && open.held.waiting === null) {
+        return await checkItFirst(open, text, imageCards(attachments), lookFirst);
+      }
       await agent.prompt(text, imageCards(attachments), { lookFirst });
       return done(null);
     } catch (cause) {

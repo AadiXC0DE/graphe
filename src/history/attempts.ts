@@ -19,6 +19,9 @@ import { mkdir, rm } from 'node:fs/promises';
 import { ProjectHistory, HistoryError, historyProblems } from './repo';
 import { AT_A_TIME, nextUp, roomLeft, type WorkState } from '../work/board';
 
+/** The window says these too, and it has no folders — see src/share/holding.ts. */
+export { holdWords } from '../share/holding';
+
 /** One try, and where it is being made. */
 export type Attempt = {
   id: string;
@@ -177,6 +180,155 @@ export class Tries {
       recursive: true,
       force: true,
     });
+  }
+}
+
+/* ========================================================================== */
+/* Work that waits to be let in                                                */
+/* ========================================================================== */
+
+/**
+ * One piece of work that does not become the project until somebody says so.
+ *
+ * Same machinery as a try: a second copy of the project sharing its history, so
+ * nothing it does can touch the files on screen. The difference is only in what
+ * happens at the end — a try is compared against another try, and this waits.
+ *
+ * Both answers are undoable, which is the promise the rest of the product makes
+ * and this one has no licence to break. Letting it in is a version like any
+ * other, so it can be put back. Setting it aside keeps the work reachable, so
+ * bringing it back later is the same call as letting it in.
+ */
+export type Waiting = {
+  id: string;
+  /** What this work was asked to do, in the person's own words. */
+  doing: string;
+  /** Where it is up to. */
+  state: 'making' | 'waiting' | 'in' | 'aside' | 'nothing';
+  /** What it ended at. Null until it has finished. */
+  version: string | null;
+  /** When it was asked for, epoch ms. */
+  at: number;
+};
+
+/** Where a held copy lives: outside the project, so nothing it writes can ever
+ *  appear in the folder somebody is looking at. */
+export function folderForHeld(under: string, id: string): string {
+  return path.join(under, safeName(id));
+}
+
+export class HeldWork {
+  readonly waiting: Waiting;
+  readonly folder: string;
+
+  private readonly history: ProjectHistory;
+  private letGo = false;
+
+  private constructor(history: ProjectHistory, folder: string, waiting: Waiting) {
+    this.history = history;
+    this.folder = folder;
+    this.waiting = waiting;
+  }
+
+  /**
+   * Start a piece of work that will wait to be let in.
+   *
+   * The project must have nothing unsaved, for the reason every copy in this
+   * file needs it: work starts from a version, and starting from a half-finished
+   * state would make letting it in mean losing whatever was half-finished.
+   */
+  static async start(options: {
+    history: ProjectHistory;
+    /** Somewhere outside the project to keep the copy. */
+    under: string;
+    id: string;
+    doing: string;
+    at?: number;
+  }): Promise<HeldWork> {
+    if (await options.history.hasUnsavedChanges()) {
+      throw new HistoryError(historyProblems.unsavedFirst);
+    }
+    const from = await options.history.currentVersion();
+    if (from === null) throw new HistoryError(historyProblems.tryFailed);
+
+    const folder = folderForHeld(options.under, options.id);
+    await mkdir(path.dirname(folder), { recursive: true });
+    await options.history.addWorkspace(folder, from);
+
+    return new HeldWork(options.history, folder, {
+      id: options.id,
+      doing: options.doing.trim(),
+      state: 'making',
+      version: null,
+      at: options.at ?? Date.now(),
+    });
+  }
+
+  /**
+   * The work has finished. Save what it did, keep it reachable, and let the
+   * copy go.
+   *
+   * Keeping it reachable first is the order that matters: a version nothing
+   * points at stops being findable the moment its copy goes, and the whole
+   * promise here is that setting work aside can be undone.
+   */
+  async settle(title: string): Promise<string | null> {
+    const inside = new ProjectHistory(this.folder);
+    const version = await inside.snapshot(title);
+    if (version !== null) await this.history.hold(version);
+    await this.release();
+
+    this.waiting.version = version;
+    this.waiting.state = version === null ? 'nothing' : 'waiting';
+    return version;
+  }
+
+  /**
+   * Let it in. The project's files become what this work made.
+   *
+   * `restoreTo` does it, because letting work in and putting an old version
+   * back are the same act: take that set of files, record it as a new version,
+   * rewrite nothing. Which is also what makes it undoable — `undoTo` is the
+   * version the project was at a moment ago.
+   */
+  async approve(title: string): Promise<{ version: string; undoTo: string } | null> {
+    const version = this.waiting.version;
+    if (version === null) return null;
+    const before = await this.history.currentVersion();
+    const made = await this.history.restoreTo(version, title);
+    // Nothing needs to keep it reachable now — the project's own history does.
+    await this.history.release(version);
+    this.waiting.state = 'in';
+    return { version: made, undoTo: before ?? made };
+  }
+
+  /**
+   * Turn it down. The project is exactly as it was.
+   *
+   * Returns the version anyway, because turning work down is not throwing it
+   * away: it is still reachable, and putting the project at it is the same call
+   * as putting it at any other version. That is what makes this undoable.
+   */
+  setAside(): string | null {
+    if (this.waiting.version === null) return null;
+    this.waiting.state = 'aside';
+    return this.waiting.version;
+  }
+
+  /** Stop keeping it at all. Only ever from somebody saying so twice. */
+  async forget(): Promise<void> {
+    const version = this.waiting.version;
+    this.waiting.version = null;
+    this.waiting.state = 'nothing';
+    if (version !== null) await this.history.release(version);
+  }
+
+  /** Let the copy go, whatever state it was left in. Safe to call twice. */
+  async release(): Promise<void> {
+    if (this.letGo) return;
+    this.letGo = true;
+    await this.history.removeWorkspace(this.folder);
+    await rm(this.folder, { recursive: true, force: true });
   }
 }
 

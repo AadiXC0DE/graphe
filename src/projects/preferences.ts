@@ -62,6 +62,15 @@ export type Preferences = {
    * who asked once is asking for good.
    */
   showFiles: boolean;
+  /**
+   * Do the work in a copy first, and show it before it reaches the files.
+   *
+   * Off by default because the promise the product already keeps — every moment
+   * is saved, going back is one press — makes work landing straight away safe.
+   * On, for the people whose files are shared with somebody else and who would
+   * rather look first.
+   */
+  holdBack: boolean;
 };
 
 export const defaultPreferences: Preferences = {
@@ -69,6 +78,7 @@ export const defaultPreferences: Preferences = {
   model: null,
   kept: {},
   showFiles: false,
+  holdBack: false,
 };
 
 type Stored = { version: 1; preferences: Preferences };
@@ -94,6 +104,7 @@ function asPreferences(value: unknown): Preferences {
         : null,
     kept: asKept(record['kept']),
     showFiles: record['showFiles'] === true,
+    holdBack: record['holdBack'] === true,
   };
 }
 
@@ -121,6 +132,7 @@ export class PreferenceFile {
     const unchanged =
       next.showMe === this.#preferences.showMe &&
       next.showFiles === this.#preferences.showFiles &&
+      next.holdBack === this.#preferences.holdBack &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
       sameKept(next.kept, this.#preferences.kept);

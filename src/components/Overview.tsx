@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import CostMeter from './CostMeter';
 import Drift from './Drift';
 import Helpers from './Helpers';
+import Landing, { type Outcome } from './Landing';
 import Legible from './Legible';
 import Responsive from './Responsive';
 import Styles from './Styles';
@@ -11,6 +12,7 @@ import type {
   Artifact,
   ChangedFile,
   GitSnapshot,
+  Landing as LandingState,
   Look,
   PutBack,
   SavedVersion,
@@ -51,6 +53,15 @@ export type OverviewView = {
   swatches: readonly Swatch[];
   /** This project's own tokens, and where they live. */
   styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
+  /** What can be done with the work now it exists. Null until the shell has
+   *  answered, so the band does not flash on the way in. */
+  landing: LandingState | null;
+  /** Which of the two things that can send anywhere is going, if either is. */
+  going: 'developer' | 'online' | null;
+  /** What came of the last one that went. */
+  landed: Outcome;
+  /** What was just decided about work that was waiting, and how to undo it. */
+  decided: { letIn: boolean; undoTo: string } | null;
 };
 
 type Props = {
@@ -71,6 +82,16 @@ type Props = {
   onWorkAt?: (look: Look) => void;
   /** Write a page of what changed, for somebody who is not you. */
   onShare: () => void;
+  /** Check work in a copy before it reaches the files, or stop. */
+  onHoldBack: (on: boolean) => void;
+  /** Let the work that is waiting in, or set it aside. */
+  onDecide: (letIn: boolean) => void;
+  /** Write the work up and put it where a developer picks it up. */
+  onHandOver: () => void;
+  /** Put the finished project on the internet. */
+  onPutOnline: () => void;
+  /** Open an address in the person's own browser. */
+  onOpenLink: (address: string) => void;
   /** Change one design token directly. */
   onNudge: (name: string, value: string) => void;
   /** Move the colour behind a pairing nobody can read to one they can. */
@@ -127,6 +148,11 @@ export default function Overview({
   onCheckWidths,
   onWorkAt,
   onShare,
+  onHoldBack,
+  onDecide,
+  onHandOver,
+  onPutOnline,
+  onOpenLink,
   onNudge,
   onFixColour,
   onUseYours,
@@ -443,9 +469,21 @@ export default function Overview({
       </div>
 
       <div className="overview__foot">
-        <button type="button" className="overview__do" onClick={onShare} disabled={busy}>
-          Send this to someone
-        </button>
+        <Landing
+          state={view.landing}
+          busy={busy}
+          showMe={showMe}
+          going={view.going}
+          outcome={view.landed}
+          decided={view.decided}
+          onHoldBack={onHoldBack}
+          onDecide={onDecide}
+          onUndo={onPutBack}
+          onHandOver={onHandOver}
+          onPutOnline={onPutOnline}
+          onShare={onShare}
+          onOpenLink={onOpenLink}
+        />
       </div>
 
       {spent === null ? null : <CostMeter spent={spent.total} corner onDetails={onShowSplit} />}

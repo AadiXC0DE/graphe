@@ -705,6 +705,18 @@ export type PromptAttachment = {
   bytes: string;
 };
 
+/** One installed skill Pi can use. A handle is the compact spelling accepted
+ * by the composer — `@${handle}` — while `path` is only a clue for the reader,
+ * never an argument that lets the renderer read arbitrary files. */
+export type Skill = {
+  id: string;
+  name: string;
+  handle: string;
+  description: string;
+  source: 'global' | 'project';
+  path: string;
+};
+
 /**
  * What the overview panel knows about the project's folder.
  *
@@ -909,6 +921,8 @@ export const CHANNEL = {
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
   tidyNow: 'graphe:tidy-now',
+  skills: 'graphe:skills',
+  skillText: 'graphe:skill-text',
   nudgeToken: 'graphe:nudge-token',
   nudgeMotion: 'graphe:nudge-motion',
   shareReview: 'graphe:share-review',
@@ -916,6 +930,7 @@ export const CHANNEL = {
   conversations: 'graphe:conversations',
   openConversation: 'graphe:open-conversation',
   closeConversation: 'graphe:close-conversation',
+  deleteConversation: 'graphe:delete-conversation',
   pageAt: 'graphe:page-at',
   pageHidden: 'graphe:page-hidden',
   watchStart: 'graphe:watch-start',
@@ -1050,6 +1065,10 @@ export type GrapheApi = {
   room(where?: Where): Promise<Result<Room | null>>;
   /** Shorten it now. Answers with the room there is afterwards. */
   tidyNow(where?: Where): Promise<Result<Room | null>>;
+  /** The installed instruction packs available to this project and computer. */
+  skills(where?: Where): Promise<Result<readonly Skill[]>>;
+  /** Full text for a library row. `id` is checked against that library first. */
+  skillText(id: string, where?: Where): Promise<Result<string>>;
   /** Stop checking before things that would otherwise be asked about, or start
    *  again. Answers with what is true afterwards. */
   stopAsking(on: boolean, where?: Where): Promise<Result<boolean>>;
@@ -1093,6 +1112,8 @@ export type GrapheApi = {
    *  to close one is still a whole bridge. */
   /** Put a conversation down without losing it. Opening it again resumes. */
   closeConversation(where?: Where): Promise<Result<null>>;
+  /** Throw a conversation away. The file on disk goes; the project does not. */
+  deleteConversation(path: string, where?: Where): Promise<Result<readonly Conversation[]>>;
   /** Point the page at an address and glue it to a rectangle in the window.
    *  A null rectangle closes it. */
   pageAt(address: string | null, bounds: { x: number; y: number; width: number; height: number } | null): Promise<Result<null>>;
@@ -1192,8 +1213,9 @@ export type GrapheApi = {
   /** Everything happening for this project whether or not the window is open. */
   away(where?: Where): Promise<Result<Away>>;
   /** Start a piece of work that carries on with the window closed. It runs in
-   *  its own copy, so the folder on screen is untouched until it is kept. */
-  keepGoing(text: string, where?: Where): Promise<Result<Away>>;
+   *  its own copy, so the folder on screen is untouched until it is kept.
+   *  `untilDone` is the overnight mode: full access, no questions, wall clock. */
+  keepGoing(text: string, untilDone?: boolean, where?: Where): Promise<Result<Away>>;
   /**
    * The same, but it waits until another has finished before it starts.
    *

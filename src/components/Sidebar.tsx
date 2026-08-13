@@ -18,6 +18,10 @@ type Props = {
   openConversation: string | null;
   onOpenConversation: (path: string) => void;
   onNewConversation: () => void;
+  /** Throw one away. Optional so a shelf that cannot yet is still whole. */
+  onDeleteConversation?: (path: string) => void;
+  /** Open the quieter controls — skills, spend, the rest. */
+  onSettings?: () => void;
   /** Whether the shelf is expanded or reduced to its mark. ⌘B does the same
    *  thing as pressing the mark, and the two are one control. */
   open: boolean;
@@ -27,9 +31,15 @@ type Props = {
   onAsk?: () => void;
   onDesign?: () => void;
   onHistory?: () => void;
+  /** Skills stay close to the work, but open as a library rather than another
+      permanent section competing with conversations. */
+  onSkills?: () => void;
   /** Where more can be added. Down here as well as under the project's name,
    *  because nobody finds it in a menu they never open. */
   onAddMore?: () => void;
+  /** The project files are optional furniture. When their panel is folded, the
+   *  way back belongs in this dock rather than as a second, stranded rail. */
+  onFiles?: () => void;
   /** The clock, so a test of the day headings means something. */
   now?: number;
 };
@@ -57,12 +67,16 @@ export default function Sidebar({
   openConversation,
   onOpenConversation,
   onNewConversation,
+  onDeleteConversation,
+  onSettings,
   open,
   onToggle,
   onAsk,
   onDesign,
   onHistory,
+  onSkills,
   onAddMore,
+  onFiles,
   now,
 }: Props) {
   const [term, setTerm] = useState('');
@@ -80,9 +94,7 @@ export default function Sidebar({
       {open ? (
         <>
           <div className="shelf__top">
-            <span className="shelf__caption" id="shelf-projects">
-              {projects.find((one) => one.path === openPath)?.name ?? 'Projects'}
-            </span>
+            <span className="shelf__caption" id="shelf-projects">Projects</span>
             <button
               type="button"
               className="shelf__collapse"
@@ -106,19 +118,20 @@ export default function Sidebar({
               </svg>
             </button>
           </div>
-          {/* Which project, and the way to another one. A list of every folder
-              this machine remembers is not what somebody already working in one
-              needs down the side of their work — it is one row and a menu. */}
+          {/* Projects are the primary navigation. Keep the current one in the
+              same list as the rest, visibly selected, so the screen answers
+              both “where am I?” and “where else can I go?” at a glance. */}
           <ul className="shelf__list">
             {projects
-              .filter((one) => one.path !== openPath)
-              .slice(0, 3)
               .map((project) => (
                 <li key={project.path}>
                   <button
                     type="button"
-                    className="shelf__row"
-                    onClick={() => onOpen(project)}
+                    className={`shelf__row ${project.path === openPath ? 'shelf__row--project-here' : ''}`}
+                    onClick={() => {
+                      if (project.path !== openPath) onOpen(project);
+                    }}
+                    aria-current={project.path === openPath ? 'page' : undefined}
                     title={project.missing ? 'This folder is not where it was' : project.path}
                   >
                     <span
@@ -181,7 +194,7 @@ export default function Sidebar({
                   {labelled ? <h3 className="shelf__daylabel">{day.label}</h3> : null}
                   <ul className="shelf__list">
                     {day.items.map((one) => (
-                      <li key={one.id}>
+                      <li key={one.id} className="shelf__convo">
                         <button
                           type="button"
                           className={`shelf__row ${one.path === openConversation ? 'shelf__row--here' : ''}`}
@@ -190,6 +203,27 @@ export default function Sidebar({
                           <span className="shelf__rowname">{one.title}</span>
                           <span className="shelf__rowsub">{ago(one.at)}</span>
                         </button>
+                        {onDeleteConversation === undefined ? null : (
+                          <button
+                            type="button"
+                            className="shelf__forget"
+                            title="Throw this conversation away"
+                            aria-label={`Throw away “${one.title}”`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onDeleteConversation(one.path);
+                            }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                              <path
+                                d="M3 3l6 6M9 3l-6 6"
+                                stroke="currentColor"
+                                strokeWidth="1.4"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -218,9 +252,36 @@ export default function Sidebar({
 
           {/* The last row and never a band: it sits under the work rather than
               beside it, and stays put while the conversations scroll. */}
-          {onAddMore === undefined ? null : (
+          {onAddMore === undefined && onSkills === undefined && onSettings === undefined ? null : (
             <div className="shelf__foot">
-              <button
+              {onSettings === undefined ? null : (
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__more"
+                  onClick={onSettings}
+                  title="Skills, spend, and the rest"
+                >
+                  <span className="shelf__moremark" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" />
+                      <path
+                        d="M8 1.8v1.4M8 12.8v1.4M1.8 8h1.4M12.8 8h1.4M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">Settings</span>
+                </button>
+              )}
+              {onSkills === undefined ? null : (
+                <button type="button" className="shelf__row shelf__row--quiet shelf__more" onClick={onSkills} title="Browse skills and use one with @">
+                  <span className="shelf__moremark" aria-hidden="true">@</span>
+                  <span className="shelf__rowname">Skills</span>
+                </button>
+              )}
+              {onAddMore === undefined ? null : <button
                 type="button"
                 className="shelf__row shelf__row--quiet shelf__more"
                 onClick={onAddMore}
@@ -246,7 +307,22 @@ export default function Sidebar({
                   </svg>
                 </span>
                 <span className="shelf__rowname">Add more to Graphe</span>
-              </button>
+              </button>}
+              {onFiles === undefined ? null : (
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__more"
+                  onClick={onFiles}
+                  title="Open project files"
+                >
+                  <span className="shelf__moremark" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path d="M2.5 4.5h3l1.2 1.5h6.3v5.5H2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">Project files</span>
+                </button>
+              )}
             </div>
           )}
         </>
@@ -321,6 +397,11 @@ export default function Sidebar({
               </svg>
             </button>
           )}
+          {onSkills === undefined ? null : (
+            <button type="button" className="shelf__act shelf__act--skills" onClick={onSkills} title="Browse skills" aria-label="Browse skills">
+              @
+            </button>
+          )}
           {onHistory === undefined ? null : (
             <button
               type="button"
@@ -364,6 +445,38 @@ export default function Sidebar({
                   d="M8 5.75v4.5M5.75 8h4.5"
                   stroke="currentColor"
                   strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
+          {onFiles === undefined ? null : (
+            <button
+              type="button"
+              className="shelf__act"
+              onClick={onFiles}
+              title="Open project files"
+              aria-label="Open project files"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2.5 4.5h3l1.2 1.5h6.3v5.5H2.5z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
+          {onSettings === undefined ? null : (
+            <button
+              type="button"
+              className="shelf__act shelf__act--settings"
+              onClick={onSettings}
+              title="Settings"
+              aria-label="Open settings"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" />
+                <path
+                  d="M8 1.8v1.4M8 12.8v1.4M1.8 8h1.4M12.8 8h1.4M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l1 1"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
                   strokeLinecap="round"
                 />
               </svg>

@@ -42,6 +42,7 @@ type Offer = {
 export default function ThinkingWith({ state, onSelect, onThinking, onConnect, bare }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [view, setView] = useState<'models' | 'thinking'>('models');
   const root = useRef<HTMLDivElement>(null);
 
   /* Flat, because the provider is a heading in the list rather than a level to
@@ -106,7 +107,10 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, b
   }, [open]);
 
   useEffect(() => {
-    if (!open) setQuery('');
+    if (!open) {
+      setQuery('');
+      setView('models');
+    }
   }, [open]);
 
   /* Nothing connected goes straight to the connect screen — an empty list is a
@@ -126,8 +130,15 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, b
       <button
         type="button"
         className={`thinking__chip ${nothingConnected ? 'thinking__chip--none' : ''}`}
-        onClick={() => (nothingConnected ? onConnect() : setOpen((was) => !was))}
-        aria-haspopup={nothingConnected ? undefined : 'listbox'}
+        onClick={() => {
+          if (nothingConnected) {
+            onConnect();
+            return;
+          }
+          setView('models');
+          setOpen((was) => !was);
+        }}
+        aria-haspopup={nothingConnected ? undefined : 'dialog'}
         aria-expanded={nothingConnected ? undefined : open}
         title={
           nothingConnected
@@ -153,102 +164,131 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, b
       </button>
 
       {open && !nothingConnected ? (
-        <div className="thinking__menu" role="listbox" aria-label="Which model should answer">
-          {/* Skipped on a short list: a field above a list you can already see
-              is a field in the way. */}
-          {offers.length > 8 ? (
-            <input
-              className="thinking__search"
-              type="text"
-              value={query}
-              autoFocus
-              placeholder="Search models"
-              aria-label="Search models"
-              onChange={(event) => setQuery(event.target.value)}
-            />
+        <div className="thinking__menu" role="dialog" aria-label="Choose a model and thinking time">
+          {view === 'models' ? (
+            <>
+              <div className="thinking__menuhead">
+                <span className="thinking__menutitle">Choose a model</span>
+                <span className="thinking__menucount">{offers.length} available</span>
+              </div>
+
+              {/* Skipped on a short list: a field above a list you can already see
+                  is a field in the way. */}
+              {offers.length > 8 ? (
+                <input
+                  className="thinking__search"
+                  type="text"
+                  value={query}
+                  autoFocus
+                  placeholder="Search models"
+                  aria-label="Search models"
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              ) : null}
+
+              <div className="thinking__list" role="listbox" aria-label="Which model should answer">
+                {shown.length === 0 ? (
+                  <p className="thinking__empty">Nothing here matches that.</p>
+                ) : (
+                  sections(shown).map((section) => (
+                    <section className="thinking__group" key={section.key}>
+                      <h4 className="thinking__groupname">
+                        {section.name}
+                        {section.note === undefined ? null : (
+                          <span className="thinking__groupnote">{section.note}</span>
+                        )}
+                      </h4>
+                      {section.models.map((one) => {
+                        const isChosen =
+                          chosen !== null &&
+                          chosen.providerId === one.providerId &&
+                          chosen.modelId === one.modelId;
+                        return (
+                          <button
+                            key={`${one.providerId}/${one.modelId}`}
+                            type="button"
+                            role="option"
+                            aria-selected={isChosen}
+                            className={`thinking__option ${isChosen ? 'thinking__option--chosen' : ''}`}
+                            onClick={() => {
+                              onSelect({ providerId: one.providerId, modelId: one.modelId });
+                              setOpen(false);
+                            }}
+                          >
+                            <span className="thinking__tick" aria-hidden="true">
+                              {isChosen ? (
+                                <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
+                                  <path
+                                    d="M2 6l3 3 5-5.5"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              ) : null}
+                            </span>
+                            <span className="thinking__optiontext">
+                              <span className="thinking__optionlabel">{one.label}</span>
+                              <span className="thinking__optionid">
+                                {one.providerName} · {one.modelId}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </section>
+                  ))
+                )}
+              </div>
+
+              {chosen !== null && current !== null && onThinking !== undefined && current.thinking.length > 1 ? (
+                <button
+                  type="button"
+                  className="thinking__tune"
+                  onClick={() => setView('thinking')}
+                  aria-label="Change how long the selected model thinks"
+                >
+                  <span>Thinking time</span>
+                  <span>
+                    {thinkingLevels[state?.chosenThinking ?? 'off'].name}
+                    <span aria-hidden="true">›</span>
+                  </span>
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                className="thinking__more"
+                onClick={() => {
+                  setOpen(false);
+                  onConnect();
+                }}
+              >
+                Connect another account…
+              </button>
+            </>
+          ) : chosen !== null && current !== null ? (
+            <>
+              <header className="thinking__menuhead thinking__menuhead--back">
+                <button type="button" className="thinking__back" onClick={() => setView('models')}>
+                  <span aria-hidden="true">‹</span> Models
+                </button>
+                <span className="thinking__menutitle">Thinking time</span>
+              </header>
+              <p className="thinking__selectedmodel" title={`${chosen.providerId}/${chosen.modelId}`}>
+                {current.label}
+              </p>
+              <Pace
+                levels={current.thinking}
+                chosen={state?.chosenThinking ?? 'off'}
+                onPick={(level) => {
+                  onThinking?.(chosen, level);
+                  setOpen(false);
+                }}
+              />
+            </>
           ) : null}
-
-          <div className="thinking__list">
-            {shown.length === 0 ? (
-              <p className="thinking__empty">Nothing here matches that.</p>
-            ) : (
-              sections(shown).map((section) => (
-                <section className="thinking__group" key={section.key}>
-                  <h4 className="thinking__groupname">
-                    {section.name}
-                    {section.note === undefined ? null : (
-                      <span className="thinking__groupnote">{section.note}</span>
-                    )}
-                  </h4>
-                  {section.models.map((one) => {
-                    const isChosen =
-                      chosen !== null &&
-                      chosen.providerId === one.providerId &&
-                      chosen.modelId === one.modelId;
-                    return (
-                      <button
-                        key={`${one.providerId}/${one.modelId}`}
-                        type="button"
-                        role="option"
-                        aria-selected={isChosen}
-                        className={`thinking__option ${isChosen ? 'thinking__option--chosen' : ''}`}
-                        onClick={() => {
-                          onSelect({ providerId: one.providerId, modelId: one.modelId });
-                          setOpen(false);
-                        }}
-                      >
-                        <span className="thinking__tick" aria-hidden="true">
-                          {isChosen ? (
-                            <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
-                              <path
-                                d="M2 6l3 3 5-5.5"
-                                stroke="currentColor"
-                                strokeWidth="1.6"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          ) : null}
-                        </span>
-                        <span className="thinking__optiontext">
-                          <span className="thinking__optionlabel">{one.label}</span>
-                          {/* The raw id stays visible, so somebody who knows
-                              exactly which one they want can still see it. */}
-                          <span className="thinking__optionid">
-                            {one.providerName} · {one.modelId}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </section>
-              ))
-            )}
-          </div>
-
-          {chosen !== null && current !== null ? (
-            <Pace
-              choice={chosen}
-              model={current.label}
-              levels={current.thinking}
-              chosen={state?.chosenThinking ?? 'off'}
-              onPick={(level) => {
-                onThinking?.(chosen, level);
-                setOpen(false);
-              }}
-            />
-          ) : null}
-
-          <button
-            type="button"
-            className="thinking__more"
-            onClick={() => {
-              setOpen(false);
-              onConnect();
-            }}
-          >
-            Connect another account…
-          </button>
         </div>
       ) : null}
     </div>
@@ -286,14 +326,10 @@ function sections(offers: readonly Offer[]): Section[] {
  *  knows it. A model that only answers straight away draws nothing and is
  *  already a complete answer. */
 function Pace({
-  choice,
-  model,
   levels,
   chosen,
   onPick,
 }: {
-  choice: ModelChoice;
-  model: string;
   levels: readonly ThinkingLevel[];
   chosen: ThinkingLevel;
   onPick: (level: ThinkingLevel) => void;
@@ -301,12 +337,6 @@ function Pace({
   if (onPick === undefined) return null;
   return (
     <section className="thinking__pace" aria-label="How long it thinks first">
-      <header className="thinking__pacehead">
-        <h4 className="thinking__groupname thinking__pacehead-name">How long it thinks first</h4>
-        <span className="thinking__pacehead-model" title={`${choice.providerId}/${choice.modelId}`}>
-          {model}
-        </span>
-      </header>
       <div className="thinking__paces" role="radiogroup" aria-label="How long it should think">
         {/* `levels` comes from the model's own capability map, so an offset
             selection (a map that skips `medium`) is a real thing and is drawn

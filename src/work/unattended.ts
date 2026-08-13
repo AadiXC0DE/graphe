@@ -51,6 +51,11 @@ export const awayWords = {
   /** Under the heading, once, so nobody has to press something to find out
    *  what it does. */
   what: 'Work that carries on in a copy of your project, whether or not this window stays open.',
+  /** Overnight mode: one switch, full access, no questions, wall clock. */
+  untilDone: 'Until it’s done',
+  untilDoneHint:
+    'Full computer access for this run. I will not stop to ask, and I stop myself after four hours if something is stuck. Your project stays in a copy until you keep the result.',
+  startUntilDone: 'Start and keep going',
 } as const;
 
 const NUMBERS = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];

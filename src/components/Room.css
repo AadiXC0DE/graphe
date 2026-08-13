@@ -48,10 +48,6 @@
 /* ---------------------------------------------------------------------------
    The numbers, on hover and on focus
    The ring shows a proportion and nothing else; this is where the figures live.
-
-   The gap between ring and card is padding on the wrapper rather than an offset,
-   so the pointer can travel up into the card without leaving the ring — which is
-   what lets the mark inside it be hovered at all.
    --------------------------------------------------------------------------- */
 
 .room__tip {
@@ -83,9 +79,9 @@
   background: var(--bg-raised);
   box-shadow: var(--shadow-md);
   text-align: left;
-  /* The one part of the tip that takes the pointer, so the mark inside it can
-     be hovered. The padding above it stays transparent to clicks. */
-  pointer-events: auto;
+  /* The tip is read-only. Letting it take the pointer made its invisible hover
+     area cover the field beneath it after the card had appeared. */
+  pointer-events: none;
 }
 
 .room__ring:focus-visible .room__tip {
@@ -122,63 +118,6 @@
   color: var(--text-muted);
 }
 
-/* What a context window is, for the one person in ten who has not met one.
-   Behind a mark rather than printed under the numbers every time: three lines
-   of explanation on a tooltip somebody opens forty times a day is three lines
-   they learn to look past. */
-.room__why {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  margin-left: auto;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
-  font-size: 9px;
-  font-style: italic;
-  line-height: 1;
-  color: var(--text-faint);
-  cursor: help;
-}
-
-.room__whatis {
-  position: absolute;
-  bottom: calc(100% + var(--space-2));
-  right: -8px;
-  width: 232px;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-md);
-  font-size: var(--text-2xs);
-  font-style: normal;
-  line-height: 1.45;
-  color: var(--text-muted);
-  text-wrap: pretty;
-  opacity: 0;
-  pointer-events: none;
-  transform-origin: 100% 100%;
-  transform: scale(0.97);
-  transition:
-    opacity var(--dur-exit) var(--ease-out-quart),
-    transform var(--dur-exit) var(--ease-out-quart);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .room__why:hover .room__whatis {
-    opacity: 1;
-    transform: scale(1);
-    transition-duration: var(--dur-ui);
-  }
-
-  .room__why:hover {
-    color: var(--text);
-    border-color: var(--text-faint);
-  }
-}
-
 .room__tipwhat {
   max-width: 232px;
   font-size: var(--text-2xs);
@@ -194,8 +133,7 @@
   }
 
   .room__ring:hover .room__tip,
-  .room__ring:focus-visible .room__tip,
-  .room__why:hover .room__whatis {
+  .room__ring:focus-visible .room__tip {
     transform: none;
   }
 }

@@ -52,6 +52,7 @@ import {
   type Result,
   type CarriedExtension,
   type Room,
+  type Skill,
   type SavedVersion,
   type ShowOutcome,
   type HowFar,
@@ -261,6 +262,15 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.tidyNow, named(where)) as Promise<Result<Room | null>>;
   },
 
+  skills(where?: Where): Promise<Result<readonly Skill[]>> {
+    return ipcRenderer.invoke(CHANNEL.skills, named(where)) as Promise<Result<readonly Skill[]>>;
+  },
+
+  skillText(id: string, where?: Where): Promise<Result<string>> {
+    if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<string>('I could not tell which skill to open.'));
+    return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
+  },
+
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {
     return ipcRenderer.invoke(CHANNEL.carried, named(where)) as Promise<Result<readonly CarriedExtension[]>>;
   },
@@ -332,6 +342,12 @@ const api: GrapheApi = {
 
   closeConversation(where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.closeConversation, named(where)) as Promise<Result<null>>;
+  },
+
+  deleteConversation(path: string, where?: Where): Promise<Result<readonly Conversation[]>> {
+    return ipcRenderer.invoke(CHANNEL.deleteConversation, path, named(where)) as Promise<
+      Result<readonly Conversation[]>
+    >;
   },
 
   packages(term?: string): Promise<Result<readonly Pack[]>> {
@@ -634,11 +650,13 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.away, named(where)) as Promise<Result<Away>>;
   },
 
-  keepGoing(text: string, where?: Where): Promise<Result<Away>> {
+  keepGoing(text: string, untilDone?: boolean, where?: Where): Promise<Result<Away>> {
     if (typeof text !== 'string' || text.trim() === '') {
       return Promise.resolve(refuse<Away>('There was nothing to get on with.'));
     }
-    return ipcRenderer.invoke(CHANNEL.keepGoing, text, named(where)) as Promise<Result<Away>>;
+    return ipcRenderer.invoke(CHANNEL.keepGoing, text, untilDone === true, named(where)) as Promise<
+      Result<Away>
+    >;
   },
 
   startAfter(text: string, after: string, where?: Where): Promise<Result<Away>> {

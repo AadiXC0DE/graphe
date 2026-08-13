@@ -1,0 +1,70 @@
+/* A details sheet, not a dashboard: one sitting's accounting is read once,
+   so the numbers get room without becoming permanent furniture. */
+.usage {
+  position: fixed;
+  inset: 0;
+  z-index: 41;
+  overflow: auto;
+  padding: var(--space-7) var(--space-6);
+  background: var(--bg);
+}
+
+.usage__top,
+.usage__body,
+.usage__empty {
+  width: min(100%, 560px);
+  margin-inline: auto;
+}
+
+.usage__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.usage__eyebrow {
+  margin: 0 0 var(--space-1);
+  color: var(--accent-ink);
+  font-size: var(--text-2xs);
+  font-weight: 650;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.usage h1 { margin: 0 0 var(--space-2); font-size: var(--text-xl); letter-spacing: -.03em; }
+.usage__top p, .usage__card > p, .usage__empty { margin: 0; color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
+
+.usage__close {
+  flex: none;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.usage__close kbd { margin-left: var(--space-2); color: var(--text-faint); font-family: var(--font-mono); font-size: var(--text-2xs); }
+
+.usage__body { display: grid; gap: var(--space-3); }
+.usage__total { display: flex; align-items: baseline; justify-content: space-between; padding: var(--space-4); border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--accent-ink); }
+.usage__total span { font-size: var(--text-sm); }
+.usage__total strong { font-size: 1.5rem; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+
+.usage__card { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-raised); }
+.usage__card h2 { margin: 0 0 var(--space-3); font-size: var(--text-sm); font-weight: 600; }
+.usage__reuse { display: flex; align-items: baseline; gap: var(--space-2); }
+.usage__reuse strong { font-size: 2rem; line-height: 1; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
+.usage__reuse span { color: var(--text-muted); font-size: var(--text-sm); }
+.usage__rule { height: 4px; margin: var(--space-3) 0; overflow: hidden; border-radius: 999px; background: var(--bg-sunken); }
+.usage__rule span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.usage__models { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.usage__models li, .usage__split p { display: flex; justify-content: space-between; gap: var(--space-3); margin: 0; font-size: var(--text-sm); }
+.usage__models li span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage__models li span:last-child, .usage__split strong { flex: none; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.usage__split { display: grid; gap: var(--space-2); }
+.usage__split p span { color: var(--text-muted); }
+.usage__close:active { transform: scale(.97); }
+@media (hover: hover) and (pointer: fine) { .usage__close:hover { color: var(--text); border-color: var(--border-strong); } }
+@media (prefers-reduced-motion: reduce) { .usage__close:active { transform: none; } }

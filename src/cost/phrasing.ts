@@ -113,6 +113,18 @@ export const meter = {
    *  rather than left to be assumed: a running figure beside a plan somebody
    *  already paid for is the meter making a confident claim it cannot check. */
   onAPlan: 'This account is on a plan you already pay for, so this is a rough count and not a bill.',
+  /** Share of the prompt that came back free from earlier work. Never "tokens". */
+  reused(share: number): string {
+    const pct = Math.round(Math.min(1, Math.max(0, share)) * 100);
+    if (pct <= 0) return 'Nothing reused from earlier yet';
+    if (pct >= 95) return 'Almost everything reused from earlier';
+    return `Reused ${pct}% from earlier`;
+  },
+  /** Which model took most of the bill. The real name is fine here — this is
+   *  the details surface, not the ordinary corner. */
+  mostUsed(name: string): string {
+    return `Mostly ${name}`;
+  },
 };
 
 /* -------------------------------------------------------- before a bigger job */
@@ -295,6 +307,8 @@ export function choseStyle(style: 'quick' | 'careful'): string {
 export const longConversation = {
   tidying:
     'We’ve covered a lot in here. I’ll tidy up my notes so things stay quick — nothing gets lost, and you can still scroll back through everything.',
+  stayedAsIs:
+    'I kept this conversation as it is for now. Nothing was changed or lost.',
   newThing: {
     title: 'This looks like a new thing',
     body: 'Starting fresh will be faster and cheaper. I’ll bring everything I know about the project with me, so you won’t have to explain it again.',
@@ -429,6 +443,7 @@ export function auditableStrings(voice: Voice = {}): string[] {
   push(meter.label);
   push(meter.detailsLink);
   push(meter.onAPlan);
+  push(meter.reused(0.72));
   push(nothingSpentYet);
   push(meter.today(inr(12_000), voice));
   push(meter.screenReaderLabel(inr(12_000), voice));

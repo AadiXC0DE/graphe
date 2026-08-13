@@ -43,18 +43,11 @@ export const SAYS = {
   },
 } as const;
 
-/** How many projects get a colour of their own before they start sharing. The
- *  app allows itself a second colour in exactly this one place, and four is
- *  where a row of them stops being read as grouping and starts being decoration. */
-const TONES = 4;
-
 /**
- * One row of tabs, across the top.
- *
- * Two lines each: the conversation, and under it the project in quieter type.
- * Two tabs in the same codebase read as siblings; two in different ones do not.
- * A 2px underline carries the project, coloured in the order projects were
- * opened — grouping without nesting, no tab groups, no second row.
+ * A compact conversation switcher. The project sits beside it as a separate
+ * fact, so a tab does not waste its scarce width repeating the folder name.
+ * They are the open conversations in the project in front, kept in their
+ * opening order; the project list belongs in the sidebar.
  *
  * **The state mark is the point.** Switching away from something that is still
  * working and having the tab tell you when it needs you is the whole reason
@@ -82,27 +75,35 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
     };
   }, [listing]);
 
-  if (tabs.length === 0) return null;
+  if (tabs.length === 0) {
+    return (
+      <div className="tabs tabs--empty" ref={root}>
+        <button type="button" className="tabs__empty" onClick={onNew}>
+          <svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true">
+            <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          <span>New conversation</span>
+        </button>
+      </div>
+    );
+  }
 
-  /* Colour by the order projects were opened, so the same folder keeps the same
-     line for as long as it is open. */
-  const order: string[] = [];
-  for (const tab of tabs) if (!order.includes(tab.projectPath)) order.push(tab.projectPath);
-  const toneOf = (path: string): number => order.indexOf(path) % TONES;
-
-  /* One project open is one project: an underline that never varies is not
-     carrying a fact, it is just a line. */
-  const grouped = order.length > 1;
+  // A tab strip is spatial memory. Never bring the selected tab to the front:
+  // that turns a click into a moving target and makes the row impossible to
+  // learn. The current tab is marked in place instead.
+  const shown = tabs.slice(0, 3);
+  /* A tab strip should finish where its tabs finish. This is deliberately a
+     comfortable working width rather than a percentage of the entire header;
+     when there are more conversations, the overflow control takes over. */
+  const compactWidth = shown.length * 192 + 30 + (tabs.length > shown.length ? 32 : 0);
 
   return (
-    <div className="tabs" ref={root}>
+    <div className="tabs" ref={root} style={{ width: `${String(compactWidth)}px` }}>
       <div className="tabs__strip" role="tablist" aria-label={SAYS.label}>
-        {tabs.map((tab) => (
+        {shown.map((tab) => (
           <div
             key={tab.id}
-            className={`tabs__tab ${tab.id === at ? 'tabs__tab--here' : ''} ${
-              grouped ? `tabs__tab--tone${String(toneOf(tab.projectPath))}` : ''
-            }`}
+            className={`tabs__tab ${tab.id === at ? 'tabs__tab--here' : ''}`}
           >
             <button
               type="button"
@@ -120,7 +121,6 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
               <Mark state={tab.state} />
               <span className="tabs__text">
                 <span className="tabs__title">{tab.title}</span>
-                <span className="tabs__project">{tab.project}</span>
               </span>
             </button>
 
@@ -146,7 +146,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
 
       {/* The strip scrolls; this lists everything, marks and all, for the ones
           that have scrolled out of sight. */}
-      {tabs.length > 3 ? (
+      {tabs.length > shown.length ? (
         <div className="tabs__overflow">
           <button
             type="button"

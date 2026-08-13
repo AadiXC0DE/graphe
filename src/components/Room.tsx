@@ -76,10 +76,8 @@ export default function Room({ room, tidying, onTidy, busy }: Props) {
           />
         </svg>
 
-        {/* The numbers the ring cannot show, and nothing else — the sentence
-            explaining what a context window is sits behind the mark, where
-            anybody who already knows never has to read it again. Decoration for
-            the eye: the ring's own label is what anybody listening gets. */}
+        {/* The numbers the ring cannot show. The ring's label carries the same
+            information for anyone listening. */}
         <span className="room__tip" aria-hidden="true">
           <span className="room__tipcard">
             {tidying || room === null ? (
@@ -92,10 +90,6 @@ export default function Room({ room, tidying, onTidy, busy }: Props) {
                   {room.used.toLocaleString()} of {room.total.toLocaleString()}
                 </span>
                 <span className="room__tippart">{Math.round(part * 100)}%</span>
-                <span className="room__why">
-                  i
-                  <span className="room__whatis">{SAYS.whatFull}</span>
-                </span>
               </span>
             )}
           </span>

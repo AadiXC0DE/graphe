@@ -12,7 +12,7 @@
  * — the ledger is the book, this is a tally kept between glances at it.
  */
 
-import type { AgentEvent, Money, SpendSummary } from '../agent/types';
+import type { AgentEvent, Money, SittingUsage, SpendSummary } from '../agent/types';
 import { add } from '../cost/money';
 
 export type SpendView = {
@@ -21,6 +21,8 @@ export type SpendView = {
   /** The split between work and our own retries, once a sitting has settled.
    *  Null until then — there is nothing honest to say about it mid-run. */
   split: SpendSummary | null;
+  /** Cache reuse and which model, once anything has been priced. */
+  usage: SittingUsage | null;
 };
 
 /**
@@ -29,7 +31,7 @@ export type SpendView = {
  */
 export function applySpend(view: SpendView | null, event: AgentEvent): SpendView | null {
   if (event.type === 'spend') {
-    if (view === null) return { total: event.amount, split: null };
+    if (view === null) return { total: event.amount, split: null, usage: null };
     // A currency change mid-sitting cannot happen — one account, one currency.
     // If it ever did, the entry is dropped rather than added to the wrong pile.
     if (view.total.currency !== event.amount.currency) return view;
@@ -37,7 +39,16 @@ export function applySpend(view: SpendView | null, event: AgentEvent): SpendView
   }
 
   if (event.type === 'spend-summary') {
-    return { total: event.summary.total, split: event.summary };
+    return {
+      total: event.summary.total,
+      split: event.summary,
+      usage: view?.usage ?? null,
+    };
+  }
+
+  if (event.type === 'model-reading') {
+    if (view === null) return null;
+    return { ...view, usage: event.reading };
   }
 
   return view;

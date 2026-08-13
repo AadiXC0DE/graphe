@@ -1,10 +1,10 @@
 import { useState } from 'react';
 
-import type { Money } from '../agent/types';
+import type { Money, SittingUsage, SpendSummary } from '../agent/types';
 import { checkLimit, type SpendLimit } from '../cost/limits';
 import { formatMoney, fromMajor, toMajor } from '../cost/money';
-import { asSummary, forProject, type OverTime, type Split } from '../cost/overtime';
-import { limitNudge, limitSetup, meter, sessionSummary } from '../cost/phrasing';
+import { forProject, type OverTime } from '../cost/overtime';
+import { limitSetup, meter } from '../cost/phrasing';
 import './CostMeter.css';
 
 /** Which stretch the figure covers. */
@@ -23,27 +23,26 @@ type Props = {
   /** The account being used is paid for by its own plan rather than by use, so
    *  the figure is a count and not a bill, and the meter has to say so. */
   onAPlan?: boolean;
-  /** Pin it to the bottom-right of the window as permanent furniture. */
-  corner?: boolean;
+  /** Pin it as permanent furniture. `window` floats bottom-right; `panel`
+   *  sticks to the foot of the right rail so scrolling cannot drag it. */
+  corner?: boolean | 'window' | 'panel';
   /** BCP 47 tag; left off, the host's own locale formats the amount. */
   locale?: string;
   /** Longer than one sitting: what each folder and each month came to. Given
-   *  this, the meter offers those stretches beside today's figure. */
+   *  this, the meter draws a quiet month strip under the figure. */
   history?: OverTime;
   /** The folder open right now, so "this project" means the right one. */
   project?: string;
+  /** The work-versus-retry split for this sitting, once it has settled. */
+  split?: SpendSummary | null;
+  /** Cache reuse and which model, once anything has been priced. */
+  usage?: SittingUsage | null;
   /** Drive the stretch from outside. Left off, the meter remembers its own. */
   span?: Span;
   onSpan?: (span: Span) => void;
 };
 
-const SPANS: readonly { span: Span; word: string }[] = [
-  { span: 'today', word: 'Today' },
-  { span: 'project', word: 'This project' },
-  { span: 'months', word: 'Each month' },
-];
-
-/** The small, still number in the corner.
+/** The small, still number in the corner or rail.
  *
  * It never animates — not on mount, not when the figure changes. A number that
  * moves catches the eye every time it changes, and this one changes constantly;
@@ -57,56 +56,44 @@ export default function CostMeter({
   limit,
   onDetails,
   onLimit,
-  onAPlan,
   corner,
   locale,
   history,
   project,
-  span,
-  onSpan,
+  split = null,
+  usage = null,
 }: Props) {
-  const [held, hold] = useState<Span>('today');
-  const chosen = span ?? held;
-
   const status = limit ? checkLimit(limit, spent) : null;
   const state = status?.state ?? 'ok';
-  const near = state === 'nudge' || state === 'stop';
-
   const ceiling = limit ? formatMoney(limit.ceiling, { locale }) : null;
   // Clamped for display: past the ceiling the rule is full, not overflowing.
   const filled = status ? Math.max(0, Math.min(1, status.fraction)) : 0;
 
-  const totals = history?.main ?? null;
-  const here = totals ? (project ? forProject(totals, project) : (totals.byProject[0] ?? null)) : null;
-  const months = totals?.byMonth ?? [];
-  const thisMonth = months.find((one) => one.current) ?? months[0] ?? null;
+  const amount = formatMoney(spent, { locale });
+  const dock =
+    corner === true || corner === 'window'
+      ? 'cost-meter--corner'
+      : corner === 'panel'
+        ? 'cost-meter--panel'
+        : '';
 
-  const offer = totals !== null;
-  const showing = offer ? chosen : 'today';
-
-  const head =
-    showing === 'project'
-      ? { label: here?.name ?? 'This project', figure: here?.total ?? null }
-      : showing === 'months'
-        ? { label: thisMonth?.name ?? 'This month', figure: thisMonth?.total ?? null }
-        : { label: 'Today', figure: spent };
-
-  const amount = head.figure ? formatMoney(head.figure, { locale }) : null;
-  const todayAmount = formatMoney(spent, { locale });
+  const months = history?.main?.byMonth.slice(0, 6).reverse() ?? [];
+  const monthPeak = Math.max(1, ...months.map((one) => one.total.minor));
+  const projectTotal =
+    history?.main !== undefined && history.main !== null && project !== undefined
+      ? forProject(history.main, project)
+      : null;
+  const retryShare = split?.retryShare ?? projectTotal?.retryShare ?? null;
 
   return (
     <aside
-      className={`cost-meter cost-meter--${state} ${corner ? 'cost-meter--corner' : ''}`}
-      aria-label={
-        showing === 'today'
-          ? meter.screenReaderLabel(spent, { locale })
-          : `Spent, ${head.label.toLowerCase()}: ${amount ?? 'nothing yet'}`
-      }
+      className={`cost-meter cost-meter--${state} ${dock}`}
+      aria-label={meter.screenReaderLabel(spent, { locale })}
     >
       <div className="cost-meter__row">
-        <span className="cost-meter__label">{head.label}</span>
+        <span className="cost-meter__label">Total</span>
         <span className="cost-meter__value" aria-hidden="true">
-          {amount ?? '—'}
+          {amount}
         </span>
       </div>
 
@@ -114,57 +101,43 @@ export default function CostMeter({
         <div
           className="cost-meter__rule"
           role="img"
-          aria-label={`${todayAmount} of the ${ceiling} you set`}
+          aria-label={`${amount} of the ${ceiling} you set`}
         >
           <span className="cost-meter__fill" style={{ width: `${filled * 100}%` }} />
         </div>
       ) : null}
 
-      {onAPlan ? <p className="cost-meter__note">{meter.onAPlan}</p> : null}
-
-      {status && near ? (
-        <p className="cost-meter__note" title={limitNudge(status, { locale })}>
-          {state === 'stop'
-            ? `That’s the ${ceiling} you set. I’ll ask before spending more.`
-            : `Getting close to the ${ceiling} you set.`}
-        </p>
+      {/* Quiet month strip — a git-like activity graph of spend, not a chart
+          that needs a legend. Absent until there is more than one sitting. */}
+      {months.length > 1 ? (
+        <div
+          className="cost-meter__months"
+          role="img"
+          aria-label={months.map((one) => `${one.name}: ${formatMoney(one.total, { locale })}`).join('. ')}
+        >
+          {months.map((one) => (
+            <span
+              key={one.key}
+              className={`cost-meter__bar ${one.current ? 'cost-meter__bar--now' : ''}`}
+              style={{ height: `${Math.max(12, Math.round((one.total.minor / monthPeak) * 100))}%` }}
+              title={`${one.name}: ${formatMoney(one.total, { locale })}`}
+            />
+          ))}
+        </div>
       ) : null}
 
-      {offer ? (
-        <>
-          <div className="cost-meter__spans" role="group" aria-label="What the figure covers">
-            {SPANS.map(({ span: one, word }) => (
-              <button
-                key={one}
-                type="button"
-                className="cost-meter__span"
-                aria-pressed={showing === one}
-                onClick={() => {
-                  hold(one);
-                  onSpan?.(one);
-                }}
-              >
-                {word}
-              </button>
-            ))}
-          </div>
+      {usage?.reusedShare !== null && usage?.reusedShare !== undefined ? (
+        <p className="cost-meter__retry">{meter.reused(usage.reusedShare)}</p>
+      ) : null}
 
-          {showing === 'project' ? <Where split={here} locale={locale} /> : null}
-          {showing === 'months' ? (
-            <ul className="cost-meter__list">
-              {months.map((month) => (
-                <li key={month.key} className="cost-meter__item">
-                  <span className="cost-meter__item-name">{month.name}</span>
-                  <span className="cost-meter__item-value">
-                    {formatMoney(month.total, { locale })}
-                  </span>
-                </li>
-              ))}
-              {months.length === 0 ? <li className="cost-meter__aside">Nothing yet.</li> : null}
-            </ul>
-          ) : null}
-          {showing !== 'today' ? <Elsewhere history={history} locale={locale} /> : null}
-        </>
+      {usage?.mostUsed !== null && usage?.mostUsed !== undefined ? (
+        <p className="cost-meter__retry">{meter.mostUsed(usage.mostUsed)}</p>
+      ) : null}
+
+      {retryShare !== null && retryShare > 0 ? (
+        <p className="cost-meter__retry">
+          {Math.round(retryShare * 100)}% on retries
+        </p>
       ) : null}
 
       <div className="cost-meter__row cost-meter__row--doing">
@@ -180,34 +153,6 @@ export default function CostMeter({
       </div>
     </aside>
   );
-}
-
-/** The split, in the same words the end of a sitting uses. */
-function Where({ split, locale }: { split: Split | null; locale?: string }) {
-  if (split === null || split.entryCount === 0) {
-    return <p className="cost-meter__aside">Nothing spent here yet.</p>;
-  }
-  const said = sessionSummary(asSummary(split), { locale });
-  return (
-    <p className="cost-meter__aside">
-      {said.work}
-      <br />
-      {said.retry}
-    </p>
-  );
-}
-
-/** Money in another currency is never folded into the figure above, so it says
- *  so out loud rather than going missing. */
-function Elsewhere({ history, locale }: { history?: OverTime; locale?: string }) {
-  const others = (history?.currencies ?? []).slice(1);
-  if (others.length === 0) return null;
-  const amounts = others.map((one) => formatMoney(one.overall.total, { locale }));
-  const said =
-    amounts.length === 1
-      ? amounts[0]
-      : `${amounts.slice(0, -1).join(', ')} and ${amounts[amounts.length - 1]}`;
-  return <p className="cost-meter__aside">Also {said}, kept apart — it isn’t the same money.</p>;
 }
 
 
@@ -288,6 +233,11 @@ function Ceiling({
             {limitSetup.clear}
           </button>
         )}
+        {/* Always a way out. Escape works too, but a panel that only closes on
+            a key nobody is told about is a panel that traps the hand. */}
+        <button type="button" className="cost-meter__details" onClick={() => setOpen(false)}>
+          Not now
+        </button>
       </div>
     </div>
   );

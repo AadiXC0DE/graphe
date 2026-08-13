@@ -109,6 +109,7 @@
   color: var(--text-muted);
 }
 
+.chip__draw,
 .chip__remove {
   position: relative;
   flex: none;
@@ -160,5 +161,17 @@
 
   .chip__remove:active {
     transform: none;
+  }
+}
+
+/* Quieter than the cross beside it: taking something away is the action people
+   reach for by reflex, and drawing is the one they go looking for. */
+.chip__draw {
+  color: var(--text-faint);
+}
+
+@media (hover: hover) {
+  .chip__draw:hover {
+    color: var(--text);
   }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ConnectionState, ModelChoice } from '../lib/ipc';
+import type { ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
+import { thinkingLevels } from '../lib/thinking';
 import './ThinkingWith.css';
 
 type Props = {
@@ -8,6 +9,9 @@ type Props = {
    *  is on its way. */
   state: ConnectionState | null;
   onSelect: (choice: ModelChoice) => void;
+  /** How long the chosen model should take before answering. Left off, only
+   *  the picker is shown — which is how the pieces can be looked at alone. */
+  onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
   /** Open the full connect screen — the way to add an account, as opposed to
    *  picking between the ones already here. */
   onConnect: () => void;
@@ -23,6 +27,7 @@ type Offer = {
   modelId: string;
   label: string;
   rates: { input: number; output: number } | null;
+  thinking: readonly ThinkingLevel[];
 };
 
 /**
@@ -34,7 +39,7 @@ type Offer = {
  * The list holds only models that can be used right now; a menu of things that
  * will fail is not a menu.
  */
-export default function ThinkingWith({ state, onSelect, onConnect, bare }: Props) {
+export default function ThinkingWith({ state, onSelect, onThinking, onConnect, bare }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const root = useRef<HTMLDivElement>(null);
@@ -53,6 +58,9 @@ export default function ThinkingWith({ state, onSelect, onConnect, bare }: Props
           modelId: model.id,
           label: model.label,
           rates: model.rates,
+          // Absent on older shell data: a model whose capability was never
+          // declared is treated as one that only answers straight away.
+          thinking: model.thinking ?? ['off'],
         });
       }
     }
@@ -218,6 +226,19 @@ export default function ThinkingWith({ state, onSelect, onConnect, bare }: Props
             )}
           </div>
 
+          {chosen !== null && current !== null ? (
+            <Pace
+              choice={chosen}
+              model={current.label}
+              levels={current.thinking}
+              chosen={state?.chosenThinking ?? 'off'}
+              onPick={(level) => {
+                onThinking?.(chosen, level);
+                setOpen(false);
+              }}
+            />
+          ) : null}
+
           <button
             type="button"
             className="thinking__more"
@@ -257,4 +278,60 @@ function sections(offers: readonly Offer[]): Section[] {
     else already.push(one);
   }
   return [...byProvider.entries()].map(([name, models]) => ({ key: name, name, models }));
+}
+
+/** How long the chosen model thinks before it answers (A0 in BACKLOG-4).
+ *  Only the levels this model can actually use are drawn, in the words a
+ *  person reads — the raw Pi name stays on the element's title for whoever
+ *  knows it. A model that only answers straight away draws nothing and is
+ *  already a complete answer. */
+function Pace({
+  choice,
+  model,
+  levels,
+  chosen,
+  onPick,
+}: {
+  choice: ModelChoice;
+  model: string;
+  levels: readonly ThinkingLevel[];
+  chosen: ThinkingLevel;
+  onPick: (level: ThinkingLevel) => void;
+}) {
+  if (onPick === undefined) return null;
+  return (
+    <section className="thinking__pace" aria-label="How long it thinks first">
+      <header className="thinking__pacehead">
+        <h4 className="thinking__groupname thinking__pacehead-name">How long it thinks first</h4>
+        <span className="thinking__pacehead-model" title={`${choice.providerId}/${choice.modelId}`}>
+          {model}
+        </span>
+      </header>
+      <div className="thinking__paces" role="radiogroup" aria-label="How long it should think">
+        {/* `levels` comes from the model's own capability map, so an offset
+            selection (a map that skips `medium`) is a real thing and is drawn
+            truthfully rather than filled in. */}
+        {levels.map((level) => {
+          const said = thinkingLevels[level];
+          const active = level === chosen;
+          return (
+            <button
+              key={level}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              className={`thinking__pace-level ${active ? 'thinking__pace-level--on' : ''}`}
+              title={said.note}
+              aria-label={`${said.name}, ${said.plain}`}
+              onClick={() => onPick(level)}
+            >
+              <span className="thinking__pace-dot" aria-hidden="true" />
+              <span className="thinking__pace-name">{said.name}</span>
+              <span className="thinking__pace-plain">({said.plain})</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
 }

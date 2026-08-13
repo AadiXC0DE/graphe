@@ -399,6 +399,59 @@ describe('translating one event', () => {
     ).toEqual({ type: 'tool-end', id: 'c1', ok: false });
   });
 
+  /* E5. A helper's words travel as the tool's partial result, which Pi sends in
+     the same shape a tool result takes — an object with a `content` list, not a
+     string. Reading only the string form is what made every helper come back
+     "Nothing said yet" while having answered in full. */
+  it('reads a helper\'s progress out of the object-form partial result', () => {
+    expect(
+      translatePiEvent({
+        type: 'tool_execution_update',
+        toolCallId: 'c2',
+        toolName: 'task',
+        args: {},
+        partialResult: {
+          content: [{ type: 'text', text: 'Reading the layout files…' }],
+          details: {},
+        },
+      }),
+    ).toEqual({ type: 'tool-progress', id: 'c2', text: 'Reading the layout files…' });
+  });
+
+  it('reads a helper\'s progress out of a plain-string partial result too', () => {
+    expect(
+      translatePiEvent({
+        type: 'tool_execution_update',
+        toolCallId: 'c2',
+        toolName: 'task',
+        args: {},
+        partialResult: 'Two of them do: the blog and the changelog.',
+      }),
+    ).toEqual({ type: 'tool-progress', id: 'c2', text: 'Two of them do: the blog and the changelog.' });
+  });
+
+  /* Whole, not a line of it: the helper board shows everything a helper has
+     said, and only the feed row is short. Trimming here threw away the findings
+     before anything had a chance to show them. */
+  it('keeps everything the step has said so far', () => {
+    expect(
+      translatePiEvent({
+        type: 'tool_execution_update',
+        toolCallId: 'c3',
+        toolName: 'task',
+        args: {},
+        partialResult: {
+          content: [{ type: 'text', text: '  Two pages use it.\n\nThe blog and the changelog.\n' }],
+          details: {},
+        },
+      }),
+    ).toEqual({
+      type: 'tool-progress',
+      id: 'c3',
+      text: 'Two pages use it.\n\nThe blog and the changelog.',
+    });
+  });
+
   /* F8. Tidying a long conversation is Pi's own compaction and never ours
      (REUSE-PI.md), so the only thing on our side is the narration — and it has
      to cover the case where Pi decided by itself, or the app goes quiet for

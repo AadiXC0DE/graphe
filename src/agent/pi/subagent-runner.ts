@@ -15,6 +15,9 @@
  *    question that could hang a process with nobody to ask.
  *  - It reports in plain JSON lines on stdout and nothing else. Whatever the
  *    parent does not read is not sent.
+ *  - Underneath all of that it is wrapped in whatever boundary the computer
+ *    itself can hold around it, and it checks that from in here rather than
+ *    trusting a clean start (src/agent/sandbox/).
  *
  * The Guard here is the same decision table the main process uses
  * (src/agent/guard/policy.ts): the same deny-by-default floor, the same
@@ -23,9 +26,12 @@
  * argued out.
  */
 
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { patchWorkerThreads } from './node-shim';
+import type { HelperPace } from './tools';
+import type { GuardFacts } from '../guard/policy';
 
 patchWorkerThreads();
 
@@ -37,13 +43,46 @@ type Job = {
    *  this app nobody has ever written — and a session with no model answers
    *  nothing at all, which is what a helper saying nothing looked like. */
   model?: { providerId: string; modelId: string } | null;
+  /** How long to think first. The child has no preferences of its own, so the
+   *  pace chosen in the window travels with the job. Pi clamps a level this
+   *  model cannot use. */
+  thinking?: HelperPace;
+  /** A file outside everything this process should be able to touch. Named by
+   *  the parent so the answer means something to it. */
+  outside?: string;
 };
+
+/** The job arrives as JSON on a pipe, so nothing in it is trusted to be what it
+ *  says. An unrecognised pace is left off rather than passed on. */
+const PACES: readonly HelperPace[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+function paceOf(value: unknown): HelperPace | undefined {
+  return PACES.find((level) => level === value);
+}
 
 /** The one channel out. Only JSON lines ever leave, so a parent that reads by
  *  line never has to guess which parts are report and which are noise. The
  *  shapes are the `SubagentLine` contract in tools.ts. */
 function report(payload: unknown): void {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
+}
+
+/**
+ * Try to reach outside the folder this process was given, and say what happened.
+ *
+ * The parent asks the computer to hold this process inside one folder, and a
+ * boundary that failed to load starts exactly as cleanly as one that worked. The
+ * only answer worth having comes from in here, trying it.
+ */
+function tellBoundary(outside: unknown): void {
+  if (typeof outside !== 'string' || outside.trim() === '') return;
+  try {
+    writeFileSync(outside, '');
+    rmSync(outside, { force: true });
+    report({ type: 'boundary', held: false });
+  } catch {
+    report({ type: 'boundary', held: true });
+  }
 }
 
 function readJob(): Promise<Job> {
@@ -99,9 +138,12 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  tellBoundary(job.outside);
+
   const cwd = job.cwd ?? process.cwd();
   const agentDir = job.agentDir ?? '';
-  const facts = { projectRoot: cwd };
+  // The helper reads its own skills too — the same folder, the same reason.
+  const facts = agentDir === '' ? { projectRoot: cwd } : { projectRoot: cwd, agentFolder: agentDir };
 
   try {
     return await work(job, cwd, agentDir, facts);
@@ -118,7 +160,7 @@ async function work(
   job: Job,
   cwd: string,
   agentDir: string,
-  facts: { projectRoot: string },
+  facts: GuardFacts,
 ): Promise<number> {
 
   // Everything Pi and the policy modules take to load is done before any
@@ -165,6 +207,7 @@ async function work(
       : { authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') },
   );
 
+  const pace = paceOf(job.thinking);
   const chosen = job.model ?? null;
   const model =
     chosen === null
@@ -221,6 +264,12 @@ async function work(
       spoken += event.text;
       report({ type: 'delta', text: event.text });
     }
+    // Nobody else can see this. The helper calls the account from its own
+    // process, so unless it says what a turn cost, a fan-out to six helpers is
+    // money that never reaches a meter or a ceiling.
+    if (event.type === 'spend') {
+      report({ type: 'spend', amount: event.amount, label: event.label, reason: event.reason });
+    }
     if (event.type === 'error') finish({ ok: false, error: event.message });
     if (event.type === 'settled') {
       const said = spoken.trim();
@@ -241,6 +290,7 @@ async function work(
       customTools: helperTools,
       modelRuntime: runtime,
       model,
+      ...(pace === undefined ? {} : { thinkingLevel: pace }),
       sessionManager: pi.SessionManager.inMemory(cwd),
       settingsManager: pi.SettingsManager.create(cwd, agentDir),
       resourceLoader: loader,

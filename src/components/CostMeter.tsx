@@ -2,9 +2,9 @@ import { useState } from 'react';
 
 import type { Money } from '../agent/types';
 import { checkLimit, type SpendLimit } from '../cost/limits';
-import { formatMoney } from '../cost/money';
+import { formatMoney, fromMajor, toMajor } from '../cost/money';
 import { asSummary, forProject, type OverTime, type Split } from '../cost/overtime';
-import { limitNudge, meter, sessionSummary } from '../cost/phrasing';
+import { limitNudge, limitSetup, meter, sessionSummary } from '../cost/phrasing';
 import './CostMeter.css';
 
 /** Which stretch the figure covers. */
@@ -17,6 +17,12 @@ type Props = {
   limit?: SpendLimit;
   /** Opens the session split — work versus attempts that didn't work. */
   onDetails?: () => void;
+  /** Set the ceiling, raise it, or take it away with null. Left off, the meter
+   *  only reports and the ceiling is somebody else's business. */
+  onLimit?: (ceiling: Money | null) => void;
+  /** The account being used is paid for by its own plan rather than by use, so
+   *  the figure is a count and not a bill, and the meter has to say so. */
+  onAPlan?: boolean;
   /** Pin it to the bottom-right of the window as permanent furniture. */
   corner?: boolean;
   /** BCP 47 tag; left off, the host's own locale formats the amount. */
@@ -50,6 +56,8 @@ export default function CostMeter({
   spent,
   limit,
   onDetails,
+  onLimit,
+  onAPlan,
   corner,
   locale,
   history,
@@ -112,6 +120,8 @@ export default function CostMeter({
         </div>
       ) : null}
 
+      {onAPlan ? <p className="cost-meter__note">{meter.onAPlan}</p> : null}
+
       {status && near ? (
         <p className="cost-meter__note" title={limitNudge(status, { locale })}>
           {state === 'stop'
@@ -157,11 +167,17 @@ export default function CostMeter({
         </>
       ) : null}
 
-      {onDetails ? (
-        <button type="button" className="cost-meter__details" onClick={onDetails}>
-          {meter.detailsLink}
-        </button>
-      ) : null}
+      <div className="cost-meter__row cost-meter__row--doing">
+        {onDetails ? (
+          <button type="button" className="cost-meter__details" onClick={onDetails}>
+            {meter.detailsLink}
+          </button>
+        ) : null}
+
+        {onLimit ? (
+          <Ceiling limit={limit ?? null} spent={spent} onLimit={onLimit} />
+        ) : null}
+      </div>
     </aside>
   );
 }
@@ -192,4 +208,87 @@ function Elsewhere({ history, locale }: { history?: OverTime; locale?: string })
       ? amounts[0]
       : `${amounts.slice(0, -1).join(', ')} and ${amounts[amounts.length - 1]}`;
   return <p className="cost-meter__aside">Also {said}, kept apart — it isn’t the same money.</p>;
+}
+
+
+/**
+ * Setting a ceiling, on the meter itself.
+ *
+ * It belongs here rather than in a settings screen because this is where
+ * somebody is already looking at the number when they decide they want a limit
+ * on it. Closed it is four words; open it is one field and two buttons.
+ */
+function Ceiling({
+  limit,
+  spent,
+  onLimit,
+}: {
+  limit: SpendLimit | null;
+  spent: Money;
+  onLimit: (ceiling: Money | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+
+  const currency = limit?.ceiling.currency ?? spent.currency;
+
+  const save = () => {
+    const wanted = Number(typed.replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(wanted) || wanted <= 0) return;
+    onLimit(fromMajor(wanted, currency));
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="cost-meter__details"
+        onClick={() => {
+          setTyped(limit === null ? '' : String(toMajor(limit.ceiling)));
+          setOpen(true);
+        }}
+      >
+        {limit === null ? limitSetup.open : limitSetup.change}
+      </button>
+    );
+  }
+
+  return (
+    <div className="cost-meter__ceiling">
+      <label className="cost-meter__ceilinglabel">
+        {limitSetup.field}
+        <input
+          className="cost-meter__ceilingfield"
+          type="text"
+          inputMode="decimal"
+          autoFocus
+          value={typed}
+          onChange={(event) => setTyped(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') save();
+            if (event.key === 'Escape') setOpen(false);
+          }}
+        />
+      </label>
+      <p className="cost-meter__ceilingnote">{limitSetup.scope}</p>
+      <div className="cost-meter__ceilingrow">
+        <button type="button" className="cost-meter__ceilingsave" onClick={save}>
+          {limitSetup.save}
+        </button>
+        {limit === null ? null : (
+          <button
+            type="button"
+            className="cost-meter__details"
+            onClick={() => {
+              onLimit(null);
+              setOpen(false);
+            }}
+          >
+            {limitSetup.clear}
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }

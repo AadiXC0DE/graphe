@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import Away from './Away';
 import CostMeter from './CostMeter';
 import { SAYS as DESIGN, type DesignPart } from './DesignView';
-import Helpers from './Helpers';
 import History from './History';
 import Landing, { type Outcome } from './Landing';
 import Swatches from './Swatches';
@@ -17,6 +16,8 @@ import type {
   Landing as LandingState,
   PutBack,
   SavedVersion,
+  Money,
+  SpendLimit,
   StyleToken,
   Swatch,
 } from '../lib/ipc';
@@ -39,6 +40,11 @@ export type OverviewView = {
   kept: readonly string[];
   putBack: PutBack | null;
   spent: SpendView | null;
+  /** The account in use is paid for by its own plan, so the figure beside it is
+   *  a count rather than a bill. */
+  onAPlan: boolean;
+  /** The ceiling somebody set, or null when they have not set one. */
+  ceiling: SpendLimit | null;
   busy: boolean;
   showMe: boolean;
   /** Things the last turn made that are worth looking at. */
@@ -76,6 +82,8 @@ type Props = {
   onKeep: (versionId: string, keep: boolean) => void;
   onDismissPutBack: () => void;
   onShowSplit: () => void;
+  /** Set the ceiling, raise it, or take it away with null. */
+  onLimit: (ceiling: Money | null) => void;
   /** Open one changed file where the person actually edits things. */
   onOpenFile: (path: string) => void;
   /** Keep where the project stands right now, so it can be come back to. */
@@ -101,6 +109,8 @@ type Props = {
 
   /** Get on with something whether or not this window stays open. */
   onKeepGoing: (text: string) => void;
+  /** Ask for work that waits until another piece has finished. */
+  onStartAfter: (text: string, after: string) => void;
   /** Take one of those results into the project. */
   onKeepAway: (id: string) => void;
   /** Stop one, or let its result go. */
@@ -192,6 +202,7 @@ export default function Overview({
   onKeep,
   onDismissPutBack,
   onShowSplit,
+  onLimit,
   onOpenFile,
   onSave,
   onOpenDesign,
@@ -203,6 +214,7 @@ export default function Overview({
   onPutOnline,
   onOpenLink,
   onKeepGoing,
+  onStartAfter,
   onKeepAway,
   onDropAway,
   onAnswerAway,
@@ -210,7 +222,7 @@ export default function Overview({
   onSwitchRepeat,
   onForgetRepeat,
 }: Props) {
-  const { now, git, research, references, versions, pictures, kept, putBack, spent, busy, showMe } =
+  const { now, git, research, references, versions, pictures, kept, putBack, spent, onAPlan, ceiling, busy, showMe } =
     view;
   const { artifacts, swatches } = view;
 
@@ -283,13 +295,8 @@ export default function Overview({
         </section>
       ) : null}
 
-      {/* Every helper, what it was asked and what it has said. Nobody else
-          shows this, and it is the most interesting thing in a long sitting. */}
-      {now.helpers.length === 0 ? null : (
-        <section className="overview__block">
-          <Helpers helpers={now.helpers} />
-        </section>
-      )}
+      {/* Helpers used to be a band here. They belong beside the composer: this
+          panel is a reading of what has already happened, and a helper is now. */}
 
       <section className="overview__block">
         <h2 className="overview__title">Changes</h2>
@@ -427,6 +434,7 @@ export default function Overview({
           now={view.clock}
           busy={busy}
           onKeepGoing={onKeepGoing}
+          onStartAfter={onStartAfter}
           onKeep={onKeepAway}
           onDrop={onDropAway}
           onAnswer={onAnswerAway}
@@ -516,7 +524,16 @@ export default function Overview({
         />
       </div>
 
-      {spent === null ? null : <CostMeter spent={spent.total} corner onDetails={onShowSplit} />}
+      {spent === null ? null : (
+        <CostMeter
+          spent={spent.total}
+          corner
+          onAPlan={onAPlan}
+          {...(ceiling === null ? {} : { limit: ceiling })}
+          onDetails={onShowSplit}
+          onLimit={onLimit}
+        />
+      )}
     </aside>
   );
 }

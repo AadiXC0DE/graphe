@@ -87,6 +87,25 @@ describe('M-01 several at once', () => {
     await bench.clear();
   });
 
+  /** The history deliberately does not keep a project's keys, so a copy made
+   *  from it arrives without them and every piece of work fails on whatever it
+   *  talks to. They are carried across instead. */
+  it('gives every copy the private files the history never kept', async () => {
+    const { history, root, under } = await aProject();
+    await put(root, '.env', 'API_KEY=abc\n');
+    const bench = new Workbench({ history, under });
+    bench.ask('Calm the hero');
+    bench.ask('Tighten the nav');
+
+    await bench.begin();
+    for (const piece of bench.pieces) {
+      expect(await get(piece.folder ?? '', '.env')).toBe('API_KEY=abc\n');
+    }
+    // And the project itself is untouched by any of it.
+    expect(await get(root, '.env')).toBe('API_KEY=abc\n');
+    await bench.clear();
+  });
+
   it('keeps what each one is doing, in its own words', async () => {
     const { history, under } = await aProject();
     const bench = new Workbench({ history, under });

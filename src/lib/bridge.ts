@@ -31,10 +31,12 @@ import {
 import { pagesIn, type Page } from '../preview/pages';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
+import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
 import { nextRun, saysNext, saysRepeat, type Repeat } from '../work/schedule';
 import {
   showWords,
+  modelKey,
   type AgentNotice,
   type Away,
   type AwayPiece,
@@ -69,7 +71,13 @@ import {
   type Room,
   type SavedVersion,
   type ShowOutcome,
+  type HowFar,
+  type Money,
+  type Recording,
   type ShowProgress,
+  type SpendLimit,
+  type SpendSummary,
+  type ThinkingLevel,
   type VisualChange,
   type VisualFrames,
   type VisualNotice,
@@ -524,6 +532,9 @@ function previewBridge(): Bridge {
    *  tidy button has something to undo. */
   let previewRoom: Room = { used: 36_000, total: 200_000, part: 0.18 };
   let previewQuiet = false;
+  let previewHowFar: HowFar = 'asking';
+  let previewCeiling: SpendLimit | null = null;
+  let previewMade = 0;
   let previewCarried: readonly CarriedExtension[] = [
     {
       id: 'storybook-tools@1a2b3c4d5e6f7a8b',
@@ -547,9 +558,11 @@ function previewBridge(): Bridge {
   let preferred: Preferences = {
     showMe: false,
     model: null,
+    thinking: {},
     kept: {},
     showFiles: true,
     holdBack: false,
+    ceiling: null,
   };
 
   const send = (event: AgentEvent): void => {
@@ -583,6 +596,7 @@ function previewBridge(): Bridge {
    *  agent doing work, and there is no agent here. Everything else in this
    *  preview waits to be asked for. */
   let spendAnnounced = false;
+  let split: SpendSummary | null = null;
   const announceSpend = (): void => {
     if (spendAnnounced) return;
     spendAnnounced = true;
@@ -596,7 +610,8 @@ function previewBridge(): Bridge {
       send({ type: 'spend', amount, label: entry.label, reason: entry.reason });
     }
     send({ type: 'settled' });
-    send({ type: 'spend-summary', summary: ledger.summary() });
+    split = ledger.summary();
+    send({ type: 'spend-summary', summary: split });
   };
 
   return {
@@ -615,7 +630,9 @@ function previewBridge(): Bridge {
       }, 500);
       // No saved conversation in a browser tab — there is no disk. The window
       // therefore greets the folder the way it greets a new one (B1.1).
-      return Promise.resolve(done({ path, name, history: [], conversation: null }));
+      return Promise.resolve(
+        done({ path, name, history: [], conversation: null, address: `first-${name}` }),
+      );
     },
 
     async prompt(
@@ -886,6 +903,11 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(previewQuiet));
     },
 
+    goAsFarAs(howFar: HowFar): Promise<Result<HowFar>> {
+      previewHowFar = howFar;
+      return Promise.resolve(done(previewHowFar));
+    },
+
     saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>> {
       const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
       const already = previewVersions(path).map((one) => ({ ...one, current: false }));
@@ -997,12 +1019,16 @@ function previewBridge(): Bridge {
      *  path exists to avoid. */
     openConversation(path: string | null): Promise<Result<OpenedProject>> {
       const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
+      // A name of its own even before anything has been written down, which is
+      // what lets a brand new conversation have a tab.
+      previewMade += 1;
       return Promise.resolve(
         done({
           path: here?.path ?? '',
           name: here?.name ?? '',
           history: [],
           conversation: path,
+          address: path ?? `new-${String(previewMade)}`,
         }),
       );
     },
@@ -1066,7 +1092,20 @@ function previewBridge(): Bridge {
     /** The sample connection above, with whatever model the visitor chose
      *  worn over it. */
     connection(): Promise<Result<ConnectionState>> {
-      return Promise.resolve(done({ ...PREVIEW_CONNECTION, chosen: preferred.model }));
+      // The shell picks one the first time it finds none, so a visitor who has
+      // chosen nothing still sees the app as it actually is rather than with
+      // half the row missing.
+      const chosen = preferred.model ?? PREVIEW_CONNECTION.chosen;
+      return Promise.resolve(
+        done({
+          ...PREVIEW_CONNECTION,
+          chosen,
+          chosenThinking:
+            chosen === null
+              ? 'off'
+              : (preferred.thinking[modelKey(chosen)] ?? PREVIEW_CONNECTION.chosenThinking),
+        }),
+      );
     },
 
     /** A pretend connection: the steps are real, the browser tab is not. The
@@ -1104,6 +1143,48 @@ function previewBridge(): Bridge {
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setThinking(choice: ModelChoice, level: ThinkingLevel): Promise<Result<Preferences>> {
+      preferred = { ...preferred, thinking: { ...preferred.thinking, [modelKey(choice)]: level } };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    spendSplit(): Promise<Result<SpendSummary | null>> {
+      return Promise.resolve(done(split));
+    },
+
+    closeConversation(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    /** A browser tab has nowhere to put a page, and says nothing rather than
+     *  pretending it did. */
+    pageAt(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    pageHidden(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    /** A browser tab has no page of ours to watch, and says so rather than
+     *  handing back an empty run that would read as "nothing happened". */
+    watchStart(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    watchStop(): Promise<Result<Recording | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    spendLimit(): Promise<Result<SpendLimit | null>> {
+      return Promise.resolve(done(previewCeiling));
+    },
+
+    setSpendLimit(ceiling: Money | null): Promise<Result<SpendLimit | null>> {
+      previewCeiling = ceiling === null ? null : createLimit(ceiling, 'session');
+      return Promise.resolve(done(previewCeiling));
+    },
+
     onConnectStep(listener: (step: ConnectStep) => void): () => void {
       connecting.add(listener);
       return () => {
@@ -1137,6 +1218,7 @@ function previewBridge(): Bridge {
           handOverSays: PREVIEW_LANDING,
           canPutOnline: false,
           onlineSays: PREVIEW_LANDING,
+          held: null,
         }),
       );
     },
@@ -1156,6 +1238,7 @@ function previewBridge(): Bridge {
             handOverSays: PREVIEW_LANDING,
             canPutOnline: false,
             onlineSays: PREVIEW_LANDING,
+            held: null,
           },
           versions: [],
           letIn,
@@ -1178,6 +1261,32 @@ function previewBridge(): Bridge {
        board, so what a person does to one of these can actually be looked at. */
     away(): Promise<Result<Away>> {
       return Promise.resolve(done(atWork));
+    },
+
+    startAfter(text: string, after: string): Promise<Result<Away>> {
+      const waited = atWork.pieces.find((one) => one.id === after);
+      return this.keepGoing(text).then((answer) => {
+        if (!answer.ok || waited === undefined) return answer;
+        const last = answer.value.pieces[answer.value.pieces.length - 1];
+        if (last === undefined) return answer;
+        atWork = {
+          ...atWork,
+          pieces: atWork.pieces.map((one) =>
+            one.id === last.id
+              ? {
+                  ...one,
+                  state: 'waiting' as const,
+                  after: { id: waited.id, doing: waited.doing, says: `After “${waited.doing}”` },
+                }
+              : one,
+          ),
+        };
+        return done({ ...atWork });
+      });
+    },
+
+    putAfter(): Promise<Result<Away>> {
+      return Promise.resolve(done({ ...atWork }));
     },
 
     keepGoing(text: string): Promise<Result<Away>> {
@@ -1384,10 +1493,11 @@ const PREVIEW_CONNECTION: ConnectionState = {
       apiKeyLabel: 'Anthropic API key',
       connected: true,
       available: true,
+      subscription: false,
       models: [
-        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000 },
-        { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', available: true, rates: { input: 5, output: 25 }, contextWindow: 200000 },
-        { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', available: true, rates: { input: 1, output: 5 }, contextWindow: 200000 },
+        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
+        { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', available: true, rates: { input: 5, output: 25 }, contextWindow: 200000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
+        { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', available: true, rates: { input: 1, output: 5 }, contextWindow: 200000, thinking: ['off'] },
       ],
     },
     {
@@ -1398,9 +1508,10 @@ const PREVIEW_CONNECTION: ConnectionState = {
       apiKeyLabel: null,
       connected: false,
       available: false,
+      subscription: false,
       models: [
-        { id: 'gpt-5', label: 'GPT-5', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 400000 },
-        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: false, rates: { input: 0.25, output: 2 }, contextWindow: 400000 },
+        { id: 'gpt-5', label: 'GPT-5', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 400000, thinking: ['off', 'low', 'medium', 'high', 'xhigh'] },
+        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: false, rates: { input: 0.25, output: 2 }, contextWindow: 400000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
       ],
     },
     {
@@ -1411,14 +1522,16 @@ const PREVIEW_CONNECTION: ConnectionState = {
       apiKeyLabel: 'OpenCode API key',
       connected: false,
       available: false,
+      subscription: false,
       models: [
-        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: false, rates: { input: 3, output: 15 }, contextWindow: 1000000 },
-        { id: 'deepseek-v3.1', label: 'DeepSeek V3.1', available: false, rates: { input: 0.435, output: 0.87 }, contextWindow: 1000000 },
-        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 1048576 },
+        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: false, rates: { input: 3, output: 15 }, contextWindow: 1000000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
+        { id: 'deepseek-v3.1', label: 'DeepSeek V3.1', available: false, rates: { input: 0.435, output: 0.87 }, contextWindow: 1000000, thinking: ['off'] },
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 1048576, thinking: ['off', 'low', 'high'] },
       ],
     },
   ],
   chosen: { providerId: 'anthropic', modelId: 'claude-sonnet-4-5' },
+  chosenThinking: 'medium',
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1455,6 +1568,7 @@ function connect(): Bridge {
     room: () => api.room(),
     tidyNow: () => api.tidyNow(),
     stopAsking: (on) => api.stopAsking(on),
+    goAsFarAs: (howFar) => api.goAsFarAs(howFar),
     carried: () => api.carried(),
     trustCarried: (id, trust) => api.trustCarried(id, trust),
     revealFolder: () => api.revealFolder(),
@@ -1482,6 +1596,17 @@ function connect(): Bridge {
     cancelConnect: () => api.cancelConnect(),
     disconnect: (providerId) => api.disconnect(providerId),
     selectModel: (choice) => api.selectModel(choice),
+    setThinking: (choice, level) => api.setThinking(choice, level),
+    closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
+    startAfter: (text, after, where) => api.startAfter(text, after, where),
+    putAfter: (id, after, where) => api.putAfter(id, after, where),
+    pageAt: (address, bounds) => api.pageAt(address, bounds),
+    pageHidden: (hidden) => api.pageHidden(hidden),
+    watchStart: (says) => api.watchStart(says),
+    watchStop: () => api.watchStop(),
+    spendSplit: () => api.spendSplit(),
+    spendLimit: () => api.spendLimit(),
+    setSpendLimit: (ceiling) => api.setSpendLimit(ceiling),
     onConnectStep: (listener) => api.onConnectStep(listener),
     discoveredAccounts: () => api.discoveredAccounts(),
     importAccount: (account) => api.importAccount(account),

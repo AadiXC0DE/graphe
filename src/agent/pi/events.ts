@@ -155,15 +155,39 @@ function fromMessageEnd(source: Fields): AgentEvent | null {
   return { type: 'message-end' };
 }
 
-/** Only the last line, and only a short one. This is a step's one-line detail,
- *  not a second conversation running underneath the first. */
+/** Pi carries a tool's partial result in the shape a tool result takes — an
+ *  object whose text lives in `content` entries. A bare string was sent in an
+ *  earlier version, so both are read. This is the whole channel a spawned
+ *  helper's words travel on; dropping it is what made a finished helper report
+ *  "Nothing said yet". */
+function partialTextOf(value: unknown): string | null {
+  if (typeof value === 'string') return value === '' ? null : value;
+  const fields = fieldsOf(value);
+  if (fields === null) return null;
+  const content = fields['content'];
+  if (!Array.isArray(content)) return null;
+  let said = '';
+  for (const entry of content) {
+    const item = fieldsOf(entry);
+    if (item === null || textAt(item, 'type') !== 'text') continue;
+    const text = textAt(item, 'text');
+    if (text !== null) said += text;
+  }
+  return said === '' ? null : said;
+}
+
+/** Everything the step has said so far, whole. The feed shows one line of it
+ *  and the helper board shows all of it, so the trimming belongs where it is
+ *  drawn rather than here — cutting it at the seam left the board with a
+ *  finished helper and no findings. */
 function fromToolExecutionUpdate(source: Fields): AgentEvent | null {
   const id = textAt(source, 'toolCallId');
-  const partial = textAt(source, 'partialResult');
-  if (id === null || partial === null) return null;
-  const last = partial.split('\n').map((line) => line.trim()).filter(Boolean).pop();
-  if (last === undefined || last === '') return null;
-  return { type: 'tool-progress', id, text: last.length > 120 ? `${last.slice(0, 119)}…` : last };
+  if (id === null) return null;
+  const partial = partialTextOf(source['partialResult']);
+  if (partial === null) return null;
+  const said = partial.trim();
+  if (said === '') return null;
+  return { type: 'tool-progress', id, text: said };
 }
 
 function fromToolExecutionEnd(source: Fields): AgentEvent | null {

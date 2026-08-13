@@ -132,6 +132,22 @@ export function estimated(text: string, prompt: Prompt): Turn {
   return { kind: 'estimate', id: newId(), text, prompt, answered: null };
 }
 
+/** Whether the conversation is waiting on a person rather than on the agent.
+ *  Anything held back until somebody answers is the next thing to happen, so
+ *  a message waiting in line waits for it too. */
+export function askingYou(turns: readonly Turn[]): boolean {
+  const last = turns[turns.length - 1];
+  if (last === undefined) return false;
+  switch (last.kind) {
+    case 'asked':
+    case 'estimate':
+    case 'plan':
+      return last.answered === null;
+    default:
+      return false;
+  }
+}
+
 /** Close off the most recent activity for a call. Returns the same array when
  *  there was nothing to close, which is how `blocked` tells the difference
  *  between "stopped something that had started" and "stopped it before it

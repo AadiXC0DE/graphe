@@ -55,6 +55,17 @@ export type ResearchEntry = {
   state: 'running' | 'done' | 'failed';
 };
 
+/** One helper working alongside the conversation, as the screen sees it. */
+export type Helper = {
+  id: string;
+  task: string;
+  /** Everything it has said so far, whole. The rail shows a few words of it
+   *  and the sheet shows all of it. */
+  saying: string | null;
+  state: 'running' | 'done' | 'failed';
+  startedAt: number;
+};
+
 /** What is happening this second: the step in flight, and any helpers still
  *  working. Derived from the thread, like the research log. */
 export type NowView = {
@@ -62,13 +73,7 @@ export type NowView = {
   step: { label: string; detail?: string } | null;
   /** Every helper this conversation sent off, oldest first — the ones still
    *  working and the ones that came back. */
-  helpers: readonly {
-    id: string;
-    task: string;
-    saying: string | null;
-    state: 'running' | 'done' | 'failed';
-    startedAt: number;
-  }[];
+  helpers: readonly Helper[];
   /** How many files this conversation has opened. Rarely interesting on its
    *  own; it is what makes a bill make sense. */
   filesRead: number;
@@ -108,6 +113,35 @@ export type Desk = {
    *  measured when it settles. Null when nothing is running. */
   doing: { task: Task; startedAt: number } | null;
   /**
+   * What was typed while something was already running, in the order it was
+   * typed. Each goes out on its own as soon as the one before it is finished.
+   *
+   * Per desk, because a second thought belongs to the project it was had in —
+   * switching away and back finds it still waiting.
+   */
+  waiting: readonly Waiting[];
+  /**
+   * Which conversation is on screen, as the shell addresses it. Null before the
+   * shell has said — everything still works, it just cannot be addressed.
+   */
+  address: string | null;
+  /**
+   * The project's other open conversations, by address.
+   *
+   * `turns` above is whichever one is in front; these are the rest, kept whole
+   * so switching is swapping and nothing is refetched. A reply that arrives for
+   * one of them lands in it rather than in whatever happens to be on screen.
+   */
+  parked: Readonly<Record<string, Parked>>;
+  /**
+   * Every conversation open here, in the order they were opened.
+   *
+   * Kept apart from `parked` because that is a bag: switching moves one out of
+   * it and another in, and a row of tabs built from it would reorder under the
+   * hand every time somebody pressed one.
+   */
+  order: readonly string[];
+  /**
    * How much of this sitting's running total has already been attributed to a
    * finished job.
    *
@@ -117,6 +151,23 @@ export type Desk = {
    * estimate after it would be nonsense.
    */
   counted: number;
+};
+
+/** A conversation this project has open but is not showing.
+ *
+ * Only the two things that belong to a conversation rather than to the project:
+ * what was said in it, and anything typed into it that has not gone yet. The
+ * versions, the spend and the pictures are the project's, and are shared.
+ */
+export type Parked = {
+  turns: readonly Turn[];
+  waiting: readonly Waiting[];
+};
+
+/** One message typed while the last one was still being answered. */
+export type Waiting = {
+  id: string;
+  text: string;
 };
 
 /** Every desk, and which one is in front. */
@@ -140,8 +191,58 @@ function blankDesk(path: string, name: string): Desk {
     putBack: null,
     jobs: [],
     doing: null,
+    waiting: [],
+    address: null,
+    parked: {},
+    order: [],
     counted: 0,
   };
+}
+
+/**
+ * Bring one of a project's conversations to the front.
+ *
+ * The one that was in front is parked whole, so coming back to it finds it as
+ * it was rather than as a thread that has to be read off disk again.
+ */
+export function showThread(desks: Desks, project: string, address: string): Desks {
+  return changeDesk(desks, project, (desk) => {
+    if (desk.address === address) return desk;
+    const wanted = desk.parked[address];
+    if (wanted === undefined) return desk;
+    const { [address]: _taken, ...rest } = desk.parked;
+    return {
+      ...desk,
+      turns: wanted.turns,
+      waiting: wanted.waiting,
+      address,
+      parked:
+        desk.address === null
+          ? rest
+          : { ...rest, [desk.address]: { turns: desk.turns, waiting: desk.waiting } },
+    };
+  });
+}
+
+/** Put a conversation down without losing what is in it. Never the one in
+ *  front — closing what you are looking at is a different move. */
+export function parkThread(desks: Desks, project: string, address: string): Desks {
+  return changeDesk(desks, project, (desk) => {
+    if (desk.parked[address] === undefined) return desk;
+    const { [address]: _gone, ...rest } = desk.parked;
+    return { ...desk, parked: rest, order: desk.order.filter((one) => one !== address) };
+  });
+}
+
+/** Every conversation this project has open, in the order they were opened,
+ *  with the one in front marked. */
+export function threadsIn(desk: Desk): readonly { address: string; here: boolean }[] {
+  const known = new Set([...Object.keys(desk.parked), ...(desk.address === null ? [] : [desk.address])]);
+  const ordered = desk.order.filter((one) => known.has(one));
+  // Anything the order has not caught up with yet goes on the end rather than
+  // being left out — a tab missing from the row is worse than one out of place.
+  for (const one of known) if (!ordered.includes(one)) ordered.push(one);
+  return ordered.map((address) => ({ address, here: address === desk.address }));
 }
 
 /** The desk in front, or null when no project is open. */
@@ -200,12 +301,27 @@ export function changeCurrent(desks: Desks, change: (desk: Desk) => Desk): Desks
 export function receive(desks: Desks, notice: AgentNotice, at: number = Date.now()): Desks {
   const path = notice.project ?? desks.current;
   if (path === null) return desks;
-  return changeDesk(desks, path, (desk) => ({
-    ...desk,
-    turns: applyEvent(desk.turns, notice.event),
-    spent: applySpend(desk.spent, notice.event),
-    ...measure(desk, notice, at),
-  }));
+  return changeDesk(desks, path, (desk) => {
+    // A reply that was still arriving when somebody switched conversations
+    // belongs to the conversation it started in. The spend is the project's
+    // either way, so it is counted wherever the words land.
+    const said = notice.conversation ?? '';
+    const parked = said === '' ? undefined : desk.parked[said];
+    if (parked !== undefined) {
+      return {
+        ...desk,
+        parked: { ...desk.parked, [said]: { ...parked, turns: applyEvent(parked.turns, notice.event) } },
+        spent: applySpend(desk.spent, notice.event),
+        ...measure(desk, notice, at),
+      };
+    }
+    return {
+      ...desk,
+      turns: applyEvent(desk.turns, notice.event),
+      spent: applySpend(desk.spent, notice.event),
+      ...measure(desk, notice, at),
+    };
+  });
 }
 
 /**

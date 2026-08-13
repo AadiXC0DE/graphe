@@ -30,7 +30,14 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 
-import { injectPointer, POINT_PATH, type Pointed, type Rect } from './point';
+import {
+  injectPointer,
+  POINT_PATH,
+  type Pointed,
+  type PointedSource,
+  type Rect,
+  type Trace,
+} from './point';
 
 /** A site being looked at right now. */
 export type Serving = {
@@ -154,9 +161,12 @@ function refuse(response: ServerResponse, code: number, says: string): void {
 /* The one path that takes something in                                        */
 /* -------------------------------------------------------------------------- */
 
-/** A description of one element is a few hundred bytes. This is the only route
- *  that reads a request body, so it reads as little as it can. */
-const POINTED_MAX = 8 * 1024;
+/** A description of one element used to be a few hundred bytes. It now carries
+ *  the element's own markup, its resolved styles and the project's values in
+ *  scope on it — the page sheds the least useful of those to fit, so a limit
+ *  that is too small is not silence, it is a quieter answer. This is the only
+ *  route that reads a request body, so it still reads as little as it can. */
+const POINTED_MAX = 96 * 1024;
 
 function asRect(value: unknown): Rect | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -188,6 +198,78 @@ function asPlace(value: unknown): NonNullable<Pointed['place']> | null {
 
 /** Checked rather than trusted, and rebuilt rather than passed through. Whatever
  *  arrives here came off a page we did not write. */
+/** Read defensively: everything here crossed a wire from a page we do not
+ *  control, so a field that is not the shape it claims is left out rather than
+ *  passed on. */
+function words(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, said] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof said === 'string') out[key] = said;
+  }
+  return out;
+}
+
+function asSource(value: unknown): PointedSource | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const from = value as Record<string, unknown>;
+  const html = from['html'];
+  if (typeof html !== 'string') return null;
+  const source: PointedSource = { html, styles: words(from['styles']) };
+  const vars = words(from['vars']);
+  if (Object.keys(vars).length > 0) source.vars = vars;
+  return source;
+}
+
+function asOrigin(value: unknown): Trace[] {
+  if (!Array.isArray(value)) return [];
+  const out: Trace[] = [];
+  for (const one of value) {
+    if (typeof one !== 'object' || one === null) continue;
+    const from = one as Record<string, unknown>;
+    const how = from['how'];
+    const file = from['file'];
+    const line = from['line'];
+    const column = from['column'];
+    const component = from['component'];
+    if (how === 'stamp' && typeof file === 'string' && typeof line === 'number') {
+      const rung: Extract<Trace, { how: 'stamp' }> = { how, file, line };
+      if (typeof column === 'number') rung.column = column;
+      if (typeof component === 'string') rung.component = component;
+      out.push(rung);
+      continue;
+    }
+    if (how === 'stack' && typeof file === 'string' && typeof line === 'number') {
+      const rung: Extract<Trace, { how: 'stack' }> = { how, file, line };
+      if (typeof column === 'number') rung.column = column;
+      if (typeof from['mapped'] === 'boolean') rung.mapped = from['mapped'];
+      out.push(rung);
+      continue;
+    }
+    if (how === 'owner' && typeof component === 'string') out.push({ how, component });
+    if (how === 'selector' && typeof from['selector'] === 'string') {
+      out.push({ how, selector: from['selector'] });
+    }
+    if (how === 'markup' && typeof from['html'] === 'string') out.push({ how, html: from['html'] });
+    if (how === 'text' && typeof from['text'] === 'string') out.push({ how, text: from['text'] });
+  }
+  return out;
+}
+
+function asView(value: unknown): { width: number; height: number } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const from = value as Record<string, unknown>;
+  const width = from['width'];
+  const height = from['height'];
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  return { width: width as number, height: height as number };
+}
+
+/** What a name for one element could plausibly be. The body may now be large,
+ *  because markup and styles travel in it — but a selector or a label of that
+ *  size is not a description of anything, it is somebody leaning on the door. */
+const NAME_MAX = 2 * 1024;
+
 function asPointed(value: unknown): Pointed | null {
   if (typeof value !== 'object' || value === null) return null;
   const from = value as Record<string, unknown>;
@@ -195,9 +277,9 @@ function asPointed(value: unknown): Pointed | null {
   const selector = from['selector'];
   const label = from['label'];
   const kind = from['kind'];
-  if (typeof selector !== 'string' || selector === '') return null;
-  if (typeof label !== 'string') return null;
-  if (kind !== undefined && typeof kind !== 'string') return null;
+  if (typeof selector !== 'string' || selector === '' || selector.length > NAME_MAX) return null;
+  if (typeof label !== 'string' || label.length > NAME_MAX) return null;
+  if (kind !== undefined && (typeof kind !== 'string' || kind.length > NAME_MAX)) return null;
 
   const rect = asRect(from['rect']);
   if (rect === null) return null;
@@ -210,6 +292,17 @@ function asPointed(value: unknown): Pointed | null {
     if (place === null) return null;
     pointed.place = place;
   }
+
+  // Everything the reading is built from. Carried through rather than dropped:
+  // the card that names a component and its tokens is made of exactly this, and
+  // a seam that keeps only the selector is the reason it never existed.
+  const source = asSource(from['source']);
+  if (source !== null) pointed.source = source;
+  const origin = asOrigin(from['origin']);
+  if (origin.length > 0) pointed.origin = origin;
+  const view = asView(from['view']);
+  if (view !== null) pointed.view = view;
+
   return pointed;
 }
 

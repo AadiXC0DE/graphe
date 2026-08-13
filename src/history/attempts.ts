@@ -17,6 +17,7 @@ import path from 'node:path';
 import { mkdir, rm } from 'node:fs/promises';
 
 import { ProjectHistory, HistoryError, historyProblems } from './repo';
+import { carryOver } from './newcopy';
 import { AT_A_TIME, nextUp, roomLeft, type WorkState } from '../work/board';
 
 /** The window says these too, and it has no folders — see src/share/holding.ts. */
@@ -122,6 +123,7 @@ export class Tries {
         const folder = folderForTry(options.under, options.id, index);
         await mkdir(path.dirname(folder), { recursive: true });
         await options.history.addWorkspace(folder, from);
+        await carryOver(options.history.root, folder);
         made.push({
           id: `${options.id}-${index + 1}`,
           name: nameOfTry(index),
@@ -254,6 +256,7 @@ export class HeldWork {
     const folder = folderForHeld(options.under, options.id);
     await mkdir(path.dirname(folder), { recursive: true });
     await options.history.addWorkspace(folder, from);
+    await carryOver(options.history.root, folder);
 
     return new HeldWork(options.history, folder, {
       id: options.id,
@@ -368,6 +371,10 @@ export function folderForWork(under: string, id: string): string {
  * at once, who is next when a slot frees up, which copy belongs to which piece
  * of work, and — the part that has to be right — that letting one go can only
  * ever remove that one's copy.
+ *
+ * One writer each, and never two in a copy. What makes that hold is the caller
+ * judging its agent against `folder` rather than against the project: a copy is
+ * isolation only if the Guard is told the copy is the world.
  */
 export class Workbench {
   private readonly history: ProjectHistory;
@@ -444,6 +451,7 @@ export class Workbench {
       try {
         await mkdir(path.dirname(folder), { recursive: true });
         await this.history.addWorkspace(folder, from);
+        await carryOver(this.history.root, folder);
       } catch (cause) {
         // One copy failing is that piece's problem and not the board's — the
         // others carry on, and this one says so rather than disappearing.

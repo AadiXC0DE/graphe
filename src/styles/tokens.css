@@ -27,8 +27,8 @@
   /* One step under --text-xs, for the second line of a chip and nothing bigger.
      It was already in the app as a literal in Attachments.css; it is here now so
      there is one smallest size rather than one smallest size and an exception. */
-  --text-2xs: 0.75rem;
-  --text-xs: 0.75rem;
+  --text-2xs: 0.8125rem;
+  --text-xs: 0.8125rem;
   --text-sm: 0.8125rem;
   --text-base: 0.9375rem;
   --text-lg: 1.125rem;

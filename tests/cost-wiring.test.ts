@@ -18,7 +18,14 @@ import { describe, expect, it } from 'vitest';
 
 import { EventRelay } from '../src/agent/pi/events';
 import { DEFAULT_SPEND_LABEL } from '../src/agent/pi/spend';
-import { PI_CURRENCY, Purse, priceOfPiMessage } from '../src/agent/pi/usage';
+import {
+  PI_CURRENCY,
+  Purse,
+  cacheHitShare,
+  priceOfPiMessage,
+  shortModelName,
+  usageOfPiMessage,
+} from '../src/agent/pi/usage';
 import type { AgentEvent, SpendSummary, ToolCall } from '../src/agent/types';
 import { formatMoney, toMajor } from '../src/cost/money';
 import * as phrasing from '../src/cost/phrasing';
@@ -70,6 +77,37 @@ function session(billedSoFar: () => number | null = () => null) {
 describe('reading what Pi says a turn cost', () => {
   it('takes the price Pi worked out rather than working one out again', () => {
     expect(priceOfPiMessage(pricedTurn(0.0431))).toBe(0.0431);
+  });
+
+  it('reads cache fields the same way Pi totals them', () => {
+    const usage = usageOfPiMessage({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-20250514',
+        usage: {
+          input: 200,
+          output: 40,
+          cacheRead: 800,
+          cacheWrite: 0,
+          cost: { total: 0.01 },
+        },
+      },
+    });
+    expect(usage).toMatchObject({
+      input: 200,
+      cacheRead: 800,
+      cacheWrite: 0,
+      costTotal: 0.01,
+      model: 'claude-sonnet-4-20250514',
+    });
+    expect(cacheHitShare(usage!)).toBeCloseTo(0.8);
+    expect(shortModelName(usage!.model!)).toBe('claude-sonnet-4');
+  });
+
+  it('does not invent a cache hit when the provider never reports caching', () => {
+    expect(cacheHitShare({ input: 1000, cacheRead: 0, cacheWrite: 0 })).toBeNull();
   });
 
   it('ignores everything that is not the assistant being billed', () => {

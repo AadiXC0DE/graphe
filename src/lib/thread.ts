@@ -372,6 +372,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
     // commentary on cost is the anxiety this design exists to avoid.
     case 'spend':
     case 'spend-summary':
+    case 'model-reading':
     case 'settled':
       return turns;
   }

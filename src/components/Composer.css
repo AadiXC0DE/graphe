@@ -60,8 +60,8 @@
 .composer__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  justify-content: flex-start;
+  gap: var(--space-1);
   padding: var(--space-1) var(--space-2) 0;
 }
 
@@ -86,6 +86,14 @@
 .composer__row .thinking {
   display: flex;
   align-items: center;
+  min-width: 0;
+}
+
+/* The message controls read as a compact working strip, not a row whose
+   * available width is redistributed into arbitrary gaps. The quiet hint takes
+   * the flexible space and keeps the room/send pair parked at the far edge. */
+.composer__row .composer__hint {
+  margin-left: var(--space-1);
 }
 
 .composer__hint {

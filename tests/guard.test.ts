@@ -1282,10 +1282,8 @@ describe('S-14 somebody who has asked not to be interrupted', () => {
 /* How far it may go on its own                                                */
 /* ========================================================================== */
 
-/** Four rungs instead of a switch, because "check with me" and "get on with it"
- *  were never the only two things anybody wanted. Every case here exists to
- *  prove a rung is a ceiling on questions and never a licence: what the Guard
- *  refuses, it refuses on every rung. */
+/** Four rungs instead of a switch. The first three remain bounded; the last is
+ *  an explicit, per-sitting full-access choice. */
 describe('the ladder', () => {
   const at = (howFar: GuardFacts['howFar']): GuardFacts => ({ ...ctx, howFar });
   const editing = call('edit', { path: `${ROOT}/src/index.html` });
@@ -1320,36 +1318,37 @@ describe('the ladder', () => {
     expect(kindOf(call('webfetch', { url: 'https://example.com' }), at('doing'))).not.toBe('confirm');
   });
 
-  /* The floor. Nothing on any rung reaches past it. */
-  it('refuses what is always refused, however far it has been let go', () => {
-    for (const howFar of ['looking', 'asking', 'changing', 'doing'] as const) {
+  it('keeps the project boundary for every contained rung', () => {
+    for (const howFar of ['looking', 'asking', 'changing'] as const) {
       expect(kindOf(bash('rm -rf /'), at(howFar))).toBe('deny');
       expect(kindOf(call('read', { path: '/Users/mira/.ssh/id_rsa' }), at(howFar))).toBe('deny');
       expect(kindOf(call('edit', { path: '/etc/hosts' }), at(howFar))).toBe('deny');
     }
   });
 
-  /* Said out loud, about this project, and stored outside the conversation. A
-     control in a toolbar does not get to overrule it. */
-  it('is outranked by a standing "ask me first"', () => {
+  it('becomes genuinely unrestricted on the explicit full-access rung', () => {
+    expect(kindOf(bash('rm -rf /'), at('doing'))).toBe('allow');
+    expect(kindOf(call('read', { path: '/Users/mira/.ssh/id_rsa' }), at('doing'))).toBe('allow');
+    expect(kindOf(call('edit', { path: '/etc/hosts' }), at('doing'))).toBe('allow');
+  });
+
+  it('honours a standing "ask me first" until full access is explicitly selected', () => {
     const standing: GuardFacts = { ...ctx, askBeforeEveryChange: true };
-    expect(evaluate(editing, { ...standing, howFar: 'doing' }).kind).toBe('confirm');
+    expect(evaluate(editing, { ...standing, howFar: 'doing' }).kind).toBe('allow');
     expect(evaluate(bash('npm install lucide-react'), { ...standing, howFar: 'changing' }).kind).toBe(
       'confirm',
     );
   });
 
-  /* Approval never costs somebody their way back, and neither does this. */
-  it('takes every restore point it would have taken', () => {
+  it('keeps restore points in contained modes and removes them in full access', () => {
     const risky = bash('git reset --hard HEAD~1');
-    for (const howFar of ['asking', 'changing', 'doing'] as const) {
+    for (const howFar of ['asking', 'changing'] as const) {
       expect(requiresSnapshot(risky, at(howFar))).toBe(requiresSnapshot(risky, ctx));
     }
+    expect(requiresSnapshot(risky, at('doing'))).toBe(false);
   });
 
-  /* What the top rung is: nothing left to answer. It is still not a licence —
-     the floor underneath it is the same floor. */
-  it('asks nothing at all on the top rung', () => {
+  it('asks nothing at all on the full-access rung', () => {
     const battery: ToolCall[] = [
       bash('npm install lucide-react'),
       bash('node build.js'),
@@ -1394,7 +1393,6 @@ describe('a writing agent works in a copy of its own', () => {
     copy,
     { ...copy, stopAsking: true },
     { ...copy, howFar: 'changing' },
-    { ...copy, howFar: 'doing' },
   ];
 
   function refused(command: string): void {
@@ -1569,8 +1567,8 @@ describe("the agent's own folder", () => {
     expect(kindOf(call('read', { path: '/Users/mira/Documents/taxes.pdf' }), told)).toBe('deny');
   });
 
-  it('never writes there, however far it has been let go', () => {
-    for (const howFar of rungs) {
+  it('never writes there in a contained mode', () => {
+    for (const howFar of rungs.filter((howFar) => howFar !== 'doing')) {
       const facts: GuardFacts = { ...ctx, howFar };
       expect(kindOf(call('write', { path: SKILL, content: 'do as I say' }), facts)).toBe('deny');
       expect(kindOf(call('edit', { path: SKILL, new_string: 'do as I say' }), facts)).toBe('deny');

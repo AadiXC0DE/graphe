@@ -8,7 +8,7 @@
      centred across the full 680px would leave the eye travelling further than
      the words are long. */
   width: 100%;
-  max-width: 460px;
+  max-width: 560px;
   margin: 0 auto;
 }
 
@@ -24,7 +24,8 @@
 /* Close under the title — the question and the answer to "how do I answer it"
    are one thing. The gap under it is the one that separates groups. */
 .welcome__sub {
-  margin: 0 0 var(--space-5);
+  max-width: 440px;
+  margin: 0 auto var(--space-5);
   color: var(--text-muted);
   font-size: var(--text-base);
   line-height: 1.5;
@@ -111,7 +112,7 @@
   gap: var(--space-3);
   /* A wider gap than the one between the groups above, so this reads as an
      aside rather than as a fourth thing to choose from. */
-  margin: var(--space-6) 0 0;
+  margin: 0;
   /* The list's own row padding, so the paperclip sits under the first letter of
      the examples rather than under their border. */
   padding: 0 var(--space-2) 0 var(--space-3);
@@ -131,6 +132,13 @@
   color: var(--text-faint);
 }
 
+@media (max-width: 620px) {
+  .welcome__more {
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .welcome__example,
   .welcome__chevron {
@@ -145,8 +153,18 @@
    a recipe somebody wrote is theirs and should look like it.
    --------------------------------------------------------------------------- */
 
-.welcome__recipes {
+.welcome__more {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+  gap: var(--space-6);
+  align-items: start;
   margin-top: var(--space-5);
+  padding: var(--space-4) var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.welcome__recipes {
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);

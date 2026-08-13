@@ -11,6 +11,7 @@ import './Welcome.css';
  * Exported so the gallery shows the same three the app does. */
 export const firstMoves: readonly string[] = [
   'Build this Figma frame with the components we already have',
+  'Make this page feel more like the reference, then show me what changed',
   'Send a helper into every page, tell me what breaks, then fix the worst three',
   'Find everywhere we rebuilt something this project already has',
 ];
@@ -55,9 +56,9 @@ type Props = {
  * should be still.
  */
 export default function Welcome({ onUse, examples = firstMoves, recipes = STARTERS }: Props) {
-  /* Six is as many as the first screen can hold before the band stops reading as
-     a few suggestions and starts reading as a menu to get through. */
-  const shown = recipes.slice(0, 6);
+  /* Four is enough to show the range without turning the first screen into a
+     catalogue. The rest remain one click away in the composer. */
+  const shown = recipes.slice(0, 4);
 
   return (
     <div className="welcome">
@@ -69,7 +70,7 @@ export default function Welcome({ onUse, examples = firstMoves, recipes = STARTE
       <p className="welcome__sub">
         {examples.length === 0
           ? 'Describe it in a sentence.'
-          : 'Describe it, or start from one of these.'}
+          : 'Describe it, start from one of these, or bring in something you are looking at.'}
       </p>
 
       {examples.length === 0 ? null : (
@@ -105,57 +106,50 @@ export default function Welcome({ onUse, examples = firstMoves, recipes = STARTE
         </ul>
       )}
 
-      {/* The things people ask for again and again, as buttons. Pressing one
-          fills the box rather than sending it — the same rule the examples
-          above follow, for the same reason. */}
-      {shown.length === 0 ? null : (
-        <div className="welcome__recipes">
-          <span className="welcome__recipesname">Or something you ask for often</span>
-          <ul className="welcome__chips" aria-label="Things to ask for">
-            {shown.map((recipe) => (
-              <li key={recipe.id}>
-                <button
-                  type="button"
-                  className={`welcome__chip ${recipe.from === 'yours' ? 'welcome__chip--yours' : ''}`}
-                  onClick={() => onUse?.(recipe.prompt)}
-                  title={recipe.prompt}
-                >
-                  {recipe.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <div className="welcome__more">
+        {/* The things people ask for again and again, as buttons. Pressing one
+            fills the box rather than sending it — the same rule the examples
+            above follow, for the same reason. */}
+        {shown.length === 0 ? null : (
+          <div className="welcome__recipes">
+            <span className="welcome__recipesname">Useful starting points</span>
+            <ul className="welcome__chips" aria-label="Things to ask for">
+              {shown.map((recipe) => (
+                <li key={recipe.id}>
+                  <button
+                    type="button"
+                    className={`welcome__chip ${recipe.from === 'yours' ? 'welcome__chip--yours' : ''}`}
+                    onClick={() => onUse?.(recipe.prompt)}
+                    title={recipe.prompt}
+                  >
+                    {recipe.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
-      {/* The other way in, and it needs to look like one.
-          It was the faintest, smallest, most centred line on the screen — fine
-          print under a list, which is exactly where somebody holding a Figma
-          file would not look. It now sits on the list's own left margin,
-          carries the same paperclip the composer wears, and is read in the same
-          tone as everything else here: an alternative, not a footnote. */}
-      <p className="welcome__drop">
-        <svg
-          className="welcome__clip"
-          width="16"
-          height="16"
-          viewBox="0 0 16 16"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M9.6 4.2 5.2 8.6a1.9 1.9 0 0 0 2.7 2.7l4.7-4.7a3.2 3.2 0 0 0-4.5-4.5L3.3 6.9a4.5 4.5 0 0 0 6.4 6.4l3.6-3.6"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <span>
-          Already have it? Drop a Figma file, a screenshot or a photo of a sketch onto the box
-          below.
-        </span>
-      </p>
+        <p className="welcome__drop">
+          <svg
+            className="welcome__clip"
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M9.6 4.2 5.2 8.6a1.9 1.9 0 0 0 2.7 2.7l4.7-4.7a3.2 3.2 0 0 0-4.5-4.5L3.3 6.9a4.5 4.5 0 0 0 6.4 6.4l3.6-3.6"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span>Drop a Figma file, screenshot or sketch onto the box below.</span>
+        </p>
+      </div>
     </div>
   );
 }

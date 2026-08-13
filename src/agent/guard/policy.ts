@@ -68,10 +68,11 @@ import {
 /**
  * How far the agent may go before it stops and asks.
  *
- * A ladder rather than a switch. Each rung is a ceiling on what happens without
- * a question — never on what is refused. Everything the Guard refuses outright
- * it still refuses on every rung, and every restore point is still taken, so
- * the worst any of these can cost is one undo.
+ * A ladder rather than a switch. The first three rungs are ceilings on what
+ * happens without a question. The final rung is deliberately different: it is
+ * explicit full-computer access for the current sitting, equivalent to the
+ * "dangerously skip permissions" modes in other coding agents. It removes the
+ * Guard's project boundary as well as its questions and restore-point work.
  */
 export type HowFar =
   /** Reads and reports. Anything that would change something is turned down. */
@@ -81,8 +82,8 @@ export type HowFar =
   /** Changes files without asking; still stops before running a command or
    *  reaching the internet. */
   | 'changing'
-  /** Runs things too, without asking. Nothing to answer on this rung — and the
-   *  refusals underneath it are the same ones as on the first. */
+  /** Runs things too, with the person's full computer access for this sitting.
+   *  This deliberately bypasses the Guard and its project boundary. */
   | 'doing';
 
 export type GuardFacts = GuardContext & {
@@ -1833,7 +1834,14 @@ function asFarAs(judgement: Judgement, ctx: GuardFacts): Judgement {
 }
 
 function judge(call: ToolCall, ctx: GuardFacts): Judgement {
-  const first = asFarAs(applyStandingInstruction(judgeCall(call, ctx), ctx), ctx);
+  const raw = judgeCall(call, ctx);
+  // "Get on with it" is an explicit full-access choice, not merely fewer
+  // questions. The terminal runner is widened for this same mode; leaving this
+  // earlier policy gate in place was why harmless uses of /tmp were still
+  // rejected before the shell ever saw them.
+  if (ctx.howFar === 'doing') return allow(raw.mutates);
+
+  const first = asFarAs(applyStandingInstruction(raw, ctx), ctx);
   return withoutQuestions(first, { ...ctx, stopAsking: quietFor(call, ctx) });
 }
 

@@ -16,7 +16,7 @@ export const SAYS = {
     changing: { name: 'Changes files', note: 'I edit without asking, and still stop before running anything.' },
     doing: {
       name: 'Gets on with it',
-      note: 'I run in your normal terminal too, with the accounts and tools you already use there.',
+      note: 'Full computer access for this sitting, using the accounts and tools you already use in your terminal.',
     },
   },
 
@@ -25,11 +25,11 @@ export const SAYS = {
    *  middle one is the part people assume wrongly. */
   screens: {
     doing: {
-      title: 'You will not be asked again this sitting',
+      title: 'Full computer access for this sitting',
       changes:
-        'I will stop checking with you before things I would normally ask about — running something, reaching the internet, changing a lot of files at once.',
+        'I will run commands and work anywhere on your computer without asking first, using your normal terminal environment.',
       keeps:
-        'Two things do not change: a saved moment is still taken before anything destructive, so you can put it back; and the handful of things I refuse outright — wiping a disk, reaching outside this folder, reading your keys — I still refuse.',
+        'This is intentionally unrestricted: it can reach outside this project and it does not create restore points first. Turn it on only when you want that level of access.',
       go: 'Turn it off for this sitting',
     },
   },

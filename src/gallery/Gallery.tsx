@@ -695,6 +695,11 @@ const REFERENCES: readonly Reference[] = [
 const SPENT: SpendView = {
   total: inr(4000),
   split: null,
+  usage: {
+    reusedShare: 0.72,
+    mostUsed: 'claude-sonnet-4',
+    byModel: [{ name: 'claude-sonnet-4', share: 1 }],
+  },
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1637,7 +1642,6 @@ export default function Gallery() {
                 onHoldBack={noop}
                 onDecide={noop}
                 onHandOver={noop}
-                onPutOnline={noop}
                 onOpenLink={noop}
                 onKeepGoing={noop}
                 onStartAfter={noop}
@@ -1708,8 +1712,8 @@ export default function Gallery() {
           </Section>
 
           <Section
-            title="Ship it"
-            note="The foot of the overview, and the only place in the app where anything can leave this computer. Work checked in a copy sits in the accent until somebody answers it; both answers are undoable, so neither button is the dangerous one. The two that can send anywhere never do it on one press — each opens its own confirmation first, in the same sentences the shell would use."
+            title="Ready to ship"
+            note="The foot of the overview. Work checked in a copy sits until somebody answers it; both answers are undoable. Handing work to a developer never does it on one press — the confirmation says what is about to leave, in the same sentences the shell would use. Putting something online is a conversation with the agent, not a button that only works for one host."
           >
             <div className="gallery__overview">
               <Landing
@@ -1723,14 +1727,13 @@ export default function Gallery() {
                 onDecide={noop}
                 onUndo={noop}
                 onHandOver={noop}
-                onPutOnline={noop}
                 onShare={noop}
                 onOpenLink={noop}
               />
             </div>
             <p className="gallery__caption">
-              Nothing here is named after how it works. "Check my work before it lands" rather than
-              anything about copies; "Let it in" and "Set it aside" rather than approve and reject.
+              Nothing here is named after how it works. "Work in a copy, and ask me first" rather than
+              anything about sandboxes; "Let it in" and "Set it aside" rather than approve and reject.
               What is waiting says what it was asked for, in the person's own words.
             </p>
           </Section>

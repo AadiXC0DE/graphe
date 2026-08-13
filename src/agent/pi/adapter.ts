@@ -44,7 +44,7 @@ import { EventRelay } from './events';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { grapheTools } from './tools';
-import { heldShell } from '../sandbox/shell';
+import { heldShell, loginShell } from '../sandbox/shell';
 import {
   collectAccounts,
   credentialFor,
@@ -205,6 +205,15 @@ export function createGuardInterceptor(
   };
 
   return async function review(call: ToolCall): Promise<Interception> {
+    // The explicit top autonomy rung is full access for this sitting. Keep this
+    // before planning too: otherwise a leftover plan-only state silently turns
+    // "Get on with it" back into a restricted mode. `evaluate` mirrors this
+    // rule for every other policy consumer.
+    if (facts.howFar === 'doing') {
+      relay.started(call);
+      return undefined;
+    }
+
     // Looking only. Withheld rather than refused-as-an-error: the model is told
     // to put it in the plan, which is the answer we actually want back.
     if (planning?.() === true && readOnlyTools([call.name]).length === 0) {
@@ -247,7 +256,8 @@ export function createGuardInterceptor(
 /* -------------------------------------------------------------------------- */
 
 export type CreateSessionOptions = {
-  /** The project folder. Also the Guard's boundary: nothing may reach outside it. */
+  /** The project folder. The Guard's boundary in the normal autonomy modes;
+   *  the explicit "Get on with it" mode deliberately lifts that boundary. */
   projectRoot: string;
   /** Every event the app shows, in order. */
   onEvent: (event: AgentEvent) => void;
@@ -1075,8 +1085,17 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       return {};
     }
   })();
+  const localShell = pi.createLocalBashOperations({ shellPath: settings.shell }).exec;
+  const fullAccessShell = loginShell(
+    process.env['SHELL'] ?? settings.shell ?? (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash'),
+    localShell,
+  );
   const shell = heldShell({
     folder: options.projectRoot,
+    // The runner reads this immediately before every command, so changing the
+    // session's autonomy setting applies to the next command without replacing
+    // the current conversation.
+    unrestricted: () => facts.howFar === 'doing',
     parts: () => {
       const config = pi.getShellConfig(settings.shell);
       // A shell fed its command down a pipe is not one we can name on a command
@@ -1084,7 +1103,8 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       if (config.commandTransport === 'stdin') throw new Error('nothing to name');
       return { shell: config.shell, args: config.args };
     },
-    plain: pi.createLocalBashOperations({ shellPath: settings.shell }).exec,
+    plain: localShell,
+    unrestrictedPlain: fullAccessShell,
   });
   const boundShell = pi.createBashToolDefinition(options.projectRoot, {
     operations: shell,

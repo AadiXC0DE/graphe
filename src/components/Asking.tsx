@@ -14,10 +14,9 @@ export const SAYS = {
     looking: { name: 'Just looking', note: 'I read and tell you what I find. I change nothing.' },
     asking: { name: 'Asks first', note: 'I stop and check with you before anything that could cost you something.' },
     changing: { name: 'Changes files', note: 'I edit without asking, and still stop before running anything.' },
-    doing: { name: 'Gets on with it', note: 'I run things too. Every change is still one undo away.' },
-    anything: {
-      name: 'No limits',
-      note: 'Nothing is refused. I can reach anything on this computer, not just this project.',
+    doing: {
+      name: 'Gets on with it',
+      note: 'Full computer access for this sitting, using the accounts and tools you already use in your terminal.',
     },
   },
 
@@ -26,20 +25,12 @@ export const SAYS = {
    *  middle one is the part people assume wrongly. */
   screens: {
     doing: {
-      title: 'You will not be asked again this sitting',
+      title: 'Full computer access for this sitting',
       changes:
-        'I will stop checking with you before things I would normally ask about — running something, reaching the internet, changing a lot of files at once.',
+        'I will run commands and work anywhere on your computer without asking first, using your normal terminal environment.',
       keeps:
-        'Two things do not change: a saved moment is still taken before anything destructive, so you can put it back; and the handful of things I refuse outright — wiping a disk, reaching outside this folder, reading your keys — I still refuse.',
+        'This is intentionally unrestricted: it can reach outside this project and it does not create restore points first. Turn it on only when you want that level of access.',
       go: 'Turn it off for this sitting',
-    },
-    anything: {
-      title: 'This takes the last of it off',
-      changes:
-        'Everything I normally refuse outright becomes something I will simply do: reading anywhere on this computer including the files your accounts are kept in, changing things outside this project, running anything at all, and letting a command send whatever it sends.',
-      keeps:
-        'One thing does not change: a saved moment is still taken before anything destructive, so your project can still be put back. Nothing outside your project can be.',
-      go: 'Take the limits off for this sitting',
     },
   },
   until: 'It goes back to asking when you next open Graphe.',
@@ -61,15 +52,14 @@ export const SAYS = {
  */
 /** In the order they let go, so the menu reads as a ladder rather than a list
  *  of unrelated modes. */
-export const RUNGS: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing', 'anything'];
+export const RUNGS: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing'];
 
-/** The two worth stopping somebody on, and the screen each one gets. Below
- *  these nothing happens that a question would have caught. */
-const WORTH_A_WARNING: readonly HowFar[] = ['doing', 'anything'];
+/** The one worth stopping somebody on: it runs commands in the person's normal
+ * terminal environment rather than the contained project environment. */
+const WORTH_A_WARNING: readonly HowFar[] = ['doing'];
 
 function screenFor(rung: HowFar): (typeof SAYS.screens)['doing'] | null {
   if (rung === 'doing') return SAYS.screens.doing;
-  if (rung === 'anything') return SAYS.screens.anything;
   return null;
 }
 
@@ -108,16 +98,10 @@ export default function Asking({ howFar, onHowFar }: Props) {
   };
 
   const here = SAYS.rungs[howFar];
-  const loose = howFar === 'changing' || howFar === 'doing' || howFar === 'anything';
-  // Nothing is holding this back, so the chip stops being furniture. It is the
-  // one state in the row somebody must not be able to forget they left on.
-  const nothingHeld = howFar === 'anything';
+  const loose = howFar === 'changing' || howFar === 'doing';
 
   return (
-    <div
-      className={`asking ${loose ? 'asking--quiet' : ''} ${nothingHeld ? 'asking--nolimits' : ''}`}
-      ref={root}
-    >
+    <div className={`asking ${loose ? 'asking--quiet' : ''}`} ref={root}>
       <button
         type="button"
         className="asking__chip"
@@ -155,9 +139,7 @@ export default function Asking({ howFar, onHowFar }: Props) {
            how long it lasts — in that order, because the middle one is the part
            people assume wrongly. */
         <div
-          className={`asking__menu asking__menu--warning ${
-            warning === 'anything' ? 'asking__menu--nolimits' : ''
-          }`}
+          className="asking__menu asking__menu--warning"
           role="dialog"
           aria-label={screenFor(warning)?.title ?? ''}
         >

@@ -24,7 +24,10 @@ import AddMore from "./components/AddMore";
 import ProjectMenu from "./components/ProjectMenu";
 import ProjectPicker from "./components/ProjectPicker";
 import BrowserPane, { type Room as PaneRoom } from "./components/BrowserPane";
+import Settings, { type SettingsLink } from "./components/Settings";
+import Usage from "./components/Usage";
 import Sidebar from "./components/Sidebar";
+import Skills from "./components/Skills";
 import Tabs, { type Tab } from "./components/Tabs";
 import Steps from "./components/Steps";
 import ThinkingWith from "./components/ThinkingWith";
@@ -36,6 +39,7 @@ import type { Found, Things } from "./lib/anything";
 import type { Task } from "./cost/estimate";
 import {
   longConversation,
+  meter,
   nothingSpentYet,
   retryHonesty,
   sessionSummary,
@@ -73,6 +77,7 @@ import {
   type RecentProject,
   type Result,
   type Room as RoomState,
+  type Skill,
   type HowFar,
   type Money,
   type PointedAt,
@@ -167,6 +172,25 @@ function titleOf(turns: readonly Turn[]): string {
   if (first === undefined || first.kind !== 'said') return 'New conversation';
   const words = first.text.trim().replace(/\s+/g, ' ');
   return words.length > 40 ? `${words.slice(0, 39)}…` : words;
+}
+
+/** Recent-project storage is ordered by last use, which is useful for a picker
+ * on first launch but hostile to a sidebar someone is scanning. Once the UI has
+ * shown a project order, preserve that spatial order: refresh the entries in
+ * place, remove forgotten folders, and put only genuinely new folders at the
+ * end. Selecting a project must move the selection, never the list. */
+function stableProjectOrder(
+  previous: readonly RecentProject[] | null,
+  incoming: readonly RecentProject[],
+): readonly RecentProject[] {
+  if (previous === null) return incoming;
+  const byPath = new Map(incoming.map((project) => [project.path, project]));
+  const kept = previous.flatMap((project) => {
+    const refreshed = byPath.get(project.path);
+    return refreshed === undefined ? [] : [refreshed];
+  });
+  const known = new Set(previous.map((project) => project.path));
+  return [...kept, ...incoming.filter((project) => !known.has(project.path))];
 }
 
 /** The one line under the project's name: where the work stands, and what has
@@ -375,9 +399,19 @@ function Conversation() {
     });
   }, []);
 
+  const refreshSkills = useCallback(() => {
+    void bridge.skills().then((answer) => {
+      if (answer.ok) setSkills(answer.value);
+    });
+  }, []);
+
   useEffect(() => {
     refreshConnection();
   }, [refreshConnection]);
+
+  useEffect(() => {
+    refreshSkills();
+  }, [desks.current, refreshSkills]);
 
   /** Follow along while a connection happens. Each step is one moment of the
    *  provider's sign-in — a browser it opened, a question it asked. The step
@@ -583,6 +617,18 @@ function Conversation() {
   /** Whether the shelf is open. Deliberately not remembered across launches —
    *  it is a thing people flip all the time and it costs nothing to reset. */
   const [shelfOpen, setShelfOpen] = useState(true);
+  /** The project file rail keeps its setting when folded, just like the main
+   *  sidebar: showing it again is one press rather than a trip to settings. */
+  const [filesOpen, setFilesOpen] = useState(true);
+  /* Once a project has earned its right rail, keep that shell mounted for the
+     sitting. Snapshot and status refreshes arrive independently of agent events;
+     deriving the rail directly from each one made it blink out for a frame and
+     reflow the conversation under a running response. */
+  const overviewSeen = useRef(new Set<string>());
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [skills, setSkills] = useState<readonly Skill[]>([]);
 
   /** Which band of the design view is open, or null when it is not. Both of the
    *  surfaces that take the whole width live here rather than inside a panel:
@@ -594,6 +640,9 @@ function Conversation() {
   const [fixing, setFixing] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
+  /** The conversation that owns the current send. `busy` is window-wide (it
+   *  also covers picking a folder), so tabs need this narrower identity. */
+  const [busyConversation, setBusyConversation] = useState<string | null>(null);
   /** How full the conversation on screen is, and whether it is being shortened
    *  right now. Asked for rather than counted here: the number is the model's
    *  own reckoning, and only the shell can see it. */
@@ -936,6 +985,10 @@ function Conversation() {
       // Which conversation this landed in. Without it nothing in the shelf is
       // marked, and pressing the row you are already in looks like a dead button.
       setInConversation(opened.value.conversation);
+      // The shelf is about the project in front. Clear the old project's list
+      // while this project's list is on its way so its conversation names can
+      // never briefly appear under the wrong project.
+      setConversations([]);
       setDesks((current) => {
         const next = openDesk(current, opened.value);
         const desk = next.byPath[opened.value.path];
@@ -968,11 +1021,13 @@ function Conversation() {
       void bridge.pages().then((answer) => {
         if (answer.ok) setPages(answer.value);
       });
-      void bridge.conversations().then((answer) => {
-        if (answer.ok) setConversations(answer.value);
+      void bridge.conversations({ project: opened.value.path }).then((answer) => {
+        if (answer.ok && desksNow.current.current === opened.value.path) {
+          setConversations(answer.value);
+        }
       });
       void bridge.recentProjects().then((answer) => {
-        if (answer.ok) setRecent(answer.value);
+        if (answer.ok) setRecent((current) => stableProjectOrder(current, answer.value));
       });
     },
     [desks.current, refreshVersions, refreshOverview, toChat, troubleHere],
@@ -1001,11 +1056,13 @@ function Conversation() {
         return;
       }
       toChat();
-      // Mid-answer. Swapping disposes the session underneath, so the turn on its
-      // way would be lost — said out loud rather than ignored.
+      // Mid-answer. Other tools let you open another conversation any time;
+      // blocking with "finish this thought" is how people feel trapped. Stop
+      // the turn that is in flight, then move — the stopped turn is still
+      // written down on the conversation it belongs to.
       if (busy) {
-        troubleHere(swapWords.busy);
-        return;
+        await bridge.stop();
+        setBusy(false);
       }
       const opened = await bridge.openConversation(path);
       if (!opened.ok) {
@@ -1048,11 +1105,33 @@ function Conversation() {
       refreshRoom();
       // A new session asks again, whatever the last one had been told.
       setHowFarHere('asking');
-      void bridge.conversations().then((answer) => {
-        if (answer.ok) setConversations(answer.value);
+      const project = desksNow.current.current;
+      if (project !== null) setConversations([]);
+      void bridge.conversations(project === null ? undefined : { project }).then((answer) => {
+        if (answer.ok && desksNow.current.current === project) setConversations(answer.value);
       });
     },
     [busy, inConversation, desk?.turns.length, toChat, troubleHere],
+  );
+
+  /** Throw a conversation away. If it is the one on screen, open a fresh one
+   *  after so the desk is never left pointing at a file that is gone. */
+  const deleteConversation = useCallback(
+    async (path: string) => {
+      const wasHere = path === inConversation;
+      if (wasHere && busy) {
+        await bridge.stop();
+        setBusy(false);
+      }
+      const answer = await bridge.deleteConversation(path);
+      if (!answer.ok) {
+        troubleHere(answer.trouble);
+        return;
+      }
+      setConversations(answer.value);
+      if (wasHere) await swapConversation(null);
+    },
+    [busy, inConversation, swapConversation, troubleHere],
   );
 
   const browse = useCallback(async () => {
@@ -1085,7 +1164,7 @@ function Conversation() {
       return next;
     });
     const answer = await bridge.forgetProject(project.path);
-    if (answer.ok) setRecent(answer.value);
+    if (answer.ok) setRecent((current) => stableProjectOrder(current, answer.value));
   }, []);
 
   /* ------------------------------------------------------------ first paint */
@@ -1103,7 +1182,7 @@ function Conversation() {
     });
     void bridge.recentProjects().then((answer) => {
       if (!stillHere) return;
-      setRecent(answer.ok ? answer.value : []);
+      setRecent((current) => stableProjectOrder(current, answer.ok ? answer.value : []));
       if (openOnLoad === null || !answer.ok) return;
       const wanted =
         answer.value.find((one) => one.name === openOnLoad && !one.missing) ??
@@ -1189,12 +1268,17 @@ function Conversation() {
    *  narration is Pi's own, arriving through the ordinary event stream, so
    *  there is nothing to say here. */
   const tidyNow = useCallback(() => {
-    setTidying(true);
     void bridge
       .tidyNow()
       .then((answer) => {
         if (answer.ok) setRoom(answer.value);
-        else troubleHere(answer.trouble);
+        // "Not enough to shorten" and "Pi was already shortening it" are
+        // ordinary, harmless outcomes. Pi's event stream has already left the
+        // truthful activity line in the conversation when there was work to
+        // narrate, so a large error card here would only contradict it.
+        else if (answer.trouble.what !== 'I could not tidy this conversation just now.') {
+          troubleHere(answer.trouble);
+        }
       })
       .finally(() => setTidying(false));
   }, [troubleHere]);
@@ -1397,8 +1481,10 @@ function Conversation() {
         })),
       );
       setBusy(true);
+      const desk = currentDesk(desksNow.current);
+      const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
+      setBusyConversation(owner);
       try {
-        const desk = currentDesk(desksNow.current);
         const reply = await bridge.prompt(text, pictures, ways, {
           ...(desk === null ? {} : { project: desk.path }),
           ...(desk?.address == null ? {} : { conversation: desk.address }),
@@ -1416,6 +1502,7 @@ function Conversation() {
         });
       } finally {
         setBusy(false);
+        setBusyConversation((current) => (current === owner ? null : current));
       }
     },
     [troubleHere],
@@ -1481,7 +1568,9 @@ function Conversation() {
       // rather than quoting a precision it does not have.
       const desk = currentDesk(desks);
       const priced = quote(desk?.jobs ?? [], desk?.spent?.total ?? null, text);
-      const asking = priced.prompt;
+      // Full access is an explicit instruction to proceed. It still records the
+      // work, but does not put either kind of large-job pause in its way.
+      const asking = howFar === 'doing' ? null : priced.prompt;
       if (asking !== null) {
         setDesks((current) =>
           changeCurrent(current, (one) => ({
@@ -1508,11 +1597,13 @@ function Conversation() {
       // somebody has said otherwise for this message. It is not a mode people
       // switch on: the failure designers fear most is forty files changed
       // without warning, and that is worth a round trip by default.
-      const lookFirst = plans === 'always' || (plans === 'auto' && worthPlanning(text));
+      const lookFirst =
+        howFar !== 'doing' &&
+        (plans === 'always' || (plans === 'auto' && worthPlanning(text)));
       if (lookFirst) asked.current = text;
       await deliver(text, priced.task, { lookFirst });
     },
-    [deliver, desks, open, plans, say],
+    [deliver, desks, howFar, open, plans, say],
   );
 
   /* ------------------------------------------------------------ in line */
@@ -1908,24 +1999,6 @@ function Conversation() {
       });
   }, [refreshLanding, troubleHere]);
 
-  const putItOnline = useCallback(() => {
-    setGoing("online");
-    setLanded(null);
-    void bridge
-      .putOnline(true)
-      .then((answer) => {
-        if (!answer.ok) {
-          troubleHere(answer.trouble);
-          return;
-        }
-        setLanded({ kind: "online", went: answer.value });
-      })
-      .finally(() => {
-        setGoing(null);
-        refreshLanding();
-      });
-  }, [refreshLanding, troubleHere]);
-
   /* ------------------------------------------- while you are not looking */
 
   /**
@@ -1982,10 +2055,10 @@ function Conversation() {
   }, [troubleHere]);
 
   const keepGoing = useCallback(
-    (text: string) => {
+    (text: string, untilDone = false) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.keepGoing(text).then(afterAway(path));
+      void bridge.keepGoing(text, untilDone).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2140,8 +2213,45 @@ function Conversation() {
       say(nothingSpentYet);
       return;
     }
-    say(`${sessionSummary(split).lines.join("\n")}\n\n${retryHonesty}`);
+    const usage = desk?.spent?.usage;
+    const extra: string[] = [];
+    if (usage?.reusedShare !== null && usage?.reusedShare !== undefined) {
+      extra.push(meter.reused(usage.reusedShare));
+    }
+    const body = [
+      ...sessionSummary(split).lines,
+      ...extra,
+      '',
+      retryHonesty,
+    ].join('\n');
+    say(body);
   }, [desk, say]);
+
+  const openSettingsLink = useCallback(
+    (link: SettingsLink) => {
+      switch (link) {
+        case 'skills':
+          refreshSkills();
+          setSkillsOpen(true);
+          return;
+        case 'add-more':
+          openAddMore();
+          return;
+        case 'usage':
+          setUsageOpen(true);
+          return;
+        case 'folder':
+          revealFolder();
+          return;
+        case 'editor':
+          openInEditor();
+          return;
+        default:
+          return;
+      }
+    },
+    [refreshSkills, openAddMore, showSplit, revealFolder, openInEditor],
+  );
 
   /* ----------------------------------------------------------------- see it */
 
@@ -2250,24 +2360,32 @@ function Conversation() {
   const research = researchLog(desk?.turns ?? []);
   const helpers = nowDoing(desk?.turns ?? []).helpers;
 
-  /* What is open, as one row. A tab is a conversation; today a project holds
-     one at a time, so the row is a project each until the shell can hold more.
-     Newest-opened last, so the strip does not reorder under the hand. */
-  const tabs: readonly Tab[] = Object.values(desks.byPath).flatMap((one) =>
-    threadsIn(one).map(({ address, here }) => {
-      const turns = here ? one.turns : (one.parked[address]?.turns ?? []);
-      const inFront = here && one.path === desks.current;
+  /* The top row is only the conversations open in this project. Projects are
+     switched in the sidebar, where the whole project list stays in one stable
+     place. `threadsIn` preserves opening order, so selecting a tab never
+     shuffles the row beneath the pointer. */
+  const tabs: readonly Tab[] = desk === null ? [] : threadsIn(desk).map(({ address, here }) => {
+      const turns = here ? desk.turns : (desk.parked[address]?.turns ?? []);
+      // `busy` belongs to the window, not a conversation. Applying it to
+      // `here` made the spinner jump to whichever tab was clicked while another
+      // conversation was doing the work. A live turn is its own evidence.
+      const running = turns.some(
+        (turn) =>
+          (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
+          (turn.kind === 'did' && turn.state === 'running') ||
+          turn.kind === 'tidying' && turn.state === 'running',
+      );
       return {
-        id: `${one.path}\u0000${address}`,
+        id: `${desk.path}\u0000${address}`,
         title: titleOf(turns),
-        project: one.name,
-        projectPath: one.path,
-        state: inFront && busy ? ('working' as const)
+        project: desk.name,
+        projectPath: desk.path,
+        state: running || busyConversation === `${desk.path}\u0000${address}`
+          ? ('working' as const)
           : askingYou(turns) ? ('asking' as const)
           : ('idle' as const),
       };
-    }),
-  );
+    });
 
   openNow.current = tabs.map((one) => one.id);
   atNow.current =
@@ -2282,12 +2400,14 @@ function Conversation() {
     connection?.providers.find(
       (provider) => provider.providerId === connection.chosen?.providerId,
     )?.subscription === true;
-  const overviewed =
+  const hasOverview =
     desk !== null &&
     (desk.overview?.git !== null ||
       research.length > 0 ||
       desk.references.length > 0 ||
       desk.versions.length >= 2);
+  if (desk !== null && hasOverview) overviewSeen.current.add(desk.path);
+  const overviewed = desk !== null && (hasOverview || overviewSeen.current.has(desk.path));
 
   // The pill that takes you back to the live preview. It earns its place the
   // moment there is an address to go to — nothing here is worth a button before
@@ -2299,10 +2419,11 @@ function Conversation() {
   // The one region nobody is given: it is here because somebody went and asked
   // for it, and it stays until they say otherwise.
   const filesShown = desk !== null && preferences.showFiles;
+  const filesExpanded = filesShown && filesOpen;
 
   return (
     <main
-      className={`app ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesShown ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""}`}
+      className={`app ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -2310,7 +2431,7 @@ function Conversation() {
           {/* The row of what is open. It replaces nothing — the project's own
               name stays as the way into its other conversations — but it is
               where switching actually happens once there is more than one. */}
-          {tabs.length > 1 ? (
+          {desk !== null ? (
             <Tabs
               tabs={tabs}
               at={atNow.current}
@@ -2320,46 +2441,58 @@ function Conversation() {
             />
           ) : null}
 
-          {desk === null ? (
-            <span className="topbar__name topbar__name--quiet">Graphe</span>
-          ) : (
-            <button
-              type="button"
-              className="topbar__name"
-              onClick={() => setSwitching((was) => !was)}
-              aria-expanded={switching}
-              aria-haspopup="menu"
-            >
-              {desk.name}
-              <svg
-                width="9"
-                height="9"
-                viewBox="0 0 12 12"
-                fill="none"
-                aria-hidden="true"
+          <div className="topbar__project">
+            {desk === null ? (
+              <span className="topbar__name topbar__name--quiet">Graphe</span>
+            ) : (
+              <button
+                type="button"
+                className="topbar__name"
+                onClick={() => setSwitching((was) => !was)}
+                aria-expanded={switching}
+                aria-haspopup="menu"
               >
-                <path
-                  d="M2.5 4.5 6 8l3.5-3.5"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          )}
+                {desk.name}
+                <svg
+                  width="9"
+                  height="9"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M2.5 4.5 6 8l3.5-3.5"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
 
-          {/* The way into the bar for anyone who was never told about ⌘K. */}
-          {desk === null ? null : (
-            <button
-              type="button"
-              className="topbar__ask"
-              onClick={() => setAsking(true)}
-              title="Find a project, a page, a saved moment — or just say something"
-            >
-              Ask for anything
-            </button>
-          )}
+            {switching && recent !== null ? (
+              <div className="topbar__switcher" role="menu">
+                <ProjectMenu
+                  projects={recent}
+                  openPath={desks.current}
+                  onOpen={(project) => void open(project.path)}
+                  onForget={(project) => void forget(project)}
+                  onBrowse={() => void browse()}
+                  editor={editor}
+                  onOpenInEditor={openInEditor}
+                  onRevealFolder={revealFolder}
+                  showMe={preferences.showMe}
+                  onShowMe={changeShowMe}
+                  showFiles={preferences.showFiles}
+                  onShowFiles={changeShowFiles}
+                  onPreview={() => void seeIt()}
+                  onAccount={openConnect}
+                  onAddMore={openAddMore}
+                />
+              </div>
+            ) : null}
+          </div>
 
           {/* Only where the composer is not: with a project open the chip lives
               in the composer's own row, and two of them saying the same thing
@@ -2376,27 +2509,6 @@ function Conversation() {
             </div>
           ) : null}
 
-          {switching && recent !== null ? (
-            <div className="topbar__switcher" role="menu">
-              <ProjectMenu
-                projects={recent}
-                openPath={desks.current}
-                onOpen={(project) => void open(project.path)}
-                onForget={(project) => void forget(project)}
-                onBrowse={() => void browse()}
-                editor={editor}
-                onOpenInEditor={openInEditor}
-                onRevealFolder={revealFolder}
-                showMe={preferences.showMe}
-                onShowMe={changeShowMe}
-                showFiles={preferences.showFiles}
-                onShowFiles={changeShowFiles}
-                onPreview={() => void seeIt()}
-                onAccount={openConnect}
-                onAddMore={openAddMore}
-              />
-            </div>
-          ) : null}
         </div>
       ) : null}
 
@@ -2440,13 +2552,53 @@ function Conversation() {
           onAsk={() => setAsking(true)}
           onDesign={() => setDesignAt("styles")}
           onHistory={() => setGraphOpen(true)}
+          onSkills={() => { refreshSkills(); setSkillsOpen(true); }}
           onAddMore={openAddMore}
+          onFiles={filesShown ? () => setFilesOpen(true) : undefined}
+          onDeleteConversation={(path) => void deleteConversation(path)}
+          onSettings={() => setSettingsOpen(true)}
         />
       ) : null}
 
-      {filesShown && desk !== null ? (
+      <Skills
+        open={skillsOpen}
+        skills={skills}
+        onClose={() => setSkillsOpen(false)}
+        onRefresh={refreshSkills}
+        onOpen={async (skill) => {
+          const answer = await bridge.skillText(skill.id);
+          return answer.ok ? answer.value : null;
+        }}
+      />
+
+      <Settings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        showMe={preferences.showMe}
+        showFiles={preferences.showFiles}
+        onToggleShowMe={() => changeShowMe(!preferences.showMe)}
+        onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
+        onGo={openSettingsLink}
+      />
+
+      <Usage open={usageOpen} spent={desk?.spent ?? null} onClose={() => setUsageOpen(false)} />
+
+      {filesExpanded && desk !== null ? (
         <aside className="filespanel">
-          <h2 className="filespanel__title">Everything in this project</h2>
+          <div className="filespanel__head">
+            <h2 className="filespanel__title">Everything in this project</h2>
+            <button
+              type="button"
+              className="filespanel__collapse"
+              onClick={() => setFilesOpen(false)}
+              aria-label="Collapse the project files"
+              title="Collapse project files"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M6.5 4 10.5 8l-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
           <Files
             files={files[desk.path] ?? []}
             selected={reading?.path ?? null}
@@ -2458,7 +2610,7 @@ function Conversation() {
       <div className="app__column" ref={contentRef}>
         {/* The file sits where the reading happens rather than squeezed into
             the panel: a column of code is prose-width, not sidebar-width. */}
-        {filesShown && reading !== null ? (
+        {filesExpanded && reading !== null ? (
           <div className="app__file">
             <FileView
               path={reading.path}
@@ -2590,6 +2742,7 @@ function Conversation() {
               onSelectModel={selectModel}
               onConnect={openConnect}
               onThinking={changeThinking}
+              skills={skills}
               onAttachmentsChange={(next) => {
                 if (desks.current === null) setLoose(next);
                 else {
@@ -2663,13 +2816,13 @@ function Conversation() {
           onShowSplit={() => void showSplit()}
           onLimit={setLimit}
           onOpenFile={(file) => void bridge.openInEditor(file)}
+          onReviewChanges={openInEditor}
           onOpenDesign={setDesignAt}
           onOpenGraph={() => setGraphOpen(true)}
           onShare={() => void bridge.shareReview()}
           onHoldBack={changeHoldBack}
           onDecide={decideOnWork}
           onHandOver={handToDeveloper}
-          onPutOnline={putItOnline}
           onOpenLink={(address) => void bridge.openLink(address)}
           onKeepGoing={keepGoing}
           onStartAfter={startAfter}
@@ -3031,7 +3184,7 @@ function Turnstile({
       return (
         <ActivityLine
           state={turn.state}
-          label={longConversation.tidying}
+          label={turn.state === 'failed' ? longConversation.stayedAsIs : longConversation.tidying}
           real={showMe ? behind.tidying : undefined}
         />
       );

@@ -373,6 +373,14 @@ const PROGRESS_EVERY_MS = 400;
 
 type TaskParams = { task: string; cwd?: string };
 
+/** The session owns the helper's folder. A helper may be asked to look beneath
+ * it, but model-supplied `cwd` must never replace the project it was launched
+ * from. Kept as a small pure seam because this value is used for both the child
+ * process and the cost record. */
+export function helperWorkingDirectory(projectRoot?: string, requested?: string): string {
+  return projectRoot ?? requested ?? process.cwd();
+}
+
 /* -------------------------------------------------------------------------- */
 /* The boundary around a helper                                                */
 /* -------------------------------------------------------------------------- */
@@ -640,7 +648,7 @@ export const taskTool = (
     // refused halfway through has already been paid for.
     // The project this helper's spending belongs to. The model's `cwd` is a
     // suggestion; the folder the session was opened on is the fact.
-    const project = projectRoot ?? params.cwd ?? process.cwd();
+    const project = helperWorkingDirectory(projectRoot, params.cwd);
     const admitted = fleet.begin({ id: callId, kind: 'helper', stop: () => {} });
     if (!admitted.ok) {
       return { content: [{ type: 'text', text: admitted.because }], details: {} };
@@ -653,7 +661,11 @@ export const taskTool = (
     let ran: Ran;
     try {
       ran = await runSubagent(
-        { ...params, agentDir, model, thinking },
+        // `project` is the session's real folder. `params.cwd` is model input
+        // and must never decide where a helper starts: previously it was used
+        // for accounting but accidentally dropped here, so helpers fell back
+        // to Graphe's application directory and could not resolve the project.
+        { ...params, cwd: project, agentDir, model, thinking },
         signal,
         (text) => {
           progress += text;

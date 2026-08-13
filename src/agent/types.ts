@@ -95,11 +95,23 @@ export type SpendSummary = {
   largestRetry: LabelTotal | null;
 };
 
+/** How this sitting used the model, said without counts a designer has no
+ *  intuition for. Built from Pi's own usage block (cache reads, model ids). */
+export type SittingUsage = {
+  /** Share of the prompt that came back from cache, 0–1. Null when the account
+   *  never reports caching, so a zero would mean the wrong thing. */
+  reusedShare: number | null;
+  /** The model that took the largest share of the bill this sitting. */
+  mostUsed: string | null;
+  /** Models ordered by spend share, largest first. Empty until something ran. */
+  byModel: readonly { name: string; share: number }[];
+};
+
 export type AgentEvent =
   | { type: 'message-delta'; text: string }
   | { type: 'message-end' }
   | { type: 'tool-start'; call: ToolCall }
-  | { type: 'tool-end'; id: string; ok: boolean }
+  | { type: 'tool-end'; id: string; ok: boolean; detail?: string }
   /** A tool that is still running has something to say — the helper the `task`
    *  tool spawns, reporting as it reads. Replaces the step's own detail line. */
   | { type: 'tool-progress'; id: string; text: string }
@@ -152,4 +164,7 @@ export type AgentEvent =
   | { type: 'settled' }
   /** The split, from the shell's ledger. Emitted after `settled`, and only when
    *  there is something to split — no spend, no summary, no zero state. */
-  | { type: 'spend-summary'; summary: SpendSummary };
+  | { type: 'spend-summary'; summary: SpendSummary }
+  /** How the model was used this sitting — cache reuse and which model most.
+   *  Updated as turns land; never carries raw counts. */
+  | { type: 'model-reading'; reading: SittingUsage };

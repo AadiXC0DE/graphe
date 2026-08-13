@@ -39,11 +39,29 @@
   color: var(--text-faint);
 }
 
+/* The menu grows from the word that opened it, but sits above the composer so
+   it never hides the controls someone was already using. */
+.composer__skills {
+  position: absolute;
+  left: var(--space-3);
+  bottom: calc(100% + var(--space-2));
+  z-index: 4;
+  width: min(360px, calc(100vw - var(--space-6)));
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-lg);
+  animation: composer-skills-in 160ms var(--ease-out-quart) both;
+}
+@keyframes composer-skills-in { from { opacity: 0; transform: translateY(4px) scale(.99); } to { opacity: 1; transform: none; } }
+.composer__skills > p { margin: 0; padding: var(--space-1) var(--space-2) var(--space-2); font-size: var(--text-xs); color: var(--text-faint); }.composer__skills > p span { color: var(--accent); font-family: var(--font-mono); }.composer__skills button { display:flex; align-items:center; justify-content:space-between; width:100%; gap:var(--space-3); padding:var(--space-2); border-radius:var(--radius-sm); text-align:left; color:var(--text-faint); }.composer__skills button > span { display:flex; align-items:baseline; min-width:0; gap:var(--space-2); }.composer__skills strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-sm); font-weight:520; color:var(--text); }.composer__skills small,.composer__skills em { flex:none; font-family:var(--font-mono); font-size:var(--text-2xs); font-style:normal; color:var(--accent); }.composer__skills em { color:var(--text-faint); }.composer__skill--active { background:var(--accent-soft); }@media (hover:hover) and (pointer:fine) { .composer__skills button:hover { background:var(--bg-sunken); } }.composer__skills button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }@media (prefers-reduced-motion:reduce) { .composer__skills { animation:none; } }
+
 .composer__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  justify-content: flex-start;
+  gap: var(--space-1);
   padding: var(--space-1) var(--space-2) 0;
 }
 
@@ -68,6 +86,14 @@
 .composer__row .thinking {
   display: flex;
   align-items: center;
+  min-width: 0;
+}
+
+/* The message controls read as a compact working strip, not a row whose
+   * available width is redistributed into arbitrary gaps. The quiet hint takes
+   * the flexible space and keeps the room/send pair parked at the far edge. */
+.composer__row .composer__hint {
+  margin-left: var(--space-1);
 }
 
 .composer__hint {

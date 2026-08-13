@@ -1,14 +1,12 @@
-/* Failure, at half speed. Nothing shakes, nothing flashes. */
+/* A recovery note, not a failure screen. Nothing shakes or flashes. */
 
 .errorcard {
-  max-width: 460px;
-  padding: var(--space-4);
-  background: var(--bg-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  /* Slower than the rest of the app, deliberately: --dur-large, not --dur-ui. */
-  animation: errorcard-settle var(--dur-large) var(--ease-out-quart) both;
+  max-width: 620px;
+  padding: var(--space-3) var(--space-4);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: color-mix(in srgb, var(--accent-soft) 38%, var(--bg-raised));
+  animation: errorcard-settle 180ms var(--ease-out-quart) both;
 }
 
 @keyframes errorcard-settle {
@@ -25,55 +23,56 @@
 .errorcard__head {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .errorcard__mark {
   flex: none;
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  margin-top: 1px;
-  border-radius: 50%;
-  background: var(--accent-soft);
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border-radius: 6px;
+  background: transparent;
   color: var(--accent);
 }
 
 .errorcard__what {
   margin: 0;
-  font-size: var(--text-base);
-  font-weight: 600;
-  line-height: 1.45;
-  letter-spacing: -0.01em;
+  font-size: var(--text-sm);
+  font-weight: 560;
+  line-height: 1.4;
   color: var(--text);
 }
 
+.errorcard__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  margin: 3px 0 0 calc(18px + var(--space-2));
+}
+
 .errorcard__because {
-  margin: var(--space-2) 0 0;
-  padding-left: calc(22px + var(--space-3));
+  flex: 1 1 280px;
+  margin: 0;
   font-size: var(--text-sm);
-  line-height: 1.55;
+  line-height: 1.45;
   color: var(--text-muted);
 }
 
-.errorcard__actions {
-  margin-top: var(--space-4);
-  padding-left: calc(22px + var(--space-3));
-}
-
 .errorcard__button {
-  min-height: 44px;
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
+  position: relative;
+  flex: none;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
   font-weight: 500;
-  /* Neutral rather than accent: on this card the colour belongs to the mark,
-     which is what carries the severity. Two accent objects in one small card is
-     one too many. */
-  background: var(--text);
-  color: var(--bg);
-  border: 1px solid var(--text);
+  color: var(--text);
   transition:
     background-color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
@@ -89,8 +88,8 @@
 }
 
 .errorcard__tech {
-  margin-top: var(--space-3);
-  padding-left: calc(22px + var(--space-3));
+  flex: 0 0 100%;
+  margin-top: 1px;
 }
 
 .errorcard__summary {
@@ -98,7 +97,7 @@
   align-items: center;
   gap: var(--space-2);
   position: relative;
-  min-height: 28px;
+  min-height: 24px;
   font-size: var(--text-xs);
   color: var(--text-muted);
   cursor: pointer;
@@ -148,8 +147,8 @@
    capped at about fifteen lines and scrolls inside itself. Nothing is hidden:
    the whole thing is still there to scroll or select. */
 .errorcard__pre {
-  margin: var(--space-2) 0 0;
-  padding: var(--space-3);
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
   max-height: 15lh;
   overflow: auto;
   overscroll-behavior: contain;
@@ -166,8 +165,8 @@
 
 @media (hover: hover) and (pointer: fine) {
   .errorcard__button:hover {
-    background: color-mix(in srgb, var(--text) 86%, var(--bg));
-    border-color: color-mix(in srgb, var(--text) 86%, var(--bg));
+    background: var(--bg-sunken);
+    border-color: var(--text-muted);
   }
 
   .errorcard__summary:hover {

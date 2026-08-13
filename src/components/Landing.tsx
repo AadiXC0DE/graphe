@@ -3,7 +3,6 @@ import { useState } from 'react';
 import type { HandedOver, Landing as LandingState, WentOnline } from '../lib/ipc';
 import { holdWords } from '../share/holding';
 import { handoverWords } from '../share/handover';
-import { onlineWords } from '../share/online';
 import { behind, reallyRuns, realSteps } from '../lib/showme';
 import './Landing.css';
 
@@ -26,7 +25,6 @@ type Props = {
   /** Undo letting work in — the same put-back as anywhere else. */
   onUndo: (versionId: string) => void;
   onHandOver: () => void;
-  onPutOnline: () => void;
   onShare: () => void;
   onOpenLink: (address: string) => void;
   /** What was just decided about work, and the version that undoes it. Null
@@ -36,37 +34,17 @@ type Props = {
   looking?: boolean;
 };
 
-/** The two things that can leave this computer, and what each says before it
- *  does. Nothing here is a paraphrase — the sentences are the ones the shell
- *  would use, so what is promised and what happens cannot drift apart. */
-const SENDING = {
-  developer: {
-    label: handoverWords.label,
-    hint: handoverWords.hint,
-    runs: reallyRuns.handOver,
-    warning: handoverWords.aboutTo,
-    yes: 'Yes, send it',
-  },
-  online: {
-    label: onlineWords.label,
-    hint: onlineWords.hint,
-    runs: reallyRuns.online,
-    warning: `${onlineWords.aboutTo} ${onlineWords.andSo}`,
-    yes: onlineWords.confirm,
-  },
-} as const;
-
 /**
  * The band that answers "what now?".
  *
- * Three things that are one thing: work that waits to be looked at, work handed
- * to whoever writes the code, and the project itself put where anybody can open
- * it. They live together because they are the same moment — the point where a
- * designer's afternoon stops being only theirs.
+ * Two things that matter: work that waits to be looked at, and work handed to
+ * whoever writes the code. Putting it online used to live here as a button —
+ * that is a conversation with the agent now, because every host is different
+ * and a button that only works for one of them is a trap.
  *
- * Nothing here reaches the network on a single press. Both of the two that can
- * open the band's own confirmation first, saying in the shell's own words what
- * is about to happen, and only the second press does anything.
+ * Nothing here reaches the network on a single press. Handing over opens its
+ * own confirmation first, saying in the shell's own words what is about to
+ * happen, and only the second press does anything.
  */
 export default function Landing({
   state,
@@ -78,39 +56,21 @@ export default function Landing({
   onDecide,
   onUndo,
   onHandOver,
-  onPutOnline,
   onShare,
   onOpenLink,
   decided,
   looking,
 }: Props) {
-  /* Which of the two has been pressed once. The second press is the one that
-     does anything, and pressing anything else puts this away. */
-  const [asking, setAsking] = useState<'developer' | 'online' | null>(null);
+  const [asking, setAsking] = useState(false);
 
   const waiting = state?.waiting ?? null;
-  // The pictures ride with the work they are of, so there is no way to have one
-  // without the other.
   const held = state?.held ?? null;
   const stopped = busy || going !== null;
 
-  const ask = (which: 'developer' | 'online') => {
-    setAsking((was) => (was === which ? null : which));
-  };
-
-  const goAhead = () => {
-    const which = asking;
-    setAsking(null);
-    if (which === 'developer') onHandOver();
-    if (which === 'online') onPutOnline();
-  };
-
   return (
-    <section className="landing" aria-label="Ship it">
-      <h2 className="landing__title">Ship it</h2>
+    <section className="landing" aria-label="Ready to ship">
+      <h2 className="landing__title">Ready to ship</h2>
 
-      {/* The switch, where the hand already is rather than in a settings
-          screen. Everything it changes is described right under it. */}
       <label className="landing__switch">
         <input
           type="checkbox"
@@ -124,8 +84,6 @@ export default function Landing({
         </span>
       </label>
 
-      {/* The decision, with what it looks like attached. Announced here and
-          nowhere else — the same work said twice is two things to answer. */}
       <SeeFirst
         waiting={waiting}
         held={held}
@@ -134,8 +92,6 @@ export default function Landing({
         onDecide={onDecide}
       />
 
-      {/* Both answers undo through the same door, because both are a version
-          and putting the project at a version is one thing this app does. */}
       {decided === null ? null : (
         <p className="landing__done">
           {decided.letIn ? holdWords.isIn : holdWords.isAside}{' '}
@@ -145,43 +101,42 @@ export default function Landing({
         </p>
       )}
 
-      {/* The two that can send something. Each says what it would do before it
-          is allowed to do it, in the same words the shell uses. */}
-      {(['developer', 'online'] as const).map((which) => {
-        const words = SENDING[which];
-        const can = which === 'developer' ? state?.canHandOver : state?.canPutOnline;
-        const why = which === 'developer' ? state?.handOverSays : state?.onlineSays;
-        const open = asking === which;
-        return (
-          <div key={which} className="landing__thing">
-            <button
-              type="button"
-              className="landing__do"
-              onClick={() => ask(which)}
-              disabled={state === null || stopped}
-              aria-expanded={open}
-            >
-              {going === which ? (which === 'online' ? onlineWords.working : handoverWords.working) : words.label}
-            </button>
-            <p className="landing__hint">{words.hint}</p>
-            <p className="landing__runs">{words.runs}</p>
-            {can === false && why !== undefined ? <p className="landing__why">{why}</p> : null}
-            {open ? (
-              <div className="landing__confirm">
-                <p className="landing__warning">{words.warning}</p>
-                <div className="landing__row">
-                  <button type="button" className="landing__do landing__do--first" onClick={goAhead}>
-                    {words.yes}
-                  </button>
-                  <button type="button" className="landing__quietdo" onClick={() => setAsking(null)}>
-                    Not now
-                  </button>
-                </div>
-              </div>
-            ) : null}
+      <div className="landing__thing">
+        <button
+          type="button"
+          className="landing__do"
+          onClick={() => setAsking((was) => !was)}
+          disabled={state === null || stopped}
+          aria-expanded={asking}
+        >
+          {going === 'developer' ? handoverWords.working : handoverWords.label}
+        </button>
+        <p className="landing__hint">{handoverWords.hint}</p>
+        {showMe ? <p className="landing__runs">{reallyRuns.handOver}</p> : null}
+        {state?.canHandOver === false && state.handOverSays !== undefined ? (
+          <p className="landing__why">{state.handOverSays}</p>
+        ) : null}
+        {asking ? (
+          <div className="landing__confirm">
+            <p className="landing__warning">{handoverWords.aboutTo}</p>
+            <div className="landing__row">
+              <button
+                type="button"
+                className="landing__do landing__do--first"
+                onClick={() => {
+                  setAsking(false);
+                  onHandOver();
+                }}
+              >
+                Yes, send it
+              </button>
+              <button type="button" className="landing__quietdo" onClick={() => setAsking(false)}>
+                Not now
+              </button>
+            </div>
           </div>
-        );
-      })}
+        ) : null}
+      </div>
 
       {outcome === null ? null : (
         <div className="landing__outcome" role="status">
@@ -200,8 +155,6 @@ export default function Landing({
               {address(outcome)}
             </button>
           )}
-          {/* The real commands, only for somebody who asked to see them, and
-              only out of the one file where naming the machinery is allowed. */}
           {showMe && steps(outcome).length > 0 ? (
             <ul className="landing__real">
               {realSteps(steps(outcome)).map((step) => (
@@ -212,8 +165,6 @@ export default function Landing({
         </div>
       )}
 
-      {/* The third way out, and the only one that reaches nobody: one file on
-          this computer that anybody can open. */}
       <div className="landing__thing">
         <button
           type="button"
@@ -224,10 +175,9 @@ export default function Landing({
           Save a page of what changed
         </button>
         <p className="landing__hint">
-          Every before-and-after with a sentence beside it, in one file you send yourself. It
-          opens without the internet.
+          Every before-and-after with a sentence beside it, in one file you send yourself.
         </p>
-        <p className="landing__runs">{reallyRuns.page}</p>
+        {showMe ? <p className="landing__runs">{reallyRuns.page}</p> : null}
       </div>
 
       {showMe ? <p className="landing__switchhint">{behind.landing}</p> : null}

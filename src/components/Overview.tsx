@@ -86,6 +86,9 @@ type Props = {
   onLimit: (ceiling: Money | null) => void;
   /** Open one changed file where the person actually edits things. */
   onOpenFile: (path: string) => void;
+  /** Open the whole changed set where it can be reviewed instead of presenting
+   * a dead list of filenames. */
+  onReviewChanges: () => void;
   /** Keep where the project stands right now, so it can be come back to. */
   onSave: () => void;
   /** Open everything about how the project looks, at one of its bands. */
@@ -100,8 +103,6 @@ type Props = {
   onDecide: (letIn: boolean) => void;
   /** Write the work up and put it where a developer picks it up. */
   onHandOver: () => void;
-  /** Put the finished project on the internet. */
-  onPutOnline: () => void;
   /** Open an address in the person's own browser. */
   onOpenLink: (address: string) => void;
 
@@ -204,6 +205,7 @@ export default function Overview({
   onShowSplit,
   onLimit,
   onOpenFile,
+  onReviewChanges,
   onSave,
   onOpenDesign,
   onOpenGraph,
@@ -211,7 +213,6 @@ export default function Overview({
   onHoldBack,
   onDecide,
   onHandOver,
-  onPutOnline,
   onOpenLink,
   onKeepGoing,
   onStartAfter,
@@ -243,6 +244,7 @@ export default function Overview({
   const files: readonly ChangedFile[] = git?.files ?? [];
   const shownFiles = files.slice(0, WINDOW);
   const moreFiles = (git === null ? 0 : git.unstaged + git.staged + git.untracked) - shownFiles.length;
+  const changedCount = git === null ? 0 : git.unstaged + git.staged + git.untracked;
 
   return (
     <aside className="overview" aria-label="What is going on">
@@ -298,46 +300,49 @@ export default function Overview({
       {/* Helpers used to be a band here. They belong beside the composer: this
           panel is a reading of what has already happened, and a helper is now. */}
 
-      <section className="overview__block">
-        <h2 className="overview__title">Changes</h2>
-        {git === null ? (
-          <p className="overview__quiet">
-            Nothing is being kept for this folder yet. The first time I change
-            something, I will start saving moments you can come back to.
+      {/* Only while there is something to do with it. An empty "changes" band
+          is a list of filenames nobody needed — designers want the picture and
+          a way to keep or undo; a heavy file list is for the moment something
+          is actually waiting. */}
+      {git !== null && shownFiles.length > 0 ? (
+        <section className="overview__block">
+          <h2 className="overview__title">Unsaved</h2>
+          <p className="overview__summary">
+            {changedCount === 1
+              ? 'One file has changed since your last saved moment.'
+              : `${changedCount} files have changed since your last saved moment.`}
           </p>
-        ) : shownFiles.length === 0 ? (
-          <p className="overview__quiet">Everything here is saved.</p>
-        ) : (
-          <>
-            <ul className="overview__files">
-              {shownFiles.map((file) => (
-                <li key={file.path}>
-                  <button
-                    type="button"
-                    className="overview__file"
-                    onClick={() => onOpenFile(file.path)}
-                    title={`Open ${file.path}`}
-                  >
-                    <span className="overview__filetext">
-                      <span className="overview__filename">{leaf(file.path)}</span>
-                      {folder(file.path) === '' ? null : (
-                        <span className="overview__filewhere">{folder(file.path)}</span>
-                      )}
-                    </span>
-                    {file.kind === 'new' ? <span className="overview__filenew">new</span> : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {moreFiles > 0 ? <p className="overview__more">{`and ${moreFiles} more`}</p> : null}
-            {/* The one thing worth doing about unsaved work, named after what
-                it makes: another row in the timeline below. */}
+          <ul className="overview__files">
+            {shownFiles.map((file) => (
+              <li key={file.path}>
+                <button
+                  type="button"
+                  className="overview__file"
+                  onClick={() => onOpenFile(file.path)}
+                  title={`Open ${file.path}`}
+                >
+                  <span className="overview__filetext">
+                    <span className="overview__filename">{leaf(file.path)}</span>
+                    {folder(file.path) === '' ? null : (
+                      <span className="overview__filewhere">{folder(file.path)}</span>
+                    )}
+                  </span>
+                  {file.kind === 'new' ? <span className="overview__filenew">new</span> : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {moreFiles > 0 ? <p className="overview__more">{`and ${moreFiles} more`}</p> : null}
+          <div className="overview__actions">
             <button type="button" className="overview__do" onClick={onSave} disabled={busy}>
-              Save a version now
+              Keep this moment
             </button>
-          </>
-        )}
-      </section>
+            <button type="button" className="overview__textdo" onClick={onReviewChanges}>
+              Open the files
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="overview__block">
         <h2 className="overview__title">Looked up</h2>
@@ -518,7 +523,6 @@ export default function Overview({
           onDecide={onDecide}
           onUndo={onPutBack}
           onHandOver={onHandOver}
-          onPutOnline={onPutOnline}
           onShare={onShare}
           onOpenLink={onOpenLink}
         />
@@ -527,8 +531,10 @@ export default function Overview({
       {spent === null ? null : (
         <CostMeter
           spent={spent.total}
-          corner
+          corner="panel"
           onAPlan={onAPlan}
+          split={spent.split}
+          usage={spent.usage}
           {...(ceiling === null ? {} : { limit: ceiling })}
           onDetails={onShowSplit}
           onLimit={onLimit}

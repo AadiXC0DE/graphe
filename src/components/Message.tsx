@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import Clipped, { howMuch } from './Clipped';
 import Markdown from './Markdown';
 import './Message.css';
 
@@ -39,6 +40,19 @@ export default function Message({ from, children, streaming, aside }: Props) {
   const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
   const formatted = !mine && typeof children === 'string';
 
+  /* A wall of text takes the thread over. Cut it while it is still readable,
+     and offer the rest — whether it is something somebody pasted or a long
+     reply. Streaming stays open so the cut does not fight the caret. */
+  const text = typeof children === 'string' ? children : null;
+  const body = formatted ? (
+    <Markdown text={children as string} caret={caret} />
+  ) : (
+    <>
+      {children}
+      {caret}
+    </>
+  );
+
   return (
     <article className={`message message--${from}`} aria-label={mine ? 'You' : 'Graphe'}>
       <div className="message__who">{mine ? 'You' : 'Graphe'}</div>
@@ -47,13 +61,12 @@ export default function Message({ from, children, streaming, aside }: Props) {
         aria-live={!mine && streaming ? 'polite' : undefined}
         aria-busy={streaming || undefined}
       >
-        {formatted ? (
-          <Markdown text={children} caret={caret} />
+        {streaming || text === null ? (
+          body
         ) : (
-          <>
-            {children}
-            {caret}
-          </>
+          <Clipped how={howMuch(text)} label="Show the rest">
+            {body}
+          </Clipped>
         )}
       </div>
       {aside ? <p className="message__aside">{aside}</p> : null}

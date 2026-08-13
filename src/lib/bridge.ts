@@ -69,6 +69,7 @@ import {
   type CarriedExtension,
   type Result,
   type Room,
+  type Skill,
   type SavedVersion,
   type ShowOutcome,
   type HowFar,
@@ -885,6 +886,14 @@ function previewBridge(): Bridge {
       });
     },
 
+    skills(): Promise<Result<readonly Skill[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    skillText(): Promise<Result<string>> {
+      return Promise.resolve(done(''));
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -1030,6 +1039,16 @@ function previewBridge(): Bridge {
           conversation: path,
           address: path ?? `new-${String(previewMade)}`,
         }),
+      );
+    },
+
+    deleteConversation(path: string): Promise<Result<readonly Conversation[]>> {
+      return Promise.resolve(
+        done([
+          { id: 'c1', path: 'a', title: 'Make the header sticky on scroll', at: Date.now() - 40 * 60_000, messages: 14 },
+          { id: 'c2', path: 'b', title: 'Rebuild the hero from the Figma frame', at: Date.now() - 3 * 3_600_000, messages: 31 },
+          { id: 'c3', path: 'c', title: 'Yesterday afternoon', at: Date.now() - 26 * 3_600_000, messages: 6 },
+        ].filter((one) => one.path !== path)),
       );
     },
 
@@ -1289,7 +1308,7 @@ function previewBridge(): Bridge {
       return Promise.resolve(done({ ...atWork }));
     },
 
-    keepGoing(text: string): Promise<Result<Away>> {
+    keepGoing(text: string, _untilDone?: boolean): Promise<Result<Away>> {
       atWork = {
         ...atWork,
         pieces: [
@@ -1567,6 +1586,8 @@ function connect(): Bridge {
     saveVersion: (name) => api.saveVersion(name),
     room: () => api.room(),
     tidyNow: () => api.tidyNow(),
+    skills: () => api.skills(),
+    skillText: (id) => api.skillText(id),
     stopAsking: (on) => api.stopAsking(on),
     goAsFarAs: (howFar) => api.goAsFarAs(howFar),
     carried: () => api.carried(),
@@ -1579,6 +1600,8 @@ function connect(): Bridge {
     checkWidths: () => api.checkWidths(),
     conversations: () => api.conversations(),
     openConversation: (path) => api.openConversation(path),
+    deleteConversation: (path, where) =>
+      api.deleteConversation?.(path, where) ?? Promise.resolve(done([])),
     packages: (term) => api.packages(term),
     nudgeToken: (name, value) => api.nudgeToken(name, value),
     nudgeMotion: (places, change) => api.nudgeMotion(places, change),
@@ -1617,7 +1640,7 @@ function connect(): Bridge {
     handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
     putOnline: (confirmed) => api.putOnline(confirmed),
     away: () => api.away(),
-    keepGoing: (text) => api.keepGoing(text),
+    keepGoing: (text, untilDone) => api.keepGoing(text, untilDone),
     stopAway: (id) => api.stopAway(id),
     keepAway: (id) => api.keepAway(id),
     answerAway: (id, callId, decision) => api.answerAway(id, callId, decision),

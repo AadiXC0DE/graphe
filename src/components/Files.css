@@ -108,6 +108,14 @@
   color: var(--text);
 }
 
+/* A quiet marker for what kind of file a row is — present, small, and never
+   louder than the name it sits beside. */
+.fileicon {
+  flex: none;
+  display: block;
+  color: var(--text-faint);
+}
+
 /* Changed is a mark and a word — the word is only for a screen reader, but it
    is there, so nothing about this row depends on seeing the colour. */
 .files__moved {

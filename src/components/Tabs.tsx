@@ -92,10 +92,11 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
   // that turns a click into a moving target and makes the row impossible to
   // learn. The current tab is marked in place instead.
   const shown = tabs.slice(0, 3);
-  /* A tab strip should finish where its tabs finish. This is deliberately a
-     comfortable working width rather than a percentage of the entire header;
-     when there are more conversations, the overflow control takes over. */
-  const compactWidth = shown.length * 192 + 30 + (tabs.length > shown.length ? 32 : 0);
+  /* A tab strip should finish where its tabs finish. Each tab is capped at
+     168px (Tabs.css) and the strip reserves only that — counting any wider
+     leaves a visible hole between the last tab and the add button. The
+     overflow control, when there are more conversations, sits at the end. */
+  const compactWidth = shown.length * 168 + 30 + (tabs.length > shown.length ? 32 : 0);
 
   return (
     <div className="tabs" ref={root} style={{ width: `${String(compactWidth)}px` }}>

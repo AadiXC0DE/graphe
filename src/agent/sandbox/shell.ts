@@ -112,6 +112,12 @@ export function loginShell(shell: string, fallback: RunShell): RunShell {
         env: { ...process.env, ...run.env },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        // The shell leads its own process group, so stopping it can end the
+        // whole tree it launched. Without this, `(npm run dev &)` — or any
+        // command that backgrounds a daemon — left the daemon alive after a
+        // Stop. The daemon held the shell's pipes open, so `close` below never
+        // fired, the tool never returned, and the Stop button appeared dead.
+        detached: process.platform !== 'win32',
       });
 
       const finish = (result: { exitCode: number | null }) => {
@@ -121,7 +127,7 @@ export function loginShell(shell: string, fallback: RunShell): RunShell {
         run.signal?.removeEventListener('abort', stop);
         resolve(result);
       };
-      const stop = () => child.kill('SIGTERM');
+      const stop = () => stopProcessGroup(child);
 
       child.stdout?.on('data', run.onData);
       child.stderr?.on('data', run.onData);

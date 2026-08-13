@@ -1633,8 +1633,6 @@ export default function Gallery() {
                 onDismissPutBack={noop}
                 onShowSplit={noop}
             onLimit={noop}
-            onOpenFile={noop}
-            onReviewChanges={noop}
             onSave={noop}
                 onOpenDesign={noop}
                 onOpenGraph={noop}
@@ -1800,6 +1798,9 @@ vite v6.0.5 building for production...
                   busy: false,
                   showMe: false,
                 }}
+                dirty={false}
+                onSave={noop}
+                onDiscard={noop}
                 onClose={noop}
                 onNudge={noop}
                 onNudgeMotion={noop}

@@ -8,7 +8,6 @@ import Swatches from './Swatches';
 import type {
   Artifact,
   Away as AwayState,
-  ChangedFile,
   Decision,
   EveryKind,
   GitSnapshot,
@@ -84,12 +83,8 @@ type Props = {
   onShowSplit: () => void;
   /** Set the ceiling, raise it, or take it away with null. */
   onLimit: (ceiling: Money | null) => void;
-  /** Open one changed file where the person actually edits things. */
-  onOpenFile: (path: string) => void;
-  /** Open the whole changed set where it can be reviewed instead of presenting
-   * a dead list of filenames. */
-  onReviewChanges: () => void;
-  /** Keep where the project stands right now, so it can be come back to. */
+  /** Save where the project stands right now, so it can be come back to. This
+   is the commit: the one thing the hand can do with the changed set as a whole. */
   onSave: () => void;
   /** Open everything about how the project looks, at one of its bands. */
   onOpenDesign: (part: DesignPart) => void;
@@ -175,18 +170,6 @@ function countOf(part: DesignPart, counts: Counts): number | null {
   return counts[part];
 }
 
-/** The last part of a path is what people call the file. The rest is filing. */
-function leaf(path: string): string {
-  const parts = path.split('/').filter((part) => part !== '');
-  return parts[parts.length - 1] ?? path;
-}
-
-/** Where it lives, for the second line. Empty at the top of the project. */
-function folder(path: string): string {
-  const parts = path.split('/').filter((part) => part !== '');
-  return parts.slice(0, -1).join('/');
-}
-
 /**
  * The panel on the right: what is going on, what changed, what can be gone back
  * to, and what it cost — in that order, because that is the order the questions
@@ -204,8 +187,6 @@ export default function Overview({
   onDismissPutBack,
   onShowSplit,
   onLimit,
-  onOpenFile,
-  onReviewChanges,
   onSave,
   onOpenDesign,
   onOpenGraph,
@@ -241,9 +222,6 @@ export default function Overview({
 
   const shownResearch = research.slice(-WINDOW);
   const moreResearch = research.length - shownResearch.length;
-  const files: readonly ChangedFile[] = git?.files ?? [];
-  const shownFiles = files.slice(0, WINDOW);
-  const moreFiles = (git === null ? 0 : git.unstaged + git.staged + git.untracked) - shownFiles.length;
   const changedCount = git === null ? 0 : git.unstaged + git.staged + git.untracked;
 
   return (
@@ -301,44 +279,34 @@ export default function Overview({
           panel is a reading of what has already happened, and a helper is now. */}
 
       {/* Only while there is something to do with it. An empty "changes" band
-          is a list of filenames nobody needed — designers want the picture and
-          a way to keep or undo; a heavy file list is for the moment something
-          is actually waiting. */}
-      {git !== null && shownFiles.length > 0 ? (
+          is a list of filenames nobody needed. The files themselves live in the
+          project's own place now; what belongs here is the one thing the hand
+          can do with them — save the changed set and step it forward — so the
+          band is a single commit, said the way git says it and the way people
+          say it. */}
+      {git !== null && changedCount > 0 ? (
         <section className="overview__block">
-          <h2 className="overview__title">Unsaved</h2>
+          <h2 className="overview__title">Save / commit</h2>
           <p className="overview__summary">
             {changedCount === 1
-              ? 'One file has changed since your last saved moment.'
-              : `${changedCount} files have changed since your last saved moment.`}
+              ? 'One change is waiting to be saved.'
+              : `${changedCount} changes are waiting to be saved.`}
           </p>
-          <ul className="overview__files">
-            {shownFiles.map((file) => (
-              <li key={file.path}>
-                <button
-                  type="button"
-                  className="overview__file"
-                  onClick={() => onOpenFile(file.path)}
-                  title={`Open ${file.path}`}
-                >
-                  <span className="overview__filetext">
-                    <span className="overview__filename">{leaf(file.path)}</span>
-                    {folder(file.path) === '' ? null : (
-                      <span className="overview__filewhere">{folder(file.path)}</span>
-                    )}
-                  </span>
-                  {file.kind === 'new' ? <span className="overview__filenew">new</span> : null}
-                </button>
-              </li>
-            ))}
-          </ul>
-          {moreFiles > 0 ? <p className="overview__more">{`and ${moreFiles} more`}</p> : null}
+          <p className="overview__line">
+            <span
+              className="overview__lineterm"
+              title="The line of work this project is on — git calls it a branch"
+            >
+              {git.branch === null ? 'main' : git.branch}
+            </span>
+            <span className="overview__plainsay">
+              the line of work it sits on — git calls this a “branch”
+            </span>
+          </p>
           <div className="overview__actions">
             <button type="button" className="overview__do" onClick={onSave} disabled={busy}>
-              Keep this moment
-            </button>
-            <button type="button" className="overview__textdo" onClick={onReviewChanges}>
-              Open the files
+              Commit
+              <span className="overview__plainsay">Save it now</span>
             </button>
           </div>
         </section>

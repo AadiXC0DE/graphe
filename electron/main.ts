@@ -39,6 +39,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
 import {
@@ -101,10 +102,13 @@ import {
   type PutBack,
   type RecentProject,
   type Result,
+  type RepoItem,
+  type RepoLook,
   type CarriedExtension,
   type Room,
   type Skill,
   type SavedVersion,
+  type DesignChange,
   type ShowOutcome,
   type HowFar,
   type Recording,
@@ -1031,6 +1035,167 @@ function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
       }
       resolve(parseGitStatus(out));
     });
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* A project's github repository, read through the terminal's own `gh`         */
+/* -------------------------------------------------------------------------- */
+
+/** Run `gh` in cwd and give back its JSON stdout, or null when it is not there
+ *  or not logged in. `gh` reads the person's own credentials from their keyring,
+ *  so no token has to be stored, refreshed or guarded here.
+ */
+function ghJSON(cwd: string, args: readonly string[]): Promise<unknown | null> {
+  return new Promise((resolve) => {
+    const child = spawn('gh', [...args, '--json', 'number,title,state,url,body,author,updatedAt'], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    child.stderr.resume();
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve(null);
+    }, 8000);
+    child.on('error', () => {
+      clearTimeout(timeout);
+      resolve(null);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+      try {
+        resolve(JSON.parse(out));
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
+
+/** Which github repository this folder answers to, or `owner/name`. Read from a
+ *  remote the folder already knows about, so a project with no remote or a
+ *  remote that is not github is simply not a github repository.
+ */
+function githubRepo(cwd: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      'git',
+      ['config', '--get', 'remote.origin.url'],
+      { cwd, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => out += chunk);
+    child.stderr.resume();
+    child.on('close', (code) => {
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+      const url = out.trim();
+      // Accept https://github.com/o/r, git@github.com:o/r, and ssh variants.
+      let m = /github\.com[/:]([^/]+)\/([^/.]+)(?:\.git)?$/.exec(url);
+      let full = m === null ? null : `${m[1]}/${m[2]}`;
+      resolve(full);
+    });
+  });
+}
+
+/** One issue or pull request, narrowed from gh's JSON to what the screen needs. */
+function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem {
+  const author =
+    (raw['author'] as Record<string, unknown> | null)?.['login'] ?? 'unknown';
+  const number = typeof raw['number'] === 'number' ? raw['number'] : 0;
+  return {
+    number,
+    kind,
+    title: typeof raw['title'] === 'string' ? raw['title'] : '',
+    state: typeof raw['state'] === 'string' ? raw['state'] : '',
+    url: typeof raw['url'] === 'string' ? raw['url'] : '',
+    description:
+      typeof raw['body'] === 'string' && raw['body'].trim() !== '' ? raw['body'] : null,
+    author: typeof author === 'string' ? author : 'unknown',
+    updatedAt: typeof raw['updatedAt'] === 'string' ? raw['updatedAt'] : '',
+    baseRef: null,
+  };
+}
+
+/** Everything the reviews screen asks about a project's repository, fetched in
+ *  one call. Null when this folder is not a github repo, or gh is not ready —
+ *  both are "nothing to show" rather than a failure.
+ */
+async function readRepo(open: { path: string }): Promise<RepoLook> {
+  try {
+    const full = await githubRepo(open.path);
+    if (full === null) return null;
+    const split = full.split('/');
+    const owner = split[0] ?? '';
+    const name = split[1] ?? '';
+    const issues = (await ghJSON(open.path, ['issue', 'list', '-R', full, '--limit', '50'])) as
+      | readonly Record<string, unknown>[]
+      | null;
+    const prs = (await ghJSON(open.path, ['pr', 'list', '-R', full, '--limit', '50'])) as
+      | readonly Record<string, unknown>[]
+      | null;
+    return {
+      full,
+      owner,
+      name,
+      url: `https://github.com/${full}`,
+      issues: (issues ?? []).map((one) => repoItem(one, 'issue')),
+      prs: (prs ?? []).map((one) => repoItem(one, 'pr')),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Post a review as a comment on a pull request, speaking as the person whose
+ *  terminal `gh` is logged in as. The body is written to a temp file first so
+ *  a long review survives gh's argv and needs no shell quoting. The exit code
+ *  is what answers: 0 is the comment landed.
+ */
+async function ghComment(
+  cwd: string,
+  full: string,
+  number: number,
+  body: string,
+): Promise<number> {
+  return new Promise((resolve) => {
+    const dir = tmpdir();
+    const file = join(dir, `graphe-review-${String(Date.now())}.md`);
+    void writeFile(file, body, 'utf8')
+      .then(() => {
+        const child = spawn(
+          'gh',
+          ['pr', 'comment', String(number), '-R', full, '--body-file', file],
+          { cwd, stdio: ['ignore', 'ignore', 'pipe'] },
+        );
+        let err = '';
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk: string) => (err += chunk));
+        const timeout = setTimeout(() => child.kill('SIGKILL'), 20000);
+        child.on('close', (code) => {
+          clearTimeout(timeout);
+          void rm(file, { force: true }).catch(() => {});
+          resolve(code ?? 1);
+        });
+        child.on('error', () => {
+          clearTimeout(timeout);
+          void rm(file, { force: true }).catch(() => {});
+          resolve(1);
+        });
+      })
+      .catch(() => resolve(1));
   });
 }
 
@@ -3206,6 +3371,32 @@ function register(): void {
     }
   });
 
+  handle<RepoLook>(CHANNEL.repoLook, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done(null);
+    try {
+      return done(await readRepo(open));
+    } catch (cause) {
+      return fail(plainTrouble(
+        'I could not read the github folder.',
+        detailsOf(cause),
+      ));
+    }
+  });
+
+  handle<null>(CHANNEL.repoComment, async (_event, args) => {
+    const [number, body] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0 || typeof body !== 'string' || body.trim() === '') {
+      return fail(plainTrouble('There was nothing to post.'));
+    }
+    const full = await githubRepo(open.path);
+    if (full === null) return fail(plainTrouble('This folder does not look like a github repository.'));
+    const exit = await ghComment(open.path, full, number, body);
+    return exit === 0 ? done(null) : fail(plainTrouble('The comment did not reach github.'));
+  });
+
   handle<Overview>(CHANNEL.overview, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) {
@@ -3228,42 +3419,37 @@ function register(): void {
     });
   });
 
-  handle<readonly SavedVersion[]>(CHANNEL.nudgeToken, async (_event, args) => {
-    const [name, value] = args;
+  handle<readonly SavedVersion[]>(CHANNEL.designCommit, async (_event, args) => {
+    const [changes] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    if (typeof name !== 'string' || typeof value !== 'string') return fail(NOTHING_OPEN);
+    if (typeof changes !== 'object' || changes === null) return fail(NOTHING_OPEN);
+    const given = changes as Partial<DesignChange>;
+    const tokens = Array.isArray(given.tokens)
+      ? given.tokens.filter((one) => typeof one.name === 'string' && typeof one.value === 'string')
+      : [];
+    const motions = Array.isArray(given.motions)
+      ? given.motions.filter(
+          (one) => Array.isArray(one.places) && typeof one.change === 'object' && one.change !== null,
+        )
+      : [];
+    // The whole design view is one saved moment. Anything sent here is written
+    // to the stylesheet and then kept as a single version — the window holds
+    // the edits so nothing is committed on a slide.
     const styles = await styleTokens(open.path);
     if (styles === null) return fail(NOTHING_OPEN);
     const where = join(open.path, styles.file);
     try {
-      const css = await readFile(where, 'utf8');
-      const next = writeToken(css, name, value);
-      if (next === css) return done(await versionsOf(open.held));
-      await writeFile(where, next, 'utf8');
-      await open.held.timeline.snapshot({ boundary: 'user-asked', by: 'you' });
-      return done(await versionsOf(open.held));
-    } catch (cause) {
-      const raw = cause instanceof Error ? cause.message : String(cause);
-      return fail(plainTrouble(raw, detailsOf(cause)));
-    }
-  });
-
-  handle<readonly SavedVersion[]>(CHANNEL.nudgeMotion, async (_event, args) => {
-    const [places, change] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    if (!Array.isArray(places) || typeof change !== 'object' || change === null) {
-      return fail(NOTHING_OPEN);
-    }
-    const styles = await styleTokens(open.path);
-    if (styles === null) return fail(NOTHING_OPEN);
-    const where = join(open.path, styles.file);
-    try {
-      const css = await readFile(where, 'utf8');
-      const next = writeMotionAll(css, places as Parameters<typeof writeMotionAll>[1], change as Parameters<typeof writeMotionAll>[2]);
-      if (next === css) return done(await versionsOf(open.held));
-      await writeFile(where, next, 'utf8');
+      let css = await readFile(where, 'utf8');
+      for (const one of tokens) {
+        const next = writeToken(css, one.name, one.value);
+        if (next !== css) css = next;
+      }
+      for (const one of motions) {
+        const next = writeMotionAll(css, one.places as Parameters<typeof writeMotionAll>[1], one.change as Parameters<typeof writeMotionAll>[2]);
+        if (next !== css) css = next;
+      }
+      await writeFile(where, css, 'utf8');
       await open.held.timeline.snapshot({ boundary: 'user-asked', by: 'you' });
       return done(await versionsOf(open.held));
     } catch (cause) {
@@ -4257,6 +4443,23 @@ function register(): void {
       // one card — see the note on duplicate troubles in src/App.tsx. This one
       // is the copy carrying the raw text, and the window keeps the richer of
       // the two.
+      const raw = cause instanceof Error ? cause.message : String(cause);
+      return fail(plainTrouble(raw, detailsOf(cause)));
+    }
+  });
+
+  handle<null>(CHANNEL.steer, async (_event, args) => {
+    const [text] = args;
+    if (typeof text !== 'string' || text.trim() === '') return done(null);
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const session = sessionAt(open, where);
+    if (session === null) return fail(NOTHING_OPEN);
+    try {
+      await session.steer(text);
+      return done(null);
+    } catch (cause) {
       const raw = cause instanceof Error ? cause.message : String(cause);
       return fail(plainTrouble(raw, detailsOf(cause)));
     }

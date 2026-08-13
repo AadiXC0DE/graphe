@@ -45,6 +45,7 @@ import {
   type PromptOptions,
   type ProviderMethod,
   type PutBack,
+  type RepoLook,
   type RecentProject,
   type Conversation,
   type Look,
@@ -54,6 +55,7 @@ import {
   type Room,
   type Skill,
   type SavedVersion,
+  type DesignChange,
   type ShowOutcome,
   type HowFar,
   type Money,
@@ -142,6 +144,16 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.stop, named(where)) as Promise<Result<null>>;
   },
 
+  steer(text: string, where?: Where): Promise<Result<null>> {
+    if (typeof text !== 'string' || text.trim() === '') {
+      return Promise.resolve({
+        ok: true,
+        value: null,
+      });
+    }
+    return ipcRenderer.invoke(CHANNEL.steer, text, named(where)) as Promise<Result<null>>;
+  },
+
   answer(callId: string, decision: Decision, where?: Where): Promise<Result<boolean>> {
     if (typeof callId !== 'string' || callId === '' || !isDecision(decision)) {
       return Promise.resolve(refuse<boolean>('I could not tell which question that answered.'));
@@ -172,6 +184,14 @@ const api: GrapheApi = {
 
   versions(where?: Where): Promise<Result<readonly SavedVersion[]>> {
     return ipcRenderer.invoke(CHANNEL.versions, named(where)) as Promise<Result<readonly SavedVersion[]>>;
+  },
+
+  repoLook(where?: Where): Promise<Result<RepoLook>> {
+    return ipcRenderer.invoke(CHANNEL.repoLook, named(where)) as Promise<Result<RepoLook>>;
+  },
+
+  repoComment(number: number, body: string, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.repoComment, number, body, named(where)) as Promise<Result<null>>;
   },
 
   putBack(versionId: string, where?: Where): Promise<Result<PutBack>> {
@@ -376,27 +396,22 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.explainPackage, id, named(where)) as Promise<Result<string>>;
   },
 
-  nudgeToken(
-    name: string,
-    value: string,
+  designCommit(
+    changes: DesignChange,
     where?: Where,
   ): Promise<Result<readonly SavedVersion[]>> {
-    if (typeof name !== 'string' || name === '' || typeof value !== 'string') {
+    const tokens = changes.tokens;
+    const motions = changes.motions;
+    if (!Array.isArray(tokens) || !Array.isArray(motions)) {
       return Promise.resolve(refuse<readonly SavedVersion[]>('I could not tell what to change.'));
     }
-    return ipcRenderer.invoke(CHANNEL.nudgeToken, name, value, named(where)) as Promise<
-      Result<readonly SavedVersion[]>
-    >;
-  },
-  nudgeMotion(
-    places: readonly unknown[],
-    change: unknown,
-    where?: Where,
-  ): Promise<Result<readonly SavedVersion[]>> {
-    if (!Array.isArray(places) || typeof change !== 'object' || change === null) {
-      return Promise.resolve(refuse('I could not change that.'));
+    if (tokens.some((one) => typeof one?.name !== 'string' || typeof one?.value !== 'string')) {
+      return Promise.resolve(refuse<readonly SavedVersion[]>('I could not tell what to change.'));
     }
-    return ipcRenderer.invoke(CHANNEL.nudgeMotion, places, change, named(where)) as Promise<
+    if (motions.some((one) => !Array.isArray(one?.places) || typeof one?.change !== 'object' || one.change === null)) {
+      return Promise.resolve(refuse<readonly SavedVersion[]>('I could not change that.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.designCommit, changes, named(where)) as Promise<
       Result<readonly SavedVersion[]>
     >;
   },

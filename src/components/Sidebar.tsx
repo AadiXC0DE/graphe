@@ -31,6 +31,8 @@ type Props = {
   onAsk?: () => void;
   onDesign?: () => void;
   onHistory?: () => void;
+  /** The github pull requests and issues of the project in front. */
+  onReviews?: () => void;
   /** Skills stay close to the work, but open as a library rather than another
       permanent section competing with conversations. */
   onSkills?: () => void;
@@ -74,6 +76,7 @@ export default function Sidebar({
   onAsk,
   onDesign,
   onHistory,
+  onReviews,
   onSkills,
   onAddMore,
   onFiles,
@@ -151,8 +154,10 @@ export default function Sidebar({
 
           {/* Everything said in this folder, newest first. The rail's whole job
               is this project, and this is the biggest thing there is to say
-              about it. */}
-          <section className="shelf__band">
+              about it. Only this band scrolls — the projects, the work to use
+              and the foot stay put — so a long history never rides the whole
+              shelf off the bottom of the window. */}
+          <section className="shelf__band shelf__band--scroll">
             <div className="shelf__bandtop">
               <h2 className="shelf__caption">Conversations</h2>
               <button
@@ -252,8 +257,89 @@ export default function Sidebar({
 
           {/* The last row and never a band: it sits under the work rather than
               beside it, and stays put while the conversations scroll. */}
-          {onAddMore === undefined && onSkills === undefined && onSettings === undefined ? null : (
+          {onAsk === undefined && onDesign === undefined && onHistory === undefined &&
+            onReviews === undefined && onAddMore === undefined && onSkills === undefined && onSettings === undefined ? null : (
             <div className="shelf__foot">
+              {onAsk === undefined ? null : (
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__more"
+                  onClick={onAsk}
+                  title="Find anything — ⌘K"
+                >
+                  <span className="shelf__moremark" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <circle cx="7" cy="7" r="4.25" stroke="currentColor" strokeWidth="1.5" />
+                      <path d="m10.25 10.25 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">Find anything</span>
+                </button>
+              )}
+              {onDesign === undefined ? null : (
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__more"
+                  onClick={onDesign}
+                  title="Colour, type and spacing — ⌘D"
+                >
+                  <span className="shelf__moremark" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M8 2.25c2 2.2 3.75 4.25 3.75 6.25a3.75 3.75 0 1 1-7.5 0c0-2 1.75-4.05 3.75-6.25Z"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">Design</span>
+                </button>
+              )}
+              {onHistory === undefined ? null : (
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__more"
+                  onClick={onHistory}
+                  title="Every moment, and what came after what"
+                >
+                  <span className="shelf__moremark" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <circle cx="5" cy="3.75" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+                      <circle cx="5" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+                      <circle cx="11" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+                      <path
+                        d="M5 5.25v5.5M5 7.75h3.5A2.5 2.5 0 0 1 11 10.25v.5"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">History</span>
+                </button>
+              )}
+              {onReviews === undefined ? null : (
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__more"
+                  onClick={onReviews}
+                  title="The pull requests and issues of this project"
+                >
+                  <span className="shelf__moremark" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M5 2.5h6a1.5 1.5 0 0 1 1.5 1.5v8.5H5a1.5 1.5 0 0 0-1.5 1.5V4A1.5 1.5 0 0 1 5 2.5Z"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinejoin="round"
+                      />
+                      <path d="M5 6h5M5 8.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">Pull requests</span>
+                </button>
+              )}
               {onSettings === undefined ? null : (
                 <button
                   type="button"
@@ -420,6 +506,25 @@ export default function Sidebar({
                   strokeWidth="1.5"
                   strokeLinecap="round"
                 />
+              </svg>
+            </button>
+          )}
+          {onReviews === undefined ? null : (
+            <button
+              type="button"
+              className="shelf__act"
+              onClick={onReviews}
+              title="The pull requests and issues of this project"
+              aria-label="Open pull requests"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M5 2.5h6a1.5 1.5 0 0 1 1.5 1.5v8.5H5a1.5 1.5 0 0 0-1.5 1.5V4A1.5 1.5 0 0 1 5 2.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinejoin="round"
+                />
+                <path d="M5 6h5M5 8.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
               </svg>
             </button>
           )}

@@ -107,6 +107,7 @@ import {
   type CarriedExtension,
   type Room,
   type Skill,
+  type Workflow,
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
@@ -146,6 +147,8 @@ import { findEditor, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
 import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
 import { availableSkills, selectedSkills, skillContents, skillNamed } from '../src/agent/pi/skills';
+import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
+import { promptFor } from '../src/work/workflows';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -4361,6 +4364,16 @@ function register(): void {
     return done(skills);
   });
 
+  /* The `/word` ways of working. The body stays here — the window gets only
+     what it needs to list them in a `/` menu and to hold the typed words. */
+  handle<readonly Workflow[]>(CHANNEL.workflows, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    const all = await availableWorkflows(open?.path ?? null, await defaultAgentDir());
+    return done(
+      all.map(({ command, name, description, hint, source }) => ({ command, name, description, hint, source })),
+    );
+  });
+
   handle<string>(CHANNEL.skillText, async (_event, args) => {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
@@ -4381,8 +4394,9 @@ function register(): void {
   });
 
   handle<null>(CHANNEL.prompt, async (_event, args) => {
-    const [text, attachments, ways] = args;
-    if (typeof text !== 'string' || text.trim() === '') return done(null);
+    const [textIn, attachments, ways] = args;
+    if (typeof textIn !== 'string' || textIn.trim() === '') return done(null);
+    let text = textIn;
     const where = whereIn(args);
     const open = projectAt(where);
     const conversation = open === null ? null : conversationAt(open.held, where);
@@ -4391,6 +4405,29 @@ function register(): void {
     // worked in, so it is the one that keeps its place.
     open.held.sessions.resume(conversation.path);
     const agent = conversation.held;
+    // A `/word` at the start is a workflow, not a sentence. Turn it into the
+    // workflow's own prompt before it goes anywhere, so a workflow is exactly
+    // the file that named it and the words somebody typed after it. Anything
+    // that is not a known `/word` is left as the plain message it looks like.
+    const leadingSlash = /^\/([a-z][a-z0-9-]*)(?:\s|$)/i.exec(text);
+    if (leadingSlash !== null) {
+      const workflow = await workflowNamed(
+        open.path,
+        await defaultAgentDir(),
+        leadingSlash[1] ?? '',
+      );
+      if (workflow !== null) {
+        const rest = text.slice((leadingSlash[1]?.length ?? 0) + 1).trim();
+        if (workflow.hint !== null && rest === '') {
+          return fail({
+            what: `Say what you want ${workflow.command} to do.`,
+            because: workflow.hint,
+            actionLabel: 'Got it',
+          });
+        }
+        text = promptFor(workflow, rest);
+      }
+    }
     // A new turn is a new thing started, which is the one thing the ceiling
     // refuses. Whatever was running finished and was saved to get here.
     const ceiling = fleet.status;

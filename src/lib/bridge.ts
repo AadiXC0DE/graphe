@@ -71,6 +71,7 @@ import {
   type Result,
   type Room,
   type Skill,
+  type Workflow,
   type SavedVersion,
   type ShowOutcome,
   type HowFar,
@@ -906,6 +907,10 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(''));
     },
 
+    workflows(): Promise<Result<readonly Workflow[]>> {
+      return Promise.resolve(done([]));
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -1611,6 +1616,7 @@ function connect(): Bridge {
     tidyNow: () => api.tidyNow(),
     skills: () => api.skills(),
     skillText: (id) => api.skillText(id),
+    workflows: () => api.workflows(),
     stopAsking: (on) => api.stopAsking(on),
     goAsFarAs: (howFar) => api.goAsFarAs(howFar),
     carried: () => api.carried(),

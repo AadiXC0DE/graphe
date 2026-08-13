@@ -54,6 +54,7 @@ import {
   type CarriedExtension,
   type Room,
   type Skill,
+  type Workflow,
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
@@ -289,6 +290,10 @@ const api: GrapheApi = {
   skillText(id: string, where?: Where): Promise<Result<string>> {
     if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<string>('I could not tell which skill to open.'));
     return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
+  },
+
+  workflows(where?: Where): Promise<Result<readonly Workflow[]>> {
+    return ipcRenderer.invoke(CHANNEL.workflows, named(where)) as Promise<Result<readonly Workflow[]>>;
   },
 
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {

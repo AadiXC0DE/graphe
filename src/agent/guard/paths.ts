@@ -249,6 +249,47 @@ export function isCredentialPath(candidate: string): boolean {
   return false;
 }
 
+/** Is this the agent's own folder — the skills, extensions and packages it was
+ *  installed with?
+ *
+ *  Somebody installed those on purpose, and a feature that cannot be read is a
+ *  feature that quietly does nothing. The shape is recognised as well as the
+ *  folder we are told about, so a caller that never says where its own folder
+ *  is still gets the ordinary one. This answers a question about reading:
+ *  nothing here grants a write. */
+export function isAgentFolder(candidate: string, agentFolder?: string): boolean {
+  const path = normalizePosixPath(toPosix(candidate));
+  if (!path.startsWith('/')) return false;
+
+  const given = (agentFolder ?? '').trim();
+  if (given !== '') {
+    const root = normalizePosixPath(toPosix(given));
+    if (root.startsWith('/') && root !== '/' && within(root, path)) return true;
+  }
+
+  const segments = path.split('/');
+  return segments.some((segment, index) => segment === '.pi' && segments[index + 1] === 'agent');
+}
+
+/** The one file in that folder that is nobody's instructions: where the
+ *  sign-ins are kept. */
+export function isSignInStore(candidate: string): boolean {
+  const segments = toPosix(candidate).toLowerCase().split('/');
+  return (segments[segments.length - 1] ?? '') === 'auth.json';
+}
+
+/** The private record a project's history is kept in.
+ *
+ *  Worth its own answer because in a second copy of a project that record is a
+ *  pointer back to the original: a write landing in it reaches straight into the
+ *  folder somebody is looking at, while looking for all the world like a write
+ *  inside this copy. `.gitignore` and `.github` are ordinary files and do not
+ *  match — only the folder itself, or the pointer standing in for it. */
+export function isHistoryStore(candidate: string): boolean {
+  const path = toPosix(candidate).toLowerCase();
+  return path.split('/').some((segment) => segment === '.git');
+}
+
 /** Files that end up in the browser, where anyone visiting the site can read them.
  *  Used to decide whether a key in a file is merely private or actually exposed. */
 const BROWSER_EXTENSIONS = new Set([

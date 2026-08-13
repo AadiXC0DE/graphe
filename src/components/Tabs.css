@@ -1,0 +1,271 @@
+/* One row of tabs across the top. A tab is a conversation; the underline says
+   which project it is in.
+
+   The whole strip is quiet: it sits on the window's first band beside the
+   traffic lights, and it is furniture. The only thing that moves is the ring on
+   a conversation that is actually working. */
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-1);
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+.tabs__strip {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs__strip::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs__tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* Never squeezed: a strip of six tabs reading "p…" tells you nothing, and the
+     whole job of a tab is being recognisable at a glance. Past the width, the
+     strip scrolls and the list at the end holds everything. */
+  flex: 0 0 auto;
+  min-width: 132px;
+  max-width: 200px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.tabs__tab--here {
+  background: var(--bg-sunken);
+}
+
+@media (hover: hover) {
+  .tabs__tab:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+/* The project, as a 2px line under the tab. Grouping without nesting: two tabs
+   in one codebase read as siblings, two in different ones do not. This is the
+   one place the app is allowed a second colour, and it earns it by carrying the
+   only fact that is genuinely hard to read otherwise. */
+.tabs__tab[class*='tabs__tab--tone']::after {
+  content: '';
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--tab-tone);
+}
+
+.tabs__tab--tone0 {
+  --tab-tone: var(--accent);
+}
+
+.tabs__tab--tone1 {
+  --tab-tone: #4a7c8c;
+}
+
+.tabs__tab--tone2 {
+  --tab-tone: #7a6a9c;
+}
+
+.tabs__tab--tone3 {
+  --tab-tone: #6f8a52;
+}
+
+.tabs__open {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 var(--space-1) 0 var(--space-3);
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.tabs__tab--here .tabs__open {
+  color: var(--text);
+}
+
+.tabs__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.tabs__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+
+/* Quieter, because it is the thing that changes least and reads loudest when it
+   is not shouting. */
+.tabs__project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.tabs__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  margin-right: var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+/* Present when the tab is in front or under the pointer, and reachable by
+   keyboard always — an action that only exists on hover is an action a keyboard
+   cannot take. */
+.tabs__tab--here .tabs__close,
+.tabs__close:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .tabs__tab:hover .tabs__close {
+    opacity: 1;
+  }
+
+  .tabs__close:hover {
+    color: var(--text);
+  }
+}
+
+.tabs__add,
+.tabs__more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) {
+  .tabs__add:hover,
+  .tabs__more:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+.tabs__overflow {
+  position: relative;
+  display: flex;
+}
+
+.tabs__list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 220px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.tabs__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.tabs__row--here {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+@media (hover: hover) {
+  .tabs__row:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+/* --------------------------------------------------------------- the marks */
+
+.tabs__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--text-faint);
+}
+
+.tabs__mark--working {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent);
+  animation: tabs-turn 900ms linear infinite;
+}
+
+/* The one state that cannot move on without a person, so it is the one thing
+   in the strip allowed to be loud. */
+.tabs__mark--asking {
+  color: var(--accent);
+}
+
+@keyframes tabs-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tabs__open:focus-visible,
+.tabs__close:focus-visible,
+.tabs__add:focus-visible,
+.tabs__more:focus-visible,
+.tabs__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tabs__mark--working {
+    animation: none;
+    transform: rotate(-45deg);
+  }
+}

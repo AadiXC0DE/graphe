@@ -9,7 +9,19 @@ import CostMeter from '../components/CostMeter';
 import ErrorCard from '../components/ErrorCard';
 import Files from '../components/Files';
 import FileView from '../components/FileView';
+import HelperRail from '../components/HelperRail';
+import InLine from '../components/InLine';
 import Message from '../components/Message';
+import Steps from '../components/Steps';
+import EvidenceReel from '../components/EvidenceReel';
+import Inspector from '../components/Inspector';
+import type { Reading } from '../preview/inspect';
+import SeeFirst from '../components/SeeFirst';
+import type { Held } from '../diff/holdshot';
+import type { Recording } from '../diff/flow';
+import Tabs, { type Tab } from '../components/Tabs';
+import type { StepTurn } from '../lib/steps';
+import type { HowFar } from '../agent/guard/policy';
 import Away from '../components/Away';
 import InStep from '../components/InStep';
 import Landing from '../components/Landing';
@@ -33,7 +45,7 @@ import type {
   RecentProject,
   SavedVersion,
 } from '../lib/ipc';
-import type { Reference, ResearchEntry } from '../lib/projects';
+import type { Helper, Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
 import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
@@ -150,6 +162,80 @@ const PAGE_SHOT = `data:image/svg+xml,${encodeURIComponent(
 const FIGMA_FILE = { path: '/Users/you/Sites/paper-street/design/landing-v4.fig' };
 const TOKENS_FILE = { path: '/Users/you/Sites/paper-street/src/styles/tokens.css' };
 const BUILD = { command: 'npm run build' };
+
+/** The kind of run that made the folded row worth building: seven reads on the
+ *  way to one sentence. */
+const CHAIN: readonly StepTurn[] = [
+  { kind: 'did', id: 'c1', callId: 'k1', state: 'done', label: 'Reading index.html' },
+  { kind: 'did', id: 'c2', callId: 'k2', state: 'done', label: 'Reading about.html' },
+  { kind: 'did', id: 'c3', callId: 'k3', state: 'done', label: 'Reading pricing.html' },
+  { kind: 'did', id: 'c4', callId: 'k4', state: 'done', label: 'Reading blog.html' },
+  { kind: 'did', id: 'c5', callId: 'k5', state: 'failed', label: 'Reading old.html', detail: 'no longer there' },
+  { kind: 'did', id: 'c6', callId: 'k6', state: 'done', label: 'Reading tokens.css' },
+  {
+    kind: 'did',
+    id: 'c7',
+    callId: 'k7',
+    state: 'running',
+    label: 'Looking for the type scale',
+    detail: 'four sizes so far',
+  },
+];
+
+/** Three helpers at the three states a helper can be in. The one still working
+ *  started a couple of minutes ago, because a rail whose clock reads zero is a
+ *  rail nobody can judge. */
+const STARTED = Date.now() - 138_000;
+
+const HELPING: readonly Helper[] = [
+  {
+    id: 'h1',
+    task: 'Find every page that loads a font from somewhere other than our own server',
+    saying: 'Two pages do.\nThe blog loads Inter from Google.\nThe changelog loads it too.',
+    state: 'done',
+    startedAt: STARTED,
+  },
+  {
+    id: 'h2',
+    task: 'Check the contrast on every button against the background it sits on',
+    saying: 'Three fail at the smallest size.',
+    state: 'running',
+    startedAt: STARTED,
+  },
+  {
+    id: 'h3',
+    task: 'Work out which spacing values are used once and only once',
+    saying: null,
+    state: 'failed',
+    startedAt: STARTED,
+  },
+];
+
+/** Four conversations across three codebases, at the four states a tab can be
+ *  in. Two of them share a project, which is the case the underline exists for. */
+const OPEN: readonly Tab[] = [
+  { id: 't1', title: 'the hero, tighter', project: 'paper-street', projectPath: '/a', state: 'idle' },
+  { id: 't2', title: 'pricing page at phone width', project: 'paper-street', projectPath: '/a', state: 'working' },
+  { id: 't3', title: 'the sign-in flow', project: 'atlas-studio', projectPath: '/b', state: 'asking' },
+  { id: 't4', title: 'docs site', project: 'field-notes', projectPath: '/c', state: 'finished' },
+];
+
+/** A walkthrough of the states nobody screenshots, including one that could not
+ *  be photographed — a run that quietly read as complete would be the one thing
+ *  this feature must never do. */
+const WALKED: Recording = {
+  id: 'r1',
+  says: 'Buying something on a phone',
+  startedAt: 0,
+  frames: [
+    { id: 'f1', says: 'At the start', after: 0, shot: PAGE_SHOT, missing: null },
+    { id: 'f2', says: 'After pressing Add to basket', after: 1400, shot: PAGE_SHOT, missing: null },
+    { id: 'f3', says: 'After the page changed on its own', after: 2100, shot: PAGE_SHOT, missing: null },
+    { id: 'f4', says: 'After typing in Card number', after: 6800, shot: null, missing: 'The window was hidden.' },
+    { id: 'f5', says: 'After pressing Pay', after: 9200, shot: PAGE_SHOT, missing: null },
+  ],
+  note: null,
+};
 
 const ATTACHED: readonly Attachment[] = [
   { id: 'a1', kind: 'figma', name: 'Landing v4', note: 'Figma file', url: 'https://figma.com' },
@@ -428,6 +514,73 @@ const IN_STEP = {
 /** A piece of work finished and waiting to be looked at, with both of the
  *  things that can send anywhere reachable. The state worth drawing, because it
  *  is the one where every press in the band means something. */
+/** What comes back from pointing at a button on a real React 19 dev server:
+ *  the component and the line, its tokens, one value a hair off one of them,
+ *  and an honest note about what could not be worked out. */
+const POINTED: Reading = {
+  title: 'A button — “Start a project”',
+  made: {
+    how: 'stack',
+    sure: 'likely',
+    component: 'Welcome',
+    where: { file: 'src/components/Welcome.tsx', line: 84, column: 11 },
+    alsoIn: ['src/components/Landing.tsx', 'src/gallery/Gallery.tsx'],
+    screens: ['/', '/pricing'],
+    find: 'Welcome',
+    says: 'Made by Welcome, at src/components/Welcome.tsx:84.',
+  },
+  using: [
+    { what: 'the background', name: '--accent', value: '#b8492c', says: 'The background is your --accent.' },
+    { what: 'the corners', name: '--radius-sm', value: '6px', says: 'The corners are your --radius-sm.' },
+  ],
+  adrift: [
+    {
+      what: 'the space inside',
+      wrote: '13px',
+      mine: { name: '--space-3', value: '12px' },
+      confidence: 'likely',
+      says: 'The space inside is 13px, a hair off your --space-3.',
+      detail: '13px vs 12px',
+    },
+  ],
+  changed: {
+    name: 'Made the first screen ask one question',
+    when: NOW - 3 * 3_600_000,
+    says: 'Last changed 3 hours ago, in “Made the first screen ask one question”.',
+  },
+  widths: {
+    all: [
+      { id: 'phone', name: 'Phone', width: 390, height: 844, here: false },
+      { id: 'tablet', name: 'Tablet', width: 834, height: 1112, here: true },
+      { id: 'desktop', name: 'Desktop', width: 1440, height: 900, here: false },
+    ],
+    says: 'Shown at Tablet.',
+  },
+  unsure: ['I could not tell which of your text sizes this is using.'],
+};
+
+/** Work waiting in a copy, photographed before it is let in — including one
+ *  width that would not build, because that is half of these. */
+const HELD: Held = {
+  id: 'held-1',
+  doing: 'Make the pricing cards breathe a bit more',
+  at: NOW - 90_000,
+  sights: [
+    { id: 'phone', name: 'Phone', width: 390, now: PAGE_SHOT, changed: PAGE_SHOT, missing: null, trouble: null },
+    { id: 'desktop', name: 'Desktop', width: 1440, now: PAGE_SHOT, changed: PAGE_SHOT, missing: null, trouble: null },
+    {
+      id: 'wide',
+      name: 'Wide',
+      width: 1920,
+      now: null,
+      changed: null,
+      missing: 'The project would not build at this width.',
+      trouble: null,
+    },
+  ],
+  note: null,
+};
+
 const LANDING: LandingState = {
   waiting: {
     id: 'held-1',
@@ -435,6 +588,7 @@ const LANDING: LandingState = {
     state: 'waiting',
     at: NOW - 90_000,
   },
+  held: HELD,
   holdBack: true,
   canHandOver: true,
   handOverSays: 'Everything needed is here.',
@@ -477,6 +631,7 @@ const AWAY: AwayState = {
       picture: PAGE_SHOT,
       says: 'It builds, and nothing looks different from yesterday.',
       trouble: null,
+      spent: inr(2400),
       question: null,
     },
     {
@@ -487,6 +642,12 @@ const AWAY: AwayState = {
       picture: null,
       says: null,
       trouble: null,
+      spent: inr(700),
+      after: {
+        id: 'away-2',
+        doing: 'Check the site still builds',
+        says: 'After “Check the site still builds”',
+      },
       question: null,
     },
   ],
@@ -545,6 +706,7 @@ const SPENT: SpendView = {
  *  Google that has no account yet and no way to get one from here. */
 const CONNECT_STATE: ConnectionState = {
   chosen: null,
+  chosenThinking: 'off',
   providers: [
     {
       providerId: 'anthropic',
@@ -554,9 +716,10 @@ const CONNECT_STATE: ConnectionState = {
       apiKeyLabel: 'Anthropic API key',
       connected: true,
       available: true,
+      subscription: false,
       models: [
-        { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000 },
-        { id: 'claude-opus-4-5', label: 'Opus 4.5', available: false, rates: { input: 5, output: 25 }, contextWindow: 200000 },
+        { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
+        { id: 'claude-opus-4-5', label: 'Opus 4.5', available: false, rates: { input: 5, output: 25 }, contextWindow: 200000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
       ],
     },
     {
@@ -567,6 +730,7 @@ const CONNECT_STATE: ConnectionState = {
       apiKeyLabel: 'OpenAI API key',
       connected: false,
       available: false,
+      subscription: false,
       models: [
         { id: 'gpt-5', label: 'GPT-5', available: true, rates: { input: 1.25, output: 10 }, contextWindow: 400000 },
         { id: 'gpt-5-mini', label: 'GPT-5 mini', available: true, rates: { input: 0.25, output: 2 }, contextWindow: 400000 },
@@ -580,6 +744,7 @@ const CONNECT_STATE: ConnectionState = {
       apiKeyLabel: 'OpenCode Go API key',
       connected: false,
       available: false,
+      subscription: false,
       models: [{ id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', available: true, rates: { input: 0.14, output: 0.28 }, contextWindow: 1000000 }],
     },
     {
@@ -590,6 +755,7 @@ const CONNECT_STATE: ConnectionState = {
       apiKeyLabel: 'Gemini API key',
       connected: false,
       available: false,
+      subscription: false,
       models: [
         { id: 'gemini-3', label: 'Gemini 3', available: true, rates: { input: 2, output: 12 }, contextWindow: 1048576 },
         { id: 'gemini-3-flash', label: 'Gemini 3 Flash', available: true, rates: { input: 0.5, output: 3 }, contextWindow: 1048576 },
@@ -740,6 +906,7 @@ export default function Gallery() {
    *  gesture they are rather than as two components that happen to be near each
    *  other. */
   const [draft, setDraft] = useState('');
+  const [howFar, setHowFar] = useState<HowFar>('asking');
 
   useEffect(() => {
     const root = document.documentElement;
@@ -868,6 +1035,111 @@ export default function Gallery() {
               in the feed that turns is the ring beside it. There is no bar filling up, because
               nothing here knows how many steps are left — and a progress bar that is guessing is
               worse than no progress bar.
+            </p>
+          </Section>
+
+          <Section
+            title="A long chain, folded"
+            note="A turn that reads eleven files is eleven lines, and by the time the answer arrives the sentence somebody wanted is off the top of the screen. Consecutive steps gather into one row carrying the newest of them, with the rest a click away. Nothing is summarised and nothing is dropped."
+          >
+            <div className="thread-sample">
+              <Steps steps={CHAIN} showMe={showMe} />
+            </div>
+            <p className="gallery__caption">
+              The row carries the <em>last</em> step rather than a description of all of them, which
+              is what keeps “never a spinner without a sentence” true while the chain is still
+              running: the newest thing is the thing being done now.
+            </p>
+          </Section>
+
+          <Section
+            title="Point at anything and be told what it is"
+            note="A click already knew the selector, the label, the markup and the computed styles — and threw all of it away into one sentence. This is the designer's version of DevTools: which component made it, which of your tokens it is using, which values are a hair off one of them, when it last changed, and what it looks like at the other sizes."
+          >
+            <div className="gallery__rail">
+              <Inspector reading={POINTED} onAsk={noop} onWidth={noop} />
+            </div>
+            <p className="gallery__caption">
+              The chain degrades rather than failing: on a React 19 dev server it names the component
+              and the line; on a production build it falls back through the selector, the markup and
+              the visible text until it has something the agent can go and find. What it could not
+              work out is written down rather than left out.
+            </p>
+          </Section>
+
+          <Section
+            title="See it before you say yes"
+            note="We already show a before-and-after after a change lands, and the timeline can take you back — but both of those are recovery. The designer's version of reading a diff is seeing the rendered result before approving it. The work happens in a copy, the copy gets photographed, and the decision arrives with the picture attached."
+          >
+            <div className="thread-sample">
+              <SeeFirst waiting={LANDING.waiting} held={HELD} onDecide={noop} />
+            </div>
+            <p className="gallery__caption">
+              This turns the safest mode in the app from something you switch on out of caution into
+              the one you want, because it is the only one that shows you what you are agreeing to.
+              A width that would not build says so and is still decidable — never a blank frame.
+            </p>
+          </Section>
+
+          <Section
+            title="Evidence, not a diff"
+            note="Everything the app photographs otherwise is a page at rest. Real interface work lives in the states nobody screenshots — hover, focus, loading, empty, error, the third step of a form, the toast that lasts two seconds. Click through your own app with this watching and every state is captured with the thing that produced it."
+          >
+            <div className="thread-sample">
+              <EvidenceReel recording={WALKED} openAtFirst width={260} height={180} />
+            </div>
+            <p className="gallery__caption">
+              With one agent you read the diff. With five you cannot, and this is the only review
+              artifact that scales with the number of them: recordings can be watched side by side,
+              diffs cannot. A state that could not be photographed keeps its place in the run and
+              says why, so a recording never quietly reads as complete.
+            </p>
+          </Section>
+
+          <Section
+            title="What you have open"
+            note="A tab is a conversation, not a project — that is the unit of work people switch between, and it is the only shape in which “two agents in one codebase” can be said at all. Two lines each: the conversation, and under it the project in quieter type. The 2px underline groups by codebase without nesting anything."
+          >
+            <Tabs tabs={OPEN} at="t2" onOpen={noop} onClose={noop} onNew={noop} />
+            <p className="gallery__caption">
+              The state mark is the point. Switching away from something still working and having
+              the tab tell you when it needs you is the whole reason tabs exist here — and the
+              question mark is the loudest thing in the strip, because it is the only state that
+              cannot move on without a person.
+            </p>
+          </Section>
+
+          <Section
+            title="Who else is working"
+            note="Helpers used to live in a band in the right-hand panel. That panel is a reading of what has already happened; a helper is now, and it is the only thing in the app still working while you read something else. So it sits above the composer, where the eye already is. A chip opens the whole of what one was asked and everything it said."
+          >
+            <div className="thread-sample">
+              <HelperRail helpers={HELPING} onOpen={noop} />
+            </div>
+            <p className="gallery__caption">
+              The state is a shape, not a colour: a ring that turns while it works, a tick when it
+              is finished, a bar when it stopped. A helper that has come back recedes — the record
+              is worth keeping on screen, and it is not worth as much as the one still going.
+            </p>
+          </Section>
+
+          <Section
+            title="Waiting in line"
+            note="A second thought typed while something is still running. It joins a line instead of being swallowed by a box that will not take it, and goes out on its own the moment the one before it is finished."
+          >
+            <div className="thread-sample">
+              <InLine
+                waiting={[
+                  { id: 'w1', text: 'and make the footer links the same size' },
+                  { id: 'w2', text: 'then show me the pricing page at phone width' },
+                ]}
+                onTake={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              Directly above the composer, because that is where the words were typed. Each can be
+              taken back out — the words return to the box, so a second thought can be changed
+              rather than only cancelled.
             </p>
           </Section>
 
@@ -1047,8 +1319,8 @@ export default function Gallery() {
             note="Small, glanceable, corner-mounted, and it never animates — a number that moves turns awareness into anxiety."
           >
             <div className="gallery__meters">
-              <CostMeter spent={inr(4000)} onDetails={noop} />
-              <CostMeter spent={inr(120_000)} limit={monthlyLimit} onDetails={noop} />
+              <CostMeter spent={inr(4000)} onDetails={noop} onLimit={noop} />
+              <CostMeter spent={inr(120_000)} limit={monthlyLimit} onDetails={noop} onLimit={noop} />
               <CostMeter spent={inr(163_000)} limit={monthlyLimit} onDetails={noop} />
               <CostMeter spent={inr(200_000)} limit={monthlyLimit} onDetails={noop} />
             </div>
@@ -1104,6 +1376,8 @@ export default function Gallery() {
                 onConnect={noop}
                 room={{ used: 128_000, total: 200_000, part: 0.64 }}
                 onTidy={noop}
+                howFar={howFar}
+                onHowFar={setHowFar}
               />
             </div>
             <p className="gallery__caption">
@@ -1317,6 +1591,8 @@ export default function Gallery() {
                   kept: [],
                   putBack: JUST_PUT_BACK,
                   spent: SPENT,
+                  onAPlan: false,
+                  ceiling: monthlyLimit,
                   busy: true,
                   showMe: false,
                   artifacts: [
@@ -1351,6 +1627,7 @@ export default function Gallery() {
                 onKeep={noop}
                 onDismissPutBack={noop}
                 onShowSplit={noop}
+                onLimit={noop}
                 onOpenFile={noop}
                 onSave={noop}
                 onOpenDesign={noop}
@@ -1362,6 +1639,7 @@ export default function Gallery() {
                 onPutOnline={noop}
                 onOpenLink={noop}
                 onKeepGoing={noop}
+                onStartAfter={noop}
                 onKeepAway={noop}
                 onDropAway={noop}
                 onAnswerAway={noop}
@@ -1411,6 +1689,7 @@ export default function Gallery() {
                 now={NOW}
                 busy={false}
                 onKeepGoing={noop}
+                onStartAfter={noop}
                 onKeep={noop}
                 onDrop={noop}
                 onAnswer={noop}

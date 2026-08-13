@@ -267,6 +267,37 @@ describe('H-02 saving', () => {
     await put(root, 'index.html', 'half-finished');
     expect(await line.hasUnsavedChanges()).toBe(true);
   });
+
+  it('says what last changed each file, newest wins', async () => {
+    const { root, line } = await projectWithOneVersion();
+    await put(root, 'src/nav.css', '.nav { gap: 8px; }');
+    await line.snapshot({ instruction: 'add the nav' });
+    await put(root, 'index.html', '<h1>Hello again</h1>');
+    const newest = await line.snapshot({ instruction: 'change the greeting' });
+
+    const changed = await new ProjectHistory(root).lastChangeByFile();
+    expect(changed.get('index.html')?.name).toBe('Changed the greeting');
+    expect(changed.get('index.html')?.id).toBe(newest!.id);
+    expect(changed.get('index.html')?.when).toBeGreaterThan(0);
+    // Untouched since its own version, so that is the one it still points at.
+    expect(changed.get('src/nav.css')?.name).toBe('Added the nav');
+    expect(changed.get('never-existed.html')).toBeUndefined();
+  });
+
+  it('reads nothing back from a project with no versions at all', async () => {
+    const root = await newFolder();
+    await Timeline.open(root);
+    expect((await new ProjectHistory(root).lastChangeByFile()).size).toBe(0);
+  });
+
+  it('reads back a file whose name is awkward', async () => {
+    const { root, line } = await projectWithOneVersion();
+    await put(root, 'src/héllo wörld.css', '.a { color: red; }');
+    await line.snapshot({ instruction: 'add a stylesheet' });
+
+    const changed = await new ProjectHistory(root).lastChangeByFile();
+    expect(changed.get('src/héllo wörld.css')?.name).toBe('Added a stylesheet');
+  });
 });
 
 /* ========================================================================== */

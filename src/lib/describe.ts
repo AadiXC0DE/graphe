@@ -52,6 +52,30 @@ function short(value: string | null): string | undefined {
   return oneLine.length > DETAIL_LIMIT ? undefined : oneLine;
 }
 
+/** Kept whole, on one line. For the few details worth reading in full — the
+ *  place that shows them decides how much of it fits. */
+function oneLine(value: string | null): string | undefined {
+  if (value === null) return undefined;
+  const collapsed = value.replace(/\s+/g, ' ').trim();
+  return collapsed === '' ? undefined : collapsed;
+}
+
+/** The last thing something said, as a line short enough to sit in the feed.
+ *  The whole of it is kept on the turn; this is only what the row shows. */
+export function lastSaid(text: string): string | undefined {
+  const last = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .pop();
+  if (last === undefined) return undefined;
+  return last.length > SAYING_LIMIT ? `${last.slice(0, SAYING_LIMIT - 1)}…` : last;
+}
+
+/** Long enough for a sentence of what a step is doing, short enough that the
+ *  feed does not become a second conversation. */
+const SAYING_LIMIT = 120;
+
 function named(verb: string, file: string | null, fallback: string): Described {
   return file === null ? { label: fallback } : { label: `${verb} ${file}` };
 }
@@ -119,7 +143,10 @@ export function describeCall(call: ToolCall): Described {
     case 'delegate':
       return {
         label: TASK_LABEL,
-        detail: short(textField(input, ['task', 'instructions'])),
+        // Not through `short`: a piece of work handed to a helper is a
+        // paragraph, and dropping it past 64 characters left the helper board
+        // saying "Asked" and then nothing at all.
+        detail: oneLine(textField(input, ['task', 'instructions'])),
       };
 
     default:

@@ -42,6 +42,10 @@ export type WorkspacesOptions<T> = {
   /** Let go of everything a workspace held. Called exactly once per workspace,
    *  whether it was closed on purpose or fell off the end of the list. */
   close: (held: T) => void;
+  /** One fell off the end rather than being closed on purpose. Runs first, so
+   *  whatever it held is still whole when somebody is told about it — a limit
+   *  nobody is told about is a thing that disappeared. */
+  evicted?: (workspace: Workspace<T>) => void;
   limit?: number;
 };
 
@@ -51,10 +55,12 @@ export class Workspaces<T> {
   #open: Workspace<T>[] = [];
 
   readonly #close: (held: T) => void;
+  readonly #evicted: (workspace: Workspace<T>) => void;
   readonly #limit: number;
 
   constructor(options: WorkspacesOptions<T>) {
     this.#close = options.close;
+    this.#evicted = options.evicted ?? (() => undefined);
     this.#limit = Math.max(1, options.limit ?? LIMIT);
   }
 
@@ -101,6 +107,7 @@ export class Workspaces<T> {
       // be the limit deciding what they are working on.
       const oldest = this.#open.pop();
       if (oldest === undefined) break;
+      this.#evicted(oldest);
       this.#close(oldest.held);
     }
     return workspace;
@@ -120,4 +127,21 @@ export class Workspaces<T> {
     this.#open = [];
     for (const one of all) this.#close(one.held);
   }
+}
+
+/**
+ * The one named, or the one in front when nothing is named.
+ *
+ * `also` is the second name a workspace can answer to — a conversation is filed
+ * under the address it was opened with and answers to the file it is written
+ * down in as well, and the two differ until its first word is written. A name
+ * that matches neither is nothing, never the nearest thing.
+ */
+export function addressed<T>(
+  workspaces: Workspaces<T>,
+  named: string | undefined,
+  also: (held: T) => string | null = () => null,
+): Workspace<T> | null {
+  if (named === undefined) return workspaces.current;
+  return workspaces.find(named) ?? workspaces.open.find((one) => also(one.held) === named) ?? null;
 }

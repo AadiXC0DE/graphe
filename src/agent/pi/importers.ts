@@ -204,9 +204,13 @@ export function parseOpencodeAuth(text: string): readonly FoundCredential[] {
   return found;
 }
 
-/** Codex's `auth.json`: an `OPENAI_API_KEY` when somebody pasted a key, and
- *  a `tokens` block with `access_token` when they signed in with ChatGPT
- *  Plus or Pro. Both mean the OpenAI provider. */
+/** Codex's `auth.json`: an `OPENAI_API_KEY` when somebody pasted a key. That
+ *  is the only thing in it this app can carry.
+ *
+ *  Its `tokens` block holds a ChatGPT sign-in, which is not a key and cannot
+ *  be sent to the same address a key goes to. Signing in with ChatGPT is a
+ *  button on the connect screen and works properly; offering the sign-in here
+ *  as well only ever produced a connection that failed on first use. */
 export function parseCodexAuth(text: string): readonly FoundCredential[] {
   let data: unknown;
   try {
@@ -217,31 +221,15 @@ export function parseCodexAuth(text: string): readonly FoundCredential[] {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) return [];
 
   const entry = data as Record<string, unknown>;
-  const found: FoundCredential[] = [];
-  if (typeof entry.OPENAI_API_KEY === 'string' && entry.OPENAI_API_KEY !== '') {
-    found.push({
+  if (typeof entry.OPENAI_API_KEY !== 'string' || entry.OPENAI_API_KEY === '') return [];
+  return [
+    {
       providerId: 'openai',
       kind: 'api-key',
       source: 'codex',
       secret: entry.OPENAI_API_KEY,
-    });
-  }
-  const tokens = entry.tokens;
-  if (
-    typeof tokens === 'object' &&
-    tokens !== null &&
-    !Array.isArray(tokens) &&
-    typeof (tokens as Record<string, unknown>).access_token === 'string' &&
-    (tokens as Record<string, unknown>).access_token !== ''
-  ) {
-    found.push({
-      providerId: 'openai',
-      kind: 'sign-in',
-      source: 'codex',
-      secret: (tokens as Record<string, unknown>).access_token as string,
-    });
-  }
-  return found;
+    },
+  ];
 }
 
 function parseCredentials(text: string, source: FoundSource): readonly FoundCredential[] {

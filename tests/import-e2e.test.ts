@@ -9,6 +9,12 @@ import {
   importAccount,
 } from '../src/agent/pi/adapter';
 
+/* These three load Pi's runtime for real and touch the disk. Under the default
+   five seconds they fail whenever the machine is busy — which reads as the
+   import being broken rather than the clock being short, and a suite that cries
+   wolf is a suite people stop reading. */
+const REALLY_RUNS = 30_000;
+
 describe('import end to end', () => {
   it('finds an account, imports it, and the provider becomes connected', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'graphe-import-e2e-'));
@@ -36,5 +42,39 @@ describe('import end to end', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, REALLY_RUNS);
+});
+
+/* Nobody chose to ship the Anthropic sign-in; it arrived because the list is
+   whatever the runtime offers. Anthropic's own terms forbid another app signing
+   people in with their Claude plan, and the path underneath it dresses up as
+   their CLI. It must not come back by omission, which is how it got here. */
+describe('what the connect screen is allowed to offer', () => {
+  it('does not offer to sign in with a Claude plan, and still offers the key', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'graphe-methods-'));
+    try {
+      const providers = await connection(join(dir, 'pi'));
+      const anthropic = providers.find((one) => one.providerId === 'anthropic');
+
+      expect(anthropic).toBeDefined();
+      expect(anthropic?.methods).not.toContain('oauth');
+      expect(anthropic?.methods).toContain('api-key');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, REALLY_RUNS);
+
+  it('leaves every other provider sign-in alone', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'graphe-methods-others-'));
+    try {
+      const providers = await connection(join(dir, 'pi'));
+      const codex = providers.find((one) => one.providerId === 'openai-codex');
+
+      // The one we deliberately keep: no clause forbids it, and Pi's path
+      // there says who it is rather than pretending to be somebody else.
+      expect(codex?.methods).toContain('oauth');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, REALLY_RUNS);
 });

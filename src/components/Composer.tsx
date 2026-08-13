@@ -7,12 +7,14 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import Annotate from './Annotate';
 import Attachments, { type Attachment } from './Attachments';
 import Asking from './Asking';
+import type { HowFar } from '../agent/guard/policy';
 import HowToWork, { type Plans } from './HowToWork';
 import Room from './Room';
 import ThinkingWith from './ThinkingWith';
-import type { ConnectionState, ModelChoice, Room as RoomState } from '../lib/ipc';
+import type { ConnectionState, ModelChoice, Room as RoomState, ThinkingLevel } from '../lib/ipc';
 import {
   NOT_DRAGGING,
   carriesSomething,
@@ -69,6 +71,8 @@ type Props = {
   onPlans?: (plans: Plans) => void;
   onSelectModel?: (choice: ModelChoice) => void;
   onConnect?: () => void;
+  /** How long the chosen model should take before answering. */
+  onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
   /** Whether a drop anywhere in the window lands here. On by default: people
    *  drag at the picture they are talking about, not at a box. */
   anywhere?: boolean;
@@ -82,9 +86,9 @@ type Props = {
   tidying?: boolean;
   /** Shorten it now, by hand. */
   onTidy?: () => void;
-  /** True while the Guard is not stopping to ask. */
-  quiet?: boolean;
-  onQuiet?: (quiet: boolean) => void;
+  /** How far it may go before it stops and asks. */
+  howFar?: HowFar;
+  onHowFar?: (howFar: HowFar) => void;
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -138,13 +142,14 @@ export default function Composer({
   onPlans,
   onSelectModel,
   onConnect,
+  onThinking,
   anywhere = true,
   outLoud = true,
   room,
   tidying,
   onTidy,
-  quiet,
-  onQuiet,
+  howFar,
+  onHowFar,
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -154,6 +159,11 @@ export default function Composer({
   /** Why the last thing was turned away. One sentence, and never the user's
    *  fault. Cleared as soon as anything else happens. */
   const [refused, setRefused] = useState<string | null>(null);
+  /** The picture open in the drawing surface, by its chip id. */
+  const [drawingOn, setDrawingOn] = useState<string | null>(null);
+  /** What was drawn on the last picture, in sentences. It goes out with the
+   *  message, because a box with no words beside it is half a thought. */
+  const [drawn, setDrawn] = useState<string | null>(null);
 
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -246,9 +256,14 @@ export default function Composer({
 
   const submit = () => {
     const text = value.trim();
-    if (!text || busy) return;
+    // Sent even while something is running: a second thought during a long run
+    // goes in line rather than being swallowed by a box that will not take it.
+    if (!text) return;
     ears.current?.stop();
-    onSend(text);
+    // The marks travel as words as well as pixels: coordinates the model can
+    // act on, beside a picture it can see.
+    onSend(drawn === null ? text : `${text}\n\n${drawn}`);
+    setDrawn(null);
     setValue('');
     setRefused(null);
     if (areaRef.current) areaRef.current.style.height = 'auto';
@@ -439,9 +454,47 @@ export default function Composer({
     field?.focus();
   };
 
+  /** Stop is what the button does only when there is nothing written. With
+   *  words in the box the same press sends them, whatever is running. */
+  const stopping = busy === true && onStop !== undefined && value.trim() === '';
+
+  /** The picture being drawn on, if the chip is still there. Read rather than
+   *  held, so removing a chip mid-draw closes the surface instead of stranding
+   *  it over a picture that no longer exists. */
+  const open = attachments.find((one) => one.id === drawingOn && one.kind === 'image') ?? null;
+
   return (
     <div className={`composer ${dropping ? 'composer--dropping' : ''}`}>
-      <Attachments items={attachments} onRemove={remove} />
+      <Attachments items={attachments} onRemove={remove} onDrawOn={setDrawingOn} />
+
+      {/* Drawn on rather than described. The marked picture replaces the one it
+          came from, so the chip stays the same chip and the message still has
+          exactly one of it. */}
+      {open === null ? null : (
+        <Annotate
+          source={open.preview ?? ''}
+          name={open.name}
+          onClose={() => setDrawingOn(null)}
+          onDone={(marked) => {
+            change(
+              attachedRef.current.map((one) =>
+                one.id === open.id
+                  ? {
+                      ...one,
+                      name: marked.file.name,
+                      note: ['PNG', readableSize(marked.file.size)].join(' · '),
+                      preview: marked.dataUrl,
+                      file: marked.file,
+                    }
+                  : one,
+              ),
+            );
+            setDrawn(marked.said);
+            setDrawingOn(null);
+            areaRef.current?.focus();
+          }}
+        />
+      )}
 
       <textarea
         ref={areaRef}
@@ -521,13 +574,16 @@ export default function Composer({
           <HowToWork plans={plans} onPlans={onPlans} />
         )}
 
-        {onQuiet === undefined ? null : <Asking quiet={quiet === true} onQuiet={onQuiet} />}
+        {onHowFar === undefined ? null : (
+          <Asking howFar={howFar ?? 'asking'} onHowFar={onHowFar} />
+        )}
 
         {onSelectModel === undefined || onConnect === undefined ? null : (
           <ThinkingWith
             state={connection ?? null}
             onSelect={onSelectModel}
             onConnect={onConnect}
+            onThinking={onThinking}
           />
         )}
 
@@ -556,14 +612,17 @@ export default function Composer({
         {/* The same button in two states (BACKLOG A1): an arrow that sends, or a
             square that stops. They swap in place so the layout does not jump
             when a turn begins, and the Stop half is never disabled — a run that
-            has been started must always be stoppable, even with an empty box. */}
+            has been started must always be stoppable, even with an empty box.
+
+            Words in the box outrank both: whatever is running, the button
+            sends what has been written, and it waits its turn. */}
         <button
           className="composer__send"
-          onClick={busy && onStop !== undefined ? onStop : submit}
-          disabled={busy && onStop !== undefined ? false : !value.trim() || busy}
-          aria-label={busy && onStop !== undefined ? 'Stop' : 'Send'}
+          onClick={stopping ? onStop : submit}
+          disabled={stopping ? false : !value.trim()}
+          aria-label={stopping ? 'Stop' : busy ? 'Send when it is free' : 'Send'}
         >
-          {busy && onStop !== undefined ? (
+          {stopping ? (
             <svg
               width="12"
               height="12"

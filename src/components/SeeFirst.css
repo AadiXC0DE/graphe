@@ -1,0 +1,222 @@
+/* The two answers, under a picture of what they mean. Loud enough to stop
+   somebody, because this is the one place in the app where nothing has happened
+   to their files yet and they are about to decide that it should. */
+
+.seefirst {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+}
+
+.seefirst__doing {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.seefirst__says {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+/* ------------------------------------------------------------ the picture */
+
+.seefirst__look {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.seefirst__title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.seefirst__sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.seefirst__size {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.seefirst__size:hover {
+  border-color: var(--border-strong);
+}
+
+.seefirst__size--on {
+  background: var(--bg-sunken);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.seefirst__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.seefirst__pair--one {
+  grid-template-columns: 1fr;
+}
+
+.seefirst__half {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  min-width: 0;
+}
+
+.seefirst__picture {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 380px;
+  object-fit: cover;
+  object-position: top center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  animation: seefirst-arrive var(--dur-ui) var(--ease-out-quart) both;
+}
+
+/* The half that does not exist yet, marked once and quietly — a designer
+   should not have to read a caption to know which one is the change. */
+.seefirst__half--after .seefirst__picture {
+  border-color: var(--accent);
+}
+
+.seefirst__caption {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+.seefirst__half--after .seefirst__caption {
+  color: var(--text);
+}
+
+/* --------------------------------------------------------------- honesty */
+
+/* Where the picture would have been. A frame with nothing in it says the same
+   thing as a picture of a blank page, and one of those is a lie. */
+.seefirst__blank {
+  margin: 0;
+  padding: var(--space-4) var(--space-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.seefirst__nothing,
+.seefirst__honest,
+.seefirst__trouble {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.seefirst__trouble {
+  color: var(--text);
+}
+
+/* -------------------------------------------------------------- answering */
+
+.seefirst__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.seefirst__do,
+.seefirst__quietdo {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.seefirst__do--first {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-raised);
+  font-weight: 550;
+}
+
+.seefirst__do--first:hover:not(:disabled) {
+  border-color: var(--accent-ink);
+}
+
+.seefirst__quietdo {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.seefirst__quietdo:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.seefirst__do:disabled,
+.seefirst__quietdo:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes seefirst-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seefirst__picture {
+    animation: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .seefirst__pair {
+    grid-template-columns: 1fr;
+  }
+}

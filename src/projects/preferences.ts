@@ -17,6 +17,7 @@
  * product is that we make them.
  */
 
+import type { Money } from '../agent/types';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -87,6 +88,15 @@ export type Preferences = {
    * rather look first.
    */
   holdBack: boolean;
+  /**
+   * The ceiling on spending, or null when nobody has set one.
+   *
+   * Remembered across launches, because a ceiling that forgets itself the
+   * moment you close the window is not a ceiling. What has been spent is not
+   * remembered with it — that is per sitting, and measuring a month against one
+   * afternoon would hold nobody to anything.
+   */
+  ceiling: Money | null;
 };
 
 export const defaultPreferences: Preferences = {
@@ -97,6 +107,7 @@ export const defaultPreferences: Preferences = {
   trusted: {},
   showFiles: false,
   holdBack: false,
+  ceiling: null,
 };
 
 type Stored = { version: 1; preferences: Preferences };
@@ -135,7 +146,20 @@ function asPreferences(value: unknown): Preferences {
     trusted: asTrusted(record['trusted']),
     showFiles: record['showFiles'] === true,
     holdBack: record['holdBack'] === true,
+    ceiling: asCeiling(record['ceiling']),
   };
+}
+
+/** Read back defensively: a file edited by hand must not become a ceiling of
+ *  NaN, which would hold nobody to anything. */
+function asCeiling(value: unknown): Money | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const money = value as Record<string, unknown>;
+  const minor = money['minor'];
+  const currency = money['currency'];
+  if (typeof minor !== 'number' || !Number.isFinite(minor) || minor <= 0) return null;
+  if (typeof currency !== 'string' || currency === '') return null;
+  return { minor: Math.round(minor), currency };
 }
 
 function sameThinking(

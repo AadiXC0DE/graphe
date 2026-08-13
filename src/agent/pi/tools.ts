@@ -36,8 +36,10 @@
  * that touches Pi is inside this one folder.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // One line on purpose: the boundary test in tests/adapter.test.ts reads the
 // line that names Pi and expects `import type` on it.
@@ -45,6 +47,9 @@ import type { AgentToolResult, AgentToolUpdateCallback, ToolDefinition } from '@
 import { Type } from 'typebox';
 
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
+import { ceilingWords, fleet } from '../../cost/fleet';
+import { hold } from '../sandbox';
+import type { Money, SpendReason } from '../types';
 
 /** The result envelope every tool here returns: the model's answer in text.
  *  Failures are *thrown*, not tucked into the envelope — Pi marks a thrown
@@ -61,6 +66,14 @@ export type SubagentOutcome =
 /** One line in the child's report, as JSON on stdout. */
 export type SubagentLine =
   | { type: 'delta'; text: string }
+  /** What the child found when it tried to write outside the folder it was
+   *  given. The boundary we asked for, checked from inside rather than assumed
+   *  from a clean start. */
+  | { type: 'boundary'; held: boolean }
+  /** What the helper's own turn cost. Nothing upstream can see this — the
+   *  helper is a separate process with its own account calls — so a fan-out to
+   *  six helpers is money nobody counted until it travels this line. */
+  | { type: 'spend'; amount: Money; label: string; reason: SpendReason }
   | { type: 'done'; outcome: SubagentOutcome };
 
 /* -------------------------------------------------------------------------- */
@@ -137,7 +150,6 @@ export const websearchTool: ToolDefinition = {
   parameters: Type.Object({
     query: Type.String({ description: 'What to search for, in plain words.', minLength: 1 }),
   }),
-  executionMode: 'sequential',
   execute: async (
     _callId: string,
     params: { query: string },
@@ -279,7 +291,6 @@ export const webfetchTool: ToolDefinition = {
   parameters: Type.Object({
     url: Type.String({ description: 'The full address of the page, beginning https://.', minLength: 1 }),
   }),
-  executionMode: 'sequential',
   execute: async (
     _callId: string,
     params: { url: string },
@@ -362,11 +373,62 @@ const PROGRESS_EVERY_MS = 400;
 
 type TaskParams = { task: string; cwd?: string };
 
+/* -------------------------------------------------------------------------- */
+/* The boundary around a helper                                                */
+/* -------------------------------------------------------------------------- */
+
+/** How a helper's run was held, as intended and as observed. */
+export type BoundaryFacts = {
+  /** True when the computer's own boundary was applied to this run. */
+  asked: boolean;
+  /** What the helper found from inside. Null when it never got that far. */
+  observed: boolean | null;
+  /** Why there was no boundary, in plain words, when there was none. */
+  because: string | null;
+};
+
+const BOUNDARY_BROKEN =
+  'I asked this computer to keep that helper inside your project folder and it did not, so the helper ran with only the Guard around it.';
+
+/** A path a held helper cannot possibly write to, so its own answer means
+ *  something. Home rather than a temporary folder: a temporary folder is the one
+ *  place a boundary is likely to hand back a fresh writable copy of. */
+let checks = 0;
+function outsidePath(): string {
+  checks += 1;
+  return join(homedir(), `.graphe-boundary-check-${String(process.pid)}-${String(Date.now())}-${String(checks)}`);
+}
+
+/**
+ * The sentence to put alongside a helper's answer, or null when there is
+ * nothing to say.
+ *
+ * Never silent about a missing boundary, and never quiet about one that was
+ * supposed to be there and was not — that second case is the one a clean start
+ * would otherwise hide completely.
+ */
+export function boundaryNote(facts: BoundaryFacts): string | null {
+  if (facts.observed === true) return null;
+  if (facts.asked) return facts.observed === false ? BOUNDARY_BROKEN : null;
+  return facts.because;
+}
+
+/** What a helper may write to: the folder it works in, and the app's own folder
+ *  — the account it thinks with is kept there, along with the small records Pi
+ *  keeps for itself, and a helper that cannot write them will not start. */
+function helperBounds(cwd: string, agentDir: string): { writable: string[]; reach: 'secure' } {
+  return { writable: agentDir === '' ? [cwd] : [cwd, agentDir], reach: 'secure' };
+}
+
 /** Who the helper thinks with. The child has no window, no settings of its own
  *  and no way to ask, so the model the person chose has to travel with the job
  *  — without it Pi falls back to whatever its own settings say, which in this
  *  app is nothing, and the helper answers with silence. */
 export type HelperModel = { providerId: string; modelId: string } | null;
+
+/** How long the helper thinks first. The same reasoning as the model: the
+ *  child has no preferences of its own, so the chosen pace travels with it. */
+export type HelperPace = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /** A missing helper otherwise arrives as ENOENT on the child's error event,
  *  which reads exactly like a helper that crashed. Under vitest this module is
@@ -388,37 +450,81 @@ function lastLine(text: string): string | null {
   return last;
 }
 
+/** How long a child gets to leave politely before it is made to. */
+const GIVE_UP_AFTER_MS = 3000;
+
+/**
+ * End a helper's process.
+ *
+ * The polite signal, then the one it cannot ignore. Nothing is lost by it: a
+ * helper reads and reports and cannot change anything, which is what makes this
+ * safe to call the moment a ceiling is reached.
+ */
+export function stopChild(child: ChildProcess): void {
+  if (!child.killed) child.kill('SIGTERM');
+  setTimeout(() => {
+    if (!child.killed) child.kill('SIGKILL');
+  }, GIVE_UP_AFTER_MS).unref();
+}
+
+/** What one run tells the fleet about itself while it is going. */
+type Watching = {
+  /** Given the way to end this child, for as long as it is alive. */
+  begun: (stop: () => void) => void;
+  spent: (line: { amount: Money; label: string; reason: SpendReason }) => void;
+};
+
+/** One run: what the helper said, and how it was held while saying it. */
+type Ran = { outcome: SubagentOutcome; boundary: BoundaryFacts };
+
 /** One run: spawn the child, feed it its job, relay what it says, and answer
  *  Pi with the finished text. The `signal` is Pi's own abort signal — pressing
- *  Stop in the window kills the helper too. */
-function runSubagent(
-  job: TaskParams & { agentDir: string; model: HelperModel },
+ *  Stop in the window kills the helper too.
+ *
+ *  The child is wrapped in whatever boundary this computer can hold around it
+ *  before it starts. When there is none it still runs — a helper reads and
+ *  reports, and the Guard covers it — but never quietly: the reason travels back
+ *  with the answer. */
+async function runSubagent(
+  job: TaskParams & { agentDir: string; model: HelperModel; thinking?: HelperPace },
   signal: AbortSignal | undefined,
   onProgress: (text: string) => void,
-): Promise<SubagentOutcome> {
+  watching?: Watching,
+): Promise<Ran> {
   const missing = whyNoHelper();
-  if (missing !== null) return Promise.resolve({ ok: false, error: missing });
+  const cwd = job.cwd ?? process.cwd();
+  const boundary: BoundaryFacts = { asked: false, observed: null, because: null };
+  if (missing !== null) return { outcome: { ok: false, error: missing }, boundary };
+
+  const bound = await hold(process.execPath, [SUBAGENT_RUNNER], helperBounds(cwd, job.agentDir));
+  boundary.asked = bound.held;
+  if (!bound.held) boundary.because = bound.sentence;
 
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [SUBAGENT_RUNNER], {
-      cwd: job.cwd ?? process.cwd(),
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const child = spawn(
+      bound.held ? bound.command : process.execPath,
+      bound.held ? [...bound.args] : [SUBAGENT_RUNNER],
+      {
+        cwd,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
 
     let buffer = '';
     let done = false;
     const finish = (outcome: SubagentOutcome): void => {
       if (done) return;
       done = true;
-      resolve(outcome);
+      resolve({ outcome, boundary });
       // Never leave a live child behind a resolved promise: the helper may not
       // have noticed its own report arrived.
-      if (!child.killed) child.kill('SIGTERM');
-      setTimeout(() => {
-        if (!child.killed) child.kill('SIGKILL');
-      }, 3000).unref();
+      stopChild(child);
     };
+
+    // The same ending the ceiling uses, so stopping the fleet is the stop this
+    // run already knows how to do rather than a second way of dying.
+    watching?.begun(() => finish({ ok: false, error: ceilingWords.stopped }));
 
     const abort = (): void => {
       if (signal?.aborted === true) finish({ ok: false, error: 'This piece of work was stopped.' });
@@ -439,6 +545,8 @@ function runSubagent(
           continue;
         }
         if (received.type === 'delta') onProgress(received.text);
+        if (received.type === 'boundary') boundary.observed = received.held;
+        if (received.type === 'spend') watching?.spent(received);
         if (received.type === 'done') finish(received.outcome);
       }
     });
@@ -486,19 +594,28 @@ function runSubagent(
     // The one message in. Nothing else ever touches the pipe once the job is
     // written — a child that tries to read more has nowhere to go.
     child.stdin.on('error', () => {});
-    child.stdin.write(JSON.stringify(job));
+    child.stdin.write(JSON.stringify({ ...job, outside: outsidePath() }));
     child.stdin.end();
   });
 }
 
-export const taskTool = (agentDir: string, model: HelperModel = null): ToolDefinition => ({
+export const taskTool = (
+  agentDir: string,
+  model: HelperModel = null,
+  thinking?: HelperPace,
+  projectRoot?: string,
+): ToolDefinition => ({
   name: 'task',
   label: 'Task',
   description:
-    'Send a piece of work to a helper agent with its own fresh context window. The helper can read the project and search the web, and cannot change anything. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context.',
+    'Send a piece of work to a helper agent with its own fresh context window. The helper can read the project and search the web, and cannot change anything. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context. Call it several times in one reply to put several helpers on separate pieces of work at the same time.',
   promptSnippet: 'task(task) — send a piece of work to a read-only helper',
   promptGuidelines: [
     'Give the helper one whole piece of work: a question it can answer without this conversation.',
+    // Without this the model sends one helper, waits for its answer, and sends
+    // the next — which is a queue wearing a fan-out's clothes.
+    'To send several helpers, put every task call in the same reply. They then work at once instead of queueing, and you get all the answers together.',
+    'Split the work so no helper needs another helper\'s answer. Anything that has to happen in order belongs in one helper, or in a second round after the first answers.',
     'The helper cannot make changes. Ask it for findings, not fixes.',
     'A small piece of work is not worth the help: the helper reads the same files and searches the same web you would.',
   ],
@@ -506,12 +623,12 @@ export const taskTool = (agentDir: string, model: HelperModel = null): ToolDefin
     task: Type.String({ description: 'The piece of work for the helper, in plain words.', minLength: 1 }),
     cwd: Type.Optional(Type.String({ description: 'The folder the helper should work in. Defaults to the project folder.' })),
   }),
-  /* Helpers are the one tool worth running side by side: each is its own
-     process with its own context, and the whole reason to send three is that
-     they work at once. Sequential turned "send in a team" into a queue. */
+  /* Pi runs a whole batch of calls one after another as soon as a single tool
+     in it says `sequential`, so this is the setting nothing else here may
+     contradict: the reason to send three helpers is that they work at once. */
   executionMode: 'parallel',
   execute: async (
-    _callId: string,
+    callId: string,
     params: TaskParams,
     signal: AbortSignal | undefined,
     onUpdate: AgentToolUpdateCallback<unknown> | undefined,
@@ -519,23 +636,53 @@ export const taskTool = (agentDir: string, model: HelperModel = null): ToolDefin
     if (params.task.trim() === '') {
       return { content: [{ type: 'text', text: 'I need a piece of work to hand over.' }], details: {} };
     }
+    // Asked before anything is spawned: a helper refused costs nothing, and one
+    // refused halfway through has already been paid for.
+    // The project this helper's spending belongs to. The model's `cwd` is a
+    // suggestion; the folder the session was opened on is the fact.
+    const project = projectRoot ?? params.cwd ?? process.cwd();
+    const admitted = fleet.begin({ id: callId, kind: 'helper', stop: () => {} });
+    if (!admitted.ok) {
+      return { content: [{ type: 'text', text: admitted.because }], details: {} };
+    }
+
     // The child's progress goes out as Pi's partial tool result, which is the
     // only way anything a custom tool learns mid-run can reach the session.
     let progress = '';
     let sentAt = 0;
-    const outcome = await runSubagent({ ...params, agentDir, model }, signal, (text) => {
-      progress += text;
-      const now = Date.now();
-      if (now - sentAt < PROGRESS_EVERY_MS) return;
-      sentAt = now;
-      onUpdate?.({ content: [{ type: 'text', text: progress }], details: {} });
-    });
-    if (!outcome.ok) throw new Error(outcome.error);
+    let ran: Ran;
+    try {
+      ran = await runSubagent(
+        { ...params, agentDir, model, thinking },
+        signal,
+        (text) => {
+          progress += text;
+          const now = Date.now();
+          if (now - sentAt < PROGRESS_EVERY_MS) return;
+          sentAt = now;
+          onUpdate?.({ content: [{ type: 'text', text: progress }], details: {} });
+        },
+        {
+          begun: (stop) => fleet.watch(callId, stop),
+          spent: (line) => fleet.spentUnseen(callId, { ...line, project }),
+        },
+      );
+    } finally {
+      // However this ended, its share goes back. A helper that never got as far
+      // as a process would otherwise hold a slice of the ceiling for good.
+      fleet.ended(callId);
+    }
+    const { outcome, boundary } = ran;
+    // Said out loud rather than left to be inferred from a helper that started
+    // cleanly: a run with less than usual around it says so alongside its answer.
+    const note = boundaryNote(boundary);
+    if (!outcome.ok) throw new Error(note === null ? outcome.error : `${outcome.error}\n\n${note}`);
+    const said = note === null ? outcome.text : `${outcome.text}\n\n${note}`;
     // One last update with the whole of it. The throttle above means the final
     // few hundred milliseconds of a helper's answer would otherwise never reach
     // the window, which is the difference between a finding and half of one.
-    onUpdate?.({ content: [{ type: 'text', text: outcome.text }], details: {} });
-    return { content: [{ type: 'text', text: outcome.text }], details: {} };
+    onUpdate?.({ content: [{ type: 'text', text: said }], details: {} });
+    return { content: [{ type: 'text', text: said }], details: {} };
   },
 });
 
@@ -578,7 +725,6 @@ export const figmaReadTool = (token: string): ToolDefinition => ({
   parameters: Type.Object({
     url: Type.String({ description: 'The Figma address, copied from Figma.', minLength: 1 }),
   }),
-  executionMode: 'sequential',
   execute: async (
     _callId: string,
     params: { url: string },
@@ -646,8 +792,10 @@ export const grapheTools = (
   agentDir: string,
   figmaToken?: string | null,
   model: HelperModel = null,
+  thinking?: HelperPace,
+  projectRoot?: string,
 ): ToolDefinition[] => {
-  const tools = [websearchTool, webfetchTool, taskTool(agentDir, model)];
+  const tools = [websearchTool, webfetchTool, taskTool(agentDir, model, thinking, projectRoot)];
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));
   return tools;

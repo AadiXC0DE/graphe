@@ -705,6 +705,18 @@ export type PromptAttachment = {
   bytes: string;
 };
 
+/** One installed skill Pi can use. A handle is the compact spelling accepted
+ * by the composer — `@${handle}` — while `path` is only a clue for the reader,
+ * never an argument that lets the renderer read arbitrary files. */
+export type Skill = {
+  id: string;
+  name: string;
+  handle: string;
+  description: string;
+  source: 'global' | 'project';
+  path: string;
+};
+
 /**
  * What the overview panel knows about the project's folder.
  *
@@ -909,6 +921,8 @@ export const CHANNEL = {
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
   tidyNow: 'graphe:tidy-now',
+  skills: 'graphe:skills',
+  skillText: 'graphe:skill-text',
   nudgeToken: 'graphe:nudge-token',
   nudgeMotion: 'graphe:nudge-motion',
   shareReview: 'graphe:share-review',
@@ -1050,6 +1064,10 @@ export type GrapheApi = {
   room(where?: Where): Promise<Result<Room | null>>;
   /** Shorten it now. Answers with the room there is afterwards. */
   tidyNow(where?: Where): Promise<Result<Room | null>>;
+  /** The installed instruction packs available to this project and computer. */
+  skills(where?: Where): Promise<Result<readonly Skill[]>>;
+  /** Full text for a library row. `id` is checked against that library first. */
+  skillText(id: string, where?: Where): Promise<Result<string>>;
   /** Stop checking before things that would otherwise be asked about, or start
    *  again. Answers with what is true afterwards. */
   stopAsking(on: boolean, where?: Where): Promise<Result<boolean>>;

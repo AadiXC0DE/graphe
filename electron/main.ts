@@ -103,6 +103,7 @@ import {
   type Result,
   type CarriedExtension,
   type Room,
+  type Skill,
   type SavedVersion,
   type ShowOutcome,
   type HowFar,
@@ -140,6 +141,7 @@ import { addressed, Workspaces, type Workspace } from '../src/projects/workspace
 import { findEditor, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
 import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
+import { availableSkills, selectedSkills, skillContents, skillNamed } from '../src/agent/pi/skills';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -337,6 +339,12 @@ function movedOrGone(name: string): Trouble {
 const NOTHING_OPEN: Trouble = {
   what: 'I do not have a folder to work in yet.',
   because: 'Pick the folder your project lives in and I will start there.',
+  actionLabel: 'Got it',
+};
+
+const COULD_NOT_TIDY: Trouble = {
+  what: 'I could not tidy this conversation just now.',
+  because: 'There is not enough settled conversation to shorten yet, or it is already being tidied.',
   actionLabel: 'Got it',
 };
 
@@ -3383,7 +3391,8 @@ function register(): void {
     if (open === null) return fail(NOTHING_OPEN);
     const session = workingAt(open, where);
     if (session === null) return done(null);
-    await session.tidyNow();
+    const didTidy = await session.tidyNow();
+    if (!didTidy) return fail(COULD_NOT_TIDY);
     return done(session.room);
   });
 
@@ -4078,6 +4087,31 @@ function register(): void {
     }
   });
 
+  handle<readonly Skill[]>(CHANNEL.skills, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    const skills = await availableSkills(open?.path ?? null, await defaultAgentDir());
+    return done(skills);
+  });
+
+  handle<string>(CHANNEL.skillText, async (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
+    const open = projectAt(whereIn(args));
+    const skill = await skillNamed(open?.path ?? null, await defaultAgentDir(), id);
+    if (skill === null) {
+      return fail({
+        what: 'That skill is no longer installed.',
+        because: 'The library changed since it was opened, so I did not read a different file by mistake.',
+        actionLabel: 'Refresh skills',
+      });
+    }
+    try {
+      return done(await skillContents(skill));
+    } catch (cause) {
+      return fail(plainTrouble('I could not open that skill.', detailsOf(cause)));
+    }
+  });
+
   handle<null>(CHANNEL.prompt, async (_event, args) => {
     const [text, attachments, ways] = args;
     if (typeof text !== 'string' || text.trim() === '') return done(null);
@@ -4114,7 +4148,26 @@ function register(): void {
           lookFirst,
         );
       }
-      await agent.prompt(text, imageCards(attachments), { lookFirst });
+      // `@name` is a deliberate, per-turn selection — stronger than hoping a
+      // model notices a description in the system prompt. Keep the original
+      // words visible in the thread, but give the agent the selected complete
+      // instructions. This also makes a project-local skill safe to use without
+      // turning on passive loading of every instruction a cloned folder carries.
+      const selected = await selectedSkills(open.path, await defaultAgentDir(), text);
+      const loaded = await Promise.all(
+        selected.map(async (skill) => ({ skill, text: await skillContents(skill).catch(() => '') })),
+      );
+      const chosen = loaded.filter((one) => one.text !== '').slice(0, 4);
+      const withSkills =
+        chosen.length === 0
+          ? text
+          : `${text}\n\n<graphe-selected-skills>\n${chosen
+              .map(
+                ({ skill, text: instructions }) =>
+                  `The user explicitly selected @${skill.handle}. Follow these instructions for this request:\n<skill name="${skill.name}">\n${instructions.slice(0, 50000)}\n</skill>`,
+              )
+              .join('\n\n')}\n</graphe-selected-skills>`;
+      await agent.prompt(withSkills, imageCards(attachments), { lookFirst });
       return done(null);
     } catch (cause) {
       // The adapter has already relayed this as an `error` event, worded by the

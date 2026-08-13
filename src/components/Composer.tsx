@@ -14,7 +14,7 @@ import type { HowFar } from '../agent/guard/policy';
 import HowToWork, { type Plans } from './HowToWork';
 import Room from './Room';
 import ThinkingWith from './ThinkingWith';
-import type { ConnectionState, ModelChoice, Room as RoomState, ThinkingLevel } from '../lib/ipc';
+import type { ConnectionState, ModelChoice, Room as RoomState, Skill, ThinkingLevel } from '../lib/ipc';
 import {
   NOT_DRAGGING,
   carriesSomething,
@@ -89,6 +89,9 @@ type Props = {
   /** How far it may go before it stops and asks. */
   howFar?: HowFar;
   onHowFar?: (howFar: HowFar) => void;
+  /** Skills the open project can use. `@` turns this quiet library into an
+   * explicit per-turn choice instead of a command someone has to memorise. */
+  skills?: readonly Skill[];
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -150,6 +153,7 @@ export default function Composer({
   onTidy,
   howFar,
   onHowFar,
+  skills = [],
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -164,6 +168,8 @@ export default function Composer({
   /** What was drawn on the last picture, in sentences. It goes out with the
    *  message, because a box with no words beside it is half a thought. */
   const [drawn, setDrawn] = useState<string | null>(null);
+  const [mention, setMention] = useState<{ from: number; query: string } | null>(null);
+  const [mentionAt, setMentionAt] = useState(0);
 
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -174,6 +180,23 @@ export default function Composer({
 
   const attachedRef = useRef(attachments);
   attachedRef.current = attachments;
+
+  const mentions = mention === null ? [] : skills
+    .filter((skill) => `${skill.name} ${skill.handle}`.toLowerCase().includes(mention.query.toLowerCase()))
+    .slice(0, 6);
+
+  const chooseMention = (skill: Skill) => {
+    const current = mention;
+    if (current === null) return;
+    const before = value.slice(0, current.from);
+    const after = value.slice(areaRef.current?.selectionStart ?? value.length);
+    const next = `${before}@${skill.handle} ${after}`;
+    const caretAt = before.length + skill.handle.length + 2;
+    setValue(next);
+    setCaret(caretAt);
+    setMention(null);
+    setMentionAt(0);
+  };
 
   const change = useCallback(
     (next: readonly Attachment[]) => {
@@ -270,6 +293,24 @@ export default function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mention !== null && mentions.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionAt((was) => (e.key === 'ArrowDown' ? (was + 1) % mentions.length : (was + mentions.length - 1) % mentions.length));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const chosen = mentions[mentionAt] ?? mentions[0];
+        if (chosen !== undefined) chooseMention(chosen);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMention(null);
+        return;
+      }
+    }
     if (e.key === 'Escape' && listening) {
       e.preventDefault();
       stopListening();
@@ -508,12 +549,29 @@ export default function Composer({
           // thing heard land on top of what was just written.
           if (listening) stopListening();
           setValue(e.target.value);
+          const cursor = e.target.selectionStart;
+          const before = e.target.value.slice(0, cursor);
+          const match = before.match(/(?:^|\s)@([a-z0-9-]*)$/i);
+          const query = match?.[1];
+          setMention(query === undefined ? null : { from: cursor - (query.length + 1), query });
+          setMentionAt(0);
           resize(e.target);
         }}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         aria-label="What do you want to make?"
       />
+
+      {mention === null || mentions.length === 0 ? null : (
+        <div className="composer__skills" role="listbox" aria-label="Skills">
+          <p><span>@</span> Use a skill for this turn</p>
+          {mentions.map((skill, index) => (
+            <button key={skill.id} type="button" role="option" aria-selected={index === mentionAt} className={index === mentionAt ? 'composer__skill--active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseMention(skill)}>
+              <span><strong>{skill.name}</strong><small>@{skill.handle}</small></span><em>{skill.source === 'project' ? 'This project' : 'Your computer'}</em>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="composer__row">
         <button

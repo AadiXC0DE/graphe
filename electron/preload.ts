@@ -52,6 +52,7 @@ import {
   type Result,
   type CarriedExtension,
   type Room,
+  type Skill,
   type SavedVersion,
   type ShowOutcome,
   type HowFar,
@@ -259,6 +260,15 @@ const api: GrapheApi = {
 
   tidyNow(where?: Where): Promise<Result<Room | null>> {
     return ipcRenderer.invoke(CHANNEL.tidyNow, named(where)) as Promise<Result<Room | null>>;
+  },
+
+  skills(where?: Where): Promise<Result<readonly Skill[]>> {
+    return ipcRenderer.invoke(CHANNEL.skills, named(where)) as Promise<Result<readonly Skill[]>>;
+  },
+
+  skillText(id: string, where?: Where): Promise<Result<string>> {
+    if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<string>('I could not tell which skill to open.'));
+    return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
   },
 
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {

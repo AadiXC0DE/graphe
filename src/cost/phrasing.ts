@@ -295,6 +295,8 @@ export function choseStyle(style: 'quick' | 'careful'): string {
 export const longConversation = {
   tidying:
     'We’ve covered a lot in here. I’ll tidy up my notes so things stay quick — nothing gets lost, and you can still scroll back through everything.',
+  stayedAsIs:
+    'I kept this conversation as it is for now. Nothing was changed or lost.',
   newThing: {
     title: 'This looks like a new thing',
     body: 'Starting fresh will be faster and cheaper. I’ll bring everything I know about the project with me, so you won’t have to explain it again.',

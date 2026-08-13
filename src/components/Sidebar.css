@@ -372,6 +372,30 @@
   font-weight: 500;
 }
 
+/* The current project is a destination, not a hidden heading. It stays in the
+   project list and receives the same quiet selection treatment as the current
+   conversation, plus the small accent edge that distinguishes the two lists. */
+.shelf__row--project-here {
+  position: relative;
+  background: var(--bg-sunken);
+}
+
+.shelf__row--project-here::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  bottom: var(--space-2);
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+
+.shelf__row--project-here .shelf__rowname {
+  color: var(--text);
+  font-weight: 500;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .shelf__new:hover {
     color: var(--text);

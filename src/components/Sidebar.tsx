@@ -27,6 +27,9 @@ type Props = {
   onAsk?: () => void;
   onDesign?: () => void;
   onHistory?: () => void;
+  /** Skills stay close to the work, but open as a library rather than another
+      permanent section competing with conversations. */
+  onSkills?: () => void;
   /** Where more can be added. Down here as well as under the project's name,
    *  because nobody finds it in a menu they never open. */
   onAddMore?: () => void;
@@ -62,6 +65,7 @@ export default function Sidebar({
   onAsk,
   onDesign,
   onHistory,
+  onSkills,
   onAddMore,
   now,
 }: Props) {
@@ -80,9 +84,7 @@ export default function Sidebar({
       {open ? (
         <>
           <div className="shelf__top">
-            <span className="shelf__caption" id="shelf-projects">
-              {projects.find((one) => one.path === openPath)?.name ?? 'Projects'}
-            </span>
+            <span className="shelf__caption" id="shelf-projects">Projects</span>
             <button
               type="button"
               className="shelf__collapse"
@@ -106,19 +108,20 @@ export default function Sidebar({
               </svg>
             </button>
           </div>
-          {/* Which project, and the way to another one. A list of every folder
-              this machine remembers is not what somebody already working in one
-              needs down the side of their work — it is one row and a menu. */}
+          {/* Projects are the primary navigation. Keep the current one in the
+              same list as the rest, visibly selected, so the screen answers
+              both “where am I?” and “where else can I go?” at a glance. */}
           <ul className="shelf__list">
             {projects
-              .filter((one) => one.path !== openPath)
-              .slice(0, 3)
               .map((project) => (
                 <li key={project.path}>
                   <button
                     type="button"
-                    className="shelf__row"
-                    onClick={() => onOpen(project)}
+                    className={`shelf__row ${project.path === openPath ? 'shelf__row--project-here' : ''}`}
+                    onClick={() => {
+                      if (project.path !== openPath) onOpen(project);
+                    }}
+                    aria-current={project.path === openPath ? 'page' : undefined}
                     title={project.missing ? 'This folder is not where it was' : project.path}
                   >
                     <span
@@ -218,9 +221,15 @@ export default function Sidebar({
 
           {/* The last row and never a band: it sits under the work rather than
               beside it, and stays put while the conversations scroll. */}
-          {onAddMore === undefined ? null : (
+          {onAddMore === undefined && onSkills === undefined ? null : (
             <div className="shelf__foot">
-              <button
+              {onSkills === undefined ? null : (
+                <button type="button" className="shelf__row shelf__row--quiet shelf__more" onClick={onSkills} title="Browse skills and use one with @">
+                  <span className="shelf__moremark" aria-hidden="true">@</span>
+                  <span className="shelf__rowname">Skills</span>
+                </button>
+              )}
+              {onAddMore === undefined ? null : <button
                 type="button"
                 className="shelf__row shelf__row--quiet shelf__more"
                 onClick={onAddMore}
@@ -246,7 +255,7 @@ export default function Sidebar({
                   </svg>
                 </span>
                 <span className="shelf__rowname">Add more to Graphe</span>
-              </button>
+              </button>}
             </div>
           )}
         </>
@@ -319,6 +328,11 @@ export default function Sidebar({
                   strokeLinejoin="round"
                 />
               </svg>
+            </button>
+          )}
+          {onSkills === undefined ? null : (
+            <button type="button" className="shelf__act shelf__act--skills" onClick={onSkills} title="Browse skills" aria-label="Browse skills">
+              @
             </button>
           )}
           {onHistory === undefined ? null : (

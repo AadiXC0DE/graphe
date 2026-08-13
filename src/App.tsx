@@ -118,7 +118,6 @@ import {
   applyEvent,
   askingYou,
   estimated,
-  newId,
   said,
   withTrouble,
   STOPPED_PART_WAY,
@@ -324,6 +323,17 @@ function Conversation() {
    */
   const [desks, setDesks] = useState<Desks>(noDesks);
   const desk = currentDesk(desks);
+  /* The front conversation is busy when its own stream is live — not when some
+     other tab is running, which is different work and must not turn this one's
+     Send into Stop. Same test the tab row uses for its working dot. */
+  const frontBusy =
+    desk !== null &&
+    desk.turns.some(
+      (turn) =>
+        (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
+        (turn.kind === 'did' && turn.state === 'running') ||
+        (turn.kind === 'tidying' && turn.state === 'running'),
+    );
 
   /** What this computer remembers. Null until the shell has been asked — which
    *  is not the same as an empty list, and the two states look different: one is
@@ -700,7 +710,12 @@ function Conversation() {
     >
   >({});
 
-  const [busy, setBusy] = useState(false);
+  const [busyCount, setBusyCount] = useState(0);
+  const busy = busyCount > 0;
+  /* Busy is how many operations are in flight, so a turn in one tab stopping
+     must not clear the busy another tab is still using. Counted, not a flag. */
+  const goBusy = (): void => setBusyCount((count) => count + 1);
+  const goQuiet = (): void => setBusyCount((count) => Math.max(0, count - 1));
   /** The conversation that owns the current send. `busy` is window-wide (it
    *  also covers picking a folder), so tabs need this narrower identity. */
   const [busyConversation, setBusyConversation] = useState<string | null>(null);
@@ -1137,14 +1152,11 @@ function Conversation() {
         return;
       }
       toChat();
-      // Mid-answer. Other tools let you open another conversation any time;
-      // blocking with "finish this thought" is how people feel trapped. Stop
-      // the turn that is in flight, then move — the stopped turn is still
-      // written down on the conversation it belongs to.
-      if (busy) {
-        await bridge.stop();
-        setBusy(false);
-      }
+      // Opening another conversation leaves an in-flight turn where it is,
+      // running in the conversation it belongs to. Each conversation is its
+      // own agent session, so the turn on the tab being left carries on in the
+      // background and stays saved — this is how two tabs work at once. The
+      // turn only stops if somebody presses Stop on it.
       const opened = await bridge.openConversation(path);
       if (!opened.ok) {
         troubleHere(opened.trouble);
@@ -1192,7 +1204,7 @@ function Conversation() {
         if (answer.ok && desksNow.current.current === project) setConversations(answer.value);
       });
     },
-    [busy, inConversation, desk?.turns.length, toChat, troubleHere],
+    [inConversation, desk?.turns.length, toChat, troubleHere],
   );
 
   /** Throw a conversation away. If it is the one on screen, open a fresh one
@@ -1202,7 +1214,7 @@ function Conversation() {
       const wasHere = path === inConversation;
       if (wasHere && busy) {
         await bridge.stop();
-        setBusy(false);
+        goQuiet();
       }
       const answer = await bridge.deleteConversation(path);
       if (!answer.ok) {
@@ -1574,7 +1586,7 @@ function Conversation() {
           references: [...one.references, ...reference],
         })),
       );
-      setBusy(true);
+      goBusy();
       const desk = currentDesk(desksNow.current);
       const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
       setBusyConversation(owner);
@@ -1595,7 +1607,7 @@ function Conversation() {
             cause instanceof Error ? (cause.stack ?? cause.message) : undefined,
         });
       } finally {
-        setBusy(false);
+        goQuiet();
         setBusyConversation((current) => (current === owner ? null : current));
       }
     },
@@ -1627,10 +1639,10 @@ function Conversation() {
 
       if (before === null) {
         if (!bridge.desktop) return;
-        setBusy(true);
+        goBusy();
         const picked = await bridge
           .chooseFolder()
-          .finally(() => setBusy(false));
+          .finally(() => goQuiet());
         if (!picked.ok) {
           setPickerTrouble({ path: "", trouble: picked.trouble });
           return;
@@ -1716,14 +1728,14 @@ function Conversation() {
         return;
       }
       const desk = currentDesk(desksNow.current);
-      const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
       // The agent is mid-turn on exactly this conversation, and the person is
       // typing into it. Instead of parking the message until the turn ends, put
       // it straight into that turn — Pi's steer. It interrupts the flow without
       // stopping it, which is the "insert into the loop" move. The window owns
       // the person's own words (the shell never sends them back), so it is laid
-      // down here just as `send` would.
-      if (desk !== null && busyConversation === owner) {
+      // down here just as `send` would. `frontBusy` is this conversation's own
+      // live stream — another tab working is not this turn and sends.
+      if (desk !== null && frontBusy) {
         setDesks((current) =>
           changeDesk(current, desk.path, (one) => ({
             ...one,
@@ -1736,18 +1748,13 @@ function Conversation() {
         });
         return;
       }
-      if (!busy || owner === null) {
-        void send(text);
-        return;
-      }
-      setDesks((current) =>
-        changeCurrent(current, (one) => ({
-          ...one,
-          waiting: [...one.waiting, { id: newId(), text }],
-        })),
-      );
+      // No turn of mine is going, whether nothing at all is, or another
+      // conversation is running its own. Send to my conversation now — two
+      // tabs working at once is the point, not a turn that waits for the
+      // other's to finish.
+      void send(text);
     },
-    [busy, busyConversation, desks, send],
+    [frontBusy, desks, send],
   );
 
   /** Fetch the open project's github pull requests and issues, and hold the
@@ -1965,7 +1972,7 @@ function Conversation() {
     async (versionId: string) => {
       const path = desks.current;
       if (path === null) return;
-      setBusy(true);
+      goBusy();
       try {
         const answer = await bridge.putBack(versionId);
         if (!answer.ok) {
@@ -1980,7 +1987,7 @@ function Conversation() {
           })),
         );
       } finally {
-        setBusy(false);
+        goQuiet();
       }
     },
     [desks.current, troubleHere],
@@ -2105,7 +2112,7 @@ function Conversation() {
     (letIn: boolean) => {
       const path = desks.current;
       if (path === null) return;
-      setBusy(true);
+      goBusy();
       void bridge
         .decideOnWork(letIn)
         .then((answer) => {
@@ -2124,7 +2131,7 @@ function Conversation() {
           );
           void refreshOverview(path);
         })
-        .finally(() => setBusy(false));
+        .finally(() => goQuiet());
     },
     [desks.current, refreshOverview, troubleHere],
   );
@@ -2969,7 +2976,10 @@ function Conversation() {
               onSend={hand}
               onStop={halt}
               autoFocus
-              busy={busy}
+              // Busy is this conversation's own live stream, not a background
+              // turn in another tab — a tab working beside you must not turn
+              // your Send into Stop or its own work into a wait.
+              busy={frontBusy}
               draft={draft}
               attachments={attachments}
               connection={connection}

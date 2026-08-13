@@ -286,17 +286,33 @@
   gap: var(--space-2);
 }
 
+.away__plus {
+  flex: none;
+  color: currentColor;
+}
+
 .away__new {
   flex: none;
-  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 26px;
   padding: 0 var(--space-2);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
   font-size: var(--text-2xs);
   color: var(--text-muted);
   white-space: nowrap;
   transition:
     color var(--dur-micro) var(--ease-hover),
-    background-color var(--dur-micro) var(--ease-hover);
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.away__new:active {
+  transform: scale(0.97);
 }
 
 .away__new:focus-visible {
@@ -306,8 +322,14 @@
 
 @media (hover: hover) and (pointer: fine) {
   .away__new:hover {
-    background: var(--bg-sunken);
+    border-color: var(--border-strong);
     color: var(--text);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .away__new:active {
+    transform: none;
   }
 }
 

@@ -95,6 +95,27 @@ describe('what the runtime is asked to run', () => {
 /* ========================================================================== */
 
 describe('every command goes through the boundary first', () => {
+  it('uses the normal terminal directly when the person chose get on with it', async () => {
+    const folder = newFolder();
+    const kept = recorder();
+    const shell = heldShell({
+      folder,
+      parts: () => PARTS,
+      plain: kept.plain,
+      unrestricted: () => true,
+    });
+    try {
+      await shell.exec('git push', folder, listening());
+      expect(kept.runs).toHaveLength(1);
+      expect(kept.runs[0]?.command).toBe('git push');
+      // The inherited environment is left intact, so Git can use the same
+      // credential helper that works in the person's own terminal.
+      expect(kept.runs[0]?.run.env?.['TMPDIR']).toBeUndefined();
+    } finally {
+      await shell.close();
+    }
+  });
+
   it('hands the runtime the held command, with somewhere to write temporary files', async () => {
     lookAgain();
     const look = await boundaryHere();

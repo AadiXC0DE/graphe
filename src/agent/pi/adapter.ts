@@ -1077,6 +1077,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   })();
   const shell = heldShell({
     folder: options.projectRoot,
+    // The runner reads this immediately before every command, so changing the
+    // session's autonomy setting applies to the next command without replacing
+    // the current conversation.
+    unrestricted: () => facts.howFar === 'doing',
     parts: () => {
       const config = pi.getShellConfig(settings.shell);
       // A shell fed its command down a pipe is not one we can name on a command

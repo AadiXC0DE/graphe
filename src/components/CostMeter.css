@@ -4,14 +4,14 @@
 
 .cost-meter {
   display: inline-flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 168px;
-  padding: var(--space-2) var(--space-3) var(--space-3);
-  background: var(--bg-raised);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-sm);
 }
 
 .cost-meter--corner {
@@ -25,7 +25,7 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--space-2);
 }
 
 .cost-meter__label {
@@ -36,14 +36,16 @@
 }
 
 .cost-meter__value {
-  font-size: var(--text-base);
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: 560;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   color: var(--text);
 }
 
 .cost-meter__rule {
+  flex: 0 0 28px;
+  order: 1;
   height: 2px;
   border-radius: 1px;
   background: var(--border);
@@ -63,84 +65,6 @@
 }
 
 /* Approaching the ceiling is carried by a sentence, not by colour alone. */
-.cost-meter__note {
-  margin: 0;
-  max-width: 26ch;
-  font-size: var(--text-xs);
-  line-height: 1.45;
-  color: var(--text-muted);
-}
-
-.cost-meter--stop .cost-meter__note {
-  color: var(--text);
-}
-
-/* The stretch the figure covers, offered as words rather than a control to
-   learn. Present only once there is more than one sitting to compare. */
-.cost-meter__spans {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-}
-
-.cost-meter__span {
-  padding: 0;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  border-bottom: 1px solid transparent;
-}
-
-.cost-meter__span[aria-pressed='true'] {
-  color: var(--text);
-  border-bottom-color: var(--border-strong);
-}
-
-.cost-meter__span:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-  border-radius: var(--radius-sm);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .cost-meter__span:hover {
-    color: var(--text);
-  }
-}
-
-.cost-meter__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  /* Nine months is a year of glances; past that it is a report, not a corner. */
-  max-height: 11rem;
-  overflow-y: auto;
-}
-
-.cost-meter__item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-}
-
-.cost-meter__item-value {
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-.cost-meter__aside {
-  margin: 0;
-  max-width: 26ch;
-  font-size: var(--text-xs);
-  line-height: 1.45;
-  color: var(--text-muted);
-}
-
 .cost-meter__details {
   align-self: flex-start;
   position: relative;
@@ -179,6 +103,7 @@
 /* Setting a ceiling, on the meter itself — where somebody is already looking at
    the number when they decide they want a limit on it. */
 .cost-meter__row--doing {
+  order: 2;
   gap: var(--space-3);
   justify-content: flex-start;
   flex-wrap: wrap;

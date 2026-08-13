@@ -86,6 +86,9 @@ type Props = {
   onLimit: (ceiling: Money | null) => void;
   /** Open one changed file where the person actually edits things. */
   onOpenFile: (path: string) => void;
+  /** Open the whole changed set where it can be reviewed instead of presenting
+   * a dead list of filenames. */
+  onReviewChanges: () => void;
   /** Keep where the project stands right now, so it can be come back to. */
   onSave: () => void;
   /** Open everything about how the project looks, at one of its bands. */
@@ -204,6 +207,7 @@ export default function Overview({
   onShowSplit,
   onLimit,
   onOpenFile,
+  onReviewChanges,
   onSave,
   onOpenDesign,
   onOpenGraph,
@@ -243,6 +247,7 @@ export default function Overview({
   const files: readonly ChangedFile[] = git?.files ?? [];
   const shownFiles = files.slice(0, WINDOW);
   const moreFiles = (git === null ? 0 : git.unstaged + git.staged + git.untracked) - shownFiles.length;
+  const changedCount = git === null ? 0 : git.unstaged + git.staged + git.untracked;
 
   return (
     <aside className="overview" aria-label="What is going on">
@@ -299,7 +304,7 @@ export default function Overview({
           panel is a reading of what has already happened, and a helper is now. */}
 
       <section className="overview__block">
-        <h2 className="overview__title">Changes</h2>
+        <h2 className="overview__title">Ready to review</h2>
         {git === null ? (
           <p className="overview__quiet">
             Nothing is being kept for this folder yet. The first time I change
@@ -309,6 +314,9 @@ export default function Overview({
           <p className="overview__quiet">Everything here is saved.</p>
         ) : (
           <>
+            <p className="overview__summary">
+              {`${changedCount} ${changedCount === 1 ? 'file has' : 'files have'} changed since your last version.`}
+            </p>
             <ul className="overview__files">
               {shownFiles.map((file) => (
                 <li key={file.path}>
@@ -330,11 +338,14 @@ export default function Overview({
               ))}
             </ul>
             {moreFiles > 0 ? <p className="overview__more">{`and ${moreFiles} more`}</p> : null}
-            {/* The one thing worth doing about unsaved work, named after what
-                it makes: another row in the timeline below. */}
-            <button type="button" className="overview__do" onClick={onSave} disabled={busy}>
-              Save a version now
-            </button>
+            <div className="overview__actions">
+              <button type="button" className="overview__do" onClick={onReviewChanges}>
+                Review changes
+              </button>
+              <button type="button" className="overview__textdo" onClick={onSave} disabled={busy}>
+                Save version
+              </button>
+            </div>
           </>
         )}
       </section>

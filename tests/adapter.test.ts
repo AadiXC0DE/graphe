@@ -399,6 +399,23 @@ describe('translating one event', () => {
     ).toEqual({ type: 'tool-end', id: 'c1', ok: false });
   });
 
+  it('keeps a failed tool call’s explanation beside its status', () => {
+    expect(
+      translatePiEvent({
+        type: 'tool_execution_end',
+        toolCallId: 'c1',
+        toolName: 'bash',
+        isError: true,
+        result: { content: [{ type: 'text', text: 'git push: authentication failed' }] },
+      }),
+    ).toEqual({
+      type: 'tool-end',
+      id: 'c1',
+      ok: false,
+      detail: 'git push: authentication failed',
+    });
+  });
+
   /* E5. A helper's words travel as the tool's partial result, which Pi sends in
      the same shape a tool result takes — an object with a `content` list, not a
      string. Reading only the string form is what made every helper come back

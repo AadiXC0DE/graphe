@@ -72,6 +72,16 @@ export type HeldShellOptions = {
   parts: () => ShellParts;
   /** Running a command with nothing around it. */
   plain: RunShell;
+  /**
+   * The person has deliberately chosen the high-autonomy mode. Commands in
+   * that mode use their normal login environment, including the credential
+   * helpers and package-manager folders already set up on this computer.
+   *
+   * This is a function rather than a value because the control changes an
+   * already-open session. The next command must see the new choice without
+   * rebuilding the agent.
+   */
+  unrestricted?: () => boolean;
   /** Home, for the folders below. Tests pass their own. */
   home?: string;
 };
@@ -139,6 +149,13 @@ export function heldShell(options: HeldShellOptions): HeldShell {
 
   return {
     exec: async (command, cwd, run) => {
+      // "Get on with it" means the agent gets the same terminal environment
+      // the person has. Keeping the OS boundary here made the label misleading:
+      // Git could not reach macOS's credential helper and package scripts could
+      // not use their normal supporting folders even though the Guard had let
+      // the command through.
+      if (options.unrestricted?.() === true) return options.plain(command, cwd, run);
+
       const folder = await scratchFolder();
       if (folder === null) return unheld(command, cwd, run, NO_SCRATCH);
 

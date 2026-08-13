@@ -69,6 +69,7 @@ import {
   type CarriedExtension,
   type Result,
   type Room,
+  type Skill,
   type SavedVersion,
   type ShowOutcome,
   type HowFar,
@@ -885,6 +886,14 @@ function previewBridge(): Bridge {
       });
     },
 
+    skills(): Promise<Result<readonly Skill[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    skillText(): Promise<Result<string>> {
+      return Promise.resolve(done(''));
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -1567,6 +1576,8 @@ function connect(): Bridge {
     saveVersion: (name) => api.saveVersion(name),
     room: () => api.room(),
     tidyNow: () => api.tidyNow(),
+    skills: () => api.skills(),
+    skillText: (id) => api.skillText(id),
     stopAsking: (on) => api.stopAsking(on),
     goAsFarAs: (howFar) => api.goAsFarAs(howFar),
     carried: () => api.carried(),

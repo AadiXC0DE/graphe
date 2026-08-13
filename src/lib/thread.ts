@@ -262,7 +262,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       );
 
     case 'tool-end':
-      return closeActivity(turns, event.id, event.ok ? 'done' : 'failed');
+      return closeActivity(turns, event.id, event.ok ? 'done' : 'failed', event.detail);
 
     case 'blocked': {
       const closed = closeActivity(turns, event.call.id, 'failed', event.reason);
@@ -360,8 +360,9 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       );
       if (index === -1) return turns;
       const next = [...turns];
-      // A tidy that could not be done leaves the line saying it was tried and
-      // nothing else. Nothing was lost, so there is nothing to apologise for.
+      // A compaction can discover there is not enough settled conversation yet.
+      // Do not leave behind a claim that notes were shortened when they were
+      // not: the completed line says plainly that the conversation stayed put.
       next[index] = { kind: 'tidying', id: turns[index]!.id, state: event.ok ? 'done' : 'failed' };
       return next;
     }

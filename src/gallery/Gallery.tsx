@@ -1627,9 +1627,10 @@ export default function Gallery() {
                 onKeep={noop}
                 onDismissPutBack={noop}
                 onShowSplit={noop}
-                onLimit={noop}
-                onOpenFile={noop}
-                onSave={noop}
+            onLimit={noop}
+            onOpenFile={noop}
+            onReviewChanges={noop}
+            onSave={noop}
                 onOpenDesign={noop}
                 onOpenGraph={noop}
                 onShare={noop}

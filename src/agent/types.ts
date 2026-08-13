@@ -99,7 +99,7 @@ export type AgentEvent =
   | { type: 'message-delta'; text: string }
   | { type: 'message-end' }
   | { type: 'tool-start'; call: ToolCall }
-  | { type: 'tool-end'; id: string; ok: boolean }
+  | { type: 'tool-end'; id: string; ok: boolean; detail?: string }
   /** A tool that is still running has something to say — the helper the `task`
    *  tool spawns, reporting as it reads. Replaces the step's own detail line. */
   | { type: 'tool-progress'; id: string; text: string }

@@ -193,7 +193,28 @@ function fromToolExecutionUpdate(source: Fields): AgentEvent | null {
 function fromToolExecutionEnd(source: Fields): AgentEvent | null {
   const id = textAt(source, 'toolCallId');
   if (id === null) return null;
-  return { type: 'tool-end', id, ok: flagAt(source, 'isError') !== true };
+  const failed = flagAt(source, 'isError') === true;
+  const detail = failed ? failureFromResult(source['result']) : undefined;
+  return detail === undefined
+    ? { type: 'tool-end', id, ok: !failed }
+    : { type: 'tool-end', id, ok: !failed, detail };
+}
+
+/** A red cross without its reason makes a command failure look like a rendering
+ * mistake, especially when the model has already moved on. Pi puts the useful
+ * explanation in a few different result shapes, so read the small common
+ * subset and keep it to one feed-sized line. */
+function failureFromResult(result: unknown): string | undefined {
+  const fields = fieldsOf(result);
+  const nested = fields === null ? null : nestedAt(fields, 'error');
+  const raw =
+    (fields === null ? null : textAt(fields, 'errorMessage')) ??
+    (nested === null ? null : textAt(nested, 'errorMessage')) ??
+    (fields === null ? null : textAt(fields, 'message')) ??
+    partialTextOf(result);
+  if (raw === null) return undefined;
+  const line = raw.replace(/\s+/g, ' ').trim();
+  return line === '' ? undefined : line.length > 240 ? `${line.slice(0, 239)}…` : line;
 }
 
 /* -------------------------------------------------------------------------- */

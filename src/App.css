@@ -358,7 +358,8 @@
      aligned to the conversation made the two collide on any narrow window. */
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: var(--space-3);
   /* Centred over the conversation, which is the thing it names. The strip's own
      `left`/`right` already stop where the panels start, so the only inset left
      to make is the traffic lights' — and only when the shelf is not there to
@@ -386,6 +387,19 @@
 
 .topbar__name,
 .topbar__preview {
+  -webkit-app-region: no-drag;
+}
+
+/* The project is a destination in its own right, so it owns the menu anchor.
+   Keeping this wrapper in the header avoids a viewport-centred menu that feels
+   disconnected from the name that opened it. */
+.topbar__project {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  margin-right: var(--space-4);
   -webkit-app-region: no-drag;
 }
 
@@ -454,26 +468,6 @@
 
 /* Sits beside the project's name, quieter than it. The bar it opens is the one
    place that reaches everything, so the way in is never further than here. */
-.topbar__ask {
-  min-height: 26px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
-  line-height: 26px;
-  color: var(--text-faint);
-  white-space: nowrap;
-  transition:
-    color var(--dur-micro) var(--ease-hover),
-    background-color var(--dur-micro) var(--ease-hover);
-}
-
-@media (hover: hover) {
-  .topbar__ask:hover {
-    color: var(--text);
-    background: var(--bg-sunken);
-  }
-}
-
 .topbar__name--quiet {
   color: var(--text-faint);
 }
@@ -515,11 +509,8 @@
    dropdown does: up 4px with a fade, 200ms ease-out, once. */
 .topbar__switcher {
   position: absolute;
-  top: calc(100% - var(--space-1));
-  /* Under the name it hangs from, which is the middle of the strip. */
-  left: 50%;
-  transform-origin: top center;
-  margin-left: -160px;
+  top: calc(100% + var(--space-2));
+  right: 0;
   width: 320px;
   max-width: calc(100vw - var(--space-5));
   padding: var(--space-2) 0 0;
@@ -528,7 +519,7 @@
   background: var(--bg-raised);
   box-shadow: var(--shadow-md);
   -webkit-app-region: no-drag;
-  transform-origin: top left;
+  transform-origin: top right;
   animation: switcher-arrives var(--dur-ui) var(--ease-out-quart) both;
 }
 

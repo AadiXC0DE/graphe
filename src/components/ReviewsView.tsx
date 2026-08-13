@@ -20,7 +20,12 @@ export const SAYS = {
   heading: 'Pull requests',
   from: (full: string): string => `github.com/${full}`,
   refresh: 'Refresh',
-  empty: 'Nothing here to review yet.',
+  empty: 'No pull requests here yet.',
+  emptyDetail:
+    'When someone opens one in this project it will show up here to read and review.',
+  noIssues: 'No issues have been opened.',
+  noIssuesDetail:
+    'When someone raises one in this project it will show up here.',
   noRepo:
     'This folder is not a github repository, or github is not set up on your terminal.',
   noRepoDetail:
@@ -112,8 +117,11 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview }
   }
 
   const items = tab === 'prs' ? repo.prs : repo.issues;
-  const empty = items.length === 0;
-  const chosen = items.find((one) => one.number === open) ?? null;
+  /* Nothing picked yet, so the first one stands in — a list and an empty
+     detail pane next to each other is a screen that has taught the hand there
+     is nothing to read here, when there clearly is. */
+  const chosen = items.find((one) => one.number === open) ?? items[0] ?? null;
+  const picked = chosen?.number ?? null;
 
   return (
     <section className="sheet" aria-label={SAYS.heading}>
@@ -149,18 +157,26 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview }
       </header>
 
       <div className="sheet__body">
+        {chosen === null ? (
+          <div className="reviews reviews--empty">
+            <div className="reviews__blank">
+              {tab === 'prs' ? <svg viewBox="0 0 32 32" className="reviews__blankicon" width="34" height="34" fill="none" aria-hidden="true"><path d="M10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm12 0a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM10 19a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm3 0h9a5 5 0 0 0 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M13 19v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg> : <svg viewBox="0 0 32 32" className="reviews__blankicon" width="34" height="34" fill="none" aria-hidden="true"><circle cx="9" cy="16" r="3" stroke="currentColor" strokeWidth="2"/><path d="M6 16h7m0 0h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>}
+              <h2 className="reviews__blanktitle">{tab === 'prs' ? SAYS.empty : SAYS.noIssues}</h2>
+              <p className="reviews__blankdetail">{tab === 'prs' ? SAYS.emptyDetail : SAYS.noIssuesDetail}</p>
+            </div>
+          </div>
+        ) : (
         <div className="reviews">
           <ul className="reviews__list">
-            {empty ? <p className="reviews__none">{SAYS.empty}</p> : null}
             {items.map((item) => (
               <li key={`${item.kind}-${item.number}`}>
                 <button
                   type="button"
-                  className={`reviews__row ${item.number === open ? 'reviews__row--open' : ''}`}
+                  className={`reviews__row ${item.number === picked ? 'reviews__row--open' : ''}`}
                   onClick={() => setOpen(item.number === open ? null : item.number)}
                   aria-expanded={item.number === open}
                 >
-                  <span className="reviews__num">#{item.number}</span>
+                  <span className={`reviews__num reviews__num--${item.state}`}>#{item.number}</span>
                   <span className="reviews__text">
                     <span className="reviews__title">{item.title}</span>
                     <span className="reviews__sub">
@@ -174,13 +190,6 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview }
             ))}
           </ul>
 
-          {chosen === null ? (
-            <aside className="reviews__about">
-              <p className="reviews__hint">
-                Pick one on the left to read what it is about.
-              </p>
-            </aside>
-          ) : (
             <aside className="reviews__about">
               <h2 className="sheet__blocktitle">
                 {chosen.kind === 'pr' ? SAYS.prs : SAYS.issues} #{chosen.number}
@@ -215,8 +224,8 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview }
                 </a>
               )}
             </aside>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </section>
   );

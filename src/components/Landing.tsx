@@ -68,8 +68,8 @@ export default function Landing({
   const stopped = busy || going !== null;
 
   return (
-    <section className="landing" aria-label="Ready to ship">
-      <h2 className="landing__title">Ready to ship</h2>
+    <section className="landing" aria-label="When the work is done">
+      <h2 className="landing__title">When the work is done</h2>
 
       <label className="landing__switch">
         <input

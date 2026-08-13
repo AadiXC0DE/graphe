@@ -147,6 +147,7 @@ export default function Away({
           aria-expanded={starting}
           onClick={() => setStarting((was) => !was)}
         >
+          <Plus />
           {awayWords.keepGoing}
         </button>
       </div>
@@ -298,6 +299,7 @@ export default function Away({
             aria-expanded={asking}
             onClick={() => setAsking((was) => !was)}
           >
+            <Plus />
             {standingWords.label}
           </button>
         </div>
@@ -394,5 +396,15 @@ export default function Away({
         ) : null}
       </div>
     </section>
+  );
+}
+
+/** The small + that says a pill adds something. Its own component so the two
+ *  pills and the one in the repeat form stay the same shape. */
+function Plus() {
+  return (
+    <svg className="away__plus" width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   );
 }

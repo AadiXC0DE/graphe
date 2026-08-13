@@ -62,13 +62,45 @@
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
+  padding: var(--space-5) var(--space-3);
 }
 
+/* The nothing-yet state: one quiet panel, centred, an invitation rather than a
+   lone line stranded at the top left. */
 .reviews--empty {
   display: block;
-  max-width: 560px;
-  padding: var(--space-7) var(--space-4);
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 12vh var(--space-4);
   text-align: center;
+}
+
+.reviews__blank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.reviews__blankicon {
+  color: var(--text-faint);
+  opacity: 0.75;
+}
+
+.reviews__blanktitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.reviews__blankdetail {
+  margin: 0;
+  max-width: 320px;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-faint);
 }
 
 .reviews__list {
@@ -86,7 +118,7 @@
   gap: var(--space-3);
   width: 100%;
   min-width: 0;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-3);
   border-radius: var(--radius-md);
   text-align: left;
   transition: background-color var(--dur-micro) var(--ease-hover);
@@ -113,6 +145,10 @@
   font-size: var(--text-2xs);
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+
+.reviews__num--merged {
+  color: var(--accent-ink);
 }
 
 .reviews__text {

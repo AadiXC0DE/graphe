@@ -277,3 +277,17 @@
     color: var(--text);
   }
 }
+
+/* Order, offered where the work is asked for rather than in a screen of its
+   own. Quiet: most work waits for nothing, and this is the uncommon case. */
+.away__after {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.away__afterlabel {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}

@@ -99,6 +99,15 @@ export type StoredVersion = {
 
 export type UnsavedChange = { path: string; kind: ChangeKind };
 
+/** The most recent version that touched one file. */
+export type LastChange = {
+  id: string;
+  /** The version's title, as it reads in the timeline. */
+  name: string;
+  /** Milliseconds since the epoch. */
+  when: number;
+};
+
 /** Every sentence this module can put in front of someone, in one place so it
  *  can be swept for retired vocabulary. */
 export const historyProblems = {
@@ -306,6 +315,44 @@ export class ProjectHistory {
       throw new HistoryError(historyProblems.listFailed, detailsOf(listed));
     }
     return parseVersions(listed.stdout);
+  }
+
+  /**
+   * What last touched each file, by path as the folder spells it.
+   *
+   * Newest first, so the first mention of a path wins and everything older is
+   * passed over. Bounded by `limit` versions rather than by paths: this is asked
+   * for while somebody waits, and a project's whole history is not worth reading
+   * to answer "when did this last change".
+   */
+  async lastChangeByFile(limit = 300): Promise<Map<string, LastChange>> {
+    await this.ensureReady();
+    const listed = await this.attempt([
+      'log',
+      '-n',
+      String(Math.max(1, Math.floor(limit))),
+      '--name-only',
+      '--no-renames',
+      `--pretty=format:${RECORD}%H${FIELD}%at${FIELD}%s${FIELD}`,
+    ]);
+    if (listed.code !== 0) return new Map();
+
+    const found = new Map<string, LastChange>();
+    for (const record of listed.stdout.split(RECORD)) {
+      const [id = '', at = '', title = '', names = ''] = record.split(FIELD);
+      if (!VERSION_ID.test(id)) continue;
+      const seconds = Number.parseInt(at, 10);
+      const change: LastChange = {
+        id,
+        name: title.trim(),
+        when: Number.isFinite(seconds) ? seconds * 1000 : 0,
+      };
+      for (const line of names.split('\n')) {
+        const file = line.trim();
+        if (file !== '' && !found.has(file)) found.set(file, change);
+      }
+    }
+    return found;
   }
 
   /** One version by id, or null if this project has never heard of it. */

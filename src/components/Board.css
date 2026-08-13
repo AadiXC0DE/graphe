@@ -307,3 +307,20 @@
     transform: none;
   }
 }
+
+/* What a piece came to, at the end of its own state line. Tabular so a column
+   of them lines up, and quiet: the picture is the point of the card. */
+.work__spent {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+/* What this one is waiting for. Quiet, and never louder than the sentence that
+   says what it is: the plan is context, the work is the point. */
+.work__after {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-faint);
+}

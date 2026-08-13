@@ -17,10 +17,11 @@
  * product is that we make them.
  */
 
+import type { Money } from '../agent/types';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import type { ModelChoice } from '../lib/ipc';
+import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { asTrusted, sameTrusted, type Trusted } from './carried';
 import { asKept, sameKept, type Kept } from './kept';
 
@@ -45,6 +46,10 @@ export type Preferences = {
    * full list so a choice is never more than one click away.
    */
   model: ModelChoice | null;
+  /** How much time each model should take before it answers. The map is keyed
+   * by its provider and model id because different models support different
+   * choices. */
+  thinking: Readonly<Record<string, ThinkingLevel>>;
   /**
    * Versions somebody chose to keep at the top of the rail, by project folder.
    *
@@ -83,15 +88,26 @@ export type Preferences = {
    * rather look first.
    */
   holdBack: boolean;
+  /**
+   * The ceiling on spending, or null when nobody has set one.
+   *
+   * Remembered across launches, because a ceiling that forgets itself the
+   * moment you close the window is not a ceiling. What has been spent is not
+   * remembered with it — that is per sitting, and measuring a month against one
+   * afternoon would hold nobody to anything.
+   */
+  ceiling: Money | null;
 };
 
 export const defaultPreferences: Preferences = {
   showMe: false,
   model: null,
+  thinking: {},
   kept: {},
   trusted: {},
   showFiles: false,
   holdBack: false,
+  ceiling: null,
 };
 
 type Stored = { version: 1; preferences: Preferences };
@@ -103,6 +119,16 @@ function asPreferences(value: unknown): Preferences {
   const record = raw as Record<string, unknown>;
   const showMe = record['showMe'];
   const model = record['model'];
+  const rawThinking = record['thinking'];
+  const thinking: Record<string, ThinkingLevel> = {};
+  const levels = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+  if (typeof rawThinking === 'object' && rawThinking !== null && !Array.isArray(rawThinking)) {
+    for (const [key, level] of Object.entries(rawThinking)) {
+      if (typeof level === 'string' && levels.has(level as ThinkingLevel)) {
+        thinking[key] = level as ThinkingLevel;
+      }
+    }
+  }
   return {
     showMe: showMe === true,
     model:
@@ -115,11 +141,34 @@ function asPreferences(value: unknown): Preferences {
             modelId: (model as Record<string, unknown>)['modelId'] as string,
           }
         : null,
+    thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
     showFiles: record['showFiles'] === true,
     holdBack: record['holdBack'] === true,
+    ceiling: asCeiling(record['ceiling']),
   };
+}
+
+/** Read back defensively: a file edited by hand must not become a ceiling of
+ *  NaN, which would hold nobody to anything. */
+function asCeiling(value: unknown): Money | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const money = value as Record<string, unknown>;
+  const minor = money['minor'];
+  const currency = money['currency'];
+  if (typeof minor !== 'number' || !Number.isFinite(minor) || minor <= 0) return null;
+  if (typeof currency !== 'string' || currency === '') return null;
+  return { minor: Math.round(minor), currency };
+}
+
+function sameThinking(
+  left: Readonly<Record<string, ThinkingLevel>>,
+  right: Readonly<Record<string, ThinkingLevel>>,
+): boolean {
+  const leftEntries = Object.entries(left);
+  if (leftEntries.length !== Object.keys(right).length) return false;
+  return leftEntries.every(([key, level]) => right[key] === level);
 }
 
 export class PreferenceFile {
@@ -149,6 +198,7 @@ export class PreferenceFile {
       next.holdBack === this.#preferences.holdBack &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
+      sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted);
     if (unchanged) return this.all();

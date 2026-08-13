@@ -1,0 +1,125 @@
+/* Who is working alongside the conversation, one row above the composer.
+
+   The rail is quiet by construction. It has to be readable at a glance without
+   competing with either the thread above it or the box below, so it is small
+   type, no fills, and the only thing that moves is the ring on a helper that is
+   actually working. */
+
+.helperrail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.helperrail__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+  max-width: 240px;
+  padding: 0 var(--space-2) 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.helperrail__chip:active {
+  transform: scale(0.97);
+}
+
+/* One that has come back recedes. The record is worth keeping on screen; it is
+   not worth as much as the one still going. */
+.helperrail__chip--done,
+.helperrail__chip--failed {
+  color: var(--text-faint);
+}
+
+.helperrail__chip--running {
+  color: var(--text);
+}
+
+.helperrail__task {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.helperrail__time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.helperrail__more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (hover: hover) {
+  .helperrail__chip:hover,
+  .helperrail__more:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+.helperrail__chip:focus-visible,
+.helperrail__more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   The state mark, shared with the sheet
+   --------------------------------------------------------------------------- */
+
+.helpermark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+/* The same constant-speed turn the activity line uses, at chip size. Constant
+   speed because it is reporting that something is happening, not guessing how
+   much of it is left. */
+.helpermark--running {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent);
+  animation: helpermark-turn 900ms linear infinite;
+}
+
+@keyframes helpermark-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .helpermark--running {
+    animation: none;
+    transform: rotate(-45deg);
+  }
+
+  .helperrail__chip:active {
+    transform: none;
+  }
+}

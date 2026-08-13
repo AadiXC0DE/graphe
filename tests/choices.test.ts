@@ -158,10 +158,12 @@ describe('D1 — the real name of what just happened', () => {
         preferences: {
           showMe: true,
           model: null,
+          thinking: {},
           kept: {},
           trusted: {},
           showFiles: false,
           holdBack: false,
+          ceiling: null,
         },
       });
     });
@@ -291,13 +293,24 @@ describe('F7 — what gets said, and to whom', () => {
     expect(priced.prompt).toBeNull();
   });
 
-  it('asks before a big one, in money and in minutes', () => {
+  /* The pause before something big is the whole point of this question. The
+     price never was: a subscription is not metered per token, and a confident
+     number we cannot check is worse than none. */
+  it('asks before a big one, in minutes and never in money', () => {
     const priced = quote([], null, 'build me a website for my studio');
     expect(priced.warn).toBe(true);
     expect(priced.prompt?.title).toBe('This is a bigger job');
-    expect(priced.prompt?.body).toMatch(/^About \$/);
+    expect(priced.prompt?.body).toMatch(/It should take/);
     expect(priced.prompt?.confirm).toBe('Go ahead');
     expect(priced.prompt?.alternative).toBe('Do a smaller version first');
+  });
+
+  it('puts no price anywhere in the question, in any currency', () => {
+    for (const spent of [null, money(4000, 'INR'), money(100, 'USD')]) {
+      const priced = quote([], spent, 'build me a website for my studio');
+      const words = `${priced.prompt?.body ?? ''} ${priced.prompt?.note ?? ''}`;
+      expect(words).not.toMatch(/[₹$€£]|\d+(\.\d+)?\s*(cents?|dollars?|rupees?)/i);
+    }
   });
 
   it('admits it is guessing until it has measured something', () => {
@@ -305,10 +318,11 @@ describe('F7 — what gets said, and to whom', () => {
     expect(quote([], null, 'build me a website').prompt?.note).toMatch(/haven’t done one of these/);
   });
 
-  it('quotes in whatever the account is actually billed in', () => {
+  /* The estimate still carries a currency, because the ceiling somebody set is
+     in one and the two have to be comparable. Only the sentence stays silent. */
+  it('estimates in whatever the account is actually billed in', () => {
     const inr = quote([], money(4000, 'INR'), 'build me a website');
     expect(inr.estimate.expected.currency).toBe('INR');
-    expect(inr.prompt?.body).toMatch(/₹/);
   });
 
   /** The window cannot import from src/agent/pi — the renderer is not allowed

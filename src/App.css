@@ -38,6 +38,14 @@
      what keeps this whole file unchanged for everybody who has not. */
   --files-take: 0px;
   --files-width: 264px;
+  /* How much of the window the project's own page is holding. Zero unless
+     somebody has opened it, which keeps this whole file unchanged for everybody
+     who has not. */
+  --browser-take: 0px;
+  /* The conversation's floor. It never goes below this — squeezing a thread
+     into a column too narrow to read is how every side-by-side layout fails,
+     and the fix is a floor rather than a smaller font. */
+  --chat-floor: 420px;
   --pair-gap: clamp(
     0px,
     calc(
@@ -852,4 +860,76 @@ p {
     border-color: var(--border-strong);
     background: var(--bg-raised);
   }
+}
+
+
+/* ---------------------------------------------------------------------------
+   The page, beside the conversation
+
+   Three rooms, one control, and the conversation is never destroyed: it has a
+   floor in the split, and past that floor the page takes the window and the
+   conversation becomes a pill one key away.
+   --------------------------------------------------------------------------- */
+
+.app--split {
+  /* Everything already holding room is counted, so the floor is a real floor
+     rather than one the file tree can push through. */
+  --browser-take: max(
+    360px,
+    calc(
+      100vw - var(--shelf-take) - var(--files-take) - var(--chat-floor) -
+        (2 * var(--column-pad))
+    )
+  );
+  --thread-width: var(--chat-floor);
+  padding-right: var(--browser-take);
+}
+
+/* Pinned left rather than centred: the pair is the layout now, and a column
+   drifting toward the middle of its half reads as a mistake. */
+.app--split .app__column {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.app--whole {
+  --browser-take: calc(100vw - var(--shelf-take));
+  padding-right: var(--browser-take);
+}
+
+/* The conversation is not unmounted — scroll position, drafts and anything
+   half-typed survive the trip and are there when you come back. */
+.app--whole .app__column,
+.app--whole .app__composer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* The panel on the right is a reading; the page is work. It stands aside while
+   the page is open and comes back when it closes. */
+.app--split.app--overviewed,
+.app--whole.app--overviewed {
+  --overview-take: 0px;
+}
+
+.app--split .topbar,
+.app--whole .topbar {
+  right: var(--browser-take);
+}
+
+/* What somebody pointed at, held over the right-hand rail. It sits where the
+   panel does rather than beside the page, because the page is a native view and
+   paints above everything drawn here. */
+.pointedat {
+  position: fixed;
+  top: var(--topbar-height);
+  right: 0;
+  bottom: 0;
+  z-index: 7;
+  width: var(--rail-width);
+  overflow-y: auto;
+  padding: var(--space-3);
+  border-left: 1px solid var(--border);
+  background: var(--bg-raised);
+  scrollbar-width: thin;
 }

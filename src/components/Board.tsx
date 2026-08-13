@@ -8,6 +8,8 @@ import {
   saysWhen,
   type OnBoard,
 } from '../work/board';
+import type { Money } from '../agent/types';
+import { formatMoney } from '../cost/money';
 import './Board.css';
 
 /**
@@ -28,6 +30,11 @@ import './Board.css';
 export type BoardPiece = OnBoard & {
   /** Said when it did not work. */
   trouble?: string | null;
+  /** What this one is waiting for, already a sentence. Null when it waits for
+   *  nothing, which is almost all of them. */
+  after?: { id: string; doing: string; says: string } | null;
+  /** What this one came to. Null until anything has been spent on it. */
+  spent?: Money | null;
 };
 
 export type BoardProps = {
@@ -85,7 +92,17 @@ function Card({
           <span className="work__dot" aria-hidden="true" />
           {saysState(piece.state)}
           <span className="work__when">{saysWhen(piece.at, now)}</span>
+          {/* A row is a picture, a sentence and what it cost. Absent until
+              there is a number, like the meter — nothing spent, nothing said. */}
+          {piece.spent === null || piece.spent === undefined ? null : (
+            <span className="work__spent">{formatMoney(piece.spent)}</span>
+          )}
         </p>
+        {/* A plan is only a plan if you can see it. Under the state line,
+            because it is a fact about when this starts, not about what it is. */}
+        {piece.after === null || piece.after === undefined ? null : (
+          <p className="work__after">{piece.after.says}</p>
+        )}
         {piece.trouble === null || piece.trouble === undefined ? null : (
           <p className="work__trouble">{piece.trouble}</p>
         )}

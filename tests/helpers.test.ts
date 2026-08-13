@@ -78,6 +78,32 @@ describe('a piece of work sent to a helper', () => {
     expect(helpers[1]?.saying).toBe('Three fail at the smallest size.');
   });
 
+  /* A real piece of work is a paragraph, and the detail every other step gets
+     is dropped past 64 characters. That rule threw the whole question away, so
+     the card read "Asked" and then nothing. */
+  it('keeps a long question whole', () => {
+    const long =
+      'Go through every page and tell me which ones load a font from somewhere other than our own server, and what each one is loading.';
+    const turns = fold([
+      { type: 'tool-start', call: { id: 'call-3', name: 'task', input: { task: long } } },
+    ]);
+
+    expect(nowDoing(turns).helpers[0]?.task).toBe(long);
+  });
+
+  /* The board shows everything a helper has said. Only the feed row is short,
+     and it is shortened where it is drawn. */
+  it('keeps every line of what it said, not the last one', () => {
+    const found = 'Two pages do.\nThe blog loads Inter from Google.\nThe changelog loads it too.';
+    const turns = fold([
+      { type: 'tool-start', call: HELP },
+      { type: 'tool-progress', id: 'call-1', text: found },
+      { type: 'tool-end', id: 'call-1', ok: true },
+    ]);
+
+    expect(nowDoing(turns).helpers[0]?.saying).toBe(found);
+  });
+
   it('marks one that stopped as stopped', () => {
     const turns = fold([
       { type: 'tool-start', call: HELP },

@@ -39,6 +39,9 @@ export const awayWords = {
   no: 'No, leave it',
   /** When a piece of work was let go with a question still open. */
   turnedDown: 'I stopped rather than deciding for you, and then this was let go.',
+  /** Work that carries on unwatched is where spend multiplies fastest, so the
+   *  ceiling holds here before it holds anywhere else. */
+  overTheLimit: 'This didn’t start: you’ve reached the limit you set.',
   nothing: 'Nothing is running.',
   keepGoing: 'Set something running',
   keepGoingHint:

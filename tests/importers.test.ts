@@ -73,7 +73,11 @@ describe('parseCodexAuth', () => {
     ]);
   });
 
-  it('reads a ChatGPT Plus sign-in', () => {
+  /* A ChatGPT sign-in is not a key, and it cannot be sent to the address a key
+     goes to — carrying one over produced a connection that failed on first use.
+     Signing in with ChatGPT is a button on the connect screen and works; this
+     door beside it never did, so it is not offered. */
+  it('carries no ChatGPT sign-in over, because that one never worked', () => {
     const found = parseCodexAuth(
       JSON.stringify({
         auth_mode: 'chatgpt',
@@ -86,8 +90,19 @@ describe('parseCodexAuth', () => {
         last_refresh: '2026-08-11T00:00:00Z',
       }),
     );
+    expect(found).toEqual([]);
+  });
+
+  it('still carries a key that sits beside one', () => {
+    const found = parseCodexAuth(
+      JSON.stringify({
+        OPENAI_API_KEY: 'sk-proj-2',
+        auth_mode: 'chatgpt',
+        tokens: { access_token: 'chatgpt-token' },
+      }),
+    );
     expect(found).toEqual([
-      { providerId: 'openai', kind: 'sign-in', source: 'codex', secret: 'chatgpt-token' },
+      { providerId: 'openai', kind: 'api-key', source: 'codex', secret: 'sk-proj-2' },
     ]);
   });
 

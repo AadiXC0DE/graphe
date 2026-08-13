@@ -75,9 +75,13 @@ function Thumbnail({ kind, preview }: { kind: AttachmentKind; preview: string | 
 export default function Attachments({
   items,
   onRemove,
+  onDrawOn,
 }: {
   items: readonly Attachment[];
   onRemove: (id: string) => void;
+  /** Open a picture to draw on. Offered only for pictures, and only when
+   *  somewhere has been given to draw. */
+  onDrawOn?: (id: string) => void;
 }) {
   /**
    * Chips on their way out.
@@ -133,6 +137,29 @@ export default function Attachments({
               <span className="chip__name">{item.name}</span>
               <span className="chip__note">{item.note}</span>
             </span>
+
+            {/* Take a screenshot, draw a box and an arrow, write "this, but
+                tighter" — the way designers have said things for thirty years,
+                offered where the picture already is. */}
+            {onDrawOn !== undefined && item.kind === 'image' ? (
+              <button
+                type="button"
+                className="chip__draw"
+                onClick={() => onDrawOn(item.id)}
+                disabled={going}
+                aria-label={`Draw on ${item.name}`}
+                title="Draw on it"
+              >
+                <svg viewBox="0 0 14 14" width="11" height="11" fill="none" aria-hidden="true">
+                  <path
+                    d="M9.2 2.4l2.4 2.4-6.6 6.6-3 .6.6-3z"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            ) : null}
 
             <button
               type="button"

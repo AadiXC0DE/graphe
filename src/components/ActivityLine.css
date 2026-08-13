@@ -117,8 +117,14 @@
    on one file" reads as one long label; stacked, the sentence is the sentence
    and the particulars are the particulars, and a long detail no longer pushes
    the duration off the end of the row. */
+/* Two lines, because a piece of work handed to a helper is a paragraph and the
+   feed is not a place to read one. The whole of it is on the helper's card. */
 .activity__detail {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }

@@ -32,10 +32,12 @@ import {
   Notification,
   session,
   shell,
+  WebContentsView,
   type IpcMainInvokeEvent,
 } from 'electron';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
@@ -55,10 +57,15 @@ import {
   type Conversation,
   type OurAuthInteraction,
 } from '../src/agent/pi/adapter';
-import type { AgentEvent, ImageCard } from '../src/agent/types';
+import type { AgentEvent, ImageCard, Money } from '../src/agent/types';
+import { fleet, readCeiling } from '../src/cost/fleet';
+import { getReady } from '../src/history/newcopy';
+import { watchWhileUsed, type Watching } from '../src/diff/capture';
+import { createLimit } from '../src/cost/limits';
+import { limitReached } from '../src/cost/phrasing';
 import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline, type Version } from '../src/history/timeline';
-import { ProjectHistory } from '../src/history/repo';
+import { ProjectHistory, type LastChange } from '../src/history/repo';
 import {
   cannotOpen,
   everythingIn,
@@ -71,6 +78,7 @@ import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
   type Away,
+  type AwayAfter,
   type AwayPiece,
   type EveryKind,
   type Repeating,
@@ -87,6 +95,7 @@ import {
   type OpenedProject,
   type WentOnline,
   type Overview,
+  type PointedAt,
   type Preferences,
   type PromptOptions,
   type PutBack,
@@ -96,10 +105,19 @@ import {
   type Room,
   type SavedVersion,
   type ShowOutcome,
+  type HowFar,
+  type Recording,
   type ShowProgress,
+  type SpendLimit,
+  type SpendSummary,
+  type ThinkingLevel,
+  modelKey,
   type Trouble,
   type VisualChange,
   type VisualFrames,
+  type Where,
+  setDownWords,
+  whereIn,
 } from '../src/lib/ipc';
 import { parseGitStatus } from '../src/lib/gitstatus';
 import {
@@ -118,10 +136,11 @@ import { inDesignWords, readChanges, NOTHING_TO_SAY, type Edit } from '../src/de
 import { isTrusted, trusting } from '../src/projects/carried';
 import { keeping, PreferenceFile } from '../src/projects/preferences';
 import { Recents } from '../src/projects/recents';
-import { Workspaces } from '../src/projects/workspaces';
+import { addressed, Workspaces, type Workspace } from '../src/projects/workspaces';
 import { findEditor, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
 import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
+import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
 import { writeMotionAll } from '../src/motion/read';
@@ -134,7 +153,7 @@ import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
 import { HeldWork, holdWords, Workbench, type PieceOfWork } from '../src/history/attempts';
 import { AT_A_TIME } from '../src/work/board';
-import { saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
+import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
 import {
   addStanding,
   dueNow,
@@ -147,6 +166,18 @@ import {
   type Standing,
 } from '../src/work/standing';
 import type { Repeat, TimeOfDay, Weekday } from '../src/work/schedule';
+import { keyFor, Notebook } from '../src/work/notebook';
+import { afterWords, Following } from '../src/work/after';
+import { endStrays } from '../src/work/strays';
+import {
+  addSpend,
+  asPiece,
+  noteOf,
+  onComingBack,
+  writtenWords,
+  type Owner,
+  type Written,
+} from '../src/work/written';
 import { StandingFile } from '../src/projects/standing';
 import { HandoverError, handToDeveloper, whatIsHere, type Change } from '../src/share/developer';
 import { handoverWords } from '../src/share/handover';
@@ -156,7 +187,11 @@ import { canPutOnline, canSendItOn } from '../src/share/tools';
 
 import type { Serving } from '../src/preview/serve';
 import { makeAndServe, ShowError, showSays } from '../src/preview/show';
-import { describePointed, type Pointed } from '../src/preview/point';
+import { describePointed, POINTER_SCRIPT, type Pointed } from '../src/preview/point';
+import { read as readPointed, type Material, type Change as Touched } from '../src/preview/inspect';
+import { readUsage } from '../src/design/usage';
+import { photographHeld, type Held as HeldPictures } from '../src/diff/holdshot';
+import { holdCamera } from '../src/diff/holdcamera';
 import { knownTrouble, plainMessage, plainTrouble } from './plainly';
 
 /**
@@ -305,6 +340,12 @@ const NOTHING_OPEN: Trouble = {
   actionLabel: 'Got it',
 };
 
+/** A wait that could never come round. The sentence is src/work/after.ts's; all
+ *  this does is put it where the window already knows to draw one. */
+function couldNotWait(because: string): Trouble {
+  return { what: 'I did not set that up.', because, actionLabel: 'Got it' };
+}
+
 const PICKER_FAILED: Trouble = {
   what: 'I could not open the folder picker.',
   because: 'Something on this computer would not let the window open.',
@@ -383,12 +424,12 @@ function couldNotShow(cause: unknown): Trouble {
 
 let mainWindow: BrowserWindow | null = null;
 
-/** Every event carries the folder it belongs to. A reply that was still
- *  arriving when somebody switched projects belongs to the project it started
- *  in, and this is what lets the window put it there — see `AgentNotice`. */
-function send(project: string | null, event: AgentEvent): void {
+/** Every event carries the folder and the conversation it belongs to. A reply
+ *  that was still arriving when somebody switched belongs where it started, and
+ *  this is what lets the window put it there — see `AgentNotice`. */
+function send(project: string | null, event: AgentEvent, conversation?: string): void {
   if (mainWindow === null || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(CHANNEL.event, { project, event });
+  mainWindow.webContents.send(CHANNEL.event, { project, conversation: conversation ?? null, event });
 }
 
 function tell(progress: ShowProgress): void {
@@ -508,6 +549,84 @@ async function load(win: BrowserWindow): Promise<void> {
   }
   await win.loadURL(DEV_SERVER);
 }
+
+/* -------------------------------------------------------------------------- */
+/* The project's own page, held inside the window                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The page beside the conversation.
+ *
+ * A native view rather than a `<webview>`: that tag is off in this app on
+ * purpose and stays off. It paints *above* the window's own contents, so
+ * anything that would sit over it — a sheet, a menu, a modal — has to hide it
+ * first, and the window says when.
+ *
+ * Its own store, so a site the person visits here can never see, set or reuse
+ * anything belonging to the app itself.
+ */
+let pageView: WebContentsView | null = null;
+let pageWatching: Watching | null = null;
+/** Which project the page belongs to, so a click in it is read against the
+ *  right folder. */
+let pageProject: string | null = null;
+
+function pageStore(): Electron.Session {
+  return session.fromPartition('persist:graphe-page');
+}
+
+/** Run once per document, however the page got here. A page we served already
+ *  carries the script, and a second copy would put a second button on it. */
+const POINTER_ONCE = `if (!window.__graphePointer) { ${POINTER_SCRIPT} }`;
+
+function makePageView(): WebContentsView | null {
+  if (mainWindow === null || mainWindow.isDestroyed()) return null;
+  if (pageView !== null) return pageView;
+  const view = new WebContentsView({
+    webPreferences: {
+      session: pageStore(),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
+      // Carries a click back out. It exposes nothing: the page can say what was
+      // clicked and cannot ask for anything.
+      preload: resolve(here, 'pagepreload.cjs'),
+    },
+  });
+  // Nothing the page does opens a second window, and nothing it links to takes
+  // the app somewhere. It is somebody's own site, not a browser.
+  view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // Every document, because the page is somebody's own site and they navigate
+  // around it. Inert until the button it puts on the page is pressed.
+  view.webContents.on('dom-ready', () => {
+    void view.webContents.executeJavaScript(POINTER_ONCE, true).catch(() => undefined);
+  });
+  mainWindow.contentView.addChildView(view);
+  pageView = view;
+  return view;
+}
+
+function dropPageView(): void {
+  const view = pageView;
+  pageView = null;
+  pageProject = null;
+  void pageWatching?.stop().catch(() => undefined);
+  pageWatching = null;
+  if (view === null) return;
+  if (mainWindow !== null && !mainWindow.isDestroyed()) {
+    mainWindow.contentView.removeChildView(view);
+  }
+  view.webContents.close();
+}
+
+/** A click in the page beside the conversation. It arrives from the page's own
+ *  world, so it is only listened to while that view is the one that sent it. */
+ipcMain.on(CHANNEL.pagePointed, (event, pointed: Pointed) => {
+  if (pageView === null || event.sender !== pageView.webContents) return;
+  if (pageProject === null) return;
+  sayPointed(pageProject, pointed);
+});
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -641,32 +760,101 @@ function rememberPicture(looking: Looking, versionId: string, picture: string): 
   }
 }
 
+/**
+ * How many conversations one project may have live at once.
+ *
+ * Each one is a whole context window sitting in memory, so this is a product
+ * decision rather than a detail: three is as many as anybody holds in their head
+ * at once, and the fourth is better put down and picked up again than paid for
+ * all afternoon. Putting one down loses nothing — it is written down, and
+ * opening it again carries on.
+ */
+const CONVERSATIONS = 3;
+
 type Held = {
   timeline: Timeline;
   spend: SpendRecorder;
-  /** Null only for the moment between the timeline opening and the session
-   *  starting, which is the window in which the session can fail. */
-  session: GrapheSession | null;
+  /** The conversations live in this project, in front first. Empty only for the
+   *  moment between the timeline opening and the first session starting, which
+   *  is the window in which that session can fail. */
+  sessions: Workspaces<GrapheSession>;
   /** The finished site being looked at, if "See it" has been pressed here. */
   serving: Serving | null;
   /** The before-and-after (BACKLOG F2). */
   looking: Looking;
   /** Work being checked before it reaches the files, or null when none is. */
   waiting: HeldWork | null;
+  /** What that work would look like, photographed in the copy while the copy
+   *  still existed. Null until it has been, or when nothing came out. */
+  pictures: HeldPictures | null;
   /** True while something is being sent off this computer, so a second press
    *  cannot start a second one. */
   sending: boolean;
 };
 
+/** Every conversation in one project, with the one that has waited longest put
+ *  down when there are too many — and said out loud where it was happening. */
+function conversationsIn(project: string): Workspaces<GrapheSession> {
+  return new Workspaces<GrapheSession>({
+    limit: CONVERSATIONS,
+    close: (session) => session.dispose(),
+    evicted: (one) => {
+      send(project, { type: 'message-delta', text: setDownWords.said }, one.path);
+      send(project, { type: 'message-end' }, one.path);
+    },
+  });
+}
+
 const workspaces = new Workspaces<Held>({
   close: (held) => {
-    held.session?.dispose();
+    held.sessions.closeAll();
     void held.serving?.stop();
     // The copy goes; whatever it made stays reachable, so closing a project
     // while something waits in it cannot be how somebody loses work.
     void held.waiting?.release();
   },
 });
+
+/* -------------------------------------------------------------------------- */
+/* Which project, which conversation                                          */
+/* -------------------------------------------------------------------------- */
+
+/** The project named, or the one in front. Never the nearest one: a project that
+ *  is not open is nothing, the same way `Workspaces.find` says it. */
+function projectAt(where: Where): Workspace<Held> | null {
+  return addressed(workspaces, where.project === undefined ? undefined : resolve(where.project));
+}
+
+/** The conversation named, or the one in front of this project. */
+function conversationAt(held: Held, where: Where): Workspace<GrapheSession> | null {
+  return addressed(held.sessions, where.conversation, (session) => session.conversation);
+}
+
+function sessionAt(open: Workspace<Held>, where: Where): GrapheSession | null {
+  return conversationAt(open.held, where)?.held ?? null;
+}
+
+/** The same one, counted as the one being worked in — so the conversation
+ *  somebody keeps coming back to is never the one put down. */
+function workingAt(open: Workspace<Held>, where: Where): GrapheSession | null {
+  const found = conversationAt(open.held, where);
+  if (found === null) return null;
+  open.held.sessions.resume(found.path);
+  return found.held;
+}
+
+/** What a conversation answers to for as long as it is open. The file it is
+ *  written down in, or a name of its own until there is one. */
+let unwritten = 0;
+function addressOf(session: GrapheSession): string {
+  return session.conversation ?? `new-${String(++unwritten)}`;
+}
+
+/** Put a conversation in front of its project. Whatever it is called on the
+ *  shelf, so the sentence about one being put down names a thing, not an id. */
+function keepConversation(held: Held, address: string, session: GrapheSession): void {
+  held.sessions.adopt({ path: address, name: session.name ?? address, held: session });
+}
 
 /**
  * The list of projects this computer remembers.
@@ -1012,14 +1200,18 @@ async function saidInDesignWords(
   return said === NOTHING_TO_SAY ? null : said;
 }
 
-function forwardTo(path: string, held: Held): (event: AgentEvent) => void {
+/** Which conversation a relay is speaking for. Filled the moment the session
+ *  exists, which is before anything it says can arrive. */
+type Speaking = { address: string | null };
+
+function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent) => void {
   return (event) => {
     // Failures are the one kind of event that can arrive in somebody else's
     // words — see the note at the top of plainly.ts. Everything else in the
     // stream was written by us or by the Guard and goes through untouched.
     const said: AgentEvent =
       event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
-    send(path, said);
+    send(path, said, from.address ?? undefined);
 
     // Which files a turn wrote, collected as it goes. Read off the same stream
     // the conversation is drawn from rather than by asking the folder
@@ -1033,10 +1225,16 @@ function forwardTo(path: string, held: Held): (event: AgentEvent) => void {
     // where taking it cannot slow anything down.
     if (said.type === 'settled') void look(path, held);
 
+    // Against the ceiling as well as into the ledger. This is the conversation
+    // somebody is sitting in front of, so it is never registered as something
+    // the ceiling may stop — it finishes and is saved, and what is refused is
+    // the next thing asked for.
+    if (said.type === 'spend') fleet.spent(null, said.amount);
+
     // Recorded whether or not there is a window to tell: a reload must not lose
     // money that was already spent.
     for (const also of held.spend.observe(said)) {
-      send(path, also);
+      send(path, also, from.address ?? undefined);
       // What a sitting came to is worth keeping beside the project's name, so
       // opening it again is not the first time anybody finds out.
       if (also.type === 'spend-summary') {
@@ -1054,13 +1252,14 @@ function forwardTo(path: string, held: Held): (event: AgentEvent) => void {
  * change is in the copy, and photographing the folder on screen would produce a
  * before and after of a project nothing has happened to.
  */
-function forwardHeld(path: string, held: Held): (event: AgentEvent) => void {
+function forwardHeld(path: string, held: Held, from: Speaking): (event: AgentEvent) => void {
   return (event) => {
     const said: AgentEvent =
       event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
-    send(path, said);
+    send(path, said, from.address ?? undefined);
+    if (said.type === 'spend') fleet.spent(null, said.amount);
     for (const also of held.spend.observe(said)) {
-      send(path, also);
+      send(path, also, from.address ?? undefined);
       if (also.type === 'spend-summary') {
         void recents().then((list) => list.recordSpend(path, also.summary.total));
       }
@@ -1124,12 +1323,37 @@ async function landingNow(folder: string, held: Held): Promise<Landing> {
   const reach = await whatCanBeReached(folder);
   return {
     waiting: held.waiting === null ? null : { ...held.waiting.waiting },
+    // Only ever beside the work it is of. Nothing is waiting, so there is
+    // nothing for a picture to be a picture of.
+    held: held.waiting === null ? null : held.pictures,
     holdBack: chosen.holdBack,
     canHandOver: reach.canHandOver,
     handOverSays: reach.handOverSays,
     canPutOnline: reach.canPutOnline,
     onlineSays: reach.onlineSays,
   };
+}
+
+/**
+ * The copy, and the project it would replace, at every width.
+ *
+ * Both halves are rendered and photographed, so this is the slowest thing in a
+ * held turn by a distance. It is also the only thing that turns "some work
+ * finished" into a decision somebody can actually make, so it is not optional
+ * and it is not backgrounded.
+ */
+async function photographWaiting(project: string, work: HeldWork): Promise<HeldPictures | null> {
+  const sizes = await styleSheets(project)
+    .then(sizesFor)
+    .catch(() => undefined);
+  return photographHeld({
+    photographer: holdCamera(sizes),
+    copy: work.folder,
+    project,
+    id: work.waiting.id,
+    doing: work.waiting.doing,
+    ...(sizes === undefined ? {} : { sizes }),
+  });
 }
 
 /**
@@ -1142,12 +1366,14 @@ async function landingNow(folder: string, held: Held): Promise<Landing> {
  */
 async function checkItFirst(
   open: { path: string; name: string; held: Held },
+  from: Speaking,
   text: string,
   cards: readonly ImageCard[] | undefined,
   lookFirst: boolean,
 ): Promise<Result<null>> {
   const held = open.held;
   const history = new ProjectHistory(open.path);
+  held.pictures = null;
 
   // Work starts from a version. Anything unfinished becomes one first, silently
   // and without a question, exactly as going back does.
@@ -1166,13 +1392,25 @@ async function checkItFirst(
   }
   held.waiting = waiting;
 
+  // A copy with no pieces in it fails on the first test command, which reads as
+  // the work being wrong rather than the copy being empty.
+  const fresh = await getReady(open.path, waiting.folder);
+  if (!fresh.ready) {
+    return fail({
+      what: 'I could not get the copy ready.',
+      because: fresh.trouble ?? 'Something went wrong setting it up.',
+      actionLabel: 'Got it',
+    });
+  }
+
   let inside: GrapheSession | null = null;
   try {
     inside = await createSession({
       projectRoot: waiting.folder,
-      onEvent: forwardHeld(open.path, held),
+      onEvent: forwardHeld(open.path, held, from),
       timeline: await Timeline.open(waiting.folder),
       model: (await preferences()).all().model,
+      thinking: thinkingFor((await preferences()).all()),
       sessionDir: sessionsFolder(),
     });
     await inside.prompt(text, cards, { lookFirst });
@@ -1185,14 +1423,24 @@ async function checkItFirst(
   }
   inside.dispose();
 
+  // Before settling, because settling deletes the copy and the copy is the only
+  // place what the work made exists. A picture that could not be taken is a
+  // thinner decision, never a failed one.
+  held.pictures = await photographWaiting(open.path, waiting).catch(() => null);
+
   try {
     await waiting.settle(saysHeldWork(text));
   } catch (cause) {
     await waiting.release().catch(() => undefined);
     held.waiting = null;
+    held.pictures = null;
     return fail(historyTrouble(cause));
   }
-  if (waiting.waiting.version === null) held.waiting = null;
+  // Nothing was changed, so there is nothing waiting and nothing to look at.
+  if (waiting.waiting.version === null) {
+    held.waiting = null;
+    held.pictures = null;
+  }
   return done(null);
 }
 
@@ -1292,6 +1540,80 @@ async function styleSheets(root: string): Promise<readonly string[]> {
   return texts;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Pointing at something                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What the project knows, for a click to be read against.
+ *
+ * Only this process can answer any of it — the project's own values, every
+ * place each component is used, what last touched each file — and reading the
+ * components alone is a few hundred milliseconds of somebody's folder. A click
+ * is answered while they watch, and none of this changes between two clicks in
+ * the same minute.
+ */
+const knows = new Map<string, { at: number; material: Material }>();
+const STILL_KNOWN = 60_000;
+
+/**
+ * The same change under both spellings a page can hand back.
+ *
+ * A file arrives from the page as its address there, and the two shapes that
+ * come out of that are the project-relative path and the whole path with the
+ * leading slash gone. History knows only the first, so the second is written
+ * down beside it rather than guessed at afterwards.
+ */
+function changesByPath(root: string, changes: ReadonlyMap<string, LastChange>): Map<string, Touched> {
+  const whole = root.split(sep).filter((one) => one !== '').join('/');
+  const found = new Map<string, Touched>();
+  for (const [path, one] of changes) {
+    const change: Touched = { name: one.name, when: one.when, id: one.id };
+    found.set(path, change);
+    found.set(`${whole}/${path}`, change);
+  }
+  return found;
+}
+
+async function whatIsKnown(folder: string): Promise<Material> {
+  const already = knows.get(folder);
+  if (already !== undefined && Date.now() - already.at < STILL_KNOWN) return already.material;
+
+  const [styles, sheets, usage, changes] = await Promise.all([
+    styleTokens(folder).catch(() => null),
+    styleSheets(folder).catch(() => [] as readonly string[]),
+    readUsage(folder).catch(() => null),
+    new ProjectHistory(folder).lastChangeByFile().catch(() => new Map<string, LastChange>()),
+  ]);
+
+  const material: Material = {
+    tokens: styles?.tokens ?? [],
+    usage,
+    changes: changesByPath(folder, changes),
+    widths: sizesFor(sheets),
+  };
+  knows.set(folder, { at: Date.now(), material });
+  return material;
+}
+
+/** One click, read against the project it came out of. `says` is the same click
+ *  as the one line the composer would have made somebody type. */
+async function readingOf(folder: string, pointed: Pointed): Promise<PointedAt | null> {
+  try {
+    const material = await whatIsKnown(folder);
+    return { pointed, reading: readPointed(pointed, material), says: describePointed(pointed) };
+  } catch {
+    return null;
+  }
+}
+
+function sayPointed(folder: string, pointed: Pointed): void {
+  void readingOf(folder, pointed).then((at) => {
+    if (at === null || mainWindow === null || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send(CHANNEL.pointed, at);
+  });
+}
+
 /** Where every project's conversations are kept. */
 function sessionsFolder(): string {
   return join(app.getPath('userData'), 'sessions');
@@ -1312,6 +1634,71 @@ function openProject(folder: string): Promise<Result<OpenedProject>> {
   return attempt;
 }
 
+/**
+ * Start a conversation in a project, and put it in front of the others.
+ *
+ * What `how` means is `openingFor`'s to decide; what this adds is that one
+ * already live at that address is handed straight back rather than built again.
+ * Two sessions writing one transcript is the race `opening` exists to prevent,
+ * and it would also throw away the half-typed thought in the live one.
+ */
+async function startConversation(
+  open: { path: string; held: Held },
+  how: Opening,
+  keep?: string,
+): Promise<Result<{ session: GrapheSession; address: string }>> {
+  const held = open.held;
+  const asked = how.kind === 'carry-on' ? how.path : undefined;
+  if (asked !== undefined) {
+    const already = conversationAt(held, { conversation: asked });
+    if (already !== null) {
+      held.sessions.resume(already.path);
+      return done({ session: already.held, address: already.path });
+    }
+  }
+
+  const from: Speaking = { address: null };
+  const prefs = (await preferences()).all();
+  let session: GrapheSession;
+  try {
+    session = await createSession({
+      projectRoot: open.path,
+      onEvent: forwardTo(open.path, held, from),
+      timeline: held.timeline,
+      model: prefs.model,
+      thinking: thinkingFor(prefs),
+      trusts: await trustsIn(open.path),
+      // One folder of transcripts for all projects, under the app's own data
+      // directory — never inside the user's project, so uninstalling Graphe
+      // takes them with it. Pi tells them apart by the folder each was recorded
+      // in, not by where the file sits.
+      //
+      // Two known limits of that, both accepted for now: a project that is
+      // renamed or moved no longer matches, so it opens a fresh conversation and
+      // the old file stays behind; and nothing prunes this folder, so a
+      // long-lived install accumulates transcripts (pictures included, which are
+      // the bulk of it). Both want the "forget this conversation" action B1.1
+      // asks for, which is not built yet.
+      ...(asked !== undefined
+        ? { sessionPath: asked }
+        : { sessionDir: sessionsFolder(), ...(how.kind === 'fresh' ? { fresh: true } : {}) }),
+    });
+  } catch (cause) {
+    // The adapter wraps whatever went wrong in a sentence of its own, so the
+    // reason worth reading is down the `cause` chain rather than on top of it.
+    // Search the whole chain before falling back to the likeliest explanation.
+    const chain = detailsOf(cause);
+    return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
+  }
+
+  // `keep` is a conversation rebuilt in place — the window is already calling it
+  // something, and a new name for the same thread would lose it.
+  const address = keep ?? addressOf(session);
+  from.address = address;
+  keepConversation(held, address, session);
+  return done({ session, address });
+}
+
 async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   const name = basename(path) === '' ? path : basename(path);
 
@@ -1329,11 +1716,13 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   const resumed = workspaces.resume(path);
   if (resumed !== null) {
     await (await recents()).remember({ path, name });
+    const front = resumed.held.sessions.current;
     return done({
       path,
       name,
-      history: resumed.held.session?.history ?? [],
-      conversation: resumed.held.session?.conversation ?? null,
+      history: front?.held.history ?? [],
+      conversation: front?.held.conversation ?? null,
+      ...(front === null ? {} : { address: front.path }),
     });
   }
 
@@ -1347,10 +1736,11 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   const held: Held = {
     timeline,
     spend: new SpendRecorder(),
-    session: null,
+    sessions: conversationsIn(path),
     serving: null,
     looking: nothingSeenYet(),
     waiting: null,
+    pictures: null,
     sending: false,
   };
 
@@ -1358,34 +1748,9 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   // pick later — so pick now, before the session is made and binds it.
   if ((await preferences()).all().model === null) await chooseAModelIfNoneIs();
 
-  try {
-    held.session = await createSession({
-      projectRoot: path,
-      onEvent: forwardTo(path, held),
-      timeline,
-      model: (await preferences()).all().model,
-      trusts: await trustsIn(path),
-      // One folder of transcripts for all projects, under the app's own data
-      // directory — never inside the user's project, so uninstalling Graphe
-      // takes them with it. Opening a project again resumes its most recent
-      // conversation (BACKLOG B1.1); Pi tells them apart by the folder each was
-      // recorded in, not by where the file sits.
-      //
-      // Two known limits of that, both accepted for now: a project that is
-      // renamed or moved no longer matches, so it opens a fresh conversation and
-      // the old file stays behind; and nothing prunes this folder, so a
-      // long-lived install accumulates transcripts (pictures included, which are
-      // the bulk of it). Both want the "forget this conversation" action B1.1
-      // asks for, which is not built yet.
-      sessionDir: sessionsFolder(),
-    });
-  } catch (cause) {
-    // The adapter wraps whatever went wrong in a sentence of its own, so the
-    // reason worth reading is down the `cause` chain rather than on top of it.
-    // Search the whole chain before falling back to the likeliest explanation.
-    const chain = detailsOf(cause);
-    return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
-  }
+  // Opening a project carries on its most recent conversation (BACKLOG B1.1).
+  const started = await startConversation({ path, held }, openingFor(null));
+  if (!started.ok) return started;
 
   workspaces.adopt({ path, name, held });
   await (await recents()).remember({ path, name });
@@ -1402,8 +1767,9 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   return done({
     path,
     name,
-    history: held.session.history,
-    conversation: held.session.conversation,
+    history: started.value.session.history,
+    conversation: started.value.session.conversation,
+    address: started.value.address,
   });
 }
 
@@ -1526,6 +1892,86 @@ function atPage(address: string, at: unknown): string {
 }
 
 /* -------------------------------------------------------------------------- */
+/* The ceiling                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A limit that binds, rather than one that counts.
+ *
+ * Every run that can spend on its own registers with `fleet` — a helper in its
+ * own process, a piece of work carrying on unwatched — and this is where the
+ * shell hands it what it needs: what has been spent, and somewhere for the
+ * answer to land. Three things follow from it and nothing else in this file
+ * decides them:
+ *
+ *  - Nothing new starts once the remainder cannot cover a run's share.
+ *  - What is going is stopped, and only what loses nothing by stopping.
+ *  - Money a helper spent in its own process reaches the ledger the meter
+ *    reads, so a fan-out to six of them is not six numbers nobody saw.
+ *
+ * The ceiling is whatever was set on the meter last time, and `GRAPHE_SPEND_LIMIT`
+ * ("20 USD") sets one for a run without touching what is remembered — the same
+ * setting reached two ways, which is what every control here owes both
+ * audiences.
+ */
+function watchTheCeiling(): void {
+  const fromTheEnvironment = readCeiling(process.env['GRAPHE_SPEND_LIMIT'] ?? '');
+  if (fromTheEnvironment !== null) fleet.hold(fromTheEnvironment);
+  else {
+    void preferences().then((file) => {
+      const remembered = file.all().ceiling;
+      if (remembered !== null) fleet.hold(createLimit(remembered, 'session'));
+    });
+  }
+
+  // A helper is a separate process, so its spend has been seen by nothing: not
+  // the ledger the meter reads, not the project's own total. Filed under the
+  // folder it ran in, which is the project that asked for it.
+  fleet.onUnseenSpend((spend) => {
+    const event: AgentEvent = {
+      type: 'spend',
+      amount: spend.amount,
+      label: spend.label,
+      reason: spend.reason,
+    };
+    const open = workspaces.find(resolve(spend.project));
+    if (open !== null) {
+      send(open.path, event);
+      for (const also of open.held.spend.observe(event)) send(open.path, also);
+      return;
+    }
+    // A run that carries on unwatched works in a copy, so the folder is the
+    // copy's rather than the project's.
+    for (const desk of awayDesks.values()) {
+      if (!desk.bench.pieces.some((piece) => piece.folder === spend.project)) continue;
+      desk.spend.observe(event);
+      pushAway(desk.path);
+      return;
+    }
+    // A helper is told which folder to work in and does not always say. Filed
+    // where the person is working rather than dropped: it is their money either
+    // way, and a number nobody is shown is the thing being fixed here.
+    const here = workspaces.current;
+    if (here === null) return;
+    send(here.path, event);
+    for (const also of here.held.spend.observe(event)) send(here.path, also);
+  });
+
+  // Said once, when it is first reached, and after everything has actually been
+  // stopped. The window may be shut — this is exactly the case where somebody
+  // has left something running — so it goes to the screen rather than into a
+  // conversation nobody is looking at.
+  fleet.onReached((status) => {
+    const said = limitReached(status);
+    for (const desk of awayDesks.values()) pushAway(desk.path);
+    const open = workspaces.current;
+    if (open !== null) send(open.path, { type: 'error', message: `${said.title}. ${said.body}` });
+    const where = open?.path ?? [...awayDesks.keys()][0] ?? null;
+    if (where !== null) tellThem(said.title, said.body, where);
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* Work that carries on without you                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -1549,12 +1995,23 @@ function atPage(address: string, at: unknown): string {
  */
 
 /** Where copies of a project live while work carries on in them. Per project,
- *  so letting one project's work go can never reach another's. */
+ *  so letting one project's work go can never reach another's — and beside the
+ *  rest of what this app keeps rather than in a temporary folder, because work
+ *  that is meant to outlive a quit cannot live somewhere the machine tidies. */
 function awayFolder(path: string): string {
-  const named = basename(path).replace(/[^a-zA-Z0-9-]+/g, '-').slice(0, 24) || 'project';
-  let stamp = 0;
-  for (const character of path) stamp = (stamp * 31 + character.charCodeAt(0)) >>> 0;
-  return join(app.getPath('temp'), 'graphe-away', `${named}-${stamp.toString(36)}`);
+  return join(app.getPath('userData'), 'copies', keyFor(path));
+}
+
+/** Which run of the app this is, so a note left by an earlier one is told apart
+ *  from a note we wrote ourselves a moment ago. */
+const us: Owner = { pid: process.pid, since: Date.now() };
+
+/** The notes about work in flight, so it is all still here next launch. */
+let notebook: Notebook | null = null;
+
+function notes(): Notebook {
+  notebook ??= new Notebook(join(app.getPath('userData'), 'work'));
+  return notebook;
 }
 
 /** One piece of work in flight, and the questions it has left standing. */
@@ -1574,8 +2031,21 @@ type AwayDesk = {
   name: string;
   history: ProjectHistory;
   bench: Workbench;
+  /** What is waiting for something else to finish before it starts. Nothing in
+   *  here is on the board yet, and nothing in here has a copy of the project. */
+  chain: Following;
+  /** What each piece of work was asked to come after, kept once it has started
+   *  so its card still says what the plan was. */
+  after: Map<string, string>;
+  /** How many have been asked for here, so no two are ever given one name. */
+  asked: number;
   runs: Map<string, Run>;
   spend: SpendRecorder;
+  /** What each piece of work has cost on its own, kept past the end of the run
+   *  so a board read back off the disk still says what it cost. */
+  costs: Map<string, Money>;
+  /** The last sentence each one said, for the same reason. */
+  saids: Map<string, string>;
   /** True once something has landed that nobody has been shown yet. */
   unseen: boolean;
   /** True while copies are being made. Two runs finishing at the same moment
@@ -1593,13 +2063,27 @@ function deskFor(path: string, name: string): AwayDesk {
   const already = awayDesks.get(path);
   if (already !== undefined) return already;
   const history = new ProjectHistory(path);
+  const bench = new Workbench({ history, under: awayFolder(path), atOnce: AT_A_TIME });
   const desk: AwayDesk = {
     path,
     name,
     history,
-    bench: new Workbench({ history, under: awayFolder(path), atOnce: AT_A_TIME }),
+    bench,
+    chain: new Following({
+      ask: (doing, where) => {
+        bench.ask(doing, where);
+      },
+      stopped: (id, trouble) => {
+        bench.stopped(id, trouble);
+      },
+      stateOf: (id) => bench.pieces.find((one) => one.id === id)?.state ?? null,
+    }),
+    after: new Map(),
+    asked: 0,
     runs: new Map(),
     spend: new SpendRecorder(),
+    costs: new Map(),
+    saids: new Map(),
     unseen: false,
     starting: false,
     again: false,
@@ -1640,8 +2124,91 @@ function saidBriefly(text: string): string | null {
   return sentence.length > 160 ? `${sentence.slice(0, 159)}…` : sentence;
 }
 
+/** The last thing one said, whether it is still going or was read back off the
+ *  disk after a quit. */
+function lastSaidBy(desk: AwayDesk, id: string): string {
+  const live = desk.runs.get(id)?.said ?? '';
+  return live === '' ? desk.saids.get(id) ?? '' : live;
+}
+
+/** One piece of work, whether it is on the board or still waiting for another to
+ *  finish. One waiting has no copy and no result, which is exactly a piece of
+ *  work that has not had its turn. */
+function pieceFor(desk: AwayDesk, id: string): PieceOfWork | null {
+  const on = desk.bench.pieces.find((one) => one.id === id);
+  if (on !== undefined) return on;
+  const held = desk.chain.one(id);
+  if (held === null) return null;
+  return {
+    id: held.id,
+    doing: held.doing,
+    state: 'waiting',
+    folder: null,
+    version: null,
+    picture: null,
+    at: held.at,
+    trouble: null,
+  };
+}
+
+/** Write down where one piece of work stands. Called wherever it moves, so the
+ *  note on the disk is never behind the board on the screen by more than the
+ *  write itself. */
+function noteDown(desk: AwayDesk, id: string): void {
+  const piece = pieceFor(desk, id);
+  if (piece === null) return;
+  void notes().note(
+    noteOf(piece, {
+      project: desk.path,
+      name: desk.name,
+      owner: us,
+      says: saidBriefly(lastSaidBy(desk, id)),
+      spent: desk.costs.get(id) ?? null,
+      after: desk.after.get(id) ?? null,
+    }),
+  );
+}
+
+function noteEveryone(desk: AwayDesk): void {
+  for (const piece of desk.bench.pieces) noteDown(desk, piece.id);
+  for (const held of desk.chain.waiting) noteDown(desk, held.id);
+}
+
+function forgetNote(desk: AwayDesk, id: string): void {
+  desk.costs.delete(id);
+  desk.saids.delete(id);
+  desk.after.delete(id);
+  void notes().forget(desk.path, id);
+}
+
+/** A name nothing else here has, on the board or waiting behind it. */
+function nextName(desk: AwayDesk): string {
+  const taken = new Set<string>([
+    ...desk.bench.pieces.map((one) => one.id),
+    ...desk.chain.waiting.map((one) => one.id),
+  ]);
+  let number = desk.asked;
+  let name = '';
+  do {
+    number += 1;
+    name = `work-${String(number)}`;
+  } while (taken.has(name));
+  desk.asked = number;
+  return name;
+}
+
+/** What one is waiting for, as its card reads it. Null once the one it followed
+ *  has been let go — there is nothing left to point at. */
+function afterFor(desk: AwayDesk, id: string): AwayAfter | null {
+  const which = desk.after.get(id);
+  if (which === undefined) return null;
+  const doing = pieceFor(desk, which)?.doing;
+  if (doing === undefined) return null;
+  return { id: which, doing, says: afterWords.waits(doing) };
+}
+
 function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
-  return desk.bench.pieces.map((piece) => {
+  const on: AwayPiece[] = desk.bench.pieces.map((piece) => {
     const run = desk.runs.get(piece.id);
     const asked = run?.held.first ?? null;
     return {
@@ -1650,8 +2217,9 @@ function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
       state: piece.state,
       at: piece.at,
       picture: piece.picture,
-      says: saidBriefly(run?.said ?? ''),
+      says: saidBriefly(lastSaidBy(desk, piece.id)),
       trouble: piece.trouble,
+      spent: desk.costs.get(piece.id) ?? null,
       question:
         asked === null
           ? null
@@ -1661,8 +2229,26 @@ function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
               detail: asked.detail,
               consequence: asked.consequence,
             },
+      after: afterFor(desk, piece.id),
     };
   });
+  // Waiting for another is waiting, so it is drawn in the same band as anything
+  // else that has not had its turn — with the one line saying what it is for.
+  for (const held of desk.chain.waiting) {
+    on.push({
+      id: held.id,
+      doing: held.doing,
+      state: 'waiting',
+      at: held.at,
+      picture: null,
+      says: null,
+      trouble: null,
+      spent: null,
+      question: null,
+      after: afterFor(desk, held.id),
+    });
+  }
+  return on;
 }
 
 function awayRepeats(path: string, now: number): readonly Repeating[] {
@@ -1758,11 +2344,36 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
   const run: Run = { held, session: null, said: '' };
   desk.runs.set(piece.id, run);
 
+  // Its share of the ceiling, taken before there is a session to spend
+  // anything. Stopping one of these loses nothing: it works in its own copy of
+  // the project and whatever it reached is saved on the way out.
+  let stopped = false;
+  const admitted = fleet.begin({
+    id: piece.id,
+    kind: 'away',
+    stop: () => {
+      stopped = true;
+      held.stop();
+      void run.session?.stop();
+    },
+  });
+  if (!admitted.ok) {
+    desk.bench.stopped(piece.id, awayWords.overTheLimit);
+    desk.runs.delete(piece.id);
+    noteDown(desk, piece.id);
+    stopWhatFollows(desk, piece.id, afterWords.broke);
+    pushAway(desk.path);
+    return;
+  }
+
   const hear = (event: AgentEvent): void => {
     held.heard(event, Date.now());
     if (event.type === 'message-delta') run.said = `${run.said}${event.text}`.slice(0, 2000);
 
+    // Two different things: whether the card moved, and whether anything worth
+    // writing down changed. What it has cost is the second without the first.
     let moved = false;
+    let changed = false;
     if (event.type === 'needs-confirmation') {
       piece.state = 'needs-you';
       desk.unseen = true;
@@ -1780,13 +2391,35 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       }
     }
 
+    if (event.type === 'spend') {
+      fleet.spent(piece.id, event.amount);
+      const running = addSpend(desk.costs.get(piece.id) ?? null, event.amount);
+      if (running !== null) desk.costs.set(piece.id, running);
+      changed = true;
+    }
     for (const also of desk.spend.observe(event)) {
       if (also.type === 'spend-summary') {
         void recents().then((list) => list.recordSpend(desk.path, also.summary.total));
       }
     }
-    if (moved || event.type === 'error' || event.type === 'settled') pushAway(desk.path);
+    if (moved || changed || event.type === 'error' || event.type === 'settled') {
+      noteDown(desk, piece.id);
+      pushAway(desk.path);
+    }
   };
+
+  // A copy with no pieces in it fails on the first test command, which reads as
+  // the work being wrong rather than the copy being empty. Stopped properly, so
+  // it does not sit on the board claiming to be running.
+  const fresh = await getReady(desk.path, folder);
+  if (!fresh.ready) {
+    desk.bench.stopped(piece.id, fresh.trouble ?? 'I could not get the copy ready.');
+    fleet.ended(piece.id);
+    noteDown(desk, piece.id);
+    stopWhatFollows(desk, piece.id, afterWords.broke);
+    pushAway(desk.path);
+    return;
+  }
 
   try {
     session = await createSession({
@@ -1794,8 +2427,12 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       onEvent: hear,
       timeline: await Timeline.open(folder),
       model: (await preferences()).all().model,
+      thinking: thinkingFor((await preferences()).all()),
     });
     run.session = session;
+    // The ceiling can be reached while this was being built, when there was no
+    // session yet for it to stop.
+    if (stopped) await session.stop();
     await session.prompt(piece.doing);
     await desk.bench.settle(piece.id, saysHeldWork(piece.doing));
   } catch (cause) {
@@ -1807,6 +2444,12 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
     held.stop();
     session?.dispose();
     run.session = null;
+    // Kept past the run itself, so the sentence beside the picture is still
+    // there on a board read back off the disk.
+    desk.saids.set(piece.id, run.said);
+    // What it did not use goes back to whatever runs next.
+    fleet.ended(piece.id);
+    noteDown(desk, piece.id);
   }
 
   // What it made, as a picture. Quiet when it cannot be taken — a project that
@@ -1830,10 +2473,35 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
     );
     tellThem(notice.title, notice.body, desk.path);
   }
+  noteDown(desk, piece.id);
+  whatFollows(desk, piece.id);
   pushAway(desk.path);
 
   await runWhatCan(desk);
   quitIfNothingIsLeft();
+}
+
+/**
+ * What was waiting for this one.
+ *
+ * It landed, so what comes next is asked for — asked for, not started: it goes
+ * on the board as waiting and takes its turn behind everything else, which is
+ * what keeps a plan from being a way round the ceiling or round the number that
+ * can go at once.
+ *
+ * It did not land, so nothing behind it does either. Carrying on would mean
+ * working against a project that was never changed and reporting on it as
+ * though it had been, which is the one answer worse than stopping.
+ */
+function whatFollows(desk: AwayDesk, id: string): void {
+  const moved = desk.chain.finished(id);
+  for (const one of [...moved.started, ...moved.stopped]) noteDown(desk, one);
+}
+
+/** Everything behind this one, however far back, on the board saying why it will
+ *  never start. */
+function stopWhatFollows(desk: AwayDesk, id: string, because: string): void {
+  for (const one of desk.chain.stopFollowing(id, because)) noteDown(desk, one);
 }
 
 /** Start as many as there is room for. Called when one is asked for and again
@@ -1843,6 +2511,10 @@ async function runWhatCan(desk: AwayDesk): Promise<void> {
     desk.again = true;
     return;
   }
+  // Nothing new starts at the ceiling, and nothing is copied for it either.
+  // What is waiting stays waiting: a limit is not a reason to throw away what
+  // somebody asked for.
+  if (!fleet.allowsNewWork) return;
   desk.starting = true;
   let began: readonly PieceOfWork[];
   try {
@@ -1854,15 +2526,23 @@ async function runWhatCan(desk: AwayDesk): Promise<void> {
     began = await desk.bench.begin();
   } catch (cause) {
     const why = cause instanceof Error ? cause.message : String(cause);
+    const stopped: string[] = [];
     for (const piece of desk.bench.pieces) {
-      if (piece.state === 'waiting') desk.bench.stopped(piece.id, plainMessage(why));
+      if (piece.state !== 'waiting') continue;
+      desk.bench.stopped(piece.id, plainMessage(why));
+      stopped.push(piece.id);
     }
+    for (const id of stopped) stopWhatFollows(desk, id, afterWords.broke);
+    noteEveryone(desk);
     pushAway(desk.path);
     return;
   } finally {
     desk.starting = false;
   }
-  if (began.length > 0) pushAway(desk.path);
+  if (began.length > 0) {
+    noteEveryone(desk);
+    pushAway(desk.path);
+  }
   for (const piece of began) void runOne(desk, piece);
   if (desk.again) {
     desk.again = false;
@@ -1870,12 +2550,195 @@ async function runWhatCan(desk: AwayDesk): Promise<void> {
   }
 }
 
-/** Ask for a piece of work that carries on whether or not anybody is looking. */
-async function keepGoing(path: string, name: string, doing: string): Promise<void> {
+/**
+ * Ask for a piece of work that carries on whether or not anybody is looking.
+ *
+ * With something to come after, the answer can be a refusal — asked to wait for
+ * something that is waiting for it, there would be nothing left to start. Said
+ * as a sentence rather than thrown: it is a decision, not a failure.
+ */
+async function keepGoing(
+  path: string,
+  name: string,
+  doing: string,
+  after: string | null = null,
+): Promise<string | null> {
   const desk = deskFor(path, name);
-  desk.bench.ask(doing);
+  const id = nextName(desk);
+  const at = Date.now();
+
+  if (after !== null) {
+    const asked = desk.chain.hold({ id, doing, at, after });
+    if (!asked.ok) return asked.because;
+    desk.after.set(id, after);
+    if (asked.waits) {
+      // Written down straight away, so a quit leaves the whole plan behind and
+      // not only the half of it that had already started.
+      const held = pieceFor(desk, id);
+      if (held !== null) {
+        await notes().note(noteOf(held, { project: path, name, owner: us, after }));
+      }
+      pushAway(path);
+      return null;
+    }
+  }
+
+  const piece = desk.bench.ask(doing, { id, at });
+  // Written down before it starts, so a machine that loses power between the
+  // asking and the first word still comes back to something waiting its turn.
+  await notes().note(
+    noteOf(piece, { project: path, name, owner: us, after: desk.after.get(id) ?? null }),
+  );
   pushAway(path);
   await runWhatCan(desk);
+  return null;
+}
+
+/* --------------------------------------------------------- picking it up */
+
+/**
+ * Everything that was going last time, back on its board.
+ *
+ * Read once, before anything is started, and the decision for each note is
+ * src/work/written.ts. The two that matter: something that never got its turn
+ * simply takes it now, and something that was mid-thought when the app went
+ * away says so and keeps its copy — the thinking was never on the disk, and
+ * pretending it can be resumed would be worse than saying it stopped.
+ *
+ * Everything is put back on the board before any of it is wired up again, so a
+ * plan reads the same whichever order its notes came off the disk.
+ */
+async function pickUpWhereWeLeftOff(): Promise<void> {
+  let byProject: ReadonlyMap<string, readonly Written[]>;
+  try {
+    byProject = await notes().everything();
+  } catch {
+    return;
+  }
+
+  for (const [path, written] of byProject) {
+    if (!existsSync(path)) {
+      // The project itself has been moved or thrown away. Its notes go with it.
+      for (const one of written) await notes().forget(path, one.id);
+      continue;
+    }
+    const desk = deskFor(path, written[0]?.name ?? basename(path));
+    let start = false;
+    for (const one of written) {
+      // Nothing else is looking after these. One copy of the app runs at a
+      // time, so at this moment every note that is not ours is left over.
+      const next = onComingBack(one, {
+        ours: us,
+        alive: () => false,
+        copyThere: (folder) => existsSync(folder),
+      });
+      if (next.do === 'leave' || next.do === 'carry-on') continue;
+
+      const piece = desk.bench.ask(one.doing, { id: one.id, at: one.at });
+      Object.assign(piece, asPiece(one));
+      if (one.spent !== null) desk.costs.set(piece.id, one.spent);
+      if (one.says !== null) desk.saids.set(piece.id, one.says);
+      if (next.do === 'pick-up') {
+        piece.state = 'waiting';
+        piece.folder = null;
+        start = true;
+      }
+      if (next.do === 'cut-short') {
+        piece.state = 'failed';
+        piece.trouble = next.trouble;
+      }
+      if (one.after !== null) desk.after.set(piece.id, one.after);
+      noteDown(desk, piece.id);
+    }
+    putPlansBack(desk, written);
+    await letGoOfCopiesNobodyClaims(desk);
+    if (desk.bench.pieces.length === 0 && desk.chain.waiting.length === 0) {
+      awayDesks.delete(path);
+      continue;
+    }
+    desk.unseen = true;
+    pushAway(path);
+    if (start) await runWhatCan(desk);
+  }
+}
+
+/**
+ * The waits between them, put back once they are all on the board.
+ *
+ * Only work that never got its turn can still be waiting for something: one
+ * that was going when the app closed has already been dealt with. The one it
+ * was waiting for may have landed while it sat there, in which case it is
+ * simply next; may have gone; or may never have run, and then this never runs
+ * either and says so.
+ */
+function putPlansBack(desk: AwayDesk, written: readonly Written[]): void {
+  for (const one of written) {
+    if (one.after === null) continue;
+    const piece = desk.bench.pieces.find((on) => on.id === one.id);
+    if (piece === undefined || piece.state !== 'waiting') continue;
+
+    const asked = desk.chain.hold({ id: one.id, doing: one.doing, at: one.at, after: one.after });
+    if (asked.ok && !asked.waits) continue;
+    if (!asked.ok) {
+      desk.bench.stopped(one.id, afterWords.broke);
+      noteDown(desk, one.id);
+      continue;
+    }
+    // Held rather than queued: it must not take a copy of the project until the
+    // one in front of it has landed.
+    void desk.bench.drop(one.id);
+    noteDown(desk, one.id);
+  }
+}
+
+/**
+ * Copies of a project with nothing on the board pointing at them.
+ *
+ * A whole checkout each, so a handful of these is somebody's disk. Only ever
+ * from inside the room this project's copies are made in, and only ever ones no
+ * piece of work claims — which at this moment means ones whose notes did not
+ * survive whatever ended the last run.
+ */
+async function letGoOfCopiesNobodyClaims(desk: AwayDesk): Promise<void> {
+  const room = awayFolder(desk.path);
+  const claimed = new Set(desk.bench.pieces.map((one) => one.folder));
+  let there: string[];
+  try {
+    there = await readdir(room);
+  } catch {
+    return;
+  }
+  for (const name of there) {
+    const folder = join(room, name);
+    if (claimed.has(folder)) continue;
+    await desk.history.removeWorkspace(folder).catch(() => undefined);
+    await rm(folder, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/** On the way out, every run still going is written down as cut short. The next
+ *  launch would work this out from the number the machine gave us, but numbers
+ *  come round again and a note that says so plainly cannot be misread. */
+function writeDownWhatWasGoing(): void {
+  if (notebook === null) return;
+  for (const desk of awayDesks.values()) {
+    for (const piece of desk.bench.pieces) {
+      if (piece.state !== 'running' && piece.state !== 'needs-you') continue;
+      notebook.noteNow(
+        noteOf(
+          { ...piece, state: 'failed', trouble: writtenWords.cutShort },
+          {
+            project: desk.path,
+            name: desk.name,
+            owner: us,
+            says: saidBriefly(lastSaidBy(desk, piece.id)),
+            spent: desk.costs.get(piece.id) ?? null,
+            after: desk.after.get(piece.id) ?? null,
+          },
+        ),
+      );
+    }
+  }
 }
 
 /* ------------------------------------------------------- over and over */
@@ -2045,6 +2908,11 @@ function handle<T>(channel: string, run: (event: IpcMainInvokeEvent, args: unkno
  * Only ever fills a blank. A choice already made is never overwritten, and a
  * choice whose provider is still offering it is a choice already made.
  */
+function thinkingFor(preferences: Preferences): ThinkingLevel | undefined {
+  const choice = preferences.model;
+  return choice === null ? undefined : preferences.thinking[modelKey(choice)];
+}
+
 async function chooseAModelIfNoneIs(): Promise<void> {
   const prefs = await preferences();
   const providers = await readConnection(await defaultAgentDir());
@@ -2065,10 +2933,11 @@ async function chooseAModelIfNoneIs(): Promise<void> {
     const first = provider.models.find((model) => model.available);
     if (first === undefined) continue;
     await prefs.change({ model: { providerId: provider.providerId, modelId: first.id } });
-    await workspaces.current?.held.session?.useModel({
-      providerId: provider.providerId,
-      modelId: first.id,
-    });
+    // Every conversation live in the project in front, not only the one on
+    // screen: a model chosen once is the model chosen for all of them.
+    for (const one of workspaces.current?.held.sessions.open ?? []) {
+      await one.held.useModel({ providerId: provider.providerId, modelId: first.id });
+    }
     return;
   }
 }
@@ -2271,6 +3140,8 @@ function register(): void {
           run.held.stop();
           run.session?.dispose();
         }
+        for (const piece of desk.bench.pieces) forgetNote(desk, piece.id);
+        for (const held of desk.chain.waiting) forgetNote(desk, held.id);
         await desk.bench.clear().catch(() => undefined);
         awayDesks.delete(resolve(path));
       }
@@ -2281,8 +3152,8 @@ function register(): void {
     return done(await rememberedProjects());
   });
 
-  handle<readonly SavedVersion[]>(CHANNEL.versions, async () => {
-    const open = workspaces.current;
+  handle<readonly SavedVersion[]>(CHANNEL.versions, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return done([]);
     try {
       return done(await versionsOf(open.held));
@@ -2291,8 +3162,8 @@ function register(): void {
     }
   });
 
-  handle<Overview>(CHANNEL.overview, async () => {
-    const open = workspaces.current;
+  handle<Overview>(CHANNEL.overview, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) {
       return done({ git: null, preview: null, artifacts: [], swatches: [], styles: null });
     }
@@ -2315,7 +3186,7 @@ function register(): void {
 
   handle<readonly SavedVersion[]>(CHANNEL.nudgeToken, async (_event, args) => {
     const [name, value] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof name !== 'string' || typeof value !== 'string') return fail(NOTHING_OPEN);
     const styles = await styleTokens(open.path);
@@ -2336,7 +3207,7 @@ function register(): void {
 
   handle<readonly SavedVersion[]>(CHANNEL.nudgeMotion, async (_event, args) => {
     const [places, change] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (!Array.isArray(places) || typeof change !== 'object' || change === null) {
       return fail(NOTHING_OPEN);
@@ -2359,7 +3230,7 @@ function register(): void {
 
   handle<PutBack>(CHANNEL.putBack, async (_event, args) => {
     const [versionId] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof versionId !== 'string' || versionId.trim() === '') return fail(NO_SUCH_VERSION);
     try {
@@ -2377,7 +3248,7 @@ function register(): void {
 
   handle<readonly SavedVersion[]>(CHANNEL.nameVersion, async (_event, args) => {
     const [versionId, name] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof versionId !== 'string' || typeof name !== 'string') return fail(NO_SUCH_VERSION);
     try {
@@ -2391,8 +3262,8 @@ function register(): void {
   /** What each version looked like. Empty is a real answer: a project nothing
    *  has been photographed in yet has no pictures, and the rail says so by
    *  drawing words instead. */
-  handle<Readonly<Record<string, string>>>(CHANNEL.versionPictures, () => {
-    const open = workspaces.current;
+  handle<Readonly<Record<string, string>>>(CHANNEL.versionPictures, (_event, args) => {
+    const open = projectAt(whereIn(args));
     return Promise.resolve(done(open === null ? {} : Object.fromEntries(open.held.looking.pictures)));
   });
 
@@ -2412,8 +3283,8 @@ function register(): void {
 
   /** Everything the project holds. Nothing open is an empty list rather than a
    *  failure: the panel simply has nothing to draw. */
-  handle<readonly FileEntry[]>(CHANNEL.projectFiles, async () => {
-    const open = workspaces.current;
+  handle<readonly FileEntry[]>(CHANNEL.projectFiles, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return done([]);
     const [walked, git] = await Promise.all([
       everythingIn(open.path, insideFolder),
@@ -2427,7 +3298,7 @@ function register(): void {
    *  for a screen — comes back as a sentence instead of as content. */
   handle<string>(CHANNEL.fileText, async (_event, args) => {
     const [path] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof path !== 'string' || path.trim() === '') {
       return fail(cannotShowFile(cannotOpen.gone));
@@ -2451,7 +3322,7 @@ function register(): void {
   handle<Preferences>(CHANNEL.keepVersion, async (_event, args) => {
     const [versionId, keep] = args;
     const prefs = await preferences();
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null || typeof versionId !== 'string' || typeof keep !== 'boolean') {
       return done(prefs.all());
     }
@@ -2473,7 +3344,7 @@ function register(): void {
    */
   handle<null>(CHANNEL.openInEditor, async (_event, args) => {
     const [file] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const found = await editor();
     if (found === null) return fail(NO_EDITOR);
@@ -2498,17 +3369,20 @@ function register(): void {
   /** How full the conversation is. Null rather than a failure when there is no
    *  session yet or the model has not answered once — the ring simply has
    *  nothing to draw, which is not something to put a card in front of. */
-  handle<Room | null>(CHANNEL.room, async () => {
-    return done(workspaces.current?.held.session?.room ?? null);
+  handle<Room | null>(CHANNEL.room, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    return done(open === null ? null : sessionAt(open, where)?.room ?? null);
   });
 
   /** Shorten it now. The window hears about the tidying itself through the
    *  ordinary event stream; this answers with the room there is afterwards. */
-  handle<Room | null>(CHANNEL.tidyNow, async () => {
-    const open = workspaces.current;
+  handle<Room | null>(CHANNEL.tidyNow, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    const session = open.held.session;
-    if (session === null || session === undefined) return done(null);
+    const session = workingAt(open, where);
+    if (session === null) return done(null);
     await session.tidyNow();
     return done(session.room);
   });
@@ -2517,18 +3391,35 @@ function register(): void {
    *  down anywhere, so a window opened tomorrow asks again. */
   handle<boolean>(CHANNEL.stopAsking, async (_event, args) => {
     const [on] = args;
-    const open = workspaces.current;
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
-    open.held.session?.stopAsking(on);
-    return done(open.held.session?.quiet === true);
+    const session = sessionAt(open, where);
+    session?.stopAsking(on);
+    return done(session?.quiet === true);
+  });
+
+  handle<HowFar>(CHANNEL.goAsFarAs, (_event, args) => {
+    const [howFar] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
+    const rungs: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing'];
+    const rung = rungs.find((one) => one === howFar);
+    if (rung === undefined) return Promise.resolve(fail(NOTHING_OPEN));
+    const session = sessionAt(open, where);
+    session?.goAsFarAs(rung);
+    return Promise.resolve(done(session?.howFar ?? 'asking'));
   });
 
   /** What the open project brought with it. Read off the session that is
    *  already running: the list is worked out while its extensions load, so
    *  there is nothing here to go and look up. */
-  handle<readonly CarriedExtension[]>(CHANNEL.carried, async () => {
-    return done(workspaces.current?.held.session?.carried ?? []);
+  handle<readonly CarriedExtension[]>(CHANNEL.carried, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    return done(open === null ? [] : sessionAt(open, where)?.carried ?? []);
   });
 
   /**
@@ -2541,7 +3432,7 @@ function register(): void {
    */
   handle<readonly CarriedExtension[]>(CHANNEL.trustCarried, async (_event, args) => {
     const [id, trust] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof id !== 'string' || id === '' || typeof trust !== 'boolean') return fail(NOTHING_OPEN);
 
@@ -2549,28 +3440,17 @@ function register(): void {
     await file.change({ trusted: trusting(file.all().trusted, open.path, id, trust) });
 
     const held = open.held;
-    const carryOn = held.session?.conversation ?? null;
-    held.session?.dispose();
-    held.session = null;
-    try {
-      held.session = await createSession({
-        projectRoot: open.path,
-        onEvent: forwardTo(open.path, held),
-        timeline: held.timeline,
-        model: file.all().model,
-        trusts: await trustsIn(open.path),
-        ...(carryOn === null ? { sessionDir: sessionsFolder() } : { sessionPath: carryOn }),
-      });
-    } catch (cause) {
-      const chain = detailsOf(cause);
-      return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
-    }
-    return done(held.session.carried);
+    const was = conversationAt(held, whereIn(args));
+    const carryOn = was?.held.conversation ?? null;
+    if (was !== null) held.sessions.close(was.path);
+    const started = await startConversation(open, openingFor(carryOn), was?.path);
+    if (!started.ok) return started;
+    return done(started.value.session.carried);
   });
 
   handle<readonly SavedVersion[]>(CHANNEL.saveVersion, async (_event, args) => {
     const [name] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     try {
       await open.held.timeline.snapshot({
@@ -2586,8 +3466,8 @@ function register(): void {
     }
   });
 
-  handle<{ looks: readonly Look[]; says: string }>(CHANNEL.checkWidths, async () => {
-    const open = workspaces.current;
+  handle<{ looks: readonly Look[]; says: string }>(CHANNEL.checkWidths, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_TO_SHOW);
     let ready;
     try {
@@ -2607,8 +3487,8 @@ function register(): void {
     }
   });
 
-  handle<string | null>(CHANNEL.shareReview, async () => {
-    const open = workspaces.current;
+  handle<string | null>(CHANNEL.shareReview, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const versions = await versionsOf(open.held);
     const changes: Shown[] = versions.slice(0, 12).map((version) => ({
@@ -2645,8 +3525,8 @@ function register(): void {
 
   /* ------------------------------------------------------------ landing it */
 
-  handle<Landing>(CHANNEL.landing, async () => {
-    const open = workspaces.current;
+  handle<Landing>(CHANNEL.landing, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     return done(await landingNow(open.path, open.held));
   });
@@ -2659,7 +3539,7 @@ function register(): void {
 
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
     const [letIn] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const waiting = open.held.waiting;
 
@@ -2679,6 +3559,7 @@ function register(): void {
       // "bring it back" is the ordinary put-back and nothing special.
       const version = waiting.setAside();
       open.held.waiting = null;
+      open.held.pictures = null;
       return done(await asItStands(version));
     }
 
@@ -2688,6 +3569,7 @@ function register(): void {
       await open.held.timeline.snapshot({ boundary: 'turn-ended' });
       const outcome = await waiting.approve(saysHeldWork(waiting.waiting.doing));
       open.held.waiting = null;
+      open.held.pictures = null;
       return done(await asItStands(outcome?.undoTo ?? null));
     } catch (cause) {
       return fail(historyTrouble(cause));
@@ -2710,7 +3592,7 @@ function register(): void {
   handle<HandedOver>(CHANNEL.handToDeveloper, async (_event, args) => {
     const [confirmed] = args;
     if (confirmed !== true) return fail(notPressed);
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (open.held.sending) return fail(alreadyGoing);
 
@@ -2748,7 +3630,7 @@ function register(): void {
   handle<WentOnline>(CHANNEL.putOnline, async (_event, args) => {
     const [confirmed] = args;
     if (confirmed !== true) return fail(notPressed);
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (open.held.sending) return fail(alreadyGoing);
 
@@ -2773,8 +3655,8 @@ function register(): void {
 
   /* ------------------------------------------- while you are not looking */
 
-  handle<Away>(CHANNEL.away, async () => {
-    const open = workspaces.current;
+  handle<Away>(CHANNEL.away, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     // Read before answering, so the first ask of a launch is not told there are
     // no repeats when there are.
@@ -2788,16 +3670,69 @@ function register(): void {
 
   handle<Away>(CHANNEL.keepGoing, async (_event, args) => {
     const [text] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof text !== 'string' || text.trim() === '') return done(awayNow(open.path));
     await keepGoing(open.path, open.name, text);
     return done(awayNow(open.path));
   });
 
+  handle<Away>(CHANNEL.startAfter, async (_event, args) => {
+    const [text, after] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof text !== 'string' || text.trim() === '' || typeof after !== 'string') {
+      return done(awayNow(open.path));
+    }
+    const because = await keepGoing(open.path, open.name, text, after);
+    if (because !== null) return fail(couldNotWait(because));
+    return done(awayNow(open.path));
+  });
+
+  /** Change what one waits for, or let it off its wait. Only work that has not
+   *  started: what is already going cannot be made to wait for anything. */
+  handle<Away>(CHANNEL.putAfter, async (_event, args) => {
+    const [id, after] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const desk = awayDesks.get(open.path);
+    if (desk === undefined || typeof id !== 'string') return done(awayNow(open.path));
+
+    if (after === null) {
+      const held = desk.chain.take(id);
+      if (held === null) return done(awayNow(open.path));
+      desk.after.delete(id);
+      desk.bench.ask(held.doing, { id: held.id, at: held.at });
+      noteDown(desk, id);
+      pushAway(open.path);
+      await runWhatCan(desk);
+      return done(awayNow(open.path));
+    }
+    if (typeof after !== 'string') return done(awayNow(open.path));
+
+    const allowed = desk.chain.could(id, after);
+    if (!allowed.ok) return fail(couldNotWait(allowed.because));
+
+    const was = pieceFor(desk, id);
+    if (was === null) return done(awayNow(open.path));
+    desk.chain.take(id);
+    void desk.bench.drop(id);
+
+    // Nothing left to wait for, or nothing that would hold: either way it goes
+    // back on the board and takes its turn there.
+    const asked = desk.chain.hold({ id, doing: was.doing, at: was.at, after });
+    if (asked.ok) desk.after.set(id, after);
+    if (!asked.ok || !asked.waits) desk.bench.ask(was.doing, { id, at: was.at });
+    noteDown(desk, id);
+    pushAway(open.path);
+    if (!asked.ok) return fail(couldNotWait(asked.because));
+    if (!asked.waits) await runWhatCan(desk);
+    return done(awayNow(open.path));
+  });
+
   handle<Away>(CHANNEL.stopAway, async (_event, args) => {
     const [id] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const desk = awayDesks.get(open.path);
     if (desk === undefined || typeof id !== 'string') return done(awayNow(open.path));
@@ -2807,14 +3742,19 @@ function register(): void {
     void run?.session?.stop();
     run?.session?.dispose();
     desk.runs.delete(id);
+    desk.chain.take(id);
     await desk.bench.drop(id);
+    forgetNote(desk, id);
+    // Nothing that was waiting for this one can happen now, so it says so rather
+    // than sitting on the board waiting for something that will never come.
+    stopWhatFollows(desk, id, afterWords.thrownAway);
     await runWhatCan(desk);
     return done(awayNow(open.path));
   });
 
   handle<Away>(CHANNEL.keepAway, async (_event, args) => {
     const [id] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const desk = awayDesks.get(open.path);
     if (desk === undefined || typeof id !== 'string') return done(awayNow(open.path));
@@ -2826,6 +3766,7 @@ function register(): void {
       await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
       await desk.bench.keep(id, saysHeldWork(piece.doing));
       desk.runs.delete(id);
+      forgetNote(desk, id);
     } catch (cause) {
       return fail(historyTrouble(cause));
     }
@@ -2841,7 +3782,7 @@ function register(): void {
    */
   handle<Away>(CHANNEL.answerAway, async (_event, args) => {
     const [id, callId, decision] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (
       typeof id !== 'string' ||
@@ -2858,12 +3799,13 @@ function register(): void {
     }
     run.held.answer(callId, decision as Decision);
     if (!run.held.isWaiting && piece.state === 'needs-you') piece.state = 'running';
+    noteDown(desk, id);
     return done(awayNow(open.path));
   });
 
   handle<Away>(CHANNEL.addRepeat, async (_event, args) => {
     const [doing, every, at, on] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const repeat = asRepeat(every, at, on);
     if (typeof doing !== 'string' || doing.trim() === '' || repeat === null) {
@@ -2889,7 +3831,7 @@ function register(): void {
 
   handle<Away>(CHANNEL.switchRepeat, async (_event, args) => {
     const [id, on] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof id === 'string' && typeof on === 'boolean') {
       await changeStanding((all) => switchStanding(all, id, on));
@@ -2900,7 +3842,7 @@ function register(): void {
 
   handle<Away>(CHANNEL.forgetRepeat, async (_event, args) => {
     const [id] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof id === 'string') await changeStanding((all) => withoutStanding(all, id));
     if (!standingNow.some((one) => one.on)) stopWatchingTheClock();
@@ -2909,57 +3851,58 @@ function register(): void {
 
   handle<OpenedProject>(CHANNEL.openConversation, async (_event, args) => {
     const [path] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    const held = open.held;
-    // The old session goes first: two sessions writing one project's transcripts
-    // is the race `opening` exists to prevent, and this is the same hazard.
-    held.session?.dispose();
-    held.session = null;
-    // The ledger belongs to the sitting, not to the conversation, so it stays.
-    try {
-      held.session = await createSession({
-        projectRoot: open.path,
-        onEvent: forwardTo(open.path, held),
-        timeline: held.timeline,
-        model: (await preferences()).all().model,
-        // No path is somebody pressing "new" — a conversation started, not the
-        // last one carried on, which is what opening the project already does.
-        trusts: await trustsIn(open.path),
-        ...(typeof path === 'string' && path !== ''
-          ? { sessionPath: path }
-          : { sessionDir: sessionsFolder(), fresh: true }),
-      });
-    } catch (cause) {
-      const chain = detailsOf(cause);
-      return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
-    }
+    // The one already open stays open. Moving between conversations is moving
+    // between things that are both still going on, and the ledger belongs to the
+    // sitting rather than to either of them, so it stays too.
+    //
+    // No path is somebody pressing "new" — a conversation started, not the last
+    // one carried on, which is what opening the project already does.
+    const started = await startConversation(open, openingFor(path, true));
+    if (!started.ok) return started;
     return done({
       path: open.path,
       name: open.name,
-      history: held.session.history,
-      conversation: held.session.conversation,
+      history: started.value.session.history,
+      conversation: started.value.session.conversation,
+      address: started.value.address,
     });
+  });
+
+  /**
+   * Put a conversation down.
+   *
+   * Closing is closing a view. Nothing is thrown away — it stays written down
+   * exactly as it was, and opening it again carries on from the last word.
+   */
+  handle<null>(CHANNEL.closeConversation, (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
+    const found = conversationAt(open.held, where);
+    if (found !== null) open.held.sessions.close(found.path);
+    return Promise.resolve(done(null));
   });
 
   /** One shelf per run. Building it reads settings off disk, and the screen it
    *  feeds is opened over and over. */
   let shelf: Awaited<ReturnType<typeof openShelf>> | null = null;
   const openShelf = async () => {
-    const where = workspaces.current?.path ?? app.getPath('home');
-    return packageShelf(await packageHost(await defaultAgentDir(), where));
+    const folder = workspaces.current?.path ?? app.getPath('home');
+    return packageShelf(await packageHost(await defaultAgentDir(), folder));
   };
   const theShelf = async () => (shelf ??= await openShelf());
 
-  handle<InStep>(CHANNEL.inStep, async () => {
-    const open = workspaces.current;
+  handle<InStep>(CHANNEL.inStep, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return done(inStepOf(null));
     return done(inStepOf((await followed()).for(open.path)));
   });
 
   handle<InStep>(CHANNEL.followDesign, async (_event, args) => {
     const [address] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof address !== 'string' || address.trim() === '') return fail(NOTHING_OPEN);
 
@@ -2985,8 +3928,8 @@ function register(): void {
     }
   });
 
-  handle<InStep>(CHANNEL.lookAgain, async () => {
-    const open = workspaces.current;
+  handle<InStep>(CHANNEL.lookAgain, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const file = await followed();
     const held = file.for(open.path);
@@ -3008,8 +3951,8 @@ function register(): void {
     }
   });
 
-  handle<InStep>(CHANNEL.caughtUp, async () => {
-    const open = workspaces.current;
+  handle<InStep>(CHANNEL.caughtUp, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const file = await followed();
     const held = file.for(open.path);
@@ -3017,8 +3960,8 @@ function register(): void {
     return done(inStepOf(await file.keep(open.path, { ...held, design: held.latest })));
   });
 
-  handle<InStep>(CHANNEL.stopFollowing, async () => {
-    const open = workspaces.current;
+  handle<InStep>(CHANNEL.stopFollowing, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return done(inStepOf(null));
     await (await followed()).forget(open.path);
     return done(inStepOf(null));
@@ -3058,8 +4001,9 @@ function register(): void {
   handle<string>(CHANNEL.explainPackage, async (_event, args) => {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
-    const open = workspaces.current;
-    const agent = open?.held.session ?? null;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    const agent = open === null ? null : sessionAt(open, where);
     if (agent === null) {
       return done(
         'Open a project first and I will read this one and tell you what it does.',
@@ -3073,14 +4017,14 @@ function register(): void {
     return done('Asked — the answer is in the conversation.');
   });
 
-  handle<readonly Conversation[]>(CHANNEL.conversations, async () => {
-    const open = workspaces.current;
+  handle<readonly Conversation[]>(CHANNEL.conversations, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return done([]);
     return done(await listConversations(open.path, sessionsFolder()));
   });
 
-  handle<null>(CHANNEL.revealFolder, async () => {
-    const open = workspaces.current;
+  handle<null>(CHANNEL.revealFolder, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     // Opens the folder itself rather than selecting it in its parent. Somebody
     // asking to see their project wants to be inside it.
@@ -3096,15 +4040,15 @@ function register(): void {
     return done(null);
   });
 
-  handle<readonly Page[]>(CHANNEL.pages, async () => {
-    const open = workspaces.current;
+  handle<readonly Page[]>(CHANNEL.pages, async (_event, args) => {
+    const open = projectAt(whereIn(args));
     if (open === null) return done([]);
     return done(pagesIn(await filesUnder(open.path)));
   });
 
   handle<ShowOutcome>(CHANNEL.show, async (_event, args) => {
     const [at, point] = args;
-    const open = workspaces.current;
+    const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_TO_SHOW);
 
     // One at a time per project. Pressing it again means "show me what it looks
@@ -3118,10 +4062,7 @@ function register(): void {
         says: tell,
         // Every serving can be pointed at; the page only listens once the
         // address says so, which is what the button does.
-        onPointed: (pointed: Pointed) => {
-          if (mainWindow === null || mainWindow.isDestroyed()) return;
-          mainWindow.webContents.send(CHANNEL.pointed, describePointed(pointed));
-        },
+        onPointed: (pointed: Pointed) => sayPointed(open.path, pointed),
       });
       if (outcome.kind === 'unsure') return done({ kind: 'unsure', question: outcome.question });
       open.held.serving = outcome.serving;
@@ -3140,9 +4081,21 @@ function register(): void {
   handle<null>(CHANNEL.prompt, async (_event, args) => {
     const [text, attachments, ways] = args;
     if (typeof text !== 'string' || text.trim() === '') return done(null);
-    const open = workspaces.current;
-    const agent = open?.held.session ?? null;
-    if (open === null || agent === null) return fail(NOTHING_OPEN);
+    const where = whereIn(args);
+    const open = projectAt(where);
+    const conversation = open === null ? null : conversationAt(open.held, where);
+    if (open === null || conversation === null) return fail(NOTHING_OPEN);
+    // Saying something is the clearest sign of which conversation is being
+    // worked in, so it is the one that keeps its place.
+    open.held.sessions.resume(conversation.path);
+    const agent = conversation.held;
+    // A new turn is a new thing started, which is the one thing the ceiling
+    // refuses. Whatever was running finished and was saved to get here.
+    const ceiling = fleet.status;
+    if (ceiling !== null && !ceiling.allowsNewWork) {
+      const said = limitReached(ceiling);
+      return fail({ what: said.title, because: said.body, actionLabel: 'Got it' });
+    }
     // Their own words, kept for the sentence beside the pictures. The same
     // sentence the version timeline writes for the same moment — see
     // src/diff/summary.ts.
@@ -3153,7 +4106,13 @@ function register(): void {
       // Checked first, when they have asked for that and nothing is already
       // waiting. Two pieces of work waiting at once is a decision nobody made.
       if ((await preferences()).all().holdBack && open.held.waiting === null) {
-        return await checkItFirst(open, text, imageCards(attachments), lookFirst);
+        return await checkItFirst(
+          open,
+          { address: conversation.path },
+          text,
+          imageCards(attachments),
+          lookFirst,
+        );
       }
       await agent.prompt(text, imageCards(attachments), { lookFirst });
       return done(null);
@@ -3168,15 +4127,19 @@ function register(): void {
     }
   });
 
-  handle<null>(CHANNEL.stop, async () => {
-    await workspaces.current?.held.session?.stop();
+  handle<null>(CHANNEL.stop, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open !== null) await sessionAt(open, where)?.stop();
     return done(null);
   });
 
   handle<boolean>(CHANNEL.answer, async (_event, args) => {
     const [callId, decision] = args;
     if (typeof callId !== 'string' || (decision !== 'yes' && decision !== 'no')) return done(false);
-    const agent = workspaces.current?.held.session ?? null;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    const agent = open === null ? null : sessionAt(open, where);
     return done(agent?.answer(callId, decision as Decision) ?? false);
   });
 
@@ -3224,7 +4187,19 @@ function register(): void {
       readConnection(await defaultAgentDir()),
       preferences(),
     ]);
-    return done({ providers, chosen: prefs.all().model });
+    const all = prefs.all();
+    const selected = all.model;
+    const model =
+      selected === null
+        ? null
+        : providers
+            .find((provider) => provider.providerId === selected.providerId)
+            ?.models.find((one) => one.id === selected.modelId) ?? null;
+    const chosenThinking =
+      selected === null
+        ? 'off'
+        : all.thinking[modelKey(selected)] ?? model?.thinking[0] ?? 'off';
+    return done({ providers, chosen: selected, chosenThinking });
   });
 
   handle<ConnectOutcome>(CHANNEL.connect, async (_event, args) => {
@@ -3300,15 +4275,170 @@ function register(): void {
       (provider) => provider.providerId === providerId && provider.models.some((model) => model.id === modelId),
     );
     if (!known) return done(prefs.all());
-    const saved = await prefs.change({ model: { providerId, modelId } });
+    const choice = { providerId, modelId };
+    const model = providers
+      .find((provider) => provider.providerId === providerId)
+      ?.models.find((one) => one.id === modelId);
+    const current = prefs.all();
+    const remembered = current.thinking[modelKey(choice)];
+    const level =
+      remembered !== undefined && model?.thinking.includes(remembered)
+        ? remembered
+        : model?.thinking[0] ?? 'off';
+    const saved = await prefs.change({
+      model: choice,
+      thinking: { ...current.thinking, [modelKey(choice)]: level },
+    });
     // And on the conversation already in front of somebody, not only on the
     // next one they open. Choosing a model and finding the old one still
     // answering — with no way to tell, because nothing on screen said which was
     // which — was the whole of this bug. A session that will not take the model
     // keeps the one it had; the preference is still saved, so opening the
     // project again picks it up.
-    await workspaces.current?.held.session?.useModel({ providerId, modelId });
+    const where = whereIn(args);
+    const open = projectAt(where);
+    const session = open === null ? null : sessionAt(open, where);
+    await session?.useModel(choice);
+    session?.setThinking(level);
     return done(saved);
+  });
+
+  handle<Preferences>(CHANNEL.setThinking, async (_event, args) => {
+    const [providerId, modelId, level] = args;
+    const prefs = await preferences();
+    if (
+      typeof providerId !== 'string' ||
+      typeof modelId !== 'string' ||
+      !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(level as string)
+    ) {
+      return done(prefs.all());
+    }
+    const choice = { providerId, modelId };
+    const providers = await readConnection(await defaultAgentDir());
+    const model = providers
+      .find((provider) => provider.providerId === providerId)
+      ?.models.find((one) => one.id === modelId);
+    if (model === undefined || !model.thinking.includes(level as ThinkingLevel)) return done(prefs.all());
+    const saved = await prefs.change({
+      thinking: { ...prefs.all().thinking, [modelKey(choice)]: level as ThinkingLevel },
+    });
+    const where = whereIn(args);
+    const open = projectAt(where);
+    const session = open === null ? null : sessionAt(open, where);
+    if (session?.model?.providerId === providerId && session.model.modelId === modelId) {
+      session.setThinking(level as ThinkingLevel);
+    }
+    return done(saved);
+  });
+
+  /* Read when it is asked for, not when a sitting happens to settle. The window
+     only ever heard the split as an aside to a `spend-summary`, so "See where
+     it went" was dead for the whole of the first sitting and after any reload. */
+  handle<SpendSummary | null>(CHANNEL.spendSplit, (_event, args) => {
+    const open = projectAt(whereIn(args));
+    return Promise.resolve(done(open?.held.spend.ledger?.summary() ?? null));
+  });
+
+  /* Where the window has drawn its placeholder, in window coordinates. The
+     native view is glued to it: nothing here guesses the rectangle, because a
+     view that drifts from the space kept for it is worse than none. */
+  handle<null>(CHANNEL.pageAt, async (_event, args) => {
+    const [address, bounds] = args;
+    const box = bounds as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;
+    if (typeof address !== 'string' || address.trim() === '' || box === null) {
+      dropPageView();
+      return done(null);
+    }
+    if (
+      typeof box.x !== 'number' ||
+      typeof box.y !== 'number' ||
+      typeof box.width !== 'number' ||
+      typeof box.height !== 'number'
+    ) {
+      return done(null);
+    }
+    const view = makePageView();
+    if (view === null) return done(null);
+    pageProject = projectAt(whereIn(args))?.path ?? null;
+    view.setBounds({
+      x: Math.round(box.x),
+      y: Math.round(box.y),
+      width: Math.max(0, Math.round(box.width)),
+      height: Math.max(0, Math.round(box.height)),
+    });
+    // Asking for the address it is already on is asking for it again — which is
+    // what a reload is, and the only thing a person means by pressing it.
+    if (view.webContents.getURL() === address) view.webContents.reload();
+    else await view.webContents.loadURL(address).catch(() => undefined);
+    return done(null);
+  });
+
+  /* A sheet, a menu or a modal would be painted under a native view, so the
+     window says when one is open and the page steps out of the way. */
+  handle<null>(CHANNEL.pageHidden, (_event, args) => {
+    const [hidden] = args;
+    pageView?.setVisible(hidden !== true);
+    return Promise.resolve(done(null));
+  });
+
+  handle<null>(CHANNEL.watchStart, async (_event, args) => {
+    const [says] = args;
+    const view = pageView;
+    if (view === null) {
+      return fail({
+        what: 'There is no page open to watch.',
+        because: 'Open the project’s page first, then press it again.',
+        actionLabel: 'Got it',
+      });
+    }
+    // A window nobody can see hands back the last thing it composited, so a run
+    // started behind something else would be a run of stale pictures.
+    if (mainWindow === null || mainWindow.isDestroyed() || mainWindow.isMinimized()) {
+      return fail({
+        what: 'I can only watch a window that is on screen.',
+        because: 'Bring Graphe to the front and press it again.',
+        actionLabel: 'Got it',
+      });
+    }
+    await pageWatching?.stop().catch(() => undefined);
+    pageWatching = await watchWhileUsed(
+      view.webContents,
+      typeof says === 'string' && says.trim() !== '' ? { says } : {},
+    );
+    return done(null);
+  });
+
+  handle<Recording | null>(CHANNEL.watchStop, async () => {
+    const run = (await pageWatching?.stop().catch(() => null)) ?? null;
+    pageWatching = null;
+    return done(run);
+  });
+
+  handle<SpendLimit | null>(CHANNEL.spendLimit, () => Promise.resolve(done(fleet.ceiling)));
+
+  /* The technical audience reaches in through GRAPHE_SPEND_LIMIT; this is the
+     same ceiling, set from the meter where the hand already is. */
+  handle<SpendLimit | null>(CHANNEL.setSpendLimit, async (_event, args) => {
+    const [ceiling] = args;
+    if (ceiling === null) {
+      fleet.hold(null);
+      await (await preferences()).change({ ceiling: null });
+      return done(null);
+    }
+    const money = ceiling as { minor?: unknown; currency?: unknown };
+    if (
+      typeof money.minor !== 'number' ||
+      !Number.isFinite(money.minor) ||
+      money.minor <= 0 ||
+      typeof money.currency !== 'string' ||
+      money.currency === ''
+    ) {
+      return done(fleet.ceiling);
+    }
+    const held = createLimit({ minor: Math.round(money.minor), currency: money.currency }, 'session');
+    fleet.hold(held);
+    await (await preferences()).change({ ceiling: held.ceiling });
+    return done(fleet.ceiling);
   });
 
   handle<null>(CHANNEL.openLink, async (_event, args) => {
@@ -3377,11 +4507,18 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(async () => {
     applyContentPolicy();
     applyPermissionPolicy();
+    watchTheCeiling();
     register();
     createWindow();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
+    // Before anything of ours starts: helpers left running by a copy of the app
+    // that went away. Nothing above them to report to, nothing to stop them, and
+    // they spend until they are done.
+    await endStrays().catch(() => 0);
+    // Work that was going when this last closed, back on its board.
+    await pickUpWhereWeLeftOff().catch(() => undefined);
     // What somebody asked for over and over, picked up where it left off. One
     // that came round while this was shut is done once — see whenNext.
     await standingFile().catch(() => null);
@@ -3410,6 +4547,7 @@ if (!app.requestSingleInstanceLock()) {
   // still waiting on an answer is turned down, which changes nothing, because a
   // question is always asked before the thing it is about happens.
   app.on('before-quit', () => {
+    writeDownWhatWasGoing();
     stopEverythingAway();
     closeSession();
   });

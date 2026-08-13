@@ -14,10 +14,14 @@
  * means *start nothing new*: whatever is in flight finishes and is saved, then
  * the agent explains and asks. There is deliberately no state in this module
  * that means "abandon what you are doing", because nothing should ever be able
- * to ask for that. */
+ * to ask for that.
+ *
+ * `Allotment` at the foot of this file shares one ceiling out between several
+ * runs at once. It only ever admits or refuses; who is running, and what it
+ * takes to stop one, is fleet.ts. */
 
 import type { Money } from '../agent/types';
-import { compare, max as maxMoney, money, ratio, subtract, zero } from './money';
+import { add, compare, max as maxMoney, money, ratio, subtract, zero } from './money';
 
 export type LimitPeriod = 'session' | 'day' | 'month';
 
@@ -142,5 +146,120 @@ export class LimitWatcher {
     this.#limit = raiseCeiling(this.#limit, ceiling);
     this.#announced = 'ok';
     return this.#limit;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* One ceiling, several runs                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** What one run was given before it started, and what it has used since. */
+export type Slice = {
+  id: string;
+  /** Set aside at the moment it began. */
+  reserved: Money;
+  spent: Money;
+};
+
+/** Refused for one of two different reasons, and they are worth telling apart:
+ *  at the ceiling nothing starts at all, while `not-enough-left` is this
+ *  particular run being too big for what is left. */
+export type Admission =
+  | { ok: true; slice: Slice; status: LimitStatus }
+  | { ok: false; because: 'at-the-ceiling' | 'not-enough-left'; status: LimitStatus };
+
+/**
+ * The ceiling, shared out between everything running at once.
+ *
+ * A meter that counts one number cannot answer the question a fleet asks: six
+ * helpers started together each look affordable against the total, and together
+ * they are not. So a run is given its share up front, and what is unclaimed by
+ * the runs already going is what the next one is measured against.
+ */
+export class Allotment {
+  readonly #watcher: LimitWatcher;
+  readonly #currency: string;
+  readonly #open = new Map<string, Slice>();
+  #spent: Money;
+
+  constructor(limit: SpendLimit, spent?: Money) {
+    this.#watcher = new LimitWatcher(limit);
+    this.#currency = limit.ceiling.currency;
+    this.#spent = spent ?? zero(this.#currency);
+    if (this.#spent.currency !== this.#currency) {
+      throw new TypeError(`This ceiling is in ${this.#currency}, not ${this.#spent.currency}`);
+    }
+  }
+
+  get limit(): SpendLimit {
+    return this.#watcher.limit;
+  }
+
+  get currency(): string {
+    return this.#currency;
+  }
+
+  get spent(): Money {
+    return this.#spent;
+  }
+
+  get status(): LimitStatus {
+    return checkLimit(this.#watcher.limit, this.#spent);
+  }
+
+  /** Slices open right now, oldest first. */
+  get open(): readonly Slice[] {
+    return [...this.#open.values()];
+  }
+
+  /** What the runs already going have claimed and not yet used. */
+  get held(): Money {
+    let minor = 0;
+    for (const slice of this.#open.values()) {
+      minor += Math.max(0, slice.reserved.minor - slice.spent.minor);
+    }
+    return money(minor, this.#currency);
+  }
+
+  /** What is left for the next run, once every open slice is honoured. */
+  get free(): Money {
+    return maxMoney(subtract(this.status.remaining, this.held), zero(this.#currency));
+  }
+
+  /** May this run start, and if so what is it allowed? */
+  begin(id: string, want: Money): Admission {
+    if (want.currency !== this.#currency) {
+      throw new TypeError(`This ceiling is in ${this.#currency}, not ${want.currency}`);
+    }
+    const status = this.status;
+    if (!status.allowsNewWork) return { ok: false, because: 'at-the-ceiling', status };
+    if (compare(this.free, want) < 0) return { ok: false, because: 'not-enough-left', status };
+    const slice: Slice = { id, reserved: want, spent: zero(this.#currency) };
+    this.#open.set(id, slice);
+    return { ok: true, slice, status };
+  }
+
+  /** Money that has gone. `id` names the run that spent it; null is spend
+   *  nobody claimed, which still counts against the ceiling. */
+  record(id: string | null, amount: Money): LimitUpdate {
+    if (amount.currency !== this.#currency) {
+      throw new TypeError(`This ceiling is in ${this.#currency}, not ${amount.currency}`);
+    }
+    const slice = id === null ? undefined : this.#open.get(id);
+    if (slice !== undefined) slice.spent = add(slice.spent, amount);
+    this.#spent = add(this.#spent, amount);
+    return this.#watcher.update(this.#spent);
+  }
+
+  /** A run is over. Whatever it did not use goes back to everyone else. */
+  end(id: string): Money | null {
+    const slice = this.#open.get(id);
+    if (slice === undefined) return null;
+    this.#open.delete(id);
+    return slice.spent;
+  }
+
+  raiseTo(ceiling: Money): SpendLimit {
+    return this.#watcher.raiseTo(ceiling);
   }
 }

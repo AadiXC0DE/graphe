@@ -320,5 +320,8 @@ export class EventRelay {
       label: report.label,
       reason: report.reason,
     });
+    // Cache reuse and which model, right after the money — the same turn that
+    // was priced is the one that moved these numbers.
+    this.deliver({ type: 'model-reading', reading: this.spend.usage() });
   }
 }

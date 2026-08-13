@@ -2063,6 +2063,9 @@ type AwayDesk = {
   /** A slot freed up while that was happening. Look again when it ends, or the
    *  piece at the front of the queue waits for a turn that never comes. */
   again: boolean;
+  /** Pieces started as "until it's done" — full access, no questions, and a
+   *  wall-clock ceiling so a stuck loop cannot burn a night. */
+  goals: Set<string>;
 };
 
 const awayDesks = new Map<string, AwayDesk>();
@@ -2095,10 +2098,16 @@ function deskFor(path: string, name: string): AwayDesk {
     unseen: false,
     starting: false,
     again: false,
+    goals: new Set(),
   };
   awayDesks.set(path, desk);
   return desk;
 }
+
+/** Four hours is long enough for a real overnight job and short enough that a
+ *  stuck loop cannot empty an account. Goal runs get this wall clock; ordinary
+ *  background work keeps the ordinary command ceilings. */
+const GOAL_WALL_MS = 4 * 60 * 60 * 1000;
 
 /** The list of repeats, mirrored here so drawing the panel never waits on a
  *  disk. The file is the truth; this is the copy the window is told about. */
@@ -2438,15 +2447,40 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       thinking: thinkingFor((await preferences()).all()),
     });
     run.session = session;
+    // "Until it's done": full access for this run, no questions, and a wall
+    // clock so a stuck loop cannot burn the night. Ordinary background work
+    // keeps asking when it should.
+    const untilDone = desk.goals.has(piece.id);
+    if (untilDone) session.goAsFarAs('doing');
+    let goalTimer: ReturnType<typeof setTimeout> | undefined;
+    if (untilDone) {
+      goalTimer = setTimeout(() => {
+        held.stop();
+        void session?.stop();
+        desk.bench.stopped(
+          piece.id,
+          'I stopped after four hours so a stuck loop could not keep going overnight.',
+        );
+        pushAway(desk.path);
+      }, GOAL_WALL_MS);
+    }
     // The ceiling can be reached while this was being built, when there was no
     // session yet for it to stop.
     if (stopped) await session.stop();
-    await session.prompt(piece.doing);
-    await desk.bench.settle(piece.id, saysHeldWork(piece.doing));
+    else {
+      await session.prompt(piece.doing);
+      // Goal timer may already have marked it stopped; only settle a live run.
+      const still = desk.bench.pieces.find((one) => one.id === piece.id);
+      if (still?.state === 'running') {
+        await desk.bench.settle(piece.id, saysHeldWork(piece.doing));
+      }
+    }
+    if (goalTimer !== undefined) clearTimeout(goalTimer);
   } catch (cause) {
     const raw = cause instanceof Error ? cause.message : String(cause);
     desk.bench.stopped(piece.id, plainMessage(raw));
   } finally {
+    desk.goals.delete(piece.id);
     // Whatever happened, nothing is left parked on a question nobody can reach.
     // Turned down, never up: the run ending is not a person saying yes.
     held.stop();
@@ -2570,10 +2604,12 @@ async function keepGoing(
   name: string,
   doing: string,
   after: string | null = null,
+  untilDone = false,
 ): Promise<string | null> {
   const desk = deskFor(path, name);
   const id = nextName(desk);
   const at = Date.now();
+  if (untilDone) desk.goals.add(id);
 
   if (after !== null) {
     const asked = desk.chain.hold({ id, doing, at, after });
@@ -3678,11 +3714,11 @@ function register(): void {
   });
 
   handle<Away>(CHANNEL.keepGoing, async (_event, args) => {
-    const [text] = args;
+    const [text, untilDone] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof text !== 'string' || text.trim() === '') return done(awayNow(open.path));
-    await keepGoing(open.path, open.name, text);
+    await keepGoing(open.path, open.name, text, null, untilDone === true);
     return done(awayNow(open.path));
   });
 
@@ -3892,6 +3928,52 @@ function register(): void {
     const found = conversationAt(open.held, where);
     if (found !== null) open.held.sessions.close(found.path);
     return Promise.resolve(done(null));
+  });
+
+  /** Throw a conversation away. Closing only puts the view down; this removes
+   *  the file so a long-lived install does not fill the disk with old ones. */
+  handle<readonly Conversation[]>(CHANNEL.deleteConversation, async (_event, args) => {
+    const [path] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof path !== 'string' || path.trim() === '') {
+      return fail({
+        what: 'I could not tell which conversation you meant.',
+        because: 'Nothing was named.',
+        actionLabel: 'Got it',
+      });
+    }
+    const target = resolve(path);
+    // Only files under the app's own transcript folder. A path that points
+    // somewhere else is not a conversation of ours, and deleting it would be.
+    const root = resolve(sessionsFolder());
+    if (target !== root && !target.startsWith(`${root}${sep}`)) {
+      return fail({
+        what: 'That is not one of your conversations.',
+        because: 'I only throw away files I wrote myself.',
+        actionLabel: 'Got it',
+      });
+    }
+    // Drop any live session on this file first so nothing is still writing it.
+    for (const one of open.held.sessions.open) {
+      const file = one.held.conversation;
+      if (one.path === target || (file !== null && resolve(file) === target)) {
+        await one.held.stop().catch(() => undefined);
+        open.held.sessions.close(one.path);
+      }
+    }
+    try {
+      await rm(target, { force: true });
+      await rm(`${target}.bak`, { force: true }).catch(() => undefined);
+    } catch (cause) {
+      return fail({
+        what: 'I could not throw that conversation away.',
+        because: 'This computer would not let me remove the file.',
+        actionLabel: 'Got it',
+        details: detailsOf(cause),
+      });
+    }
+    return done(await listConversations(open.path, sessionsFolder()));
   });
 
   /** One shelf per run. Building it reads settings off disk, and the screen it

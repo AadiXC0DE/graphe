@@ -14,9 +14,11 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { boundaryHere, lookAgain } from '../src/agent/sandbox';
 import {
+  developmentServerCommand,
   downloadFolders,
   heldLine,
   heldShell,
+  isForegroundDevelopmentServer,
   quoted,
   shellBounds,
   type RunShell,
@@ -90,6 +92,27 @@ describe('what the runtime is asked to run', () => {
   });
 });
 
+describe('foreground development servers', () => {
+  it('recognises the commands that would otherwise hold the agent open', () => {
+    expect(isForegroundDevelopmentServer('npm run dev -- --host 127.0.0.1 --port 5173')).toBe(true);
+    expect(isForegroundDevelopmentServer('pnpm run preview')).toBe(true);
+    expect(isForegroundDevelopmentServer('yarn start')).toBe(true);
+    expect(isForegroundDevelopmentServer('npm test')).toBe(false);
+    expect(isForegroundDevelopmentServer('(npm run dev -- --host 127.0.0.1 > /tmp/vite.log 2>&1 & echo $!)')).toBe(true);
+    expect(isForegroundDevelopmentServer('nohup npm run dev -- --port 5173 >/tmp/vite.log 2>&1 &')).toBe(true);
+  });
+
+  it('turns the model’s background wrapper back into a process we can own and stop', () => {
+    expect(developmentServerCommand('(npm run dev -- --host 127.0.0.1 > /tmp/vite.log 2>&1 & echo $!)')).toBe(
+      'npm run dev -- --host 127.0.0.1 > /tmp/vite.log 2>&1',
+    );
+    expect(developmentServerCommand('npm test')).toBeNull();
+    expect(developmentServerCommand('nohup npm run dev -- --port 5173 >/tmp/vite.log 2>&1 &')).toBe(
+      'npm run dev -- --port 5173 >/tmp/vite.log 2>&1',
+    );
+  });
+});
+
 /* ========================================================================== */
 /* The interposition                                                           */
 /* ========================================================================== */
@@ -111,6 +134,26 @@ describe('every command goes through the boundary first', () => {
       // The inherited environment is left intact, so Git can use the same
       // credential helper that works in the person's own terminal.
       expect(kept.runs[0]?.run.env?.['TMPDIR']).toBeUndefined();
+    } finally {
+      await shell.close();
+    }
+  });
+
+  it('uses the login-environment runner when one is supplied for get on with it', async () => {
+    const folder = newFolder();
+    const contained = recorder();
+    const terminal = recorder();
+    const shell = heldShell({
+      folder,
+      parts: () => PARTS,
+      plain: contained.plain,
+      unrestrictedPlain: terminal.plain,
+      unrestricted: () => true,
+    });
+    try {
+      await shell.exec('npm run app', folder, listening());
+      expect(terminal.runs.map((run) => run.command)).toEqual(['npm run app']);
+      expect(contained.runs).toHaveLength(0);
     } finally {
       await shell.close();
     }
@@ -211,6 +254,7 @@ describe('where it is wired in', () => {
     expect(adapter).toContain('createBashToolDefinition');
     expect(adapter).toContain('operations: shell');
     expect(adapter).toContain('heldShell');
+    expect(adapter).toContain('unrestrictedPlain: fullAccessShell');
   });
 
   it('holds the folder this session was opened on, which may be a copy', () => {

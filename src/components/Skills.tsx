@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Skill } from '../lib/ipc';
+import Clipped, { howMuch } from './Clipped';
 import './Skills.css';
 
 type Props = {
@@ -80,7 +81,15 @@ export default function Skills({ open, skills, onClose, onRefresh, onOpen }: Pro
         <article className="skills__detail">
           {selected === null ? <div className="skills__blank"><span>@</span><h2>Choose a skill to read it.</h2><p>Its instructions stay local. Selecting it in chat makes it explicit for that one request.</p></div> : <>
             <div className="skills__detailhead"><div><p className="skills__eyebrow">{selected.source === 'project' ? 'This project' : 'Your computer'}</p><h2>{selected.name}</h2><p>{selected.description}</p></div><code>@{selected.handle}</code></div>
-            {loading ? <p className="skills__reading">Opening its instructions…</p> : <pre>{text ?? 'This skill could not be read.'}</pre>}
+            {loading ? (
+              <p className="skills__reading">Opening its instructions…</p>
+            ) : text === null ? (
+              <pre>This skill could not be read.</pre>
+            ) : (
+              <Clipped how={howMuch(text)} label="Show all of it" height={420}>
+                <pre>{text}</pre>
+              </Clipped>
+            )}
           </>}
         </article>
       </div>

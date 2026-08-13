@@ -87,6 +87,8 @@
    strip this narrow: everything else in the product is quiet furniture, and
    this is the one thing that may carry the colour. */
 .shelf__thin {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -129,6 +131,12 @@
 
 .shelf__act:active {
   transform: scale(0.97);
+}
+
+/* The one persistent control on the folded shelf: it stays at the lower edge,
+   separate from the places somebody moves between. */
+.shelf__act--settings {
+  margin-top: auto;
 }
 
 .shelf__mark {
@@ -199,6 +207,50 @@
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.shelf__convo {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-radius: var(--radius-md);
+}
+
+.shelf__convo .shelf__row {
+  flex: 1;
+  min-width: 0;
+}
+
+.shelf__forget {
+  flex: none;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  margin-right: var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.shelf__convo:hover .shelf__forget,
+.shelf__convo:focus-within .shelf__forget,
+.shelf__forget:focus-visible {
+  opacity: 1;
+}
+
+.shelf__forget:hover,
+.shelf__forget:focus-visible {
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+.shelf__forget:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .shelf__row {

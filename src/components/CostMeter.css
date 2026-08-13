@@ -14,11 +14,31 @@
   border-radius: var(--radius-sm);
 }
 
+/* Floating alone, when the right panel is closed. */
 .cost-meter--corner {
   position: fixed;
   right: var(--space-5);
   bottom: var(--space-5);
   z-index: 5;
+}
+
+/* Docked to the foot of the right panel. `fixed` inside a scrolling overview
+   hitching a few pixels on scroll left a gap under the meter. Sticky keeps it
+   on the glass of its own column. */
+.cost-meter--panel {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  width: 100%;
+  margin-top: auto;
+  flex-direction: column;
+  align-items: stretch;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  background: var(--bg);
+  padding: var(--space-3) var(--space-4);
 }
 
 .cost-meter__row {
@@ -107,6 +127,38 @@
   gap: var(--space-3);
   justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+.cost-meter__months {
+  order: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 28px;
+  width: 100%;
+  padding-top: var(--space-1);
+}
+
+.cost-meter__bar {
+  flex: 1;
+  min-width: 0;
+  border-radius: 2px 2px 0 0;
+  background: var(--border-strong);
+}
+
+.cost-meter__bar--now {
+  background: var(--accent);
+}
+
+.cost-meter__retry {
+  order: 1;
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.cost-meter--panel .cost-meter__row {
+  width: 100%;
 }
 
 .cost-meter__ceiling {

@@ -4,8 +4,8 @@
 
 **The coding agent that starts from your design.**
 
-Give it a Figma file, a screenshot, or a sentence. It writes real code, shows you every change as a
-picture, and publishes when you're ready.
+Give it a Figma file, a screenshot, or a sentence. It works through a real project, writes real
+code, and keeps the design conversation clear from first idea to review.
 
 Free · open source · runs on the AI subscription you already have
 
@@ -13,10 +13,9 @@ Free · open source · runs on the AI subscription you already have
 
 ---
 
-> **Status: early, but it runs.** The agent, the safety layer, version history, cost tracking,
-> multiple projects and a one-button preview all work, and `npm run package` produces a disk image
-> that installs. Still missing: Figma import, visual before/after diffs, and sharing a link. No
-> release yet — build it from source if you want to try it.
+> **Status: early and moving quickly.** Graphe is now a capable local agent with visual review,
+> project history, cost tracking, designer-friendly controls, a file rail, reusable skills and a
+> one-button preview. More is on the way. Build it from source if you want to try it.
 
 ---
 
@@ -43,7 +42,8 @@ click to return — including the change you made an hour ago and regret now. Sn
 anything destructive, automatically, and going back is itself undoable.
 
 **You see what changed, as a picture.** A before and after of the page itself, plus a sentence
-describing what moved. Not a wall of code — though the code is one click away whenever you want it.
+describing what moved. Not a wall of code — though the code, project files and the underlying
+folder are within reach whenever you want them.
 
 **It tells you what things cost, in money.** No tokens, no context windows, no model names. An estimate
 before a large job, a running total, and a limit you set. At the end of a session it tells you what you
@@ -56,11 +56,15 @@ everything" mode to switch on, because that switch is the first thing people fli
 they should.
 
 **It speaks design.** Leading, tracking, optical alignment, your 8pt grid. Changes come back described
-the same way: "moved the button 8px down, used your brand blue, added a gentle hover."
+the same way: "moved the button 8px down, used your brand blue, added a gentle hover." Screenshots,
+Figma links and marked-up references can all travel with the conversation.
 
 **Nothing is trapped.** Your project is an ordinary folder with ordinary git from the first second.
 Open it in VS Code tomorrow. Hand it to a developer. There is nothing to export because nothing was
 ever locked in.
+
+**It grows with your practice.** Use built-in starting points, bring in skills with `@`, and tune how
+much the agent checks before it acts — all from the same place you write.
 
 ---
 
@@ -104,7 +108,9 @@ npm run shot <name>  # screenshot the running UI in both themes
 | **Local-first** | Runs on your machine. No account, no server, no telemetry. Your code never leaves your disk |
 | **Bring your own model** | Connect Claude, ChatGPT or Copilot. Nothing is metered by us, because there is no us in the middle |
 | **Real git underneath** | Version history is ordinary commits with readable messages. The word "commit" never appears in the interface |
-| **Guarded execution** | Every tool call is evaluated before it runs — allow, snapshot first, confirm, or deny |
+| **Guarded execution** | Choose how much the agent can do for this sitting, from looking only to full access |
+| **Design-aware work** | Bring screenshots, Figma links, annotations and visual review into the same conversation |
+| **Skills and starting points** | Reuse good ways of working without turning the interface into a terminal |
 
 ```
 src/

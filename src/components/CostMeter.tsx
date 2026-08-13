@@ -1,9 +1,9 @@
 import { useState } from 'react';
 
-import type { Money } from '../agent/types';
+import type { Money, SittingUsage, SpendSummary } from '../agent/types';
 import { checkLimit, type SpendLimit } from '../cost/limits';
 import { formatMoney, fromMajor, toMajor } from '../cost/money';
-import { type OverTime } from '../cost/overtime';
+import { forProject, type OverTime } from '../cost/overtime';
 import { limitSetup, meter } from '../cost/phrasing';
 import './CostMeter.css';
 
@@ -23,15 +23,20 @@ type Props = {
   /** The account being used is paid for by its own plan rather than by use, so
    *  the figure is a count and not a bill, and the meter has to say so. */
   onAPlan?: boolean;
-  /** Pin it to the bottom-right of the window as permanent furniture. */
-  corner?: boolean;
+  /** Pin it as permanent furniture. `window` floats bottom-right; `panel`
+   *  sticks to the foot of the right rail so scrolling cannot drag it. */
+  corner?: boolean | 'window' | 'panel';
   /** BCP 47 tag; left off, the host's own locale formats the amount. */
   locale?: string;
   /** Longer than one sitting: what each folder and each month came to. Given
-   *  this, the meter offers those stretches beside today's figure. */
+   *  this, the meter draws a quiet month strip under the figure. */
   history?: OverTime;
   /** The folder open right now, so "this project" means the right one. */
   project?: string;
+  /** The work-versus-retry split for this sitting, once it has settled. */
+  split?: SpendSummary | null;
+  /** Cache reuse and which model, once anything has been priced. */
+  usage?: SittingUsage | null;
   /** Drive the stretch from outside. Left off, the meter remembers its own. */
   span?: Span;
   onSpan?: (span: Span) => void;
@@ -53,6 +58,10 @@ export default function CostMeter({
   onLimit,
   corner,
   locale,
+  history,
+  project,
+  split = null,
+  usage = null,
 }: Props) {
   const status = limit ? checkLimit(limit, spent) : null;
   const state = status?.state ?? 'ok';
@@ -61,10 +70,24 @@ export default function CostMeter({
   const filled = status ? Math.max(0, Math.min(1, status.fraction)) : 0;
 
   const amount = formatMoney(spent, { locale });
+  const dock =
+    corner === true || corner === 'window'
+      ? 'cost-meter--corner'
+      : corner === 'panel'
+        ? 'cost-meter--panel'
+        : '';
+
+  const months = history?.main?.byMonth.slice(0, 6).reverse() ?? [];
+  const monthPeak = Math.max(1, ...months.map((one) => one.total.minor));
+  const projectTotal =
+    history?.main !== undefined && history.main !== null && project !== undefined
+      ? forProject(history.main, project)
+      : null;
+  const retryShare = split?.retryShare ?? projectTotal?.retryShare ?? null;
 
   return (
     <aside
-      className={`cost-meter cost-meter--${state} ${corner ? 'cost-meter--corner' : ''}`}
+      className={`cost-meter cost-meter--${state} ${dock}`}
       aria-label={meter.screenReaderLabel(spent, { locale })}
     >
       <div className="cost-meter__row">
@@ -82,6 +105,39 @@ export default function CostMeter({
         >
           <span className="cost-meter__fill" style={{ width: `${filled * 100}%` }} />
         </div>
+      ) : null}
+
+      {/* Quiet month strip — a git-like activity graph of spend, not a chart
+          that needs a legend. Absent until there is more than one sitting. */}
+      {months.length > 1 ? (
+        <div
+          className="cost-meter__months"
+          role="img"
+          aria-label={months.map((one) => `${one.name}: ${formatMoney(one.total, { locale })}`).join('. ')}
+        >
+          {months.map((one) => (
+            <span
+              key={one.key}
+              className={`cost-meter__bar ${one.current ? 'cost-meter__bar--now' : ''}`}
+              style={{ height: `${Math.max(12, Math.round((one.total.minor / monthPeak) * 100))}%` }}
+              title={`${one.name}: ${formatMoney(one.total, { locale })}`}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {usage?.reusedShare !== null && usage?.reusedShare !== undefined ? (
+        <p className="cost-meter__retry">{meter.reused(usage.reusedShare)}</p>
+      ) : null}
+
+      {usage?.mostUsed !== null && usage?.mostUsed !== undefined ? (
+        <p className="cost-meter__retry">{meter.mostUsed(usage.mostUsed)}</p>
+      ) : null}
+
+      {retryShare !== null && retryShare > 0 ? (
+        <p className="cost-meter__retry">
+          {Math.round(retryShare * 100)}% on retries
+        </p>
       ) : null}
 
       <div className="cost-meter__row cost-meter__row--doing">
@@ -177,6 +233,11 @@ function Ceiling({
             {limitSetup.clear}
           </button>
         )}
+        {/* Always a way out. Escape works too, but a panel that only closes on
+            a key nobody is told about is a panel that traps the hand. */}
+        <button type="button" className="cost-meter__details" onClick={() => setOpen(false)}>
+          Not now
+        </button>
       </div>
     </div>
   );

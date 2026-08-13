@@ -29,8 +29,9 @@ export type AwayProps = {
   /** Now, epoch ms. Passed in so the band draws the same twice. */
   now: number;
   busy: boolean;
-  /** Get on with something whether or not the window stays open. */
-  onKeepGoing: (text: string) => void;
+  /** Get on with something whether or not the window stays open.
+   *  `untilDone` is overnight mode: full access, no questions, wall clock. */
+  onKeepGoing: (text: string, untilDone?: boolean) => void;
   /** Ask for work that waits until another piece has finished. Left off, the
    *  offer is not made — there is nothing to wait for on an empty board. */
   onStartAfter?: (text: string, after: string) => void;
@@ -96,6 +97,8 @@ export default function Away({
   /* Both forms are folded until somebody wants one. The band is about what is
      running; a pair of empty boxes above that is a pair of empty boxes. */
   const [starting, setStarting] = useState(false);
+  /** Overnight: full access, no questions, keep going until the goal lands. */
+  const [untilDone, setUntilDone] = useState(false);
   /** Which piece this one should wait for, or empty for none. */
   const [waitFor, setWaitFor] = useState('');
   const [asking, setAsking] = useState(false);
@@ -116,9 +119,12 @@ export default function Away({
   const send = () => {
     const text = doing.trim();
     if (text === '') return;
+    const goal = untilDone;
     setDoing('');
     setStarting(false);
-    if (waitFor === '') onKeepGoing(text);
+    setUntilDone(false);
+    // Overnight mode cannot wait on something else — it is the thing that runs.
+    if (waitFor === '' || goal) onKeepGoing(text, goal);
     else onStartAfter?.(text, waitFor);
     setWaitFor('');
   };
@@ -167,10 +173,23 @@ export default function Away({
           />
           <p className="away__hint">{awayWords.keepGoingHint}</p>
 
+          <label className="away__goal">
+            <input
+              type="checkbox"
+              checked={untilDone}
+              disabled={busy}
+              onChange={(event) => setUntilDone(event.target.checked)}
+            />
+            <span>
+              <span className="away__goalname">{awayWords.untilDone}</span>
+              <span className="away__hint">{awayWords.untilDoneHint}</span>
+            </span>
+          </label>
+
           {/* Order, said in the words somebody would use. Offered only when
               there is something to wait for, which is what makes it an offer
-              rather than a setting. */}
-          {onStartAfter === undefined || canWaitFor.length === 0 ? null : (
+              rather than a setting. Overnight work never waits. */}
+          {untilDone || onStartAfter === undefined || canWaitFor.length === 0 ? null : (
             <div className="away__after">
               <label className="away__afterlabel" htmlFor="away-after">
                 {afterWords.pick}
@@ -199,7 +218,7 @@ export default function Away({
             onClick={send}
             disabled={busy || doing.trim() === ''}
           >
-            {waitFor === '' ? awayWords.start : afterWords.start}
+            {untilDone ? awayWords.startUntilDone : waitFor === '' ? awayWords.start : afterWords.start}
           </button>
         </div>
       ) : null}

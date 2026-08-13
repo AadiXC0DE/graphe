@@ -217,7 +217,6 @@ export default function Files({
           aria-pressed={only}
           onClick={() => setOnly(!only)}
         >
-          <span className="files__chipdot" aria-hidden="true" />
           Only what changed
         </button>
         <button
@@ -227,7 +226,6 @@ export default function Files({
           onClick={() => setAll(!all)}
           title="Include the dotted names and lock files a project keeps for itself"
         >
-          <span className="files__chipdot" aria-hidden="true" />
           Every file
         </button>
       </div>

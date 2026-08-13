@@ -24,7 +24,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Confirmations, createGuardInterceptor } from '../src/agent/pi/adapter';
 import { EventRelay } from '../src/agent/pi/events';
-import { grapheTools, taskTool, webfetchTool, websearchTool } from '../src/agent/pi/tools';
+import { grapheTools, helperWorkingDirectory, taskTool, webfetchTool, websearchTool } from '../src/agent/pi/tools';
 import type { AgentEvent } from '../src/agent/types';
 
 /** Pi's loop, from the copy that is installed. An upgrade that moves it fails
@@ -206,6 +206,12 @@ describe('a team of helpers', () => {
 /* ------------------------------------------------- what the tools declare */
 
 describe('what Graphe adds to Pi', () => {
+  it('always gives a helper the open project, not a path the model supplied', () => {
+    expect(helperWorkingDirectory('/Users/mira/Projects/portfolio', '/Users/mira')).toBe(
+      '/Users/mira/Projects/portfolio',
+    );
+  });
+
   it('leaves nothing in the batch that would hold the rest of it up', () => {
     const modes = grapheTools('/tmp/agent', 'a-figma-token').map((tool) => ({
       name: tool.name,

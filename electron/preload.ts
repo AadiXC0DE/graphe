@@ -344,6 +344,12 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.closeConversation, named(where)) as Promise<Result<null>>;
   },
 
+  deleteConversation(path: string, where?: Where): Promise<Result<readonly Conversation[]>> {
+    return ipcRenderer.invoke(CHANNEL.deleteConversation, path, named(where)) as Promise<
+      Result<readonly Conversation[]>
+    >;
+  },
+
   packages(term?: string): Promise<Result<readonly Pack[]>> {
     const asked = typeof term === 'string' ? term : undefined;
     return ipcRenderer.invoke(CHANNEL.packages, asked) as Promise<Result<readonly Pack[]>>;
@@ -644,11 +650,13 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.away, named(where)) as Promise<Result<Away>>;
   },
 
-  keepGoing(text: string, where?: Where): Promise<Result<Away>> {
+  keepGoing(text: string, untilDone?: boolean, where?: Where): Promise<Result<Away>> {
     if (typeof text !== 'string' || text.trim() === '') {
       return Promise.resolve(refuse<Away>('There was nothing to get on with.'));
     }
-    return ipcRenderer.invoke(CHANNEL.keepGoing, text, named(where)) as Promise<Result<Away>>;
+    return ipcRenderer.invoke(CHANNEL.keepGoing, text, untilDone === true, named(where)) as Promise<
+      Result<Away>
+    >;
   },
 
   startAfter(text: string, after: string, where?: Where): Promise<Result<Away>> {

@@ -103,8 +103,6 @@ type Props = {
   onDecide: (letIn: boolean) => void;
   /** Write the work up and put it where a developer picks it up. */
   onHandOver: () => void;
-  /** Put the finished project on the internet. */
-  onPutOnline: () => void;
   /** Open an address in the person's own browser. */
   onOpenLink: (address: string) => void;
 
@@ -215,7 +213,6 @@ export default function Overview({
   onHoldBack,
   onDecide,
   onHandOver,
-  onPutOnline,
   onOpenLink,
   onKeepGoing,
   onStartAfter,
@@ -303,52 +300,49 @@ export default function Overview({
       {/* Helpers used to be a band here. They belong beside the composer: this
           panel is a reading of what has already happened, and a helper is now. */}
 
-      <section className="overview__block">
-        <h2 className="overview__title">Ready to review</h2>
-        {git === null ? (
-          <p className="overview__quiet">
-            Nothing is being kept for this folder yet. The first time I change
-            something, I will start saving moments you can come back to.
+      {/* Only while there is something to do with it. An empty "changes" band
+          is a list of filenames nobody needed — designers want the picture and
+          a way to keep or undo; a heavy file list is for the moment something
+          is actually waiting. */}
+      {git !== null && shownFiles.length > 0 ? (
+        <section className="overview__block">
+          <h2 className="overview__title">Unsaved</h2>
+          <p className="overview__summary">
+            {changedCount === 1
+              ? 'One file has changed since your last saved moment.'
+              : `${changedCount} files have changed since your last saved moment.`}
           </p>
-        ) : shownFiles.length === 0 ? (
-          <p className="overview__quiet">Everything here is saved.</p>
-        ) : (
-          <>
-            <p className="overview__summary">
-              {`${changedCount} ${changedCount === 1 ? 'file has' : 'files have'} changed since your last version.`}
-            </p>
-            <ul className="overview__files">
-              {shownFiles.map((file) => (
-                <li key={file.path}>
-                  <button
-                    type="button"
-                    className="overview__file"
-                    onClick={() => onOpenFile(file.path)}
-                    title={`Open ${file.path}`}
-                  >
-                    <span className="overview__filetext">
-                      <span className="overview__filename">{leaf(file.path)}</span>
-                      {folder(file.path) === '' ? null : (
-                        <span className="overview__filewhere">{folder(file.path)}</span>
-                      )}
-                    </span>
-                    {file.kind === 'new' ? <span className="overview__filenew">new</span> : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {moreFiles > 0 ? <p className="overview__more">{`and ${moreFiles} more`}</p> : null}
-            <div className="overview__actions">
-              <button type="button" className="overview__do" onClick={onReviewChanges}>
-                Review changes
-              </button>
-              <button type="button" className="overview__textdo" onClick={onSave} disabled={busy}>
-                Save version
-              </button>
-            </div>
-          </>
-        )}
-      </section>
+          <ul className="overview__files">
+            {shownFiles.map((file) => (
+              <li key={file.path}>
+                <button
+                  type="button"
+                  className="overview__file"
+                  onClick={() => onOpenFile(file.path)}
+                  title={`Open ${file.path}`}
+                >
+                  <span className="overview__filetext">
+                    <span className="overview__filename">{leaf(file.path)}</span>
+                    {folder(file.path) === '' ? null : (
+                      <span className="overview__filewhere">{folder(file.path)}</span>
+                    )}
+                  </span>
+                  {file.kind === 'new' ? <span className="overview__filenew">new</span> : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {moreFiles > 0 ? <p className="overview__more">{`and ${moreFiles} more`}</p> : null}
+          <div className="overview__actions">
+            <button type="button" className="overview__do" onClick={onSave} disabled={busy}>
+              Keep this moment
+            </button>
+            <button type="button" className="overview__textdo" onClick={onReviewChanges}>
+              Open the files
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="overview__block">
         <h2 className="overview__title">Looked up</h2>
@@ -529,7 +523,6 @@ export default function Overview({
           onDecide={onDecide}
           onUndo={onPutBack}
           onHandOver={onHandOver}
-          onPutOnline={onPutOnline}
           onShare={onShare}
           onOpenLink={onOpenLink}
         />
@@ -538,8 +531,10 @@ export default function Overview({
       {spent === null ? null : (
         <CostMeter
           spent={spent.total}
-          corner
+          corner="panel"
           onAPlan={onAPlan}
+          split={spent.split}
+          usage={spent.usage}
           {...(ceiling === null ? {} : { limit: ceiling })}
           onDetails={onShowSplit}
           onLimit={onLimit}

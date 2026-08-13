@@ -76,6 +76,42 @@ function positiveAt(source: Fields, key: string): number | null {
  * every number the user sees.
  */
 export function priceOfPiMessage(event: unknown): number | null {
+  const usage = usageOfPiMessage(event);
+  return usage?.costTotal ?? null;
+}
+
+/** What Pi reported on one assistant turn — tokens and cost, still internal.
+ *  Nothing here crosses into the window as a count; only ratios and money do. */
+export type PiTurnUsage = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Whole currency units, same as priceOfPiMessage. */
+  costTotal: number | null;
+  /** Provider id, when Pi named one. */
+  provider: string | null;
+  /** Model id, when Pi named one. */
+  model: string | null;
+};
+
+/** Non-negative finite number, or 0. Usage blocks sometimes ship 0 rather than
+ *  omitting a field, and both mean the same thing to us. */
+function countAt(source: Fields, key: string): number {
+  const value = source[key];
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
+  return value;
+}
+
+/**
+ * The usage block on an assistant message, read the same way as the price.
+ *
+ * Pi's own shape (see SessionStats / UsageTotals): `input`, `output`,
+ * `cacheRead`, `cacheWrite`, and `cost.total`. Providers that do not support
+ * prompt caching leave the cache fields at 0 forever — that is how we know not
+ * to claim a hit rate.
+ */
+export function usageOfPiMessage(event: unknown): PiTurnUsage | null {
   const source = fieldsOf(event);
   if (source === null) return null;
   const message = fieldsOf(source['message']);
@@ -83,8 +119,45 @@ export function priceOfPiMessage(event: unknown): number | null {
   const usage = fieldsOf(message['usage']);
   if (usage === null) return null;
   const cost = fieldsOf(usage['cost']);
-  if (cost === null) return null;
-  return positiveAt(cost, 'total');
+  const provider =
+    typeof message['provider'] === 'string' && message['provider'] !== ''
+      ? message['provider']
+      : null;
+  const modelRaw =
+    (typeof message['responseModel'] === 'string' && message['responseModel'] !== ''
+      ? message['responseModel']
+      : null) ??
+    (typeof message['model'] === 'string' && message['model'] !== '' ? message['model'] : null);
+  return {
+    input: countAt(usage, 'input'),
+    output: countAt(usage, 'output'),
+    cacheRead: countAt(usage, 'cacheRead'),
+    cacheWrite: countAt(usage, 'cacheWrite'),
+    costTotal: cost === null ? null : positiveAt(cost, 'total'),
+    provider,
+    model: modelRaw,
+  };
+}
+
+/** How much of the prompt was served from cache, 0–1, or null when the provider
+ *  never reported any caching at all (so a 0 would be a lie). */
+export function cacheHitShare(usage: {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+}): number | null {
+  const prompt = usage.input + usage.cacheRead + usage.cacheWrite;
+  if (prompt <= 0) return null;
+  if (usage.cacheRead <= 0 && usage.cacheWrite <= 0) return null;
+  return Math.min(1, Math.max(0, usage.cacheRead / prompt));
+}
+
+/** A model id shortened for a person: drop provider prefixes and date tails. */
+export function shortModelName(model: string): string {
+  const trimmed = model.trim();
+  if (trimmed === '') return trimmed;
+  const last = trimmed.split(/[/:]/).pop() ?? trimmed;
+  return last.replace(/-\d{8}$/, '').replace(/-\d{4}-\d{2}-\d{2}$/, '');
 }
 
 /**

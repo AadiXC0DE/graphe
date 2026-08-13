@@ -16,6 +16,10 @@ export type DesignPart = 'styles' | 'motion' | 'drift' | 'legible' | 'widths' | 
 
 export const SAYS = {
   heading: 'Design',
+  save: 'Save changes',
+  discard: 'Throw away',
+  dirty: 'You have changes waiting to be saved.',
+  clean: 'Nothing changed yet.',
   close: 'Close',
   /** Said under the title: what this reads, so nobody wonders what they are
    *  editing. */
@@ -57,6 +61,12 @@ type Props = {
   data: DesignData;
   /** The band to land on. */
   at: DesignPart;
+  /** Whether there are edits waiting to be saved. */
+  dirty: boolean;
+  /** Saved by hand, once — the project is untouched until this. */
+  onSave: () => void;
+  /** Throw the held edits away without writing anything. */
+  onDiscard: () => void;
   onClose: () => void;
   onNudge: (name: string, value: string) => void;
   onNudgeMotion: (move: Movable, change: Change) => void;
@@ -105,6 +115,9 @@ function countOf(part: DesignPart, data: DesignData): number | null {
 export default function DesignView({
   data,
   at,
+  dirty,
+  onSave,
+  onDiscard,
   onClose,
   onNudge,
   onNudgeMotion,
@@ -196,6 +209,32 @@ export default function DesignView({
           })}
         </nav>
 
+        <div className="sheet__save">
+          <span
+            className={`sheet__dirty${dirty ? ' sheet__dirty--on' : ''}`}
+            title={dirty ? SAYS.dirty : SAYS.clean}
+            aria-live="polite"
+          >
+            {dirty ? SAYS.dirty : SAYS.clean}
+          </span>
+          <button
+            type="button"
+            className="sheet__discard"
+            onClick={onDiscard}
+            disabled={!dirty}
+          >
+            {SAYS.discard}
+          </button>
+          <button
+            type="button"
+            className="sheet__savebtn"
+            onClick={onSave}
+            disabled={!dirty || data.busy}
+          >
+            {SAYS.save}
+          </button>
+        </div>
+
         <button ref={shut} type="button" className="sheet__close" onClick={onClose}>
           {SAYS.close}
           <kbd className="sheet__key">Esc</kbd>
@@ -204,7 +243,7 @@ export default function DesignView({
 
       <div className="sheet__body" ref={body}>
         <div className="sheet__grid">
-          <section className="sheet__block" id="design-styles">
+          <section className="sheet__block sheet__block--wide sheet__block--bare" id="design-styles">
             <h2 className="sheet__blocktitle">{SAYS.parts.styles}</h2>
             {data.styles === null ? (
               <p className="sheet__nothing">{SAYS.fromNothing}</p>

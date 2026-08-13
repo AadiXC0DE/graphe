@@ -65,6 +65,7 @@ import {
   type PromptAttachment,
   type ProviderMethod,
   type PutBack,
+  type RepoLook,
   type RecentProject,
   type CarriedExtension,
   type Result,
@@ -657,6 +658,11 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(null));
     },
 
+    // No live agent in the preview, so steering is a no-op that still answers.
+    steer(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
     answer(_callId: string, _decision: Decision): Promise<Result<boolean>> {
       return Promise.resolve(done(true));
     },
@@ -739,6 +745,16 @@ function previewBridge(): Bridge {
 
     versions(): Promise<Result<readonly SavedVersion[]>> {
       return Promise.resolve(done(openPath === null ? [] : versionsFor(openPath)));
+    },
+
+    repoLook(): Promise<Result<RepoLook>> {
+      // The preview has no github behind it; a repository with nothing in it is
+      // the honest answer.
+      return Promise.resolve(done(null));
+    },
+
+    repoComment(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
     },
 
     putBack(versionId: string): Promise<Result<PutBack>> {
@@ -855,11 +871,7 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(null));
     },
 
-    nudgeToken(): Promise<Result<readonly SavedVersion[]>> {
-      const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
-      return Promise.resolve(done(previewVersions(path)));
-    },
-    nudgeMotion(): Promise<Result<readonly SavedVersion[]>> {
+    designCommit(): Promise<Result<readonly SavedVersion[]>> {
       const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
       return Promise.resolve(done(previewVersions(path)));
     },
@@ -1564,14 +1576,25 @@ function connect(): Bridge {
   return {
     desktop: true,
     openProject: (path) => api.openProject(path),
-    prompt: (text, attachments) => api.prompt(text, attachments),
-    stop: () => api.stop(),
+    // The `where` is what names *which conversation* this message belongs to.
+    // Dropping it — as a bare `(text, attachments) =>` call but that left them
+    // extra and ignored — sent every prompt to whatever the shell happened to
+    // have in front, so with two tabs open a message typed into one ran in the
+    // other. The where rides through with the options.
+    prompt: (text, attachments, options, where) => api.prompt(text, attachments, options, where),
+    // Same complaint, same fix: stop must say *which* conversation it is
+    // stopping, or press Stop ends the shell's front conversation instead of
+    // the one on screen.
+    stop: (where) => api.stop(where),
+    steer: (text, where) => api.steer(text, where),
     answer: (callId, decision) => api.answer(callId, decision),
     chooseFolder: () => api.chooseFolder(),
     recentProjects: () => api.recentProjects(),
     overview: () => api.overview(),
     forgetProject: (path) => api.forgetProject(path),
     versions: () => api.versions(),
+    repoLook: (where) => api.repoLook(where),
+    repoComment: (number, body, where) => api.repoComment(number, body, where),
     putBack: (versionId) => api.putBack(versionId),
     nameVersion: (versionId, name) => api.nameVersion(versionId, name),
     versionPictures: () => api.versionPictures(),
@@ -1599,12 +1622,11 @@ function connect(): Bridge {
     shareReview: () => api.shareReview(),
     checkWidths: () => api.checkWidths(),
     conversations: () => api.conversations(),
-    openConversation: (path) => api.openConversation(path),
+    openConversation: (path, where) => api.openConversation(path, where),
     deleteConversation: (path, where) =>
       api.deleteConversation?.(path, where) ?? Promise.resolve(done([])),
     packages: (term) => api.packages(term),
-    nudgeToken: (name, value) => api.nudgeToken(name, value),
-    nudgeMotion: (places, change) => api.nudgeMotion(places, change),
+    designCommit: (changes) => api.designCommit(changes),
     addPackage: (id) => api.addPackage(id),
     removePackage: (id) => api.removePackage(id),
     explainPackage: (id) => api.explainPackage(id),

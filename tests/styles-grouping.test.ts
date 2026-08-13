@@ -92,9 +92,13 @@ describe('what can be moved, and what can only be seen', () => {
     expect(canShow(make('--shadow-md', '0 4px 16px #0001', 'shadow'))).toBe(true);
   });
 
-  it('leaves out what can be neither moved nor drawn', () => {
-    expect(canShow(make('--font-ui', 'Inter, sans-serif', 'other'))).toBe(false);
-    expect(shelves([make('--font-ui', 'Inter, sans-serif', 'other')])).toEqual([]);
+  it('shows a font family, because the design system is where fonts are read', () => {
+    expect(canShow(make('--font-ui', 'Inter, sans-serif', 'other'))).toBe(true);
+    expect(shelves([make('--font-ui', 'Inter, sans-serif', 'other')])).toEqual(['type']);
+  });
+
+  it('leaves out everything else neither moved nor drawn', () => {
+    expect(canShow(make('--brand', 'some prose that is not a value', 'other'))).toBe(false);
   });
 
   it('shows a colour even though it has no steps at all', () => {
@@ -170,7 +174,7 @@ describe('grouping a project', () => {
       make('--space-2', '8px', 'space', RAMP),
       make('--font-ui', 'Inter, sans-serif', 'other'),
     ]);
-    expect(countShown(groups)).toBe(3);
+    expect(countShown(groups)).toBe(4);
   });
 });
 
@@ -329,7 +333,16 @@ describe('grouping the tokens this app ships with', () => {
   it('finds a type scale it can draw at size', () => {
     const type = shelf('type');
     expect(type.map((token) => token.name)).toContain('--text-base');
-    expect(type.every((token) => specimenSize(token.value) !== null)).toBe(true);
+    /* Sizes are drawn at size; the family stacks ride at the head of the shelf. */
+    const sized = type.filter((token) => specimenSize(token.value) !== null);
+    expect(sized.length).toBeGreaterThan(0);
+    expect(sized.every((token) => specimenSize(token.value) !== null)).toBe(true);
+  });
+
+  it('names the families it types in', () => {
+    const type = shelf('type').map((token) => token.name);
+    expect(type).toContain('--font-ui');
+    expect(type).toContain('--font-mono');
   });
 
   it('keeps the window furniture off the type shelf', () => {

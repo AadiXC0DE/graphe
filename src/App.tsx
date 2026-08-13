@@ -8,6 +8,7 @@ import ConnectModal from "./components/ConnectModal";
 import CostMeter from "./components/CostMeter";
 import DesignView, { type DesignPart } from "./components/DesignView";
 import HistoryView from "./components/HistoryView";
+import ReviewsView, { reviewPrompt } from "./components/ReviewsView";
 import ErrorCard from "./components/ErrorCard";
 import Files from "./components/Files";
 import EvidenceReel from "./components/EvidenceReel";
@@ -48,6 +49,7 @@ import { sizeUp } from "./cost/sizing";
 import { worthPlanning } from "./agent/plan";
 import { asResearch, researchWords } from "./agent/research";
 import { readDesign } from "./design/reading";
+import { writeToken } from "./design/tokens";
 import { bridge } from "./lib/bridge";
 import { lastSaid } from "./lib/describe";
 import { quote, smallerFirst } from "./lib/estimating";
@@ -75,6 +77,8 @@ import {
   type PromptAttachment,
   type ProviderMethod,
   type RecentProject,
+  type RepoItem,
+  type RepoLook,
   type Result,
   type Room as RoomState,
   type Skill,
@@ -268,6 +272,40 @@ function sortPictures(
   }
 
   return { under, last };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Design edits held in the window                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The stylesheet with the window's unsaved design edits laid over it.
+ *
+ * The design view reads the stylesheet from disk, so with a draft held in the
+ * window that reading needs a copy with the draft values substituted in — the
+ * sliders and the readings describe what is being tested, not only what the
+ * project already is. Nothing is written; the project only changes when
+ * `commitDesign` files the draft.
+ */
+function withDesignDraft(
+  styles: { file: string; tokens: readonly import("./lib/ipc").StyleToken[]; text: string } | null,
+  draft: { tokens: Record<string, string> } | undefined,
+): { file: string; tokens: readonly import("./lib/ipc").StyleToken[]; text: string } | null {
+  if (styles === null || draft === undefined) return styles;
+  const names = Object.keys(draft.tokens);
+  if (names.length === 0) return styles;
+  let text = styles.text;
+  for (const name of names) {
+    const value = draft.tokens[name];
+    if (value === undefined) continue;
+    const next = writeToken(text, name, value);
+    if (next !== text) text = next;
+  }
+  const tokens = styles.tokens.map((token) => {
+    const value = draft.tokens[token.name];
+    return value === undefined ? token : { ...token, value };
+  });
+  return { file: styles.file, text, tokens };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -635,9 +673,23 @@ function Conversation() {
    *  they cover the conversation, and the conversation belongs to this file. */
   const [designAt, setDesignAt] = useState<DesignPart | null>(null);
   const [graphOpen, setGraphOpen] = useState(false);
+  /** The github pull requests and issues of the project in front. */
+  const [reviewsOpen, setReviewsOpen] = useState(false);
+  /** The fetched reading of the open project's repository, and whether a fetch
+   *  is in flight. */
+  const [repo, setRepo] = useState<RepoLook | null>(null);
+  const [reviewsBusy, setReviewsBusy] = useState(false);
   /** The pairing whose colour is on its way to being changed. Cleared the
    *  moment new values arrive, which is what finishing looks like from here. */
   const [fixing, setFixing] = useState<string | null>(null);
+  /** Design edits being tested but not yet saved, per project. Nothing here
+   *  has touched the project — a slider moves in the view, and only "Save
+   *  changes" writes it. Keyed by token name, and appended to for motion. */
+  const [designDraft, setDesignDraft] = useState<
+    Readonly<
+      Record<string, { tokens: Record<string, string>; motions: readonly { places: readonly unknown[]; change: unknown }[] }>
+    >
+  >({});
 
   const [busy, setBusy] = useState(false);
   /** The conversation that owns the current send. `busy` is window-wide (it
@@ -850,7 +902,27 @@ function Conversation() {
   const toChat = useCallback(() => {
     setDesignAt(null);
     setGraphOpen(false);
+    setReviewsOpen(false);
+    setHelpersAt(null);
   }, []);
+
+  /** The screens that take the whole work over the conversation, so that
+   *  opening one closes the rest. "Design", "History", the shelf and the
+   *  others all live on flags that could otherwise stay set side by side, and
+   *  two full-width surfaces on top of each other hide one entirely. */
+  const goToScreen = useCallback(
+    (screen: 'chat' | 'design' | 'graph' | 'reviews' | 'skills' | 'settings' | 'usage' | 'add-more' | 'helpers') => {
+      if (screen !== 'chat') setDesignAt(null);
+      if (screen !== 'graph') setGraphOpen(false);
+      if (screen !== 'reviews') setReviewsOpen(false);
+      if (screen !== 'skills') setSkillsOpen(false);
+      if (screen !== 'settings') setSettingsOpen(false);
+      if (screen !== 'usage') setUsageOpen(false);
+      if (screen !== 'add-more') setAddMore(false);
+      if (screen !== 'helpers') setHelpersAt(null);
+    },
+    [],
+  );
 
   /** Optimistic on screen, confirmed underneath — the same bargain "Show me"
    *  makes: the chip has to change on the click, and the shell's answer is what
@@ -1260,7 +1332,14 @@ function Conversation() {
   }, [switching]);
 
   const halt = useCallback(() => {
-    void bridge.stop();
+    // Name *which* conversation is being stopped. Without the `where`, Stop
+    // would end whatever the shell has in front — which, with two tabs open,
+    // may not be the one on screen (see the `where` fixes in bridge.ts).
+    const desk = currentDesk(desksNow.current);
+    void bridge.stop({
+      ...(desk === null ? {} : { project: desk.path }),
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    });
   }, []);
 
 
@@ -1347,7 +1426,13 @@ function Conversation() {
       }
       if (event.key === "d" && desk !== null) {
         event.preventDefault();
-        setDesignAt((was) => (was === null ? "styles" : null));
+        // Design toggles on and off on the same key, like the shelf. Only a
+        // switch from another screen clears the rest.
+        setDesignAt((was) => {
+          if (was !== null) return null;
+          goToScreen("design");
+          return "styles";
+        });
         return;
       }
       /* Moving between what is open. `openNow` is the row as drawn, so these
@@ -1617,7 +1702,32 @@ function Conversation() {
    */
   const hand = useCallback(
     (text: string) => {
-      if (!busy || desks.current === null) {
+      if (desks.current === null) {
+        void send(text);
+        return;
+      }
+      const desk = currentDesk(desksNow.current);
+      const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
+      // The agent is mid-turn on exactly this conversation, and the person is
+      // typing into it. Instead of parking the message until the turn ends, put
+      // it straight into that turn — Pi's steer. It interrupts the flow without
+      // stopping it, which is the "insert into the loop" move. The window owns
+      // the person's own words (the shell never sends them back), so it is laid
+      // down here just as `send` would.
+      if (desk !== null && busyConversation === owner) {
+        setDesks((current) =>
+          changeDesk(current, desk.path, (one) => ({
+            ...one,
+            turns: [...one.turns, said('you', text)],
+          })),
+        );
+        void bridge.steer(text, {
+          project: desk.path,
+          conversation: desk.address ?? undefined,
+        });
+        return;
+      }
+      if (!busy || owner === null) {
         void send(text);
         return;
       }
@@ -1628,7 +1738,39 @@ function Conversation() {
         })),
       );
     },
-    [busy, desks, send],
+    [busy, busyConversation, desks, send],
+  );
+
+  /** Fetch the open project's github pull requests and issues, and hold the
+   *  reading for the reviews screen. Asked whenever that screen opens or its
+   *  Refresh is pressed; the shell reads it from the terminal's own `gh`, so it
+   *  is never kept past the moment it is fetched. */
+  const refreshRepo = useCallback(() => {
+    const desk = currentDesk(desksNow.current);
+    setReviewsBusy(true);
+    void bridge
+      .repoLook({
+        ...(desk === null ? {} : { project: desk.path }),
+        ...(desk?.address == null ? {} : { conversation: desk.address }),
+      })
+      .then((answer) => {
+        if (answer.ok) setRepo(answer.value);
+      })
+      .finally(() => setReviewsBusy(false));
+  }, []);
+
+  /** Open a fresh conversation and send the review of one pull request into
+   *  it, so the agent reads the whole change on this codebase and posts its
+   *  thoughts as the terminal user's github account. */
+  const startReview = useCallback(
+    (item: RepoItem) => {
+      if (repo === null) return;
+      toChat();
+      void swapConversation(null).then(
+        () => void send(reviewPrompt(item, repo.full)),
+      );
+    },
+    [repo, toChat, swapConversation, send],
   );
 
   /* A tab names a conversation inside a project, so going to one is at most two
@@ -2138,40 +2280,98 @@ function Conversation() {
   );
 
   /** One value moved, from wherever the panel offered it: a slider, or a colour
-   *  nobody could read against the one underneath it. */
+   *  nobody could read against the one underneath it. Filed in the draft and
+   *  nothing more — the project is untouched until "Save changes" is pressed. */
   const nudge = useCallback((name: string, value: string) => {
-    void bridge.nudgeToken(name, value).then((answer) => {
+    setDesignDraft((current) => {
       const path = desks.current;
-      if (!answer.ok || path === null) return;
+      if (path === null) return current;
+      const here = current[path] ?? { tokens: {}, motions: [] };
+      return {
+        ...current,
+        [path]: { ...here, tokens: { ...here.tokens, [name]: value } },
+      };
+    });
+  }, [desks.current]);
+
+  /* Same bargain as a colour: the change waits in the draft, and lands with the
+     whole batch the moment somebody saves. */
+  const nudgeMotion = useCallback(
+    (move: { places: readonly unknown[] }, change: unknown) => {
+      setDesignDraft((current) => {
+        const path = desks.current;
+        if (path === null) return current;
+        const here = current[path] ?? { tokens: {}, motions: [] };
+        return { ...current, [path]: { ...here, motions: [...here.motions, { places: move.places, change }] } };
+      });
+    },
+    [desks.current],
+  );
+
+  /** "Save changes": write the draft to the stylesheet and keep it as one
+   *  version, then let go of the draft. Nothing has been saved until this. */
+  const commitDesign = useCallback(() => {
+    const path = desks.current;
+    if (path === null) return;
+    const draft = designDraft[path];
+    if (draft === undefined) return;
+    const tokens = Object.entries(draft.tokens).map(([name, value]) => ({ name, value }));
+    if (tokens.length === 0 && draft.motions.length === 0) return;
+    void bridge.designCommit({ tokens, motions: draft.motions }).then((answer) => {
+      if (!answer.ok) return;
+      setDesignDraft((current) => {
+        if (current[path] === undefined) return current;
+        const next = { ...current };
+        delete next[path];
+        return next;
+      });
       setDesks((current) =>
-        changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
+        current.current === path
+          ? changeDesk(current, path, (one) => ({ ...one, versions: answer.value }))
+          : current,
       );
       void refreshOverview(path);
     });
-  }, [desks.current, refreshOverview]);
+  }, [designDraft, desks.current, refreshOverview]);
 
-  /* Same bargain as a colour: arithmetic on the file, one saved moment, no
-     question put to a model. */
-  const nudgeMotion = useCallback(
-    (move: { places: readonly unknown[] }, change: unknown) => {
-      void bridge.nudgeMotion(move.places, change).then((answer) => {
-        const path = desks.current;
-        if (!answer.ok || path === null) return;
-        setDesks((current) =>
-          changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
-        );
-        void refreshOverview(path);
-      });
-    },
-    [desks.current, refreshOverview],
+  /** Throw the draft away. Nothing was ever written, so there is nothing to
+   *  undo — forgetting the values is all there was. */
+  const discardDesign = useCallback(() => {
+    const path = desks.current;
+    if (path === null) return;
+    setDesignDraft((current) => {
+      if (current[path] === undefined) return current;
+      const next = { ...current };
+      delete next[path];
+      return next;
+    });
+  }, [desks.current]);
+
+  /** Whether the project in front has edits waiting to be saved. */
+  const designDirty = useCallback((): boolean => {
+    const path = desk === null ? null : desk.path;
+    if (path === null) return false;
+    const here = designDraft[path];
+    if (here === undefined) return false;
+    return Object.keys(here.tokens).length > 0 || here.motions.length > 0;
+  }, [desk, designDraft]);
+
+  /** The stylesheet with the draft edits laid over it, so the design view shows
+   *  what is being tested without anything reaching the project. */
+  const designStyles = useMemo(
+    () => withDesignDraft(desk?.overview?.styles ?? null, desk === null ? undefined : designDraft[desk.path]),
+    [desk,
+      desk?.overview?.styles,
+      designDraft,
+    ],
   );
 
   /** What the project's own stylesheet says about itself: how it moves, what
    *  was written by hand, what cannot be read. One reading, shared by the panel
    *  that counts it and the view that draws it. */
   const design = useMemo(
-    () => readDesign(desk?.overview?.styles ?? null, desk?.overview?.swatches ?? []),
-    [desk?.overview?.styles, desk?.overview?.swatches],
+    () => readDesign(designStyles, desk?.overview?.swatches ?? []),
+    [designStyles, desk?.overview?.swatches],
   );
 
   useEffect(() => setFixing(null), [desk?.overview?.styles]);
@@ -2179,7 +2379,7 @@ function Conversation() {
   /* A native view paints above the window's own contents, so anything that
      would cover it has to take it off screen first. */
   const covered =
-    designAt !== null || graphOpen || helpersAt !== null || connectOpen || addMore;
+    designAt !== null || graphOpen || reviewsOpen || helpersAt !== null || connectOpen || addMore;
   useEffect(() => {
     if (pane === 'off') return;
     void bridge.pageHidden(covered);
@@ -2231,13 +2431,16 @@ function Conversation() {
     (link: SettingsLink) => {
       switch (link) {
         case 'skills':
+          goToScreen("skills");
           refreshSkills();
           setSkillsOpen(true);
           return;
         case 'add-more':
+          goToScreen("add-more");
           openAddMore();
           return;
         case 'usage':
+          goToScreen("usage");
           setUsageOpen(true);
           return;
         case 'folder':
@@ -2550,13 +2753,33 @@ function Conversation() {
           open={shelfOpen}
           onToggle={() => setShelfOpen((was) => !was)}
           onAsk={() => setAsking(true)}
-          onDesign={() => setDesignAt("styles")}
-          onHistory={() => setGraphOpen(true)}
-          onSkills={() => { refreshSkills(); setSkillsOpen(true); }}
-          onAddMore={openAddMore}
+          onDesign={() => {
+            goToScreen("design");
+            setDesignAt("styles");
+          }}
+          onHistory={() => {
+            goToScreen("graph");
+            setGraphOpen(true);
+          }}
+          onReviews={() => {
+            goToScreen("reviews");
+            setReviewsOpen(true);
+          }}
+          onSkills={() => {
+            goToScreen("skills");
+            refreshSkills();
+            setSkillsOpen(true);
+          }}
+          onAddMore={() => {
+            goToScreen("add-more");
+            openAddMore();
+          }}
           onFiles={filesShown ? () => setFilesOpen(true) : undefined}
           onDeleteConversation={(path) => void deleteConversation(path)}
-          onSettings={() => setSettingsOpen(true)}
+          onSettings={() => {
+            goToScreen("settings");
+            setSettingsOpen(true);
+          }}
         />
       ) : null}
 
@@ -2721,7 +2944,13 @@ function Conversation() {
             {/* Both bands sit above the composer rather than in the panel on
                 the right: that panel is a reading of what has happened, and
                 these two are what is happening. */}
-            <HelperRail helpers={helpers} onOpen={(at) => setHelpersAt({ at })} />
+            <HelperRail
+              helpers={helpers}
+              onOpen={(at) => {
+                goToScreen("helpers");
+                setHelpersAt({ at });
+              }}
+            />
             <InLine waiting={desk?.waiting ?? []} onTake={takeBack} />
 
             <Composer
@@ -2799,7 +3028,7 @@ function Conversation() {
             showMe: preferences.showMe,
             artifacts: desk.overview?.artifacts ?? [],
             swatches: desk.overview?.swatches ?? [],
-            styles: desk.overview?.styles ?? null,
+            styles: designStyles,
             reading: design,
             inStep,
             landing,
@@ -2815,10 +3044,14 @@ function Conversation() {
           onDismissPutBack={dismissPutBack}
           onShowSplit={() => void showSplit()}
           onLimit={setLimit}
-          onOpenFile={(file) => void bridge.openInEditor(file)}
-          onReviewChanges={openInEditor}
-          onOpenDesign={setDesignAt}
-          onOpenGraph={() => setGraphOpen(true)}
+          onOpenDesign={(part) => {
+            goToScreen("design");
+            setDesignAt(part);
+          }}
+          onOpenGraph={() => {
+            goToScreen("graph");
+            setGraphOpen(true);
+          }}
           onShare={() => void bridge.shareReview()}
           onHoldBack={changeHoldBack}
           onDecide={decideOnWork}
@@ -2852,7 +3085,7 @@ function Conversation() {
         <DesignView
           at={designAt}
           data={{
-            styles: desk.overview?.styles ?? null,
+            styles: designStyles,
             motion: design.motion,
             drifted: design.drifted,
             unreadable: design.unreadable,
@@ -2866,6 +3099,9 @@ function Conversation() {
             busy,
             showMe: preferences.showMe,
           }}
+          dirty={designDirty()}
+          onSave={commitDesign}
+          onDiscard={discardDesign}
           onClose={() => setDesignAt(null)}
           onNudge={nudge}
           onNudgeMotion={nudgeMotion}
@@ -2908,6 +3144,16 @@ function Conversation() {
           onClose={() => setGraphOpen(false)}
           onPutBack={(versionId) => void putBack(versionId)}
           onOpenFile={(file) => void bridge.openInEditor(file)}
+        />
+      ) : null}
+
+      {reviewsOpen && desk !== null ? (
+        <ReviewsView
+          repo={repo}
+          busy={reviewsBusy}
+          onRefresh={refreshRepo}
+          onClose={() => setReviewsOpen(false)}
+          onReview={startReview}
         />
       ) : null}
 

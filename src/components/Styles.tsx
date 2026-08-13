@@ -25,14 +25,23 @@ export const SAYS = {
   where: (file: string): string => `From ${file}`,
   more: (count: number): string =>
     count === 1 ? '1 more in the file' : `${String(count)} more in the file`,
-  pickHint: 'Hover a colour to read it.',
   /** Two letters with an ascender and a descender: the shape of a size. */
   specimen: 'Ag',
+  /** Shown at the top of a discipline, so a visitor reads what they are.' */
+  groups: {
+    colour: 'The palette, each swatch named and its value beside it.',
+    type: 'Text sizes, drawn at size. Drag a row to borrow a step.',
+    spacing: 'The room between things, as bars measured at their own width.',
+    corners: 'How much the edges soften, as squares of their own radius.',
+    shadow: 'How high things sit, as cards casting their own shadow.',
+    size: 'Sizes that are not text, stepped by number.',
+    other: 'The rest, without a shape of their own.',
+  } as const,
 } as const;
 
-/** Shelves everybody wants open the moment the panel appears. The leftovers
- *  start shut because they are the ones nobody came here for. */
-const SHUT_AT_FIRST: readonly GroupId[] = ['other'];
+/** Everything open the moment the panel appears: this is where somebody comes
+ *  to read a whole system, not to hunt a band. */
+const SHUT_AT_FIRST: readonly GroupId[] = [];
 
 type Nudge = (name: string, value: string) => void;
 
@@ -63,7 +72,7 @@ export default function Styles({ tokens, file, onNudge, busy }: Props) {
         const open = !shut.has(group.id);
         const panel = `${base}-${group.id}`;
         return (
-          <section className="styles__group" key={group.id}>
+          <section className={`styles__group ${open ? 'styles__group--open' : ''}`} key={group.id}>
             <button
               type="button"
               className={`styles__band${open ? ' styles__band--open' : ''}`}
@@ -71,14 +80,17 @@ export default function Styles({ tokens, file, onNudge, busy }: Props) {
               aria-controls={panel}
               onClick={() => toggle(group.id)}
             >
-              <span className="styles__caret" aria-hidden="true" />
               <span className="styles__shelf">{group.title}</span>
               <span className="styles__count">{group.tokens.length + group.hidden}</span>
+              <span className="styles__caret" aria-hidden="true" />
             </button>
 
             <div className="styles__body" id={panel} hidden={!open}>
+              <p className="styles__intro">{SAYS.groups[group.id]}</p>
               <Shelf group={group} onNudge={onNudge} busy={busy === true} />
-              {group.hidden > 0 ? <p className="styles__rest">{SAYS.more(group.hidden)}</p> : null}
+              {group.hidden > 0 ? (
+                <p className="styles__rest">{SAYS.more(group.hidden)}</p>
+              ) : null}
             </div>
           </section>
         );
@@ -91,16 +103,34 @@ export default function Styles({ tokens, file, onNudge, busy }: Props) {
 function Shelf({ group, onNudge, busy }: { group: StyleGroup; onNudge: Nudge; busy: boolean }) {
   if (group.id === 'colour') return <Palette tokens={group.tokens} onNudge={onNudge} busy={busy} />;
   if (group.id === 'shadow') return <Shadows tokens={group.tokens} />;
+  if (group.id === 'spacing') return <SpacingScale tokens={group.tokens} onNudge={onNudge} busy={busy} />;
+  if (group.id === 'corners') return <CornerScale tokens={group.tokens} onNudge={onNudge} busy={busy} />;
 
+  /* The type shelf is a mix: real sizes get a specimen at size, and a font
+     stack — not editable, but still the answer to “what type is this?” — is
+     drawn as the family it names. */
   const type = group.id === 'type';
-  const Row = type ? TypeStep : Step;
+
+  if (type) {
+    return (
+      <div className="styles__scale styles__scale--type">
+        {group.tokens.map((token) =>
+          controlFor(token) === 'steps' ? (
+            <TypeStep key={token.name} token={token} onNudge={onNudge} busy={busy} />
+          ) : (
+            <Family key={token.name} token={token} />
+          ),
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div className={`styles__scale${type ? ' styles__scale--type' : ''}`}>
+    <div className="styles__scale">
       {group.tokens
         .filter((token) => controlFor(token) === 'steps')
         .map((token) => (
-          <Row key={token.name} token={token} onNudge={onNudge} busy={busy} />
+          <Step key={token.name} token={token} onNudge={onNudge} busy={busy} />
         ))}
     </div>
   );
@@ -121,11 +151,11 @@ function useKnob(token: StyleToken, onNudge: Nudge) {
 }
 
 /**
- * The palette as squares.
+ * The palette as swatches.
  *
- * Twenty colours in the space four rows used to take, because a colour is the
- * one thing a name cannot tell you. The line underneath is the label: it says
- * whatever the hand is over, so nothing has to be written beside each square.
+ * Each swatch carries its name and value beneath it, so the whole palette
+ * reads as a family you can scan rather than a wall of colour you have to hunt
+ * through. Changing a swatch needs one press of the colour well inside it.
  */
 function Palette({
   tokens,
@@ -136,72 +166,135 @@ function Palette({
   onNudge: Nudge;
   busy: boolean;
 }) {
-  const [peek, setPeek] = useState<{ name: string; value: string } | null>(null);
-
   return (
-    <div className="styles__palette">
-      <div className="styles__wells">
-        {tokens.map((token) => (
-          <Chip
-            key={token.name}
-            token={token}
-            onNudge={onNudge}
-            onPeek={(name, value) => setPeek({ name, value })}
-            busy={busy}
-          />
-        ))}
-      </div>
-      <p className="styles__read">
-        {peek === null ? (
-          SAYS.pickHint
-        ) : (
-          <>
-            <span className="styles__name">{readable(peek.name)}</span>
-            <span className="styles__value">{peek.value}</span>
-          </>
-        )}
-      </p>
-    </div>
+    <ul className="styles__palette">
+      {tokens.map((token) => (
+        <Chip key={token.name} token={token} onNudge={onNudge} busy={busy} />
+      ))}
+    </ul>
   );
 }
 
-/** One colour. The well is painted with the value as written, so a blend or a
- *  soft grey looks like itself rather than like whatever a picker can hold. */
+/** One colour. The well is painted with the value as written, and the value it
+ *  writes back is shown beside the name. A blend or a soft grey looks like
+ *  itself rather than like whatever a picker can hold. */
 function Chip({
   token,
   onNudge,
-  onPeek,
   busy,
 }: {
   token: StyleToken;
   onNudge: Nudge;
-  onPeek: (name: string, value: string) => void;
   busy: boolean;
 }) {
   const { value, setValue, settle } = useKnob(token, onNudge);
   const name = readable(token.name);
 
   return (
-    <span
-      className="styles__well"
-      style={{ background: value }}
-      title={`${name} — ${value}`}
-      onPointerEnter={() => onPeek(token.name, value)}
-    >
-      <input
-        type="color"
-        className="styles__pick"
-        aria-label={name}
-        value={/^#[0-9a-f]{6}$/i.test(value) ? value : '#000000'}
-        disabled={busy}
-        onFocus={() => onPeek(token.name, value)}
-        onChange={(event) => {
-          setValue(event.target.value);
-          onPeek(token.name, event.target.value);
-        }}
-        onBlur={settle}
-      />
-    </span>
+    <li className="styles__swatch">
+      <span className="styles__well" style={{ background: value }}>
+        <input
+          type="color"
+          className="styles__pick"
+          aria-label={name}
+          value={/^#[0-9a-f]{6}$/i.test(value) ? value : '#000000'}
+          disabled={busy}
+          onChange={(event) => {
+            setValue(event.target.value);
+          }}
+          onBlur={settle}
+        />
+      </span>
+      <span className="styles__swname" title={`${name} — ${value}`}>
+        {name}
+      </span>
+    </li>
+  );
+}
+
+/** A spacing token drawn as a bar at its own width, so a 4px step is visibly
+ *  a hair and a 48px step is visibly a room. The label + slider sit under it. */
+function SpacingScale({
+  tokens,
+  onNudge,
+  busy,
+}: {
+  tokens: readonly StyleToken[];
+  onNudge: Nudge;
+  busy: boolean;
+}) {
+  return (
+    <div className="styles__measures">
+      {tokens.map((token) => (
+        <SpacingStep key={token.name} token={token} onNudge={onNudge} busy={busy} />
+      ))}
+    </div>
+  );
+}
+
+function SpacingStep({
+  token,
+  onNudge,
+  busy,
+}: {
+  token: StyleToken;
+  onNudge: Nudge;
+  busy: boolean;
+}) {
+  const { value, setValue, settle } = useKnob(token, onNudge);
+  return (
+    <label className="styles__measure">
+      <span className="styles__measuretrack" aria-hidden="true">
+        <span className="styles__measurebar" style={{ width: `min(${value}, 100%)` }} />
+      </span>
+      <span className="styles__measuremeta">
+        <span className="styles__name">{readable(token.name)}</span>
+        <span className="styles__value">{value}</span>
+      </span>
+      <Slider token={token} value={value} setValue={setValue} settle={settle} busy={busy} />
+    </label>
+  );
+}
+
+/** Corner radius drawn as a square that round is, so the curve itself is the
+ *  picture — not a number pressed through a gradient of more or less. */
+function CornerScale({
+  tokens,
+  onNudge,
+  busy,
+}: {
+  tokens: readonly StyleToken[];
+  onNudge: Nudge;
+  busy: boolean;
+}) {
+  return (
+    <div className="styles__corners">
+      {tokens.map((token) => (
+        <CornerStep key={token.name} token={token} onNudge={onNudge} busy={busy} />
+      ))}
+    </div>
+  );
+}
+
+function CornerStep({
+  token,
+  onNudge,
+  busy,
+}: {
+  token: StyleToken;
+  onNudge: Nudge;
+  busy: boolean;
+}) {
+  const { value, setValue, settle } = useKnob(token, onNudge);
+  return (
+    <label className="styles__corner">
+      <span className="styles__cornerbox" style={{ borderRadius: value }} aria-hidden="true" />
+      <span className="styles__cornerhead">
+        <span className="styles__name">{readable(token.name)}</span>
+        <span className="styles__value">{value}</span>
+      </span>
+      <Slider token={token} value={value} setValue={setValue} settle={settle} busy={busy} />
+    </label>
   );
 }
 
@@ -242,6 +335,24 @@ function TypeStep({ token, onNudge, busy }: { token: StyleToken; onNudge: Nudge;
         <Slider token={token} value={value} setValue={setValue} settle={settle} busy={busy} />
       </span>
     </label>
+  );
+}
+
+/** A font family: not editable, but the very thing the type shelf exists to
+ *  name. Drawn as the specimen in that face, with the stack written under it. */
+function Family({ token }: { token: StyleToken }) {
+  return (
+    <div className="styles__family">
+      <span className="styles__familysample" style={{ fontFamily: token.value }} aria-hidden="true">
+        {SAYS.specimen} Family
+      </span>
+      <span className="styles__typehead">
+        <span className="styles__name">{readable(token.name)}</span>
+        <span className="styles__value styles__familyvalue" title={token.value}>
+          {token.value}
+        </span>
+      </span>
+    </div>
   );
 }
 

@@ -21,11 +21,10 @@
   padding: var(--space-2) var(--space-2) var(--space-3);
   background: var(--bg);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
-  /* Reserved, so the rows do not reflow narrower the first time the list grows
-     past the window. */
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
+  /* The shelf itself does not scroll: only the conversations band inside it
+     does, so the projects, the pinned work and the foot keep their places
+     while a long history ends in one quiet moving strip. */
+  overflow: hidden;
 }
 
 /* Collapsed, it is a strip of the same width as the mark's hit area. Nothing
@@ -196,6 +195,22 @@
   margin-top: var(--space-5);
   padding-top: var(--space-4);
   border-top: 1px solid var(--border);
+}
+
+/* The one band that scrolls: the conversations. It takes whatever height the
+   fixed bands above and below leave it, and scrolls inside itself. The bar is
+   hidden so the column reads as clean as the rest of the shelf — wheel,
+   trackpad and keyboard still scroll it, but nothing paints down its side. */
+.shelf__band--scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.shelf__band--scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .shelf__band .shelf__caption {

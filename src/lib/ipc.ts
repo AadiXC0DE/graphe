@@ -169,6 +169,13 @@ export type Room = {
  * module that spawns processes and reads folders; this one crosses a structured
  * clone into a sandbox, and the seam between them is the point of this file.
  */
+/** A set of design edits the window is holding, to be written and saved in one
+ *  go. Nothing about them touches the project until the window asks. */
+export type DesignChange = {
+  tokens: readonly { name: string; value: string }[];
+  motions: readonly { places: readonly unknown[]; change: unknown }[];
+};
+
 export type SavedVersion = {
   id: string;
   /** The same id, short. What a terminal, a review page or a colleague calls
@@ -880,12 +887,51 @@ export type AgentNotice = {
   event: AgentEvent;
 };
 
+/* -------------------------------------------------------------------------- */
+/* Pull requests and issues, read for the Github screen                       */
+/* -------------------------------------------------------------------------- */
+
+/** One issue or pull request, as the reviews screen shows it. Drawn from the
+ *  terminal's own `gh` JSON so the window never talks to github itself. */
+export type RepoItem = {
+  /** The number github gives it, and that `gh pr comment` wants. */
+  number: number;
+  kind: 'issue' | 'pr';
+  title: string;
+  /** Open, closed, merged … */
+  state: string;
+  /** The html url, for whenever somebody would rather open it in a browser. */
+  url: string;
+  /** The description, when there is one. */
+  description: string | null;
+  author: string;
+  /** ISO time, newest first as gh returns it. */
+  updatedAt: string;
+  /** The base branch, for a pull request. */
+  baseRef: string | null;
+};
+
+/** Everything the reviews screen needs about the project's github repository.
+ *  Null when this folder is not a github repository, or `gh` is not logged in. */
+export type RepoLook =
+  | {
+      /** `owner/name`, which is how github and gh address it. */
+      full: string;
+      owner: string;
+      name: string;
+      url: string;
+      issues: readonly RepoItem[];
+      prs: readonly RepoItem[];
+    }
+  | null;
+
 /** Channel names. Namespaced so nothing else on the wire can be mistaken for
  *  ours, and centralised so preload and main cannot drift apart. */
 export const CHANNEL = {
   openProject: 'graphe:open-project',
   prompt: 'graphe:prompt',
   stop: 'graphe:stop',
+  steer: 'graphe:steer',
   answer: 'graphe:answer',
   chooseFolder: 'graphe:choose-folder',
   event: 'graphe:event',
@@ -918,13 +964,14 @@ export const CHANNEL = {
   room: 'graphe:room',
   carried: 'graphe:carried',
   trustCarried: 'graphe:trust-carried',
+  repoLook: 'graphe:repo-look',
+  repoComment: 'graphe:repo-comment',
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
   tidyNow: 'graphe:tidy-now',
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
-  nudgeToken: 'graphe:nudge-token',
-  nudgeMotion: 'graphe:nudge-motion',
+  designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
   checkWidths: 'graphe:check-widths',
   conversations: 'graphe:conversations',
@@ -1005,6 +1052,10 @@ export type GrapheApi = {
   ): Promise<Result<null>>;
   /** Stop what it is doing. Open questions are answered no. */
   stop(where?: Where): Promise<Result<null>>;
+  /** Put a message into the turn already in flight, without stopping it. The
+   *  agent hears it between tool calls and carries on — the "insert into the
+   *  loop" move. */
+  steer(text: string, where?: Where): Promise<Result<null>>;
   /** Answer a question the Guard asked. False when there was no such question. */
   answer(callId: string, decision: Decision, where?: Where): Promise<Result<boolean>>;
   /** Ask the person to pick a folder. Null when they closed the picker. */
@@ -1023,6 +1074,12 @@ export type GrapheApi = {
   /** Every version of the open project, newest first. Empty before anything has
    *  been saved, and empty — not a failure — when no project is open. */
   versions(where?: Where): Promise<Result<readonly SavedVersion[]>>;
+  /** Everything about a project's github repository, read from the terminal's
+   *  own `gh` — the issues and pull requests of this codebase. Null when the
+   *  folder is not a github repository or `gh` is not set up. */
+  repoLook(where?: Where): Promise<Result<RepoLook>>;
+  /** Ask the terminal's `gh pr comment` to speak for the current person. */
+  repoComment(number: number, body: string, where?: Where): Promise<Result<null>>;
   /** Put the project back to a version. Undoable; see `PutBack`. */
   putBack(versionId: string, where?: Where): Promise<Result<PutBack>>;
   /** Give a version a name of the user's own. */
@@ -1131,13 +1188,12 @@ export type GrapheApi = {
   removePackage(id: string): Promise<Result<readonly Pack[]>>;
   /** Two plain sentences on what one does, written by the model. */
   explainPackage(id: string, where?: Where): Promise<Result<string>>;
-  /** Change one design token and save the result as a version. */
-  nudgeToken(name: string, value: string, where?: Where): Promise<Result<readonly SavedVersion[]>>;
-  /** Change how long something takes, or how it starts and stops. The places
-   *  and the change are the shapes `src/motion/read.ts` hands out. */
-  nudgeMotion(
-    places: readonly unknown[],
-    change: unknown,
+  /** Write every design change the window has been holding and save it as one
+   *  version. `tokens` renames to real names with the value each is set to;
+   *  `motions` are the shapes `src/motion/read.ts` hands out. Nothing is
+   *  written on the way to this — the design view stays untracked until asked. */
+  designCommit(
+    changes: DesignChange,
     where?: Where,
   ): Promise<Result<readonly SavedVersion[]>>;
   /** Follow along while that happens. Returns the function that stops. */

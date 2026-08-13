@@ -350,6 +350,11 @@ export type GrapheSession = {
   setThinking(level: ThinkingLevel): ThinkingLevel;
   /** Stop what it is doing now. Open questions are answered no. */
   stop(): Promise<void>;
+  /** Put a message into a turn already in flight, without stopping it — the
+   *  agent hears it between tool calls and carries on. This is the "insert
+   *  into the loop" move other coding agents offer; Pi calls it steering.
+   *  Safe to call at any time: when nothing is running it simply joins. */
+  steer(text: string, images?: readonly ImageCard[]): Promise<void>;
   /** Finish with this session. Safe to call twice. */
   dispose(): void;
   /** Answer a `needs-confirmation`. False if there was no such question. */
@@ -1334,6 +1339,29 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     async stop(): Promise<void> {
       confirmations.abandonAll();
       await session.abort();
+    },
+
+    async steer(text: string, images?: readonly ImageCard[]): Promise<void> {
+      if (closed) throw new AdapterError('That project is no longer open.');
+      // Same envelope the prompt makes: nobody outside this file hears the
+      // word `ImageContent`. Pi's steer lands the message mid-turn and lets
+      // the current run carry on — it does not start a separate one.
+      const withPictures =
+        images === undefined || images.length === 0
+          ? undefined
+          : {
+              images: images.map((picture) => ({
+                type: 'image' as const,
+                data: picture.bytes,
+                mimeType: picture.mimeType,
+              })),
+            };
+      await session.steer(
+        text,
+        withPictures === undefined || withPictures.images.length === 0
+          ? undefined
+          : withPictures.images,
+      );
     },
 
     dispose(): void {

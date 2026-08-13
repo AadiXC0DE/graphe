@@ -1,6 +1,24 @@
 /* Graphe design tokens.
    Motion values follow notes/strategy/UI-DESIGN.md — do not invent new easings or durations. */
 
+/* Satoshi, the face the interface wears. A single variable file spans every
+   weight the app uses, so there is one face to ship rather than a folder. */
+@font-face {
+  font-family: 'Satoshi';
+  src: url('../fonts/Satoshi-Variable.woff2') format('woff2');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Satoshi';
+  src: url('../fonts/Satoshi-VariableItalic.woff2') format('woff2');
+  font-weight: 300 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 :root {
   /* Motion — entering/exiting */
   --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
@@ -18,10 +36,11 @@
      speed. This is that rule, expressed once. */
   --dur-exit: 160ms;
 
-  /* Type */
+  /* Type. Satoshi is the face of the interface; the system list is the fallback
+     while it loads and the off-machine list when it never does. */
   --font-ui:
-    ui-sans-serif, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui,
-    sans-serif;
+    'Satoshi', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
+    system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
 
   /* One step under --text-xs, for the second line of a chip and nothing bigger.

@@ -82,6 +82,7 @@ import {
   type Result,
   type Room as RoomState,
   type Skill,
+  type Workflow,
   type HowFar,
   type Money,
   type PointedAt,
@@ -443,13 +444,20 @@ function Conversation() {
     });
   }, []);
 
+  const refreshWorkflows = useCallback(() => {
+    void bridge.workflows().then((answer) => {
+      if (answer.ok) setWorkflows(answer.value);
+    });
+  }, []);
+
   useEffect(() => {
     refreshConnection();
   }, [refreshConnection]);
 
   useEffect(() => {
     refreshSkills();
-  }, [desks.current, refreshSkills]);
+    refreshWorkflows();
+  }, [desks.current, refreshSkills, refreshWorkflows]);
 
   /** Follow along while a connection happens. Each step is one moment of the
    *  provider's sign-in — a browser it opened, a question it asked. The step
@@ -667,6 +675,7 @@ function Conversation() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [skills, setSkills] = useState<readonly Skill[]>([]);
+  const [workflows, setWorkflows] = useState<readonly Workflow[]>([]);
 
   /** Which band of the design view is open, or null when it is not. Both of the
    *  surfaces that take the whole width live here rather than inside a panel:
@@ -2433,6 +2442,7 @@ function Conversation() {
         case 'skills':
           goToScreen("skills");
           refreshSkills();
+          refreshWorkflows();
           setSkillsOpen(true);
           return;
         case 'add-more':
@@ -2768,6 +2778,7 @@ function Conversation() {
           onSkills={() => {
             goToScreen("skills");
             refreshSkills();
+            refreshWorkflows();
             setSkillsOpen(true);
           }}
           onAddMore={() => {
@@ -2786,6 +2797,7 @@ function Conversation() {
       <Skills
         open={skillsOpen}
         skills={skills}
+        workflows={workflows}
         onClose={() => setSkillsOpen(false)}
         onRefresh={refreshSkills}
         onOpen={async (skill) => {

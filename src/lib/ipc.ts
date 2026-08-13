@@ -724,6 +724,17 @@ export type Skill = {
   path: string;
 };
 
+/** One way of working somebody can ask for with `/word`. The prompt body stays
+ *  in the shell — the window only needs the command, what it does and what to
+ *  put after it to list a `/` menu and hold the typed words. */
+export type Workflow = {
+  command: string;
+  name: string;
+  description: string;
+  hint: string | null;
+  source: 'global' | 'project';
+};
+
 /**
  * What the overview panel knows about the project's folder.
  *
@@ -971,6 +982,7 @@ export const CHANNEL = {
   tidyNow: 'graphe:tidy-now',
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
+  workflows: 'graphe:workflows',
   designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
   checkWidths: 'graphe:check-widths',
@@ -1124,6 +1136,8 @@ export type GrapheApi = {
   tidyNow(where?: Where): Promise<Result<Room | null>>;
   /** The installed instruction packs available to this project and computer. */
   skills(where?: Where): Promise<Result<readonly Skill[]>>;
+  /** The `/word` ways of working this project can ask for. */
+  workflows(where?: Where): Promise<Result<readonly Workflow[]>>;
   /** Full text for a library row. `id` is checked against that library first. */
   skillText(id: string, where?: Where): Promise<Result<string>>;
   /** Stop checking before things that would otherwise be asked about, or start

@@ -1,0 +1,206 @@
+/* The project's own page, held beside the conversation.
+
+   A fixed region on the right, because the page inside it is a native view
+   glued to a rectangle in window coordinates — it cannot be a child of anything
+   that scrolls. */
+
+.pane {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  width: var(--browser-take, 0px);
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.pane__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  /* Its first line sits on the same band as the conversation's, the way every
+     other region here does. */
+  padding: calc(var(--topbar-height) - var(--space-4)) var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+}
+
+.pane__bar > * {
+  -webkit-app-region: no-drag;
+}
+
+.pane__address {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+/* The one place in the ordinary run of the app that shows an address, because
+   somebody typed it and needs to see what they typed. */
+.pane__field {
+  width: 100%;
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.pane__field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  color: var(--text);
+}
+
+.pane__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) {
+  .pane__act:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+.pane__stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg-sunken);
+}
+
+.pane__nothing {
+  margin: 0;
+  max-width: 34ch;
+  padding: var(--space-5);
+  text-align: center;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   The conversation, when the page has the whole window
+   --------------------------------------------------------------------------- */
+
+/* One key back, always the same key. In split the question does not arise,
+   because both are on screen. */
+.chatpill {
+  position: fixed;
+  left: calc(var(--shelf-take, 0px) + var(--space-4));
+  bottom: var(--space-4);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 340px;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.chatpill:active {
+  transform: scale(0.98);
+}
+
+.chatpill__last {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatpill__key {
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+@media (hover: hover) {
+  .chatpill:hover {
+    color: var(--text);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatpill:active {
+    transform: none;
+  }
+}
+
+/* Watching how somebody uses the page. In the pane's own band beside the
+   address, because that is where the hand already is. */
+.pane__watch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.pane__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--text-faint);
+}
+
+/* Recording is the one state here worth being unmistakable about, and it is a
+   fill rather than a flash: something that blinks while you work is something
+   you stop seeing. */
+.pane__watch--on {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.pane__watch--on .pane__dot {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+@media (hover: hover) {
+  .pane__watch:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}

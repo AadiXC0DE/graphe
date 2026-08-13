@@ -1,4 +1,4 @@
-// Compiles the desktop shell — electron/main.ts, electron/preload.ts and the
+// Compiles the desktop shell — electron/main.ts, the two preloads and the
 // subagent helper — into dist-electron/, which is what package.json's "main"
 // points at. The helper is spawned at runtime by the `task` tool, and it must
 // sit where the shell expects it: beside itself, so packaged and unpackaged
@@ -17,7 +17,8 @@
 //
 //   preload → CommonJS (.cjs). Electron does not load ES modules in a sandboxed
 //             preload, and we are not giving up the sandbox to have nicer
-//             syntax there.
+//             syntax there. Two of them: the window's, and the one for the
+//             project's own page held beside the conversation.
 //
 //   runner  → ESM (.mjs). The subagent child runs under `ELECTRON_RUN_AS_NODE`,
 //             which is Electron's Node: it reads ESM fine, and the child needs
@@ -78,6 +79,12 @@ const builds = [
   },
   {
     ...shared,
+    entryPoints: [`${root}electron/pagepreload.ts`],
+    outfile: `${root}dist-electron/pagepreload.cjs`,
+    format: 'cjs',
+  },
+  {
+    ...shared,
     entryPoints: [`${root}src/agent/pi/subagent-runner.ts`],
     outfile: `${root}dist-electron/subagent-runner.mjs`,
     format: 'esm',
@@ -98,5 +105,7 @@ if (watch) {
   console.log('watching electron/ — ctrl-c to stop');
 } else {
   await Promise.all(builds.map((options) => build(options)));
-  console.log('built dist-electron/main.mjs, dist-electron/preload.cjs and dist-electron/subagent-runner.mjs');
+  console.log(
+    'built dist-electron/main.mjs, dist-electron/preload.cjs, dist-electron/pagepreload.cjs and dist-electron/subagent-runner.mjs',
+  );
 }

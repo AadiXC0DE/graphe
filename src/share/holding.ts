@@ -15,6 +15,15 @@ export const holdWords = {
   waiting: 'This is finished and waiting for you. Nothing has reached your project yet.',
   approve: 'Let it in',
   setAside: 'Set it aside',
+  /** Over the pictures the decision arrives with. */
+  seeIt: 'Before you say yes',
+  /** While they are still being taken. Both answers stay live throughout. */
+  looking: 'Making a picture of it…',
+  now: 'How it looks now',
+  ifIn: 'If you let it in',
+  /** Said where a picture should have been, and never instead of the answer. */
+  decideAnyway: 'You can still let it in or set it aside.',
+  atWidth: 'Look at it at another size',
   bringBack: 'Bring it back',
   undo: 'Undo',
   isIn: 'It is in. Your project looks like this now.',

@@ -43,8 +43,17 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 
 import { saysHowItHolds, WIDTHS, type Look, type Width } from '../design/widths';
 import { makeAndServe } from '../preview/show';
+import { alsoSay, saysItMissed, type Recording } from './flow';
+import { record, type Camera } from './recorder';
 import { comparePictures, realSize, type Bitmap, type ChangedArea } from './regions';
 import { shotFile, shotsFolder } from './shots';
+import {
+  DRAIN_WATCHING,
+  readDrained,
+  START_WATCHING,
+  STOP_WATCHING,
+  WATCHING_SCRIPT,
+} from './watching';
 
 /** Wide enough to be the desktop layout, short enough that a long page does not
  *  become a picture nobody can see the top of. */
@@ -338,6 +347,94 @@ export async function lookAtEveryWidth(
   const looks: Look[] = [];
   for (const size of sizes) looks.push(await lookAt(address, size));
   return looks;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Watching somebody use it                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** How wide a frame is kept. A run is dozens of pictures and each one is
+ *  evidence rather than a pixel comparison, so it is a photograph at a size
+ *  somebody can look at, not the whole retina buffer forty times over. */
+const FRAME_WIDTH = 900;
+
+function framePicture(image: NativeImage): string {
+  const size = image.getSize();
+  const small =
+    size.width > FRAME_WIDTH ? image.resize({ width: FRAME_WIDTH, quality: 'good' }) : image;
+  return `data:image/jpeg;base64,${small.toJPEG(78).toString('base64')}`;
+}
+
+/** Whatever is showing the page. Described by what it can do rather than by
+ *  what it is, so the bookkeeping around one can be tested without opening a
+ *  window. */
+export type Showing = {
+  capturePage: () => Promise<NativeImage>;
+  executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
+};
+
+/** A camera pointed at a view that is already open. */
+export function cameraOn(showing: Showing): Camera {
+  return {
+    snap: async () => {
+      const image = await waitFor(showing.capturePage(), 8000);
+      if (image === null || image.isEmpty()) return null;
+      return framePicture(image);
+    },
+  };
+}
+
+/** How often the page is asked what has happened. Short enough that a press and
+ *  the picture of what it did are the same moment. */
+const POLL = 150;
+
+export type Watching = {
+  /** Stop, wait for the pictures still in flight, and hand back the run. */
+  stop: () => Promise<Recording>;
+};
+
+/**
+ * Record somebody using the page in front of them.
+ *
+ * The page keeps its own short list of what it saw and is emptied on a timer
+ * rather than reaching back to us. Nothing has to be given a channel, and it
+ * works the same on a page we serve and on a server the designer runs
+ * themselves — which is most of them.
+ */
+export async function watchWhileUsed(
+  showing: Showing,
+  options: { says?: string } = {},
+): Promise<Watching> {
+  const taking = record({ camera: cameraOn(showing), says: options.says });
+  let missed = 0;
+
+  const install = async (): Promise<void> => {
+    await showing.executeJavaScript(WATCHING_SCRIPT, true).catch(() => {});
+    await showing.executeJavaScript(START_WATCHING, true).catch(() => {});
+  };
+
+  const ask = async (): Promise<void> => {
+    const answer = await showing.executeJavaScript(DRAIN_WATCHING, true).catch(() => null);
+    const drained = readDrained(answer);
+    missed += drained.missed;
+    for (const doing of drained.doings) taking.saw(doing);
+    // A page that has moved on has lost the script with it, and the new page
+    // opening is the first state of it.
+    if (drained.gone) await install();
+  };
+
+  await install();
+  const timer = setInterval(() => void ask(), POLL);
+
+  return {
+    stop: async () => {
+      clearInterval(timer);
+      await ask();
+      await showing.executeJavaScript(STOP_WATCHING, true).catch(() => {});
+      const run = await taking.finish();
+      return missed === 0 ? run : { ...run, note: alsoSay(run.note, saysItMissed(missed)) };
+    },
+  };
 }
 
 /** A picture as it is on disk, read back into pixels and a thumbnail. Used for

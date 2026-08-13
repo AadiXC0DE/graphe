@@ -1,3 +1,4 @@
+import { afterWords } from '../work/after';
 import { useState } from 'react';
 import Board from './Board';
 import type { Away as AwayState, Decision, EveryKind } from '../lib/ipc';
@@ -30,6 +31,9 @@ export type AwayProps = {
   busy: boolean;
   /** Get on with something whether or not the window stays open. */
   onKeepGoing: (text: string) => void;
+  /** Ask for work that waits until another piece has finished. Left off, the
+   *  offer is not made — there is nothing to wait for on an empty board. */
+  onStartAfter?: (text: string, after: string) => void;
   /** Take one's result into the project. */
   onKeep: (id: string) => void;
   /** Stop one, or let its result go. */
@@ -80,6 +84,7 @@ export default function Away({
   now,
   busy,
   onKeepGoing,
+  onStartAfter,
   onKeep,
   onDrop,
   onAnswer,
@@ -91,6 +96,8 @@ export default function Away({
   /* Both forms are folded until somebody wants one. The band is about what is
      running; a pair of empty boxes above that is a pair of empty boxes. */
   const [starting, setStarting] = useState(false);
+  /** Which piece this one should wait for, or empty for none. */
+  const [waitFor, setWaitFor] = useState('');
   const [asking, setAsking] = useState(false);
   const [repeatDoing, setRepeatDoing] = useState('');
   const [every, setEvery] = useState<EveryKind>('day');
@@ -100,13 +107,20 @@ export default function Away({
   const pieces = away?.pieces ?? [];
   const repeats = away?.repeats ?? [];
   const asked = pieces.filter((one) => one.question !== null);
+  /* Only work that has not finished can be waited for — waiting for something
+     already done would start straight away, which is not what was asked. */
+  const canWaitFor = pieces.filter(
+    (one) => one.state === 'running' || one.state === 'waiting' || one.state === 'needs-you',
+  );
 
   const send = () => {
     const text = doing.trim();
     if (text === '') return;
     setDoing('');
     setStarting(false);
-    onKeepGoing(text);
+    if (waitFor === '') onKeepGoing(text);
+    else onStartAfter?.(text, waitFor);
+    setWaitFor('');
   };
 
   const askForIt = () => {
@@ -152,13 +166,40 @@ export default function Away({
             }}
           />
           <p className="away__hint">{awayWords.keepGoingHint}</p>
+
+          {/* Order, said in the words somebody would use. Offered only when
+              there is something to wait for, which is what makes it an offer
+              rather than a setting. */}
+          {onStartAfter === undefined || canWaitFor.length === 0 ? null : (
+            <div className="away__after">
+              <label className="away__afterlabel" htmlFor="away-after">
+                {afterWords.pick}
+              </label>
+              <select
+                id="away-after"
+                className="away__pick"
+                value={waitFor}
+                disabled={busy}
+                onChange={(event) => setWaitFor(event.target.value)}
+              >
+                <option value="">{afterWords.noWait}</option>
+                {canWaitFor.map((one) => (
+                  <option key={one.id} value={one.id}>
+                    {afterWords.waits(one.doing)}
+                  </option>
+                ))}
+              </select>
+              <p className="away__hint">{afterWords.what}</p>
+            </div>
+          )}
+
           <button
             type="button"
             className="away__do away__do--first"
             onClick={send}
             disabled={busy || doing.trim() === ''}
           >
-            {awayWords.start}
+            {waitFor === '' ? awayWords.start : afterWords.start}
           </button>
         </div>
       ) : null}

@@ -1,3 +1,4 @@
+import SeeFirst from './SeeFirst';
 import { useState } from 'react';
 import type { HandedOver, Landing as LandingState, WentOnline } from '../lib/ipc';
 import { holdWords } from '../share/holding';
@@ -31,6 +32,8 @@ type Props = {
   /** What was just decided about work, and the version that undoes it. Null
    *  until somebody decides something. */
   decided: { letIn: boolean; undoTo: string } | null;
+  /** True while the pictures are still being taken. */
+  looking?: boolean;
 };
 
 /** The two things that can leave this computer, and what each says before it
@@ -79,12 +82,16 @@ export default function Landing({
   onShare,
   onOpenLink,
   decided,
+  looking,
 }: Props) {
   /* Which of the two has been pressed once. The second press is the one that
      does anything, and pressing anything else puts this away. */
   const [asking, setAsking] = useState<'developer' | 'online' | null>(null);
 
   const waiting = state?.waiting ?? null;
+  // The pictures ride with the work they are of, so there is no way to have one
+  // without the other.
+  const held = state?.held ?? null;
   const stopped = busy || going !== null;
 
   const ask = (which: 'developer' | 'online') => {
@@ -117,34 +124,15 @@ export default function Landing({
         </span>
       </label>
 
-      {waiting === null ? null : (
-        <div className="landing__waiting" role="group" aria-label="Work waiting for you">
-          <p className="landing__doing">{waiting.doing}</p>
-          <p className="landing__says">
-            {waiting.state === 'making' ? holdWords.making : holdWords.waiting}
-          </p>
-          {waiting.state === 'making' ? null : (
-            <div className="landing__row">
-              <button
-                type="button"
-                className="landing__do landing__do--first"
-                onClick={() => onDecide(true)}
-                disabled={stopped}
-              >
-                {holdWords.approve}
-              </button>
-              <button
-                type="button"
-                className="landing__quietdo"
-                onClick={() => onDecide(false)}
-                disabled={stopped}
-              >
-                {holdWords.setAside}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      {/* The decision, with what it looks like attached. Announced here and
+          nowhere else — the same work said twice is two things to answer. */}
+      <SeeFirst
+        waiting={waiting}
+        held={held}
+        {...(looking === undefined ? {} : { looking })}
+        busy={stopped}
+        onDecide={onDecide}
+      />
 
       {/* Both answers undo through the same door, because both are a version
           and putting the project at a version is one thing this app does. */}

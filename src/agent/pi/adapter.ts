@@ -36,6 +36,7 @@
 
 import type { GuardFacts } from '../guard/policy';
 import { evaluate, requiresSnapshot } from '../guard/policy';
+import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
@@ -43,6 +44,7 @@ import { EventRelay } from './events';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { grapheTools } from './tools';
+import { heldShell } from '../sandbox/shell';
 import {
   collectAccounts,
   credentialFor,
@@ -355,6 +357,11 @@ export type GrapheSession = {
   stopAsking(on: boolean): void;
   /** Whether it is currently not asking. */
   readonly quiet: boolean;
+  /** How far it may go on its own, for as long as this session lives. A
+   *  ceiling on questions, never on what is refused. */
+  goAsFarAs(howFar: HowFar): void;
+  /** Where the ladder is set right now. */
+  readonly howFar: HowFar;
   /** The extensions this folder brought with it, and which of them loaded.
    *  Empty for a project that carries none, which is almost all of them. */
   readonly carried: readonly Carried[];
@@ -428,6 +435,9 @@ export type ProviderSummary = {
   apiKeyLabel: string | null;
   connected: boolean;
   available: boolean;
+  /** True when the connected account is paid for by its own plan rather than
+   *  by use, so no per-use figure about it can be honest. */
+  subscription: boolean;
   models: readonly ModelSummary[];
 };
 
@@ -556,7 +566,10 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
     const methods: ProviderMethod[] = [];
     let oauthLabel: string | null = null;
     let apiKeyLabel: string | null = null;
-    if (provider.auth.oauth?.login !== undefined) {
+    // Anthropic's own terms forbid another app signing people in with their
+    // Claude plan, so only its key is offered. No other provider is filtered.
+    const signInAllowed = provider.id !== 'anthropic';
+    if (signInAllowed && provider.auth.oauth?.login !== undefined) {
       methods.push('oauth');
       oauthLabel = provider.auth.oauth.loginLabel ?? provider.auth.oauth.name ?? null;
     }
@@ -584,6 +597,7 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
       apiKeyLabel,
       connected: connected.has(provider.id),
       available: safeConfigured(runtime, provider.id),
+      subscription: safeSubscription(runtime, provider.id),
       models: models.map((model) =>
         usable.has(model.id) ? { ...model, available: true } : model,
       ),
@@ -744,6 +758,14 @@ function safeConfigured(runtime: PiRuntime, providerId: string): boolean {
   }
 }
 
+function safeSubscription(runtime: PiRuntime, providerId: string): boolean {
+  try {
+    return runtime.isUsingSubscription(providerId);
+  } catch {
+    return false;
+  }
+}
+
 /** Sign in to a provider, or paste its API key. The interaction is the main
  *  process's: it opens the browser, asks the window for keys and pasted
  *  codes, and reports each step on its way. Resolves when the attempt is
@@ -898,7 +920,16 @@ const WORKING_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as
 export async function createSession(options: CreateSessionOptions): Promise<GrapheSession> {
   const pi = await loadPi();
 
-  const facts: GuardFacts = { ...options.guard, projectRoot: options.projectRoot };
+  // Worked out before the Guard's facts rather than beside the runtime, because
+  // the agent has to be able to read the skills and extensions it runs on — a
+  // feature somebody installed failing silently is the bug this prevents.
+  const agentDir = options.agentDir ?? (await defaultAgentDir());
+
+  const facts: GuardFacts = {
+    ...options.guard,
+    projectRoot: options.projectRoot,
+    agentFolder: agentDir,
+  };
 
   /**
    * Pi's own running total for this session, in whole currency units.
@@ -953,7 +984,6 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     planning: () => planning,
   });
 
-  const agentDir = options.agentDir ?? (await defaultAgentDir());
   const runtime = await runtimeFor(agentDir);
   /** Filled while the loader runs, which is before anything below can read it. */
   let carried: readonly Carried[] = [];
@@ -1013,7 +1043,53 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       ? firstUsable(runtime)
       : { providerId: model.provider, modelId: model.id };
 
-  const customTools = grapheTools(agentDir, options.figmaToken, forHelpers);
+  const customTools = grapheTools(
+    agentDir,
+    options.figmaToken,
+    forHelpers,
+    options.thinking,
+    options.projectRoot,
+  );
+
+  // The shell is Pi's tool, not ours, and it is the one that can change
+  // anything on this disk. Pi builds it from `createBashToolDefinition`, whose
+  // `operations` seam is where a command is actually run — so the same
+  // definition, built here with a runner that wraps every command in the
+  // computer's own boundary first, and handed over as a custom tool. A custom
+  // tool of the same name replaces the built-in in Pi's registry, so the model
+  // sees one `bash`, described exactly as Pi describes it, and the Guard's hook
+  // fires on it exactly as before.
+  //
+  // The folder held is the one this session was opened on. That may be a copy
+  // rather than the project on screen, which is precisely why it is read from
+  // the options rather than worked out here.
+  //
+  // The shell somebody chose for themselves is still the shell: it is read the
+  // same way Pi reads it and put inside the boundary, rather than replaced by
+  // one of ours.
+  const settings = ((): { shell?: string; prefix?: string } => {
+    try {
+      const chosenShell = pi.SettingsManager.create(options.projectRoot, agentDir);
+      return { shell: chosenShell.getShellPath(), prefix: chosenShell.getShellCommandPrefix() };
+    } catch {
+      return {};
+    }
+  })();
+  const shell = heldShell({
+    folder: options.projectRoot,
+    parts: () => {
+      const config = pi.getShellConfig(settings.shell);
+      // A shell fed its command down a pipe is not one we can name on a command
+      // line, so it runs unheld rather than wrongly.
+      if (config.commandTransport === 'stdin') throw new Error('nothing to name');
+      return { shell: config.shell, args: config.args };
+    },
+    plain: pi.createLocalBashOperations({ shellPath: settings.shell }).exec,
+  });
+  const boundShell = pi.createBashToolDefinition(options.projectRoot, {
+    operations: shell,
+    ...(settings.prefix === undefined ? {} : { commandPrefix: settings.prefix }),
+  });
 
   /* Our own ids rather than Pi's `Model`, so no Pi shape leaves this file. */
   let inUse: { providerId: string; modelId: string } | null =
@@ -1046,7 +1122,9 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         // custom tool" to "exactly this list", so ours have to be in it or they
         // vanish. Taken off the tools themselves rather than written twice.
         tools: [...WORKING_TOOLS, ...customTools.map((tool) => tool.name)],
-        customTools,
+        // Cast because Pi's own bash definition is narrower in its schema than
+        // the list it goes into; Pi assigns it the same way internally.
+        customTools: [...customTools, boundShell as (typeof customTools)[number]],
         modelRuntime: runtime,
         model,
         ...(options.thinking === undefined ? {} : { thinkingLevel: options.thinking }),
@@ -1244,6 +1322,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       confirmations.abandonAll();
       unsubscribe();
       session.dispose();
+      void shell.close();
     },
 
     answer(callId: string, decision: Decision): boolean {
@@ -1274,6 +1353,14 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
     get quiet(): boolean {
       return facts.stopAsking === true;
+    },
+
+    goAsFarAs(howFar: HowFar): void {
+      facts.howFar = howFar;
+    },
+
+    get howFar(): HowFar {
+      return facts.howFar ?? 'asking';
     },
 
     get carried(): readonly Carried[] {

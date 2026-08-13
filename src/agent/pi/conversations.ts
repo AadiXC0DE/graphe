@@ -72,6 +72,24 @@ export function nameOf(chosen: unknown, firstMessage: string, at: number): strin
   return /[\p{L}\p{N}]/u.test(said) ? shortened(said) : titleOf(firstMessage, at);
 }
 
+/**
+ * How to open a conversation.
+ *
+ * A conversation that has a file is always picked up where it was left, never
+ * begun again: putting one down puts down the view of it, and every word is
+ * still written down. Without a file, `fresh` is the difference between somebody
+ * pressing "new" and somebody opening the project they were last in.
+ */
+export type Opening =
+  | { kind: 'carry-on'; path: string }
+  | { kind: 'most-recent' }
+  | { kind: 'fresh' };
+
+export function openingFor(asked: unknown, fresh = false): Opening {
+  if (typeof asked === 'string' && asked.trim() !== '') return { kind: 'carry-on', path: asked };
+  return fresh ? { kind: 'fresh' } : { kind: 'most-recent' };
+}
+
 type Fields = Readonly<Record<string, unknown>>;
 
 function fieldsOf(value: unknown): Fields | null {

@@ -1,0 +1,169 @@
+/* A list and a pane. The list is narrow because a helper is told apart by the
+   first few words of what it was asked; the pane is wide because what it found
+   is the thing worth coming here for. */
+
+.helpersview {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  align-items: start;
+  gap: 0;
+}
+
+.helpersview__none {
+  padding: var(--space-5);
+}
+
+.helpersview__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: var(--space-3);
+  border-right: 1px solid var(--border);
+  list-style: none;
+  position: sticky;
+  top: 0;
+}
+
+.helpersview__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* Two lines each: enough to tell them apart, not so much that the list becomes
+   the pane it is meant to be an index of. */
+.helpersview__rowtask {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.helpersview__row--here {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+@media (hover: hover) {
+  .helpersview__row:hover {
+    color: var(--text);
+  }
+}
+
+.helpersview__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* --------------------------------------------------------------- the pane */
+
+.helpersview__one {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5);
+  max-width: 70ch;
+}
+
+.helpersview__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.helpersview__state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+.helpersview__when {
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.helpersview__part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.helpersview__asked {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text);
+}
+
+/* Whole and wrapped, newlines kept. A helper's findings arrive as it wrote
+   them, and reflowing somebody's list into a paragraph loses the list. */
+.helpersview__said {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.helpersview__bring {
+  align-self: flex-start;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.helpersview__bring:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) {
+  .helpersview__bring:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+@container (max-width: 720px) {
+  .helpersview {
+    grid-template-columns: 1fr;
+  }
+
+  .helpersview__list {
+    position: static;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .helpersview__bring:active {
+    transform: none;
+  }
+}

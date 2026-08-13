@@ -1,0 +1,63 @@
+/* A run of steps as one line. The chain of eight is still a chain of eight —
+   this is a fold in the paper, not a summary. */
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.steps__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}
+
+.steps__head > .activity {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Quarter turn down when it is open. The one thing that moves, and only on the
+   press that asked it to. */
+.steps__caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 21px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.steps--open .steps__caret {
+  transform: rotate(90deg);
+}
+
+@media (hover: hover) {
+  .steps__head:hover .steps__caret {
+    color: var(--text-muted);
+  }
+}
+
+/* Indented under the line that gathered them, so the relationship is read
+   rather than explained. */
+.steps__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border);
+  margin-left: calc(var(--space-3) / 2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .steps__caret {
+    transition: none;
+  }
+}

@@ -1461,7 +1461,7 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       const checkout =
         !inFront || from.address === null ? null : held.checkouts.get(from.address) ?? null;
       const applied =
-        checkout === null ? Promise.resolve() : bringBack(gitRunHereFor(), path, checkout.folder, 'HEAD');
+        checkout === null ? Promise.resolve() : bringBack(gitRunHereFor(), path, checkout.folder);
       void applied.then(() => look(path, held));
     }
 
@@ -4190,7 +4190,7 @@ function register(): void {
     // still opens and its work stays in its checkout until it settles.
     const checkout = open.held.checkouts.get(started.value.address) ?? null;
     if (checkout !== null) {
-      await bringBack(gitRunHereFor(), open.path, checkout.folder, 'HEAD').catch(() => undefined);
+      await bringBack(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
     }
     return done({
       path: open.path,

@@ -1923,6 +1923,11 @@ function Conversation() {
   const answerPlan = useCallback(
     (turnId: string, go: boolean) => {
       const text = asked.current;
+      // The steps the agent proposed for this plan, read before the answer is
+      // written — the build-plan store wants the real task list.
+      const planTurn =
+        desk === null ? null : desk.turns.find((turn): turn is Extract<typeof turn, { kind: "plan" }> => turn.kind === "plan" && turn.id === turnId);
+      const steps = planTurn === undefined || planTurn === null ? [] : planTurn.steps;
       setDesks((current) =>
         changeCurrent(current, (one) => ({
           ...one,
@@ -1935,11 +1940,34 @@ function Conversation() {
       );
       if (text === "") return;
       asked.current = "";
-      if (go) void deliver(text, sizeUp(text), { lookFirst: false });
-      else setDraft(text);
+      if (go) {
+        // A build plan keeps the real task list the agent proposed, so a
+        // resumed session knows each step and where it got to.
+        const path = desks.current;
+        if (path !== null && steps.length > 0) {
+          void bridge.buildSave(
+            steps.map((step) => ({ title: step, acceptance: "" })),
+            { project: path },
+          );
+        }
+        void deliver(text, sizeUp(text), { lookFirst: false });
+      } else setDraft(text);
     },
-    [deliver],
+    [deliver, desk, desks],
   );
+
+  /* "Get on with it" means what it says: a plan is there to be built, not to
+     sit waiting for a click while somebody stepped away. Where the project's
+     hold-back is off, an unanswered plan approves itself the moment it lands,
+     so a big document can be kicked off and left alone.*/
+  useEffect(() => {
+    if (desk === null) return;
+    if (preferences.heldBack[desk.path] === true) return;
+    const waiting = desk.turns.find((one) => one.kind === 'plan' && one.answered === null);
+    if (waiting !== undefined && waiting.kind === 'plan') {
+      answerPlan(waiting.id, true);
+    }
+  }, [desk, preferences.heldBack, answerPlan]);
 
   const respond = useCallback(
     (turnId: string, callId: string, decision: Decision) => {

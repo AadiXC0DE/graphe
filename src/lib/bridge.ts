@@ -954,6 +954,10 @@ function previewBridge(): Bridge {
       return Promise.resolve(previewFail<{ name: string; text: string } | null>());
     },
 
+    buildSave(): Promise<Result<BuildPlan | null>> {
+      return Promise.resolve(done(null));
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -1674,6 +1678,7 @@ function connect(): Bridge {
     buildStart: (source, where) => api.buildStart(source, where),
     buildPlan: (where) => api.buildPlan(where),
     chooseDocument: (where) => api.chooseDocument(where),
+    buildSave: (tasks, where) => api.buildSave(tasks, where),
     stopAsking: (on) => api.stopAsking(on),
     goAsFarAs: (howFar) => api.goAsFarAs(howFar),
     carried: () => api.carried(),

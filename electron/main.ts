@@ -1721,27 +1721,73 @@ const TOKEN_FILES = [
  * token file and a globals file keeps its tokens in one of them, and counting
  * is a better guess than an ordering we made up.
  */
+/** Every stylesheet the project keeps, with its name, so a read can say which
+ *  file a token came from. Token files first, then the style folders — the same
+ *  breadcrumb `styleSheets` follows, but paired with names for aggregation. */
+async function tokenSheets(root: string): Promise<readonly { name: string; css: string }[]> {
+  const names = [...TOKEN_FILES];
+  for (const folder of STYLE_FOLDERS) {
+    const inside = await readdir(join(root, folder)).catch(() => [] as string[]);
+    for (const name of inside) {
+      if (name.toLowerCase().endsWith('.css')) names.push(`${folder}/${name}`);
+    }
+  }
+  const out: { name: string; css: string }[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (out.length >= MOST_SHEETS || seen.has(name)) continue;
+    seen.add(name);
+    const css = await readFile(join(root, name), 'utf8').catch(() => null);
+    if (css !== null) out.push({ name, css });
+  }
+  return out;
+}
+
+/**
+ * The project's design tokens, gathered from every stylesheet it keeps.
+ *
+ * A project's visual language is rarely one file — tokens live in `globals.css`
+ * and `variables.css` and the component sheets together. This reads them all,
+ * keeps the first declaration of each name (which is the one that wins on
+ * `:root`), and remembers which file each came from so an edit to it lands in
+ * the right place. `file`/`text` name the sheet with the most tokens, which is
+ * where the live editing preview writes.
+ */
 async function styleTokens(
   root: string,
 ): Promise<
   { file: string; tokens: readonly import('../src/lib/ipc').StyleToken[]; text: string } | null
 > {
-  let best: {
-    file: string;
-    tokens: readonly import('../src/lib/ipc').StyleToken[];
-    text: string;
-  } | null = null;
-  for (const candidate of TOKEN_FILES) {
-    const css = await readFile(join(root, candidate), 'utf8').catch(() => null);
-    if (css === null) continue;
-    const found = readTokens(css);
-    if (found.length === 0) continue;
-    const withSteps = found.map((one) => ({ ...one, steps: steps(one, found) }));
-    if (best === null || withSteps.length > best.tokens.length) {
-      best = { file: candidate, tokens: withSteps, text: css };
+  const sheets = await tokenSheets(root);
+  // Raw reads named by file, then the first declaration of each name kept — the
+  // one that wins on :root — so a value restated per theme is not repeated.
+  const byName = new Map<string, { raw: ReturnType<typeof readTokens>[number]; file: string }>();
+  for (const sheet of sheets) {
+    for (const raw of readTokens(sheet.css)) {
+      if (byName.has(raw.name)) continue;
+      byName.set(raw.name, { raw, file: sheet.name });
     }
   }
-  return best;
+  if (byName.size === 0) return null;
+  const raws = [...byName.values()].map((one) => one.raw);
+  const withSteps: import('../src/lib/ipc').StyleToken[] = [...byName.values()].map((one) => ({
+    ...one.raw,
+    steps: steps(one.raw, raws),
+    file: one.file,
+  }));
+  // The sheet holding the most tokens is the one the panel edits live.
+  const counts = new Map<string, number>();
+  for (const one of withSteps) counts.set(one.file ?? '', (counts.get(one.file ?? '') ?? 0) + 1);
+  let bestName = withSteps[0]?.file ?? '';
+  let bestCount = -1;
+  for (const [name, count] of counts) {
+    if (name !== '' && count > bestCount) {
+      bestName = name;
+      bestCount = count;
+    }
+  }
+  const text = sheets.find((one) => one.name === bestName)?.css ?? '';
+  return { file: bestName, tokens: withSteps, text };
 }
 
 /** Folders a project keeps its stylesheets in, looked in one level down. */
@@ -3526,22 +3572,56 @@ function register(): void {
         )
       : [];
     // The whole design view is one saved moment. Anything sent here is written
-    // to the stylesheet and then kept as a single version — the window holds
-    // the edits so nothing is committed on a slide.
+    // back where each token lived and then kept as a single version — the
+    // window holds the edits so nothing is committed on a slide.
     const styles = await styleTokens(open.path);
-    if (styles === null) return fail(NOTHING_OPEN);
-    const where = join(open.path, styles.file);
+    if (styles === null && tokens.length === 0 && motions.length === 0) return fail(NOTHING_OPEN);
     try {
-      let css = await readFile(where, 'utf8');
+      // Apply edits per file, so a token that came from a component sheet is
+      // written where it lives, not into whichever sheet holds the most. The
+      // source is looked up by name from the read, because the window only
+      // sends a name and a value.
+      const perFile = new Map<string, string>();
+      const edits = new Map<string, { name: string; value: string }[]>();
+      const whereLives = new Map<string, string>();
+      if (styles !== null) {
+        for (const one of styles.tokens) whereLives.set(one.name, one.file ?? styles.file);
+      }
       for (const one of tokens) {
-        const next = writeToken(css, one.name, one.value);
-        if (next !== css) css = next;
+        const file = whereLives.get(one.name) ?? styles?.file;
+        if (file === undefined) continue;
+        edits.set(file, [...(edits.get(file) ?? []), { name: one.name, value: one.value }]);
       }
-      for (const one of motions) {
-        const next = writeMotionAll(css, one.places as Parameters<typeof writeMotionAll>[1], one.change as Parameters<typeof writeMotionAll>[2]);
-        if (next !== css) css = next;
+      const writeFileEdits = async (
+        file: string,
+        list: readonly { name: string; value: string }[],
+      ): Promise<void> => {
+        const where = join(open.path, file);
+        let css = await readFile(where, 'utf8');
+        let wrote = false;
+        for (const one of list) {
+          const next = writeToken(css, one.name, one.value);
+          if (next !== css) {
+            css = next;
+            wrote = true;
+          }
+        }
+        if (wrote) perFile.set(where, css);
+      };
+      for (const [file, list] of edits) await writeFileEdits(file, list);
+      // Motion edits land in the primary stylesheet.
+      if (styles !== null && motions.length > 0) {
+        const where = join(open.path, styles.file);
+        let css = perFile.get(where) ?? (await readFile(where, 'utf8'));
+        for (const one of motions) {
+          const next = writeMotionAll(css, one.places as Parameters<typeof writeMotionAll>[1], one.change as Parameters<typeof writeMotionAll>[2]);
+          if (next !== css) {
+            css = next;
+            perFile.set(where, css);
+          }
+        }
       }
-      await writeFile(where, css, 'utf8');
+      for (const [where, css] of perFile) await writeFile(where, css, 'utf8');
       await open.held.timeline.snapshot({ boundary: 'user-asked', by: 'you' });
       return done(await versionsOf(open.held));
     } catch (cause) {

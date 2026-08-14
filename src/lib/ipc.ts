@@ -778,7 +778,7 @@ export type Artifact = {
 
 export type Swatch = { name: string; value: string };
 
-/** One custom property in the project's own token file. */
+/** One custom property in the project's own design tokens. */
 export type StyleToken = {
   name: string;
   value: string;
@@ -786,6 +786,9 @@ export type StyleToken = {
   line: number;
   /** The values a slider should snap to, derived from the file's own scale. */
   steps: readonly string[];
+  /** The stylesheet it was read from, so an edit lands in the same file. Left
+   *  off (a fixture), an edit falls back to the project's primary sheet. */
+  file?: string;
 };
 
 /* -------------------------------------------------------------------------- */

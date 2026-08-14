@@ -2877,7 +2877,7 @@ function Conversation() {
             onBrowse={() => void browse()}
           />
         ) : desk === null || desk.turns.length === 0 ? (
-          <Welcome onUse={setDraft} />
+          <Welcome onUse={setDraft} project={desk?.name ?? null} />
         ) : (
           <>
             {/* The top of the page. A sibling of the thread rather than its

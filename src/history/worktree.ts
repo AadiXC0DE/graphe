@@ -206,7 +206,16 @@ async function worktreeChanges(
   return [...byPath.entries()].map(([path, kind]) => ({ kind, path }));
 }
 
-/** Whether the main checkout changed that path since the same base. */
+/** The commit the worktree branched from: two sides one ancestor, so the
+ *  changes each side made since then are the ones worth comparing. */
+async function sharedBase(run: RunGit, folder: string, repo: string): Promise<string | null> {
+  const branch = await branchAt(run, folder);
+  if (branch === null) return null;
+  const { code, out } = await run(['merge-base', branch, 'HEAD'], { cwd: repo });
+  return code === 0 && out !== undefined ? out.trim() : null;
+}
+
+/** Whether the main checkout changed that path since the shared base. */
 async function mainChanged(run: RunGit, repo: string, base: string, path: string): Promise<boolean> {
   const rows = await changedAgainst(run, repo, ['diff', '--name-status', '--no-renames', base, '--', path]);
   return rows.length > 0;
@@ -239,9 +248,10 @@ export async function bringBack(
   run: RunGit,
   repo: string,
   folder: string,
-  base: string,
 ): Promise<{ ok: true; value: BringBack } | { ok: false; because: string }> {
   if (!(await isRepo(run, repo))) return { ok: false, because: bringBackWords.notRepo };
+  const base = await sharedBase(run, folder, repo);
+  if (base === null) return { ok: false, because: bringBackWords.notRepo };
   const changes = await worktreeChanges(run, folder, base);
   const applied: string[] = [];
   const conflicted: string[] = [];

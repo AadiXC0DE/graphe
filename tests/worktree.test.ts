@@ -192,7 +192,7 @@ describe('bringBack — Cursor-style Apply, files come home uncommitted', () => 
 
       await writeFile(path.join(made.value.folder, 'a.txt'), 'changed in the tab\n');
       // The main checkout is untouched.
-      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      const applied = await bringBack(git(), repo, made.value.folder);
       expect(applied.ok).toBe(true);
       if (applied.ok) expect(applied.value.applied).toContain('a.txt');
       // The change is on disk in main, uncommitted.
@@ -213,7 +213,7 @@ describe('bringBack — Cursor-style Apply, files come home uncommitted', () => 
       await writeFile(path.join(made.value.folder, 'a.txt'), 'from the tab\n');
       await writeFile(path.join(repo, 'a.txt'), 'mine on main\n');
 
-      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      const applied = await bringBack(git(), repo, made.value.folder);
       expect(applied.ok).toBe(true);
       if (!applied.ok) return;
       expect(applied.value.applied).not.toContain('a.txt');
@@ -233,7 +233,7 @@ describe('bringBack — Cursor-style Apply, files come home uncommitted', () => 
       if (!made.ok || made.value === null) return;
 
       await writeFile(path.join(made.value.folder, 'brand-new.ts'), 'export const x = 1;\n');
-      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      const applied = await bringBack(git(), repo, made.value.folder);
       expect(applied.ok).toBe(true);
       if (applied.ok) expect(applied.value.applied).toContain('brand-new.ts');
       expect(readFileContent(repo, 'brand-new.ts')).toBe('export const x = 1;\n');
@@ -263,7 +263,7 @@ describe('parallel isolation — the reference behaviour in miniature', () => {
       await writeFile(path.join(made.value.folder, 'b.txt'), 'b from tab two\n');
 
       // Bring the tab's work home: b lands, a stays the primary's version.
-      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      const applied = await bringBack(git(), repo, made.value.folder);
       expect(applied.ok).toBe(true);
       if (!applied.ok) return;
       expect(applied.value.applied).toContain('b.txt');
@@ -286,7 +286,7 @@ describe('parallel isolation — the reference behaviour in miniature', () => {
       if (!made.ok || made.value === null) return;
       await writeFile(path.join(made.value.folder, 'a.txt'), 'tab two version\n');
 
-      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      const applied = await bringBack(git(), repo, made.value.folder);
       expect(applied.ok).toBe(true);
       if (!applied.ok) return;
       // The tab's file is NOT applied over the primary's — it's reported and
@@ -294,6 +294,35 @@ describe('parallel isolation — the reference behaviour in miniature', () => {
       expect(applied.value.applied).not.toContain('a.txt');
       expect(applied.value.conflicted).toContain('a.txt');
       expect(readFileContent(repo, 'a.txt')).toBe('primary version\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('shared base — a folder that commits ahead is still protected', () => {
+  it('does not overwrite a file the folder committed after the tab branched', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'tab', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      // The primary commits a change to a.txt after the tab branched off it.
+      await writeFile(path.join(repo, 'a.txt'), 'primary committed this\n');
+      await raw(repo, 'commit', '-am', 'primary advances');
+
+      // The tab edits the same file in its own checkout.
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'tab edited this\n');
+
+      const applied = await bringBack(git(), repo, made.value.folder);
+      expect(applied.ok).toBe(true);
+      if (!applied.ok) return;
+      // Not silently overwritten: the tab's version waits, the folder keeps its
+      // committed one, and the conflict is reported.
+      expect(applied.value.applied).not.toContain('a.txt');
+      expect(applied.value.conflicted).toContain('a.txt');
+      expect(readFileContent(repo, 'a.txt')).toBe('primary committed this\n');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

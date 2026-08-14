@@ -325,6 +325,10 @@ const api: GrapheApi = {
     >;
   },
 
+  buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>> {
+    return ipcRenderer.invoke(CHANNEL.buildSave, tasks, named(where)) as Promise<Result<BuildPlan | null>>;
+  },
+
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {
     return ipcRenderer.invoke(CHANNEL.carried, named(where)) as Promise<Result<readonly CarriedExtension[]>>;
   },

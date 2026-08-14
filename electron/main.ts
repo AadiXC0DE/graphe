@@ -4679,6 +4679,31 @@ function register(): void {
     return done(read ?? { source: name, tasks: [], next: null, done: 0, total: 0 });
   });
 
+  handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildSave, async (_event, args) => {
+    const [stepsRaw] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const prior = await readBuildPlan(open.path);
+    if (prior === null) return fail(NOTHING_OPEN);
+    const steps = Array.isArray(stepsRaw)
+      ? (stepsRaw as { title?: unknown; acceptance?: unknown }[])
+      : [];
+    const tasks: Task[] = steps
+      .map((one, index) => ({
+        n: index + 1,
+        title: typeof one.title === 'string' ? one.title : 'A step',
+        acceptance:
+          typeof one.acceptance === 'string' ? one.acceptance : '',
+        test: null,
+        status: 'pending' as const,
+        note: null,
+      }))
+      .filter((one) => one.title.trim() !== '');
+    if (tasks.length === 0) return done(prior);
+    await writeBuildPlan(open.path, prior.source, tasks);
+    return done(await readBuildPlan(open.path));
+  });
+
   handle<string>(CHANNEL.skillText, async (_event, args) => {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);

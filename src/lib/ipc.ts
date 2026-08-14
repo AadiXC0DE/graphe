@@ -1013,6 +1013,7 @@ export const CHANNEL = {
   worktreeDrop: 'graphe:worktree-drop',
   buildStart: 'graphe:build-start',
   buildPlan: 'graphe:build-plan',
+  buildSave: 'graphe:build-save',
   chooseDocument: 'graphe:choose-document',
   designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
@@ -1174,6 +1175,9 @@ export type GrapheApi = {
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>>;
   /** The current build plan, or null when none is under way. */
   buildPlan(where?: Where): Promise<Result<BuildPlan | null>>;
+  /** Record the plan the agent produced into the stored build-plan, so a
+   *  resumed session has the real task list. */
+  buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>>;
   /** Pick a requirements document on disk and read its text, or null if closed. */
   chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>>;
   /** Put the front conversation to work in its own git branch and checkout. */

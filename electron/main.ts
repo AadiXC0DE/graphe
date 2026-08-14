@@ -115,6 +115,8 @@ import {
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
+  type VariationSpec,
+  type VariationsOutcome,
   type HowFar,
   type Recording,
   type ShowProgress,
@@ -160,7 +162,13 @@ import {
   landWorktree,
   type RunGit,
 } from '../src/history/worktree';
-import { readPlan, type Task } from '../src/work/buildplan';
+import {
+  addTasks,
+  finishTask,
+  readPlan,
+  startTask,
+  type Task,
+} from '../src/work/buildplan';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -208,8 +216,13 @@ import { canPutOnline, canSendItOn } from '../src/share/tools';
 
 import type { Serving } from '../src/preview/serve';
 import { makeAndServe, ShowError, showSays } from '../src/preview/show';
-import { describePointed, POINTER_SCRIPT, type Pointed } from '../src/preview/point';
-import { read as readPointed, type Material, type Change as Touched } from '../src/preview/inspect';
+import { POINTER_SCRIPT, type Pointed } from '../src/preview/point';
+import {
+  read as readPointed,
+  saysReading,
+  type Material,
+  type Change as Touched,
+} from '../src/preview/inspect';
 import { readUsage } from '../src/design/usage';
 import { photographHeld, type Held as HeldPictures } from '../src/diff/holdshot';
 import { holdCamera } from '../src/diff/holdcamera';
@@ -807,6 +820,8 @@ type Held = {
   sessions: Workspaces<GrapheSession>;
   /** The finished site being looked at, if "See it" has been pressed here. */
   serving: Serving | null;
+  /** Every variation in the set in front, each served on its own address. */
+  variations: readonly Serving[];
   /** The before-and-after (BACKLOG F2). */
   looking: Looking;
   /** A conversation's own checkout, by its address. Present only for the ones
@@ -840,6 +855,7 @@ const workspaces = new Workspaces<Held>({
   close: (held) => {
     held.sessions.closeAll();
     void held.serving?.stop();
+    for (const served of held.variations) void served.stop();
     // The copy goes; whatever it made stays reachable, so closing a project
     // while something waits in it cannot be how somebody loses work.
     void held.waiting?.release();
@@ -1889,7 +1905,8 @@ async function whatIsKnown(folder: string): Promise<Material> {
 async function readingOf(folder: string, pointed: Pointed): Promise<PointedAt | null> {
   try {
     const material = await whatIsKnown(folder);
-    return { pointed, reading: readPointed(pointed, material), says: describePointed(pointed) };
+    const reading = readPointed(pointed, material);
+    return { pointed, reading, says: saysReading(reading) };
   } catch {
     return null;
   }
@@ -2056,6 +2073,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     spend: new SpendRecorder(),
     sessions: conversationsIn(path),
     serving: null,
+    variations: [],
     looking: nothingSeenYet(),
     checkouts: new Map(),
     waiting: null,
@@ -4515,7 +4533,7 @@ function register(): void {
   });
 
   handle<ShowOutcome>(CHANNEL.show, async (_event, args) => {
-    const [at, point] = args;
+    const [at] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_TO_SHOW);
 
@@ -4534,16 +4552,67 @@ function register(): void {
       });
       if (outcome.kind === 'unsure') return done({ kind: 'unsure', question: outcome.question });
       open.held.serving = outcome.serving;
-      // Their own browser, not a window of ours. It is the one they already
-      // trust, it is where their client will open the link we send later, and
-      // the alternative is us drawing somebody else's HTML inside the same app
-      // that holds their folder open.
+      // The page belongs inside this app now, drawn in the pane beside the
+      // conversation. The window points the pane at the served address and
+      // opens it; nothing opens in a separate browser window. Pointing is
+      // already wired into the pane's view, so only the address needs to
+      // travel back.
       const address = atPage(outcome.serving.address, at);
-      await shell.openExternal(point === true ? `${address}#graphe-point` : address);
-      return done({ kind: 'showing', name: open.name });
+      return done({ kind: 'showing', name: open.name, address });
     } catch (cause) {
       return fail(couldNotShow(cause));
     }
+  });
+
+  /* Several designs of the same thing, each served on its own address so the
+     pane can switch between them. Every folder is read and served the way a
+     single “See it” is — nothing here invents a server or opens a project wide. */
+  handle<VariationsOutcome>(CHANNEL.variationsServe, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_TO_SHOW);
+    const spec = Array.isArray(args) ? (args[0] as { subject?: unknown; variations?: unknown } ?? null) : null;
+    const subject = typeof spec?.subject === 'string' ? spec.subject : '';
+    const variations =
+      Array.isArray(spec?.variations) && subject !== ''
+        ? (spec.variations as VariationSpec[]).filter(
+            (one) => one && typeof one.folder === 'string' && one.folder !== '' &&
+              typeof one.id === 'string' && typeof one.name === 'string',
+          )
+        : [];
+    if (variations.length === 0) {
+      return fail({
+        what: 'There are no variations to look at.',
+        because: 'Tell me you want a few designs of something, and it can make them.',
+        actionLabel: 'Got it',
+      });
+    }
+
+    // Make ready the earlier set — a new set replaces the old, like “See it”.
+    for (const served of open.held.variations) await served.stop().catch(() => undefined);
+    open.held.variations = [];
+
+    const ready: { id: string; name: string; address: string }[] = [];
+    for (const one of variations) {
+      try {
+        const outcome = await makeAndServe({
+          folder: one.folder,
+          says: tell,
+          onPointed: (pointed: Pointed) => sayPointed(open.path, pointed),
+        });
+        if (outcome.kind === 'unsure') {
+          // One variation that cannot be read holds nothing up: it is skipped,
+          // and the rest still show.
+          continue;
+        }
+        open.held.variations = [...open.held.variations, outcome.serving];
+        ready.push({ id: one.id, name: one.name, address: outcome.serving.address });
+      } catch {
+        // Keep going past one that will not build. A comparison never needs
+        // every frame to be useful.
+        continue;
+      }
+    }
+    return done({ kind: 'showing', subject, variations: ready });
   });
 
   handle<readonly Skill[]>(CHANNEL.skills, async (_event, args) => {
@@ -4625,6 +4694,23 @@ function register(): void {
     }
   }
 
+  /** The stored plan whole: its source name and the real task list, so a step
+   *  can be advanced and written back without losing anything the window shape
+   *  leaves out. */
+  async function readStoredTasks(project: string): Promise<{ source: string; tasks: readonly Task[] } | null> {
+    const raw = await readFile(buildPlanFile(project), 'utf8').catch(() => null);
+    if (raw === null) return null;
+    try {
+      const stored = JSON.parse(raw) as { source?: unknown; tasks?: unknown };
+      if (typeof stored?.source !== 'string') return null;
+      const tasks = readPlan(stored.tasks);
+      if (tasks.length === 0) return null;
+      return { source: stored.source, tasks };
+    } catch {
+      return null;
+    }
+  }
+
   async function writeBuildPlan(project: string, source: string, tasks: readonly Task[]): Promise<void> {
     const file = buildPlanFile(project);
     await mkdir(dirname(file), { recursive: true });
@@ -4701,6 +4787,28 @@ function register(): void {
       .filter((one) => one.title.trim() !== '');
     if (tasks.length === 0) return done(prior);
     await writeBuildPlan(open.path, prior.source, tasks);
+    return done(await readBuildPlan(open.path));
+  });
+
+  /* The tracker's own step, as the run goes: close the task a settled turn
+     finished, or add tasks for requirements found while building. */
+  handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildAdvance, async (_event, args) => {
+    const [opRaw] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const stored = await readStoredTasks(open.path);
+    if (stored === null) return fail(NOTHING_OPEN);
+    const op = opRaw as import('../src/lib/ipc').BuildAdvance | null;
+    if (op === null || typeof op !== 'object') return fail(NOTHING_OPEN);
+    let tasks: readonly Task[] = stored.tasks;
+    if (op.kind === 'start') {
+      tasks = startTask(stored.tasks);
+    } else if (op.kind === 'finish') {
+      tasks = finishTask(stored.tasks, op.ok !== false);
+    } else if (op.kind === 'add' && Array.isArray(op.titles)) {
+      tasks = addTasks(stored.tasks, op.titles.filter((one) => typeof one === 'string'));
+    }
+    await writeBuildPlan(open.path, stored.source, tasks);
     return done(await readBuildPlan(open.path));
   });
 

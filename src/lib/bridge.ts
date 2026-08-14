@@ -73,8 +73,10 @@ import {
   type Skill,
   type Workflow,
   type BuildPlan,
+  type BuildAdvance,
   type SavedVersion,
   type ShowOutcome,
+  type VariationsOutcome,
   type HowFar,
   type Money,
   type Recording,
@@ -950,6 +952,10 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(null));
     },
 
+    buildAdvance(_op: BuildAdvance): Promise<Result<BuildPlan | null>> {
+      return Promise.resolve(done(null));
+    },
+
     chooseDocument(): Promise<Result<{ name: string; text: string } | null>> {
       return Promise.resolve(previewFail<{ name: string; text: string } | null>());
     },
@@ -1021,6 +1027,18 @@ function previewBridge(): Bridge {
         question:
           'This is Graphe running in a browser tab, so there is no folder underneath and nothing for me to get ready. Open the desktop app and this button will show you your own site.',
       });
+    },
+
+    /** Same honest answer as “See it”: no folder behind a browser tab, so there
+     *  is nowhere for variations to come from. */
+    variationsServe(): Promise<Result<VariationsOutcome>> {
+      return Promise.resolve(
+        done({
+          kind: 'unsure',
+          question:
+            'This is Graphe running in a browser tab, so there is no folder underneath and nothing for me to get ready. Open the desktop app and it can make you a few designs.',
+        }),
+      );
     },
 
     /** A folder somebody made up, with the shape of a real one, so the rail's
@@ -1677,6 +1695,7 @@ function connect(): Bridge {
     worktreeDrop: (where) => api.worktreeDrop(where),
     buildStart: (source, where) => api.buildStart(source, where),
     buildPlan: (where) => api.buildPlan(where),
+    buildAdvance: (op, where) => api.buildAdvance(op, where),
     chooseDocument: (where) => api.chooseDocument(where),
     buildSave: (tasks, where) => api.buildSave(tasks, where),
     stopAsking: (on) => api.stopAsking(on),
@@ -1685,6 +1704,7 @@ function connect(): Bridge {
     trustCarried: (id, trust) => api.trustCarried(id, trust),
     revealFolder: () => api.revealFolder(),
     show: (at, point) => api.show(at, point),
+    variationsServe: (parts, where) => api.variationsServe(parts, where),
     onPointed: (listener) => api.onPointed(listener),
     pages: () => api.pages(),
     shareReview: () => api.shareReview(),

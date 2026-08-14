@@ -3,7 +3,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  addTasks,
   buildWords,
+  finishTask,
   nextOf,
   note,
   numberFrom,
@@ -11,6 +13,8 @@ import {
   readPlan,
   resumeFrom,
   setStatus,
+  standing,
+  startTask,
   taskFrom,
   toMarkdown,
   unfinished,
@@ -63,6 +67,54 @@ describe('progress and next', () => {
   it('keeps a note with a task', () => {
     const said = note(plan, 1, 'tests pass');
     expect(said[0]?.note).toBe('tests pass');
+  });
+
+  it('closes off the task a turn just finished', () => {
+    expect(finishTask(plan, true)[0]?.status).toBe('done');
+    expect(finishTask(plan, false)[0]?.status).toBe('failed');
+    // A task mid-work is the one finished, not the first pending.
+    const working = setStatus(plan, 1, 'doing' as const);
+    expect(finishTask(working, true)[0]?.status).toBe('done');
+    expect(finishTask(working, false)[0]?.status).toBe('failed');
+    // Once done, a settle disturbs nothing.
+    const allDone = plan.map((one) => ({ ...one, status: 'done' as const }));
+    expect(finishTask(allDone, true)).toBe(allDone);
+  });
+
+  it('adds newly discovered requirements as their own tasks', () => {
+    const added = addTasks(plan, ['Three', 'Token cleanup']);
+    expect(added.map((one) => one.n)).toEqual([1, 2, 3, 4]);
+    expect(added.map((one) => one.title)).toContain('Three');
+    expect(added.every((one) => one.status === 'pending')).toBe(true);
+    expect(addTasks(plan, [])).toBe(plan);
+    expect(addTasks(plan, ['  ']).length).toBe(plan.length);
+  });
+
+  it('counts what is done, what remains and what is stuck', () => {
+    expect(standing(plan)).toEqual({ done: 0, total: 2, failed: 0 });
+    const mixed = [
+      { n: 1, title: 'A', acceptance: '', test: null, status: 'done' as const, note: null },
+      { n: 2, title: 'B', acceptance: '', test: null, status: 'failed' as const, note: null },
+      { n: 3, title: 'C', acceptance: '', test: null, status: 'pending' as const, note: null },
+    ];
+    expect(standing(mixed)).toEqual({ done: 1, total: 3, failed: 1 });
+  });
+
+  it('picks up the next task as the one being worked on', () => {
+    const started = startTask(plan);
+    expect(started[0]?.status).toBe('doing');
+    expect(started[1]?.status).toBe('pending');
+    // Already in hand is left alone — a run starting twice marks once.
+    expect(startTask(started)).toBe(started);
+    // A finished run has nothing left to pick up.
+    const allDone = plan.map((one) => ({ ...one, status: 'done' as const }));
+    expect(startTask(allDone)).toBe(allDone);
+  });
+
+  it('picks up a failed task again, so a retry is the current work', () => {
+    const failed = setStatus(plan, 1, 'failed' as const);
+    const retried = startTask(failed);
+    expect(retried[0]?.status).toBe('doing');
   });
 });
 

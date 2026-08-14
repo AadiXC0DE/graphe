@@ -56,9 +56,12 @@ import {
   type Skill,
   type Workflow,
   type BuildPlan,
+  type BuildAdvance,
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
+  type VariationSpec,
+  type VariationsOutcome,
   type HowFar,
   type Money,
   type Recording,
@@ -319,6 +322,21 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.buildPlan, named(where)) as Promise<Result<BuildPlan | null>>;
   },
 
+  buildAdvance(op: BuildAdvance, where?: Where): Promise<Result<BuildPlan | null>> {
+    if (
+      typeof op !== 'object' ||
+      op === null ||
+      (op.kind !== 'start' && op.kind !== 'finish' && op.kind !== 'add')
+    ) {
+      return Promise.resolve(
+        refuse<BuildPlan | null>('I could not tell how the work moved on.'),
+      );
+    }
+    return ipcRenderer.invoke(CHANNEL.buildAdvance, op, named(where)) as Promise<
+      Result<BuildPlan | null>
+    >;
+  },
+
   chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>> {
     return ipcRenderer.invoke(CHANNEL.chooseDocument, named(where)) as Promise<
       Result<{ name: string; text: string } | null>
@@ -363,6 +381,25 @@ const api: GrapheApi = {
 
   show(at?: string, point?: boolean, where?: Where): Promise<Result<ShowOutcome>> {
     return ipcRenderer.invoke(CHANNEL.show, at, point === true, named(where)) as Promise<Result<ShowOutcome>>;
+  },
+
+  variationsServe(
+    parts: { subject: string; variations: readonly VariationSpec[] },
+    where?: Where,
+  ): Promise<Result<VariationsOutcome>> {
+    if (
+      typeof parts !== 'object' ||
+      parts === null ||
+      typeof parts.subject !== 'string' ||
+      !Array.isArray(parts.variations)
+    ) {
+      return Promise.resolve(refuse<VariationsOutcome>('I could not tell what to compare.'));
+    }
+    return ipcRenderer.invoke(
+      CHANNEL.variationsServe,
+      parts as { subject: string; variations: readonly VariationSpec[] },
+      named(where),
+    ) as Promise<Result<VariationsOutcome>>;
   },
 
   onPointed(listener: (at: PointedAt) => void): () => void {

@@ -26,6 +26,9 @@ type Props = {
   examples?: readonly string[];
   /** The saved starting points, ours and theirs. Left out, ours are shown. */
   recipes?: readonly Recipe[];
+  /** The project this chat is starting in, so the first sentence names the
+   *  folder somebody is about to work in. Null on the very first launch. */
+  project?: string | null;
 };
 
 /**
@@ -55,14 +58,18 @@ type Props = {
  * launch begins on, which by the frequency rule is exactly the screen that
  * should be still.
  */
-export default function Welcome({ onUse, examples = firstMoves, recipes = STARTERS }: Props) {
+export default function Welcome({ onUse, examples = firstMoves, recipes = STARTERS, project }: Props) {
   /* Four is enough to show the range without turning the first screen into a
      catalogue. The rest remain one click away in the composer. */
   const shown = recipes.slice(0, 4);
 
   return (
     <div className="welcome">
-      <h1 className="welcome__title">What do you want to make?</h1>
+      <h1 className="welcome__title">
+        {project === null || project === undefined
+          ? 'What do you want to make?'
+          : `What do you want to make in ${project}?`}
+      </h1>
       {/* The second sentence is the only instruction on the screen, and it is
           there because nothing else says what pressing a row does. Without it
           the examples are decoration and somebody has to click one to find out

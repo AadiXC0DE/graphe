@@ -983,6 +983,9 @@ export const CHANNEL = {
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
   workflows: 'graphe:workflows',
+  worktreeStart: 'graphe:worktree-start',
+  worktreeLand: 'graphe:worktree-land',
+  worktreeDrop: 'graphe:worktree-drop',
   designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
   checkWidths: 'graphe:check-widths',
@@ -1138,6 +1141,12 @@ export type GrapheApi = {
   skills(where?: Where): Promise<Result<readonly Skill[]>>;
   /** The `/word` ways of working this project can ask for. */
   workflows(where?: Where): Promise<Result<readonly Workflow[]>>;
+  /** Put the front conversation to work in its own git branch and checkout. */
+  worktreeStart(where?: Where): Promise<Result<{ folder: string; branch: string }>>;
+  /** Merge the front conversation's own branch back, and drop the checkout. */
+  worktreeLand(where?: Where): Promise<Result<null>>;
+  /** Throw the front conversation's own checkout away, branch and all. */
+  worktreeDrop(where?: Where): Promise<Result<null>>;
   /** Full text for a library row. `id` is checked against that library first. */
   skillText(id: string, where?: Where): Promise<Result<string>>;
   /** Stop checking before things that would otherwise be asked about, or start

@@ -72,6 +72,7 @@ import {
   type Room,
   type Skill,
   type Workflow,
+  type BuildPlan,
   type SavedVersion,
   type ShowOutcome,
   type HowFar,
@@ -941,6 +942,18 @@ function previewBridge(): Bridge {
       return Promise.resolve(previewFail<null>());
     },
 
+    buildStart(): Promise<Result<BuildPlan>> {
+      return Promise.resolve(previewFail<BuildPlan>());
+    },
+
+    buildPlan(): Promise<Result<BuildPlan | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    chooseDocument(): Promise<Result<{ name: string; text: string } | null>> {
+      return Promise.resolve(previewFail<{ name: string; text: string } | null>());
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -1658,6 +1671,9 @@ function connect(): Bridge {
     worktreeStart: (where) => api.worktreeStart(where),
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),
+    buildStart: (source, where) => api.buildStart(source, where),
+    buildPlan: (where) => api.buildPlan(where),
+    chooseDocument: (where) => api.chooseDocument(where),
     stopAsking: (on) => api.stopAsking(on),
     goAsFarAs: (howFar) => api.goAsFarAs(howFar),
     carried: () => api.carried(),

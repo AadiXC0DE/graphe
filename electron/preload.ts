@@ -55,6 +55,7 @@ import {
   type Room,
   type Skill,
   type Workflow,
+  type BuildPlan,
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
@@ -308,6 +309,20 @@ const api: GrapheApi = {
 
   worktreeDrop(where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.worktreeDrop, named(where)) as Promise<Result<null>>;
+  },
+
+  buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>> {
+    return ipcRenderer.invoke(CHANNEL.buildStart, source, named(where)) as Promise<Result<BuildPlan>>;
+  },
+
+  buildPlan(where?: Where): Promise<Result<BuildPlan | null>> {
+    return ipcRenderer.invoke(CHANNEL.buildPlan, named(where)) as Promise<Result<BuildPlan | null>>;
+  },
+
+  chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>> {
+    return ipcRenderer.invoke(CHANNEL.chooseDocument, named(where)) as Promise<
+      Result<{ name: string; text: string } | null>
+    >;
   },
 
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {

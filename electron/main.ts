@@ -39,9 +39,10 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { existsSync } from 'node:fs';
-import { readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
 import * as path from 'node:path';
+import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
@@ -159,6 +160,7 @@ import {
   landWorktree,
   type RunGit,
 } from '../src/history/worktree';
+import { readPlan, type Task } from '../src/work/buildplan';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -1911,6 +1913,12 @@ function sessionsFolder(): string {
 function worktreesFolder(project: string): string {
   const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
   return join(app.getPath('userData'), 'worktrees', key);
+}
+
+/** Where a project's build plan lives, so it survives the window closing. */
+function buildPlanFile(project: string): string {
+  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+  return join(app.getPath('userData'), 'builds', `${key}.json`);
 }
 
 /** Opens asked for and not yet answered, by folder. Two requests for the same
@@ -4588,6 +4596,87 @@ function register(): void {
     if (folder === null) return fail(worktreeTrouble('No checkout of this project to throw away.'));
     const dropped = await dropWorktree(gitRunHereFor(), open.path, folder);
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
+  });
+
+  /* -------------------------------------------------- document to build */
+  /* The document that started a build, kept so a resumed session knows what it
+     was building, and the plan that turns it into tasks. Stored outside the
+     project so nothing it contains appears in the folder the person watches. */
+  async function readBuildPlan(project: string): Promise<import('../src/lib/ipc').BuildPlan | null> {
+    const raw = await readFile(buildPlanFile(project), 'utf8').catch(() => null);
+    if (raw === null) return null;
+    try {
+      const stored = JSON.parse(raw) as {
+        source: string;
+        tasks?: unknown;
+      };
+      if (typeof stored?.source !== 'string') return null;
+      const tasks = readPlan(stored.tasks);
+      const next = tasks.find((one) => one.status !== 'done')?.n ?? null;
+      return {
+        source: stored.source,
+        tasks: tasks.map(toWindowTask),
+        next,
+        done: tasks.filter((one) => one.status === 'done').length,
+        total: tasks.length,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async function writeBuildPlan(project: string, source: string, tasks: readonly Task[]): Promise<void> {
+    const file = buildPlanFile(project);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, `${JSON.stringify({ source, tasks }, null, 2)}\n`, 'utf8');
+  }
+
+  function toWindowTask(one: Task): import('../src/lib/ipc').BuildTask {
+    return {
+      n: one.n,
+      title: one.title,
+      acceptance: one.acceptance,
+      test: one.test,
+      status: one.status,
+      note: one.note,
+    };
+  }
+
+  handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildPlan, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    return done(open === null ? null : await readBuildPlan(open.path));
+  });
+
+  handle<{ name: string; text: string } | null>(CHANNEL.chooseDocument, async (_event, _args) => {
+    if (mainWindow === null || mainWindow.isDestroyed()) return fail(PICKER_FAILED);
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: 'Which requirements document?',
+      buttonLabel: 'Build from this',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Documents', extensions: ['md', 'txt', 'markdown', 'rst', 'html'] },
+      ],
+    });
+    const file = picked.filePaths[0];
+    if (picked.canceled || file === undefined) return done(null);
+    const text = await readFile(file, 'utf8').catch(() => '');
+    if (text === '') return fail({ what: 'I could not read that document.', because: 'It may be empty or not plain text.', actionLabel: 'Got it' });
+    return done({ name: basename(file), text });
+  });
+
+  handle<import('../src/lib/ipc').BuildPlan>(CHANNEL.buildStart, async (_event, args) => {
+    const [sourceRaw] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof sourceRaw !== 'object' || sourceRaw === null) return fail(NOTHING_OPEN);
+    const source = sourceRaw as { name?: unknown; text?: unknown; instruction?: unknown };
+    const name = typeof source.name === 'string' ? source.name : 'A document';
+    if (typeof source.text !== 'string') return fail(NOTHING_OPEN);
+    // Start the plan empty — the planning turn that fills it runs in the
+    // conversation, where its steps show themselves before anything changes.
+    await writeBuildPlan(open.path, name, []);
+    const read = await readBuildPlan(open.path);
+    return done(read ?? { source: name, tasks: [], next: null, done: 0, total: 0 });
   });
 
   handle<string>(CHANNEL.skillText, async (_event, args) => {

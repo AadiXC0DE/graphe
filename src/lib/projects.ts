@@ -390,10 +390,29 @@ export function closeDesk(desks: Desks, path: string): Desks {
  * is the one being drawn — earlier ones have finished — and a helper counts as
  * out until its own line closes.
  */
+/** The mechanical, per-command steps — a shell command, an edit, a read — that
+ *  happen dozens of times a turn. They tell the band what is happening this
+ *  instant but not what is actually going on, and stepping them into the panel
+ *  keeps it flickering. Everything else is worth naming. */
+function isMechanical(label: string): boolean {
+  return (
+    label === 'Running a command' ||
+    label === 'Looking at what is in the folder' ||
+    label === 'Looking through your files' ||
+    label.startsWith('Reading ') ||
+    label.startsWith('Changing ') ||
+    label.startsWith('Writing ') ||
+    label.startsWith('Removing ')
+  );
+}
+
 export function nowDoing(turns: readonly Turn[], at: number = Date.now()): NowView {
   let step: NowView['step'] = null;
   const helpers: NowView['helpers'][number][] = [];
   let filesRead = 0;
+  /** Any work is going, whatever the step says — so the band can say "working"
+   *  steadily even when the step underneath is only a command that would churn. */
+  let atWork = false;
   for (const turn of turns) {
     if (turn.kind !== 'did') continue;
     if (turn.label.startsWith('Reading') && turn.state !== 'failed') filesRead += 1;
@@ -412,8 +431,13 @@ export function nowDoing(turns: readonly Turn[], at: number = Date.now()): NowVi
         startedAt: turn.at ?? at,
       });
     }
-    if (turn.state === 'running') step = { label: turn.label, detail: turn.detail };
+    if (turn.state !== 'running') continue;
+    atWork = true;
+    // A notable step gets named; the mechanical ones stay quiet so the band
+    // reads as one steady sentence rather than a ledger of every command.
+    if (step === null && !isMechanical(turn.label)) step = { label: turn.label, detail: turn.detail };
   }
+  if (step === null && atWork) step = { label: 'Working on it' };
   return { step, helpers, filesRead };
 }
 

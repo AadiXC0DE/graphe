@@ -2178,7 +2178,7 @@ function Conversation() {
   }, []);
 
   const refreshAway = useCallback(async (path: string) => {
-    const answer = await bridge.away();
+    const answer = await bridge.away({ project: path });
     if (!answer.ok || desksNow.current.current !== path) return;
     setAway((current) => ({ ...current, [path]: answer.value }));
   }, []);
@@ -2216,7 +2216,7 @@ function Conversation() {
     (text: string, untilDone = false) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.keepGoing(text, untilDone).then(afterAway(path));
+      void bridge.keepGoing(text, untilDone, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2229,7 +2229,7 @@ function Conversation() {
       if (path === null) return;
       // A plan that could never run comes back refused, with the reason in
       // plain words — the same door every other failure comes through.
-      void bridge.startAfter(text, after).then(afterAway(path));
+      void bridge.startAfter(text, after, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway, troubleHere],
   );
@@ -2238,7 +2238,7 @@ function Conversation() {
     (id: string) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.keepAway(id).then((answer) => {
+      void bridge.keepAway(id, { project: path }).then((answer) => {
         afterAway(path)(answer);
         // Keeping one is a version like any other, and the rail has to say so.
         void refreshVersions(path);
@@ -2252,7 +2252,7 @@ function Conversation() {
     (id: string) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.stopAway(id).then(afterAway(path));
+      void bridge.stopAway(id, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2263,7 +2263,7 @@ function Conversation() {
     (id: string, callId: string, decision: Decision) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.answerAway(id, callId, decision).then(afterAway(path));
+      void bridge.answerAway(id, callId, decision, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2272,7 +2272,7 @@ function Conversation() {
     (doing: string, every: EveryKind, at: { hour: number; minute: number }, on?: number) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.addRepeat(doing, every, at, on).then(afterAway(path));
+      void bridge.addRepeat(doing, every, at, on, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2281,7 +2281,7 @@ function Conversation() {
     (id: string, on: boolean) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.switchRepeat(id, on).then(afterAway(path));
+      void bridge.switchRepeat(id, on, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2290,7 +2290,7 @@ function Conversation() {
     (id: string) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.forgetRepeat(id).then(afterAway(path));
+      void bridge.forgetRepeat(id, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );

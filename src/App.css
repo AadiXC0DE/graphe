@@ -162,6 +162,15 @@
   padding-bottom: var(--space-2);
 }
 
+/* The quiet measure a long run earns for itself: how long it went for, said
+   once at the end and never shouted. */
+.threadnote {
+  margin: 0;
+  padding-top: var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
 /* ---------------------------------------------------------------------------
    The workspace header
    The project as a page title, on the same band as the panel's first heading.

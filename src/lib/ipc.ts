@@ -229,7 +229,28 @@ export type PutBack = {
  * more dangerous than it looks.
  */
 export type ShowOutcome =
-  | { kind: 'showing'; name: string }
+  | { kind: 'showing'; name: string; address: string }
+  | { kind: 'unsure'; question: string };
+
+/** One variation to make ready: a folder that already holds it, named and
+ *  briefed the way the person asked, and the served address once it is ready. */
+export type VariationSpec = {
+  /** A short stable id, ours. */
+  id: string;
+  /** What it is, said plainly: "Minimal and clean". */
+  name: string;
+  /** The folder it lives in, absolute. */
+  folder: string;
+};
+
+/** The answer to "show me the variations". A set whose members are served, or
+ *  the first question that could not be answered — surfaced rather than guessed. */
+export type VariationsOutcome =
+  | {
+      kind: 'showing';
+      subject: string;
+      variations: readonly { id: string; name: string; address: string }[];
+    }
   | { kind: 'unsure'; question: string };
 
 /**
@@ -238,8 +259,10 @@ export type ShowOutcome =
  * The whole reading travels, not a sentence about it. The shell is the only side
  * that can read the project the element came out of — its values, where each
  * component is used, what last touched the file — so it decides there and the
- * window draws what it is handed. `says` is the same click as one line, for the
- * composer, so nothing has to derive it twice.
+ * window draws what it is handed. `says` is that same reading written out for the
+ * agent that gets asked to change it, so the composer message carries the element's
+ * file, component and values without the person having to describe where the
+ * element lives.
  */
 export type PointedAt = {
   pointed: Pointed;
@@ -757,6 +780,14 @@ export type BuildPlan = {
   total: number;
 };
 
+/** One step the tracker takes as the build runs — picking up the next task,
+ *  closing a finished one, or registering requirements the agent discovered
+ *  along the way. */
+export type BuildAdvance =
+  | { kind: 'start' }
+  | { kind: 'finish'; ok: boolean }
+  | { kind: 'add'; titles: readonly string[] };
+
 /**
  * What the overview panel knows about the project's folder.
  *
@@ -978,6 +1009,7 @@ export const CHANNEL = {
   putBack: 'graphe:put-back',
   nameVersion: 'graphe:name-version',
   show: 'graphe:show',
+  variationsServe: 'graphe:variations-serve',
   showProgress: 'graphe:show-progress',
   windowState: 'graphe:window-state',
   pointed: 'graphe:pointed',
@@ -1013,6 +1045,7 @@ export const CHANNEL = {
   worktreeDrop: 'graphe:worktree-drop',
   buildStart: 'graphe:build-start',
   buildPlan: 'graphe:build-plan',
+  buildAdvance: 'graphe:build-advance',
   buildSave: 'graphe:build-save',
   chooseDocument: 'graphe:choose-document',
   designCommit: 'graphe:design-commit',
@@ -1175,6 +1208,10 @@ export type GrapheApi = {
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>>;
   /** The current build plan, or null when none is under way. */
   buildPlan(where?: Where): Promise<Result<BuildPlan | null>>;
+  /** Advance the build tracker one turn: close the task a settled turn just
+   *  finished (done or failed), or add tasks for requirements found while
+   *  building. */
+  buildAdvance(op: BuildAdvance, where?: Where): Promise<Result<BuildPlan | null>>;
   /** Record the plan the agent produced into the stored build-plan, so a
    *  resumed session has the real task list. */
   buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>>;
@@ -1205,6 +1242,9 @@ export type GrapheApi = {
   /** Make the project, then open the made thing in their own browser. `at` opens
    *  one page of it rather than its front door. */
   show(at?: string, point?: boolean, where?: Where): Promise<Result<ShowOutcome>>;
+  /** Make ready every variation in a set at once, each served on its own address
+   *  so they can be compared in the pane. `where` names the project in front. */
+  variationsServe(parts: { subject: string; variations: readonly VariationSpec[] }, where?: Where): Promise<Result<VariationsOutcome>>;
   /** Somebody clicked an element, in their own browser or in the page beside
    *  the conversation. Read against the project before it gets here. */
   onPointed(listener: (at: PointedAt) => void): () => void;

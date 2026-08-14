@@ -247,27 +247,23 @@
 .welcome__buildbutton {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: var(--space-2);
-  align-self: center;
-  min-height: 34px;
-  padding: 0 var(--space-4);
-  border: 1px solid var(--border-strong);
+  align-self: flex-start;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-raised);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text);
-  box-shadow: var(--shadow-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
   transition:
     color var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
-    background-color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
 .welcome__buildbutton:active {
-  transform: scale(0.98);
+  transform: scale(0.97);
 }
 
 .welcome__buildbutton:focus-visible {
@@ -277,8 +273,8 @@
 
 @media (hover: hover) and (pointer: fine) {
   .welcome__buildbutton:hover {
-    border-color: var(--accent);
-    color: var(--accent-ink);
+    color: var(--text);
+    border-color: var(--border-strong);
   }
 }
 

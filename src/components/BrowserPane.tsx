@@ -5,6 +5,9 @@ import './BrowserPane.css';
 /** How the window is split between the conversation and the page. */
 export type Room = 'off' | 'split' | 'whole';
 
+/** The width to draw the page at. `auto` fills the room it is given. */
+export type ScreenSize = 'auto' | 'phone' | 'tablet';
+
 type Props = {
   room: Room;
   /** Where it is pointed. Null before anything is being served. */
@@ -16,6 +19,13 @@ type Props = {
    *  a placeholder: the page is painted over it by the shell, because a real
    *  browser view is a native thing and not part of this tree. */
   onBounds: (bounds: { x: number; y: number; width: number; height: number }) => void;
+  /** A set of designs being compared, each served on its own address. When
+   *  given, the pane shows the strip so the page being drawn can be switched. */
+  variations?: readonly { id: string; name: string }[];
+  /** Which variation is in front, null when none is. */
+  variation?: string | null;
+  /** Switch the page to another variation. */
+  onVariation?: (id: string) => void;
   /** Start watching how somebody uses the page, or stop and keep what was
    *  seen. Left off, the pane does not offer it. */
   onWatch?: (on: boolean) => void;
@@ -31,7 +41,18 @@ export const SAYS = {
   wider: 'Give the page the whole window',
   narrower: 'Show the conversation too',
   nothing: 'Nothing is being served yet. Press “See it” and the page will open here.',
+  variations: 'Designs to compare',
+  pick: (name: string): string => `Look at ${name}`,
 } as const;
+
+/* The sizes somebody might want to look at the page in. Terse on purpose: this
+   is a control beside the address, and a row of words the length of a sentence
+   is how a band becomes a menu. */
+export const SIZES: readonly { id: ScreenSize; label: string; title: string }[] = [
+  { id: 'auto', label: 'Full', title: 'Fill the room it is given' },
+  { id: 'phone', label: 'Phone', title: 'See it at a phone width' },
+  { id: 'tablet', label: 'Tablet', title: 'See it at a tablet width' },
+];
 
 /**
  * The project's own page, beside the conversation.
@@ -52,21 +73,27 @@ export default function BrowserPane({
   onRoom,
   onClose,
   onBounds,
+  variations,
+  variation,
+  onVariation,
   onWatch,
   watching,
 }: Props) {
   const stage = useRef<HTMLDivElement>(null);
+  const screen = useRef<HTMLDivElement>(null);
   const [typed, setTyped] = useState(address ?? '');
+  const [size, setSize] = useState<ScreenSize>('auto');
 
   useEffect(() => {
     setTyped(address ?? '');
   }, [address]);
 
-  /* The page is a native view glued to this rectangle, so every reason the
-     rectangle could move has to be heard: the window resizing, the panels
-     opening, and the mode changing. */
+  /* The page is a native view glued to the fixed-width screen box, so every
+     reason that box could move has to be heard: the window resizing, the panels
+     opening, the size changing, and the mode changing. */
   useEffect(() => {
-    const el = stage.current;
+    const holder = stage.current;
+    const el = screen.current ?? holder;
     if (el === null || room === 'off') return;
     const tell = (): void => {
       const box = el.getBoundingClientRect();
@@ -80,7 +107,7 @@ export default function BrowserPane({
       sized.disconnect();
       globalThis.removeEventListener('resize', tell);
     };
-  }, [room, onBounds]);
+  }, [room, onBounds, size, address]);
 
   if (room === 'off') return null;
 
@@ -106,6 +133,25 @@ export default function BrowserPane({
           />
         </form>
 
+        {/* A set of designs being compared: the strip sits in the same band as
+            the address, so the thing being looked at is one gesture away. */}
+        {onVariation === undefined || variations === undefined || variations.length === 0 ? null : (
+          <div className="pane__variations" role="group" aria-label={SAYS.variations}>
+            {variations.map((one) => (
+              <button
+                key={one.id}
+                type="button"
+                className={`pane__variation ${variation === one.id ? 'pane__variation--on' : ''}`}
+                onClick={() => onVariation(one.id)}
+                title={SAYS.pick(one.name)}
+                aria-pressed={variation === one.id}
+              >
+                {one.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* In the pane's own band, beside the address it is watching. Nobody
             has to know it exists to find it. */}
         {onWatch === undefined ? null : (
@@ -119,6 +165,22 @@ export default function BrowserPane({
             {watching === true ? walkthrough.stop : walkthrough.button}
           </button>
         )}
+
+        {/* The width to look at the page in, in the band beside the address. */}
+        <div className="pane__sizes" role="group" aria-label="Page width">
+          {SIZES.map((one) => (
+            <button
+              key={one.id}
+              type="button"
+              className={`pane__size ${size === one.id ? 'pane__size--on' : ''}`}
+              onClick={() => setSize(one.id)}
+              title={one.title}
+              aria-pressed={size === one.id}
+            >
+              {one.label}
+            </button>
+          ))}
+        </div>
 
         {/* A page you are working against is a page you reload constantly. */}
         <button
@@ -164,10 +226,14 @@ export default function BrowserPane({
         </button>
       </header>
 
-      {/* What the page is painted over. Empty on purpose: anything drawn in here
-          would be hidden the moment the real page arrives. */}
+      {/* What the page is painted over. The fixed-width screen box is what the
+          native view is glued to, so choosing a size redraws the page at it;
+          the stage around it just centres the box and shows its own nothing
+          until something is being served. */}
       <div className="pane__stage" ref={stage}>
-        {address === null ? <p className="pane__nothing">{SAYS.nothing}</p> : null}
+        <div className={`pane__screen pane__screen--${size}`} ref={screen}>
+          {address === null ? <p className="pane__nothing">{SAYS.nothing}</p> : null}
+        </div>
       </div>
     </section>
   );

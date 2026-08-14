@@ -402,7 +402,7 @@ function Conversation() {
     thinking: {},
     kept: {},
     showFiles: false,
-    holdBack: false,
+    heldBack: {},
     ceiling: null,
   });
   const [editor, setEditor] = useState<string | null>(null);
@@ -2045,8 +2045,11 @@ function Conversation() {
   const [landed, setLanded] = useState<Outcome>(null);
   const [decided, setDecided] = useState<{ letIn: boolean; undoTo: string } | null>(null);
 
-  const refreshLanding = useCallback(() => {
-    void bridge.landing().then((answer) => {
+  const refreshLanding = useCallback((path: string | null) => {
+    if (path === null) return;
+    // A project is named so a slow answer from another project cannot land here
+    // and repaint this panel — the same gap the away board had until that fix.
+    void bridge.landing({ project: path }).then((answer) => {
       setLanding(answer.ok ? answer.value : null);
     });
   }, []);
@@ -2058,7 +2061,7 @@ function Conversation() {
     }
     setLanded(null);
     setDecided(null);
-    refreshLanding();
+    refreshLanding(desks.current);
   }, [desks.current, refreshLanding]);
 
   /**
@@ -2098,11 +2101,14 @@ function Conversation() {
 
   const changeHoldBack = useCallback(
     (on: boolean) => {
-      setPreferences((was) => ({ ...was, holdBack: on }));
+      const path = desks.current;
+      setPreferences((was) =>
+        path === null ? was : { ...was, heldBack: { ...was.heldBack, [path]: on } },
+      );
       setLanding((was) => (was === null ? was : { ...was, holdBack: on }));
-      void bridge.setHoldBack(on).then((answer) => {
+      void bridge.setHoldBack(on, { project: path ?? undefined }).then((answer) => {
         if (answer.ok) setPreferences(answer.value);
-        refreshLanding();
+        refreshLanding(path);
       });
     },
     [refreshLanding],
@@ -2153,7 +2159,7 @@ function Conversation() {
       })
       .finally(() => {
         setGoing(null);
-        refreshLanding();
+        refreshLanding(desks.current);
       });
   }, [refreshLanding, troubleHere]);
 

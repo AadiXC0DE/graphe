@@ -379,9 +379,10 @@ export type Preferences = {
    *  somebody who did not ask for one is the thing this product exists not to
    *  do. */
   showFiles: boolean;
-  /** Do the work in a copy first and show it, rather than letting it reach the
-   *  files straight away. Off by default and sticky once asked for. */
-  holdBack: boolean;
+  /** Whether each project holds work back to be looked at first, keyed by its
+   *  path. Per project, so saying “ask me first” in one folder never changes
+   *  another. */
+  heldBack: Readonly<Record<string, boolean>>;
   /** The ceiling somebody set on spending, or null when they have not set one.
    *  Remembered across launches: a ceiling that forgets itself is not one. */
   ceiling: Money | null;
@@ -1271,7 +1272,7 @@ export type GrapheApi = {
   /** What can be done with this project's work, and what is waiting. */
   landing(where?: Where): Promise<Result<Landing>>;
   /** Check new work in a copy before it reaches the files. Sticky. */
-  setHoldBack(on: boolean): Promise<Result<Preferences>>;
+  setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>>;
   /** Let the work that is waiting in, or set it aside. Both are undoable —
    *  letting it in through `putBack`, setting it aside by deciding again. */
   decideOnWork(letIn: boolean, where?: Where): Promise<Result<Decided>>;

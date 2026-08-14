@@ -1566,7 +1566,7 @@ async function landingNow(folder: string, held: Held): Promise<Landing> {
     // Only ever beside the work it is of. Nothing is waiting, so there is
     // nothing for a picture to be a picture of.
     held: held.waiting === null ? null : held.pictures,
-    holdBack: chosen.holdBack,
+    holdBack: chosen.heldBack[folder] === true,
     canHandOver: reach.canHandOver,
     handOverSays: reach.handOverSays,
     canPutOnline: reach.canPutOnline,
@@ -3857,7 +3857,10 @@ function register(): void {
   handle<Preferences>(CHANNEL.setHoldBack, async (_event, args) => {
     const [on] = args;
     if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
-    return done(await (await preferences()).change({ holdBack: on }));
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const held = (await preferences()).all().heldBack;
+    return done(await (await preferences()).change({ heldBack: { ...held, [open.path]: on } }));
   });
 
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
@@ -4577,7 +4580,7 @@ function register(): void {
         ways !== null && typeof ways === 'object' && (ways as PromptOptions).lookFirst === true;
       // Checked first, when they have asked for that and nothing is already
       // waiting. Two pieces of work waiting at once is a decision nobody made.
-      if ((await preferences()).all().holdBack && open.held.waiting === null) {
+      if ((await preferences()).all().heldBack[open.path] === true && open.held.waiting === null) {
         return await checkItFirst(
           open,
           { address: conversation.path },

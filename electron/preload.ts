@@ -648,11 +648,11 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.landing, named(where)) as Promise<Result<Landing>>;
   },
 
-  setHoldBack(on: boolean): Promise<Result<Preferences>> {
+  setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>> {
     if (typeof on !== 'boolean') {
       return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
     }
-    return ipcRenderer.invoke(CHANNEL.setHoldBack, on) as Promise<Result<Preferences>>;
+    return ipcRenderer.invoke(CHANNEL.setHoldBack, on, named(where)) as Promise<Result<Preferences>>;
   },
 
   decideOnWork(letIn: boolean, where?: Where): Promise<Result<Decided>> {

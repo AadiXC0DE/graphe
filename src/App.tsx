@@ -48,6 +48,7 @@ import {
 import { sizeUp } from "./cost/sizing";
 import { worthPlanning } from "./agent/plan";
 import { asResearch, researchWords } from "./agent/research";
+import { asBuildRequest } from "./work/buildbrief";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
 import { bridge } from "./lib/bridge";
@@ -2877,7 +2878,21 @@ function Conversation() {
             onBrowse={() => void browse()}
           />
         ) : desk === null || desk.turns.length === 0 ? (
-          <Welcome onUse={setDraft} project={desk?.name ?? null} />
+          <Welcome
+            onUse={setDraft}
+            project={desk?.name ?? null}
+            onPickDocument={async () => {
+              const answer = await bridge.chooseDocument(desk === null ? undefined : { project: desk.path });
+              return answer.ok ? answer.value : null;
+            }}
+            onStartBuild={(source) => {
+              // The document is stored under the project, then the build brief
+              // goes into the conversation so the agent reads it against the
+              // code and plans the work in view, task by task.
+              void bridge.buildStart(source, desk === null ? undefined : { project: desk.path });
+              void send(asBuildRequest(source.text, source.instruction));
+            }}
+          />
         ) : (
           <>
             {/* The top of the page. A sibling of the thread rather than its

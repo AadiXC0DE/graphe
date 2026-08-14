@@ -736,6 +736,27 @@ export type Workflow = {
   source: 'global' | 'project';
 };
 
+/** One step of a document-to-build plan, as the window draws it. */
+export type BuildTask = {
+  n: number;
+  title: string;
+  acceptance: string;
+  test: string | null;
+  status: 'pending' | 'doing' | 'done' | 'failed';
+  note: string | null;
+};
+
+/** A document-to-build plan, whole. */
+export type BuildPlan = {
+  /** What the document is called, said once at the top of the checklist. */
+  source: string;
+  tasks: readonly BuildTask[];
+  /** The next task to work on, or null when the plan is done. */
+  next: number | null;
+  done: number;
+  total: number;
+};
+
 /**
  * What the overview panel knows about the project's folder.
  *
@@ -990,6 +1011,9 @@ export const CHANNEL = {
   worktreeStart: 'graphe:worktree-start',
   worktreeLand: 'graphe:worktree-land',
   worktreeDrop: 'graphe:worktree-drop',
+  buildStart: 'graphe:build-start',
+  buildPlan: 'graphe:build-plan',
+  chooseDocument: 'graphe:choose-document',
   designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
   checkWidths: 'graphe:check-widths',
@@ -1145,6 +1169,13 @@ export type GrapheApi = {
   skills(where?: Where): Promise<Result<readonly Skill[]>>;
   /** The `/word` ways of working this project can ask for. */
   workflows(where?: Where): Promise<Result<readonly Workflow[]>>;
+  /** Start a document-to-build: name a document and an optional instruction,
+   *  and the shell turns it into a plan. */
+  buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>>;
+  /** The current build plan, or null when none is under way. */
+  buildPlan(where?: Where): Promise<Result<BuildPlan | null>>;
+  /** Pick a requirements document on disk and read its text, or null if closed. */
+  chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>>;
   /** Put the front conversation to work in its own git branch and checkout. */
   worktreeStart(where?: Where): Promise<Result<{ folder: string; branch: string }>>;
   /** Merge the front conversation's own branch back, and drop the checkout. */

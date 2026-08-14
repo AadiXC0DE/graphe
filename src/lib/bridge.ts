@@ -103,6 +103,11 @@ function done<T>(value: T): Result<T> {
   return { ok: true, value };
 }
 
+/** Whether this project is set to hold work back for a look first. */
+function heldBackOf(preferred: { heldBack: Readonly<Record<string, boolean>> }, project: string | null): boolean {
+  return project === null ? false : preferred.heldBack[project] === true;
+}
+
 /** A browser tab cannot make a checkout; say so the way every real reading does. */
 function previewFail<T>(): Result<T> {
   return {
@@ -577,7 +582,7 @@ function previewBridge(): Bridge {
     thinking: {},
     kept: {},
     showFiles: true,
-    holdBack: false,
+    heldBack: {},
     ceiling: null,
   };
 
@@ -1270,11 +1275,11 @@ function previewBridge(): Bridge {
     /* Landing work somewhere needs a folder, a computer and somebody's account.
        A browser tab has none of the three, so the band draws itself and says
        exactly why each thing is out of reach rather than pretending. */
-    landing(): Promise<Result<Landing>> {
+    landing(_where?: Where): Promise<Result<Landing>> {
       return Promise.resolve(
         done({
           waiting: null,
-          holdBack: preferred.holdBack,
+          holdBack: heldBackOf(preferred, openPath),
           canHandOver: false,
           handOverSays: PREVIEW_LANDING,
           canPutOnline: false,
@@ -1284,17 +1289,19 @@ function previewBridge(): Bridge {
       );
     },
 
-    setHoldBack(on: boolean): Promise<Result<Preferences>> {
-      preferred = { ...preferred, holdBack: on };
+    setHoldBack(on: boolean, _where?: Where): Promise<Result<Preferences>> {
+      if (openPath !== null) {
+        preferred = { ...preferred, heldBack: { ...preferred.heldBack, [openPath]: on } };
+      }
       return Promise.resolve(done({ ...preferred }));
     },
 
-    decideOnWork(letIn: boolean): Promise<Result<Decided>> {
+    decideOnWork(letIn: boolean, _where?: Where): Promise<Result<Decided>> {
       return Promise.resolve(
         done({
           landing: {
             waiting: null,
-            holdBack: preferred.holdBack,
+            holdBack: heldBackOf(preferred, openPath),
             canHandOver: false,
             handOverSays: PREVIEW_LANDING,
             canPutOnline: false,
@@ -1697,7 +1704,7 @@ function connect(): Bridge {
     importAccount: (account) => api.importAccount(account),
     openLink: (url) => api.openLink(url),
     landing: () => api.landing(),
-    setHoldBack: (on) => api.setHoldBack(on),
+    setHoldBack: (on, where) => api.setHoldBack(on, where),
     decideOnWork: (letIn) => api.decideOnWork(letIn),
     handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
     putOnline: (confirmed) => api.putOnline(confirmed),

@@ -162,10 +162,22 @@ describe('D1 — the real name of what just happened', () => {
           kept: {},
           trusted: {},
           showFiles: false,
-          holdBack: false,
+          heldBack: {},
           ceiling: null,
         },
       });
+    });
+  });
+
+  it('holds back one project without changing another', async () => {
+    await inATemporaryFolder(async (folder) => {
+      const file = join(folder, 'preferences.json');
+      const preferences = await PreferenceFile.open(file);
+      await preferences.change({ heldBack: { ...preferences.all().heldBack, ['/one']: true } });
+      const read = await PreferenceFile.open(file);
+      // The project that asked is held back; the other is not asked for.
+      expect(read.all().heldBack['/one']).toBe(true);
+      expect(read.all().heldBack['/two']).toBeUndefined();
     });
   });
 

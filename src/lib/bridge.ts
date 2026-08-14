@@ -102,6 +102,18 @@ function done<T>(value: T): Result<T> {
   return { ok: true, value };
 }
 
+/** A browser tab cannot make a checkout; say so the way every real reading does. */
+function previewFail<T>(): Result<T> {
+  return {
+    ok: false,
+    trouble: {
+      what: 'A conversation needs its own checkout.',
+      because: 'This is Graphe in a browser tab, so there is no folder underneath to branch from.',
+      actionLabel: 'Got it',
+    },
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* A browser tab, with nothing underneath it                                   */
 /* -------------------------------------------------------------------------- */
@@ -911,6 +923,18 @@ function previewBridge(): Bridge {
       return Promise.resolve(done([]));
     },
 
+    worktreeStart(): Promise<Result<{ folder: string; branch: string }>> {
+      return Promise.resolve(previewFail<{ folder: string; branch: string }>());
+    },
+
+    worktreeLand(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
+    worktreeDrop(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -1617,6 +1641,9 @@ function connect(): Bridge {
     skills: () => api.skills(),
     skillText: (id) => api.skillText(id),
     workflows: () => api.workflows(),
+    worktreeStart: (where) => api.worktreeStart(where),
+    worktreeLand: (where) => api.worktreeLand(where),
+    worktreeDrop: (where) => api.worktreeDrop(where),
     stopAsking: (on) => api.stopAsking(on),
     goAsFarAs: (howFar) => api.goAsFarAs(howFar),
     carried: () => api.carried(),

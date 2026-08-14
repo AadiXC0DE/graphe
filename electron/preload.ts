@@ -296,6 +296,20 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.workflows, named(where)) as Promise<Result<readonly Workflow[]>>;
   },
 
+  worktreeStart(where?: Where): Promise<Result<{ folder: string; branch: string }>> {
+    return ipcRenderer.invoke(CHANNEL.worktreeStart, named(where)) as Promise<
+      Result<{ folder: string; branch: string }>
+    >;
+  },
+
+  worktreeLand(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.worktreeLand, named(where)) as Promise<Result<null>>;
+  },
+
+  worktreeDrop(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.worktreeDrop, named(where)) as Promise<Result<null>>;
+  },
+
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {
     return ipcRenderer.invoke(CHANNEL.carried, named(where)) as Promise<Result<readonly CarriedExtension[]>>;
   },

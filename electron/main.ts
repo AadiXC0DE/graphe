@@ -35,10 +35,13 @@ import {
   WebContentsView,
   type IpcMainInvokeEvent,
 } from 'electron';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync = promisify(execFile);
 import { existsSync } from 'node:fs';
 import { readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
+import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
@@ -149,6 +152,12 @@ import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/pack
 import { availableSkills, selectedSkills, skillContents, skillNamed } from '../src/agent/pi/skills';
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor } from '../src/work/workflows';
+import {
+  createWorktree,
+  dropWorktree,
+  landWorktree,
+  type RunGit,
+} from '../src/history/worktree';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -1006,6 +1015,39 @@ function imageCards(value: unknown): readonly ImageCard[] | undefined {
  * failure. Read with a short timeout so a folder that will not answer (a
  * network drive, a locked machine) costs the panel the section, not the window.
  */
+/** Run git in a folder and say whether it worked, with what it said. */
+async function gitRun(cwd: string, args: string[]): Promise<{ code: number; out?: string }> {
+  try {
+    const made = await execFileAsync('git', args, { cwd, encoding: 'utf8' });
+    return { code: 0, out: made.stdout };
+  } catch (cause) {
+    const failed = cause as { code?: number };
+    return { code: typeof failed.code === 'number' ? failed.code : 1, out: '' };
+  }
+}
+
+/** The checkouts this project has opened, main one excluded. */
+async function listWorktrees(repo: string): Promise<string[]> {
+  const { code, out } = await gitRun(repo, ['worktree', 'list', '--porcelain']);
+  if (code !== 0 || out === undefined) return [];
+  const folders: string[] = [];
+  for (const line of out.split('\n')) {
+    if (!line.startsWith('worktree ')) continue;
+    const folder = line.slice('worktree '.length).trim();
+    if (path.resolve(folder) !== path.resolve(repo)) folders.push(folder);
+  }
+  return folders;
+}
+
+function firstWorktree(list: string[]): string | null {
+  return list[0] ?? null;
+}
+
+/** A mistake to hold the window by, in the shape a reading makes. */
+function worktreeTrouble(because: string): Trouble {
+  return { what: 'This conversation needs its own checkout.', because, actionLabel: 'Got it' };
+}
+
 function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
   return new Promise((resolve) => {
     const child = spawn('git', ['status', '--porcelain=v2', '--branch'], {
@@ -4372,6 +4414,43 @@ function register(): void {
     return done(
       all.map(({ command, name, description, hint, source }) => ({ command, name, description, hint, source })),
     );
+  });
+
+  /* One conversation, its own checkout. These run the front project's own git,
+     so a technical user can keep parallel work in its own branch and merge it
+     back — and the guards (never flatten a dirty checkout) are the same ones
+     the parallel-session wiring will lean on. */
+  const runGitHere: RunGit = (args, options) => gitRun(options.cwd, args);
+
+  handle<{ folder: string; branch: string }>(CHANNEL.worktreeStart, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const made = await createWorktree(
+      runGitHere,
+      open.path,
+      `conversation-${Date.now().toString(36)}`,
+      null,
+    );
+    if (!made.ok) return fail(worktreeTrouble(made.because));
+    return made.value === null ? fail(worktreeTrouble('Could not make a checkout.')) : done(made.value);
+  });
+
+  handle<null>(CHANNEL.worktreeLand, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const folder = firstWorktree(await listWorktrees(open.path));
+    if (folder === null) return fail(worktreeTrouble('No checkout of this project to bring back.'));
+    const landed = await landWorktree(runGitHere, open.path, folder);
+    return landed.ok ? done(null) : fail(worktreeTrouble(landed.because));
+  });
+
+  handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const folder = firstWorktree(await listWorktrees(open.path));
+    if (folder === null) return fail(worktreeTrouble('No checkout of this project to throw away.'));
+    const dropped = await dropWorktree(runGitHere, open.path, folder);
+    return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
   });
 
   handle<string>(CHANNEL.skillText, async (_event, args) => {

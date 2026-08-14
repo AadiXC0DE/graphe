@@ -78,6 +78,7 @@ import {
   type Money,
   type Recording,
   type ShowProgress,
+  type Where,
   type SpendLimit,
   type SpendSummary,
   type ThinkingLevel,
@@ -1319,11 +1320,11 @@ function previewBridge(): Bridge {
 
     /* Real state for as long as the tab is open: pressing the buttons moves the
        board, so what a person does to one of these can actually be looked at. */
-    away(): Promise<Result<Away>> {
+    away(_where?: Where): Promise<Result<Away>> {
       return Promise.resolve(done(atWork));
     },
 
-    startAfter(text: string, after: string): Promise<Result<Away>> {
+    startAfter(text: string, after: string, _where?: Where): Promise<Result<Away>> {
       const waited = atWork.pieces.find((one) => one.id === after);
       return this.keepGoing(text).then((answer) => {
         if (!answer.ok || waited === undefined) return answer;
@@ -1345,11 +1346,11 @@ function previewBridge(): Bridge {
       });
     },
 
-    putAfter(): Promise<Result<Away>> {
+    putAfter(_id?: unknown, _after?: unknown, _where?: Where): Promise<Result<Away>> {
       return Promise.resolve(done({ ...atWork }));
     },
 
-    keepGoing(text: string, _untilDone?: boolean): Promise<Result<Away>> {
+    keepGoing(text: string, _untilDone?: boolean, _where?: Where): Promise<Result<Away>> {
       atWork = {
         ...atWork,
         pieces: [
@@ -1369,19 +1370,24 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(atWork));
     },
 
-    stopAway(id: string): Promise<Result<Away>> {
+    stopAway(id: string, _where?: Where): Promise<Result<Away>> {
       atWork = { ...atWork, pieces: atWork.pieces.filter((one) => one.id !== id) };
       return Promise.resolve(done(atWork));
     },
 
-    keepAway(id: string): Promise<Result<Away>> {
+    keepAway(id: string, _where?: Where): Promise<Result<Away>> {
       atWork = { ...atWork, pieces: atWork.pieces.filter((one) => one.id !== id) };
       return Promise.resolve(done(atWork));
     },
 
     /* The same rule a browser tab can still demonstrate: nothing answers itself,
        and answering moves that one on. */
-    answerAway(id: string, _callId: string, decision: Decision): Promise<Result<Away>> {
+    answerAway(
+      id: string,
+      _callId: string,
+      decision: Decision,
+      _where?: Where,
+    ): Promise<Result<Away>> {
       atWork = {
         ...atWork,
         pieces: atWork.pieces.map((one) =>
@@ -1406,6 +1412,7 @@ function previewBridge(): Bridge {
       every: EveryKind,
       at: { hour: number; minute: number },
       on?: number,
+      _where?: Where,
     ): Promise<Result<Away>> {
       const repeat: Repeat =
         every === 'week'
@@ -1430,7 +1437,7 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(atWork));
     },
 
-    switchRepeat(id: string, on: boolean): Promise<Result<Away>> {
+    switchRepeat(id: string, on: boolean, _where?: Where): Promise<Result<Away>> {
       atWork = {
         ...atWork,
         repeats: atWork.repeats.map((one) => (one.id === id ? { ...one, on } : one)),
@@ -1438,7 +1445,7 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(atWork));
     },
 
-    forgetRepeat(id: string): Promise<Result<Away>> {
+    forgetRepeat(id: string, _where?: Where): Promise<Result<Away>> {
       atWork = { ...atWork, repeats: atWork.repeats.filter((one) => one.id !== id) };
       return Promise.resolve(done(atWork));
     },
@@ -1694,14 +1701,14 @@ function connect(): Bridge {
     decideOnWork: (letIn) => api.decideOnWork(letIn),
     handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
     putOnline: (confirmed) => api.putOnline(confirmed),
-    away: () => api.away(),
-    keepGoing: (text, untilDone) => api.keepGoing(text, untilDone),
-    stopAway: (id) => api.stopAway(id),
-    keepAway: (id) => api.keepAway(id),
-    answerAway: (id, callId, decision) => api.answerAway(id, callId, decision),
-    addRepeat: (doing, every, at, on) => api.addRepeat(doing, every, at, on),
-    switchRepeat: (id, on) => api.switchRepeat(id, on),
-    forgetRepeat: (id) => api.forgetRepeat(id),
+    away: (where) => api.away(where),
+    keepGoing: (text, untilDone, where) => api.keepGoing(text, untilDone, where),
+    stopAway: (id, where) => api.stopAway(id, where),
+    keepAway: (id, where) => api.keepAway(id, where),
+    answerAway: (id, callId, decision, where) => api.answerAway(id, callId, decision, where),
+    addRepeat: (doing, every, at, on, where) => api.addRepeat(doing, every, at, on, where),
+    switchRepeat: (id, on, where) => api.switchRepeat(id, on, where),
+    forgetRepeat: (id, where) => api.forgetRepeat(id, where),
     onAway: (listener) => api.onAway(listener),
     inStep: () => api.inStep(),
     followDesign: (address) => api.followDesign(address),

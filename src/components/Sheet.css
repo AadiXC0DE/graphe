@@ -195,17 +195,17 @@
   align-items: center;
   gap: var(--space-2);
   min-height: 28px;
-  /* The same top inset the chips and the save buttons carry, so the three
-     controls in the head land on the same band as one row. */
-  padding-top: var(--space-1);
-  padding-bottom: 0;
-  padding-left: var(--space-3);
-  padding-right: var(--space-2);
+  /* The same top inset the chips and the save buttons carry, so this lands on
+     the same band as its neighbours. Carried as margin rather than padding so
+     the content is truly centred — padding-top alone lifted the label a couple
+     of pixels off the row beside it. */
+  margin-top: var(--space-1);
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
   font-size: var(--text-xs);
-  color: var(--text-muted);
+  color: var(--text);
   transition:
     color var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
@@ -217,10 +217,9 @@
 }
 
 .sheet__key {
-  padding: 1px 5px;
+  padding: 1px 4px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg-sunken);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--text-faint);

@@ -153,6 +153,7 @@ import { availableSkills, selectedSkills, skillContents, skillNamed } from '../s
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor } from '../src/work/workflows';
 import {
+  bringBack,
   createWorktree,
   dropWorktree,
   landWorktree,
@@ -806,6 +807,10 @@ type Held = {
   serving: Serving | null;
   /** The before-and-after (BACKLOG F2). */
   looking: Looking;
+  /** A conversation's own checkout, by its address. Present only for the ones
+   *  running isolated in a worktree — the primary conversation works directly
+   *  on the project folder. */
+  checkouts: Map<string, { folder: string }>;
   /** Work being checked before it reaches the files, or null when none is. */
   waiting: HeldWork | null;
   /** What that work would look like, photographed in the copy while the copy
@@ -1015,6 +1020,11 @@ function imageCards(value: unknown): readonly ImageCard[] | undefined {
  * failure. Read with a short timeout so a folder that will not answer (a
  * network drive, a locked machine) costs the panel the section, not the window.
  */
+/** A git runner, for the worktree work. The working directory comes with each call. */
+function gitRunHereFor(): RunGit {
+  return (args, options) => gitRun(options.cwd, args);
+}
+
 /** Run git in a folder and say whether it worked, with what it said. */
 async function gitRun(cwd: string, args: string[]): Promise<{ code: number; out?: string }> {
   try {
@@ -1441,7 +1451,19 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     }
     // Everything has stopped. The right moment for a picture, and the only one
     // where taking it cannot slow anything down.
-    if (said.type === 'settled') void look(path, held);
+    // A conversation's work runs in its own checkout; the one in front is the
+    // one the folder the window reads belongs to, so when its turn settles the
+    // work is carried home (Apply) before the screenshots take it in. A tab
+    // running in the background is NOT brought back — that is what keeps two
+    // parallel tabs from silently overwriting each other's files.
+    if (said.type === 'settled') {
+      const inFront = held.sessions.current?.path === from.address;
+      const checkout =
+        !inFront || from.address === null ? null : held.checkouts.get(from.address) ?? null;
+      const applied =
+        checkout === null ? Promise.resolve() : bringBack(gitRunHereFor(), path, checkout.folder, 'HEAD');
+      void applied.then(() => look(path, held));
+    }
 
     // Against the ceiling as well as into the ledger. This is the conversation
     // somebody is sitting in front of, so it is never registered as something
@@ -1837,6 +1859,14 @@ function sessionsFolder(): string {
   return join(app.getPath('userData'), 'sessions');
 }
 
+/** Where a project's conversation checkouts live — outside the project, like a
+ *  copy, so nothing the worktree writes ever appears in the folder the person
+ *  is looking at. Keyed by the project's own path so repos never collide. */
+function worktreesFolder(project: string): string {
+  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+  return join(app.getPath('userData'), 'worktrees', key);
+}
+
 /** Opens asked for and not yet answered, by folder. Two requests for the same
  *  folder inside the window between the "already open" check and `adopt` would
  *  build two sessions appending to one transcript; the second caller waits for
@@ -1877,10 +1907,25 @@ async function startConversation(
 
   const from: Speaking = { address: null };
   const prefs = (await preferences()).all();
+  // The first conversation of a project is the one on the folder the person is
+  // looking at; any further one is a parallel tab and works in its own checkout
+  // rather than writing the same files the first one is writing.
+  const primary = held.sessions.open.length === 0;
+  let checkout: { folder: string } | null = null;
+  if (!primary) {
+    const made = await createWorktree(
+      gitRunHereFor(),
+      open.path,
+      `conversation-${held.sessions.open.length + 1}`,
+      null,
+      { folder: join(worktreesFolder(open.path), `conversation-${held.sessions.open.length + 1}`) },
+    );
+    if (made.ok && made.value !== null) checkout = { folder: made.value.folder };
+  }
   let session: GrapheSession;
   try {
     session = await createSession({
-      projectRoot: open.path,
+      projectRoot: checkout?.folder ?? open.path,
       onEvent: forwardTo(open.path, held, from),
       timeline: held.timeline,
       model: prefs.model,
@@ -1913,6 +1958,7 @@ async function startConversation(
   // something, and a new name for the same thread would lose it.
   const address = keep ?? addressOf(session);
   from.address = address;
+  if (checkout !== null) held.checkouts.set(address, checkout);
   keepConversation(held, address, session);
   return done({ session, address });
 }
@@ -1957,6 +2003,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     sessions: conversationsIn(path),
     serving: null,
     looking: nothingSeenYet(),
+    checkouts: new Map(),
     waiting: null,
     pictures: null,
     sending: false,
@@ -4137,6 +4184,14 @@ function register(): void {
     // one carried on, which is what opening the project already does.
     const started = await startConversation(open, openingFor(path, true));
     if (!started.ok) return started;
+    // Making a checkout conversation the one in front brings its work home so
+    // the folder the window reads is the work it has done so far. If it cannot
+    // come home (a conflict with the folder's own version), the conversation
+    // still opens and its work stays in its checkout until it settles.
+    const checkout = open.held.checkouts.get(started.value.address) ?? null;
+    if (checkout !== null) {
+      await bringBack(gitRunHereFor(), open.path, checkout.folder, 'HEAD').catch(() => undefined);
+    }
     return done({
       path: open.path,
       name: open.name,
@@ -4420,13 +4475,12 @@ function register(): void {
      so a technical user can keep parallel work in its own branch and merge it
      back — and the guards (never flatten a dirty checkout) are the same ones
      the parallel-session wiring will lean on. */
-  const runGitHere: RunGit = (args, options) => gitRun(options.cwd, args);
 
   handle<{ folder: string; branch: string }>(CHANNEL.worktreeStart, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const made = await createWorktree(
-      runGitHere,
+      gitRunHereFor(),
       open.path,
       `conversation-${Date.now().toString(36)}`,
       null,
@@ -4440,7 +4494,7 @@ function register(): void {
     if (open === null) return fail(NOTHING_OPEN);
     const folder = firstWorktree(await listWorktrees(open.path));
     if (folder === null) return fail(worktreeTrouble('No checkout of this project to bring back.'));
-    const landed = await landWorktree(runGitHere, open.path, folder);
+    const landed = await landWorktree(gitRunHereFor(), open.path, folder);
     return landed.ok ? done(null) : fail(worktreeTrouble(landed.because));
   });
 
@@ -4449,7 +4503,7 @@ function register(): void {
     if (open === null) return fail(NOTHING_OPEN);
     const folder = firstWorktree(await listWorktrees(open.path));
     if (folder === null) return fail(worktreeTrouble('No checkout of this project to throw away.'));
-    const dropped = await dropWorktree(runGitHere, open.path, folder);
+    const dropped = await dropWorktree(gitRunHereFor(), open.path, folder);
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
   });
 

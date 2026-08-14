@@ -1,3 +1,6 @@
+import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+
 /** One conversation, its own checkout.
  *
  * Two tabs working the same project parallel are two agents writing the same
@@ -44,10 +47,22 @@ export const worktreeWords = {
   noWorktree: 'This conversation has no checkout to merge back.',
 } as const;
 
+/** What an Apply carried back, and where it could not. */
+export type BringBack = {
+  /** Paths now carrying the conversation's version in the main checkout. */
+  applied: readonly string[];
+  /** Paths both sides changed. Left as the main checkout has them. */
+  conflicted: readonly string[];
+};
+
 export type Result = { ok: true; value: Worktree | null } | { ok: false; because: string };
 
 const ok = (value: Worktree | null = null): Result => ({ ok: true, value });
 const no = (because: string): Result => ({ ok: false, because });
+
+export const bringBackWords = {
+  notRepo: 'This folder is not a git repository, so a conversation cannot bring its work back here.',
+} as const;
 
 /** Whether `folder` is a git checkout itself. */
 async function isRepo(run: RunGit, folder: string): Promise<boolean> {
@@ -76,6 +91,11 @@ export function branchFor(id: string): string {
   return `graphe/${kept === '' ? 'conversation' : kept}`;
 }
 
+/** A safe leaf name for a folder, from any id. */
+export function folderLeaf(id: string): string {
+  return branchFor(id).replace(/^graphe\//, '').replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
 /** Where the checkouts live, under the repository's own untracked roof. */
 export function checkoutFolder(repo: string): string {
   return `${repo}/.graphe/worktrees`;
@@ -93,10 +113,11 @@ export async function createWorktree(
   repo: string,
   id: string,
   base: { ref: string } | null,
+  options: { folder?: string } = {},
 ): Promise<Result> {
   if (!(await isRepo(run, repo))) return no(worktreeWords.notRepo);
   const branch = branchFor(id);
-  const folder = `${checkoutFolder(repo)}/${id}`;
+  const folder = options.folder ?? `${checkoutFolder(repo)}/${folderLeaf(id)}`;
 
   // Make the branch from the base (or the current HEAD), then check it out.
   // An existing branch is not a failure — a crash between create and use should
@@ -143,4 +164,94 @@ export async function dropWorktree(run: RunGit, repo: string, folder: string): P
   await run(['worktree', 'remove', '--force', folder], { cwd: repo });
   if (branch !== null) await run(['branch', '-D', branch], { cwd: repo });
   return ok();
+}
+
+/** The names and statuses git reports, as `{ kind, path }` rows. */
+async function changedAgainst(
+  run: RunGit,
+  dir: string,
+  args: string[],
+): Promise<Array<{ kind: 'A' | 'D' | 'M'; path: string }>> {
+  const { code, out } = await run(args, { cwd: dir });
+  if (code !== 0 || out === undefined) return [];
+  const seen = new Map<string, 'A' | 'D' | 'M'>();
+  for (const line of out.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    // A bare path (from `ls-files --others`) is a brand-new file.
+    const match = /^([AMD])\s+(.+)$/.exec(trimmed);
+    if (match === null) {
+      if (trimmed !== '.' && !trimmed.startsWith('"')) seen.set(trimmed, 'A');
+      continue;
+    }
+    const kind = match[1] ?? 'A';
+    const path = (match[2] ?? '').trim();
+    if (path !== '' && path !== '.') seen.set(path, kind === 'D' ? 'D' : 'A');
+  }
+  return [...seen.entries()].map(([path, kind]) => ({ kind, path }));
+}
+
+/** The worktree's own changes: committed since the base, uncommitted, and
+ *  brand-new (untracked). A new file is a change too — Apply carries it. */
+async function worktreeChanges(
+  run: RunGit,
+  folder: string,
+  base: string,
+): Promise<Array<{ kind: 'A' | 'D' | 'M'; path: string }>> {
+  const committed = await changedAgainst(run, folder, ['diff', '--name-status', '--no-renames', base]);
+  const working = await changedAgainst(run, folder, ['diff', '--name-status', '--no-renames']);
+  const untracked = await changedAgainst(run, folder, ['ls-files', '--others', '--exclude-standard']);
+  const byPath = new Map<string, 'A' | 'D' | 'M'>();
+  for (const row of [...committed, ...working, ...untracked]) byPath.set(row.path, row.kind);
+  return [...byPath.entries()].map(([path, kind]) => ({ kind, path }));
+}
+
+/** Whether the main checkout changed that path since the same base. */
+async function mainChanged(run: RunGit, repo: string, base: string, path: string): Promise<boolean> {
+  const rows = await changedAgainst(run, repo, ['diff', '--name-status', '--no-renames', base, '--', path]);
+  return rows.length > 0;
+}
+
+/** Copy one file from the worktree into the main checkout, or remove it. */
+async function carryFile(repo: string, folder: string, row: { kind: 'A' | 'D' | 'M'; path: string }): Promise<void> {
+  const target = resolve(repo, row.path);
+  if (row.kind === 'D') {
+    await rm(target, { force: true });
+    return;
+  }
+  await mkdir(dirname(target), { recursive: true });
+  await copyFile(resolve(folder, row.path), target);
+}
+
+/**
+ * Bring a conversation's work back into the main checkout, as uncommitted
+ * changes.
+ *
+ * This is Cursor's Apply: it diffs the checkout's whole state against the base
+ * it branched from — committed and uncommitted alike — and carries the files
+ * into the main checkout without a commit, so the work is on disk the moment
+ * it is applied and the person still decides the saving. A path the main
+ * checkout has also changed since the base is left alone and reported, rather
+ * than one side silently overwriting the other (that is the one moment a
+ * designer's unfinished work could be replaced).
+ */
+export async function bringBack(
+  run: RunGit,
+  repo: string,
+  folder: string,
+  base: string,
+): Promise<{ ok: true; value: BringBack } | { ok: false; because: string }> {
+  if (!(await isRepo(run, repo))) return { ok: false, because: bringBackWords.notRepo };
+  const changes = await worktreeChanges(run, folder, base);
+  const applied: string[] = [];
+  const conflicted: string[] = [];
+  for (const row of changes) {
+    if (await mainChanged(run, repo, base, row.path)) {
+      conflicted.push(row.path);
+    } else {
+      await carryFile(repo, folder, row);
+      applied.push(row.path);
+    }
+  }
+  return { ok: true, value: { applied, conflicted } };
 }

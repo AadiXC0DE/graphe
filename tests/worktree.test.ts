@@ -15,12 +15,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   branchFor,
+  bringBack,
   checkoutFolder,
   createWorktree,
   dropWorktree,
   landWorktree,
   type RunGit,
 } from '../src/history/worktree';
+import { readFileSync } from 'node:fs';
 
 const spawn = promisify(execFile);
 
@@ -174,6 +176,124 @@ describe('dropWorktree', () => {
       expect(dropped.ok).toBe(true);
       const list = await raw(repo, 'worktree', 'list');
       expect(list).not.toContain('.graphe/worktrees');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('bringBack — Cursor-style Apply, files come home uncommitted', () => {
+  it('carries an edited file into the main checkout', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'review', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'changed in the tab\n');
+      // The main checkout is untouched.
+      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      expect(applied.ok).toBe(true);
+      if (applied.ok) expect(applied.value.applied).toContain('a.txt');
+      // The change is on disk in main, uncommitted.
+      expect((await raw(repo, 'show', 'HEAD:a.txt')).trim()).toBe('a one');
+      expect(readFileContent(repo, 'a.txt')).toBe('changed in the tab\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a file alone when the main checkout changed it too', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'other', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'from the tab\n');
+      await writeFile(path.join(repo, 'a.txt'), 'mine on main\n');
+
+      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      expect(applied.ok).toBe(true);
+      if (!applied.ok) return;
+      expect(applied.value.applied).not.toContain('a.txt');
+      expect(applied.value.conflicted).toContain('a.txt');
+      // The main checkout keeps its own version rather than being overwritten.
+      expect(readFileContent(repo, 'a.txt')).toBe('mine on main\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('carries a new file across', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'new', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      await writeFile(path.join(made.value.folder, 'brand-new.ts'), 'export const x = 1;\n');
+      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      expect(applied.ok).toBe(true);
+      if (applied.ok) expect(applied.value.applied).toContain('brand-new.ts');
+      expect(readFileContent(repo, 'brand-new.ts')).toBe('export const x = 1;\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+function readFileContent(folder: string, name: string): string {
+  return readFileSync(path.join(folder, name), 'utf8');
+}
+
+describe('parallel isolation — the reference behaviour in miniature', () => {
+  it('two conversations on different files both land, neither is lost', async () => {
+    const repo = await freshRepo();
+    await writeFile(path.join(repo, 'b.txt'), 'b one\n');
+    await raw(repo, 'add', '.');
+    await raw(repo, 'commit', '-m', 'add b');
+    try {
+      // Primary conversation works on the main folder: edits a.txt.
+      await writeFile(path.join(repo, 'a.txt'), 'a from primary\n');
+      // A parallel tab in its own checkout edits b.txt.
+      const made = await createWorktree(git(), repo, 'tab2', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'b.txt'), 'b from tab two\n');
+
+      // Bring the tab's work home: b lands, a stays the primary's version.
+      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      expect(applied.ok).toBe(true);
+      if (!applied.ok) return;
+      expect(applied.value.applied).toContain('b.txt');
+      expect(applied.value.conflicted).not.toContain('a.txt');
+      expect(readFileContent(repo, 'a.txt')).toBe('a from primary\n');
+      expect((await raw(repo, 'status', '--porcelain')).includes('b.txt')).toBe(true);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('one conversation never silently overwrites another on the same file', async () => {
+    const repo = await freshRepo();
+    try {
+      // Primary changes a.txt in the main folder.
+      await writeFile(path.join(repo, 'a.txt'), 'primary version\n');
+      // Parallel tab also changes a.txt, in its checkout.
+      const made = await createWorktree(git(), repo, 'tab2', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'tab two version\n');
+
+      const applied = await bringBack(git(), repo, made.value.folder, 'HEAD');
+      expect(applied.ok).toBe(true);
+      if (!applied.ok) return;
+      // The tab's file is NOT applied over the primary's — it's reported and
+      // the primary keeps its own version.
+      expect(applied.value.applied).not.toContain('a.txt');
+      expect(applied.value.conflicted).toContain('a.txt');
+      expect(readFileContent(repo, 'a.txt')).toBe('primary version\n');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

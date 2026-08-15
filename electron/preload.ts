@@ -45,6 +45,7 @@ import {
   type PromptOptions,
   type ProviderMethod,
   type PutBack,
+  type RepoLook,
   type RecentProject,
   type Conversation,
   type Look,
@@ -53,8 +54,14 @@ import {
   type CarriedExtension,
   type Room,
   type Skill,
+  type Workflow,
+  type BuildPlan,
+  type BuildAdvance,
   type SavedVersion,
+  type DesignChange,
   type ShowOutcome,
+  type VariationSpec,
+  type VariationsOutcome,
   type HowFar,
   type Money,
   type Recording,
@@ -142,6 +149,16 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.stop, named(where)) as Promise<Result<null>>;
   },
 
+  steer(text: string, where?: Where): Promise<Result<null>> {
+    if (typeof text !== 'string' || text.trim() === '') {
+      return Promise.resolve({
+        ok: true,
+        value: null,
+      });
+    }
+    return ipcRenderer.invoke(CHANNEL.steer, text, named(where)) as Promise<Result<null>>;
+  },
+
   answer(callId: string, decision: Decision, where?: Where): Promise<Result<boolean>> {
     if (typeof callId !== 'string' || callId === '' || !isDecision(decision)) {
       return Promise.resolve(refuse<boolean>('I could not tell which question that answered.'));
@@ -172,6 +189,14 @@ const api: GrapheApi = {
 
   versions(where?: Where): Promise<Result<readonly SavedVersion[]>> {
     return ipcRenderer.invoke(CHANNEL.versions, named(where)) as Promise<Result<readonly SavedVersion[]>>;
+  },
+
+  repoLook(where?: Where): Promise<Result<RepoLook>> {
+    return ipcRenderer.invoke(CHANNEL.repoLook, named(where)) as Promise<Result<RepoLook>>;
+  },
+
+  repoComment(number: number, body: string, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.repoComment, number, body, named(where)) as Promise<Result<null>>;
   },
 
   putBack(versionId: string, where?: Where): Promise<Result<PutBack>> {
@@ -271,6 +296,57 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
   },
 
+  workflows(where?: Where): Promise<Result<readonly Workflow[]>> {
+    return ipcRenderer.invoke(CHANNEL.workflows, named(where)) as Promise<Result<readonly Workflow[]>>;
+  },
+
+  worktreeStart(where?: Where): Promise<Result<{ folder: string; branch: string }>> {
+    return ipcRenderer.invoke(CHANNEL.worktreeStart, named(where)) as Promise<
+      Result<{ folder: string; branch: string }>
+    >;
+  },
+
+  worktreeLand(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.worktreeLand, named(where)) as Promise<Result<null>>;
+  },
+
+  worktreeDrop(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.worktreeDrop, named(where)) as Promise<Result<null>>;
+  },
+
+  buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>> {
+    return ipcRenderer.invoke(CHANNEL.buildStart, source, named(where)) as Promise<Result<BuildPlan>>;
+  },
+
+  buildPlan(where?: Where): Promise<Result<BuildPlan | null>> {
+    return ipcRenderer.invoke(CHANNEL.buildPlan, named(where)) as Promise<Result<BuildPlan | null>>;
+  },
+
+  buildAdvance(op: BuildAdvance, where?: Where): Promise<Result<BuildPlan | null>> {
+    if (
+      typeof op !== 'object' ||
+      op === null ||
+      (op.kind !== 'start' && op.kind !== 'finish' && op.kind !== 'add')
+    ) {
+      return Promise.resolve(
+        refuse<BuildPlan | null>('I could not tell how the work moved on.'),
+      );
+    }
+    return ipcRenderer.invoke(CHANNEL.buildAdvance, op, named(where)) as Promise<
+      Result<BuildPlan | null>
+    >;
+  },
+
+  chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>> {
+    return ipcRenderer.invoke(CHANNEL.chooseDocument, named(where)) as Promise<
+      Result<{ name: string; text: string } | null>
+    >;
+  },
+
+  buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>> {
+    return ipcRenderer.invoke(CHANNEL.buildSave, tasks, named(where)) as Promise<Result<BuildPlan | null>>;
+  },
+
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {
     return ipcRenderer.invoke(CHANNEL.carried, named(where)) as Promise<Result<readonly CarriedExtension[]>>;
   },
@@ -305,6 +381,25 @@ const api: GrapheApi = {
 
   show(at?: string, point?: boolean, where?: Where): Promise<Result<ShowOutcome>> {
     return ipcRenderer.invoke(CHANNEL.show, at, point === true, named(where)) as Promise<Result<ShowOutcome>>;
+  },
+
+  variationsServe(
+    parts: { subject: string; variations: readonly VariationSpec[] },
+    where?: Where,
+  ): Promise<Result<VariationsOutcome>> {
+    if (
+      typeof parts !== 'object' ||
+      parts === null ||
+      typeof parts.subject !== 'string' ||
+      !Array.isArray(parts.variations)
+    ) {
+      return Promise.resolve(refuse<VariationsOutcome>('I could not tell what to compare.'));
+    }
+    return ipcRenderer.invoke(
+      CHANNEL.variationsServe,
+      parts as { subject: string; variations: readonly VariationSpec[] },
+      named(where),
+    ) as Promise<Result<VariationsOutcome>>;
   },
 
   onPointed(listener: (at: PointedAt) => void): () => void {
@@ -376,27 +471,22 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.explainPackage, id, named(where)) as Promise<Result<string>>;
   },
 
-  nudgeToken(
-    name: string,
-    value: string,
+  designCommit(
+    changes: DesignChange,
     where?: Where,
   ): Promise<Result<readonly SavedVersion[]>> {
-    if (typeof name !== 'string' || name === '' || typeof value !== 'string') {
+    const tokens = changes.tokens;
+    const motions = changes.motions;
+    if (!Array.isArray(tokens) || !Array.isArray(motions)) {
       return Promise.resolve(refuse<readonly SavedVersion[]>('I could not tell what to change.'));
     }
-    return ipcRenderer.invoke(CHANNEL.nudgeToken, name, value, named(where)) as Promise<
-      Result<readonly SavedVersion[]>
-    >;
-  },
-  nudgeMotion(
-    places: readonly unknown[],
-    change: unknown,
-    where?: Where,
-  ): Promise<Result<readonly SavedVersion[]>> {
-    if (!Array.isArray(places) || typeof change !== 'object' || change === null) {
-      return Promise.resolve(refuse('I could not change that.'));
+    if (tokens.some((one) => typeof one?.name !== 'string' || typeof one?.value !== 'string')) {
+      return Promise.resolve(refuse<readonly SavedVersion[]>('I could not tell what to change.'));
     }
-    return ipcRenderer.invoke(CHANNEL.nudgeMotion, places, change, named(where)) as Promise<
+    if (motions.some((one) => !Array.isArray(one?.places) || typeof one?.change !== 'object' || one.change === null)) {
+      return Promise.resolve(refuse<readonly SavedVersion[]>('I could not change that.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.designCommit, changes, named(where)) as Promise<
       Result<readonly SavedVersion[]>
     >;
   },
@@ -614,11 +704,11 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.landing, named(where)) as Promise<Result<Landing>>;
   },
 
-  setHoldBack(on: boolean): Promise<Result<Preferences>> {
+  setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>> {
     if (typeof on !== 'boolean') {
       return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
     }
-    return ipcRenderer.invoke(CHANNEL.setHoldBack, on) as Promise<Result<Preferences>>;
+    return ipcRenderer.invoke(CHANNEL.setHoldBack, on, named(where)) as Promise<Result<Preferences>>;
   },
 
   decideOnWork(letIn: boolean, where?: Where): Promise<Result<Decided>> {

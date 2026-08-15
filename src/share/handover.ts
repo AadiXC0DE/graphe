@@ -37,8 +37,8 @@ export type Handover = {
  *  can be read whole and swept. */
 export const handoverWords = {
   /** The control itself. */
-  label: 'Send it for review',
-  hint: 'Puts the work, the pictures and a written summary of what changed where your team picks it up.',
+  label: 'Hand it to your team',
+  hint: 'Puts the work, the pictures and a written summary where your team already keeps this project.',
   /** Said before anything leaves. */
   aboutTo:
     'This is the only part of Graphe that sends anything off this computer. Your work, the pictures of it and the description below go to the place your team already keeps this project.',

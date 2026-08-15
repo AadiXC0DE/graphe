@@ -86,3 +86,14 @@ export function agoInSentence(at: number, now: number = Date.now()): string {
   const said = ago(at, now);
   return said === 'Just now' ? 'a moment ago' : said.charAt(0).toLowerCase() + said.slice(1);
 }
+
+/** How long a run went for, the compact way a footer says it: "48m" or "2h 5m".
+ *  Seconds in, whole minutes and hours out, minutes alone below an hour. */
+export function durationInWords(totalSeconds: number): string {
+  const minutes = Math.max(1, Math.round(totalSeconds / 60));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+

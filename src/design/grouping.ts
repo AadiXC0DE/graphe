@@ -111,9 +111,12 @@ export function controlFor(token: StyleToken): Control {
 }
 
 /** A shadow is worth drawing even though no slider can move it; a font stack
- *  with nothing to nudge is a line of text the panel does not need. */
+ *  with nothing to nudge is still the answer to “what type is this?” and must
+ *  be shown, not hidden — the design system is where somebody comes to read
+ *  fonts. Everything else a slider cannot move, we do not need. */
 export function canShow(token: StyleToken): boolean {
-  return token.kind === 'shadow' || controlFor(token) !== 'none';
+  if (token.kind === 'shadow' || controlFor(token) !== 'none') return true;
+  return wordsIn(token.name).some((word) => TEXT_WORDS.has(word));
 }
 
 export function groupOf(token: StyleToken): GroupId {
@@ -129,7 +132,8 @@ export function groupOf(token: StyleToken): GroupId {
     case 'size':
       return wordsIn(token.name).some((word) => TEXT_WORDS.has(word)) ? 'type' : 'size';
     default:
-      return 'other';
+      /* A font stack reads as part of the type system, not as an 'other'. */
+      return wordsIn(token.name).some((word) => TEXT_WORDS.has(word)) ? 'type' : 'other';
   }
 }
 

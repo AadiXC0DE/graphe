@@ -1,0 +1,296 @@
+/* The github screen: one project's pull requests and issues, read from the
+   terminal's own `gh` and laid out as a list to one side and the chosen one
+   whole on the other — the same two-part room the history lines use, because a
+   list row has room for a title and a number, and the reading has room for the
+   description and the review.
+
+   It wears the app's own quiet: paper ground, two-grey ink, the one terracotta
+   accent on the thing that does something. */
+
+/* The refresh button sits where History has nothing, so both screens share the
+   same head band. */
+.sheet__refresh {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  /* The same top inset the close control and the chips carry, so Refresh and
+     Close Esc sit on the same band as one row. */
+  margin-top: var(--space-1);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.sheet__refresh:active {
+  transform: scale(0.97);
+}
+
+.sheet__refresh:disabled {
+  opacity: 0.5;
+}
+
+.sheet__refresh:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sheet__refresh:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet__refresh:active {
+    transform: none;
+  }
+}
+
+/* -------------------------------------------------------------- the layout */
+
+.reviews {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-5);
+  align-items: start;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  padding: var(--space-5) var(--space-3);
+}
+
+/* The nothing-yet state: one quiet panel, centred, an invitation rather than a
+   lone line stranded at the top left. */
+.reviews--empty {
+  display: block;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 12vh var(--space-4);
+  text-align: center;
+}
+
+.reviews__blank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.reviews__blankicon {
+  color: var(--text-faint);
+  opacity: 0.75;
+}
+
+.reviews__blanktitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.reviews__blankdetail {
+  margin: 0;
+  max-width: 320px;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+
+.reviews__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.reviews__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.reviews__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reviews__row:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+.reviews__row--open {
+  background: var(--bg-sunken);
+}
+
+.reviews__num {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.reviews__num--merged {
+  color: var(--accent-ink);
+}
+
+.reviews__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.reviews__title {
+  font-size: var(--text-sm);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reviews__sub {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reviews__state {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  background: var(--bg-sunken);
+  border-radius: 999px;
+  padding: 1px var(--space-2);
+  text-transform: capitalize;
+}
+
+.reviews__state--open {
+  color: var(--text-muted);
+}
+
+.reviews__state--merged {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+/* -------------------------------------------------------------- the detail */
+
+.reviews__about {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  position: sticky;
+  top: 0;
+}
+
+.reviews__hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+.reviews__abouttitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.reviews__aboutwhen {
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.reviews__detail {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reviews__do {
+  align-self: flex-start;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.reviews__do:active {
+  transform: scale(0.97);
+}
+
+.reviews__do:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reviews__do:hover {
+    filter: brightness(1.04);
+  }
+}
+
+.reviews__link {
+  font-size: var(--text-xs);
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+
+.reviews__link:hover {
+  text-decoration: underline;
+}
+
+.reviews__none {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+@media (max-width: 860px) {
+  .reviews {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reviews__about {
+    position: static;
+  }
+}

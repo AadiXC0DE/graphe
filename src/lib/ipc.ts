@@ -169,6 +169,13 @@ export type Room = {
  * module that spawns processes and reads folders; this one crosses a structured
  * clone into a sandbox, and the seam between them is the point of this file.
  */
+/** A set of design edits the window is holding, to be written and saved in one
+ *  go. Nothing about them touches the project until the window asks. */
+export type DesignChange = {
+  tokens: readonly { name: string; value: string }[];
+  motions: readonly { places: readonly unknown[]; change: unknown }[];
+};
+
 export type SavedVersion = {
   id: string;
   /** The same id, short. What a terminal, a review page or a colleague calls
@@ -222,7 +229,28 @@ export type PutBack = {
  * more dangerous than it looks.
  */
 export type ShowOutcome =
-  | { kind: 'showing'; name: string }
+  | { kind: 'showing'; name: string; address: string }
+  | { kind: 'unsure'; question: string };
+
+/** One variation to make ready: a folder that already holds it, named and
+ *  briefed the way the person asked, and the served address once it is ready. */
+export type VariationSpec = {
+  /** A short stable id, ours. */
+  id: string;
+  /** What it is, said plainly: "Minimal and clean". */
+  name: string;
+  /** The folder it lives in, absolute. */
+  folder: string;
+};
+
+/** The answer to "show me the variations". A set whose members are served, or
+ *  the first question that could not be answered — surfaced rather than guessed. */
+export type VariationsOutcome =
+  | {
+      kind: 'showing';
+      subject: string;
+      variations: readonly { id: string; name: string; address: string }[];
+    }
   | { kind: 'unsure'; question: string };
 
 /**
@@ -231,8 +259,10 @@ export type ShowOutcome =
  * The whole reading travels, not a sentence about it. The shell is the only side
  * that can read the project the element came out of — its values, where each
  * component is used, what last touched the file — so it decides there and the
- * window draws what it is handed. `says` is the same click as one line, for the
- * composer, so nothing has to derive it twice.
+ * window draws what it is handed. `says` is that same reading written out for the
+ * agent that gets asked to change it, so the composer message carries the element's
+ * file, component and values without the person having to describe where the
+ * element lives.
  */
 export type PointedAt = {
   pointed: Pointed;
@@ -372,9 +402,10 @@ export type Preferences = {
    *  somebody who did not ask for one is the thing this product exists not to
    *  do. */
   showFiles: boolean;
-  /** Do the work in a copy first and show it, rather than letting it reach the
-   *  files straight away. Off by default and sticky once asked for. */
-  holdBack: boolean;
+  /** Whether each project holds work back to be looked at first, keyed by its
+   *  path. Per project, so saying “ask me first” in one folder never changes
+   *  another. */
+  heldBack: Readonly<Record<string, boolean>>;
   /** The ceiling somebody set on spending, or null when they have not set one.
    *  Remembered across launches: a ceiling that forgets itself is not one. */
   ceiling: Money | null;
@@ -717,6 +748,46 @@ export type Skill = {
   path: string;
 };
 
+/** One way of working somebody can ask for with `/word`. The prompt body stays
+ *  in the shell — the window only needs the command, what it does and what to
+ *  put after it to list a `/` menu and hold the typed words. */
+export type Workflow = {
+  command: string;
+  name: string;
+  description: string;
+  hint: string | null;
+  source: 'global' | 'project';
+};
+
+/** One step of a document-to-build plan, as the window draws it. */
+export type BuildTask = {
+  n: number;
+  title: string;
+  acceptance: string;
+  test: string | null;
+  status: 'pending' | 'doing' | 'done' | 'failed';
+  note: string | null;
+};
+
+/** A document-to-build plan, whole. */
+export type BuildPlan = {
+  /** What the document is called, said once at the top of the checklist. */
+  source: string;
+  tasks: readonly BuildTask[];
+  /** The next task to work on, or null when the plan is done. */
+  next: number | null;
+  done: number;
+  total: number;
+};
+
+/** One step the tracker takes as the build runs — picking up the next task,
+ *  closing a finished one, or registering requirements the agent discovered
+ *  along the way. */
+export type BuildAdvance =
+  | { kind: 'start' }
+  | { kind: 'finish'; ok: boolean }
+  | { kind: 'add'; titles: readonly string[] };
+
 /**
  * What the overview panel knows about the project's folder.
  *
@@ -759,7 +830,7 @@ export type Artifact = {
 
 export type Swatch = { name: string; value: string };
 
-/** One custom property in the project's own token file. */
+/** One custom property in the project's own design tokens. */
 export type StyleToken = {
   name: string;
   value: string;
@@ -767,6 +838,9 @@ export type StyleToken = {
   line: number;
   /** The values a slider should snap to, derived from the file's own scale. */
   steps: readonly string[];
+  /** The stylesheet it was read from, so an edit lands in the same file. Left
+   *  off (a fixture), an edit falls back to the project's primary sheet. */
+  file?: string;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -880,12 +954,51 @@ export type AgentNotice = {
   event: AgentEvent;
 };
 
+/* -------------------------------------------------------------------------- */
+/* Pull requests and issues, read for the Github screen                       */
+/* -------------------------------------------------------------------------- */
+
+/** One issue or pull request, as the reviews screen shows it. Drawn from the
+ *  terminal's own `gh` JSON so the window never talks to github itself. */
+export type RepoItem = {
+  /** The number github gives it, and that `gh pr comment` wants. */
+  number: number;
+  kind: 'issue' | 'pr';
+  title: string;
+  /** Open, closed, merged … */
+  state: string;
+  /** The html url, for whenever somebody would rather open it in a browser. */
+  url: string;
+  /** The description, when there is one. */
+  description: string | null;
+  author: string;
+  /** ISO time, newest first as gh returns it. */
+  updatedAt: string;
+  /** The base branch, for a pull request. */
+  baseRef: string | null;
+};
+
+/** Everything the reviews screen needs about the project's github repository.
+ *  Null when this folder is not a github repository, or `gh` is not logged in. */
+export type RepoLook =
+  | {
+      /** `owner/name`, which is how github and gh address it. */
+      full: string;
+      owner: string;
+      name: string;
+      url: string;
+      issues: readonly RepoItem[];
+      prs: readonly RepoItem[];
+    }
+  | null;
+
 /** Channel names. Namespaced so nothing else on the wire can be mistaken for
  *  ours, and centralised so preload and main cannot drift apart. */
 export const CHANNEL = {
   openProject: 'graphe:open-project',
   prompt: 'graphe:prompt',
   stop: 'graphe:stop',
+  steer: 'graphe:steer',
   answer: 'graphe:answer',
   chooseFolder: 'graphe:choose-folder',
   event: 'graphe:event',
@@ -896,6 +1009,7 @@ export const CHANNEL = {
   putBack: 'graphe:put-back',
   nameVersion: 'graphe:name-version',
   show: 'graphe:show',
+  variationsServe: 'graphe:variations-serve',
   showProgress: 'graphe:show-progress',
   windowState: 'graphe:window-state',
   pointed: 'graphe:pointed',
@@ -918,13 +1032,23 @@ export const CHANNEL = {
   room: 'graphe:room',
   carried: 'graphe:carried',
   trustCarried: 'graphe:trust-carried',
+  repoLook: 'graphe:repo-look',
+  repoComment: 'graphe:repo-comment',
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
   tidyNow: 'graphe:tidy-now',
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
-  nudgeToken: 'graphe:nudge-token',
-  nudgeMotion: 'graphe:nudge-motion',
+  workflows: 'graphe:workflows',
+  worktreeStart: 'graphe:worktree-start',
+  worktreeLand: 'graphe:worktree-land',
+  worktreeDrop: 'graphe:worktree-drop',
+  buildStart: 'graphe:build-start',
+  buildPlan: 'graphe:build-plan',
+  buildAdvance: 'graphe:build-advance',
+  buildSave: 'graphe:build-save',
+  chooseDocument: 'graphe:choose-document',
+  designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
   checkWidths: 'graphe:check-widths',
   conversations: 'graphe:conversations',
@@ -1005,6 +1129,10 @@ export type GrapheApi = {
   ): Promise<Result<null>>;
   /** Stop what it is doing. Open questions are answered no. */
   stop(where?: Where): Promise<Result<null>>;
+  /** Put a message into the turn already in flight, without stopping it. The
+   *  agent hears it between tool calls and carries on — the "insert into the
+   *  loop" move. */
+  steer(text: string, where?: Where): Promise<Result<null>>;
   /** Answer a question the Guard asked. False when there was no such question. */
   answer(callId: string, decision: Decision, where?: Where): Promise<Result<boolean>>;
   /** Ask the person to pick a folder. Null when they closed the picker. */
@@ -1023,6 +1151,12 @@ export type GrapheApi = {
   /** Every version of the open project, newest first. Empty before anything has
    *  been saved, and empty — not a failure — when no project is open. */
   versions(where?: Where): Promise<Result<readonly SavedVersion[]>>;
+  /** Everything about a project's github repository, read from the terminal's
+   *  own `gh` — the issues and pull requests of this codebase. Null when the
+   *  folder is not a github repository or `gh` is not set up. */
+  repoLook(where?: Where): Promise<Result<RepoLook>>;
+  /** Ask the terminal's `gh pr comment` to speak for the current person. */
+  repoComment(number: number, body: string, where?: Where): Promise<Result<null>>;
   /** Put the project back to a version. Undoable; see `PutBack`. */
   putBack(versionId: string, where?: Where): Promise<Result<PutBack>>;
   /** Give a version a name of the user's own. */
@@ -1067,6 +1201,28 @@ export type GrapheApi = {
   tidyNow(where?: Where): Promise<Result<Room | null>>;
   /** The installed instruction packs available to this project and computer. */
   skills(where?: Where): Promise<Result<readonly Skill[]>>;
+  /** The `/word` ways of working this project can ask for. */
+  workflows(where?: Where): Promise<Result<readonly Workflow[]>>;
+  /** Start a document-to-build: name a document and an optional instruction,
+   *  and the shell turns it into a plan. */
+  buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>>;
+  /** The current build plan, or null when none is under way. */
+  buildPlan(where?: Where): Promise<Result<BuildPlan | null>>;
+  /** Advance the build tracker one turn: close the task a settled turn just
+   *  finished (done or failed), or add tasks for requirements found while
+   *  building. */
+  buildAdvance(op: BuildAdvance, where?: Where): Promise<Result<BuildPlan | null>>;
+  /** Record the plan the agent produced into the stored build-plan, so a
+   *  resumed session has the real task list. */
+  buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>>;
+  /** Pick a requirements document on disk and read its text, or null if closed. */
+  chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>>;
+  /** Put the front conversation to work in its own git branch and checkout. */
+  worktreeStart(where?: Where): Promise<Result<{ folder: string; branch: string }>>;
+  /** Merge the front conversation's own branch back, and drop the checkout. */
+  worktreeLand(where?: Where): Promise<Result<null>>;
+  /** Throw the front conversation's own checkout away, branch and all. */
+  worktreeDrop(where?: Where): Promise<Result<null>>;
   /** Full text for a library row. `id` is checked against that library first. */
   skillText(id: string, where?: Where): Promise<Result<string>>;
   /** Stop checking before things that would otherwise be asked about, or start
@@ -1086,6 +1242,9 @@ export type GrapheApi = {
   /** Make the project, then open the made thing in their own browser. `at` opens
    *  one page of it rather than its front door. */
   show(at?: string, point?: boolean, where?: Where): Promise<Result<ShowOutcome>>;
+  /** Make ready every variation in a set at once, each served on its own address
+   *  so they can be compared in the pane. `where` names the project in front. */
+  variationsServe(parts: { subject: string; variations: readonly VariationSpec[] }, where?: Where): Promise<Result<VariationsOutcome>>;
   /** Somebody clicked an element, in their own browser or in the page beside
    *  the conversation. Read against the project before it gets here. */
   onPointed(listener: (at: PointedAt) => void): () => void;
@@ -1131,13 +1290,12 @@ export type GrapheApi = {
   removePackage(id: string): Promise<Result<readonly Pack[]>>;
   /** Two plain sentences on what one does, written by the model. */
   explainPackage(id: string, where?: Where): Promise<Result<string>>;
-  /** Change one design token and save the result as a version. */
-  nudgeToken(name: string, value: string, where?: Where): Promise<Result<readonly SavedVersion[]>>;
-  /** Change how long something takes, or how it starts and stops. The places
-   *  and the change are the shapes `src/motion/read.ts` hands out. */
-  nudgeMotion(
-    places: readonly unknown[],
-    change: unknown,
+  /** Write every design change the window has been holding and save it as one
+   *  version. `tokens` renames to real names with the value each is set to;
+   *  `motions` are the shapes `src/motion/read.ts` hands out. Nothing is
+   *  written on the way to this — the design view stays untracked until asked. */
+  designCommit(
+    changes: DesignChange,
     where?: Where,
   ): Promise<Result<readonly SavedVersion[]>>;
   /** Follow along while that happens. Returns the function that stops. */
@@ -1192,7 +1350,7 @@ export type GrapheApi = {
   /** What can be done with this project's work, and what is waiting. */
   landing(where?: Where): Promise<Result<Landing>>;
   /** Check new work in a copy before it reaches the files. Sticky. */
-  setHoldBack(on: boolean): Promise<Result<Preferences>>;
+  setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>>;
   /** Let the work that is waiting in, or set it aside. Both are undoable —
    *  letting it in through `putBack`, setting it aside by deciding again. */
   decideOnWork(letIn: boolean, where?: Where): Promise<Result<Decided>>;

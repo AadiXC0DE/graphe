@@ -35,10 +35,15 @@ import {
   WebContentsView,
   type IpcMainInvokeEvent,
 } from 'electron';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync = promisify(execFile);
 import { existsSync } from 'node:fs';
-import { readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
+import * as path from 'node:path';
+import { dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
 import {
@@ -101,11 +106,17 @@ import {
   type PutBack,
   type RecentProject,
   type Result,
+  type RepoItem,
+  type RepoLook,
   type CarriedExtension,
   type Room,
   type Skill,
+  type Workflow,
   type SavedVersion,
+  type DesignChange,
   type ShowOutcome,
+  type VariationSpec,
+  type VariationsOutcome,
   type HowFar,
   type Recording,
   type ShowProgress,
@@ -142,6 +153,22 @@ import { findEditor, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
 import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
 import { availableSkills, selectedSkills, skillContents, skillNamed } from '../src/agent/pi/skills';
+import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
+import { promptFor } from '../src/work/workflows';
+import {
+  bringBack,
+  createWorktree,
+  dropWorktree,
+  landWorktree,
+  type RunGit,
+} from '../src/history/worktree';
+import {
+  addTasks,
+  finishTask,
+  readPlan,
+  startTask,
+  type Task,
+} from '../src/work/buildplan';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -189,8 +216,13 @@ import { canPutOnline, canSendItOn } from '../src/share/tools';
 
 import type { Serving } from '../src/preview/serve';
 import { makeAndServe, ShowError, showSays } from '../src/preview/show';
-import { describePointed, POINTER_SCRIPT, type Pointed } from '../src/preview/point';
-import { read as readPointed, type Material, type Change as Touched } from '../src/preview/inspect';
+import { POINTER_SCRIPT, type Pointed } from '../src/preview/point';
+import {
+  read as readPointed,
+  saysReading,
+  type Material,
+  type Change as Touched,
+} from '../src/preview/inspect';
 import { readUsage } from '../src/design/usage';
 import { photographHeld, type Held as HeldPictures } from '../src/diff/holdshot';
 import { holdCamera } from '../src/diff/holdcamera';
@@ -788,8 +820,14 @@ type Held = {
   sessions: Workspaces<GrapheSession>;
   /** The finished site being looked at, if "See it" has been pressed here. */
   serving: Serving | null;
+  /** Every variation in the set in front, each served on its own address. */
+  variations: readonly Serving[];
   /** The before-and-after (BACKLOG F2). */
   looking: Looking;
+  /** A conversation's own checkout, by its address. Present only for the ones
+   *  running isolated in a worktree — the primary conversation works directly
+   *  on the project folder. */
+  checkouts: Map<string, { folder: string }>;
   /** Work being checked before it reaches the files, or null when none is. */
   waiting: HeldWork | null;
   /** What that work would look like, photographed in the copy while the copy
@@ -817,6 +855,7 @@ const workspaces = new Workspaces<Held>({
   close: (held) => {
     held.sessions.closeAll();
     void held.serving?.stop();
+    for (const served of held.variations) void served.stop();
     // The copy goes; whatever it made stays reachable, so closing a project
     // while something waits in it cannot be how somebody loses work.
     void held.waiting?.release();
@@ -999,6 +1038,44 @@ function imageCards(value: unknown): readonly ImageCard[] | undefined {
  * failure. Read with a short timeout so a folder that will not answer (a
  * network drive, a locked machine) costs the panel the section, not the window.
  */
+/** A git runner, for the worktree work. The working directory comes with each call. */
+function gitRunHereFor(): RunGit {
+  return (args, options) => gitRun(options.cwd, args);
+}
+
+/** Run git in a folder and say whether it worked, with what it said. */
+async function gitRun(cwd: string, args: string[]): Promise<{ code: number; out?: string }> {
+  try {
+    const made = await execFileAsync('git', args, { cwd, encoding: 'utf8' });
+    return { code: 0, out: made.stdout };
+  } catch (cause) {
+    const failed = cause as { code?: number };
+    return { code: typeof failed.code === 'number' ? failed.code : 1, out: '' };
+  }
+}
+
+/** The checkouts this project has opened, main one excluded. */
+async function listWorktrees(repo: string): Promise<string[]> {
+  const { code, out } = await gitRun(repo, ['worktree', 'list', '--porcelain']);
+  if (code !== 0 || out === undefined) return [];
+  const folders: string[] = [];
+  for (const line of out.split('\n')) {
+    if (!line.startsWith('worktree ')) continue;
+    const folder = line.slice('worktree '.length).trim();
+    if (path.resolve(folder) !== path.resolve(repo)) folders.push(folder);
+  }
+  return folders;
+}
+
+function firstWorktree(list: string[]): string | null {
+  return list[0] ?? null;
+}
+
+/** A mistake to hold the window by, in the shape a reading makes. */
+function worktreeTrouble(because: string): Trouble {
+  return { what: 'This conversation needs its own checkout.', because, actionLabel: 'Got it' };
+}
+
 function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
   return new Promise((resolve) => {
     const child = spawn('git', ['status', '--porcelain=v2', '--branch'], {
@@ -1031,6 +1108,167 @@ function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
       }
       resolve(parseGitStatus(out));
     });
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* A project's github repository, read through the terminal's own `gh`         */
+/* -------------------------------------------------------------------------- */
+
+/** Run `gh` in cwd and give back its JSON stdout, or null when it is not there
+ *  or not logged in. `gh` reads the person's own credentials from their keyring,
+ *  so no token has to be stored, refreshed or guarded here.
+ */
+function ghJSON(cwd: string, args: readonly string[]): Promise<unknown | null> {
+  return new Promise((resolve) => {
+    const child = spawn('gh', [...args, '--json', 'number,title,state,url,body,author,updatedAt'], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    child.stderr.resume();
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve(null);
+    }, 8000);
+    child.on('error', () => {
+      clearTimeout(timeout);
+      resolve(null);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+      try {
+        resolve(JSON.parse(out));
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
+
+/** Which github repository this folder answers to, or `owner/name`. Read from a
+ *  remote the folder already knows about, so a project with no remote or a
+ *  remote that is not github is simply not a github repository.
+ */
+function githubRepo(cwd: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      'git',
+      ['config', '--get', 'remote.origin.url'],
+      { cwd, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => out += chunk);
+    child.stderr.resume();
+    child.on('close', (code) => {
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+      const url = out.trim();
+      // Accept https://github.com/o/r, git@github.com:o/r, and ssh variants.
+      let m = /github\.com[/:]([^/]+)\/([^/.]+)(?:\.git)?$/.exec(url);
+      let full = m === null ? null : `${m[1]}/${m[2]}`;
+      resolve(full);
+    });
+  });
+}
+
+/** One issue or pull request, narrowed from gh's JSON to what the screen needs. */
+function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem {
+  const author =
+    (raw['author'] as Record<string, unknown> | null)?.['login'] ?? 'unknown';
+  const number = typeof raw['number'] === 'number' ? raw['number'] : 0;
+  return {
+    number,
+    kind,
+    title: typeof raw['title'] === 'string' ? raw['title'] : '',
+    state: typeof raw['state'] === 'string' ? raw['state'] : '',
+    url: typeof raw['url'] === 'string' ? raw['url'] : '',
+    description:
+      typeof raw['body'] === 'string' && raw['body'].trim() !== '' ? raw['body'] : null,
+    author: typeof author === 'string' ? author : 'unknown',
+    updatedAt: typeof raw['updatedAt'] === 'string' ? raw['updatedAt'] : '',
+    baseRef: null,
+  };
+}
+
+/** Everything the reviews screen asks about a project's repository, fetched in
+ *  one call. Null when this folder is not a github repo, or gh is not ready —
+ *  both are "nothing to show" rather than a failure.
+ */
+async function readRepo(open: { path: string }): Promise<RepoLook> {
+  try {
+    const full = await githubRepo(open.path);
+    if (full === null) return null;
+    const split = full.split('/');
+    const owner = split[0] ?? '';
+    const name = split[1] ?? '';
+    const issues = (await ghJSON(open.path, ['issue', 'list', '-R', full, '--limit', '50'])) as
+      | readonly Record<string, unknown>[]
+      | null;
+    const prs = (await ghJSON(open.path, ['pr', 'list', '-R', full, '--limit', '50'])) as
+      | readonly Record<string, unknown>[]
+      | null;
+    return {
+      full,
+      owner,
+      name,
+      url: `https://github.com/${full}`,
+      issues: (issues ?? []).map((one) => repoItem(one, 'issue')),
+      prs: (prs ?? []).map((one) => repoItem(one, 'pr')),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Post a review as a comment on a pull request, speaking as the person whose
+ *  terminal `gh` is logged in as. The body is written to a temp file first so
+ *  a long review survives gh's argv and needs no shell quoting. The exit code
+ *  is what answers: 0 is the comment landed.
+ */
+async function ghComment(
+  cwd: string,
+  full: string,
+  number: number,
+  body: string,
+): Promise<number> {
+  return new Promise((resolve) => {
+    const dir = tmpdir();
+    const file = join(dir, `graphe-review-${String(Date.now())}.md`);
+    void writeFile(file, body, 'utf8')
+      .then(() => {
+        const child = spawn(
+          'gh',
+          ['pr', 'comment', String(number), '-R', full, '--body-file', file],
+          { cwd, stdio: ['ignore', 'ignore', 'pipe'] },
+        );
+        let err = '';
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk: string) => (err += chunk));
+        const timeout = setTimeout(() => child.kill('SIGKILL'), 20000);
+        child.on('close', (code) => {
+          clearTimeout(timeout);
+          void rm(file, { force: true }).catch(() => {});
+          resolve(code ?? 1);
+        });
+        child.on('error', () => {
+          clearTimeout(timeout);
+          void rm(file, { force: true }).catch(() => {});
+          resolve(1);
+        });
+      })
+      .catch(() => resolve(1));
   });
 }
 
@@ -1231,7 +1469,19 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     }
     // Everything has stopped. The right moment for a picture, and the only one
     // where taking it cannot slow anything down.
-    if (said.type === 'settled') void look(path, held);
+    // A conversation's work runs in its own checkout; the one in front is the
+    // one the folder the window reads belongs to, so when its turn settles the
+    // work is carried home (Apply) before the screenshots take it in. A tab
+    // running in the background is NOT brought back — that is what keeps two
+    // parallel tabs from silently overwriting each other's files.
+    if (said.type === 'settled') {
+      const inFront = held.sessions.current?.path === from.address;
+      const checkout =
+        !inFront || from.address === null ? null : held.checkouts.get(from.address) ?? null;
+      const applied =
+        checkout === null ? Promise.resolve() : bringBack(gitRunHereFor(), path, checkout.folder);
+      void applied.then(() => look(path, held));
+    }
 
     // Against the ceiling as well as into the ledger. This is the conversation
     // somebody is sitting in front of, so it is never registered as something
@@ -1334,7 +1584,7 @@ async function landingNow(folder: string, held: Held): Promise<Landing> {
     // Only ever beside the work it is of. Nothing is waiting, so there is
     // nothing for a picture to be a picture of.
     held: held.waiting === null ? null : held.pictures,
-    holdBack: chosen.holdBack,
+    holdBack: chosen.heldBack[folder] === true,
     canHandOver: reach.canHandOver,
     handOverSays: reach.handOverSays,
     canPutOnline: reach.canPutOnline,
@@ -1489,27 +1739,73 @@ const TOKEN_FILES = [
  * token file and a globals file keeps its tokens in one of them, and counting
  * is a better guess than an ordering we made up.
  */
+/** Every stylesheet the project keeps, with its name, so a read can say which
+ *  file a token came from. Token files first, then the style folders — the same
+ *  breadcrumb `styleSheets` follows, but paired with names for aggregation. */
+async function tokenSheets(root: string): Promise<readonly { name: string; css: string }[]> {
+  const names = [...TOKEN_FILES];
+  for (const folder of STYLE_FOLDERS) {
+    const inside = await readdir(join(root, folder)).catch(() => [] as string[]);
+    for (const name of inside) {
+      if (name.toLowerCase().endsWith('.css')) names.push(`${folder}/${name}`);
+    }
+  }
+  const out: { name: string; css: string }[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (out.length >= MOST_SHEETS || seen.has(name)) continue;
+    seen.add(name);
+    const css = await readFile(join(root, name), 'utf8').catch(() => null);
+    if (css !== null) out.push({ name, css });
+  }
+  return out;
+}
+
+/**
+ * The project's design tokens, gathered from every stylesheet it keeps.
+ *
+ * A project's visual language is rarely one file — tokens live in `globals.css`
+ * and `variables.css` and the component sheets together. This reads them all,
+ * keeps the first declaration of each name (which is the one that wins on
+ * `:root`), and remembers which file each came from so an edit to it lands in
+ * the right place. `file`/`text` name the sheet with the most tokens, which is
+ * where the live editing preview writes.
+ */
 async function styleTokens(
   root: string,
 ): Promise<
   { file: string; tokens: readonly import('../src/lib/ipc').StyleToken[]; text: string } | null
 > {
-  let best: {
-    file: string;
-    tokens: readonly import('../src/lib/ipc').StyleToken[];
-    text: string;
-  } | null = null;
-  for (const candidate of TOKEN_FILES) {
-    const css = await readFile(join(root, candidate), 'utf8').catch(() => null);
-    if (css === null) continue;
-    const found = readTokens(css);
-    if (found.length === 0) continue;
-    const withSteps = found.map((one) => ({ ...one, steps: steps(one, found) }));
-    if (best === null || withSteps.length > best.tokens.length) {
-      best = { file: candidate, tokens: withSteps, text: css };
+  const sheets = await tokenSheets(root);
+  // Raw reads named by file, then the first declaration of each name kept — the
+  // one that wins on :root — so a value restated per theme is not repeated.
+  const byName = new Map<string, { raw: ReturnType<typeof readTokens>[number]; file: string }>();
+  for (const sheet of sheets) {
+    for (const raw of readTokens(sheet.css)) {
+      if (byName.has(raw.name)) continue;
+      byName.set(raw.name, { raw, file: sheet.name });
     }
   }
-  return best;
+  if (byName.size === 0) return null;
+  const raws = [...byName.values()].map((one) => one.raw);
+  const withSteps: import('../src/lib/ipc').StyleToken[] = [...byName.values()].map((one) => ({
+    ...one.raw,
+    steps: steps(one.raw, raws),
+    file: one.file,
+  }));
+  // The sheet holding the most tokens is the one the panel edits live.
+  const counts = new Map<string, number>();
+  for (const one of withSteps) counts.set(one.file ?? '', (counts.get(one.file ?? '') ?? 0) + 1);
+  let bestName = withSteps[0]?.file ?? '';
+  let bestCount = -1;
+  for (const [name, count] of counts) {
+    if (name !== '' && count > bestCount) {
+      bestName = name;
+      bestCount = count;
+    }
+  }
+  const text = sheets.find((one) => one.name === bestName)?.css ?? '';
+  return { file: bestName, tokens: withSteps, text };
 }
 
 /** Folders a project keeps its stylesheets in, looked in one level down. */
@@ -1609,7 +1905,8 @@ async function whatIsKnown(folder: string): Promise<Material> {
 async function readingOf(folder: string, pointed: Pointed): Promise<PointedAt | null> {
   try {
     const material = await whatIsKnown(folder);
-    return { pointed, reading: readPointed(pointed, material), says: describePointed(pointed) };
+    const reading = readPointed(pointed, material);
+    return { pointed, reading, says: saysReading(reading) };
   } catch {
     return null;
   }
@@ -1625,6 +1922,20 @@ function sayPointed(folder: string, pointed: Pointed): void {
 /** Where every project's conversations are kept. */
 function sessionsFolder(): string {
   return join(app.getPath('userData'), 'sessions');
+}
+
+/** Where a project's conversation checkouts live — outside the project, like a
+ *  copy, so nothing the worktree writes ever appears in the folder the person
+ *  is looking at. Keyed by the project's own path so repos never collide. */
+function worktreesFolder(project: string): string {
+  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+  return join(app.getPath('userData'), 'worktrees', key);
+}
+
+/** Where a project's build plan lives, so it survives the window closing. */
+function buildPlanFile(project: string): string {
+  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+  return join(app.getPath('userData'), 'builds', `${key}.json`);
 }
 
 /** Opens asked for and not yet answered, by folder. Two requests for the same
@@ -1667,10 +1978,25 @@ async function startConversation(
 
   const from: Speaking = { address: null };
   const prefs = (await preferences()).all();
+  // The first conversation of a project is the one on the folder the person is
+  // looking at; any further one is a parallel tab and works in its own checkout
+  // rather than writing the same files the first one is writing.
+  const primary = held.sessions.open.length === 0;
+  let checkout: { folder: string } | null = null;
+  if (!primary) {
+    const made = await createWorktree(
+      gitRunHereFor(),
+      open.path,
+      `conversation-${held.sessions.open.length + 1}`,
+      null,
+      { folder: join(worktreesFolder(open.path), `conversation-${held.sessions.open.length + 1}`) },
+    );
+    if (made.ok && made.value !== null) checkout = { folder: made.value.folder };
+  }
   let session: GrapheSession;
   try {
     session = await createSession({
-      projectRoot: open.path,
+      projectRoot: checkout?.folder ?? open.path,
       onEvent: forwardTo(open.path, held, from),
       timeline: held.timeline,
       model: prefs.model,
@@ -1703,6 +2029,7 @@ async function startConversation(
   // something, and a new name for the same thread would lose it.
   const address = keep ?? addressOf(session);
   from.address = address;
+  if (checkout !== null) held.checkouts.set(address, checkout);
   keepConversation(held, address, session);
   return done({ session, address });
 }
@@ -1746,7 +2073,9 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     spend: new SpendRecorder(),
     sessions: conversationsIn(path),
     serving: null,
+    variations: [],
     looking: nothingSeenYet(),
+    checkouts: new Map(),
     waiting: null,
     pictures: null,
     sending: false,
@@ -3206,6 +3535,32 @@ function register(): void {
     }
   });
 
+  handle<RepoLook>(CHANNEL.repoLook, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done(null);
+    try {
+      return done(await readRepo(open));
+    } catch (cause) {
+      return fail(plainTrouble(
+        'I could not read the github folder.',
+        detailsOf(cause),
+      ));
+    }
+  });
+
+  handle<null>(CHANNEL.repoComment, async (_event, args) => {
+    const [number, body] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0 || typeof body !== 'string' || body.trim() === '') {
+      return fail(plainTrouble('There was nothing to post.'));
+    }
+    const full = await githubRepo(open.path);
+    if (full === null) return fail(plainTrouble('This folder does not look like a github repository.'));
+    const exit = await ghComment(open.path, full, number, body);
+    return exit === 0 ? done(null) : fail(plainTrouble('The comment did not reach github.'));
+  });
+
   handle<Overview>(CHANNEL.overview, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) {
@@ -3228,42 +3583,71 @@ function register(): void {
     });
   });
 
-  handle<readonly SavedVersion[]>(CHANNEL.nudgeToken, async (_event, args) => {
-    const [name, value] = args;
+  handle<readonly SavedVersion[]>(CHANNEL.designCommit, async (_event, args) => {
+    const [changes] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    if (typeof name !== 'string' || typeof value !== 'string') return fail(NOTHING_OPEN);
+    if (typeof changes !== 'object' || changes === null) return fail(NOTHING_OPEN);
+    const given = changes as Partial<DesignChange>;
+    const tokens = Array.isArray(given.tokens)
+      ? given.tokens.filter((one) => typeof one.name === 'string' && typeof one.value === 'string')
+      : [];
+    const motions = Array.isArray(given.motions)
+      ? given.motions.filter(
+          (one) => Array.isArray(one.places) && typeof one.change === 'object' && one.change !== null,
+        )
+      : [];
+    // The whole design view is one saved moment. Anything sent here is written
+    // back where each token lived and then kept as a single version — the
+    // window holds the edits so nothing is committed on a slide.
     const styles = await styleTokens(open.path);
-    if (styles === null) return fail(NOTHING_OPEN);
-    const where = join(open.path, styles.file);
+    if (styles === null && tokens.length === 0 && motions.length === 0) return fail(NOTHING_OPEN);
     try {
-      const css = await readFile(where, 'utf8');
-      const next = writeToken(css, name, value);
-      if (next === css) return done(await versionsOf(open.held));
-      await writeFile(where, next, 'utf8');
-      await open.held.timeline.snapshot({ boundary: 'user-asked', by: 'you' });
-      return done(await versionsOf(open.held));
-    } catch (cause) {
-      const raw = cause instanceof Error ? cause.message : String(cause);
-      return fail(plainTrouble(raw, detailsOf(cause)));
-    }
-  });
-
-  handle<readonly SavedVersion[]>(CHANNEL.nudgeMotion, async (_event, args) => {
-    const [places, change] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    if (!Array.isArray(places) || typeof change !== 'object' || change === null) {
-      return fail(NOTHING_OPEN);
-    }
-    const styles = await styleTokens(open.path);
-    if (styles === null) return fail(NOTHING_OPEN);
-    const where = join(open.path, styles.file);
-    try {
-      const css = await readFile(where, 'utf8');
-      const next = writeMotionAll(css, places as Parameters<typeof writeMotionAll>[1], change as Parameters<typeof writeMotionAll>[2]);
-      if (next === css) return done(await versionsOf(open.held));
-      await writeFile(where, next, 'utf8');
+      // Apply edits per file, so a token that came from a component sheet is
+      // written where it lives, not into whichever sheet holds the most. The
+      // source is looked up by name from the read, because the window only
+      // sends a name and a value.
+      const perFile = new Map<string, string>();
+      const edits = new Map<string, { name: string; value: string }[]>();
+      const whereLives = new Map<string, string>();
+      if (styles !== null) {
+        for (const one of styles.tokens) whereLives.set(one.name, one.file ?? styles.file);
+      }
+      for (const one of tokens) {
+        const file = whereLives.get(one.name) ?? styles?.file;
+        if (file === undefined) continue;
+        edits.set(file, [...(edits.get(file) ?? []), { name: one.name, value: one.value }]);
+      }
+      const writeFileEdits = async (
+        file: string,
+        list: readonly { name: string; value: string }[],
+      ): Promise<void> => {
+        const where = join(open.path, file);
+        let css = await readFile(where, 'utf8');
+        let wrote = false;
+        for (const one of list) {
+          const next = writeToken(css, one.name, one.value);
+          if (next !== css) {
+            css = next;
+            wrote = true;
+          }
+        }
+        if (wrote) perFile.set(where, css);
+      };
+      for (const [file, list] of edits) await writeFileEdits(file, list);
+      // Motion edits land in the primary stylesheet.
+      if (styles !== null && motions.length > 0) {
+        const where = join(open.path, styles.file);
+        let css = perFile.get(where) ?? (await readFile(where, 'utf8'));
+        for (const one of motions) {
+          const next = writeMotionAll(css, one.places as Parameters<typeof writeMotionAll>[1], one.change as Parameters<typeof writeMotionAll>[2]);
+          if (next !== css) {
+            css = next;
+            perFile.set(where, css);
+          }
+        }
+      }
+      for (const [where, css] of perFile) await writeFile(where, css, 'utf8');
       await open.held.timeline.snapshot({ boundary: 'user-asked', by: 'you' });
       return done(await versionsOf(open.held));
     } catch (cause) {
@@ -3579,7 +3963,10 @@ function register(): void {
   handle<Preferences>(CHANNEL.setHoldBack, async (_event, args) => {
     const [on] = args;
     if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
-    return done(await (await preferences()).change({ holdBack: on }));
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const held = (await preferences()).all().heldBack;
+    return done(await (await preferences()).change({ heldBack: { ...held, [open.path]: on } }));
   });
 
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
@@ -3906,6 +4293,14 @@ function register(): void {
     // one carried on, which is what opening the project already does.
     const started = await startConversation(open, openingFor(path, true));
     if (!started.ok) return started;
+    // Making a checkout conversation the one in front brings its work home so
+    // the folder the window reads is the work it has done so far. If it cannot
+    // come home (a conflict with the folder's own version), the conversation
+    // still opens and its work stays in its checkout until it settles.
+    const checkout = open.held.checkouts.get(started.value.address) ?? null;
+    if (checkout !== null) {
+      await bringBack(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
+    }
     return done({
       path: open.path,
       name: open.name,
@@ -4138,7 +4533,7 @@ function register(): void {
   });
 
   handle<ShowOutcome>(CHANNEL.show, async (_event, args) => {
-    const [at, point] = args;
+    const [at] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_TO_SHOW);
 
@@ -4157,22 +4552,264 @@ function register(): void {
       });
       if (outcome.kind === 'unsure') return done({ kind: 'unsure', question: outcome.question });
       open.held.serving = outcome.serving;
-      // Their own browser, not a window of ours. It is the one they already
-      // trust, it is where their client will open the link we send later, and
-      // the alternative is us drawing somebody else's HTML inside the same app
-      // that holds their folder open.
+      // The page belongs inside this app now, drawn in the pane beside the
+      // conversation. The window points the pane at the served address and
+      // opens it; nothing opens in a separate browser window. Pointing is
+      // already wired into the pane's view, so only the address needs to
+      // travel back.
       const address = atPage(outcome.serving.address, at);
-      await shell.openExternal(point === true ? `${address}#graphe-point` : address);
-      return done({ kind: 'showing', name: open.name });
+      return done({ kind: 'showing', name: open.name, address });
     } catch (cause) {
       return fail(couldNotShow(cause));
     }
+  });
+
+  /* Several designs of the same thing, each served on its own address so the
+     pane can switch between them. Every folder is read and served the way a
+     single “See it” is — nothing here invents a server or opens a project wide. */
+  handle<VariationsOutcome>(CHANNEL.variationsServe, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_TO_SHOW);
+    const spec = Array.isArray(args) ? (args[0] as { subject?: unknown; variations?: unknown } ?? null) : null;
+    const subject = typeof spec?.subject === 'string' ? spec.subject : '';
+    const variations =
+      Array.isArray(spec?.variations) && subject !== ''
+        ? (spec.variations as VariationSpec[]).filter(
+            (one) => one && typeof one.folder === 'string' && one.folder !== '' &&
+              typeof one.id === 'string' && typeof one.name === 'string',
+          )
+        : [];
+    if (variations.length === 0) {
+      return fail({
+        what: 'There are no variations to look at.',
+        because: 'Tell me you want a few designs of something, and it can make them.',
+        actionLabel: 'Got it',
+      });
+    }
+
+    // Make ready the earlier set — a new set replaces the old, like “See it”.
+    for (const served of open.held.variations) await served.stop().catch(() => undefined);
+    open.held.variations = [];
+
+    const ready: { id: string; name: string; address: string }[] = [];
+    for (const one of variations) {
+      try {
+        const outcome = await makeAndServe({
+          folder: one.folder,
+          says: tell,
+          onPointed: (pointed: Pointed) => sayPointed(open.path, pointed),
+        });
+        if (outcome.kind === 'unsure') {
+          // One variation that cannot be read holds nothing up: it is skipped,
+          // and the rest still show.
+          continue;
+        }
+        open.held.variations = [...open.held.variations, outcome.serving];
+        ready.push({ id: one.id, name: one.name, address: outcome.serving.address });
+      } catch {
+        // Keep going past one that will not build. A comparison never needs
+        // every frame to be useful.
+        continue;
+      }
+    }
+    return done({ kind: 'showing', subject, variations: ready });
   });
 
   handle<readonly Skill[]>(CHANNEL.skills, async (_event, args) => {
     const open = projectAt(whereIn(args));
     const skills = await availableSkills(open?.path ?? null, await defaultAgentDir());
     return done(skills);
+  });
+
+  /* The `/word` ways of working. The body stays here — the window gets only
+     what it needs to list them in a `/` menu and to hold the typed words. */
+  handle<readonly Workflow[]>(CHANNEL.workflows, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    const all = await availableWorkflows(open?.path ?? null, await defaultAgentDir());
+    return done(
+      all.map(({ command, name, description, hint, source }) => ({ command, name, description, hint, source })),
+    );
+  });
+
+  /* One conversation, its own checkout. These run the front project's own git,
+     so a technical user can keep parallel work in its own branch and merge it
+     back — and the guards (never flatten a dirty checkout) are the same ones
+     the parallel-session wiring will lean on. */
+
+  handle<{ folder: string; branch: string }>(CHANNEL.worktreeStart, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const made = await createWorktree(
+      gitRunHereFor(),
+      open.path,
+      `conversation-${Date.now().toString(36)}`,
+      null,
+    );
+    if (!made.ok) return fail(worktreeTrouble(made.because));
+    return made.value === null ? fail(worktreeTrouble('Could not make a checkout.')) : done(made.value);
+  });
+
+  handle<null>(CHANNEL.worktreeLand, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const folder = firstWorktree(await listWorktrees(open.path));
+    if (folder === null) return fail(worktreeTrouble('No checkout of this project to bring back.'));
+    const landed = await landWorktree(gitRunHereFor(), open.path, folder);
+    return landed.ok ? done(null) : fail(worktreeTrouble(landed.because));
+  });
+
+  handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const folder = firstWorktree(await listWorktrees(open.path));
+    if (folder === null) return fail(worktreeTrouble('No checkout of this project to throw away.'));
+    const dropped = await dropWorktree(gitRunHereFor(), open.path, folder);
+    return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
+  });
+
+  /* -------------------------------------------------- document to build */
+  /* The document that started a build, kept so a resumed session knows what it
+     was building, and the plan that turns it into tasks. Stored outside the
+     project so nothing it contains appears in the folder the person watches. */
+  async function readBuildPlan(project: string): Promise<import('../src/lib/ipc').BuildPlan | null> {
+    const raw = await readFile(buildPlanFile(project), 'utf8').catch(() => null);
+    if (raw === null) return null;
+    try {
+      const stored = JSON.parse(raw) as {
+        source: string;
+        tasks?: unknown;
+      };
+      if (typeof stored?.source !== 'string') return null;
+      const tasks = readPlan(stored.tasks);
+      const next = tasks.find((one) => one.status !== 'done')?.n ?? null;
+      return {
+        source: stored.source,
+        tasks: tasks.map(toWindowTask),
+        next,
+        done: tasks.filter((one) => one.status === 'done').length,
+        total: tasks.length,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The stored plan whole: its source name and the real task list, so a step
+   *  can be advanced and written back without losing anything the window shape
+   *  leaves out. */
+  async function readStoredTasks(project: string): Promise<{ source: string; tasks: readonly Task[] } | null> {
+    const raw = await readFile(buildPlanFile(project), 'utf8').catch(() => null);
+    if (raw === null) return null;
+    try {
+      const stored = JSON.parse(raw) as { source?: unknown; tasks?: unknown };
+      if (typeof stored?.source !== 'string') return null;
+      const tasks = readPlan(stored.tasks);
+      if (tasks.length === 0) return null;
+      return { source: stored.source, tasks };
+    } catch {
+      return null;
+    }
+  }
+
+  async function writeBuildPlan(project: string, source: string, tasks: readonly Task[]): Promise<void> {
+    const file = buildPlanFile(project);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, `${JSON.stringify({ source, tasks }, null, 2)}\n`, 'utf8');
+  }
+
+  function toWindowTask(one: Task): import('../src/lib/ipc').BuildTask {
+    return {
+      n: one.n,
+      title: one.title,
+      acceptance: one.acceptance,
+      test: one.test,
+      status: one.status,
+      note: one.note,
+    };
+  }
+
+  handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildPlan, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    return done(open === null ? null : await readBuildPlan(open.path));
+  });
+
+  handle<{ name: string; text: string } | null>(CHANNEL.chooseDocument, async (_event, _args) => {
+    if (mainWindow === null || mainWindow.isDestroyed()) return fail(PICKER_FAILED);
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: 'Which requirements document?',
+      buttonLabel: 'Build from this',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Documents', extensions: ['md', 'txt', 'markdown', 'rst', 'html'] },
+      ],
+    });
+    const file = picked.filePaths[0];
+    if (picked.canceled || file === undefined) return done(null);
+    const text = await readFile(file, 'utf8').catch(() => '');
+    if (text === '') return fail({ what: 'I could not read that document.', because: 'It may be empty or not plain text.', actionLabel: 'Got it' });
+    return done({ name: basename(file), text });
+  });
+
+  handle<import('../src/lib/ipc').BuildPlan>(CHANNEL.buildStart, async (_event, args) => {
+    const [sourceRaw] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof sourceRaw !== 'object' || sourceRaw === null) return fail(NOTHING_OPEN);
+    const source = sourceRaw as { name?: unknown; text?: unknown; instruction?: unknown };
+    const name = typeof source.name === 'string' ? source.name : 'A document';
+    if (typeof source.text !== 'string') return fail(NOTHING_OPEN);
+    // Start the plan empty — the planning turn that fills it runs in the
+    // conversation, where its steps show themselves before anything changes.
+    await writeBuildPlan(open.path, name, []);
+    const read = await readBuildPlan(open.path);
+    return done(read ?? { source: name, tasks: [], next: null, done: 0, total: 0 });
+  });
+
+  handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildSave, async (_event, args) => {
+    const [stepsRaw] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const prior = await readBuildPlan(open.path);
+    if (prior === null) return fail(NOTHING_OPEN);
+    const steps = Array.isArray(stepsRaw)
+      ? (stepsRaw as { title?: unknown; acceptance?: unknown }[])
+      : [];
+    const tasks: Task[] = steps
+      .map((one, index) => ({
+        n: index + 1,
+        title: typeof one.title === 'string' ? one.title : 'A step',
+        acceptance:
+          typeof one.acceptance === 'string' ? one.acceptance : '',
+        test: null,
+        status: 'pending' as const,
+        note: null,
+      }))
+      .filter((one) => one.title.trim() !== '');
+    if (tasks.length === 0) return done(prior);
+    await writeBuildPlan(open.path, prior.source, tasks);
+    return done(await readBuildPlan(open.path));
+  });
+
+  /* The tracker's own step, as the run goes: close the task a settled turn
+     finished, or add tasks for requirements found while building. */
+  handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildAdvance, async (_event, args) => {
+    const [opRaw] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const stored = await readStoredTasks(open.path);
+    if (stored === null) return fail(NOTHING_OPEN);
+    const op = opRaw as import('../src/lib/ipc').BuildAdvance | null;
+    if (op === null || typeof op !== 'object') return fail(NOTHING_OPEN);
+    let tasks: readonly Task[] = stored.tasks;
+    if (op.kind === 'start') {
+      tasks = startTask(stored.tasks);
+    } else if (op.kind === 'finish') {
+      tasks = finishTask(stored.tasks, op.ok !== false);
+    } else if (op.kind === 'add' && Array.isArray(op.titles)) {
+      tasks = addTasks(stored.tasks, op.titles.filter((one) => typeof one === 'string'));
+    }
+    await writeBuildPlan(open.path, stored.source, tasks);
+    return done(await readBuildPlan(open.path));
   });
 
   handle<string>(CHANNEL.skillText, async (_event, args) => {
@@ -4195,8 +4832,9 @@ function register(): void {
   });
 
   handle<null>(CHANNEL.prompt, async (_event, args) => {
-    const [text, attachments, ways] = args;
-    if (typeof text !== 'string' || text.trim() === '') return done(null);
+    const [textIn, attachments, ways] = args;
+    if (typeof textIn !== 'string' || textIn.trim() === '') return done(null);
+    let text = textIn;
     const where = whereIn(args);
     const open = projectAt(where);
     const conversation = open === null ? null : conversationAt(open.held, where);
@@ -4205,6 +4843,29 @@ function register(): void {
     // worked in, so it is the one that keeps its place.
     open.held.sessions.resume(conversation.path);
     const agent = conversation.held;
+    // A `/word` at the start is a workflow, not a sentence. Turn it into the
+    // workflow's own prompt before it goes anywhere, so a workflow is exactly
+    // the file that named it and the words somebody typed after it. Anything
+    // that is not a known `/word` is left as the plain message it looks like.
+    const leadingSlash = /^\/([a-z][a-z0-9-]*)(?:\s|$)/i.exec(text);
+    if (leadingSlash !== null) {
+      const workflow = await workflowNamed(
+        open.path,
+        await defaultAgentDir(),
+        leadingSlash[1] ?? '',
+      );
+      if (workflow !== null) {
+        const rest = text.slice((leadingSlash[1]?.length ?? 0) + 1).trim();
+        if (workflow.hint !== null && rest === '') {
+          return fail({
+            what: `Say what you want ${workflow.command} to do.`,
+            because: workflow.hint,
+            actionLabel: 'Got it',
+          });
+        }
+        text = promptFor(workflow, rest);
+      }
+    }
     // A new turn is a new thing started, which is the one thing the ceiling
     // refuses. Whatever was running finished and was saved to get here.
     const ceiling = fleet.status;
@@ -4221,7 +4882,7 @@ function register(): void {
         ways !== null && typeof ways === 'object' && (ways as PromptOptions).lookFirst === true;
       // Checked first, when they have asked for that and nothing is already
       // waiting. Two pieces of work waiting at once is a decision nobody made.
-      if ((await preferences()).all().holdBack && open.held.waiting === null) {
+      if ((await preferences()).all().heldBack[open.path] === true && open.held.waiting === null) {
         return await checkItFirst(
           open,
           { address: conversation.path },
@@ -4257,6 +4918,23 @@ function register(): void {
       // one card — see the note on duplicate troubles in src/App.tsx. This one
       // is the copy carrying the raw text, and the window keeps the richer of
       // the two.
+      const raw = cause instanceof Error ? cause.message : String(cause);
+      return fail(plainTrouble(raw, detailsOf(cause)));
+    }
+  });
+
+  handle<null>(CHANNEL.steer, async (_event, args) => {
+    const [text] = args;
+    if (typeof text !== 'string' || text.trim() === '') return done(null);
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const session = sessionAt(open, where);
+    if (session === null) return fail(NOTHING_OPEN);
+    try {
+      await session.steer(text);
+      return done(null);
+    } catch (cause) {
       const raw = cause instanceof Error ? cause.message : String(cause);
       return fail(plainTrouble(raw, detailsOf(cause)));
     }

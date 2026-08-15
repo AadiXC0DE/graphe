@@ -80,14 +80,16 @@ export type Preferences = {
    */
   showFiles: boolean;
   /**
-   * Do the work in a copy first, and show it before it reaches the files.
+   * Whether each project holds work back to be looked at first, keyed by its
+   * path.
    *
-   * Off by default because the promise the product already keeps — every moment
-   * is saved, going back is one press — makes work landing straight away safe.
-   * On, for the people whose files are shared with somebody else and who would
-   * rather look first.
+   * Per project, so saying "ask me first" in one folder never changes another:
+   * what a designer decides for a shared codebase they do not own is not what
+   * they want for their own. Off by default because the promise the product
+   * already keeps — every moment is saved, going back is one press — makes work
+   * landing straight away safe.
    */
-  holdBack: boolean;
+  heldBack: Readonly<Record<string, boolean>>;
   /**
    * The ceiling on spending, or null when nobody has set one.
    *
@@ -106,7 +108,7 @@ export const defaultPreferences: Preferences = {
   kept: {},
   trusted: {},
   showFiles: false,
-  holdBack: false,
+  heldBack: {},
   ceiling: null,
 };
 
@@ -145,7 +147,7 @@ function asPreferences(value: unknown): Preferences {
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
     showFiles: record['showFiles'] === true,
-    holdBack: record['holdBack'] === true,
+    heldBack: asHeldBack(record['heldBack']),
     ceiling: asCeiling(record['ceiling']),
   };
 }
@@ -160,6 +162,26 @@ function asCeiling(value: unknown): Money | null {
   if (typeof minor !== 'number' || !Number.isFinite(minor) || minor <= 0) return null;
   if (typeof currency !== 'string' || currency === '') return null;
   return { minor: Math.round(minor), currency };
+}
+
+/** True entries of a held-back map, from whatever a file held. Anything that is
+ *  not a folder-name/true pair is dropped rather than refused — a preference
+ *  that will not load is worse than one that loads short. */
+function asHeldBack(value: unknown): Readonly<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    for (const [path, on] of Object.entries(value)) {
+      if (path !== '' && on === true) out[path] = true;
+    }
+  }
+  return out;
+}
+
+/** Two held-back maps are the same when every project is held the same way. */
+function sameHeldBack(one: Readonly<Record<string, boolean>>, other: Readonly<Record<string, boolean>>): boolean {
+  const left = Object.keys(one).filter((key) => one[key]);
+  const right = Object.keys(other).filter((key) => other[key]);
+  return left.length === right.length && left.every((key) => other[key] === true);
 }
 
 function sameThinking(
@@ -195,7 +217,7 @@ export class PreferenceFile {
     const unchanged =
       next.showMe === this.#preferences.showMe &&
       next.showFiles === this.#preferences.showFiles &&
-      next.holdBack === this.#preferences.holdBack &&
+      sameHeldBack(next.heldBack, this.#preferences.heldBack) &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
       sameThinking(next.thinking, this.#preferences.thinking) &&

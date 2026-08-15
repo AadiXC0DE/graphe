@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { STARTERS, type Recipe } from '../lib/recipes';
 import './Welcome.css';
 
@@ -26,6 +27,14 @@ type Props = {
   examples?: readonly string[];
   /** The saved starting points, ours and theirs. Left out, ours are shown. */
   recipes?: readonly Recipe[];
+  /** The project this chat is starting in, so the first sentence names the
+   *  folder somebody is about to work in. Null on the very first launch. */
+  project?: string | null;
+  /** Open a file picker and hand back the document it read. Null when nothing
+   *  was chosen. Optional so the gallery can draw the screen without a shell. */
+  onPickDocument?: () => Promise<{ name: string; text: string } | null>;
+  /** Start building from a pasted or picked document. */
+  onStartBuild?: (source: { name: string; text: string; instruction: string }) => void;
 };
 
 /**
@@ -55,14 +64,51 @@ type Props = {
  * launch begins on, which by the frequency rule is exactly the screen that
  * should be still.
  */
-export default function Welcome({ onUse, examples = firstMoves, recipes = STARTERS }: Props) {
+export default function Welcome({
+  onUse,
+  examples = firstMoves,
+  recipes = STARTERS,
+  project,
+  onPickDocument,
+  onStartBuild,
+}: Props) {
   /* Four is enough to show the range without turning the first screen into a
      catalogue. The rest remain one click away in the composer. */
   const shown = recipes.slice(0, 4);
+  const [building, setBuilding] = useState(false);
+  const [docName, setDocName] = useState<string | null>(null);
+  const [docText, setDocText] = useState('');
+  const [instruction, setInstruction] = useState('');
+
+  const pick = async (): Promise<void> => {
+    if (onPickDocument === undefined) return;
+    const picked = await onPickDocument();
+    if (picked !== null) {
+      setDocName(picked.name);
+      setDocText(picked.text);
+    }
+  };
+
+  const start = (): void => {
+    if (onStartBuild === undefined || docText.trim() === '') return;
+    onStartBuild({
+      name: docName ?? 'A document',
+      text: docText,
+      instruction,
+    });
+    setBuilding(false);
+    setDocText('');
+    setInstruction('');
+    setDocName(null);
+  };
 
   return (
     <div className="welcome">
-      <h1 className="welcome__title">What do you want to make?</h1>
+      <h1 className="welcome__title">
+        {project === null || project === undefined
+          ? 'What do you want to make?'
+          : `What do you want to make in ${project}?`}
+      </h1>
       {/* The second sentence is the only instruction on the screen, and it is
           there because nothing else says what pressing a row does. Without it
           the examples are decoration and somebody has to click one to find out
@@ -104,6 +150,69 @@ export default function Welcome({ onUse, examples = firstMoves, recipes = STARTE
             </li>
           ))}
         </ul>
+      )}
+
+      {/* From a document to a build: the one control that explains itself by
+          standing apart. A PRD or spec in, a plan and then a shipping change
+          out — the whole reason somebody came to a tool like this. Present only
+          where the desktop shell can actually build. */}
+      {onStartBuild === undefined ? null : (
+      <div className="welcome__build">
+        <button
+          type="button"
+          className="welcome__buildbutton"
+          aria-expanded={building}
+          onClick={() => setBuilding((was) => !was)}
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 2.5h10v11H3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            <path d="M5 6h6M5 8.5h6M5 11h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          <span>Start from a PRD or spec</span>
+        </button>
+
+        {building && onStartBuild !== undefined ? (
+          <div className="welcome__buildpanel">
+            <p className="welcome__buildhint">
+              Paste your requirements, pick a file, or add a sentence of your own. Graphe reads it,
+              plans the work, and builds it — task by task — showing you what it did.
+            </p>
+            <div className="welcome__buildactions">
+              {onPickDocument === undefined ? null : (
+                <button type="button" className="welcome__pick" onClick={() => void pick()}>
+                  Pick a file…
+                </button>
+              )}
+              {docName === null ? null : <span className="welcome__docname">{docName}</span>}
+            </div>
+            <textarea
+              className="welcome__doctext"
+              rows={6}
+              value={docText}
+              placeholder="Paste the PRD, spec or requirements here…"
+              onChange={(event) => setDocText(event.target.value)}
+              aria-label="Requirements document"
+            />
+            <input
+              className="welcome__instruction"
+              value={instruction}
+              placeholder="Anything to add? e.g. keep it accessible"
+              onChange={(event) => setInstruction(event.target.value)}
+              aria-label="Optional instruction"
+            />
+            <div className="welcome__buildactions">
+              <button
+                type="button"
+                className="welcome__start"
+                disabled={docText.trim() === ''}
+                onClick={start}
+              >
+                Start building
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
       )}
 
       <div className="welcome__more">

@@ -11,6 +11,7 @@ import {
   type Row,
   type TreeNode,
 } from '../files/tree';
+import FileIcon from './FileIcon';
 import './Files.css';
 
 type Props = {
@@ -282,6 +283,8 @@ export default function Files({
                     </svg>
                   ) : null}
                 </span>
+
+                {folder ? null : <FileIcon name={node.name} />}
 
                 <span className={`files__name ${folder ? 'files__name--folder' : ''}`}>
                   {node.name}

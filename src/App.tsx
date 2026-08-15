@@ -2,12 +2,14 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import type { Attachment } from "./components/Attachments";
+import BuildProgress from "./components/BuildProgress";
 import Composer from "./components/Composer";
 import ConfirmChange from "./components/ConfirmChange";
 import ConnectModal from "./components/ConnectModal";
 import CostMeter from "./components/CostMeter";
 import DesignView, { type DesignPart } from "./components/DesignView";
 import HistoryView from "./components/HistoryView";
+import ReviewsView, { reviewPrompt } from "./components/ReviewsView";
 import ErrorCard from "./components/ErrorCard";
 import Files from "./components/Files";
 import EvidenceReel from "./components/EvidenceReel";
@@ -47,11 +49,14 @@ import {
 import { sizeUp } from "./cost/sizing";
 import { worthPlanning } from "./agent/plan";
 import { asResearch, researchWords } from "./agent/research";
+import { asBuildRequest } from "./work/buildbrief";
 import { readDesign } from "./design/reading";
+import { writeToken } from "./design/tokens";
 import { bridge } from "./lib/bridge";
 import { lastSaid } from "./lib/describe";
 import { quote, smallerFirst } from "./lib/estimating";
 import { rows } from "./lib/steps";
+import { durationInWords } from "./lib/when";
 import {
   showWords,
   swapWords,
@@ -75,9 +80,12 @@ import {
   type PromptAttachment,
   type ProviderMethod,
   type RecentProject,
+  type RepoItem,
+  type RepoLook,
   type Result,
   type Room as RoomState,
   type Skill,
+  type Workflow,
   type HowFar,
   type Money,
   type PointedAt,
@@ -113,7 +121,6 @@ import {
   applyEvent,
   askingYou,
   estimated,
-  newId,
   said,
   withTrouble,
   STOPPED_PART_WAY,
@@ -271,6 +278,40 @@ function sortPictures(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Design edits held in the window                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The stylesheet with the window's unsaved design edits laid over it.
+ *
+ * The design view reads the stylesheet from disk, so with a draft held in the
+ * window that reading needs a copy with the draft values substituted in — the
+ * sliders and the readings describe what is being tested, not only what the
+ * project already is. Nothing is written; the project only changes when
+ * `commitDesign` files the draft.
+ */
+function withDesignDraft(
+  styles: { file: string; tokens: readonly import("./lib/ipc").StyleToken[]; text: string } | null,
+  draft: { tokens: Record<string, string> } | undefined,
+): { file: string; tokens: readonly import("./lib/ipc").StyleToken[]; text: string } | null {
+  if (styles === null || draft === undefined) return styles;
+  const names = Object.keys(draft.tokens);
+  if (names.length === 0) return styles;
+  let text = styles.text;
+  for (const name of names) {
+    const value = draft.tokens[name];
+    if (value === undefined) continue;
+    const next = writeToken(text, name, value);
+    if (next !== text) text = next;
+  }
+  const tokens = styles.tokens.map((token) => {
+    const value = draft.tokens[token.name];
+    return value === undefined ? token : { ...token, value };
+  });
+  return { file: styles.file, text, tokens };
+}
+
+/* -------------------------------------------------------------------------- */
 /* The app                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -285,6 +326,17 @@ function Conversation() {
    */
   const [desks, setDesks] = useState<Desks>(noDesks);
   const desk = currentDesk(desks);
+  /* The front conversation is busy when its own stream is live — not when some
+     other tab is running, which is different work and must not turn this one's
+     Send into Stop. Same test the tab row uses for its working dot. */
+  const frontBusy =
+    desk !== null &&
+    desk.turns.some(
+      (turn) =>
+        (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
+        (turn.kind === 'did' && turn.state === 'running') ||
+        (turn.kind === 'tidying' && turn.state === 'running'),
+    );
 
   /** What this computer remembers. Null until the shell has been asked — which
    *  is not the same as an empty list, and the two states look different: one is
@@ -353,7 +405,7 @@ function Conversation() {
     thinking: {},
     kept: {},
     showFiles: false,
-    holdBack: false,
+    heldBack: {},
     ceiling: null,
   });
   const [editor, setEditor] = useState<string | null>(null);
@@ -405,13 +457,20 @@ function Conversation() {
     });
   }, []);
 
+  const refreshWorkflows = useCallback(() => {
+    void bridge.workflows().then((answer) => {
+      if (answer.ok) setWorkflows(answer.value);
+    });
+  }, []);
+
   useEffect(() => {
     refreshConnection();
   }, [refreshConnection]);
 
   useEffect(() => {
     refreshSkills();
-  }, [desks.current, refreshSkills]);
+    refreshWorkflows();
+  }, [desks.current, refreshSkills, refreshWorkflows]);
 
   /** Follow along while a connection happens. Each step is one moment of the
    *  provider's sign-in — a browser it opened, a question it asked. The step
@@ -629,17 +688,50 @@ function Conversation() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [skills, setSkills] = useState<readonly Skill[]>([]);
+  const [workflows, setWorkflows] = useState<readonly Workflow[]>([]);
 
   /** Which band of the design view is open, or null when it is not. Both of the
    *  surfaces that take the whole width live here rather than inside a panel:
    *  they cover the conversation, and the conversation belongs to this file. */
   const [designAt, setDesignAt] = useState<DesignPart | null>(null);
   const [graphOpen, setGraphOpen] = useState(false);
+  /** The github pull requests and issues of the project in front. */
+  const [reviewsOpen, setReviewsOpen] = useState(false);
+  /** The fetched reading of the open project's repository, and whether a fetch
+   *  is in flight. */
+  const [repo, setRepo] = useState<RepoLook | null>(null);
+  const [reviewsBusy, setReviewsBusy] = useState(false);
   /** The pairing whose colour is on its way to being changed. Cleared the
    *  moment new values arrive, which is what finishing looks like from here. */
   const [fixing, setFixing] = useState<string | null>(null);
+  /** Design edits being tested but not yet saved, per project. Nothing here
+   *  has touched the project — a slider moves in the view, and only "Save
+   *  changes" writes it. Keyed by token name, and appended to for motion. */
+  const [designDraft, setDesignDraft] = useState<
+    Readonly<
+      Record<string, { tokens: Record<string, string>; motions: readonly { places: readonly unknown[]; change: unknown }[] }>
+    >
+  >({});
 
-  const [busy, setBusy] = useState(false);
+  /** True while a turn is still running. */
+  const [busyCount, setBusyCount] = useState(0);
+  const busy = busyCount > 0;
+  /** When each project's active run began, epoch ms. Kept per project so two
+   *  conversations working at once never borrow each other's measure. Used for
+   *  the quiet "worked for" line at the end of a long run. */
+  const runStartedAt = useRef<Readonly<Record<string, number>>>({});
+  /** Whether each project's active run has done real tool work since it
+   *  settled last. A settle with no work in it is an answer, not a build step,
+   *  and must not advance the tracker. */
+  const didWorkSinceSettle = useRef<Readonly<Record<string, boolean>>>({});
+  /** A run that is finished and was long enough to be worth a line, with how
+   *  long it went for in seconds — kept with the project it belongs to so it
+   *  is never drawn under another project's conversation. */
+  const [finishedRun, setFinishedRun] = useState<{ path: string; seconds: number } | null>(null);
+  /* Busy is how many operations are in flight, so a turn in one tab stopping
+     must not clear the busy another tab is still using. Counted, not a flag. */
+  const goBusy = (): void => setBusyCount((count) => count + 1);
+  const goQuiet = (): void => setBusyCount((count) => Math.max(0, count - 1));
   /** The conversation that owns the current send. `busy` is window-wide (it
    *  also covers picking a folder), so tabs need this narrower identity. */
   const [busyConversation, setBusyConversation] = useState<string | null>(null);
@@ -683,8 +775,43 @@ function Conversation() {
   /** How the window is split between the conversation and the project's own
    *  page. Off until somebody opens it. */
   const [pane, setPane] = useState<PaneRoom>('off');
+  /** Read inside the event listener, which is subscribed once and so cannot
+   *  close over a changing `pane`. */
+  const paneNow = useRef<PaneRoom>('off');
   /** Where the page is pointed. Null until something is being served. */
   const [pageAt, setPageAt] = useState<string | null>(null);
+  /** A set of designs being compared, each served on its own address. Null until
+   *  somebody asks for variations. */
+  const [variations, setVariations] = useState<{
+    subject: string;
+    members: readonly { id: string; name: string; address: string }[];
+    inFront: string | null;
+  } | null>(null);
+  /** The build plan for the project in front, as the tracker draws it. Null
+   *  until a document-to-build has produced one. Kept with the folder it came
+   *  from, so a plan is never drawn under another project's conversation. */
+  const [buildPlan, setBuildPlan] = useState<{
+    path: string;
+    plan: import('./lib/ipc').BuildPlan;
+  } | null>(null);
+  /** Read inside the one-shot event listener, which cannot close over the
+   *  state. */
+  const buildPlanNow = useRef(buildPlan);
+  buildPlanNow.current = buildPlan;
+
+  /** Move the page between its modes, mirrored into `paneNow` so the one-shot
+   *  event listener can tell whether it is open. */
+  const movePane = useCallback((next: PaneRoom) => {
+    paneNow.current = next;
+    setPane(next);
+  }, []);
+  const togglePane = useCallback(() => {
+    setPane((was) => {
+      const next = was === 'whole' ? 'split' : was === 'split' ? 'whole' : 'split';
+      paneNow.current = next;
+      return next;
+    });
+  }, []);
   /** True while a walkthrough is being recorded in the page. */
   const [watching, setWatching] = useState(false);
   /** The last walkthrough, waiting to be looked through. */
@@ -850,7 +977,27 @@ function Conversation() {
   const toChat = useCallback(() => {
     setDesignAt(null);
     setGraphOpen(false);
+    setReviewsOpen(false);
+    setHelpersAt(null);
   }, []);
+
+  /** The screens that take the whole work over the conversation, so that
+   *  opening one closes the rest. "Design", "History", the shelf and the
+   *  others all live on flags that could otherwise stay set side by side, and
+   *  two full-width surfaces on top of each other hide one entirely. */
+  const goToScreen = useCallback(
+    (screen: 'chat' | 'design' | 'graph' | 'reviews' | 'skills' | 'settings' | 'usage' | 'add-more' | 'helpers') => {
+      if (screen !== 'chat') setDesignAt(null);
+      if (screen !== 'graph') setGraphOpen(false);
+      if (screen !== 'reviews') setReviewsOpen(false);
+      if (screen !== 'skills') setSkillsOpen(false);
+      if (screen !== 'settings') setSettingsOpen(false);
+      if (screen !== 'usage') setUsageOpen(false);
+      if (screen !== 'add-more') setAddMore(false);
+      if (screen !== 'helpers') setHelpersAt(null);
+    },
+    [],
+  );
 
   /** Optimistic on screen, confirmed underneath — the same bargain "Show me"
    *  makes: the chip has to change on the click, and the shell's answer is what
@@ -894,6 +1041,35 @@ function Conversation() {
           }))
         : current,
     );
+  }, []);
+
+  /** Read the build plan for the project in front, for the tracker above the
+   *  box. Same in-front guard as everything else that answers about a folder. */
+  const refreshBuildPlan = useCallback(async (path: string) => {
+    const answer = await bridge.buildPlan();
+    if (!answer.ok) return;
+    setBuildPlan((current) => {
+      if (desksNow.current.current !== path) return current;
+      return answer.value === null ? null : { path, plan: answer.value };
+    });
+  }, []);
+
+  /** Whether the turn that just settled finished well. The ending decides, not
+   *  any single step along the way: a failure the agent recovered from is
+   *  history, not how the run ended. The last thing it did — skipping the
+   *  messages around it — is the answer: a failed step or a problem means
+   *  stuck; anything else means it got there. */
+  const settledWell = useCallback((turns: readonly Turn[]): boolean => {
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const turn = turns[index];
+      if (turn === undefined) continue;
+      if (turn.kind === 'did') return turn.state !== 'failed';
+      if (turn.kind === 'trouble') return false;
+      // A question is not a failure — the run got to where it stopped and
+      // asked instead of breaking.
+      if (turn.kind === 'asked' || turn.kind === 'estimate' || turn.kind === 'plan') return true;
+    }
+    return true;
   }, []);
 
   /* ------------------------------------------ everything in this project */
@@ -1017,6 +1193,7 @@ function Conversation() {
 
       void refreshVersions(opened.value.path);
       void refreshOverview(opened.value.path);
+      void refreshBuildPlan(opened.value.path);
       refreshRoom();
       void bridge.pages().then((answer) => {
         if (answer.ok) setPages(answer.value);
@@ -1030,7 +1207,7 @@ function Conversation() {
         if (answer.ok) setRecent((current) => stableProjectOrder(current, answer.value));
       });
     },
-    [desks.current, refreshVersions, refreshOverview, toChat, troubleHere],
+    [desks.current, refreshVersions, refreshOverview, refreshBuildPlan, toChat, troubleHere],
   );
   openRef.current = open;
 
@@ -1056,14 +1233,11 @@ function Conversation() {
         return;
       }
       toChat();
-      // Mid-answer. Other tools let you open another conversation any time;
-      // blocking with "finish this thought" is how people feel trapped. Stop
-      // the turn that is in flight, then move — the stopped turn is still
-      // written down on the conversation it belongs to.
-      if (busy) {
-        await bridge.stop();
-        setBusy(false);
-      }
+      // Opening another conversation leaves an in-flight turn where it is,
+      // running in the conversation it belongs to. Each conversation is its
+      // own agent session, so the turn on the tab being left carries on in the
+      // background and stays saved — this is how two tabs work at once. The
+      // turn only stops if somebody presses Stop on it.
       const opened = await bridge.openConversation(path);
       if (!opened.ok) {
         troubleHere(opened.trouble);
@@ -1111,7 +1285,7 @@ function Conversation() {
         if (answer.ok && desksNow.current.current === project) setConversations(answer.value);
       });
     },
-    [busy, inConversation, desk?.turns.length, toChat, troubleHere],
+    [inConversation, desk?.turns.length, toChat, troubleHere],
   );
 
   /** Throw a conversation away. If it is the one on screen, open a fresh one
@@ -1121,7 +1295,7 @@ function Conversation() {
       const wasHere = path === inConversation;
       if (wasHere && busy) {
         await bridge.stop();
-        setBusy(false);
+        goQuiet();
       }
       const answer = await bridge.deleteConversation(path);
       if (!answer.ok) {
@@ -1204,14 +1378,78 @@ function Conversation() {
   useEffect(
     () =>
       bridge.onEvent((notice) => {
+        const key = notice.project ?? '';
+        // How long the active run is going for, so a long one ends with a quiet
+        // "worked for" line rather than silence. The clock starts on the first
+        // real step and stops when the run settles.
+        if (notice.event.type === 'tool-start') {
+          didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [key]: true };
+          if (runStartedAt.current[key] === undefined) {
+            runStartedAt.current = { ...runStartedAt.current, [key]: Date.now() };
+            // A new run makes the old footer's measure history.
+            setFinishedRun((was) => (was !== null && was.path === key ? null : was));
+            // Real work has begun on a build that still has tasks: the tracker
+            // picks the next one up as the one being worked on.
+            const plan = buildPlanNow.current;
+            if (plan !== null && plan.path === key && plan.plan.next !== null) {
+              void bridge.buildAdvance({ kind: 'start' }, key === '' ? undefined : { project: key })
+                .then((answer) => {
+                  if (answer.ok && answer.value !== null) {
+                    setBuildPlan({ path: key, plan: answer.value });
+                  }
+                });
+            }
+          }
+        }
         setDesks((current) => receive(current, notice));
         // A sitting that has settled is a sitting that has been saved, so the
-        // timeline and the overview have something new in them.
+        // timeline and the overview have something new in them — and when a
+        // live preview is already being served, the page turns itself on so
+        // there is somewhere to see the work.
+        if (notice.event.type === "settled") {
+          // A long run earns its quiet measure. Short runs stay silent — a
+          // line under every quick change is the noise this product removes.
+          const started = runStartedAt.current[key];
+          const rest = { ...runStartedAt.current };
+          delete rest[key];
+          runStartedAt.current = rest;
+          if (started !== undefined) {
+            const seconds = Math.round((Date.now() - started) / 1000);
+            if (seconds >= 60) setFinishedRun({ path: key, seconds });
+          }
+        }
         if (notice.event.type === "settled" && notice.project !== null) {
-          void refreshVersions(notice.project);
-          void refreshOverview(notice.project);
-          void refreshFiles(notice.project);
+          const where = notice.project;
+          void refreshVersions(where);
+          void refreshOverview(where);
+          void refreshFiles(where);
           refreshRoom();
+          // A settle with real work behind it advances the build tracker one
+          // task: the turn either finished the task it was on, or it got stuck.
+          // Either way the plan on disk is the truth the next session resumes
+          // from. A settle with no tool work in it is an answer to a question,
+          // and an answer must not move the build.
+          const didWork = didWorkSinceSettle.current[key] === true;
+          if (didWork) {
+            didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [key]: false };
+            const turns = desksNow.current.byPath[where]?.turns ?? [];
+            void bridge
+              .buildAdvance({ kind: 'finish', ok: settledWell(turns) }, { project: where })
+              .then((answer) => {
+                if (answer.ok) {
+                  setBuildPlan(answer.value === null ? null : { path: where, plan: answer.value });
+                } else {
+                  void refreshBuildPlan(where);
+                }
+              });
+            // Work that is finished is work to be looked at: when a live
+            // preview is already being served, the page turns itself on so
+            // there is somewhere to see it. Plain answers leave the pane alone.
+            const front = currentDesk(desksNow.current);
+            if (paneNow.current === 'off' && front?.overview?.preview != null) {
+              movePane('split');
+            }
+          }
         }
         // Pi tidies on its own as well as when asked, and the ring says the
         // same thing either way — from where somebody is sitting it is one
@@ -1222,7 +1460,15 @@ function Conversation() {
           refreshRoom();
         }
       }),
-    [refreshVersions, refreshOverview, refreshFiles, refreshRoom],
+    [
+      refreshVersions,
+      refreshOverview,
+      refreshFiles,
+      refreshRoom,
+      refreshBuildPlan,
+      settledWell,
+      movePane,
+    ],
   );
 
   useEffect(() => bridge.onShowProgress(setProgress), []);
@@ -1260,7 +1506,14 @@ function Conversation() {
   }, [switching]);
 
   const halt = useCallback(() => {
-    void bridge.stop();
+    // Name *which* conversation is being stopped. Without the `where`, Stop
+    // would end whatever the shell has in front — which, with two tabs open,
+    // may not be the one on screen (see the `where` fixes in bridge.ts).
+    const desk = currentDesk(desksNow.current);
+    void bridge.stop({
+      ...(desk === null ? {} : { project: desk.path }),
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    });
   }, []);
 
 
@@ -1347,7 +1600,13 @@ function Conversation() {
       }
       if (event.key === "d" && desk !== null) {
         event.preventDefault();
-        setDesignAt((was) => (was === null ? "styles" : null));
+        // Design toggles on and off on the same key, like the shelf. Only a
+        // switch from another screen clears the rest.
+        setDesignAt((was) => {
+          if (was !== null) return null;
+          goToScreen("design");
+          return "styles";
+        });
         return;
       }
       /* Moving between what is open. `openNow` is the row as drawn, so these
@@ -1387,7 +1646,7 @@ function Conversation() {
       // always the same key. In the split the question does not arise.
       if (event.key === "j" && desk !== null) {
         event.preventDefault();
-        setPane((was) => (was === 'whole' ? 'split' : was === 'split' ? 'whole' : 'split'));
+        togglePane();
         return;
       }
       if (event.key === "b" && desk !== null) {
@@ -1425,6 +1684,7 @@ function Conversation() {
     connectBusy,
     cancelConnect,
     closeConnect,
+    togglePane,
   ]);
 
   /* ----------------------------------------------------------------- saying */
@@ -1480,7 +1740,7 @@ function Conversation() {
           references: [...one.references, ...reference],
         })),
       );
-      setBusy(true);
+      goBusy();
       const desk = currentDesk(desksNow.current);
       const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
       setBusyConversation(owner);
@@ -1501,7 +1761,7 @@ function Conversation() {
             cause instanceof Error ? (cause.stack ?? cause.message) : undefined,
         });
       } finally {
-        setBusy(false);
+        goQuiet();
         setBusyConversation((current) => (current === owner ? null : current));
       }
     },
@@ -1533,10 +1793,10 @@ function Conversation() {
 
       if (before === null) {
         if (!bridge.desktop) return;
-        setBusy(true);
+        goBusy();
         const picked = await bridge
           .chooseFolder()
-          .finally(() => setBusy(false));
+          .finally(() => goQuiet());
         if (!picked.ok) {
           setPickerTrouble({ path: "", trouble: picked.trouble });
           return;
@@ -1617,18 +1877,70 @@ function Conversation() {
    */
   const hand = useCallback(
     (text: string) => {
-      if (!busy || desks.current === null) {
+      if (desks.current === null) {
         void send(text);
         return;
       }
-      setDesks((current) =>
-        changeCurrent(current, (one) => ({
-          ...one,
-          waiting: [...one.waiting, { id: newId(), text }],
-        })),
+      const desk = currentDesk(desksNow.current);
+      // The agent is mid-turn on exactly this conversation, and the person is
+      // typing into it. Instead of parking the message until the turn ends, put
+      // it straight into that turn — Pi's steer. It interrupts the flow without
+      // stopping it, which is the "insert into the loop" move. The window owns
+      // the person's own words (the shell never sends them back), so it is laid
+      // down here just as `send` would. `frontBusy` is this conversation's own
+      // live stream — another tab working is not this turn and sends.
+      if (desk !== null && frontBusy) {
+        setDesks((current) =>
+          changeDesk(current, desk.path, (one) => ({
+            ...one,
+            turns: [...one.turns, said('you', text)],
+          })),
+        );
+        void bridge.steer(text, {
+          project: desk.path,
+          conversation: desk.address ?? undefined,
+        });
+        return;
+      }
+      // No turn of mine is going, whether nothing at all is, or another
+      // conversation is running its own. Send to my conversation now — two
+      // tabs working at once is the point, not a turn that waits for the
+      // other's to finish.
+      void send(text);
+    },
+    [frontBusy, desks, send],
+  );
+
+  /** Fetch the open project's github pull requests and issues, and hold the
+   *  reading for the reviews screen. Asked whenever that screen opens or its
+   *  Refresh is pressed; the shell reads it from the terminal's own `gh`, so it
+   *  is never kept past the moment it is fetched. */
+  const refreshRepo = useCallback(() => {
+    const desk = currentDesk(desksNow.current);
+    setReviewsBusy(true);
+    void bridge
+      .repoLook({
+        ...(desk === null ? {} : { project: desk.path }),
+        ...(desk?.address == null ? {} : { conversation: desk.address }),
+      })
+      .then((answer) => {
+        if (answer.ok) setRepo(answer.value);
+      })
+      .finally(() => setReviewsBusy(false));
+  }, []);
+
+  /** Open a fresh conversation and send the review of one pull request into
+   *  it, so the agent reads the whole change on this codebase and posts its
+   *  thoughts as the terminal user's github account. */
+  const startReview = useCallback(
+    (item: RepoItem) => {
+      if (repo === null) return;
+      toChat();
+      void swapConversation(null).then(
+        () => void send(reviewPrompt(item, repo.full)),
       );
     },
-    [busy, desks, send],
+    [repo, toChat, swapConversation, send],
   );
 
   /* A tab names a conversation inside a project, so going to one is at most two
@@ -1764,6 +2076,11 @@ function Conversation() {
   const answerPlan = useCallback(
     (turnId: string, go: boolean) => {
       const text = asked.current;
+      // The steps the agent proposed for this plan, read before the answer is
+      // written — the build-plan store wants the real task list.
+      const planTurn =
+        desk === null ? null : desk.turns.find((turn): turn is Extract<typeof turn, { kind: "plan" }> => turn.kind === "plan" && turn.id === turnId);
+      const steps = planTurn === undefined || planTurn === null ? [] : planTurn.steps;
       setDesks((current) =>
         changeCurrent(current, (one) => ({
           ...one,
@@ -1776,11 +2093,34 @@ function Conversation() {
       );
       if (text === "") return;
       asked.current = "";
-      if (go) void deliver(text, sizeUp(text), { lookFirst: false });
-      else setDraft(text);
+      if (go) {
+        // A build plan keeps the real task list the agent proposed, so a
+        // resumed session knows each step and where it got to.
+        const path = desks.current;
+        if (path !== null && steps.length > 0) {
+          void bridge.buildSave(
+            steps.map((step) => ({ title: step, acceptance: "" })),
+            { project: path },
+          ).then(() => void refreshBuildPlan(path));
+        }
+        void deliver(text, sizeUp(text), { lookFirst: false });
+      } else setDraft(text);
     },
-    [deliver],
+    [deliver, desk, desks, refreshBuildPlan],
   );
+
+  /* "Get on with it" means what it says: a plan is there to be built, not to
+     sit waiting for a click while somebody stepped away. Where the project's
+     hold-back is off, an unanswered plan approves itself the moment it lands,
+     so a big document can be kicked off and left alone.*/
+  useEffect(() => {
+    if (desk === null) return;
+    if (preferences.heldBack[desk.path] === true) return;
+    const waiting = desk.turns.find((one) => one.kind === 'plan' && one.answered === null);
+    if (waiting !== undefined && waiting.kind === 'plan') {
+      answerPlan(waiting.id, true);
+    }
+  }, [desk, preferences.heldBack, answerPlan]);
 
   const respond = useCallback(
     (turnId: string, callId: string, decision: Decision) => {
@@ -1814,7 +2154,7 @@ function Conversation() {
     async (versionId: string) => {
       const path = desks.current;
       if (path === null) return;
-      setBusy(true);
+      goBusy();
       try {
         const answer = await bridge.putBack(versionId);
         if (!answer.ok) {
@@ -1829,7 +2169,7 @@ function Conversation() {
           })),
         );
       } finally {
-        setBusy(false);
+        goQuiet();
       }
     },
     [desks.current, troubleHere],
@@ -1887,8 +2227,11 @@ function Conversation() {
   const [landed, setLanded] = useState<Outcome>(null);
   const [decided, setDecided] = useState<{ letIn: boolean; undoTo: string } | null>(null);
 
-  const refreshLanding = useCallback(() => {
-    void bridge.landing().then((answer) => {
+  const refreshLanding = useCallback((path: string | null) => {
+    if (path === null) return;
+    // A project is named so a slow answer from another project cannot land here
+    // and repaint this panel — the same gap the away board had until that fix.
+    void bridge.landing({ project: path }).then((answer) => {
       setLanding(answer.ok ? answer.value : null);
     });
   }, []);
@@ -1900,7 +2243,7 @@ function Conversation() {
     }
     setLanded(null);
     setDecided(null);
-    refreshLanding();
+    refreshLanding(desks.current);
   }, [desks.current, refreshLanding]);
 
   /**
@@ -1940,11 +2283,14 @@ function Conversation() {
 
   const changeHoldBack = useCallback(
     (on: boolean) => {
-      setPreferences((was) => ({ ...was, holdBack: on }));
+      const path = desks.current;
+      setPreferences((was) =>
+        path === null ? was : { ...was, heldBack: { ...was.heldBack, [path]: on } },
+      );
       setLanding((was) => (was === null ? was : { ...was, holdBack: on }));
-      void bridge.setHoldBack(on).then((answer) => {
+      void bridge.setHoldBack(on, { project: path ?? undefined }).then((answer) => {
         if (answer.ok) setPreferences(answer.value);
-        refreshLanding();
+        refreshLanding(path);
       });
     },
     [refreshLanding],
@@ -1954,7 +2300,7 @@ function Conversation() {
     (letIn: boolean) => {
       const path = desks.current;
       if (path === null) return;
-      setBusy(true);
+      goBusy();
       void bridge
         .decideOnWork(letIn)
         .then((answer) => {
@@ -1973,7 +2319,7 @@ function Conversation() {
           );
           void refreshOverview(path);
         })
-        .finally(() => setBusy(false));
+        .finally(() => goQuiet());
     },
     [desks.current, refreshOverview, troubleHere],
   );
@@ -1995,7 +2341,7 @@ function Conversation() {
       })
       .finally(() => {
         setGoing(null);
-        refreshLanding();
+        refreshLanding(desks.current);
       });
   }, [refreshLanding, troubleHere]);
 
@@ -2020,7 +2366,7 @@ function Conversation() {
   }, []);
 
   const refreshAway = useCallback(async (path: string) => {
-    const answer = await bridge.away();
+    const answer = await bridge.away({ project: path });
     if (!answer.ok || desksNow.current.current !== path) return;
     setAway((current) => ({ ...current, [path]: answer.value }));
   }, []);
@@ -2058,7 +2404,7 @@ function Conversation() {
     (text: string, untilDone = false) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.keepGoing(text, untilDone).then(afterAway(path));
+      void bridge.keepGoing(text, untilDone, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2071,7 +2417,7 @@ function Conversation() {
       if (path === null) return;
       // A plan that could never run comes back refused, with the reason in
       // plain words — the same door every other failure comes through.
-      void bridge.startAfter(text, after).then(afterAway(path));
+      void bridge.startAfter(text, after, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway, troubleHere],
   );
@@ -2080,7 +2426,7 @@ function Conversation() {
     (id: string) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.keepAway(id).then((answer) => {
+      void bridge.keepAway(id, { project: path }).then((answer) => {
         afterAway(path)(answer);
         // Keeping one is a version like any other, and the rail has to say so.
         void refreshVersions(path);
@@ -2094,7 +2440,7 @@ function Conversation() {
     (id: string) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.stopAway(id).then(afterAway(path));
+      void bridge.stopAway(id, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2105,7 +2451,7 @@ function Conversation() {
     (id: string, callId: string, decision: Decision) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.answerAway(id, callId, decision).then(afterAway(path));
+      void bridge.answerAway(id, callId, decision, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2114,7 +2460,7 @@ function Conversation() {
     (doing: string, every: EveryKind, at: { hour: number; minute: number }, on?: number) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.addRepeat(doing, every, at, on).then(afterAway(path));
+      void bridge.addRepeat(doing, every, at, on, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2123,7 +2469,7 @@ function Conversation() {
     (id: string, on: boolean) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.switchRepeat(id, on).then(afterAway(path));
+      void bridge.switchRepeat(id, on, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
@@ -2132,46 +2478,104 @@ function Conversation() {
     (id: string) => {
       const path = desks.current;
       if (path === null) return;
-      void bridge.forgetRepeat(id).then(afterAway(path));
+      void bridge.forgetRepeat(id, { project: path }).then(afterAway(path));
     },
     [desks.current, afterAway],
   );
 
   /** One value moved, from wherever the panel offered it: a slider, or a colour
-   *  nobody could read against the one underneath it. */
+   *  nobody could read against the one underneath it. Filed in the draft and
+   *  nothing more — the project is untouched until "Save changes" is pressed. */
   const nudge = useCallback((name: string, value: string) => {
-    void bridge.nudgeToken(name, value).then((answer) => {
+    setDesignDraft((current) => {
       const path = desks.current;
-      if (!answer.ok || path === null) return;
+      if (path === null) return current;
+      const here = current[path] ?? { tokens: {}, motions: [] };
+      return {
+        ...current,
+        [path]: { ...here, tokens: { ...here.tokens, [name]: value } },
+      };
+    });
+  }, [desks.current]);
+
+  /* Same bargain as a colour: the change waits in the draft, and lands with the
+     whole batch the moment somebody saves. */
+  const nudgeMotion = useCallback(
+    (move: { places: readonly unknown[] }, change: unknown) => {
+      setDesignDraft((current) => {
+        const path = desks.current;
+        if (path === null) return current;
+        const here = current[path] ?? { tokens: {}, motions: [] };
+        return { ...current, [path]: { ...here, motions: [...here.motions, { places: move.places, change }] } };
+      });
+    },
+    [desks.current],
+  );
+
+  /** "Save changes": write the draft to the stylesheet and keep it as one
+   *  version, then let go of the draft. Nothing has been saved until this. */
+  const commitDesign = useCallback(() => {
+    const path = desks.current;
+    if (path === null) return;
+    const draft = designDraft[path];
+    if (draft === undefined) return;
+    const tokens = Object.entries(draft.tokens).map(([name, value]) => ({ name, value }));
+    if (tokens.length === 0 && draft.motions.length === 0) return;
+    void bridge.designCommit({ tokens, motions: draft.motions }).then((answer) => {
+      if (!answer.ok) return;
+      setDesignDraft((current) => {
+        if (current[path] === undefined) return current;
+        const next = { ...current };
+        delete next[path];
+        return next;
+      });
       setDesks((current) =>
-        changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
+        current.current === path
+          ? changeDesk(current, path, (one) => ({ ...one, versions: answer.value }))
+          : current,
       );
       void refreshOverview(path);
     });
-  }, [desks.current, refreshOverview]);
+  }, [designDraft, desks.current, refreshOverview]);
 
-  /* Same bargain as a colour: arithmetic on the file, one saved moment, no
-     question put to a model. */
-  const nudgeMotion = useCallback(
-    (move: { places: readonly unknown[] }, change: unknown) => {
-      void bridge.nudgeMotion(move.places, change).then((answer) => {
-        const path = desks.current;
-        if (!answer.ok || path === null) return;
-        setDesks((current) =>
-          changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
-        );
-        void refreshOverview(path);
-      });
-    },
-    [desks.current, refreshOverview],
+  /** Throw the draft away. Nothing was ever written, so there is nothing to
+   *  undo — forgetting the values is all there was. */
+  const discardDesign = useCallback(() => {
+    const path = desks.current;
+    if (path === null) return;
+    setDesignDraft((current) => {
+      if (current[path] === undefined) return current;
+      const next = { ...current };
+      delete next[path];
+      return next;
+    });
+  }, [desks.current]);
+
+  /** Whether the project in front has edits waiting to be saved. */
+  const designDirty = useCallback((): boolean => {
+    const path = desk === null ? null : desk.path;
+    if (path === null) return false;
+    const here = designDraft[path];
+    if (here === undefined) return false;
+    return Object.keys(here.tokens).length > 0 || here.motions.length > 0;
+  }, [desk, designDraft]);
+
+  /** The stylesheet with the draft edits laid over it, so the design view shows
+   *  what is being tested without anything reaching the project. */
+  const designStyles = useMemo(
+    () => withDesignDraft(desk?.overview?.styles ?? null, desk === null ? undefined : designDraft[desk.path]),
+    [desk,
+      desk?.overview?.styles,
+      designDraft,
+    ],
   );
 
   /** What the project's own stylesheet says about itself: how it moves, what
    *  was written by hand, what cannot be read. One reading, shared by the panel
    *  that counts it and the view that draws it. */
   const design = useMemo(
-    () => readDesign(desk?.overview?.styles ?? null, desk?.overview?.swatches ?? []),
-    [desk?.overview?.styles, desk?.overview?.swatches],
+    () => readDesign(designStyles, desk?.overview?.swatches ?? []),
+    [designStyles, desk?.overview?.swatches],
   );
 
   useEffect(() => setFixing(null), [desk?.overview?.styles]);
@@ -2179,7 +2583,7 @@ function Conversation() {
   /* A native view paints above the window's own contents, so anything that
      would cover it has to take it off screen first. */
   const covered =
-    designAt !== null || graphOpen || helpersAt !== null || connectOpen || addMore;
+    designAt !== null || graphOpen || reviewsOpen || helpersAt !== null || connectOpen || addMore;
   useEffect(() => {
     if (pane === 'off') return;
     void bridge.pageHidden(covered);
@@ -2231,13 +2635,17 @@ function Conversation() {
     (link: SettingsLink) => {
       switch (link) {
         case 'skills':
+          goToScreen("skills");
           refreshSkills();
+          refreshWorkflows();
           setSkillsOpen(true);
           return;
         case 'add-more':
+          goToScreen("add-more");
           openAddMore();
           return;
         case 'usage':
+          goToScreen("usage");
           setUsageOpen(true);
           return;
         case 'folder':
@@ -2264,7 +2672,8 @@ function Conversation() {
    * revisit; all this does is press the button and put the answer in the thread.
    */
   const seeIt = useCallback(async (at?: string, point?: boolean) => {
-    if (desks.current === null) return;
+    const askedFor = desks.current;
+    if (askedFor === null) return;
     // Said here as well as by the shell, so pressing the button has an answer
     // inside 100ms rather than after a folder has been read.
     setProgress({ says: showWords.puttingTogether, done: false });
@@ -2284,13 +2693,21 @@ function Conversation() {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
         return;
       }
-      // "Ready" gets a beat on screen. A browser window opening on its own is
-      // startling without a sentence somewhere saying it was meant to.
+      // "Ready" gets a beat on screen, and the pane beside the conversation
+      // opens showing what was served. The page belongs here in the window
+      // now, not in a separate browser. Only when the project that asked is
+      // still the one in front — a serve that lands after somebody switched
+      // must not open the page under a project that did not ask for it.
+      const address = answer.value.address;
+      if (desksNow.current.current === askedFor) {
+        setPageAt(address);
+        movePane('split');
+      }
       setProgress({ says: showWords.ready, done: true });
       window.setTimeout(() => setProgress(null), 1400);
       // The overview keeps the address of what was just served, so the pill can
       // take you back to it all evening.
-      void refreshOverview(desks.current);
+      void refreshOverview(askedFor);
     } catch (cause) {
       // Never silent. A progress line that clears on its own is indistinguishable
       // from a preview that opened behind the window.
@@ -2302,7 +2719,7 @@ function Conversation() {
         details: cause instanceof Error ? cause.message : String(cause),
       });
     }
-  }, [desks.current, say, troubleHere, refreshOverview]);
+  }, [desks.current, say, troubleHere, refreshOverview, movePane]);
 
   /* Everything the bar can reach. Held still between renders so the search does
      not re-run on every keystroke elsewhere. */
@@ -2550,19 +2967,41 @@ function Conversation() {
           open={shelfOpen}
           onToggle={() => setShelfOpen((was) => !was)}
           onAsk={() => setAsking(true)}
-          onDesign={() => setDesignAt("styles")}
-          onHistory={() => setGraphOpen(true)}
-          onSkills={() => { refreshSkills(); setSkillsOpen(true); }}
-          onAddMore={openAddMore}
+          onDesign={() => {
+            goToScreen("design");
+            setDesignAt("styles");
+          }}
+          onHistory={() => {
+            goToScreen("graph");
+            setGraphOpen(true);
+          }}
+          onReviews={() => {
+            goToScreen("reviews");
+            setReviewsOpen(true);
+          }}
+          onSkills={() => {
+            goToScreen("skills");
+            refreshSkills();
+            refreshWorkflows();
+            setSkillsOpen(true);
+          }}
+          onAddMore={() => {
+            goToScreen("add-more");
+            openAddMore();
+          }}
           onFiles={filesShown ? () => setFilesOpen(true) : undefined}
           onDeleteConversation={(path) => void deleteConversation(path)}
-          onSettings={() => setSettingsOpen(true)}
+          onSettings={() => {
+            goToScreen("settings");
+            setSettingsOpen(true);
+          }}
         />
       ) : null}
 
       <Skills
         open={skillsOpen}
         skills={skills}
+        workflows={workflows}
         onClose={() => setSkillsOpen(false)}
         onRefresh={refreshSkills}
         onOpen={async (skill) => {
@@ -2629,7 +3068,25 @@ function Conversation() {
             onBrowse={() => void browse()}
           />
         ) : desk === null || desk.turns.length === 0 ? (
-          <Welcome onUse={setDraft} />
+          <Welcome
+            onUse={setDraft}
+            project={desk?.name ?? null}
+            onPickDocument={async () => {
+              const answer = await bridge.chooseDocument(desk === null ? undefined : { project: desk.path });
+              return answer.ok ? answer.value : null;
+            }}
+            onStartBuild={(source) => {
+              // The document is stored under the project, then the build brief
+              // goes into the conversation so the agent reads it against the
+              // code and plans the work in view, task by task.
+              void bridge
+                .buildStart(source, desk === null ? undefined : { project: desk.path })
+                .then(() => {
+                  if (desk !== null) void refreshBuildPlan(desk.path);
+                });
+              void send(asBuildRequest(source.text, source.instruction));
+            }}
+          />
         ) : (
           <>
             {/* The top of the page. A sibling of the thread rather than its
@@ -2670,6 +3127,11 @@ function Conversation() {
               {pictures.last.map((one) => (
                 <Picture key={one.change.id} change={one.change} />
               ))}
+              {finishedRun !== null && desk !== null && finishedRun.path === desk.path ? (
+                <p className="threadnote">
+                  Worked for {durationInWords(finishedRun.seconds)}
+                </p>
+              ) : null}
             </div>
           </>
         )}
@@ -2718,17 +3180,34 @@ function Conversation() {
               Jump to latest
             </button>
 
+            {/* A document-to-build keeps its progress above the box, one quiet
+                line collapsed, the checklist behind it. It is the same fold the
+                steps have, and nothing about the build is lost if the window
+                closes — the plan is written down and reopened. */}
+            {buildPlan !== null && buildPlan.path === desk?.path && buildPlan.plan.total > 0 ? (
+              <BuildProgress plan={buildPlan.plan} running={frontBusy} />
+            ) : null}
+
             {/* Both bands sit above the composer rather than in the panel on
                 the right: that panel is a reading of what has happened, and
                 these two are what is happening. */}
-            <HelperRail helpers={helpers} onOpen={(at) => setHelpersAt({ at })} />
+            <HelperRail
+              helpers={helpers}
+              onOpen={(at) => {
+                goToScreen("helpers");
+                setHelpersAt({ at });
+              }}
+            />
             <InLine waiting={desk?.waiting ?? []} onTake={takeBack} />
 
             <Composer
               onSend={hand}
               onStop={halt}
               autoFocus
-              busy={busy}
+              // Busy is this conversation's own live stream, not a background
+              // turn in another tab — a tab working beside you must not turn
+              // your Send into Stop or its own work into a wait.
+              busy={frontBusy}
               draft={draft}
               attachments={attachments}
               connection={connection}
@@ -2799,7 +3278,7 @@ function Conversation() {
             showMe: preferences.showMe,
             artifacts: desk.overview?.artifacts ?? [],
             swatches: desk.overview?.swatches ?? [],
-            styles: desk.overview?.styles ?? null,
+            styles: designStyles,
             reading: design,
             inStep,
             landing,
@@ -2815,10 +3294,14 @@ function Conversation() {
           onDismissPutBack={dismissPutBack}
           onShowSplit={() => void showSplit()}
           onLimit={setLimit}
-          onOpenFile={(file) => void bridge.openInEditor(file)}
-          onReviewChanges={openInEditor}
-          onOpenDesign={setDesignAt}
-          onOpenGraph={() => setGraphOpen(true)}
+          onOpenDesign={(part) => {
+            goToScreen("design");
+            setDesignAt(part);
+          }}
+          onOpenGraph={() => {
+            goToScreen("graph");
+            setGraphOpen(true);
+          }}
           onShare={() => void bridge.shareReview()}
           onHoldBack={changeHoldBack}
           onDecide={decideOnWork}
@@ -2852,7 +3335,7 @@ function Conversation() {
         <DesignView
           at={designAt}
           data={{
-            styles: desk.overview?.styles ?? null,
+            styles: designStyles,
             motion: design.motion,
             drifted: design.drifted,
             unreadable: design.unreadable,
@@ -2866,6 +3349,9 @@ function Conversation() {
             busy,
             showMe: preferences.showMe,
           }}
+          dirty={designDirty()}
+          onSave={commitDesign}
+          onDiscard={discardDesign}
           onClose={() => setDesignAt(null)}
           onNudge={nudge}
           onNudgeMotion={nudgeMotion}
@@ -2911,12 +3397,35 @@ function Conversation() {
         />
       ) : null}
 
+      {reviewsOpen && desk !== null ? (
+        <ReviewsView
+          repo={repo}
+          busy={reviewsBusy}
+          onRefresh={refreshRepo}
+          onClose={() => setReviewsOpen(false)}
+          onReview={startReview}
+        />
+      ) : null}
+
       <BrowserPane
         room={pane}
         address={pageAt ?? previewUrl}
         onAddress={setPageAt}
-        onRoom={setPane}
-        onClose={() => setPane('off')}
+        onRoom={movePane}
+        onClose={() => movePane('off')}
+        variations={
+          variations === null
+            ? undefined
+            : variations.members.map((one) => ({ id: one.id, name: one.name }))
+        }
+        variation={variations?.inFront ?? null}
+        onVariation={variations === null ? undefined : (id) => {
+          const chosen = variations.members.find((one) => one.id === id);
+          if (chosen === undefined) return;
+          setVariations((current) => (current === null ? current : { ...current, inFront: id }));
+          setPageAt(chosen.address);
+          movePane('split');
+        }}
         watching={watching}
         onWatch={(on) => {
           if (on) {
@@ -2938,7 +3447,7 @@ function Conversation() {
 
       {/* Mode three keeps a way back that is one key and always the same key. */}
       {pane === 'whole' ? (
-        <button type="button" className="chatpill" onClick={() => setPane('split')}>
+        <button type="button" className="chatpill" onClick={() => movePane('split')}>
           <span className="chatpill__last">{lastSaidIn(desk) ?? 'Back to the conversation'}</span>
           <kbd className="chatpill__key">⌘J</kbd>
         </button>

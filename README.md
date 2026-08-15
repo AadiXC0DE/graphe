@@ -96,8 +96,15 @@ npm run dev -- --open '/?gallery'   # every component, both themes
 ```bash
 npm test             # 375 tests
 npm run typecheck
-npm run shot <name>  # screenshot the running UI in both themes
+npm run shot <name>  # screenshot the UI in both themes — boots the server, captures, shuts it down
+npm run dev:daemon   # start the dev server detached (background), returns immediately
 ```
+
+`npm run shot` is the one command to run for a visual check. It starts the dev
+server if nothing is serving yet, waits until it answers, captures both themes,
+then takes its own server down — so the call always finishes. If a dev server is
+already open in another terminal it reuses it and leaves it alone.
+
 
 ---
 

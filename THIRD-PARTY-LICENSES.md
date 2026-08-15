@@ -9,7 +9,7 @@ what we depend on and why lives in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.
 Graphe is not a fork of any of these projects. We depend on them as published packages and have
 not modified their source. Their names and marks belong to their respective owners.
 
-187 packages, generated 2026-08-13.
+188 packages, generated 2026-08-14.
 
 ## Summary
 
@@ -164,6 +164,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [protobufjs](https://protobufjs.github.io/protobuf.js/) | 7.6.5 | BSD-3-Clause |
 | [react](https://react.dev/) | 19.2.8 | MIT |
 | [react-dom](https://react.dev/) | 19.2.8 | MIT |
+| [react-icons](https://github.com/react-icons/react-icons#readme) | 5.7.0 | MIT |
 | [regex](https://github.com/slevithan/regex) | 6.1.0 | MIT |
 | [regex-recursion](https://github.com/slevithan/regex-recursion) | 6.0.2 | MIT |
 | [regex-utilities](https://github.com/slevithan/regex-utilities) | 2.3.0 | MIT |
@@ -1677,6 +1678,16 @@ Licence: MIT
 ### react-dom 19.2.8
 
 <https://react.dev/>
+
+Licence: MIT
+
+```
+[object Object]
+```
+
+### react-icons 5.7.0
+
+<https://github.com/react-icons/react-icons#readme>
 
 Licence: MIT
 

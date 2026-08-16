@@ -18,6 +18,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import initSqlJs, { type Database } from 'sql.js';
@@ -348,12 +349,20 @@ export async function openMemory(options: { dbPath: string | null; embedder?: Em
     },
 
     async close() {
-      // The export is synchronous, so the bytes are captured the moment save
-      // is called — nothing a close follows can be lost.
-      try {
-        await save();
-      } catch {
-        // A folder that vanished meanwhile is a lost note, not an error.
+      // Written synchronously: a close is the last thing a session does before
+      // its folder may be taken away, and an async write could still be in
+      // flight when the folder goes. A small note store on a rare path can
+      // afford the sync write; losing the note cannot.
+      if (options.dbPath !== null) {
+        try {
+          const bytes = db.export();
+          mkdirSync(dirname(options.dbPath), { recursive: true });
+          const tmp = `${options.dbPath}.tmp`;
+          writeFileSync(tmp, bytes);
+          renameSync(tmp, options.dbPath);
+        } catch {
+          // A folder that vanished meanwhile is a lost note, not an error.
+        }
       }
       db.close();
     },

@@ -28,6 +28,7 @@ import {
   type Handover,
   type Piece,
 } from './handover';
+import { commitSubject } from '../lib/conventional';
 import { canSendItOn, readSignedIn, readWhereItLives, type Found } from './tools';
 import { reviewPage, type Review, type Shown } from './review';
 import { notHere, runHelper } from './run';
@@ -301,7 +302,7 @@ export async function handToDeveloper(options: HandOverOptions): Promise<Handed>
 
   const steps = [
     `git push -u origin ${name}`,
-    `gh pr create --head ${name} --title "${titleOf(handover)}"`,
+    `gh pr create --head ${name} --title "${commitSubject(titleOf(handover))}"`,
   ];
 
   // As far as this computer can take it. The sentence is the one that names

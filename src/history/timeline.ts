@@ -42,6 +42,7 @@ import {
   type Actor,
   type Boundary,
 } from './titles';
+import { commitSubject, stripType } from '../lib/conventional';
 
 export type { Actor, Boundary } from './titles';
 export { HistoryError } from './repo';
@@ -237,7 +238,10 @@ function message(title: string, marks: Marks): string {
     `${MARK}Moment: ${marks.moment}`,
   ];
   if (marks.wentBackTo) lines.push(`${MARK}Went-Back-To: ${marks.wentBackTo}`);
-  return `${title.trim() || boundaryTitles[marks.moment]}\n\n${lines.join('\n')}\n`;
+  // The subject git log and the branch list see carries the conventional type;
+  // the plain surfaces strip it back off (asVersion).
+  const subject = commitSubject(title.trim() || boundaryTitles[marks.moment]);
+  return `${subject}\n\n${lines.join('\n')}\n`;
 }
 
 function marksIn(body: string): Map<string, string> {
@@ -277,7 +281,9 @@ function asVersion(stored: {
     parents: stored.parents ?? [],
     refs: stored.refs ?? [],
     at: stored.at,
-    title: stored.label ?? stored.title,
+    // A name somebody gave it is kept exactly; an automatic subject is shown
+    // without the conventional type prefix git log carries.
+    title: stored.label ?? stripType(stored.title),
     by: marks.get('by') === 'graphe' ? 'graphe' : 'you',
     named: stored.label !== null || (ours ? marks.get('kind') === 'named' : true),
     boundary: boundary && BOUNDARIES.has(boundary) ? (boundary as Boundary) : null,

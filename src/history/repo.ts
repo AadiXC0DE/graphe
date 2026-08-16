@@ -54,6 +54,7 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { ChangeKind } from './titles';
+import { stripType } from '../lib/conventional';
 
 const run = promisify(execFile);
 
@@ -351,7 +352,9 @@ export class ProjectHistory {
       const seconds = Number.parseInt(at, 10);
       const change: LastChange = {
         id,
-        name: title.trim(),
+        // The write-up this feeds is the plain surface; the typed subject
+        // stays in git log and the branch list.
+        name: stripType(title.trim()),
         when: Number.isFinite(seconds) ? seconds * 1000 : 0,
       };
       for (const line of names.split('\n')) {

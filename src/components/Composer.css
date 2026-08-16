@@ -367,6 +367,8 @@
   background: var(--bg-raised);
   color: var(--text-muted);
   font-size: var(--text-xs);
+  /* One word each — a wrapped label is a tall button. */
+  white-space: nowrap;
   transition: color var(--dur-micro) var(--ease-hover);
 }
 

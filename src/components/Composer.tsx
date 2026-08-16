@@ -46,6 +46,9 @@ type Props = {
    *  other state (BACKLOG A1). Send and Stop are one affordance in opposite
    *  states — swapping in place is why the layout does not jump. */
   onStop?: () => void;
+  /** A second thought while a turn is running is a choice, asked quietly:
+   *  interrupt the run with this message, or queue it behind the turn. */
+  onQueue?: (text: string, mode: 'steer' | 'followUp') => void;
   placeholder?: string;
   autoFocus?: boolean;
   busy?: boolean;
@@ -134,6 +137,7 @@ function resize(el: HTMLTextAreaElement | null): void {
 export default function Composer({
   onSend,
   onStop,
+  onQueue,
   placeholder,
   autoFocus,
   busy,
@@ -277,15 +281,18 @@ export default function Composer({
     [change],
   );
 
-  const submit = () => {
+  const submit = (mode?: 'steer' | 'followUp') => {
     const text = value.trim();
-    // Sent even while something is running: a second thought during a long run
-    // goes in line rather than being swallowed by a box that will not take it.
     if (!text) return;
     ears.current?.stop();
+    const said = drawn === null ? text : `${text}\n\n${drawn}`;
     // The marks travel as words as well as pixels: coordinates the model can
     // act on, beside a picture it can see.
-    onSend(drawn === null ? text : `${text}\n\n${drawn}`);
+    if (mode !== undefined && onQueue !== undefined) {
+      onQueue(said, mode);
+    } else {
+      onSend(said);
+    }
     setDrawn(null);
     setValue('');
     setRefused(null);
@@ -318,6 +325,10 @@ export default function Composer({
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      // While a turn is running and words are in the box, Enter does not guess
+      // between interrupting and queueing — the two quiet buttons beside the
+      // box are the choice. (BACKLOG A1's Stop still owns the empty box.)
+      if (busy && onQueue !== undefined && value.trim() !== '') return;
       submit();
     }
   };
@@ -672,49 +683,69 @@ export default function Composer({
             when a turn begins, and the Stop half is never disabled — a run that
             has been started must always be stoppable, even with an empty box.
 
-            Words in the box outrank both: whatever is running, the button
-            sends what has been written, and it waits its turn. */}
-        <button
-          className="composer__send"
-          onClick={stopping ? onStop : submit}
-          disabled={stopping ? false : !value.trim()}
-          aria-label={stopping ? 'Stop' : busy ? 'Send when it is free' : 'Send'}
-        >
-          {stopping ? (
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              fill="none"
-              aria-hidden="true"
+            Words in the box while a turn is running are a second thought, and a
+            second thought is a choice: queue it behind the run, or interrupt
+            with it. Two quiet buttons, asked once, never guessed. */}
+        {busy && onQueue !== undefined && value.trim() !== '' ? (
+          <span className="composer__queue">
+            <button
+              type="button"
+              className="composer__queuebtn composer__queuebtn--safe"
+              onClick={() => submit('followUp')}
             >
-              <rect
-                x="1.5"
-                y="1.5"
-                width="9"
-                height="9"
-                rx="1.5"
-                fill="currentColor"
-              />
-            </svg>
-          ) : (
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              aria-hidden="true"
+              Queue it
+            </button>
+            <button
+              type="button"
+              className="composer__queuebtn"
+              onClick={() => submit('steer')}
             >
-              <path
-                d="M8 12.75V3.5M8 3.5 4 7.5M8 3.5l4 4"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          )}
-        </button>
+              Interrupt with this
+            </button>
+          </span>
+        ) : (
+          <button
+            className="composer__send"
+            onClick={stopping ? onStop : () => submit()}
+            disabled={stopping ? false : !value.trim()}
+            aria-label={stopping ? 'Stop' : busy ? 'Send when it is free' : 'Send'}
+          >
+            {stopping ? (
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                aria-hidden="true"
+              >
+                <rect
+                  x="1.5"
+                  y="1.5"
+                  width="9"
+                  height="9"
+                  rx="1.5"
+                  fill="currentColor"
+                />
+              </svg>
+            ) : (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M8 12.75V3.5M8 3.5 4 7.5M8 3.5l4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Always in the document, empty most of the time. A live region that is

@@ -589,6 +589,9 @@ export type AwayNotice = { project: string; away: Away };
 export type PromptOptions = {
   /** Look around and propose, changing nothing, before anything is touched. */
   lookFirst?: boolean;
+  /** The agent is already working and this message should wait its turn —
+   *  delivered after the current run, never interrupting it. */
+  queue?: 'followUp';
 };
 
 /** One model, named by the provider it belongs to and its own id. Both ids are

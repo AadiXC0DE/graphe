@@ -22,6 +22,8 @@ import Message from "./components/Message";
 import type { Outcome } from "./components/Landing";
 import Overview from "./components/Overview";
 import PlanCard from "./components/PlanCard";
+import ReviewCard from "./components/ReviewCard";
+import WorkingMark from "./components/WorkingMark";
 import AddMore from "./components/AddMore";
 import ProjectMenu from "./components/ProjectMenu";
 import ProjectPicker from "./components/ProjectPicker";
@@ -329,7 +331,19 @@ function Conversation() {
   /* The front conversation is busy when its own stream is live — not when some
      other tab is running, which is different work and must not turn this one's
      Send into Stop. Same test the tab row uses for its working dot. */
-  const frontBusy =
+  /* Busy is what the turns show, plus the window's own "sent and waiting"
+     window — the gap between pressing Send and the first visible step, when
+     the model is thinking and nothing has arrived yet. `busyConversation` is
+     set in `deliver` and cleared when the shell answers, so a second thought
+     in that gap lands on the queue buttons instead of a raw error. */
+  /** The conversation that owns the current send. `busy` is window-wide (it
+   *  also covers picking a folder), so tabs need this narrower identity. Read
+   *  by `frontBusy` below, so it has to live above it. */
+  const [busyConversation, setBusyConversation] = useState<string | null>(null);
+  /** Whether a running row is already on screen carrying the motion — a
+   *  streaming reply, a step in progress, a tidy. The quiet mark only fills
+   *  the silent gaps of a run, so the two never speak at once. */
+  const runningNow =
     desk !== null &&
     desk.turns.some(
       (turn) =>
@@ -337,6 +351,15 @@ function Conversation() {
         (turn.kind === 'did' && turn.state === 'running') ||
         (turn.kind === 'tidying' && turn.state === 'running'),
     );
+  const frontBusy =
+    (desk !== null &&
+      desk.turns.some(
+        (turn) =>
+          (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
+          (turn.kind === 'did' && turn.state === 'running') ||
+          (turn.kind === 'tidying' && turn.state === 'running'),
+      )) ||
+    (desk !== null && busyConversation === `${desk.path}\u0000${desk.address ?? ''}`);
 
   /** What this computer remembers. Null until the shell has been asked — which
    *  is not the same as an empty list, and the two states look different: one is
@@ -732,9 +755,6 @@ function Conversation() {
      must not clear the busy another tab is still using. Counted, not a flag. */
   const goBusy = (): void => setBusyCount((count) => count + 1);
   const goQuiet = (): void => setBusyCount((count) => Math.max(0, count - 1));
-  /** The conversation that owns the current send. `busy` is window-wide (it
-   *  also covers picking a folder), so tabs need this narrower identity. */
-  const [busyConversation, setBusyConversation] = useState<string | null>(null);
   /** How full the conversation on screen is, and whether it is being shortened
    *  right now. Asked for rather than counted here: the number is the model's
    *  own reckoning, and only the shell can see it. */
@@ -1698,7 +1718,7 @@ function Conversation() {
    * estimate from a guess into a measurement (COST-DESIGN §2).
    */
   const deliver = useCallback(
-    async (text: string, task: Task, ways?: { lookFirst?: boolean }) => {
+    async (text: string, task: Task, ways?: { lookFirst?: boolean; queue?: 'followUp' }) => {
       // What is in the box at the moment of sending — never a snapshot from
       // whenever this callback was last rebuilt (see `attachmentsNow`).
       const inTheBox = attachmentsNow.current;
@@ -1876,20 +1896,21 @@ function Conversation() {
    * and goes out on its own the moment the one before it is finished.
    */
   const hand = useCallback(
-    (text: string) => {
+    (text: string, mode?: 'steer' | 'followUp') => {
       if (desks.current === null) {
         void send(text);
         return;
       }
       const desk = currentDesk(desksNow.current);
-      // The agent is mid-turn on exactly this conversation, and the person is
-      // typing into it. Instead of parking the message until the turn ends, put
-      // it straight into that turn — Pi's steer. It interrupts the flow without
-      // stopping it, which is the "insert into the loop" move. The window owns
-      // the person's own words (the shell never sends them back), so it is laid
-      // down here just as `send` would. `frontBusy` is this conversation's own
-      // live stream — another tab working is not this turn and sends.
-      if (desk !== null && frontBusy) {
+      if (desk === null) {
+        void send(text);
+        return;
+      }
+      // The two quiet choices beside the box, taken at face value: interrupt
+      // the live turn with this message, or queue it behind the run. The
+      // window owns the person's own words (the shell never sends them back),
+      // so the steer is laid down here just as `send` would.
+      if (mode === 'steer') {
         setDesks((current) =>
           changeDesk(current, desk.path, (one) => ({
             ...one,
@@ -1902,13 +1923,16 @@ function Conversation() {
         });
         return;
       }
-      // No turn of mine is going, whether nothing at all is, or another
-      // conversation is running its own. Send to my conversation now — two
-      // tabs working at once is the point, not a turn that waits for the
-      // other's to finish.
+      if (mode === 'followUp') {
+        void deliver(text, sizeUp(text), { queue: 'followUp' });
+        return;
+      }
+      // No turn of mine is going — nothing at all is, or another conversation
+      // is running its own. Send to my conversation now; two tabs working at
+      // once is the point, not a turn that waits for the other's to finish.
       void send(text);
     },
-    [frontBusy, desks, send],
+    [deliver, desks, send],
   );
 
   /** Fetch the open project's github pull requests and issues, and hold the
@@ -2107,6 +2131,32 @@ function Conversation() {
       } else setDraft(text);
     },
     [deliver, desk, desks, refreshBuildPlan],
+  );
+
+  /**
+   * "Fix the blocking ones" from a review card.
+   *
+   * The card names the findings; the button sends one sentence back asking for
+   * the blocking ones fixed. Nothing is sent on anybody's behalf beyond the
+   * ask itself — the agent goes and reads the findings it wrote.
+   */
+  const fixReview = useCallback(
+    (turnId: string) => {
+      setDesks((current) =>
+        changeCurrent(current, (one) => ({
+          ...one,
+          turns: one.turns.map((turn) =>
+            turn.kind === "review" && turn.id === turnId
+              ? { ...turn, asked: true }
+              : turn,
+          ),
+        })),
+      );
+      const text =
+        "Fix the blocking findings from the review I just asked for — the P0 and P1 ones — and tell me what you changed.";
+      void deliver(text, sizeUp(text), { lookFirst: false });
+    },
+    [deliver],
   );
 
   /* "Get on with it" means what it says: a plan is there to be built, not to
@@ -3109,6 +3159,7 @@ function Conversation() {
                     onDismiss={dismiss}
                     onAnswerEstimate={answerEstimate}
                     onAnswerPlan={answerPlan}
+                    onFixReview={fixReview}
                     showMe={preferences.showMe}
                   />
                   {(pictures.under.get(row.turn.id) ?? []).map((one) => (
@@ -3117,6 +3168,7 @@ function Conversation() {
                 </Fragment>
               ),
             )}
+              {frontBusy && !runningNow ? <WorkingMark /> : null}
               {walked === null ? null : (
                 <EvidenceReel
                   recording={walked}
@@ -3202,6 +3254,7 @@ function Conversation() {
 
             <Composer
               onSend={hand}
+              onQueue={hand}
               onStop={halt}
               autoFocus
               // Busy is this conversation's own live stream, not a background
@@ -3585,6 +3638,7 @@ function Turnstile({
   onDismiss,
   onAnswerEstimate,
   onAnswerPlan,
+  onFixReview,
   showMe,
 }: {
   turn: Turn;
@@ -3592,6 +3646,7 @@ function Turnstile({
   onDismiss: (turnId: string) => void;
   onAnswerEstimate: (turn: EstimateTurn, go: boolean) => void;
   onAnswerPlan: (turnId: string, go: boolean) => void;
+  onFixReview: (turnId: string) => void;
   /** Name the real command, path or operation under each step (BACKLOG D1).
    *  The words themselves were recorded when the step happened, so turning this
    *  on explains the conversation you already had. */
@@ -3653,6 +3708,15 @@ function Turnstile({
           answered={turn.answered}
           onGo={() => onAnswerPlan(turn.id, true)}
           onChange={() => onAnswerPlan(turn.id, false)}
+        />
+      );
+
+    case "review":
+      return (
+        <ReviewCard
+          verdict={turn.verdict}
+          asked={turn.asked}
+          onFix={() => onFixReview(turn.id)}
         />
       );
 

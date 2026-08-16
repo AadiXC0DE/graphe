@@ -47,6 +47,13 @@ import type { AgentToolResult, AgentToolUpdateCallback, ToolDefinition } from '@
 import { Type } from 'typebox';
 
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
+import { ProjectHistory, type ReviewTarget } from '../../history/repo';
+import type { MemoryStore } from '../memory';
+import * as debug from './debug';
+import { roleSpec, type HelperRole } from './child';
+import { arxivId, arxivMeta, readPdfPages, slicePages } from './pdf';
+import { REVIEW_ANGLES, reviewRequestFor, trimDiff } from './review';
+import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet } from '../../cost/fleet';
 import { hold } from '../sandbox';
 import type { Money, SpendReason } from '../types';
@@ -80,62 +87,11 @@ export type SubagentLine =
 /* Web search                                                                  */
 /* -------------------------------------------------------------------------- */
 
-/** How many results are worth returning. Ten results of five thousand characters
- *  is a wall of text; ten titles and their first two lines is a search. */
-const RESULT_COUNT = 8;
 /** The line somebody reads while this runs. Also what the activity feed shows. */
 const SEARCH_TOOL_LABEL = 'Searching the web';
 
-/** DuckDuckGo's HTML endpoint, scraped defensively. No key, no account, and the
- *  page is plain enough to read without a parser — which matters, because the
- *  alternative is depending on a paragraph of HTML in a dependency with its own
- *  ideas about what a search result is. */
-const SEARCH_ENDPOINT = 'https://html.duckduckgo.com/html/';
-
 /** One name for both web tools, so a site that wants to refuse us can. */
 const USER_AGENT = 'graphe/0.1 (a design workspace; contact: the user)';
-
-function stripTags(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** The results block, as plain text the model can read straight into its
- *  context. Titles and the address, then the first two lines of the snippet —
- *  enough to know whether a result is worth a `webfetch`, not a copy of the
- *  page. */
-function searchText(query: string, html: string): string {
-  const blocks = [...html.matchAll(/<div[^>]*class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>/g)];
-  const results: string[] = [];
-  for (const block of blocks.slice(0, RESULT_COUNT)) {
-    const body = block[1] ?? '';
-    const link = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(body);
-    const snippet = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i.exec(body);
-    if (link === null) continue;
-    // DuckDuckGo hands back its own redirect address. The real one is the
-    // `uddg=` query parameter, restored before it is shown.
-    let address = decodeURIComponent(
-      /[?&]uddg=([^&]+)/.exec(link[1] ?? '')?.[1] ?? link[1] ?? '',
-    );
-    if (address === '' || !address.includes('://')) address = link[1] ?? '';
-    const title = stripTags(link[2] ?? '');
-    const words = stripTags(snippet?.[1] ?? '');
-    if (title !== '' && address !== '') {
-      results.push(`- ${title}\n  ${address}\n  ${words.length > 180 ? `${words.slice(0, 180)}…` : words}`);
-    }
-  }
-  if (results.length === 0) return `I could not find anything for "${query}".`;
-  return results.join('\n\n');
-}
 
 export const websearchTool: ToolDefinition = {
   name: 'websearch',
@@ -160,15 +116,15 @@ export const websearchTool: ToolDefinition = {
       return { content: [{ type: 'text', text: 'I need something to search for.' }], details: {} };
     }
     try {
-      const response = await fetch(`${SEARCH_ENDPOINT}?q=${encodeURIComponent(query)}`, {
-        signal,
-        headers: { 'User-Agent': USER_AGENT },
-      });
-      if (!response.ok) {
-        throw new Error(`The search provider answered with ${String(response.status)}. Try again in a moment, or ask the person to check the connection.`);
+      const aborted = new AbortController();
+      const stop = (): void => aborted.abort();
+      signal?.addEventListener('abort', stop, { once: true });
+      try {
+        const outcome = await chainSearch(SEARCH_PROVIDERS, query, aborted.signal);
+        return { content: [{ type: 'text', text: formatSearch(query, outcome) }], details: {} };
+      } finally {
+        signal?.removeEventListener('abort', stop);
       }
-      const page = await response.text();
-      return { content: [{ type: 'text', text: searchText(query, page) }], details: {} };
     } catch (cause) {
       const aborted = signal?.aborted === true;
       if (aborted) throw new Error('Search stopped.');
@@ -196,7 +152,25 @@ const MAX_PAGE_CHARACTERS = 20_000;
 
 /** Content types that are words. A picture, a font or an archive is a file, and
  *  fetching a file off the internet is not what this tool is for. */
+/** Content types that are words. A picture, a font or an archive is a file, and
+ *  fetching a file off the internet is not what this tool is for. */
 const READABLE_KIND = /^\s*(?:text\/|application\/(?:json|xml|xhtml|javascript|ld\+json))/i;
+
+/** Tags to spaces, entities to letters, the way a reader skims. Search's own
+ *  copy in search.ts handles a few more entities; this one is for pages. */
+function stripTags(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 /** A page as words. Scripts and styles go first — they are instructions to a
  *  browser, not anything a person reads — and the tags that end a block become
@@ -224,7 +198,7 @@ async function openPage(
     const response = await fetch(address, {
       signal,
       redirect: 'manual',
-      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,text/plain,*/*;q=0.5' },
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,text/plain,application/pdf,*/*;q=0.5' },
     });
     if (response.status < 300 || response.status >= 400) return { response, address };
 
@@ -273,6 +247,43 @@ async function bodyText(response: Response): Promise<{ text: string; capped: boo
   return { text: text + decoder.decode(), capped };
 }
 
+/** Papers are bigger than pages — a paper is a few megabytes where a page is a
+ *  few thousand characters — so the byte cap for a PDF is its own number. It
+ *  still stops at a real cap: nobody is reading a hundred-megabyte scan. */
+const MAX_PAPER_BYTES = 30_000_000;
+
+/** The bytes of a paper, read to the cap. */
+async function bodyBytes(response: Response): Promise<{ bytes: Uint8Array; capped: boolean }> {
+  const body = response.body;
+  if (body === null) return { bytes: new Uint8Array(0), capped: false };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let capped = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined) continue;
+      total += value.byteLength;
+      if (total > MAX_PAPER_BYTES) {
+        capped = true;
+        break;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0));
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return { bytes, capped };
+}
+
 /** The name is `webfetch` rather than `web_fetch` because that is what the
  *  search tool's guidelines have always told the model to call. Both spellings
  *  reach the same Guard row — it strips the underscore — so the one the model
@@ -281,8 +292,8 @@ export const webfetchTool: ToolDefinition = {
   name: 'webfetch',
   label: 'Reading a page',
   description:
-    'Open one page on the internet and read it as plain text. Use it after a search, when the titles and snippets are not enough and you need what the page actually says.',
-  promptSnippet: 'webfetch(url) — read one page from the internet as plain text',
+    'Open one page on the internet and read it as plain text. Use it after a search, when the titles and snippets are not enough and you need what the page actually says. A paper — an arxiv address or any PDF — comes back as its text, one page at a time.',
+  promptSnippet: 'webfetch(url) — read one page from the internet as plain text (papers too, page by page)',
   promptGuidelines: [
     'Only secure addresses, the ones beginning https://, can be opened.',
     'You get the words of the page, not its layout, its pictures or anything it would have run in a browser.',
@@ -290,10 +301,12 @@ export const webfetchTool: ToolDefinition = {
   ],
   parameters: Type.Object({
     url: Type.String({ description: 'The full address of the page, beginning https://.', minLength: 1 }),
+    fromPage: Type.Optional(Type.Number({ description: 'The first page to read, when the address is a paper. Starts at 1.' })),
+    toPage: Type.Optional(Type.Number({ description: 'The last page to read, when the address is a paper.' })),
   }),
   execute: async (
     _callId: string,
-    params: { url: string },
+    params: { url: string; fromPage?: number; toPage?: number },
     signal: AbortSignal | undefined,
   ): ToolResult => {
     const say = (text: string): AgentToolResult<unknown> => ({
@@ -328,6 +341,37 @@ export const webfetchTool: ToolDefinition = {
         throw new Error(`it answered with ${String(response.status)} rather than a page.`);
       }
       const kind = response.headers.get('content-type') ?? '';
+
+      /* A paper, by intent or by kind: an arxiv address, an address that ends
+         in .pdf, or a response that says it is a PDF. It gets the paper path —
+         front matter first, then the body a page range at a time. */
+      const id = arxivId(address.href);
+      const isPaper =
+        id !== null || target.pathname.toLowerCase().endsWith('.pdf') || /pdf/i.test(kind);
+      if (isPaper) {
+        const { bytes, capped } = await bodyBytes(response);
+        if (bytes.length === 0) {
+          return say('That paper came back empty, so there was nothing for me to read.');
+        }
+        const { pages } = await readPdfPages(bytes);
+        if (pages.length === 0) {
+          return say('That paper is pictures, not words — I could not read any text out of it.');
+        }
+        const meta = id === null ? null : await arxivMeta(id, patience.signal);
+        const front =
+          meta === null
+            ? ''
+            : `${meta.title}\n${meta.authors}${meta.abstract === '' ? '' : `\n\nAbstract: ${meta.abstract}`}\n\n`;
+        const { text, note } = slicePages(pages, MAX_PAGE_CHARACTERS, {
+          fromPage: params.fromPage,
+          toPage: params.toPage,
+        });
+        const tooLong = capped
+          ? '\n\n(This paper is larger than I read in one go; I read what I could of it.)'
+          : '';
+        return say(`${address.href}${front === '' ? '' : `\n\n${front}`}${text}${note}${tooLong}`);
+      }
+
       if (kind !== '' && !READABLE_KIND.test(kind)) {
         await response.body?.cancel().catch(() => {});
         return say('That address is a file rather than a page of words, so there is nothing there for me to read.');
@@ -356,6 +400,359 @@ export const webfetchTool: ToolDefinition = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Reading a change for a review                                             */
+/* -------------------------------------------------------------------------- */
+
+/** The change a review will point at, as git text. The model names the target
+ *  — the work not saved yet, one saved version, or a named piece of work — and
+ *  the diff comes back for the reviewer helpers to look at. */
+export const readDiffTool = (cwd: string): ToolDefinition => ({
+  name: 'read_diff',
+  label: 'Reading a change',
+  description:
+    "Read the change you have been asked to check, as a diff. Targets: 'working' — everything not saved yet; 'version' — one saved version (give its id); 'line' — a named piece of work (give its name). Used when someone asks for a change to be checked before it ships.",
+  promptSnippet: 'read_diff(target) — read the change being checked, as a diff',
+  promptGuidelines: [
+    "When asked to check a change before it ships, first read it with read_diff — 'working' unless a saved version or a named piece of work is the thing being checked.",
+    'Then send the change to reviewer helpers (task with role reviewer) in parallel, one angle each, and combine their findings into a verdict.',
+    'Finish with a short plain summary followed by a fenced review block: a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, and the findings — each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact, and confidence (0-100).',
+  ],
+  parameters: Type.Object({
+    target: Type.String({
+      description: "Which change to read: 'working' for the work not yet saved, 'version' for one saved version, 'line' for a named piece of work.",
+    }),
+    id: Type.Optional(Type.String({ description: "The saved version's id, when the target is 'version'." })),
+    name: Type.Optional(Type.String({ description: "The named piece of work, when the target is 'line'." })),
+  }),
+  executionMode: 'sequential',
+  execute: async (
+    _callId: string,
+    params: { target: string; id?: string; name?: string },
+    _signal: AbortSignal | undefined,
+  ): ToolResult => {
+    const say = (text: string): AgentToolResult<unknown> => ({
+      content: [{ type: 'text', text }],
+      details: {},
+    });
+
+    let target: ReviewTarget;
+    if (params.target === 'version') {
+      if (params.id === undefined || params.id === '') {
+        return say('To read one saved version, tell me which one — its id from the versions list.');
+      }
+      target = { kind: 'version', id: params.id };
+    } else if (params.target === 'line') {
+      if (params.name === undefined || params.name === '') {
+        return say('To read a named piece of work, tell me its name.');
+      }
+      target = { kind: 'line', name: params.name };
+    } else {
+      target = { kind: 'working' };
+    }
+
+    try {
+      const diff = await new ProjectHistory(cwd).diffFor(target);
+      if (diff.trim() === '') {
+        return say('There is no change at that target to check — nothing has changed there to look at.');
+      }
+      return say(trimDiff(diff));
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'the change could not be read.';
+      throw new Error(`I could not read the change: ${message}`);
+    }
+  },
+});
+
+/** The briefs the reviewers are handed when work is checked: one per angle,
+ *  all carrying the same diff. The main agent gathers the replies and writes
+ *  the verdict. */
+export function reviewerBriefs(diff: string): readonly { key: string; task: string }[] {
+  return REVIEW_ANGLES.map((angle) => ({
+    key: angle.key,
+    task: reviewRequestFor(diff, angle.line),
+  }));
+}
+
+/* -------------------------------------------------------------------------- */
+/* The project's memory                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** One tool per memory verb, all talking to the same store. The names are the
+ *  plain words a person would use: write a fact down (retain), pull it back
+ *  (recall), think across what you know (reflect), revise a note (memory_edit),
+ *  let one go (forget). */
+export function memoryTools(store: MemoryStore): ToolDefinition[] {
+  return [
+    {
+      name: 'retain',
+      label: 'Writing a note',
+      description:
+        'Write a fact about the project or the person down, so a later sitting remembers it. Use it for the decisions, constraints and names that would cost time to rediscover — not for ordinary conversation.',
+      promptSnippet: 'retain(content, importance?, tags?) — write a fact down for later sittings',
+      promptGuidelines: [
+        'Write down the things a future sitting would need and would have to rediscover: decisions made, names agreed, constraints, traps in this project.',
+        'Mark importance 5 for anything that must never be lost. Keep each note one fact, in plain words.',
+      ],
+      parameters: Type.Object({
+        content: Type.String({ description: 'The fact, in plain words, one fact per note.', minLength: 1 }),
+        importance: Type.Optional(Type.Number({ description: '1–5. 5 means never lose this. Default 3.' })),
+        tags: Type.Optional(Type.Array(Type.String(), { description: 'A few words to find the note by.' })),
+        scope: Type.Optional(Type.String({ description: "'project' by default; 'global' follows the person across projects." })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { content: string; importance?: number; tags?: readonly string[]; scope?: string }): ToolResult => {
+        if (params.content.trim() === '') {
+          return { content: [{ type: 'text', text: 'I need a fact to write down.' }], details: {} };
+        }
+        const saved = await store.remember({
+          content: params.content,
+          importance: params.importance,
+          tags: params.tags,
+          scope: params.scope === 'global' ? 'global' : 'project',
+        });
+        return {
+          content: [{ type: 'text', text: `Noted: \u201c${saved.content}\u201d (kept for later sittings).` }],
+          details: {},
+        };
+      },
+    },
+    {
+      name: 'recall',
+      label: 'Pulling a note back',
+      description:
+        'Bring back what you remember about a topic — the notes written down in this project, closest in meaning first. Use it when a fact from an earlier sitting would help now.',
+      promptSnippet: 'recall(query) — bring back what you remember about a topic',
+      promptGuidelines: [
+        'Use recall before rediscovering: if an earlier sitting may have written it down, ask.',
+        'The closest notes come first; how recent and how important the note was also counts.',
+      ],
+      parameters: Type.Object({
+        query: Type.String({ description: 'What you need to remember, in plain words.', minLength: 1 }),
+        limit: Type.Optional(Type.Number({ description: 'How many notes to bring back. Default 6.' })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { query: string; limit?: number }): ToolResult => {
+        const found = await store.recall(params.query, { limit: params.limit });
+        if (found.length === 0) {
+          return { content: [{ type: 'text', text: 'I have nothing written down about that.' }], details: {} };
+        }
+        const lines = found.map((memory) => `- ${memory.content}`);
+        return {
+          content: [{ type: 'text', text: `What I have written down:\n${lines.join('\n')}` }],
+          details: {},
+        };
+      },
+    },
+    {
+      name: 'reflect',
+      label: 'Thinking across the notes',
+      description:
+        "Pull together everything the notes say about a question — across the project and the person's global notes. Use it when the answer may be spread over several notes.",
+      promptSnippet: 'reflect(question) — think across all the notes at once',
+      parameters: Type.Object({
+        question: Type.String({ description: 'The question to think across the notes about.', minLength: 1 }),
+        limit: Type.Optional(Type.Number({ description: 'How many notes to bring back. Default 8.' })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { question: string; limit?: number }): ToolResult => {
+        const found = await store.recall(params.question, { limit: params.limit ?? 8 });
+        if (found.length === 0) {
+          return { content: [{ type: 'text', text: 'Across everything I have written down, there is nothing about that.' }], details: {} };
+        }
+        const lines = found.map((memory) => `- ${memory.content}`);
+        return {
+          content: [{ type: 'text', text: `Across all my notes:\n${lines.join('\n')}` }],
+          details: {},
+        };
+      },
+    },
+    {
+      name: 'memory_edit',
+      label: 'Revising a note',
+      description:
+        "Revise a note you have written down — its words, its importance, or its tags — by the note's id. Use it when a fact changed or a note is wrong.",
+      promptSnippet: 'memory_edit(id, content?) — revise a note by its id',
+      parameters: Type.Object({
+        id: Type.String({ description: "The note's id, as recall or the note itself reports it." }),
+        content: Type.Optional(Type.String({ description: 'The corrected fact.' })),
+        importance: Type.Optional(Type.Number({ description: '1–5. 5 means never lose this.' })),
+        tags: Type.Optional(Type.Array(Type.String(), { description: "The note's tags, all of them." })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { id: string; content?: string; importance?: number; tags?: readonly string[] }): ToolResult => {
+        const revised = await store.update(params.id, {
+          content: params.content,
+          importance: params.importance,
+          tags: params.tags,
+        });
+        if (revised === null) {
+          return { content: [{ type: 'text', text: 'I have no note with that id.' }], details: {} };
+        }
+        return { content: [{ type: 'text', text: `Revised: \u201c${revised.content}\u201d` }], details: {} };
+      },
+    },
+    {
+      name: 'forget',
+      label: 'Letting a note go',
+      description: 'Let one note go, by its id. The note is gone and later sittings will not see it.',
+      promptSnippet: 'forget(id) — let one note go',
+      parameters: Type.Object({
+        id: Type.String({ description: "The note's id." }),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { id: string }): ToolResult => {
+        const gone = await store.forget(params.id);
+        return {
+          content: [{ type: 'text', text: gone ? 'That note is gone.' : 'I have no note with that id.' }],
+          details: {},
+        };
+      },
+    },
+  ];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Driving a real debugger                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** The sessions this sitting holds: one per attached process, pid-keyed. The
+ *  registry lives in the adapter so the tools can reach it and the session can
+ *  close every attached process when the sitting ends. */
+export type DebugRegistry = {
+  sessions: Map<number, debug.DebuggerSession>;
+};
+
+export function newDebugRegistry(): DebugRegistry {
+  return { sessions: new Map() };
+}
+
+function framesText(frames: readonly debug.Frame[]): string {
+  const lines = frames.map((frame, index) => {
+    const place = frame.file !== undefined ? `${frame.file}${frame.line !== undefined ? `:${frame.line}` : ''}` : frame.source ?? '?';
+    const head = `${index === 0 ? '\u25b8 ' : '  '}${frame.name} — ${place}`;
+    if (index === 0 && frame.variables !== undefined && frame.variables.length > 0) {
+      const values = frame.variables.map((variable) => `${variable.name} = ${variable.value}`).join(', ');
+      return `${head}\n    ${values}`;
+    }
+    return head;
+  });
+  return lines.join('\n');
+}
+
+/** The five tools that drive a debugger. Attach and evaluate ask the person
+ *  first (the Guard decides); step, frames and detach work on what was already
+ *  agreed. */
+export function debugTools(registry: DebugRegistry): ToolDefinition[] {
+  const sessionOf = (pid: number): debug.DebuggerSession => {
+    const session = registry.sessions.get(pid);
+    if (session === undefined) throw new Error('I am not attached to that program. Attach to it first (debug_attach), then ask again.');
+    return session;
+  };
+
+  return [
+    {
+      name: 'debug_attach',
+      label: 'Attaching to a program',
+      description:
+        'Attach the real debugger to a running program: pause it, read its frames and variables, step through it, and evaluate in it. Use it when a program is stuck, crashing, or misbehaving and reading its state would say why.',
+      promptSnippet: 'debug_attach(pid, kind?) — attach to a running program and read inside it',
+      promptGuidelines: [
+        'Attach by the process id (pid, from a process listing). Kind: c (C-family via lldb), go (dlv), python (debugpy); leave it out and I will look at what is running.',
+        'Attaching pauses the program. After attach, read frames with debug_frames, move with debug_step, and evaluate with debug_eval.',
+        'When a real attach is refused or impossible, fall back to a one-shot reading: a stack dump of a stuck Python program (py-spy dump --pid <pid>) or running a crashing program under lldb from the start.',
+      ],
+      parameters: Type.Object({
+        pid: Type.Number({ description: 'The process id to attach to.' }),
+        kind: Type.Optional(Type.String({ description: "What the program is: 'c' (C, Swift, Rust), 'go', or 'python'. Defaults to whatever is running." })),
+        program: Type.Optional(Type.String({ description: "The program's path, for attach targets that need it." })),
+      }),
+      executionMode: 'sequential',
+      execute: async (
+        _callId,
+        params: { pid: number; kind?: string; program?: string },
+      ): ToolResult => {
+        try {
+          const session = await debug.attach({ pid: params.pid, kind: params.kind, program: params.program });
+          registry.sessions.set(params.pid, session);
+          const seen = await debug.frames(session);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Attached to ${String(params.pid)}; it is paused.\n\n${framesText(seen)}`,
+              },
+            ],
+            details: {},
+          };
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : 'the attach failed.';
+          const hint = /permission|taskgated|not allowed|denied/i.test(message) ? `\n\n${debug.permissionHint()}` : '';
+          const fallback = `\n\nIf a real attach is not possible: ${debug.ONESHOT.join(' ')}`;
+          throw new Error(`${message}${hint}${fallback}`);
+        }
+      },
+    },
+    {
+      name: 'debug_frames',
+      label: 'Reading the frames',
+      description: 'Read the frames of the attached program — where it is and what the top frame holds.',
+      promptSnippet: 'debug_frames(pid) — read where the attached program is',
+      parameters: Type.Object({ pid: Type.Number({ description: 'The attached process id.' }) }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { pid: number }): ToolResult => {
+        const seen = await debug.frames(sessionOf(params.pid));
+        return { content: [{ type: 'text', text: framesText(seen) }], details: {} };
+      },
+    },
+    {
+      name: 'debug_step',
+      label: 'Stepping the program',
+      description: 'Step the attached program one line: over, into, or out. It pauses again where it lands.',
+      promptSnippet: 'debug_step(pid, direction) — move the attached program one line',
+      parameters: Type.Object({
+        pid: Type.Number({ description: 'The attached process id.' }),
+        direction: Type.String({ description: "'over', 'into' or 'out'." }),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { pid: number; direction: string }): ToolResult => {
+        const direction = params.direction === 'into' || params.direction === 'out' ? params.direction : 'over';
+        const seen = await debug.step(sessionOf(params.pid), direction);
+        return { content: [{ type: 'text', text: framesText(seen) }], details: {} };
+      },
+    },
+    {
+      name: 'debug_eval',
+      label: 'Asking the program a question',
+      description: 'Evaluate an expression in the attached program, in the frame it is paused in.',
+      promptSnippet: 'debug_eval(pid, expression) — evaluate in the paused program',
+      parameters: Type.Object({
+        pid: Type.Number({ description: 'The attached process id.' }),
+        expression: Type.String({ description: "The expression to evaluate, in the program's own language." }),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { pid: number; expression: string }): ToolResult => {
+        const value = await debug.evaluate(sessionOf(params.pid), params.expression);
+        return { content: [{ type: 'text', text: `${params.expression} = ${value}` }], details: {} };
+      },
+    },
+    {
+      name: 'debug_detach',
+      label: 'Letting the program go',
+      description: 'Detach from the attached program and let it run on, unharmed.',
+      promptSnippet: 'debug_detach(pid) — let the attached program run on',
+      parameters: Type.Object({ pid: Type.Number({ description: 'The attached process id.' }) }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { pid: number }): ToolResult => {
+        const session = sessionOf(params.pid);
+        await debug.detach(session);
+        registry.sessions.delete(params.pid);
+        return { content: [{ type: 'text', text: `Detached from ${String(params.pid)}; it is running on its own.` }], details: {} };
+      },
+    },
+  ];
+}
+
+/* -------------------------------------------------------------------------- */
 /* The task (subagent) tool                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -371,7 +768,7 @@ const STDERR_TAIL = 4000;
  *  per token for nothing anybody can read that fast. */
 const PROGRESS_EVERY_MS = 400;
 
-type TaskParams = { task: string; cwd?: string };
+type TaskParams = { task: string; cwd?: string; role?: HelperRole };
 
 /** The session owns the helper's folder. A helper may be asked to look beneath
  * it, but model-supplied `cwd` must never replace the project it was launched
@@ -616,8 +1013,8 @@ export const taskTool = (
   name: 'task',
   label: 'Task',
   description:
-    'Send a piece of work to a helper agent with its own fresh context window. The helper can read the project and search the web, and cannot change anything. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context. Call it several times in one reply to put several helpers on separate pieces of work at the same time.',
-  promptSnippet: 'task(task) — send a piece of work to a read-only helper',
+    'Send a piece of work to a helper agent with its own fresh context window. The helper can read the project and search the web, and cannot change anything. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context. Call it several times in one reply to put several helpers on separate pieces of work at the same time. A helper can be asked to act as a reviewer (finding problems with file and line references) or a researcher (gathering facts), or left as a general helper.',
+  promptSnippet: 'task(task, role?) — send a piece of work to a read-only helper',
   promptGuidelines: [
     'Give the helper one whole piece of work: a question it can answer without this conversation.',
     // Without this the model sends one helper, waits for its answer, and sends
@@ -626,10 +1023,16 @@ export const taskTool = (
     'Split the work so no helper needs another helper\'s answer. Anything that has to happen in order belongs in one helper, or in a second round after the first answers.',
     'The helper cannot make changes. Ask it for findings, not fixes.',
     'A small piece of work is not worth the help: the helper reads the same files and searches the same web you would.',
+    "To have work checked, send it to a 'reviewer' helper and ask it to find genuine problems with file and line references. To gather facts, send a 'researcher'. A helper that needs a decision stops and says what it needs, starting with 'To continue I need to know:' — pass that question to the person, then send the work again with the answer.",
   ],
   parameters: Type.Object({
     task: Type.String({ description: 'The piece of work for the helper, in plain words.', minLength: 1 }),
     cwd: Type.Optional(Type.String({ description: 'The folder the helper should work in. Defaults to the project folder.' })),
+    role: Type.Optional(
+      Type.String({
+        description: "What kind of helper: 'reviewer' finds problems in the work with file and line references; 'researcher' gathers facts from the web and the project; anything else is a general helper.",
+      }),
+    ),
   }),
   /* Pi runs a whole batch of calls one after another as soon as a single tool
      in it says `sequential`, so this is the setting nothing else here may
@@ -644,6 +1047,9 @@ export const taskTool = (
     if (params.task.trim() === '') {
       return { content: [{ type: 'text', text: 'I need a piece of work to hand over.' }], details: {} };
     }
+    // The role is the helper's remit: who it is, which tools it may hold, and
+    // the instructions it reads first. Anything unfamiliar is the plain helper.
+    const spec = roleSpec(params.role as HelperRole);
     // Asked before anything is spawned: a helper refused costs nothing, and one
     // refused halfway through has already been paid for.
     // The project this helper's spending belongs to. The model's `cwd` is a
@@ -665,7 +1071,7 @@ export const taskTool = (
         // and must never decide where a helper starts: previously it was used
         // for accounting but accidentally dropped here, so helpers fell back
         // to Graphe's application directory and could not resolve the project.
-        { ...params, cwd: project, agentDir, model, thinking },
+        { ...params, role: spec.name, cwd: project, agentDir, model, thinking },
         signal,
         (text) => {
           progress += text;

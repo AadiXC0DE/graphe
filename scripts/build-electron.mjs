@@ -41,7 +41,18 @@ const watch = process.argv.includes('--watch');
  *  dynamic import — which is that nothing about Pi is loaded, or can fail, until
  *  somebody actually opens a project. Node's own builtins are external already,
  *  by virtue of platform: 'node'. */
-const external = ['electron', '@earendil-works/pi-coding-agent'];
+const external = [
+  'electron',
+  '@earendil-works/pi-coding-agent',
+  // sql.js reads its wasm beside itself at runtime; bundling moves that file
+  // somewhere the loader cannot see, so it stays a runtime dependency.
+  'sql.js',
+  // The meaning engine carries a native onnx runtime for Node. We force the
+  // wasm backend at load time (memory.ts), but esbuild must not try to bundle
+  // the native binaries either way.
+  '@huggingface/transformers',
+  'onnxruntime-node',
+];
 
 /** @type {import('esbuild').BuildOptions} */
 const shared = {

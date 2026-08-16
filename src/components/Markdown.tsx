@@ -1,7 +1,9 @@
 import { useMemo, type ReactNode } from 'react';
 import CodeBlock from './CodeBlock';
+import MermaidBlock from './MermaidBlock';
 import {
   decodeEntities,
+  isMermaid,
   languageLabel,
   languageOf,
   parseMarkdown,
@@ -159,6 +161,11 @@ function renderBlock(token: Token, key: string, tail?: ReactNode): ReactNode {
     /* The mark goes inside the block, at the end of the last line of code —
        see the note on CodeBlock's `tail`. */
     case 'code': {
+      /* A fence that asks for a diagram belongs to the diagram engine, not the
+         highlighter — see MermaidBlock. */
+      if (isMermaid(token.lang)) {
+        return <MermaidBlock key={key} code={String(token.text ?? '')} tail={tail} />;
+      }
       const language = languageOf(token.lang);
       return (
         <CodeBlock

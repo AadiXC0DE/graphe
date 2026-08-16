@@ -1176,8 +1176,8 @@ function githubRepo(cwd: string): Promise<string | null> {
       }
       const url = out.trim();
       // Accept https://github.com/o/r, git@github.com:o/r, and ssh variants.
-      let m = /github\.com[/:]([^/]+)\/([^/.]+)(?:\.git)?$/.exec(url);
-      let full = m === null ? null : `${m[1]}/${m[2]}`;
+      const m = /github\.com[/:]([^/]+)\/([^/.]+)(?:\.git)?$/.exec(url);
+      const full = m === null ? null : `${m[1]}/${m[2]}`;
       resolve(full);
     });
   });

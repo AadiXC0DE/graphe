@@ -156,6 +156,7 @@ const LONGEST_WHAT = 160;
 /** Nothing here is ever handed to a shell, and these are the characters that
  *  would only matter to one. Their presence means somebody is expecting a
  *  shell, so the honest answer is to refuse rather than to half-run it. */
+// eslint-disable-next-line no-control-regex -- control characters are exactly what this refuses
 const SHELL_SYMBOLS = /[;&|<>$`]|[\u0000-\u001f]/;
 
 /** What a value may be called. Anything else could read as a second word. */
@@ -248,6 +249,7 @@ export function readValues(raw: unknown): ReadValues {
     if (typeof value !== 'string') return SAID.valueNotText;
     if (!PLAIN_NAME.test(name)) return SAID.badValueName(name.slice(0, 40));
     if (value.length > LONGEST_VALUE) return SAID.valueTooLong;
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what this refuses
     if (/[\u0000-\u001f]/.test(value)) return SAID.valueNotText;
     values[name] = value;
     return Object.keys(values).length > MOST_VALUES ? SAID.tooManyValues : null;

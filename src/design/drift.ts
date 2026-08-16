@@ -612,7 +612,7 @@ function sameColour(one: Rgb, other: Rgb): boolean {
   );
 }
 
-function useOf(known: Known): string {
+function inUse(known: Known): string {
   return known.name.startsWith('--') ? `var(${known.name})` : known.value;
 }
 
@@ -696,7 +696,7 @@ export function findDrift(
       kind: 'colour',
       wrote,
       mine: { name: theirs.name, value: theirs.value },
-      use: useOf(theirs),
+      use: inUse(theirs),
       line: place.line,
       column: place.column,
       distance: round(best.distance, 4),
@@ -726,7 +726,7 @@ export function findDrift(
       kind: 'length',
       wrote,
       mine: { name: theirs.name, value: theirs.value },
-      use: useOf(theirs),
+      use: inUse(theirs),
       line: place.line,
       column: place.column,
       distance: round(best.distance, 4),

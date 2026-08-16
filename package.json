@@ -25,7 +25,9 @@
     "icon": "node scripts/make-icon.mjs",
     "package": "node scripts/package-app.mjs",
     "package:quick": "node scripts/package-app.mjs --arm64",
-    "verify:package": "node scripts/verify-package.mjs"
+    "verify:package": "node scripts/verify-package.mjs",
+    "lint": "eslint .",
+    "check": "npm run typecheck && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -36,9 +38,12 @@
     "concurrently": "^9.2.4",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "jsdom": "^25.0.1",
     "playwright": "^1.49.1",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.67.0",
     "vite": "^6.0.5",
     "vitest": "^2.1.8"
   },

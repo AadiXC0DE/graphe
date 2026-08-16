@@ -79,6 +79,7 @@ const THE_PROJECT_ITSELF = new Set(['main', 'master', 'trunk', 'develop', 'defau
 
 const MARKS = /[\u0300-\u036f]/g;
 /** Anything that would make a line of somebody's own words behave as markup. */
+// eslint-disable-next-line no-control-regex -- control characters are exactly what this strips
 const CONTROL = /[\u0000-\u001f\u007f]/g;
 
 function slug(text: string): string {

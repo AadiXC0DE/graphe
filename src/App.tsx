@@ -2395,6 +2395,45 @@ function Conversation() {
       });
   }, [refreshLanding, troubleHere]);
 
+  /** The two moves on the lines of work: switch onto another one, or start a
+   *  new one. Both change what the project on screen is, so after either one
+   *  the readings that describe it are asked for again — the versions, the
+   *  overview, and the band that answers "what now?". */
+  const branchMove = useCallback(
+    (move: (path: string) => Promise<Result<null>>) => {
+      const path = desks.current;
+      if (path === null) return;
+      void move(path).then((answer) => {
+        if (!answer.ok) {
+          troubleHere(answer.trouble);
+          return;
+        }
+        void refreshVersions(path);
+        void refreshOverview(path);
+        refreshLanding(path);
+      });
+    },
+    [refreshVersions, refreshOverview, refreshLanding, troubleHere],
+  );
+
+  const switchBranch = useCallback(
+    (name: string) => {
+      const path = desks.current;
+      if (path === null) return;
+      branchMove((where) => bridge.branchSwitch(name, { project: where }));
+    },
+    [branchMove],
+  );
+
+  const createBranch = useCallback(
+    (name: string) => {
+      const path = desks.current;
+      if (path === null) return;
+      branchMove((where) => bridge.branchCreate(name, { project: where }));
+    },
+    [branchMove],
+  );
+
   /* ------------------------------------------- while you are not looking */
 
   /**
@@ -3065,8 +3104,10 @@ function Conversation() {
         onClose={() => setSettingsOpen(false)}
         showMe={preferences.showMe}
         showFiles={preferences.showFiles}
+        holdBack={desk === null ? false : preferences.heldBack[desk.path] === true}
         onToggleShowMe={() => changeShowMe(!preferences.showMe)}
         onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
+        onToggleHoldBack={() => changeHoldBack(!(desk !== null && preferences.heldBack[desk.path] === true))}
         onGo={openSettingsLink}
       />
 
@@ -3355,8 +3396,9 @@ function Conversation() {
             goToScreen("graph");
             setGraphOpen(true);
           }}
+          onSwitchBranch={switchBranch}
+          onCreateBranch={createBranch}
           onShare={() => void bridge.shareReview()}
-          onHoldBack={changeHoldBack}
           onDecide={decideOnWork}
           onHandOver={handToDeveloper}
           onOpenLink={(address) => void bridge.openLink(address)}

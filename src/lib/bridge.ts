@@ -716,6 +716,9 @@ function previewBridge(): Bridge {
           untracked: 1,
           ahead: 0,
           behind: 2,
+          branches: [
+            { name: 'main', current: true, upstream: 'origin/main', ahead: 0, behind: 2, message: 'The preview line' },
+          ],
           files: PREVIEW_CHANGED.map((path) => ({
             path,
             kind: path.startsWith('public/') ? ('new' as const) : ('changed' as const),
@@ -932,6 +935,12 @@ function previewBridge(): Bridge {
       return Promise.resolve(done([]));
     },
 
+    branchSwitch(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+    branchCreate(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
     worktreeStart(): Promise<Result<{ folder: string; branch: string }>> {
       return Promise.resolve(previewFail<{ folder: string; branch: string }>());
     },
@@ -1690,6 +1699,8 @@ function connect(): Bridge {
     skills: () => api.skills(),
     skillText: (id) => api.skillText(id),
     workflows: () => api.workflows(),
+    branchSwitch: (name, where) => api.branchSwitch(name, where),
+    branchCreate: (name, where) => api.branchCreate(name, where),
     worktreeStart: (where) => api.worktreeStart(where),
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),

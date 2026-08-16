@@ -34,8 +34,11 @@ jobs:
 
   test:
     name: Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The suite includes the sandbox boundary, which only exists on macOS — the
+    # product's own platform. Ubuntu would fail these tests for being the wrong
+    # machine, not for being wrong code.
+    runs-on: macos-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -224,6 +224,7 @@ const MOST_NAME = 80;
 const MOST_PROMPT = 8000;
 
 function tidyName(name: string): string {
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what this strips
   return name.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, MOST_NAME);
 }
 

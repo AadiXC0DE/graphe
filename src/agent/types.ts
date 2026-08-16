@@ -13,6 +13,25 @@ export type ToolCall = {
 };
 
 /** What the Guard decided about a tool call. */
+/** One problem a reviewer found, in the shape the review card draws. */
+export type ReviewFinding = {
+  /** P0 blocks shipping, P1 should be fixed first, P2 can wait, P3 is a note. */
+  priority: 0 | 1 | 2 | 3;
+  file?: string;
+  line?: number;
+  issue: string;
+  impact?: string;
+  /** How sure the reviewer is, 0–100. */
+  confidence: number;
+};
+
+/** The whole call on whether a change ships. */
+export type ReviewVerdict = {
+  kind: 'ships' | 'needs-work' | 'do-not-land';
+  summary: string;
+  findings: readonly ReviewFinding[];
+};
+
 export type Verdict =
   | { kind: 'allow' }
   /** Run it, but snapshot first. Used for anything destructive. */
@@ -162,6 +181,9 @@ export type AgentEvent =
   /** The agent has finished everything it was doing, tool calls included. The
    *  moment the session split is worth working out. */
   | { type: 'settled' }
+  /** A change was checked, and the verdict is in. Carries the same findings
+   *  the reply showed as words, so the window can draw them as a card. */
+  | { type: 'reviewed'; verdict: ReviewVerdict }
   /** The split, from the shell's ledger. Emitted after `settled`, and only when
    *  there is something to split — no spend, no summary, no zero state. */
   | { type: 'spend-summary'; summary: SpendSummary }

@@ -312,7 +312,7 @@ export default function Annotate({ source, name, onDone, onClose }: AnnotateProp
 
   /* ---------------------------------------------------------------- sending */
 
-  const use = useCallback(async () => {
+  const apply = useCallback(async () => {
     const picture = shown.current;
     const size = naturalNow.current;
     if (picture === null || size === null) return;
@@ -378,7 +378,7 @@ export default function Annotate({ source, name, onDone, onClose }: AnnotateProp
       }
       if (held && event.key === 'Enter') {
         event.preventDefault();
-        void use();
+        void apply();
         return;
       }
 
@@ -392,7 +392,7 @@ export default function Annotate({ source, name, onDone, onClose }: AnnotateProp
 
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, redo, undo, use]);
+  }, [onClose, redo, undo, apply]);
 
   /* --------------------------------------------------------------- drawing */
 
@@ -541,7 +541,7 @@ export default function Annotate({ source, name, onDone, onClose }: AnnotateProp
           <button
             type="button"
             className="draw__act draw__act--go"
-            onClick={() => void use()}
+            onClick={() => void apply()}
             disabled={busy || natural === null}
           >
             {SAYS.use}

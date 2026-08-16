@@ -103,12 +103,20 @@ describe('how a gathered run reads as a whole', () => {
     expect(howItWent([step('a', 'Reading', 'failed'), step('b', 'Reading', 'running')])).toBe('running');
   });
 
-  it('is stopped when something stopped and nothing is still going', () => {
-    expect(howItWent([step('a'), step('b', 'Reading', 'failed')])).toBe('failed');
-  });
-
   it('is finished when every step is', () => {
     expect(howItWent([step('a'), step('b')])).toBe('done');
+  });
+
+  it('stays finished when only some steps failed', () => {
+    // A run of fifteen where one went wrong did the other fourteen: the row
+    // says what the run did, and the failure stays visible inside it.
+    expect(howItWent([step('a'), step('b', 'Reading', 'failed')])).toBe('done');
+    expect(howItWent([step('a'), step('b', 'Reading', 'failed'), step('c')])).toBe('done');
+    expect(howItWent([step('a', 'Reading', 'failed'), step('b', 'Reading', 'failed'), step('c')])).toBe('done');
+  });
+
+  it('is stopped only when every step stopped', () => {
+    expect(howItWent([step('a', 'Reading', 'failed'), step('b', 'Reading', 'failed')])).toBe('failed');
   });
 });
 

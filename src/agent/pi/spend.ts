@@ -123,7 +123,6 @@ export class SpendWatch {
   #doing: string = DEFAULT_SPEND_LABEL;
   /** Prompt-side counts from Pi, for the cache-hit share. Never shown as counts. */
   #input = 0;
-  #output = 0;
   #cacheRead = 0;
   #cacheWrite = 0;
   /** True once any turn reported a non-zero cache field — otherwise a 0% hit
@@ -248,7 +247,6 @@ export class SpendWatch {
     const usage = usageOfPiMessage(event);
     if (usage !== null) {
       this.#input += usage.input;
-      this.#output += usage.output;
       this.#cacheRead += usage.cacheRead;
       this.#cacheWrite += usage.cacheWrite;
       if (usage.cacheRead > 0 || usage.cacheWrite > 0) this.#sawCache = true;

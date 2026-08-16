@@ -247,7 +247,7 @@ const SAY = {
  *  branches ever part company. A read left out of them falls to the
  *  deny-by-default floor and starts asking permission, which is how `find`
  *  behaved until it was listed here. */
-const READ_TOOLS = new Set(['read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat']);
+const READ_TOOLS = new Set(['read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff']);
 /** Pi's `find` is `glob` under another name: it runs `fd` and returns file names
  *  without opening any of them. The shell command of the same word is a
  *  different program entirely — see `judgeFind`. */
@@ -285,6 +285,12 @@ const WEB_TOOLS = new Set(['websearch', 'searchweb', 'googlesearch', 'ddgsearch'
  *  without the person knowing — this is the one tool that spends money on
  *  another context window. */
 const TASK_TOOLS = new Set(['task', 'subagent', 'delegate', 'handoff']);
+
+/** The project's own memory. It writes only to the app's own data folder — a
+ *  note beside the conversation, never a file in the project — so it is silent
+ *  like any read: the whole point of a memory is that it is written without
+ *  ceremony. */
+const MEMORY_TOOLS = new Set(['retain', 'remember', 'recall', 'reflect', 'memoryedit', 'memory', 'forget', 'updatenote', 'update']);
 const PUBLISH_TOOLS = new Set(['deploy', 'publish', 'release', 'ship']);
 const SESSION_EXPORT_TOOLS = new Set(['export', 'exportsession', 'share', 'sharesession', 'sendlog', 'uploadlogs']);
 /** Our own design tools. Read-only by construction, so they stay silent.
@@ -1743,6 +1749,49 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   }
 
   if (DESIGN_READ_TOOLS.has(name)) return allow();
+
+  if (MEMORY_TOOLS.has(name)) {
+    // Memory takes ids and words, never paths, so there is nothing to check
+    // outside the project for. It stays a read of the app's own notes.
+    return allow();
+  }
+
+  if (name === 'mcp') {
+    // A plugged-in tool runs with its own powers, and the call may
+    // change anything it can change. Same shape as the task question:
+    // a plain sentence, answered once per call.
+    return ask(
+      'Run this through the plugged-in tool?',
+      'I start the tool you connected and ask it to do this, then bring back what it answers.',
+      'The connected tool has its own powers, so this can change things on its side.',
+      { mutates: true },
+    );
+  }
+
+  if (name === 'debugattach') {
+    return ask(
+      'Attach to a running program and pause it?',
+      'I start the debugger and take hold of the program so its frames and values can be read.',
+      'The program is paused while it is attached, and letting it run on needs a detach.',
+      { mutates: true },
+    );
+  }
+
+  if (name === 'debugeval') {
+    return ask(
+      'Evaluate this in the paused program?',
+      'I ask the debugger to run the expression inside the program, in the frame it is paused in.',
+      'An expression can run code inside that program.',
+      { mutates: true },
+    );
+  }
+
+  // Stepping, reading frames and detaching work on a program the person has
+  // already agreed to let us attach to, and change nothing the target did not
+  // ask for — detach lets it run on. They are silent like reads.
+  if (name === 'debugstep' || name === 'debugframes' || name === 'debugdetach') {
+    return allow();
+  }
 
   // An unfamiliar tool is never silent. This is the deny-by-default floor.
   return UNKNOWN_COMMAND();

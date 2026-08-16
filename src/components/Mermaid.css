@@ -1,0 +1,22 @@
+/* A diagram in the stream of a reply.
+   Same rule as code blocks: it appears where it belongs, inside the message,
+   and nothing animates on arrival. The picture is drawn by the engine and the
+   engine's SVG is the only markup that reaches the page. */
+
+.mermaid {
+  margin: var(--space-3) 0;
+}
+
+.mermaid__svg {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  overflow-x: auto;
+}
+
+.mermaid__svg svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}

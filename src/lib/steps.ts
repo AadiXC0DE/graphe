@@ -87,8 +87,11 @@ export function rows(
 }
 
 /** How a gathered row reads as a whole: still going if any step is, stopped if
- *  any stopped and none is still going, finished otherwise. */
+ *  every step stopped, finished otherwise. A run of fifteen steps where one
+ *  went wrong did the other fourteen — the row says what the run did, and the
+ *  one failure stays visible inside it. Only when nothing worked does the row
+ *  itself read as failed. */
 export function howItWent(steps: readonly StepTurn[]): 'running' | 'done' | 'failed' {
   if (steps.some((step) => step.state === 'running')) return 'running';
-  return steps.some((step) => step.state === 'failed') ? 'failed' : 'done';
+  return steps.every((step) => step.state === 'failed') ? 'failed' : 'done';
 }

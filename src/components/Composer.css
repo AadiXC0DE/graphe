@@ -349,3 +349,38 @@
     opacity: 1;
   }
 }
+
+/* A second thought while a turn is running: two quiet choices instead of a
+   guessed send. The safe one (queue it) carries the weight, like every other
+   pair in the app. */
+.composer__queue {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.composer__queuebtn {
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.composer__queuebtn:hover {
+  color: var(--text);
+}
+
+.composer__queuebtn--safe {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.composer__queuebtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

@@ -57,9 +57,14 @@ anything visual.
 ## Before you open a pull request
 
 ```bash
-npm test          # all of it must pass
-npm run typecheck # clean
+npm run check        # typecheck and the whole test suite, in one
+npm run lint         # eslint — the same checks CI runs
 ```
+
+CI runs all of these on every pull request, plus a renderer and shell build, so a
+red check is never a surprise. `npm run check` is the whole gate, and `npm run
+lint` accepts a few deliberate warnings (`react-hooks/exhaustive-deps` on the
+ref-based patterns the app uses on purpose) — errors are what fail the build.
 
 New behaviour needs tests. Safety-related changes need adversarial tests — assume the model is
 confused or being manipulated, and write the case that catches it.

@@ -559,7 +559,7 @@ function firstUsable(runtime: PiRuntime): { providerId: string; modelId: string 
 export async function connection(agentDir: string): Promise<readonly ProviderSummary[]> {
   const runtime = await runtimeFor(agentDir);
 
-  let connected = new Set<string>();
+  const connected = new Set<string>();
   try {
     for (const one of await runtime.listCredentials()) connected.add(one.providerId);
   } catch {
@@ -602,7 +602,7 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
     // Which of its models can actually be used right now. Read through the
     // runtime's own judgement — it knows how the stored credential resolves
     // per model, and the window should not have to guess.
-    let usable = new Set<string>();
+    const usable = new Set<string>();
     try {
       for (const model of await runtime.getAvailable(provider.id)) usable.add(model.id);
     } catch {
@@ -829,7 +829,7 @@ export async function discoveredAccounts(
   const known = new Map<string, string>();
   for (const provider of runtime.getProviders()) known.set(provider.id, provider.name);
 
-  let connected = new Set<string>();
+  const connected = new Set<string>();
   try {
     for (const one of await runtime.listCredentials()) connected.add(one.providerId);
   } catch {

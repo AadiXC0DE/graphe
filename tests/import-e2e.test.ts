@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -18,9 +19,15 @@ const REALLY_RUNS = 30_000;
 describe('import end to end', () => {
   it('finds an account, imports it, and the provider becomes connected', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'graphe-import-e2e-'));
+    const oldData = process.env.XDG_DATA_HOME;
     try {
       const agentDir = join(dir, 'pi');
-      const opencode = join(dir, 'opencode.json');
+      // Credentials live where opencode keeps them, found through
+      // XDG_DATA_HOME — pointed at the scratch folder so the test is hermetic
+      // and never depends on the machine it runs on.
+      process.env.XDG_DATA_HOME = dir;
+      const opencode = join(dir, 'opencode', 'auth.json');
+      mkdirSync(dirname(opencode), { recursive: true });
       writeFileSync(opencode, JSON.stringify({ 'opencode-go': { type: 'api', key: 'occ-abc123' } }));
 
       const found = await discoveredAccounts(agentDir);
@@ -40,6 +47,8 @@ describe('import end to end', () => {
       const provider = state.find((one) => one.providerId === 'opencode-go');
       expect(provider?.connected).toBe(true);
     } finally {
+      if (oldData === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = oldData;
       rmSync(dir, { recursive: true, force: true });
     }
   }, REALLY_RUNS);

@@ -300,6 +300,12 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.workflows, named(where)) as Promise<Result<readonly Workflow[]>>;
   },
 
+  branchSwitch(name: string, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.branchSwitch, name, named(where)) as Promise<Result<null>>;
+  },
+  branchCreate(name: string, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.branchCreate, name, named(where)) as Promise<Result<null>>;
+  },
   worktreeStart(where?: Where): Promise<Result<{ folder: string; branch: string }>> {
     return ipcRenderer.invoke(CHANNEL.worktreeStart, named(where)) as Promise<
       Result<{ folder: string; branch: string }>

@@ -90,10 +90,13 @@ type Props = {
   onOpenDesign: (part: DesignPart) => void;
   /** Open the whole history, drawn as lines. */
   onOpenGraph: () => void;
+  /** Move the project onto another of its lines of work. */
+  onSwitchBranch: (name: string) => void;
+  /** Start a new line of work and move the project onto it. */
+  onCreateBranch: (name: string) => void;
   /** Write a page of what changed, for somebody who is not you. */
   onShare: () => void;
-  /** Check work in a copy before it reaches the files, or stop. */
-  onHoldBack: (on: boolean) => void;
+
   /** Let the work that is waiting in, or set it aside. */
   onDecide: (letIn: boolean) => void;
   /** Write the work up and put it where a developer picks it up. */
@@ -190,8 +193,10 @@ export default function Overview({
   onSave,
   onOpenDesign,
   onOpenGraph,
+  onSwitchBranch,
+  onCreateBranch,
   onShare,
-  onHoldBack,
+
   onDecide,
   onHandOver,
   onOpenLink,
@@ -471,6 +476,8 @@ export default function Overview({
           onKeep={onKeep}
           onDismissPutBack={onDismissPutBack}
           onOpenGraph={onOpenGraph}
+          onSwitchBranch={onSwitchBranch}
+          onCreateBranch={onCreateBranch}
           busy={busy}
           showMe={showMe}
           git={git}
@@ -487,7 +494,6 @@ export default function Overview({
           going={view.going}
           outcome={view.landed}
           decided={view.decided}
-          onHoldBack={onHoldBack}
           onDecide={onDecide}
           onUndo={onPutBack}
           onHandOver={onHandOver}

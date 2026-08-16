@@ -1,6 +1,5 @@
-/* The band that answers "what now?". Quiet furniture until something is
-   waiting; the two things that can send anywhere never look like the things
-   that cannot. */
+/* The band that answers "what now?". Quiet until work waits; then the work,
+   photographed and asking for its decision, is the whole of the band. */
 
 .landing {
   display: grid;
@@ -17,37 +16,17 @@
   text-transform: uppercase;
 }
 
-/* ------------------------------------------------------------ the switch */
-
-.landing__switch {
-  display: flex;
-  gap: var(--space-2);
-  align-items: flex-start;
-  cursor: pointer;
+/* The quiet answer when there is nothing waiting: one line, not a settings
+   panel's worth of furniture. */
+.landing__quiet {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
 }
 
-.landing__switch input {
-  margin: 2px 0 0;
-  accent-color: var(--accent);
-  flex: none;
-}
-
-.landing__switch input:disabled {
-  cursor: not-allowed;
-}
-
-.landing__switchtext {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.landing__switchlabel {
-  color: var(--text);
-  font-size: var(--text-sm);
-}
-
-.landing__switchhint,
 .landing__hint,
 .landing__why {
   color: var(--text-faint);
@@ -71,32 +50,6 @@
   color: var(--text-muted);
 }
 
-/* -------------------------------------------------------- work that waits */
-
-.landing__waiting {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-md);
-}
-
-.landing__doing {
-  margin: 0;
-  color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 550;
-  overflow-wrap: anywhere;
-}
-
-.landing__says {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  line-height: 1.45;
-}
-
 .landing__done {
   margin: 0;
   color: var(--text-muted);
@@ -104,6 +57,12 @@
 }
 
 /* --------------------------------------------------------------- pressing */
+
+.landing__actions {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
 
 .landing__row {
   display: flex;
@@ -118,7 +77,8 @@
 
 .landing__do,
 .landing__quietdo {
-  padding: var(--space-2) var(--space-3);
+  min-height: 32px;
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
@@ -130,12 +90,32 @@
   transition:
     background var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
-    color var(--dur-micro) var(--ease-hover);
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
 }
 
 .landing__do:hover:not(:disabled),
 .landing__quietdo:hover:not(:disabled) {
   border-color: var(--border-strong);
+}
+
+.landing__do:active,
+.landing__quietdo:active {
+  transform: scale(0.98);
+}
+
+/* The one action that sends work somewhere is the accent of the band; the
+   confirmation below it is deliberately louder still. */
+.landing__do--handover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 550;
+}
+
+.landing__do--handover:hover:not(:disabled) {
+  border-color: var(--accent-ink);
+  background: var(--accent-ink);
 }
 
 .landing__do--first {
@@ -155,7 +135,6 @@
 }
 
 .landing__alone {
-  margin-top: var(--space-1);
   justify-self: start;
 }
 
@@ -220,4 +199,11 @@
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
   font-size: var(--text-2xs);
   overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing__do:active,
+  .landing__quietdo:active {
+    transform: none;
+  }
 }

@@ -61,16 +61,18 @@ function handover(over: Partial<Handover> = {}): Handover {
 /* ========================================================================== */
 
 describe('HO-01 naming the work', () => {
-  it('reads as what was asked for', () => {
+  it('reads as what was asked for, with its conventional type', () => {
     expect(nameForWork('Gave the pricing cards more room', AT)).toMatch(
-      /^graphe\/gave-the-pricing-cards-more-room-[a-z0-9]+$/,
+      /^feat\/gave-the-pricing-cards-more-room-[a-z0-9]+$/,
     );
+    // A title about fixing lands on fix/.
+    expect(nameForWork('Fixed the nav alignment', AT)).toMatch(/^fix\//);
   });
 
   it('survives a title that is punctuation, accents or nothing at all', () => {
-    expect(nameForWork('Café — “20% off” banner!', AT)).toMatch(/^graphe\/cafe-20-off-banner-/);
-    expect(nameForWork('', AT)).toMatch(/^graphe\/work-/);
-    expect(nameForWork('///', AT)).toMatch(/^graphe\/work-/);
+    expect(nameForWork('Café — “20% off” banner!', AT)).toMatch(/^feat\/cafe-20-off-banner-/);
+    expect(nameForWork('', AT)).toMatch(/^feat\/work-/);
+    expect(nameForWork('///', AT)).toMatch(/^feat\/work-/);
   });
 
   it('never runs away with a very long title', () => {
@@ -86,18 +88,19 @@ describe('HO-01 naming the work', () => {
   it('never lands on what everybody else is working from', () => {
     for (const theirs of ['main', 'master', 'trunk', 'develop', 'default', 'release-2026']) {
       expect(safeToWriteTo(theirs, theirs)).toBe(false);
-      expect(safeToWriteTo(`graphe/${theirs}`, theirs)).toBe(theirs === 'release-2026');
+      expect(safeToWriteTo(`feat/${theirs}`, theirs)).toBe(theirs === 'release-2026');
     }
     expect(safeToWriteTo(nameForWork('anything', AT), 'main')).toBe(true);
   });
 
   it('refuses a name that could be a path, a walk upwards, or somebody else’s', () => {
     for (const bad of [
-      'graphe/../evil',
-      'graphe/a/b',
-      'graphe/',
-      'graphe/-leading',
-      'graphe/UPPER',
+      'feat/../evil',
+      'feat/a/b',
+      'feat/',
+      'feat/-leading',
+      'feat/UPPER',
+      'bugfix/work', // a type this app never writes
       'someone-else/work',
       '',
       'HEAD',
@@ -112,11 +115,11 @@ describe('HO-01 naming the work', () => {
 /* ========================================================================== */
 
 describe('HO-02 the pictures have somewhere to be', () => {
-  const name = 'graphe/work-abc';
+  const name = 'feat/work-abc';
 
   it('points at the pictures carried along with the work', () => {
     expect(whereAPictureLives('kettle/site', name, '.graphe/what-changed/01-before.png')).toBe(
-      'https://raw.githubusercontent.com/kettle/site/graphe/work-abc/.graphe/what-changed/01-before.png',
+      'https://raw.githubusercontent.com/kettle/site/feat/work-abc/.graphe/what-changed/01-before.png',
     );
   });
 

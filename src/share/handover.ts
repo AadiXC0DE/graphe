@@ -66,9 +66,7 @@ const REFUSAL =
 /* Naming the work                                                             */
 /* -------------------------------------------------------------------------- */
 
-/** Ours, so a project full of somebody else's names never collides with one of
- *  these and nobody has to wonder where it came from. */
-const PREFIX = 'graphe/';
+import { CONVENTIONAL_TYPES, conventionalType } from '../lib/conventional';
 
 /** Long enough to recognise, short enough to read in a list. */
 const MOST = 48;
@@ -107,8 +105,9 @@ function tail(at: number): string {
  * can never be a name somebody else is already using.
  */
 export function nameForWork(title: string, at: number): string {
+  const type = conventionalType(title);
   const middle = slug(title);
-  return `${PREFIX}${middle === '' ? 'work' : middle}-${tail(at)}`;
+  return `${type}/${middle === '' ? 'work' : middle}-${tail(at)}`;
 }
 
 /**
@@ -120,10 +119,13 @@ export function nameForWork(title: string, at: number): string {
  * itself" can wear that prefix.
  */
 export function safeToWriteTo(name: string, theProjectItself: string | null): boolean {
-  if (!name.startsWith(PREFIX)) return false;
-  const rest = name.slice(PREFIX.length);
-  if (rest === '' || rest.includes('/') || rest.includes('..')) return false;
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(rest)) return false;
+  // Ours is always one known type, one slash, one slug — never a path, never a
+  // walk upwards, never somebody else's name.
+  const shape = /^([a-z]+)\/([a-z0-9][a-z0-9-]*)$/.exec(name);
+  if (shape === null) return false;
+  if (!(CONVENTIONAL_TYPES as readonly string[]).includes(shape[1] ?? '')) return false;
+  const rest = shape[2] ?? '';
+  if (rest.includes('..')) return false;
   if (THE_PROJECT_ITSELF.has(rest)) return false;
   if (theProjectItself !== null && name === theProjectItself) return false;
   return true;

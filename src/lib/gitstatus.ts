@@ -69,6 +69,9 @@ export function parseGitStatus(raw: string): GitSnapshot {
 
   return {
     branch,
+    // The branch list is read separately (src/lib/branches.ts) and merged in
+    // by the shell; the status parser itself carries none.
+    branches: [],
     dirty,
     unstaged,
     staged,

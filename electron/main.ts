@@ -92,6 +92,7 @@ import {
   type ConnectionState,
   type Decided,
   type FileEntry,
+  type GitBranch,
   type GitSnapshot,
   type HandedOver,
   type Hatches,
@@ -132,6 +133,7 @@ import {
   whereIn,
 } from '../src/lib/ipc';
 import { parseGitStatus } from '../src/lib/gitstatus';
+import { parseBranches } from '../src/lib/branches';
 import {
   capture,
   forget,
@@ -1109,6 +1111,20 @@ function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
       resolve(parseGitStatus(out));
     });
   });
+}
+
+/** Every line of work the project keeps, from git's own listing. The format
+ *  stays on one line per branch with NUL separators, so a branch name or a
+ *  message that contains spaces cannot break the parse. */
+async function readBranches(cwd: string): Promise<readonly GitBranch[]> {
+  const FORMAT = '%(refname:short)%00%(upstream:short)%00%(upstream:track)%00%(objectname:short)%00%(subject)';
+  const [refs, head] = await Promise.all([
+    gitRun(cwd, ['for-each-ref', `--format=${FORMAT}`, 'refs/heads']),
+    gitRun(cwd, ['symbolic-ref', '--short', 'HEAD']),
+  ]);
+  if (refs.code !== 0 || refs.out === undefined) return [];
+  const current = head.code === 0 && head.out !== undefined ? head.out.trim() : null;
+  return parseBranches(refs.out, current);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -3574,8 +3590,12 @@ function register(): void {
       palette === null
         ? []
         : paletteFrom(await readFile(join(open.path, palette.path), 'utf8').catch(() => ''));
+    const git = await readGitStatus(open.path);
     return done({
-      git: await readGitStatus(open.path),
+      git:
+        git === null
+          ? null
+          : { ...git, branches: await readBranches(open.path) },
       preview: open.held.serving?.address ?? null,
       artifacts: made,
       swatches,
@@ -4635,6 +4655,52 @@ function register(): void {
      so a technical user can keep parallel work in its own branch and merge it
      back — and the guards (never flatten a dirty checkout) are the same ones
      the parallel-session wiring will lean on. */
+
+  /** Move the project onto another of its lines of work. The one rule is the
+   *  same as going back to an older version: work that is not saved yet is not
+   *  moved anywhere. Every moment is saved at the end of a turn, so a settled
+   *  project switches freely; a project caught mid-turn is told to wait. */
+  handle<null>(CHANNEL.branchSwitch, async (_event, args) => {
+    const [name] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null || typeof name !== 'string' || name.trim() === '') {
+      return fail(NOTHING_OPEN);
+    }
+    const git = await readGitStatus(open.path);
+    if (git === null || git.branch === null) {
+      return fail({ what: 'There is nothing to switch between yet.', because: 'This project has no saved work, so it has no lines of work.', actionLabel: 'Got it' });
+    }
+    if (git.dirty) {
+      return fail({ what: 'Not yet — this moment is not saved.', because: 'Let the current turn finish (it saves everything) and switch then. A line of work is only moved when the work is safe.', actionLabel: 'Got it' });
+    }
+    const switched = await gitRun(open.path, ['checkout', name]);
+    if (switched.code !== 0) {
+      return fail({ what: 'I could not move onto that line of work.', because: 'git refused the switch. Check the name, and that nothing here holds the files open.', actionLabel: 'Got it' });
+    }
+    return done(null);
+  });
+
+  /** Start a new line of work and move the project onto it. A name is checked
+   *  before it is used: spaces and leading dashes are the mistakes that make a
+   *  name mean something other than what it says. */
+  handle<null>(CHANNEL.branchCreate, async (_event, args) => {
+    const [name] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null || typeof name !== 'string') return fail(NOTHING_OPEN);
+    const clean = name.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(clean)) {
+      return fail({ what: 'That is not a usable name for a line of work.', because: 'Letters, numbers, dots, dashes and slashes — and it cannot start with a dash.', actionLabel: 'Got it' });
+    }
+    const git = await readGitStatus(open.path);
+    if (git !== null && git.dirty) {
+      return fail({ what: 'Not yet — this moment is not saved.', because: 'Let the current turn finish (it saves everything), then start the new line.', actionLabel: 'Got it' });
+    }
+    const made = await gitRun(open.path, ['checkout', '-b', clean]);
+    if (made.code !== 0) {
+      return fail({ what: 'I could not start that line of work.', because: 'git refused the new branch — the name may already exist.', actionLabel: 'Got it' });
+    }
+    return done(null);
+  });
 
   handle<{ folder: string; branch: string }>(CHANNEL.worktreeStart, async (_event, args) => {
     const open = projectAt(whereIn(args));

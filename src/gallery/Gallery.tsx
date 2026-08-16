@@ -462,6 +462,10 @@ const JUST_PUT_BACK: PutBack = {
  *  them. */
 const GIT_DIRTY = {
   branch: 'paper-street',
+  branches: [
+    { name: 'paper-street', current: true, upstream: 'origin/paper-street', ahead: 2, behind: 0, message: 'Ship the new pricing' },
+    { name: 'main', current: false, upstream: 'origin/main', ahead: 0, behind: 1, message: 'Tidy the footer' },
+  ],
   dirty: true,
   unstaged: 2,
   staged: 1,
@@ -1635,9 +1639,10 @@ export default function Gallery() {
             onLimit={noop}
             onSave={noop}
                 onOpenDesign={noop}
-                onOpenGraph={noop}
+                onSwitchBranch={() => {}}
+onCreateBranch={() => {}}
+          onOpenGraph={noop}
                 onShare={noop}
-                onHoldBack={noop}
                 onDecide={noop}
                 onHandOver={noop}
                 onOpenLink={noop}
@@ -1721,7 +1726,6 @@ export default function Gallery() {
                 going={null}
                 outcome={null}
                 decided={null}
-                onHoldBack={noop}
                 onDecide={noop}
                 onUndo={noop}
                 onHandOver={noop}

@@ -43,7 +43,12 @@ import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
-import { grapheTools } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry } from './tools';
+import { anchorEditTool, taggedReadTool } from './anchor-edit';
+import * as debug from './debug';
+import { McpRegistry, mcpTool, readMcpConfig } from './mcp';
+import { parseReview } from './review';
+import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
 import { heldShell, loginShell } from '../sandbox/shell';
 import {
   collectAccounts,
@@ -333,7 +338,7 @@ export type GrapheSession = {
   prompt(
     text: string,
     images?: readonly ImageCard[],
-    options?: { lookFirst?: boolean },
+    options?: { lookFirst?: boolean; queue?: 'followUp' },
   ): Promise<void>;
   /** Work with a different model from now on, keeping the conversation. False
    *  when the choice does not resolve to a model this computer can use; the
@@ -903,6 +908,16 @@ function plainly(cause: unknown): string {
   return 'Something went wrong on my side, and I have stopped where I was.';
 }
 
+/** Pi refuses a second prompt while a turn is still running unless it is told
+ *  how to queue it. Recognised by its own sentence, so an upgrade that renames
+ *  the error cannot take the queue with it. */
+function isAlreadyProcessing(cause: unknown): boolean {
+  return (
+    cause instanceof Error &&
+    /already processing|streamingBehavior/i.test(cause.message)
+  );
+}
+
 /**
  * All seven of Pi's tools, named rather than inherited.
  *
@@ -982,11 +997,23 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
   /** True only for the length of a looking-around pass. */
   let planning = false;
+  /** Whether this sitting has had its first question yet — the moment the most
+   *  relevant notes are handed over, so memory works without being asked. */
+  let firstTurn = true;
   /** What was said during one, kept so the proposal can be read out of it. */
   let proposed = '';
+  /** Everything said since the last settled moment, so a review verdict can be
+   *  read out of the final reply and shown as its own card. */
+  let tape = '';
   const say = (event: AgentEvent): void => {
     if (planning && event.type === 'message-delta') proposed += event.text;
+    if (event.type === 'message-delta') tape += event.text;
     options.onEvent(event);
+    if (event.type === 'settled') {
+      const verdict = parseReview(tape);
+      tape = '';
+      if (verdict !== null) options.onEvent({ type: 'reviewed', verdict });
+    }
   };
 
   const relay = new EventRelay(say, { billedSoFar });
@@ -1065,6 +1092,64 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     options.thinking,
     options.projectRoot,
   );
+
+  /* The anchored edit and its read: the model reads a file, the read's reply
+     carries the file's fingerprint, and an edit can name lines plus that
+     fingerprint instead of retyping the old text — refused cleanly if the
+     file has moved on. Both keep the built-in names, so the model sees one
+     `read` and one `edit` and the Guard's rows hold. Pi's own tools stay
+     underneath as the exact-text path and the actual reading. */
+  const piRead = pi.createReadToolDefinition(options.projectRoot);
+  const piEdit = pi.createEditToolDefinition(options.projectRoot);
+  customTools.push(
+    taggedReadTool({
+      cwd: options.projectRoot,
+      delegate: (params, signal) =>
+        piRead.execute('graphe-read', params, signal, undefined, undefined as never),
+    }),
+    anchorEditTool({
+      cwd: options.projectRoot,
+      delegate: (params, signal) =>
+        piEdit.execute(
+          'graphe-edit',
+          params as Parameters<typeof piEdit.execute>[1],
+          signal,
+          undefined,
+          undefined as never,
+        ),
+    }),
+    readDiffTool(options.projectRoot),
+  );
+
+  /* The project's memory: a note store beside the conversation, one database
+     per project, opened with the app's embedding engine when it can load. A
+     machine that cannot (no model yet, no network for the first download)
+     still gets word-based recall — the engine degrades, never fails. */
+  let memory: MemoryStore | null = null;
+  try {
+    memory = await openMemory({
+      dbPath: join(agentDir, 'memory', memoryFileName(options.projectRoot)),
+      embedder: defaultEmbedder(),
+    });
+    customTools.push(...memoryTools(memory));
+  } catch {
+    // No memory, no ceremony: the tools simply are not there, and nothing else
+    // in the session cares.
+    memory = null;
+  }
+
+  /* The debugger sessions this sitting holds: attached programs, closed with
+     the session so nothing is left paused or held. */
+  const debugRegistry = newDebugRegistry();
+  customTools.push(...debugTools(debugRegistry));
+
+  /* The plugged-in tool servers (MCP), read from the project's own .pi/mcp.json.
+     Nothing starts until the model actually calls one of them, and every call
+     travels through the Guard like any other tool call. */
+  const mcpRegistry = new McpRegistry(await readMcpConfig(options.projectRoot));
+  if (mcpRegistry.config.servers.length > 0) {
+    customTools.push(mcpTool(mcpRegistry));
+  }
 
   // The shell is Pi's tool, not ours, and it is the one that can change
   // anything on this disk. Pi builds it from `createBashToolDefinition`, whose
@@ -1256,7 +1341,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     async prompt(
       text: string,
       images?: readonly ImageCard[],
-      options?: { lookFirst?: boolean },
+      options?: { lookFirst?: boolean; queue?: 'followUp' },
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
       const looking = options?.lookFirst === true;
@@ -1279,7 +1364,52 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
                   mimeType: picture.mimeType,
                 })),
               };
-        await session.prompt(looking ? `${text}\n\n${PLAN_WORDS.asked}` : text, withPictures);
+        // A sitting starts with the notes it will need, so the memory is used
+        // without anyone having to know it exists. Only the first question of
+        // a sitting carries them, and only when there is something to carry.
+        let said = looking ? `${text}\n\n${PLAN_WORDS.asked}` : text;
+        if (firstTurn) {
+          firstTurn = false;
+          if (memory !== null) {
+            try {
+              const notes = await memory.recall('', { limit: 4 });
+              if (notes.length > 0) {
+                said = `A few notes I keep about this project, most relevant first:\n${notes
+                  .map((note) => `- ${note.content}`)
+                  .join('\n')}\n\n${said}`;
+              }
+            } catch {
+              // A memory that will not answer is a memory not worth a sentence.
+            }
+          }
+        }
+        // The window chose to queue this message behind the run in flight
+        // (the composer's "queue it" option). Pi delivers a prompt marked
+        // followUp after the current turn finishes, without interrupting it.
+        if (options?.queue === 'followUp') {
+          const queued =
+            withPictures === undefined
+              ? { streamingBehavior: 'followUp' as const }
+              : { ...withPictures, streamingBehavior: 'followUp' as const };
+          await session.prompt(said, queued);
+        } else {
+          try {
+            await session.prompt(said, withPictures);
+          } catch (cause) {
+            // Pi refuses a second prompt while a turn is still running unless
+            // it is told how to queue it. The window can ask while the agent
+            // is mid-turn (the gap between "sent" and the first visible step),
+            // so a message that arrives like that is queued as a follow-up
+            // rather than thrown back as a raw error. See the steer path for
+            // the interrupt choice.
+            if (!isAlreadyProcessing(cause)) throw cause;
+            const queued =
+              withPictures === undefined
+                ? { streamingBehavior: 'followUp' as const }
+                : { ...withPictures, streamingBehavior: 'followUp' as const };
+            await session.prompt(said, queued);
+          }
+        }
       } catch (cause) {
         const message = plainly(cause);
         relay.failed(message);
@@ -1371,6 +1501,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       unsubscribe();
       session.dispose();
       void shell.close();
+      void mcpRegistry.close();
+      void memory?.close().catch(() => {});
+      for (const attached of debugRegistry.sessions.values()) {
+        void debug.detach(attached).catch(() => {});
+      }
     },
 
     answer(callId: string, decision: Decision): boolean {

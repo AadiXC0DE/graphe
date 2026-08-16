@@ -29,6 +29,7 @@
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { roleSpec, safeChildWords, type HelperRole } from './child';
 import { patchWorkerThreads } from './node-shim';
 import type { HelperPace } from './tools';
 import type { GuardFacts } from '../guard/policy';
@@ -50,6 +51,9 @@ type Job = {
   /** A file outside everything this process should be able to touch. Named by
    *  the parent so the answer means something to it. */
   outside?: string;
+  /** What kind of helper this is: its tools and instructions come from the
+   *  role, and the child never holds more than the role allows. */
+  role?: HelperRole;
 };
 
 /** The job arrives as JSON on a pipe, so nothing in it is trusted to be what it
@@ -127,8 +131,6 @@ const SAID_NOTHING =
 /** The only tools this process may run at all — a second lock on the `tools:`
  *  list below, so anything a resource or a Pi upgrade registers is blocked by
  *  name rather than allowed by omission. */
-const ALLOWED_TOOLS = new Set(['read', 'ls', 'grep', 'find', 'websearch', 'webfetch']);
-
 async function main(): Promise<number> {
   let job: Job;
   try {
@@ -146,7 +148,7 @@ async function main(): Promise<number> {
   const facts = agentDir === '' ? { projectRoot: cwd } : { projectRoot: cwd, agentFolder: agentDir };
 
   try {
-    return await work(job, cwd, agentDir, facts);
+    return await work(job, cwd, agentDir, facts, roleSpec(job.role));
   } catch (cause) {
     // Everything below used to sit outside a try: a package that would not load
     // or a resource folder that would not read exited mute, and the parent could
@@ -161,6 +163,7 @@ async function work(
   cwd: string,
   agentDir: string,
   facts: GuardFacts,
+  spec: ReturnType<typeof roleSpec>,
 ): Promise<number> {
 
   // Everything Pi and the policy modules take to load is done before any
@@ -187,8 +190,9 @@ async function work(
    * before anything runs. A `deny` — credentials, anywhere outside the project
    * folder, a key on its way out — is still a deny.
    */
+  const allowed = new Set(spec.tools);
   const review = async (call: { id: string; name: string; input: Record<string, unknown> }) => {
-    if (!ALLOWED_TOOLS.has(call.name.toLowerCase())) return { block: true, reason: DECLINED };
+    if (!allowed.has(call.name.toLowerCase())) return { block: true, reason: DECLINED };
     const verdict = evaluate(call, facts);
     if (verdict.kind === 'deny') return { block: true, reason: verdict.reason };
     if (changesAnything(call, facts)) return { block: true, reason: DECLINED };
@@ -262,7 +266,7 @@ async function work(
   const relay = new EventRelay((event) => {
     if (event.type === 'message-delta') {
       spoken += event.text;
-      report({ type: 'delta', text: event.text });
+      report({ type: 'delta', text: safeChildWords(event.text) });
     }
     // Nobody else can see this. The helper calls the account from its own
     // process, so unless it says what a turn cost, a fan-out to six helpers is
@@ -272,7 +276,7 @@ async function work(
     }
     if (event.type === 'error') finish({ ok: false, error: event.message });
     if (event.type === 'settled') {
-      const said = spoken.trim();
+      const said = safeChildWords(spoken.trim());
       finish(said === '' ? { ok: false, error: SAID_NOTHING } : { ok: true, text: said });
     }
   });
@@ -286,8 +290,8 @@ async function work(
       // are filtered through too, so the two web tools have to be in it or they
       // are registered and immediately dropped — which is how a helper sent to
       // research something ended up able to read local files and nothing else.
-      tools: ['read', 'ls', 'grep', 'find', ...helperTools.map((tool) => tool.name)],
-      customTools: helperTools,
+      tools: [...spec.tools],
+      customTools: helperTools.filter((tool) => spec.tools.includes(tool.name)),
       modelRuntime: runtime,
       model,
       ...(pace === undefined ? {} : { thinkingLevel: pace }),
@@ -298,13 +302,13 @@ async function work(
     session = created.session;
     const unsubscribe = created.session.subscribe((event) => relay.fromPi(event));
 
-    await created.session.prompt(job.task.trim());
+    await created.session.prompt(`${spec.spoken}\n\n${job.task.trim()}`);
 
     // A run that was refused outright can resolve with no `settled` to follow.
     // Give the event a beat to land, then answer with whatever did.
     await new Promise((wake) => setTimeout(wake, 250));
     if (!finished) {
-      const said = spoken.trim();
+      const said = safeChildWords(spoken.trim());
       finish(said === '' ? { ok: false, error: SAID_NOTHING } : { ok: true, text: said });
     }
     unsubscribe();

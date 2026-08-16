@@ -48,7 +48,7 @@
  * requires nowhere. */
 
 import { execFile } from 'node:child_process';
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { devNull } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -96,6 +96,13 @@ export type StoredVersion = {
   /** The names pointing at it, tidied: `main`, `HEAD`, a line somebody made. */
   refs: readonly string[];
 };
+
+/** What a review can point at: the work not yet saved, one saved version, or
+ *  a named piece of work on its own line. Every one is read-only. */
+export type ReviewTarget =
+  | { kind: 'working' }
+  | { kind: 'version'; id: string }
+  | { kind: 'line'; name: string };
 
 export type UnsavedChange = { path: string; kind: ChangeKind };
 
@@ -560,6 +567,69 @@ export class ProjectHistory {
   async dropLine(name: string): Promise<void> {
     await this.ensureReady();
     await this.attempt(['branch', '--delete', '--force', name]);
+  }
+
+  /* ----------------------------------------------------------- checking work */
+
+  /** The empty tree, so the very first saved version can show its whole self. */
+  private static readonly EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+  /** Run one read-only git command and return its stdout, or a plain sentence
+   *  when git says no. */
+  private async readOnly(args: readonly string[]): Promise<string> {
+    const done = await this.attempt(['--no-pager', ...args]);
+    if (done.code !== 0) throw new HistoryError(historyProblems.notSetUp);
+    return done.stdout;
+  }
+
+  /** The change in front of the person right now: everything not saved yet,
+   *  including files never saved before. */
+  async diffWorking(): Promise<string> {
+    await this.ensureReady();
+    const changed = await this.readOnly(['diff', 'HEAD', '--no-ext-diff']);
+    const untracked = await this.readOnly(['ls-files', '--others', '--exclude-standard']);
+    const neverSaved = untracked
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+      .slice(0, 10)
+      .map(async (file) => {
+        // An untracked file is not in the index, so it is read off the disk —
+        // and only when it looks like words. Nobody reviews a picture.
+        const absolute = path.resolve(this.root, file);
+        try {
+          const size = await stat(absolute);
+          if (size.size > 200_000) return `# ${file} (new, too big to show here)`;
+          const contents = await readFile(absolute, 'utf8');
+          return `# ${file} (new)\n${contents}`;
+        } catch {
+          return `# ${file} (new, could not be read)`;
+        }
+      });
+    const extras = await Promise.all(neverSaved);
+    return [changed.trim(), ...extras].filter((part) => part !== '').join('\n\n');
+  }
+
+  /** What one saved version changed, against the version before it. */
+  async diffVersion(versionId: string): Promise<string> {
+    await this.ensureReady();
+    const resolved = await this.resolve(versionId);
+    const parent = await this.attempt(['rev-parse', '--quiet', '--verify', `${resolved}^`]);
+    const base = parent.code === 0 ? `${resolved}^` : ProjectHistory.EMPTY_TREE;
+    return this.readOnly(['diff', base, resolved, '--no-ext-diff']);
+  }
+
+  /** Everything a named piece of work keeps that where we are now does not. */
+  async diffLine(name: string): Promise<string> {
+    await this.ensureReady();
+    return this.readOnly(['diff', 'HEAD', name, '--no-ext-diff']);
+  }
+
+  /** The change a review target points at, as git text. */
+  async diffFor(target: ReviewTarget): Promise<string> {
+    if (target.kind === 'working') return this.diffWorking();
+    if (target.kind === 'version') return this.diffVersion(target.id);
+    return this.diffLine(target.name);
   }
 
   /** Where this project is kept as well as here, or null when it is only here. */

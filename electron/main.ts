@@ -4769,8 +4769,11 @@ function register(): void {
     const [stepsRaw] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
+    // A document-to-build brings its own plan; a plan approved in the
+    // conversation creates one of its own when there is none yet — a normal
+    // long task gets the same checklist above the box.
     const prior = await readBuildPlan(open.path);
-    if (prior === null) return fail(NOTHING_OPEN);
+    const source = prior?.source ?? 'The plan';
     const steps = Array.isArray(stepsRaw)
       ? (stepsRaw as { title?: unknown; acceptance?: unknown }[])
       : [];
@@ -4786,7 +4789,7 @@ function register(): void {
       }))
       .filter((one) => one.title.trim() !== '');
     if (tasks.length === 0) return done(prior);
-    await writeBuildPlan(open.path, prior.source, tasks);
+    await writeBuildPlan(open.path, source, tasks);
     return done(await readBuildPlan(open.path));
   });
 
@@ -4880,6 +4883,10 @@ function register(): void {
     try {
       const lookFirst =
         ways !== null && typeof ways === 'object' && (ways as PromptOptions).lookFirst === true;
+      const queue =
+        ways !== null && typeof ways === 'object' && (ways as PromptOptions).queue === 'followUp'
+          ? ('followUp' as const)
+          : undefined;
       // Checked first, when they have asked for that and nothing is already
       // waiting. Two pieces of work waiting at once is a decision nobody made.
       if ((await preferences()).all().heldBack[open.path] === true && open.held.waiting === null) {
@@ -4910,7 +4917,7 @@ function register(): void {
                   `The user explicitly selected @${skill.handle}. Follow these instructions for this request:\n<skill name="${skill.name}">\n${instructions.slice(0, 50000)}\n</skill>`,
               )
               .join('\n\n')}\n</graphe-selected-skills>`;
-      await agent.prompt(withSkills, imageCards(attachments), { lookFirst });
+      await agent.prompt(withSkills, imageCards(attachments), { lookFirst, queue });
       return done(null);
     } catch (cause) {
       // The adapter has already relayed this as an `error` event, worded by the

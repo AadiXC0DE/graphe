@@ -11,7 +11,7 @@
 
 import type { ActivityState } from '../components/ActivityLine';
 import type { MessageAuthor } from '../components/Message';
-import type { AgentEvent } from '../agent/types';
+import type { AgentEvent, ReviewVerdict } from '../agent/types';
 import type { Prompt } from '../cost/phrasing';
 import { PLAN_WORDS } from '../agent/plan';
 import { describeCall } from './describe';
@@ -108,7 +108,15 @@ export type Turn =
       answered: 'went-ahead' | 'changing' | null;
     }
   | { kind: 'tidying'; id: string; state: ActivityState }
-  | { kind: 'trouble'; id: string; trouble: Trouble };
+  | { kind: 'trouble'; id: string; trouble: Trouble }
+  /** "I checked the change: here is the verdict." Draws the review card. */
+  | {
+      kind: 'review';
+      id: string;
+      verdict: ReviewVerdict;
+      /** Whether the fix is already on its way; the card asks once. */
+      asked: boolean;
+    };
 
 /** The turn that holds a message back until somebody has seen what it will
  *  cost. Named because the window passes one around. */
@@ -352,6 +360,10 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       // fretting rather than an app tidying.
       const already = turns.some((turn) => turn.kind === 'tidying' && turn.state === 'running');
       return already ? turns : [...turns, { kind: 'tidying', id: newId(), state: 'running' }];
+    }
+
+    case 'reviewed': {
+      return [...turns, { kind: 'review', id: newId(), verdict: event.verdict, asked: false }];
     }
 
     case 'tidied': {

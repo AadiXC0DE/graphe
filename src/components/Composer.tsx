@@ -693,14 +693,14 @@ export default function Composer({
               className="composer__queuebtn composer__queuebtn--safe"
               onClick={() => submit('followUp')}
             >
-              Queue it
+              Queue
             </button>
             <button
               type="button"
               className="composer__queuebtn"
               onClick={() => submit('steer')}
             >
-              Interrupt with this
+              Interrupt
             </button>
           </span>
         ) : (

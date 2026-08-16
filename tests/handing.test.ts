@@ -158,7 +158,7 @@ describe('HD-02 the ordinary machine', () => {
     expect(handed.sent).toBe(false);
     expect(handed.address).toBeNull();
     expect(handed.says).toContain('your own folder');
-    expect(handed.name).toMatch(/^graphe\//);
+    expect(handed.name).toMatch(/^(feat|fix|refactor|docs|chore)\//);
     expect(await history.lineExists(handed.name)).toBe(true);
   });
 

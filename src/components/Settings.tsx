@@ -15,17 +15,22 @@ type Props = {
   onClose: () => void;
   showMe: boolean;
   showFiles: boolean;
+  /** Work in a copy and ask before anything lands in the project. */
+  holdBack: boolean;
   onToggleShowMe: () => void;
   onToggleShowFiles: () => void;
+  onToggleHoldBack: () => void;
   onGo: (link: SettingsLink) => void;
 };
 
-const LINKS: readonly {
-  id: SettingsLink;
-  name: string;
-  note: string;
-  kind: 'go' | 'show-me' | 'files';
-}[] = [
+/** Each row knows its own kind and its own id, so a switch row and a link row
+ *  are told apart by the union, not by a string field that could disagree. */
+const LINKS: readonly (
+  | { id: SettingsLink; name: string; note: string; kind: 'go' }
+  | { id: 'show-me'; name: string; note: string; kind: 'show-me' }
+  | { id: 'files'; name: string; note: string; kind: 'files' }
+  | { id: 'hold-back'; name: string; note: string; kind: 'hold-back' }
+)[] = [
   {
     id: 'skills',
     name: 'Skills',
@@ -57,6 +62,12 @@ const LINKS: readonly {
     kind: 'files',
   },
   {
+    id: 'hold-back',
+    name: 'Work in a copy first',
+    note: 'Changes are made in a copy and shown to you before anything reaches your files. Off, your files change as the work happens and every moment is one press from undone.',
+    kind: 'hold-back',
+  },
+  {
     id: 'folder',
     name: 'Reveal the folder',
     note: 'Open it where this computer keeps files.',
@@ -82,8 +93,10 @@ export default function Settings({
   onClose,
   showMe,
   showFiles,
+  holdBack,
   onToggleShowMe,
   onToggleShowFiles,
+  onToggleHoldBack,
   onGo,
 }: Props) {
   useEffect(() => {
@@ -131,6 +144,23 @@ export default function Settings({
               </li>
             );
           }
+          if (one.kind === 'hold-back') {
+            return (
+              <li key={one.id}>
+                <label className="settings__row settings__row--switch">
+                  <span className="settings__text">
+                    <span className="settings__name">{one.name}</span>
+                    <span className="settings__note">{one.note}</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={holdBack}
+                    onChange={onToggleHoldBack}
+                  />
+                </label>
+              </li>
+            );
+          }
           if (one.kind === 'files') {
             return (
               <li key={one.id}>
@@ -148,26 +178,29 @@ export default function Settings({
               </li>
             );
           }
-          return (
-            <li key={one.id}>
-              <button
-                type="button"
-                className="settings__row"
-                onClick={() => {
-                  onGo(one.id);
-                  onClose();
-                }}
-              >
-                <span className="settings__text">
-                  <span className="settings__name">{one.name}</span>
-                  <span className="settings__note">{one.note}</span>
-                </span>
-                <span className="settings__chev" aria-hidden="true">
-                  ›
-                </span>
-              </button>
-            </li>
-          );
+          if (one.kind === 'go') {
+            return (
+              <li key={one.id}>
+                <button
+                  type="button"
+                  className="settings__row"
+                  onClick={() => {
+                    onGo(one.id);
+                    onClose();
+                  }}
+                >
+                  <span className="settings__text">
+                    <span className="settings__name">{one.name}</span>
+                    <span className="settings__note">{one.note}</span>
+                  </span>
+                  <span className="settings__chev" aria-hidden="true">
+                    ›
+                  </span>
+                </button>
+              </li>
+            );
+          }
+          return null;
         })}
       </ul>
     </section>

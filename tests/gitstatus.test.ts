@@ -17,6 +17,7 @@ describe('git overview — reading git status text', () => {
     const snapshot = parseGitStatus('# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0\n');
     expect(snapshot).toEqual({
       branch: 'main',
+      branches: [],
       dirty: false,
       unstaged: 0,
       staged: 0,

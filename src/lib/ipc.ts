@@ -882,9 +882,28 @@ export type ChangedFile = {
 };
 
 /** One reading of the folder's saved state, at the moment it was asked for. */
+/** One line of work this project keeps, as git sees it — named for the
+ *  technical user who asked to see the branches. */
+export type GitBranch = {
+  /** The branch's own name. */
+  name: string;
+  /** True for the branch the project is on right now. */
+  current: boolean;
+  /** Where it tracks, e.g. origin/main; null when it tracks nowhere. */
+  upstream: string | null;
+  /** Saved work this branch has that its upstream does not. */
+  ahead: number;
+  /** Saved work its upstream has that this branch does not. */
+  behind: number;
+  /** The last commit's subject, so the list says what a branch is. */
+  message: string;
+};
+
 export type GitSnapshot = {
   /** The branch, or null when no commit exists yet. */
   branch: string | null;
+  /** Every branch in the project, the current one first, for the dev surface. */
+  branches: readonly GitBranch[];
   /** True when saved work differs from what is on disk. */
   dirty: boolean;
   /** Files changed but not yet saved to the project's history. */
@@ -1043,6 +1062,8 @@ export const CHANNEL = {
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
   workflows: 'graphe:workflows',
+  branchSwitch: 'graphe:branch-switch',
+  branchCreate: 'graphe:branch-create',
   worktreeStart: 'graphe:worktree-start',
   worktreeLand: 'graphe:worktree-land',
   worktreeDrop: 'graphe:worktree-drop',
@@ -1221,6 +1242,11 @@ export type GrapheApi = {
   /** Pick a requirements document on disk and read its text, or null if closed. */
   chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>>;
   /** Put the front conversation to work in its own git branch and checkout. */
+  /** Move the project onto another of its lines of work. Refuses while the
+   *  current work is not yet saved. */
+  branchSwitch(name: string, where?: Where): Promise<Result<null>>;
+  /** Start a new line of work and move the project onto it. */
+  branchCreate(name: string, where?: Where): Promise<Result<null>>;
   worktreeStart(where?: Where): Promise<Result<{ folder: string; branch: string }>>;
   /** Merge the front conversation's own branch back, and drop the checkout. */
   worktreeLand(where?: Where): Promise<Result<null>>;

@@ -1,5 +1,5 @@
-/* The history band in the panel: a heading, the line of work it is on, the
-   pictures, and the way through to the whole thing drawn as lines. */
+/* The history band in the panel: the lines of work, the pictures, and the way
+   through to the whole thing drawn as lines. */
 
 .history {
   display: flex;
@@ -10,9 +10,6 @@
 }
 
 .history__top {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
   padding: 0 var(--space-1);
 }
 
@@ -25,39 +22,205 @@
   color: var(--text-faint);
 }
 
-/* The name of the line the work is on. Monospace, because it is a name
-   somebody typed rather than a sentence we wrote. */
-.history__line {
-  margin-left: auto;
-  max-width: 45%;
-  padding: 1px var(--space-2);
-  border-radius: 999px;
-  background: var(--bg-sunken);
-  font-family: var(--font-mono);
+/* --------------------------------------------------------- the lines of work */
+
+.branches {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.branches__heading {
+  margin: 0;
   font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-muted);
+  padding: 0 var(--space-1);
+}
+
+.branches__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  max-height: 172px;
+  overflow-y: auto;
+}
+
+/* One line of work: the name in monospace, the last thing it did under it. */
+.branches__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+.branches__row--current {
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.branches__row--switch {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--dur-micro) var(--ease-hover);
+}
+
+.branches__row--switch:hover {
+  background: var(--bg-sunken);
+}
+
+.branches__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  align-self: center;
+}
+
+.branches__name {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.branches__row--current .branches__name {
+  font-weight: 600;
+}
+
+.branches__message {
+  grid-column: 2;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branches__meta {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.branches__row--switch .branches__meta {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.branches__row--current .branches__meta {
+  grid-column: 3;
+}
+
+.branches__newbtn {
+  justify-self: start;
+  border: 0;
+  background: none;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.branches__newbtn:hover {
+  color: var(--text);
+}
+
+.branches__new {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.branches__input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.branches__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.branches__create {
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.branches__create:active {
+  transform: scale(0.97);
+}
+
+.branches__create:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------- the way to the lines */
+
 .history__do {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   align-self: stretch;
-  min-height: 32px;
+  min-height: 36px;
   padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
   font-size: var(--text-xs);
   color: var(--text-muted);
+  cursor: pointer;
   transition:
     color var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
+.history__doarrow {
+  font-size: var(--text-sm);
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.history__do:hover .history__doarrow {
+  transform: translateX(2px);
+}
+
 .history__do:active {
-  transform: scale(0.98);
+  transform: scale(0.99);
 }
 
 .history__do:focus-visible {
@@ -73,7 +236,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .history__do:active {
+  .history__do:active,
+  .history__do:hover .history__doarrow {
     transform: none;
   }
 }

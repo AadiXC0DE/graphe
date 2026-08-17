@@ -18,8 +18,10 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const FROM = join(ROOT, 'site/assets/shots');
 const TO = join(ROOT, 'site/assets/web');
 
-/** The whole-window shots carry the page; everything else is a crop already at
- *  the size it is shown. */
+/** The whole-window shots carry the page. They are kept at the size they were
+ *  taken — a 2x capture shown at 1x is the only way a screenshot of an
+ *  interface stays sharp, and halving it to save a few hundred kilobytes is
+ *  what makes a product shot look soft. */
 const WIDE = /^(app-|window-|start-|design-view|history-view|skills-view|files-view)/;
 
 try {
@@ -36,8 +38,9 @@ let saved = 0;
 for (const name of files) {
   const from = join(FROM, name);
   const to = join(TO, name.replace(/\.png$/, '.webp'));
-  const width = WIDE.test(name) ? 1800 : 1100;
-  await run('cwebp', ['-q', '84', '-resize', String(width), '0', '-quiet', from, '-o', to]);
+  // Native width for the whole-window shots; crops are already at their size.
+  const resize = WIDE.test(name) ? [] : ['-resize', '1400', '0'];
+  await run('cwebp', ['-q', '95', '-sharp_yuv', ...resize, '-quiet', from, '-o', to]);
   const before = (await stat(from)).size;
   const after = (await stat(to)).size;
   saved += before - after;

@@ -381,10 +381,14 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
 
     // Money says nothing in the thread. It is furniture in the corner, and the
     // split behind it is shown only when somebody asks for it — a running
-    // commentary on cost is the anxiety this design exists to avoid.
+    // commentary on cost is the anxiety this design exists to avoid. `running`
+    // is furniture too, in its own band above the composer: a server outlives
+    // the sentence that started it, so filing it under that sentence would put
+    // it out of reach the moment the conversation moved on.
     case 'spend':
     case 'spend-summary':
     case 'model-reading':
+    case 'running':
     case 'settled':
       return turns;
   }

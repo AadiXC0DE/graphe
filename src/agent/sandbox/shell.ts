@@ -265,7 +265,7 @@ export function isForegroundDevelopmentServer(command: string): boolean {
  * asked for is already here. This is where that gets said.
  */
 export const CANNOT_LISTEN =
-  'I did not run that. What I run is sealed off from the network, so anything it started would hold a door nobody could knock on. Graphe serves the project itself, from outside that seal — ask to see it and it opens in the window here. To run a server in your own terminal instead, switch to "Gets on with it".';
+  'I did not run that here. A command run this way is waited on until it finishes, and this kind never does — and what I run has no port of its own to be reached on. Start it with the keep_running tool instead: it stays up after this turn, several can run at once, and it comes back with the address it is reachable at. Ask it about them again with running(), and end one with stop_running(id).';
 
 /** End a detached shell's entire process group. Killing its shell alone leaves
  * Vite/npm behind; killing the group is what makes the chat Stop button real. */

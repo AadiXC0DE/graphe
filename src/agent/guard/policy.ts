@@ -273,7 +273,25 @@ const WRITE_TOOLS = new Set([
   'copy',
 ]);
 const DELETE_TOOLS = new Set(['delete', 'deletefile', 'remove', 'removefile', 'rm', 'rmdir', 'trash']);
-const SHELL_TOOLS = new Set(['bash', 'shell', 'sh', 'terminal', 'exec', 'execute', 'runcommand', 'command', 'run']);
+/** Anything that runs a command somebody typed. `keeprunning` starts one that
+ *  stays up rather than one that finishes, which changes how long it lasts and
+ *  nothing at all about what it is allowed to be. */
+const SHELL_TOOLS = new Set([
+  'bash',
+  'shell',
+  'sh',
+  'terminal',
+  'exec',
+  'execute',
+  'runcommand',
+  'command',
+  'run',
+  'keeprunning',
+]);
+
+/** Asking after something already agreed to, and ending it. Neither runs
+ *  anything new, and a stop is the one action nobody should have to ask for. */
+const RUNNING_TOOLS = new Set(['running', 'stoprunning']);
 const SQL_TOOLS = new Set(['sql', 'query', 'dbquery', 'runsql', 'executesql', 'database', 'db', 'migrate']);
 const NETWORK_TOOLS = new Set(['fetch', 'http', 'httprequest', 'request', 'webfetch', 'download', 'upload', 'post', 'apicall']);
 /** Search engines. Their whole job is sending words out and bringing the
@@ -1629,6 +1647,8 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
 
   // Nothing gets to turn the Guard off, however politely it asks.
   if (GUARD_SWITCH.test(name)) return deny(SAY.guardOff);
+
+  if (RUNNING_TOOLS.has(name)) return allow();
 
   if (SHELL_TOOLS.has(name)) {
     // A command's relative locations are only safe if the folder it starts from

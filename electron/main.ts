@@ -212,6 +212,7 @@ import {
 import { StandingFile } from '../src/projects/standing';
 import { HandoverError, handToDeveloper, whatIsHere, type Change } from '../src/share/developer';
 import { handoverWords, worthTelling } from '../src/share/handover';
+import type { RunningPiece } from '../src/agent/types';
 import { OnlineError, putOnline, whatIsHereForOnline } from '../src/share/publish';
 import { onlineWords } from '../src/share/online';
 import { canPutOnline, canSendItOn } from '../src/share/tools';
@@ -3854,6 +3855,22 @@ function register(): void {
     const session = sessionAt(open, where);
     session?.stopAsking(on);
     return done(session?.quiet === true);
+  });
+
+  handle<readonly RunningPiece[]>(CHANNEL.running, (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(done([]));
+    return Promise.resolve(done(sessionAt(open, whereIn(args))?.running ?? []));
+  });
+
+  handle<readonly RunningPiece[]>(CHANNEL.stopRunning, (_event, args) => {
+    const [id] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
+    if (typeof id !== 'string') return Promise.resolve(fail(NOTHING_OPEN));
+    const session = sessionAt(open, whereIn(args));
+    session?.stopRunning(id);
+    return Promise.resolve(done(session?.running ?? []));
   });
 
   handle<HowFar>(CHANNEL.goAsFarAs, (_event, args) => {

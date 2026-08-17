@@ -43,6 +43,7 @@ import {
   type Preferences,
   type PromptAttachment,
   type PromptOptions,
+  type RunningPiece,
   type ProviderMethod,
   type PutBack,
   type RepoLook,
@@ -379,6 +380,19 @@ const api: GrapheApi = {
     const RUNGS: readonly string[] = ['looking', 'asking', 'changing', 'doing'];
     if (!RUNGS.includes(howFar)) return Promise.resolve(refuse<HowFar>('I could not apply that.'));
     return ipcRenderer.invoke(CHANNEL.goAsFarAs, howFar, named(where)) as Promise<Result<HowFar>>;
+  },
+
+  running(where?: Where): Promise<Result<readonly RunningPiece[]>> {
+    return ipcRenderer.invoke(CHANNEL.running, named(where)) as Promise<Result<readonly RunningPiece[]>>;
+  },
+
+  stopRunning(id: string, where?: Where): Promise<Result<readonly RunningPiece[]>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<readonly RunningPiece[]>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.stopRunning, id, named(where)) as Promise<
+      Result<readonly RunningPiece[]>
+    >;
   },
 
   revealFolder(where?: Where): Promise<Result<null>> {

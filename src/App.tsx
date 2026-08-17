@@ -28,6 +28,8 @@ import AddMore from "./components/AddMore";
 import ProjectMenu from "./components/ProjectMenu";
 import ProjectPicker from "./components/ProjectPicker";
 import BrowserPane, { type Room as PaneRoom } from "./components/BrowserPane";
+import Running from "./components/Running";
+import type { RunningPiece } from "./agent/types";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Usage from "./components/Usage";
 import Sidebar from "./components/Sidebar";
@@ -800,6 +802,9 @@ function Conversation() {
   const paneNow = useRef<PaneRoom>('off');
   /** Where the page is pointed. Null until something is being served. */
   const [pageAt, setPageAt] = useState<string | null>(null);
+  /** Servers and watchers this conversation has kept up. Drawn from what the
+   *  shell last said rather than asked for on a clock. */
+  const [running, setRunning] = useState<readonly RunningPiece[]>([]);
   /** A set of designs being compared, each served on its own address. Null until
    *  somebody asks for variations. */
   const [variations, setVariations] = useState<{
@@ -1035,6 +1040,14 @@ function Conversation() {
     });
   }, []);
 
+  /** What is already up. The band is kept in step by events afterwards, but a
+   *  window that has just opened has heard none of them yet. */
+  const refreshRunning = useCallback(() => {
+    void bridge.running().then((answer) => {
+      if (answer.ok) setRunning(answer.value);
+    });
+  }, []);
+
   const refreshRoom = useCallback(() => {
     void bridge.room().then((answer) => {
       if (answer.ok) setRoom(answer.value);
@@ -1215,6 +1228,7 @@ function Conversation() {
       void refreshOverview(opened.value.path);
       void refreshBuildPlan(opened.value.path);
       refreshRoom();
+      refreshRunning();
       void bridge.pages().then((answer) => {
         if (answer.ok) setPages(answer.value);
       });
@@ -1297,6 +1311,7 @@ function Conversation() {
         }),
       );
       refreshRoom();
+      refreshRunning();
       // A new session asks again, whatever the last one had been told.
       setHowFarHere('asking');
       const project = desksNow.current.current;
@@ -1444,6 +1459,7 @@ function Conversation() {
           void refreshOverview(where);
           void refreshFiles(where);
           refreshRoom();
+      refreshRunning();
           // A settle with real work behind it advances the build tracker one
           // task: the turn either finished the task it was on, or it got stuck.
           // Either way the plan on disk is the truth the next session resumes
@@ -1474,10 +1490,12 @@ function Conversation() {
         // Pi tidies on its own as well as when asked, and the ring says the
         // same thing either way — from where somebody is sitting it is one
         // event.
+        if (notice.event.type === 'running') setRunning(notice.event.pieces);
         if (notice.event.type === "tidying") setTidying(true);
         if (notice.event.type === "tidied") {
           setTidying(false);
           refreshRoom();
+      refreshRunning();
         }
       }),
     [
@@ -1485,6 +1503,7 @@ function Conversation() {
       refreshOverview,
       refreshFiles,
       refreshRoom,
+      refreshRunning,
       refreshBuildPlan,
       settledWell,
       movePane,
@@ -3292,6 +3311,21 @@ function Conversation() {
               }}
             />
             <InLine waiting={desk?.waiting ?? []} onTake={takeBack} />
+
+            {/* Servers and watchers outlive the sentence that started them, so
+                they sit above the composer rather than inside the conversation. */}
+            <Running
+              pieces={running}
+              onOpen={(address) => {
+                setPageAt(address);
+                movePane('split');
+              }}
+              onStop={(id) => {
+                void bridge.stopRunning(id).then((answer) => {
+                  if (answer.ok) setRunning(answer.value);
+                });
+              }}
+            />
 
             <Composer
               onSend={hand}

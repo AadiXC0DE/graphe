@@ -7,12 +7,15 @@
  *  write outside the folder it was given.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { boundaryHere, lookAgain } from '../src/agent/sandbox';
+import { seatbeltProfile } from '../src/agent/sandbox/profile';
 import {
   developmentServerCommand,
   downloadFolders,
@@ -158,10 +161,9 @@ describe('a server cannot come up inside the boundary, and says so', () => {
 
     expect(kept.runs).toHaveLength(0);
     expect(result.exitCode).not.toBe(0);
-    expect(said(heard)).toContain('sealed off');
-    // It names what to do instead — both ways.
-    expect(said(heard)).toContain('Graphe serves the project itself');
-    expect(said(heard)).toContain('Gets on with it');
+    // It names the tool that does work, rather than only saying no.
+    expect(said(heard)).toContain('keep_running');
+    expect(said(heard)).toContain('stop_running');
   });
 
   it('runs it in the person’s own terminal when they asked for that', async () => {
@@ -360,6 +362,63 @@ describe('where it is wired in', () => {
 /* ========================================================================== */
 /* The proof: a command of the main agent's, actually refused                  */
 /* ========================================================================== */
+
+/* The one capability a server needs and the ordinary boundary refuses. Proved
+   against the kernel rather than against the profile text: a rule that reads
+   right and does nothing is exactly the failure this is here to catch. */
+describe('the serving boundary', () => {
+  const SERVER = `
+import { createServer } from 'node:http';
+const s = createServer((_q, r) => r.end('ok'));
+s.on('error', (e) => { console.log('BIND FAILED ' + e.code); process.exit(3); });
+s.listen(0, '127.0.0.1', () => { console.log('LISTENING OK'); process.exit(0); });
+`;
+
+  const runFile = promisify(execFile);
+
+  async function tryToListen(reach: 'secure' | 'serving'): Promise<string> {
+    const folder = newFolder();
+    const script = join(folder, 'server.mjs');
+    writeFileSync(script, SERVER, 'utf8');
+    const profile = seatbeltProfile({ writable: [folder], reach });
+    const args = [
+      ...profile.params.flatMap(([name, value]) => ['-D', `${name}=${value}`]),
+      '-p',
+      profile.text,
+      process.execPath,
+      script,
+    ];
+    try {
+      const { stdout } = await runFile('/usr/bin/sandbox-exec', args, { timeout: 20_000 });
+      return stdout.trim();
+    } catch (cause) {
+      const said = cause as { stdout?: string; stderr?: string };
+      return `${said.stdout ?? ''}${said.stderr ?? ''}`.trim();
+    }
+  }
+
+  it.runIf(process.platform === 'darwin')('refuses a port under the ordinary boundary', async () => {
+    expect(await tryToListen('secure')).toContain('BIND FAILED');
+  }, 30_000);
+
+  it.runIf(process.platform === 'darwin')('allows one when serving was asked for', async () => {
+    expect(await tryToListen('serving')).toContain('LISTENING OK');
+  }, 30_000);
+
+  it('opens nothing to a machine that is not this one', () => {
+    const text = seatbeltProfile({ writable: ['/tmp/x'], reach: 'serving' }).text;
+    expect(text).toContain('network-bind');
+    // Every rule it adds is bounded to this machine.
+    for (const line of text.split('\n').filter((one) => one.includes('network-bind') || one.includes('network-inbound'))) {
+      expect(line).toContain('localhost');
+    }
+  });
+
+  it('leaves the ordinary boundary exactly as it was', () => {
+    expect(seatbeltProfile({ writable: ['/tmp/x'], reach: 'secure' }).text).not.toContain('network-bind');
+    expect(seatbeltProfile({ writable: ['/tmp/x'], reach: 'nothing' }).text).not.toContain('network-bind');
+  });
+});
 
 describe('a real refusal', () => {
   it('will not let the main agent write outside the folder it was given', async () => {

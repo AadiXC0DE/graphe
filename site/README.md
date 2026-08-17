@@ -12,6 +12,7 @@ site/
     fonts/          Satoshi, the same face the app wears
     shots/          2x captures, kept
     web/            what the page actually loads (WebP, resized)
+  serve.mjs         a static server, for looking at it locally
   scripts/
     shots.mjs       captures the pictures from the running app
     optimise.mjs    turns the captures into what the page loads
@@ -20,10 +21,11 @@ site/
 ## Looking at it
 
 ```
-cd site && python3 -m http.server 4321
+node site/serve.mjs
 ```
 
-Then <http://localhost:4321>. Any static server will do; there is nothing to compile.
+Then <http://localhost:4321>. Any static server will do; there is nothing to
+compile, and nothing to install — `serve.mjs` is forty lines of `node:http`.
 
 ## The pictures
 

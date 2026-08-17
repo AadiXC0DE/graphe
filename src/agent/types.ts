@@ -46,6 +46,30 @@ export type GuardContext = {
   projectRoot: string;
 };
 
+/** Whether something kept running is on its way up, up, or over. */
+export type RunState = 'starting' | 'running' | 'stopped';
+
+/**
+ * One thing being kept running: a server, a watcher, an API.
+ *
+ * Declared here rather than beside the register that owns it, because the
+ * window draws these and nothing the window imports may drag a process module
+ * in behind it.
+ */
+export type RunningPiece = {
+  id: string;
+  /** What to call it in a sentence. The person's own words when they gave any. */
+  label: string;
+  command: string;
+  folder: string;
+  /** Where it can be reached, once it has said. Null until then. */
+  address: string | null;
+  state: RunState;
+  since: number;
+  /** Null while it is up; the code it ended with once it is not. */
+  exitCode: number | null;
+};
+
 /** Money, in the smallest unit of the user's currency, to avoid float drift. */
 export type Money = {
   /** e.g. 4025 means 40.25 */
@@ -189,4 +213,12 @@ export type AgentEvent =
   | { type: 'spend-summary'; summary: SpendSummary }
   /** How the model was used this sitting — cache reuse and which model most.
    *  Updated as turns land; never carries raw counts. */
-  | { type: 'model-reading'; reading: SittingUsage };
+  | { type: 'model-reading'; reading: SittingUsage }
+  /**
+   * What is being kept running right now.
+   *
+   * Sent whenever one starts, says where it is, or stops — not on a clock. The
+   * window draws the band from this and nothing else, so a server that fell
+   * over stops claiming to be up without anybody having to ask it.
+   */
+  | { type: 'running'; pieces: readonly RunningPiece[] };

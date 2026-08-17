@@ -17,7 +17,6 @@ import FileView from "./components/FileView";
 import HelperRail from "./components/HelperRail";
 import HelpersView from "./components/HelpersView";
 import InLine from "./components/InLine";
-import Inspector from "./components/Inspector";
 import Message from "./components/Message";
 import type { Outcome } from "./components/Landing";
 import Overview from "./components/Overview";
@@ -92,7 +91,6 @@ import {
   type Workflow,
   type HowFar,
   type Money,
-  type PointedAt,
   type Recording,
   type ShowProgress,
   type SpendLimit,
@@ -790,10 +788,6 @@ function Conversation() {
    *  avoid. */
   const [draft, setDraft] = useState("");
 
-  /** The last thing somebody pointed at, and what we could read about it.
-   *  Null until they point at something. */
-  const [pointed, setPointed] = useState<PointedAt | null>(null);
-
   /** How the window is split between the conversation and the project's own
    *  page. Off until somebody opens it. */
   const [pane, setPane] = useState<PaneRoom>('off');
@@ -867,12 +861,17 @@ function Conversation() {
     });
   const reducedMotion = usePrefersReducedMotion();
 
-  /* Somebody clicked something — in their own browser, or in the page beside
-     the conversation. The card goes in the rail; the sentence stays available
-     for the message, but is no longer put in the box on their behalf. */
+  /* Somebody pointed at something in the page.
+     
+     Straight into the composer, and nothing else. The reading behind it is
+     genuinely useful, but the page is a native view painted above everything
+     this tree draws — so every card offering that reading was a card nobody
+     could see, and the press that put the element in the message was behind it.
+     What somebody wants from pointing at a button is to talk about that button,
+     and the sentence already carries its file, its component and its values. */
   useEffect(() => {
     return bridge.onPointed((at) => {
-      setPointed(at);
+      setDraft((was) => (was.trim() === '' ? `${at.says} — ` : `${was} ${at.says}`));
     });
   }, []);
 
@@ -3366,28 +3365,6 @@ function Conversation() {
         )}
       </div>
 
-      {/* What was pointed at, in the rail. Never over the page: the page is a
-          native view and paints above everything this tree draws, so a card
-          there would be a card nobody could see.
-
-          No `onWidth` on purpose — photographing the page at another size means
-          resizing it under somebody mid-read. Left off, the card says which
-          size it was read at rather than offering a press that does nothing. */}
-      {pointed === null ? null : (
-        <aside className="pointedat" aria-label="What you pointed at">
-          <Inspector
-            reading={pointed.reading}
-            onClose={() => setPointed(null)}
-            onAsk={() => {
-              setDraft((was) =>
-                was.trim() === '' ? `${pointed.says} — ` : `${was} ${pointed.says}`,
-              );
-              setPointed(null);
-            }}
-          />
-        </aside>
-      )}
-
       {overviewed && desk !== null ? (
         <Overview
           view={{
@@ -3567,7 +3544,12 @@ function Conversation() {
           }
           setWatching(false);
           void bridge.watchStop().then((answer) => {
-            if (answer.ok) setWalked(answer.value);
+            if (!answer.ok) return;
+            setWalked(answer.value);
+            // The strip of states is drawn in the conversation. Recording it
+            // from a page filling the whole window would put the result
+            // somewhere nobody could see it, so the conversation comes back.
+            if (answer.value !== null) movePane('split');
           });
         }}
         onBounds={(bounds) => {

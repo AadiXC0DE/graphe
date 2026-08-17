@@ -294,11 +294,6 @@ a {
   flex: none;
 }
 
-.btn--small .btn__apple {
-  width: 13px;
-  height: 15px;
-  margin-inline-end: 6px;
-}
 
 .btn--primary {
   background: var(--coral);

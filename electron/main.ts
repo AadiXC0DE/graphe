@@ -5353,9 +5353,14 @@ function register(): void {
 
   handle<null>(CHANNEL.openLink, async (_event, args) => {
     const [url] = args;
-    // https only, and nothing else: this window must never become somebody's
-    // browser. The one thing it may open is a link a person asked for.
-    if (typeof url !== 'string' || !/^https:\/\//.test(url)) return done(null);
+    // Locked addresses, and this machine. This window must never become
+    // somebody's browser: the only two things it may open are a link a person
+    // asked for, and something they are running here — which is plain http and
+    // would otherwise be dropped without a word.
+    const allowed =
+      typeof url === 'string' &&
+      (/^https:\/\//.test(url) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d{2,5})?(\/|$)/.test(url));
+    if (!allowed) return done(null);
     await shell.openExternal(url);
     return done(null);
   });

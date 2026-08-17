@@ -22,8 +22,8 @@ for (const item of document.querySelectorAll('[data-reveal]')) arriving.observe(
 
 /** What the caption says under each screen, so the picture is never unlabelled. */
 const CAPTIONS = {
-  work: ['paper-street', 'a plan, waiting for a yes'],
-  design: ['paper-street — design', 'your own tokens, read as a spec'],
+  work: ['graphe', 'the files, the work, and what is running'],
+  design: ['graphe — design', 'your own tokens, read as a spec'],
   history: ['graphe — history', '87 moments saved, drawn as lines'],
   skills: ['graphe — skills', 'craft you installed, ready to use'],
 };
@@ -64,37 +64,6 @@ document.querySelector('.stage__tabs')?.addEventListener('keydown', (event) => {
   show(next.dataset.view);
 });
 
-/* ── plain words, or the real thing ──────────────────────────────────── */
-
-const segButtons = [...document.querySelectorAll('.seg__btn')];
-const panels = [...document.querySelectorAll('.panel')];
-const pill = document.querySelector('.seg__pill');
-
-function placePill(button) {
-  if (!pill || !button) return;
-  pill.style.width = `${button.offsetWidth}px`;
-  pill.style.transform = `translateX(${button.offsetLeft - 4}px)`;
-}
-
-function tell(which) {
-  for (const button of segButtons) button.classList.toggle('is-on', button.dataset.show === which);
-  for (const panel of panels) panel.classList.toggle('is-on', panel.dataset.panel === which);
-  placePill(segButtons.find((button) => button.dataset.show === which));
-}
-
-for (const button of segButtons) {
-  button.addEventListener('click', () => tell(button.dataset.show));
-}
-
-if (segButtons.length > 0) {
-  placePill(segButtons[0]);
-  // The pill is measured, so it has to be measured again when the type reflows.
-  window.addEventListener('resize', () => {
-    placePill(segButtons.find((button) => button.classList.contains('is-on')));
-  });
-  document.fonts?.ready.then(() => placePill(segButtons.find((b) => b.classList.contains('is-on'))));
-}
-
 /* ── the nav notices it is no longer at the top ──────────────────────── */
 
 const nav = document.getElementById('nav');
@@ -127,24 +96,6 @@ if (steps.length > 0) {
   );
   for (const step of steps) here.observe(step);
 }
-
-/* ── the one line somebody actually needs to copy ────────────────────── */
-
-const copier = document.querySelector('[data-copy]');
-const copySay = document.querySelector('[data-copy-say]');
-
-copier?.addEventListener('click', async () => {
-  try {
-    await navigator.clipboard.writeText(copier.dataset.copy);
-    if (!copySay) return;
-    copySay.textContent = 'Copied';
-    setTimeout(() => {
-      copySay.textContent = 'Copy';
-    }, 1600);
-  } catch {
-    if (copySay) copySay.textContent = 'Select it';
-  }
-});
 
 /* ── the window shows itself once, so the tabs read as tabs ──────────── */
 

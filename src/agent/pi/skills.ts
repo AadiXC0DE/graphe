@@ -121,8 +121,15 @@ export async function selectedSkills(
   agentDir: string,
   text: string,
 ): Promise<readonly AvailableSkill[]> {
-  const byHandle = new Map((await availableSkills(project, agentDir)).map((skill) => [skill.handle, skill]));
   const handles = [...text.matchAll(/(?:^|\s)@([a-z0-9][a-z0-9-]*)\b/gi)].map((match) => (match[1] ?? '').toLowerCase());
+  // Read what is asked for before reading what exists. Finding out what exists
+  // walks every skill folder on the machine and opens every file in them, and
+  // this runs on every single thing anybody types — almost none of which names
+  // a skill at all. That walk was silent time between pressing send and the
+  // first word coming back.
+  if (handles.length === 0) return [];
+
+  const byHandle = new Map((await availableSkills(project, agentDir)).map((skill) => [skill.handle, skill]));
   return [...new Set(handles)].flatMap((handle) => {
     const skill = byHandle.get(handle);
     return skill === undefined ? [] : [skill];

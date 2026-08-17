@@ -50,9 +50,12 @@
   --pad-x: clamp(20px, 5vw, 64px);
   --band-y: clamp(80px, 11vh, 160px);
 
-  --r-sm: 8px;
-  --r-md: 14px;
-  --r-lg: 22px;
+  /* Nearly square. Everything here is a screenshot of an interface, a rule, or
+     a block of text — none of it is a bubble, and rounding it all until it is
+     one is the single loudest tell of a page nobody chose the shape of. */
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 8px;
 }
 
 *,
@@ -182,9 +185,9 @@ a {
 
 .mark__beta {
   margin-inline-start: 2px;
-  padding: 3px 8px;
+  padding: 3px 7px;
   border: 1px solid rgba(224, 118, 79, 0.4);
-  border-radius: 100px;
+  border-radius: 2px;
   font-size: 0.625rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -232,9 +235,10 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 12px;
+  padding: 0 12px;
+  height: 36px;
   border: 1px solid var(--edge);
-  border-radius: 100px;
+  border-radius: var(--r-sm);
   font-family: var(--mono);
   font-size: 0.75rem;
   color: var(--haze);
@@ -260,9 +264,9 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 14px 24px;
+  padding: 13px 22px;
   border: 1px solid transparent;
-  border-radius: 100px;
+  border-radius: var(--r-sm);
   font: inherit;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -287,14 +291,15 @@ a {
 }
 
 .btn--small {
-  padding: 9px 18px;
+  padding: 0 18px;
+  height: 36px;
   font-size: 0.9375rem;
   background: #f0ece9;
   color: var(--night);
 }
 
 .btn--tiny {
-  padding: 7px 14px;
+  padding: 7px 13px;
   font-size: 0.8125rem;
   background: var(--coral);
   color: #1a0f0a;
@@ -534,9 +539,9 @@ a {
 }
 
 .tab {
-  padding: 8px 16px;
+  padding: 8px 15px;
   border: 1px solid var(--edge);
-  border-radius: 100px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--haze);
   font: inherit;
@@ -691,99 +696,46 @@ a {
 
 /* ─────────────────────────────────────────────────────────────── steps ── */
 
-.how {
+/* A numbered sequence, set as one. The number is a figure in the margin, not a
+   badge on a rail — a step is a line in a list of instructions, and drawing it
+   as a station on a track is decoration standing in for structure. */
+.steps {
   max-width: var(--wide);
   margin: 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
-  gap: clamp(32px, 5vw, 72px);
-  align-items: start;
-}
-
-.how__shot {
-  position: sticky;
-  top: 104px;
-  margin: 0;
-}
-
-.how__shot figcaption {
-  margin-top: 14px;
-  color: var(--ink-muted);
-  font-size: 0.75rem;
-  text-align: center;
-}
-
-.frame--light {
-  border-color: var(--paper-edge);
-  background: var(--paper);
-  box-shadow: 0 30px 70px -40px rgba(26, 26, 25, 0.45);
-}
-
-.frame--light .frame__bar {
-  border-bottom-color: var(--paper-edge);
-  background: var(--paper-sunken);
-}
-
-.frame--light .frame__dots i {
-  background: #d2d2ce;
-}
-
-.frame--light .frame__name {
-  color: var(--ink-muted);
-}
-
-.steps {
-  margin: 0;
   padding: 0;
   list-style: none;
-  position: relative;
-}
-
-.steps::before {
-  content: '';
-  position: absolute;
-  inset-block: 12px;
-  left: 27px;
-  width: 1px;
-  background: var(--paper-edge);
+  border-top: 1px solid var(--paper-edge);
 }
 
 .step {
-  display: flex;
-  gap: 28px;
-  padding-block: 22px;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1fr);
+  gap: 0 clamp(16px, 2vw, 28px);
+  padding: 26px 0;
+  border-bottom: 1px solid var(--paper-edge);
 }
 
 .step__no {
-  flex: none;
-  width: 54px;
-  height: 54px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--paper-edge);
-  border-radius: 50%;
-  background: var(--paper);
-  color: var(--ink-muted);
   font-size: 0.8125rem;
-  letter-spacing: 0.06em;
-  transition: color 260ms ease, border-color 260ms ease, background-color 260ms ease;
+  line-height: 1.7;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  transition: color 260ms ease;
 }
 
 .step.is-here .step__no {
-  color: var(--paper);
-  background: var(--brick);
-  border-color: var(--brick);
+  color: var(--brick);
 }
 
 .step__body h3 {
-  font-size: clamp(1.25rem, 1.1rem + 0.5vw, 1.5rem);
-  margin-bottom: 8px;
+  font-size: clamp(1.1875rem, 1.1rem + 0.4vw, 1.375rem);
+  margin-bottom: 7px;
 }
 
 .step__body p {
   color: var(--ink-muted);
-  max-width: 54ch;
+  max-width: 52ch;
 }
 
 /* ─────────────────────────────────────────────────────────────── pi ── */
@@ -1030,133 +982,61 @@ a {
   font-size: 0.75rem;
 }
 
-/* ────────────────────────────────────────────────────────── show me ── */
+/* ────────────────────────────────────────────────── both audiences ── */
 
-/* Centred on purpose: the band before it is left-aligned against a picture, and
-   two identical compositions in a row read as a template. */
-#both .head {
-  text-align: center;
-}
-
-#both .head__lead {
-  margin-inline: auto;
-}
-
-.showme {
-  max-width: 860px;
-  margin: 0 auto;
-  text-align: center;
-}
-
-.seg {
-  position: relative;
-  display: inline-flex;
-  padding: 4px;
-  border: 1px solid var(--paper-edge);
-  border-radius: 100px;
-  background: var(--paper-sunken);
-}
-
-.seg__pill {
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  left: 4px;
-  width: var(--pill-w, 132px);
-  border-radius: 100px;
-  background: var(--ink);
-  transition: transform 220ms var(--ease-out), width 220ms var(--ease-out);
-}
-
-.seg__btn {
-  position: relative;
-  z-index: 1;
-  padding: 9px 20px;
-  border: 0;
-  border-radius: 100px;
-  background: transparent;
-  font: inherit;
-  font-weight: 600;
-  font-size: 0.9375rem;
-  color: var(--ink-muted);
-  cursor: pointer;
-  transition: color 200ms ease;
-}
-
-.seg__btn.is-on {
-  color: var(--paper);
-}
-
-.showme__panels {
-  position: relative;
-  margin-top: 26px;
-  min-height: 232px;
-}
-
-.panel {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  gap: 2px;
-  align-content: start;
-  opacity: 0;
-  filter: blur(4px);
-  pointer-events: none;
-  transition: opacity 260ms var(--ease-out), filter 260ms var(--ease-out);
-}
-
-.panel.is-on {
-  opacity: 1;
-  filter: blur(0);
-  pointer-events: auto;
-}
-
-.panel__line {
-  text-align: left;
-  padding: 14px 20px;
-  border: 1px solid var(--paper-edge);
-  border-radius: var(--r-sm);
-  background: var(--paper);
-  overflow-x: auto;
-  white-space: nowrap;
-}
-
-.panel__line.mono {
-  font-size: 0.8125rem;
-  color: var(--brick);
-  background: var(--paper-sunken);
-}
-
-.showme__note {
-  margin: 28px auto 0;
-  color: var(--ink-muted);
-  max-width: 54ch;
-}
-
-/* The machinery, shown rather than described — a dark panel on paper, which is
-   what opening it actually feels like. */
-.under {
+/* Two columns, one row per event: the left is what anybody reads, the right is
+   what actually ran. Reading across a row is the whole argument. */
+.both {
   max-width: var(--wide);
-  margin: clamp(56px, 7vw, 88px) auto 0;
-  text-align: center;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: clamp(24px, 4vw, 64px);
+  border-top: 1px solid var(--paper-edge);
 }
 
-.under img {
-  border: 1px solid var(--ink);
-  border-radius: var(--r-md);
-  box-shadow: 0 30px 70px -44px rgba(26, 26, 25, 0.55);
-}
-
-.under figcaption {
-  margin: 20px auto 0;
-  max-width: 58ch;
+.both__head {
+  padding: 18px 0 14px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--ink-muted);
-  font-size: 0.9375rem;
+}
+
+.both__plain,
+.both__real {
+  padding: 16px 0;
+  border-top: 1px solid var(--paper-edge);
+  align-self: stretch;
+}
+
+.both__plain {
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+/* Wraps rather than scrolls. A row that hides its own end behind a scrollbar is
+   a row nobody reads. */
+.both__real {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--brick);
+  overflow-wrap: anywhere;
+}
+
+.both__note {
+  max-width: 60ch;
+  margin: clamp(32px, 4vw, 52px) 0 0;
+  color: var(--ink-muted);
 }
 
 /* ─────────────────────────────────────────────────────── the sheet ── */
 
 .sheet {
+  counter-reset: cell;
   max-width: var(--full);
   margin: 0 auto;
   display: grid;
@@ -1169,14 +1049,31 @@ a {
 }
 
 .cell {
+  position: relative;
   background: var(--night);
-  padding: 26px 24px 28px;
+  padding: 30px 24px 30px;
   transition: background-color 200ms ease;
+}
+
+/* Its place on the sheet, in the corner. The grid is a contact sheet of what
+   the app does, and a frame number is what a contact sheet carries. */
+.cell::before {
+  content: counter(cell, decimal-leading-zero);
+  counter-increment: cell;
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  color: var(--edge-strong);
+  transition: color 200ms ease;
 }
 
 .cell h3 {
   font-size: 1.0625rem;
   margin-bottom: 8px;
+  padding-right: 2.5rem;
 }
 
 .cell p {
@@ -1195,6 +1092,10 @@ a {
   }
 
   .cell:hover h3 {
+    color: var(--coral);
+  }
+
+  .cell:hover::before {
     color: var(--coral);
   }
 }
@@ -1300,14 +1201,20 @@ a {
   margin-bottom: 38px;
 }
 
+.cta__fine {
+  margin-top: 26px;
+  color: var(--haze-dim);
+  font-size: 0.75rem;
+}
+
 .copy {
   margin-top: 28px;
   display: inline-flex;
   align-items: center;
   gap: 16px;
-  padding: 12px 16px 12px 20px;
+  padding: 12px 16px 12px 18px;
   border: 1px solid var(--edge);
-  border-radius: 100px;
+  border-radius: var(--r-sm);
   background: var(--night-raised);
   color: var(--haze);
   font: inherit;
@@ -1398,14 +1305,8 @@ a {
 
 @media (max-width: 1000px) {
   .split,
-  .away,
-  .how {
+  .away {
     grid-template-columns: 1fr;
-  }
-
-  .how__shot {
-    position: static;
-    margin-top: 12px;
   }
 
   .layers {

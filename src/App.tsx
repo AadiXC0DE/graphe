@@ -3540,6 +3540,7 @@ function Conversation() {
         room={pane}
         address={pageAt ?? previewUrl}
         onAddress={setPageAt}
+        onElsewhere={(address) => void bridge.openLink(address)}
         onRoom={movePane}
         onClose={() => movePane('off')}
         variations={

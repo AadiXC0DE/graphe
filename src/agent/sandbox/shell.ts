@@ -177,22 +177,95 @@ export function quoted(word: string): string {
   return `'${word.split("'").join("'\\''")}'`;
 }
 
+/**
+ * The ways somebody starts something that waits to be reached.
+ *
+ * Wider than the package managers on purpose. Whatever the wording, all of these
+ * end the same way: a process that sits there holding a port. Two places need to
+ * know which those are — the runner with the person's own terminal, where one
+ * must be let go of rather than waited on, and the contained runner, where one
+ * cannot work at all.
+ */
+/** Ends a name without swallowing the next word of a longer one, so `serve`
+ *  does not match `serve-report`. */
+const ENDS = '(?![\\w-])';
+
+const SERVER_COMMANDS = [
+  // Whatever the project calls its own.
+  new RegExp(`^(?:npm|pnpm)\\s+run\\s+(?:dev|serve|start|preview)${ENDS}`),
+  new RegExp(`^(?:npm|pnpm|yarn|bun)\\s+(?:dev|serve|start|preview)${ENDS}`),
+  // A folder of files, served as they are.
+  new RegExp(`^(?:python3?|py)\\s+-m\\s+(?:http\\.server|SimpleHTTPServer)${ENDS}`),
+  new RegExp(`^php\\s+-S${ENDS}`),
+  new RegExp(`^ruby\\s+-run\\s+-e\\s+httpd${ENDS}`),
+  new RegExp(`^busybox\\s+httpd${ENDS}`),
+  // The usual ones, run directly or fetched by npx.
+  new RegExp(
+    `^(?:npx\\s+(?:-y\\s+)?)?(?:serve|http-server|live-server|vite|nodemon|browser-sync|miniserve|caddy)${ENDS}`,
+  ),
+  new RegExp(
+    `^(?:npx\\s+(?:-y\\s+)?)?(?:next|nuxt|astro|remix|svelte-kit|gatsby|ng|expo)\\s+(?:dev|start|serve)${ENDS}`,
+  ),
+  new RegExp(`^(?:npx\\s+(?:-y\\s+)?)?webpack(?:-dev-server)?\\s+serve${ENDS}`),
+] as const;
+
+/** One command out of a line of them, with the wrappers people put round a
+ *  server taken off: the brackets, the `nohup`, the trailing `&`. */
+function bare(piece: string): string {
+  return piece
+    .trim()
+    .replace(/^\(\s*/, '')
+    .replace(/^nohup\s+/, '')
+    .replace(/\s*&\s*$/, '')
+    .trim();
+}
+
+/**
+ * Does any part of this line start something that waits to be reached?
+ *
+ * Any part, not the first: `cd site && python3 -m http.server` is how anybody
+ * would write it, and reading only the front of the line meant the one shape
+ * people actually type was the one shape that went unrecognised.
+ */
+function startsAServer(line: string): boolean {
+  for (const raw of line.split(/&&|\|\||;|\n/)) {
+    // The head of a pipeline is the thing that runs; `| tee log` is not.
+    const head = bare(raw.split('|')[0] ?? '');
+    if (SERVER_COMMANDS.some((shape) => shape.test(head))) return true;
+  }
+  return false;
+}
+
 /** A foreground development server does useful work only after it has returned
  * its URL. Letting one occupy the agent's one command slot makes it look as if
  * the agent has frozen, and it prevents the next check from ever running. */
 export function developmentServerCommand(command: string): string | null {
   const trimmed = command.trim();
   const grouped = /^\(\s*([\s\S]+?)\s*&\s*(?:echo\s+\$!|disown)?\s*\)$/.exec(trimmed)?.[1]?.trim();
-  const noHup = /^nohup\s+([\s\S]*?)\s*&?\s*$/.exec(grouped ?? trimmed)?.[1]?.trim();
-  const candidate = noHup ?? grouped ?? trimmed;
-  return /^(?:(?:npm|pnpm)\s+run\s+|(?:npm|pnpm|yarn|bun)\s+)(?:dev|serve|start|preview)\b/.test(candidate)
-    ? candidate
-    : null;
+  const whole = grouped ?? trimmed;
+  const candidate =
+    /^nohup\s+([\s\S]*?)\s*&?\s*$/.exec(whole)?.[1]?.trim() ?? whole.replace(/\s*&\s*$/, '');
+  return startsAServer(candidate) ? candidate : null;
 }
 
 export function isForegroundDevelopmentServer(command: string): boolean {
   return developmentServerCommand(command) !== null;
 }
+
+/**
+ * Nothing inside the boundary can be reached from outside it.
+ *
+ * The boundary opens one way out and nothing at all coming back, so a server
+ * started in there holds a port nobody can knock on. It used to fail as
+ * `Operation not permitted` several commands deep, which reads as a broken
+ * machine rather than as the rule it is — and the agent's next four guesses
+ * were all the same command wearing a different hat.
+ *
+ * Graphe serves its own preview from outside the boundary, so the thing being
+ * asked for is already here. This is where that gets said.
+ */
+export const CANNOT_LISTEN =
+  'I did not run that here. A command run this way is waited on until it finishes, and this kind never does — and what I run has no port of its own to be reached on. Start it with the keep_running tool instead: it stays up after this turn, several can run at once, and it comes back with the address it is reachable at. Ask it about them again with running(), and end one with stop_running(id).';
 
 /** End a detached shell's entire process group. Killing its shell alone leaves
  * Vite/npm behind; killing the group is what makes the chat Stop button real. */
@@ -339,6 +412,12 @@ export function heldShell(options: HeldShellOptions): HeldShell {
             ? { ...run, timeout: 20 * 60 }
             : run;
         return (options.unrestrictedPlain ?? options.plain)(command, cwd, capped);
+      }
+
+      // Said before it is attempted, because attempting it can only end one way.
+      if (isForegroundDevelopmentServer(command)) {
+        run.onData(Buffer.from(`${CANNOT_LISTEN}\n`));
+        return { exitCode: 1 };
       }
 
       const folder = await scratchFolder();

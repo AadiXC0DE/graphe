@@ -43,6 +43,7 @@ import {
   type Preferences,
   type PromptAttachment,
   type PromptOptions,
+  type RunningPiece,
   type ProviderMethod,
   type PutBack,
   type RepoLook,
@@ -381,6 +382,19 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.goAsFarAs, howFar, named(where)) as Promise<Result<HowFar>>;
   },
 
+  running(where?: Where): Promise<Result<readonly RunningPiece[]>> {
+    return ipcRenderer.invoke(CHANNEL.running, named(where)) as Promise<Result<readonly RunningPiece[]>>;
+  },
+
+  stopRunning(id: string, where?: Where): Promise<Result<readonly RunningPiece[]>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<readonly RunningPiece[]>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.stopRunning, id, named(where)) as Promise<
+      Result<readonly RunningPiece[]>
+    >;
+  },
+
   revealFolder(where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.revealFolder, named(where)) as Promise<Result<null>>;
   },
@@ -623,6 +637,7 @@ const api: GrapheApi = {
   pageAt(
     address: string | null,
     bounds: { x: number; y: number; width: number; height: number } | null,
+    again?: boolean,
   ): Promise<Result<null>> {
     const fine =
       bounds === null ||
@@ -633,7 +648,7 @@ const api: GrapheApi = {
     if ((address !== null && typeof address !== 'string') || !fine) {
       return Promise.resolve(refuse<null>('I could not tell where to put the page.'));
     }
-    return ipcRenderer.invoke(CHANNEL.pageAt, address, bounds) as Promise<Result<null>>;
+    return ipcRenderer.invoke(CHANNEL.pageAt, address, bounds, again === true) as Promise<Result<null>>;
   },
 
   pageHidden(hidden: boolean): Promise<Result<null>> {

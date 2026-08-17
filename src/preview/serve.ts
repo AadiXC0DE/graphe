@@ -33,6 +33,7 @@ import { extname, join, resolve, sep } from 'node:path';
 import {
   injectPointer,
   POINT_PATH,
+  SAID_MAX,
   type Pointed,
   type PointedSource,
   type Rect,
@@ -284,7 +285,13 @@ function asPointed(value: unknown): Pointed | null {
   const rect = asRect(from['rect']);
   if (rect === null) return null;
 
+  // Somebody's own words, arriving from a page. Length is the only thing worth
+  // checking here — everything downstream treats it as text and never as markup.
+  const said = from['said'];
+  if (said !== undefined && (typeof said !== 'string' || said.length > SAID_MAX)) return null;
+
   const pointed: Pointed = { selector, label, rect };
+  if (typeof said === 'string' && said.trim() !== '') pointed.said = said.trim();
   if (typeof kind === 'string') pointed.kind = kind;
 
   if (from['place'] !== undefined) {

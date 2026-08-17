@@ -25,6 +25,7 @@ import {
   safeToWriteTo,
   titleOf,
   whereAPictureLives,
+  worthTelling,
   type Handover,
   type Piece,
 } from './handover';
@@ -155,7 +156,10 @@ async function carryPictures(
   home: string | null,
   name: string,
 ): Promise<Piece[]> {
-  await mkdir(path.join(into, ALONGSIDE), { recursive: true });
+  // Only when there is something to carry. Work that was never photographed
+  // should leave no folder of ours in somebody else's project.
+  const any = changes.some((change) => change.before !== null || change.after !== null);
+  if (any) await mkdir(path.join(into, ALONGSIDE), { recursive: true });
   const pieces: Piece[] = [];
 
   for (const [at, change] of changes.entries()) {
@@ -181,8 +185,14 @@ async function carryPictures(
   return pieces;
 }
 
-/** The same write-up as a page anybody can open with no network at all, kept
- *  beside the pictures. One file, and it works a year later on a train. */
+/**
+ * The same write-up as a page anybody can open with no network at all, kept
+ * beside the pictures. One file, and it works a year later on a train.
+ *
+ * Only written when there are pictures to put in it. A page of headings with
+ * nothing under them is a file in somebody's review that costs them a scroll and
+ * tells them nothing.
+ */
 async function pageBeside(
   into: string,
   project: string,
@@ -190,6 +200,8 @@ async function pageBeside(
   at: number,
   spent: string | null,
 ): Promise<void> {
+  if (!changes.some((change) => change.before !== null || change.after !== null)) return;
+
   const shown: Shown[] = [];
   for (const change of changes) {
     shown.push({
@@ -230,9 +242,13 @@ async function gather(options: {
     await options.history.addWorkspace(where);
     const pieces = await carryPictures(where, options.changes, options.home, options.name);
     await pageBeside(where, options.projectName, options.changes, options.at, options.spent);
-    const version = await new ProjectHistory(where).snapshot(
-      titleOf({ project: options.projectName, title: options.title, pieces }),
-    );
+    // Nothing of ours to add means nothing to save: the work travels as it
+    // stands rather than carrying an empty moment on top of it.
+    const inside = new ProjectHistory(where);
+    const version =
+      (await inside.snapshot(
+        titleOf({ project: options.projectName, title: options.title, pieces }),
+      )) ?? (await inside.currentVersion());
     return { pieces, version };
   } finally {
     await options.history.removeWorkspace(where).catch(() => undefined);
@@ -259,7 +275,13 @@ export async function handToDeveloper(options: HandOverOptions): Promise<Handed>
   const shared = await options.history.sharedCopy();
   const reach = canSendItOn({ ...found, home: shared === null ? null : found.home });
 
-  const name = nameForWork(options.title, options.at);
+  // What the work is called has to name the work. A title the timeline wrote
+  // for itself would end up on the line of work and at the top of the request.
+  const title = worthTelling(options.title)
+    ? options.title
+    : (changes.find((one) => worthTelling(one.title))?.title ?? options.name);
+
+  const name = nameForWork(title, options.at);
   if (!safeToWriteTo(name, found.theProjectItself)) {
     throw new HandoverError(handoverWords.couldNotSend);
   }
@@ -269,7 +291,7 @@ export async function handToDeveloper(options: HandOverOptions): Promise<Handed>
   // then had to be trusted to throw away.
   const safe = safeToHandOver({
     project: options.name,
-    title: options.title,
+    title,
     pieces: changes.map((change) => ({
       title: change.title,
       says: change.says,
@@ -284,7 +306,7 @@ export async function handToDeveloper(options: HandOverOptions): Promise<Handed>
     under: options.under,
     name,
     projectName: options.name,
-    title: options.title,
+    title,
     changes,
     at: options.at,
     spent: options.spent ?? null,
@@ -295,7 +317,7 @@ export async function handToDeveloper(options: HandOverOptions): Promise<Handed>
 
   const handover: Handover = {
     project: options.name,
-    title: options.title,
+    title,
     pieces: gathered.pieces,
   };
   await options.history.nameLine(name, version);

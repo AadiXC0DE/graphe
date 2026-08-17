@@ -273,7 +273,25 @@ const WRITE_TOOLS = new Set([
   'copy',
 ]);
 const DELETE_TOOLS = new Set(['delete', 'deletefile', 'remove', 'removefile', 'rm', 'rmdir', 'trash']);
-const SHELL_TOOLS = new Set(['bash', 'shell', 'sh', 'terminal', 'exec', 'execute', 'runcommand', 'command', 'run']);
+/** Anything that runs a command somebody typed. `keeprunning` starts one that
+ *  stays up rather than one that finishes, which changes how long it lasts and
+ *  nothing at all about what it is allowed to be. */
+const SHELL_TOOLS = new Set([
+  'bash',
+  'shell',
+  'sh',
+  'terminal',
+  'exec',
+  'execute',
+  'runcommand',
+  'command',
+  'run',
+  'keeprunning',
+]);
+
+/** Asking after something already agreed to, and ending it. Neither runs
+ *  anything new, and a stop is the one action nobody should have to ask for. */
+const RUNNING_TOOLS = new Set(['running', 'stoprunning']);
 const SQL_TOOLS = new Set(['sql', 'query', 'dbquery', 'runsql', 'executesql', 'database', 'db', 'migrate']);
 const NETWORK_TOOLS = new Set(['fetch', 'http', 'httprequest', 'request', 'webfetch', 'download', 'upload', 'post', 'apicall']);
 /** Search engines. Their whole job is sending words out and bringing the
@@ -659,11 +677,16 @@ type Parse =
   | {
       ok: true;
       segments: Token[][];
+      /** For each segment, whether a `|` handed it the one before it. Only a
+       *  real pipe counts: `&&`, `;` and `&` run a command, they do not feed it. */
+      piped: boolean[];
       /** A `$VAR` the shell would swap out. We cannot see the result, so we do not run it. */
       expansion: boolean;
       /** A `$(...)` or backtick: a command hidden inside a command. */
       substitution: boolean;
-      /** A subshell. Same problem. */
+      /** Plain `( … )`. Every word inside one is still right there to be read,
+       *  so this is recorded rather than refused — unlike a substitution, which
+       *  runs whatever its own output turns out to say. */
       grouping: boolean;
     }
   | { ok: false };
@@ -679,12 +702,16 @@ type Parse =
  */
 function parseCommand(command: string): Parse {
   const segments: Token[][] = [];
+  const piped: boolean[] = [];
   let tokens: Token[] = [];
   let current = '';
   let started = false;
   let expansion = false;
   let substitution = false;
   let grouping = false;
+  /** Whether the separator just read was a pipe, and so whether whatever comes
+   *  next is being handed the output of what came before. */
+  let fed = false;
 
   const endToken = (): void => {
     if (started) {
@@ -697,6 +724,7 @@ function parseCommand(command: string): Parse {
     endToken();
     if (tokens.length > 0) {
       segments.push(tokens);
+      piped.push(fed);
       tokens = [];
     }
   };
@@ -780,7 +808,19 @@ function parseCommand(command: string): Parse {
     if (character === ';' || character === '\n' || character === '&' || character === '|') {
       endSegment();
       const next = command[index + 1];
-      if ((character === '&' || character === '|') && next === character) index += 1;
+      let feeds = false;
+      if (character === '|') {
+        // `||` is a choice between two commands. `|` and `|&` hand the first
+        // one's output to the second, which is the only case that matters.
+        if (next === '|') index += 1;
+        else {
+          if (next === '&') index += 1;
+          feeds = true;
+        }
+      } else if (character === '&' && next === '&') {
+        index += 1;
+      }
+      fed = feeds;
       continue;
     }
 
@@ -805,7 +845,7 @@ function parseCommand(command: string): Parse {
   }
 
   endSegment();
-  return { ok: true, segments, expansion, substitution, grouping };
+  return { ok: true, segments, piped, expansion, substitution, grouping };
 }
 
 function baseName(command: string): string {
@@ -1332,10 +1372,14 @@ function judgeShellCommand(command: string, ctx: GuardFacts, depth = 0): Judgeme
   const parsed = parseCommand(command);
   // Quotes that never close, brackets that never balance: we do not guess.
   if (!parsed.ok) return deny(hidingSomethingDestructive ? SAY.wipe : SAY.unreadable);
-  // `$(...)`, backticks and subshells are a command hidden inside a command.
-  // `rm -$FLAGS "$TARGET"` reads as harmless and is not. If we cannot see the
-  // final command, we do not run the command.
-  if (parsed.substitution || parsed.grouping || parsed.expansion) {
+  // `$(...)` and backticks are a command hidden inside a command, and `$VAR`
+  // is a word we never get to see. `rm -$FLAGS "$TARGET"` reads as harmless and
+  // is not. If we cannot see the final command, we do not run the command.
+  //
+  // Plain `( … )` is not that. Every word inside one is in front of us and gets
+  // judged like any other, so refusing it only cost people the ordinary way of
+  // backgrounding something.
+  if (parsed.substitution || parsed.expansion) {
     return deny(hidingSomethingDestructive ? SAY.wipe : SAY.unreadable);
   }
 
@@ -1347,8 +1391,10 @@ function judgeShellCommand(command: string, ctx: GuardFacts, depth = 0): Judgeme
   if (downloads && interprets) return deny(SAY.downloadAndRun);
   // `echo <something> | sh` and `printf ... | bash` hand an interpreter a script
   // we never get to look at. Anything downstream of a pipe that can run code is
-  // refused on sight.
-  const fedByPipe = names.some((name, index) => index > 0 && INTERPRETERS.has(name));
+  // refused on sight — but only downstream of a *pipe*: this used to refuse any
+  // interpreter that was not the first command, which made `cd site && python3
+  // -m http.server` unreadable when every word of it is right there.
+  const fedByPipe = names.some((name, index) => parsed.piped[index] === true && INTERPRETERS.has(name));
   if (fedByPipe) return deny(hidingSomethingDestructive ? SAY.wipe : SAY.unreadable);
 
   let judgement = allow();
@@ -1601,6 +1647,8 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
 
   // Nothing gets to turn the Guard off, however politely it asks.
   if (GUARD_SWITCH.test(name)) return deny(SAY.guardOff);
+
+  if (RUNNING_TOOLS.has(name)) return allow();
 
   if (SHELL_TOOLS.has(name)) {
     // A command's relative locations are only safe if the folder it starts from

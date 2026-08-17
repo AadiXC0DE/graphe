@@ -1,5 +1,9 @@
 .composer {
   position: relative;
+  /* The row below measures itself against this, not against the window. How
+     much room the composer has depends on the rails and the page beside it, so
+     the window's width is the wrong number to ask. */
+  container-type: inline-size;
   width: 100%;
   background: var(--bg-raised);
   border: 1px solid var(--border);
@@ -385,4 +389,60 @@
 .composer__queuebtn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+
+/* ─────────────────────────────────────────────────── a narrower composer ──
+
+   Only when the conversation is sharing the window — a rail open, the page
+   beside it. At full width none of this applies and nothing below changes what
+   anybody already knows.
+
+   The row is a fixed strip of chips, and a model with a long name is what
+   pushes it past its own edge. In order: the hint goes, because it is the one
+   thing there that nobody needs; then the model's name gives up width, because
+   it is the only label long enough to matter and it already truncates. */
+
+@container (max-width: 620px) {
+  .composer__row .composer__hint {
+    display: none;
+  }
+
+  /* The hint was the flexible middle, so hiding it would let the send pair
+     drift back down the row. The meter takes the job of pushing them right. */
+  .composer__row .room {
+    margin-left: auto;
+  }
+
+  .composer__row .thinking {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .composer__row .thinking__chip {
+    min-width: 0;
+  }
+
+  .composer__row .thinking__label {
+    max-width: 14ch;
+  }
+}
+
+@container (max-width: 480px) {
+  .composer__row {
+    gap: 2px;
+  }
+
+  .composer__row .thinking__label {
+    max-width: 8ch;
+  }
+}
+
+/* Past this there is no width left to take from anything, so the strip is
+   allowed a second line rather than running off the edge. */
+@container (max-width: 380px) {
+  .composer__row {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
 }

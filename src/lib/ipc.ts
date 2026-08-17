@@ -12,7 +12,9 @@
  * see.
  */
 
-import type { AgentEvent, Money, SpendSummary } from '../agent/types';
+import type { AgentEvent, Money, RunningPiece, SpendSummary } from '../agent/types';
+
+export type { RunningPiece } from '../agent/types';
 import type { HowFar } from '../agent/guard/policy';
 import type { Frame, Recording } from '../diff/flow';
 import type { SpendLimit } from '../cost/limits';
@@ -1058,6 +1060,8 @@ export const CHANNEL = {
   repoComment: 'graphe:repo-comment',
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
+  running: 'graphe:running',
+  stopRunning: 'graphe:stop-running',
   tidyNow: 'graphe:tidy-now',
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
@@ -1260,6 +1264,10 @@ export type GrapheApi = {
   /** Set how far it may go before it stops and asks. Answers with the rung it
    *  is actually on afterwards. */
   goAsFarAs(howFar: HowFar, where?: Where): Promise<Result<HowFar>>;
+  /** What is being kept running in this conversation — servers, watchers. */
+  running(where?: Where): Promise<Result<readonly RunningPiece[]>>;
+  /** Stop one of them. Answers with what is left. */
+  stopRunning(id: string, where?: Where): Promise<Result<readonly RunningPiece[]>>;
   /** What the open project carries, and whether each one is being loaded. */
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>>;
   /** Start loading one of them, or stop. Answers with the list as it stands. */
@@ -1304,7 +1312,14 @@ export type GrapheApi = {
   deleteConversation(path: string, where?: Where): Promise<Result<readonly Conversation[]>>;
   /** Point the page at an address and glue it to a rectangle in the window.
    *  A null rectangle closes it. */
-  pageAt(address: string | null, bounds: { x: number; y: number; width: number; height: number } | null): Promise<Result<null>>;
+  /** Where the page is drawn, and what it shows. Moving it never reloads it:
+   *  the box is reported whenever the window changes shape, and a turn full of
+   *  tool calls changes it many times. `again` is the reload press. */
+  pageAt(
+    address: string | null,
+    bounds: { x: number; y: number; width: number; height: number } | null,
+    again?: boolean,
+  ): Promise<Result<null>>;
   /** Take the page out of the way while something is drawn over it. */
   pageHidden(hidden: boolean): Promise<Result<null>>;
   /** Watch how somebody uses the page, capturing every state with the thing

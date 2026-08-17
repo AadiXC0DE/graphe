@@ -254,11 +254,13 @@ export function alsoSay(note: string | null, more: string): string {
 
 /** The button, and everything said around it. */
 export const walkthrough = {
-  button: 'Watch me use it',
-  working: 'Watching. Use the page as you would, then stop.',
-  stop: 'Stop watching',
+  /** Who is watching whom was the question people were left with. This names
+   *  what comes out instead: a picture of every state the page went through. */
+  button: 'Record me using it',
+  working: 'Recording. Use the page as you would, then stop.',
+  stop: 'Stop recording',
   heading: 'Every state',
-  empty: 'Nothing recorded yet — press “Watch me use it”, then use the page.',
+  empty: 'Nothing recorded yet — press “Record me using it”, then use the page.',
   again: 'Record it again',
   /** On the frame itself, where the picture should have been. */
   missing: 'Didn’t come out',

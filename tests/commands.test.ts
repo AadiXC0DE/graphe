@@ -7,12 +7,15 @@
  *  write outside the folder it was given.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { boundaryHere, lookAgain } from '../src/agent/sandbox';
+import { seatbeltProfile } from '../src/agent/sandbox/profile';
 import {
   developmentServerCommand,
   downloadFolders,
@@ -102,6 +105,36 @@ describe('foreground development servers', () => {
     expect(isForegroundDevelopmentServer('nohup npm run dev -- --port 5173 >/tmp/vite.log 2>&1 &')).toBe(true);
   });
 
+  it('recognises a server however it was spelt, not only the package managers', () => {
+    for (const command of [
+      'python3 -m http.server 4321',
+      'python -m SimpleHTTPServer 8000',
+      'npx serve site',
+      'npx -y http-server ./site -p 4321',
+      'php -S localhost:8000',
+      'vite --port 5173',
+      'next dev',
+      'ruby -run -e httpd . -p 4321',
+      '(python3 -m http.server 4321 &)',
+      'nohup npx serve site >/dev/null 2>&1 &',
+    ]) {
+      expect(isForegroundDevelopmentServer(command)).toBe(true);
+    }
+  });
+
+  it('leaves the commands that finish on their own alone', () => {
+    for (const command of [
+      'npm test',
+      'npm run build',
+      'python3 scripts/report.py',
+      'node scripts/build.mjs',
+      'npx tsc --noEmit',
+      'serve-report --once', // a word that only starts like one
+    ]) {
+      expect(isForegroundDevelopmentServer(command)).toBe(false);
+    }
+  });
+
   it('turns the model’s background wrapper back into a process we can own and stop', () => {
     expect(developmentServerCommand('(npm run dev -- --host 127.0.0.1 > /tmp/vite.log 2>&1 & echo $!)')).toBe(
       'npm run dev -- --host 127.0.0.1 > /tmp/vite.log 2>&1',
@@ -116,6 +149,45 @@ describe('foreground development servers', () => {
 /* ========================================================================== */
 /* The interposition                                                           */
 /* ========================================================================== */
+
+describe('a server cannot come up inside the boundary, and says so', () => {
+  it('answers in words instead of letting the kernel refuse it four commands later', async () => {
+    const folder = newFolder();
+    const kept = recorder();
+    const shell = heldShell({ folder, parts: () => PARTS, plain: kept.plain });
+    const heard = listening();
+
+    const result = await shell.exec('cd site && python3 -m http.server 4321', folder, heard);
+
+    expect(kept.runs).toHaveLength(0);
+    expect(result.exitCode).not.toBe(0);
+    // It names the tool that does work, rather than only saying no.
+    expect(said(heard)).toContain('keep_running');
+    expect(said(heard)).toContain('stop_running');
+  });
+
+  it('runs it in the person’s own terminal when they asked for that', async () => {
+    const folder = newFolder();
+    const kept = recorder();
+    const shell = heldShell({
+      folder,
+      parts: () => PARTS,
+      plain: kept.plain,
+      unrestricted: () => true,
+    });
+
+    await shell.exec('python3 -m http.server 4321', folder, listening());
+    expect(kept.runs).toHaveLength(1);
+  });
+
+  it('lets everything that finishes on its own straight through', async () => {
+    const folder = newFolder();
+    const kept = recorder();
+    const shell = heldShell({ folder, parts: () => PARTS, plain: kept.plain });
+    await shell.exec('npm run build', folder, listening());
+    expect(kept.runs).toHaveLength(1);
+  });
+});
 
 describe('every command goes through the boundary first', () => {
   it('uses the normal terminal directly when the person chose get on with it', async () => {
@@ -290,6 +362,63 @@ describe('where it is wired in', () => {
 /* ========================================================================== */
 /* The proof: a command of the main agent's, actually refused                  */
 /* ========================================================================== */
+
+/* The one capability a server needs and the ordinary boundary refuses. Proved
+   against the kernel rather than against the profile text: a rule that reads
+   right and does nothing is exactly the failure this is here to catch. */
+describe('the serving boundary', () => {
+  const SERVER = `
+import { createServer } from 'node:http';
+const s = createServer((_q, r) => r.end('ok'));
+s.on('error', (e) => { console.log('BIND FAILED ' + e.code); process.exit(3); });
+s.listen(0, '127.0.0.1', () => { console.log('LISTENING OK'); process.exit(0); });
+`;
+
+  const runFile = promisify(execFile);
+
+  async function tryToListen(reach: 'secure' | 'serving'): Promise<string> {
+    const folder = newFolder();
+    const script = join(folder, 'server.mjs');
+    writeFileSync(script, SERVER, 'utf8');
+    const profile = seatbeltProfile({ writable: [folder], reach });
+    const args = [
+      ...profile.params.flatMap(([name, value]) => ['-D', `${name}=${value}`]),
+      '-p',
+      profile.text,
+      process.execPath,
+      script,
+    ];
+    try {
+      const { stdout } = await runFile('/usr/bin/sandbox-exec', args, { timeout: 20_000 });
+      return stdout.trim();
+    } catch (cause) {
+      const said = cause as { stdout?: string; stderr?: string };
+      return `${said.stdout ?? ''}${said.stderr ?? ''}`.trim();
+    }
+  }
+
+  it.runIf(process.platform === 'darwin')('refuses a port under the ordinary boundary', async () => {
+    expect(await tryToListen('secure')).toContain('BIND FAILED');
+  }, 30_000);
+
+  it.runIf(process.platform === 'darwin')('allows one when serving was asked for', async () => {
+    expect(await tryToListen('serving')).toContain('LISTENING OK');
+  }, 30_000);
+
+  it('opens nothing to a machine that is not this one', () => {
+    const text = seatbeltProfile({ writable: ['/tmp/x'], reach: 'serving' }).text;
+    expect(text).toContain('network-bind');
+    // Every rule it adds is bounded to this machine.
+    for (const line of text.split('\n').filter((one) => one.includes('network-bind') || one.includes('network-inbound'))) {
+      expect(line).toContain('localhost');
+    }
+  });
+
+  it('leaves the ordinary boundary exactly as it was', () => {
+    expect(seatbeltProfile({ writable: ['/tmp/x'], reach: 'secure' }).text).not.toContain('network-bind');
+    expect(seatbeltProfile({ writable: ['/tmp/x'], reach: 'nothing' }).text).not.toContain('network-bind');
+  });
+});
 
 describe('a real refusal', () => {
   it('will not let the main agent write outside the folder it was given', async () => {

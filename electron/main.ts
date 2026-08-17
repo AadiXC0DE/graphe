@@ -211,7 +211,8 @@ import {
 } from '../src/work/written';
 import { StandingFile } from '../src/projects/standing';
 import { HandoverError, handToDeveloper, whatIsHere, type Change } from '../src/share/developer';
-import { handoverWords } from '../src/share/handover';
+import { handoverWords, worthTelling } from '../src/share/handover';
+import type { RunningPiece } from '../src/agent/types';
 import { OnlineError, putOnline, whatIsHereForOnline } from '../src/share/publish';
 import { onlineWords } from '../src/share/online';
 import { canPutOnline, canSendItOn } from '../src/share/tools';
@@ -620,6 +621,32 @@ function pageStore(): Electron.Session {
 /** Run once per document, however the page got here. A page we served already
  *  carries the script, and a second copy would put a second button on it. */
 const POINTER_ONCE = `if (!window.__graphePointer) { ${POINTER_SCRIPT} }`;
+/** Notes are questions about work that has not happened yet, so they come off
+ *  the page when it has. Guarded: the page may have navigated since. */
+const POINTER_CLEAR = 'try { window.__graphePointer && window.__graphePointer.clear(); } catch (e) {}';
+
+function clearNotesOnPage(): void {
+  const view = pageView;
+  if (view === null) return;
+  void view.webContents.executeJavaScript(POINTER_CLEAR, true).catch(() => undefined);
+}
+
+/**
+ * Show the work, once it is work and not a step on the way to it.
+ *
+ * A turn is many tool calls and the page is worth seeing after all of them, not
+ * between each one: reloading mid-run throws away the scroll position and the
+ * state somebody was looking at, over and over, to show them a page that is
+ * half-changed. A project with its own dev server reloads itself and this
+ * changes nothing for it; one being served as files does not, and this is the
+ * only moment it should.
+ */
+function showTheWorkOnPage(): void {
+  const view = pageView;
+  if (view === null || view.webContents.isDestroyed()) return;
+  if (view.webContents.getURL() === '') return;
+  view.webContents.reload();
+}
 
 function makePageView(): WebContentsView | null {
   if (mainWindow === null || mainWindow.isDestroyed()) return null;
@@ -1491,6 +1518,8 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // running in the background is NOT brought back — that is what keeps two
     // parallel tabs from silently overwriting each other's files.
     if (said.type === 'settled') {
+      clearNotesOnPage();
+      showTheWorkOnPage();
       const inFront = held.sessions.current?.path === from.address;
       const checkout =
         !inFront || from.address === null ? null : held.checkouts.get(from.address) ?? null;
@@ -1723,7 +1752,8 @@ async function checkItFirst(
  *
  * The pictures and the sentences beside them, exactly as the person has already
  * seen them. A project that cannot be photographed falls back to the version
- * titles, which is less but is still theirs and still plain.
+ * titles — but only the ones that name a change. The rest of the timeline is
+ * housekeeping, and housekeeping is for the window that shows the timeline.
  */
 async function whatChanged(open: { name: string; held: Held }): Promise<readonly Change[]> {
   const told = [...open.held.looking.told.values()];
@@ -1731,10 +1761,16 @@ async function whatChanged(open: { name: string; held: Held }): Promise<readonly
 
   const versions = await versionsOf(open.held).catch(() => []);
   return versions
+    .slice(0, LOOK_BACK)
+    .filter((one) => worthTelling(one.title))
     .slice(0, 6)
     .reverse()
     .map((one) => ({ title: one.title, says: '', where: null, before: null, after: null }));
 }
+
+/** How far back to look for six versions worth telling somebody about. Enough
+ *  that a run of housekeeping does not hide the work behind it. */
+const LOOK_BACK = 30;
 
 /** The likeliest places a project keeps its own design tokens. */
 const TOKEN_FILES = [
@@ -3849,6 +3885,22 @@ function register(): void {
     return done(session?.quiet === true);
   });
 
+  handle<readonly RunningPiece[]>(CHANNEL.running, (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(done([]));
+    return Promise.resolve(done(sessionAt(open, whereIn(args))?.running ?? []));
+  });
+
+  handle<readonly RunningPiece[]>(CHANNEL.stopRunning, (_event, args) => {
+    const [id] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
+    if (typeof id !== 'string') return Promise.resolve(fail(NOTHING_OPEN));
+    const session = sessionAt(open, whereIn(args));
+    session?.stopRunning(id);
+    return Promise.resolve(done(session?.running ?? []));
+  });
+
   handle<HowFar>(CHANNEL.goAsFarAs, (_event, args) => {
     const [howFar] = args;
     const where = whereIn(args);
@@ -5230,32 +5282,44 @@ function register(): void {
      view that drifts from the space kept for it is worse than none. */
   handle<null>(CHANNEL.pageAt, async (_event, args) => {
     const [address, bounds] = args;
+    const again = args[2] === true;
     const box = bounds as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;
-    if (typeof address !== 'string' || address.trim() === '' || box === null) {
+    // No box and no press means there is nowhere to draw it, which is how the
+    // pane says it has closed. No box *with* a press means "the same place,
+    // again" — the one thing the reload button asks for.
+    if (typeof address !== 'string' || address.trim() === '' || (box === null && !again)) {
       dropPageView();
       return done(null);
     }
     if (
-      typeof box.x !== 'number' ||
-      typeof box.y !== 'number' ||
-      typeof box.width !== 'number' ||
-      typeof box.height !== 'number'
+      box !== null &&
+      (typeof box.x !== 'number' ||
+        typeof box.y !== 'number' ||
+        typeof box.width !== 'number' ||
+        typeof box.height !== 'number')
     ) {
       return done(null);
     }
     const view = makePageView();
     if (view === null) return done(null);
     pageProject = projectAt(whereIn(args))?.path ?? null;
-    view.setBounds({
-      x: Math.round(box.x),
-      y: Math.round(box.y),
-      width: Math.max(0, Math.round(box.width)),
-      height: Math.max(0, Math.round(box.height)),
-    });
-    // Asking for the address it is already on is asking for it again — which is
-    // what a reload is, and the only thing a person means by pressing it.
-    if (view.webContents.getURL() === address) view.webContents.reload();
-    else await view.webContents.loadURL(address).catch(() => undefined);
+    if (box !== null) {
+      view.setBounds({
+        x: Math.round(box.x as number),
+        y: Math.round(box.y as number),
+        width: Math.max(0, Math.round(box.width as number)),
+        height: Math.max(0, Math.round(box.height as number)),
+      });
+    }
+    // Moving the page is not reloading it. The box is reported every time the
+    // window changes shape — which a turn full of tool calls does over and over
+    // — and reloading on each of those threw the page away while somebody was
+    // reading it. Only a press asks for it again.
+    if (view.webContents.getURL() !== address) {
+      await view.webContents.loadURL(address).catch(() => undefined);
+    } else if (again) {
+      view.webContents.reload();
+    }
     return done(null);
   });
 
@@ -5329,9 +5393,14 @@ function register(): void {
 
   handle<null>(CHANNEL.openLink, async (_event, args) => {
     const [url] = args;
-    // https only, and nothing else: this window must never become somebody's
-    // browser. The one thing it may open is a link a person asked for.
-    if (typeof url !== 'string' || !/^https:\/\//.test(url)) return done(null);
+    // Locked addresses, and this machine. This window must never become
+    // somebody's browser: the only two things it may open are a link a person
+    // asked for, and something they are running here — which is plain http and
+    // would otherwise be dropped without a word.
+    const allowed =
+      typeof url === 'string' &&
+      (/^https:\/\//.test(url) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d{2,5})?(\/|$)/.test(url));
+    if (!allowed) return done(null);
     await shell.openExternal(url);
     return done(null);
   });

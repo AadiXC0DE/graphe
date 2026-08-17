@@ -102,6 +102,36 @@ describe('foreground development servers', () => {
     expect(isForegroundDevelopmentServer('nohup npm run dev -- --port 5173 >/tmp/vite.log 2>&1 &')).toBe(true);
   });
 
+  it('recognises a server however it was spelt, not only the package managers', () => {
+    for (const command of [
+      'python3 -m http.server 4321',
+      'python -m SimpleHTTPServer 8000',
+      'npx serve site',
+      'npx -y http-server ./site -p 4321',
+      'php -S localhost:8000',
+      'vite --port 5173',
+      'next dev',
+      'ruby -run -e httpd . -p 4321',
+      '(python3 -m http.server 4321 &)',
+      'nohup npx serve site >/dev/null 2>&1 &',
+    ]) {
+      expect(isForegroundDevelopmentServer(command)).toBe(true);
+    }
+  });
+
+  it('leaves the commands that finish on their own alone', () => {
+    for (const command of [
+      'npm test',
+      'npm run build',
+      'python3 scripts/report.py',
+      'node scripts/build.mjs',
+      'npx tsc --noEmit',
+      'serve-report --once', // a word that only starts like one
+    ]) {
+      expect(isForegroundDevelopmentServer(command)).toBe(false);
+    }
+  });
+
   it('turns the model’s background wrapper back into a process we can own and stop', () => {
     expect(developmentServerCommand('(npm run dev -- --host 127.0.0.1 > /tmp/vite.log 2>&1 & echo $!)')).toBe(
       'npm run dev -- --host 127.0.0.1 > /tmp/vite.log 2>&1',
@@ -116,6 +146,46 @@ describe('foreground development servers', () => {
 /* ========================================================================== */
 /* The interposition                                                           */
 /* ========================================================================== */
+
+describe('a server cannot come up inside the boundary, and says so', () => {
+  it('answers in words instead of letting the kernel refuse it four commands later', async () => {
+    const folder = newFolder();
+    const kept = recorder();
+    const shell = heldShell({ folder, parts: () => PARTS, plain: kept.plain });
+    const heard = listening();
+
+    const result = await shell.exec('cd site && python3 -m http.server 4321', folder, heard);
+
+    expect(kept.runs).toHaveLength(0);
+    expect(result.exitCode).not.toBe(0);
+    expect(said(heard)).toContain('sealed off');
+    // It names what to do instead — both ways.
+    expect(said(heard)).toContain('Graphe serves the project itself');
+    expect(said(heard)).toContain('Gets on with it');
+  });
+
+  it('runs it in the person’s own terminal when they asked for that', async () => {
+    const folder = newFolder();
+    const kept = recorder();
+    const shell = heldShell({
+      folder,
+      parts: () => PARTS,
+      plain: kept.plain,
+      unrestricted: () => true,
+    });
+
+    await shell.exec('python3 -m http.server 4321', folder, listening());
+    expect(kept.runs).toHaveLength(1);
+  });
+
+  it('lets everything that finishes on its own straight through', async () => {
+    const folder = newFolder();
+    const kept = recorder();
+    const shell = heldShell({ folder, parts: () => PARTS, plain: kept.plain });
+    await shell.exec('npm run build', folder, listening());
+    expect(kept.runs).toHaveLength(1);
+  });
+});
 
 describe('every command goes through the boundary first', () => {
   it('uses the normal terminal directly when the person chose get on with it', async () => {

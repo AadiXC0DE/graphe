@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  asksAbout,
   framesFrom,
   mapIn,
   originIn,
@@ -15,6 +16,7 @@ import {
   POINTED_BUDGET,
   POINTER_SCRIPT,
   stampIn,
+  type Pointed,
   type SourceMap,
 } from '../src/preview/point';
 
@@ -263,5 +265,47 @@ describe('the script that runs on their page', () => {
     expect(clicked).toBeGreaterThan(-1);
     expect(stopped).toBeGreaterThan(-1);
     expect(looking).toBeGreaterThan(stopped);
+  });
+});
+
+/* ========================================================================== */
+/* What a note becomes                                                         */
+/* ========================================================================== */
+
+describe('a note written on the page, as a message', () => {
+  const at = (extra: Partial<Pointed> = {}): Pointed => ({
+    selector: 'button.btn',
+    label: 'Download for Mac',
+    kind: 'link',
+    rect: { x: 0, y: 0, width: 10, height: 10 },
+    ...extra,
+  });
+
+  it('puts their own words first, and where it was second', () => {
+    const said = asksAbout(at({ said: 'Make this say Get Graphe' }));
+    expect(said.split('\n')[0]).toBe('Make this say Get Graphe');
+    expect(said).toContain('Download for Mac');
+  });
+
+  it('names the file when the page could work one out', () => {
+    const said = asksAbout(
+      at({ said: 'Wider', origin: [{ how: 'stamp', file: 'site/index.html', line: 104 }] }),
+    );
+    expect(said).toContain('site/index.html:104');
+  });
+
+  it('says where it was even when nobody wrote anything', () => {
+    const said = asksAbout(at());
+    expect(said).toContain('Download for Mac');
+    expect(said.startsWith('About ')).toBe(true);
+  });
+
+  it('is one instruction and one line about it, not a reading', () => {
+    const said = asksAbout(
+      at({ said: 'Make this say Get Graphe', origin: [{ how: 'stamp', file: 'a.tsx', line: 2 }] }),
+    );
+    // Two paragraphs. A wall of measurements is what this replaced.
+    expect(said.split('\n\n')).toHaveLength(2);
+    expect(said).not.toMatch(/nearly your|close to your/);
   });
 });

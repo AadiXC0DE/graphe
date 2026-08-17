@@ -12,7 +12,6 @@ import HistoryView from "./components/HistoryView";
 import ReviewsView, { reviewPrompt } from "./components/ReviewsView";
 import ErrorCard from "./components/ErrorCard";
 import Files from "./components/Files";
-import EvidenceReel from "./components/EvidenceReel";
 import FileView from "./components/FileView";
 import HelperRail from "./components/HelperRail";
 import HelpersView from "./components/HelpersView";
@@ -28,6 +27,7 @@ import ProjectMenu from "./components/ProjectMenu";
 import ProjectPicker from "./components/ProjectPicker";
 import BrowserPane, { type Room as PaneRoom } from "./components/BrowserPane";
 import Running from "./components/Running";
+import { asksAbout } from "./preview/point";
 import type { RunningPiece } from "./agent/types";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Usage from "./components/Usage";
@@ -91,7 +91,6 @@ import {
   type Workflow,
   type HowFar,
   type Money,
-  type Recording,
   type ShowProgress,
   type SpendLimit,
   type ThinkingLevel,
@@ -832,9 +831,7 @@ function Conversation() {
     });
   }, []);
   /** True while a walkthrough is being recorded in the page. */
-  const [watching, setWatching] = useState(false);
   /** The last walkthrough, waiting to be looked through. */
-  const [walked, setWalked] = useState<Recording | null>(null);
 
   /** The ceiling somebody set on spending, or null when they have not set one.
    *  Read from the shell once, and again whenever it is changed here. */
@@ -861,17 +858,27 @@ function Conversation() {
     });
   const reducedMotion = usePrefersReducedMotion();
 
-  /* Somebody pointed at something in the page.
+  /** Sending a note from the page, read inside a listener subscribed once. Set
+   *  below, where the sender and whether a turn is running are both known. */
+  const handNow = useRef<(text: string) => void>(() => undefined);
+
+  /* Somebody wrote a note on the page, at the thing it is about.
      
-     Straight into the composer, and nothing else. The reading behind it is
-     genuinely useful, but the page is a native view painted above everything
-     this tree draws — so every card offering that reading was a card nobody
-     could see, and the press that put the element in the message was behind it.
-     What somebody wants from pointing at a button is to talk about that button,
-     and the sentence already carries its file, its component and its values. */
+     It goes straight to the agent, the way any other message does: now when
+     nothing of theirs is running, behind the turn when something is. Writing a
+     note about a button and then having to find the message box, and read a
+     paragraph of measurements to check we knew which button, was the whole of
+     what made this feel like work. */
   useEffect(() => {
     return bridge.onPointed((at) => {
-      setDraft((was) => (was.trim() === '' ? `${at.says} — ` : `${was} ${at.says}`));
+      const asks = asksAbout(at.pointed);
+      if ((at.pointed.said ?? '').trim() === '') {
+        // Picked, and nothing written. Their words go in the box rather than
+        // out to the agent, because there are none yet.
+        setDraft((was) => (was.trim() === '' ? `${asks}\n\n` : `${was}\n\n${asks}`));
+        return;
+      }
+      handNow.current(asks);
     });
   }, []);
 
@@ -1953,6 +1960,14 @@ function Conversation() {
     [deliver, desks, send],
   );
 
+  /* A note written on the page joins the line when a turn of mine is going, and
+     goes out now when none is — the same two answers the box gives. */
+  useEffect(() => {
+    handNow.current = (text: string) => {
+      hand(text, frontBusy ? 'followUp' : undefined);
+    };
+  }, [hand, frontBusy]);
+
   /** Fetch the open project's github pull requests and issues, and hold the
    *  reading for the reviews screen. Asked whenever that screen opens or its
    *  Refresh is pressed; the shell reads it from the terminal's own `gh`, so it
@@ -2701,7 +2716,6 @@ function Conversation() {
   useEffect(() => {
     if (pane !== 'off') return;
     void bridge.pageAt(null, null);
-    setWatching(false);
   }, [pane]);
 
   /* ------------------------------------------------------------------ money */
@@ -3228,13 +3242,6 @@ function Conversation() {
               ),
             )}
               {frontBusy && !runningNow ? <WorkingMark /> : null}
-              {walked === null ? null : (
-                <EvidenceReel
-                  recording={walked}
-                  width={260}
-                  height={180}
-                />
-              )}
               {pictures.last.map((one) => (
                 <Picture key={one.change.id} change={one.change} />
               ))}
@@ -3532,25 +3539,6 @@ function Conversation() {
           setVariations((current) => (current === null ? current : { ...current, inFront: id }));
           setPageAt(chosen.address);
           movePane('split');
-        }}
-        watching={watching}
-        onWatch={(on) => {
-          if (on) {
-            void bridge.watchStart(desk?.name).then((answer) => {
-              if (answer.ok) setWatching(true);
-              else troubleHere(answer.trouble);
-            });
-            return;
-          }
-          setWatching(false);
-          void bridge.watchStop().then((answer) => {
-            if (!answer.ok) return;
-            setWalked(answer.value);
-            // The strip of states is drawn in the conversation. Recording it
-            // from a page filling the whole window would put the result
-            // somewhere nobody could see it, so the conversation comes back.
-            if (answer.value !== null) movePane('split');
-          });
         }}
         onBounds={(bounds) => {
           void bridge.pageAt(pageAt ?? previewUrl, bounds);

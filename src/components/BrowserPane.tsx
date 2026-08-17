@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { walkthrough } from '../diff/flow';
 import './BrowserPane.css';
 
 /** How the window is split between the conversation and the page. */
@@ -26,11 +25,6 @@ type Props = {
   variation?: string | null;
   /** Switch the page to another variation. */
   onVariation?: (id: string) => void;
-  /** Start watching how somebody uses the page, or stop and keep what was
-   *  seen. Left off, the pane does not offer it. */
-  onWatch?: (on: boolean) => void;
-  /** True while a walkthrough is being recorded. */
-  watching?: boolean;
   /** Hand the address to the machine's own browser. Left off, the control is
    *  not offered. */
   onElsewhere?: (address: string) => void;
@@ -81,8 +75,6 @@ export default function BrowserPane({
   variations,
   variation,
   onVariation,
-  onWatch,
-  watching,
 }: Props) {
   const stage = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLDivElement>(null);
@@ -155,20 +147,6 @@ export default function BrowserPane({
               </button>
             ))}
           </div>
-        )}
-
-        {/* In the pane's own band, beside the address it is watching. Nobody
-            has to know it exists to find it. */}
-        {onWatch === undefined ? null : (
-          <button
-            type="button"
-            className={`pane__watch ${watching === true ? 'pane__watch--on' : ''}`}
-            onClick={() => onWatch(watching !== true)}
-            title={watching === true ? walkthrough.working : walkthrough.button}
-          >
-            <span className="pane__dot" aria-hidden="true" />
-            {watching === true ? walkthrough.stop : walkthrough.button}
-          </button>
         )}
 
         {/* The width to look at the page in, in the band beside the address. */}

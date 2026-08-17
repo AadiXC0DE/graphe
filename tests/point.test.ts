@@ -139,8 +139,23 @@ describe('the script that runs on somebody else’s page', () => {
 
   it('waits to be switched on, and can be switched off again', () => {
     expect(POINTER_SCRIPT).toContain("data.graphe !== 'point'");
-    expect(POINTER_SCRIPT).toContain('window.__graphePointer = { start: start, stop: stop }');
+    expect(POINTER_SCRIPT).toContain('window.__graphePointer = { start: start, stop: stop, clear: clear }');
     expect(POINTER_SCRIPT).toContain("window.addEventListener('pagehide', stop)");
+  });
+
+  it('asks the one question worth asking, on the page', () => {
+    // A note is written where it is about. What it says about the element is
+    // one line; the instruction is the person's own.
+    expect(POINTER_SCRIPT).toContain('What should change here?');
+    expect(POINTER_SCRIPT).toContain('function note(');
+    expect(POINTER_SCRIPT).toContain('function leaveMark(');
+    // Enter sends it, shift and enter does not.
+    expect(POINTER_SCRIPT).toContain("event.key === 'Enter' && !event.shiftKey");
+  });
+
+  it('takes the whole overlay off when it is told to', () => {
+    expect(POINTER_SCRIPT).toContain('function clear(');
+    expect(POINTER_SCRIPT).toContain('[data-graphe="mark"]');
   });
 
   it('takes its listeners back off when it stops', () => {

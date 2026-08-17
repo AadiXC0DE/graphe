@@ -211,7 +211,7 @@ import {
 } from '../src/work/written';
 import { StandingFile } from '../src/projects/standing';
 import { HandoverError, handToDeveloper, whatIsHere, type Change } from '../src/share/developer';
-import { handoverWords } from '../src/share/handover';
+import { handoverWords, worthTelling } from '../src/share/handover';
 import { OnlineError, putOnline, whatIsHereForOnline } from '../src/share/publish';
 import { onlineWords } from '../src/share/online';
 import { canPutOnline, canSendItOn } from '../src/share/tools';
@@ -1723,7 +1723,8 @@ async function checkItFirst(
  *
  * The pictures and the sentences beside them, exactly as the person has already
  * seen them. A project that cannot be photographed falls back to the version
- * titles, which is less but is still theirs and still plain.
+ * titles — but only the ones that name a change. The rest of the timeline is
+ * housekeeping, and housekeeping is for the window that shows the timeline.
  */
 async function whatChanged(open: { name: string; held: Held }): Promise<readonly Change[]> {
   const told = [...open.held.looking.told.values()];
@@ -1731,10 +1732,16 @@ async function whatChanged(open: { name: string; held: Held }): Promise<readonly
 
   const versions = await versionsOf(open.held).catch(() => []);
   return versions
+    .slice(0, LOOK_BACK)
+    .filter((one) => worthTelling(one.title))
     .slice(0, 6)
     .reverse()
     .map((one) => ({ title: one.title, says: '', where: null, before: null, after: null }));
 }
+
+/** How far back to look for six versions worth telling somebody about. Enough
+ *  that a run of housekeeping does not hide the work behind it. */
+const LOOK_BACK = 30;
 
 /** The likeliest places a project keeps its own design tokens. */
 const TOKEN_FILES = [

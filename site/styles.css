@@ -277,22 +277,28 @@ a {
     color 180ms ease;
 }
 
-.btn__icon {
-  width: 1em;
-  height: 1em;
-}
 
 .btn:active {
   transform: scale(0.97);
 }
 
-/* The mark sits with the word rather than beside it: slightly optically raised,
-   because the apple's stem reads high, and sized to the cap height. */
+/* The mark sits with the word rather than against it, and a touch high: the
+   apple's stem reads above its own box, so centring it by the numbers looks
+   low. One class for all three buttons — two marks on one button is what
+   happens when a second gets added beside a first nobody noticed. */
 .btn__apple {
+  flex: none;
   margin-inline-end: 8px;
   margin-block-start: -2px;
-  flex: none;
 }
+
+.btn--small .btn__apple {
+  width: 13px;
+  height: 15px;
+  margin-inline-end: 6px;
+  margin-block-start: -1px;
+}
+
 
 
 .btn--primary {
@@ -524,7 +530,9 @@ a {
 }
 
 .hero__actions {
-  margin-top: 36px;
+  /* The sentence above is four lines and does the arguing; the buttons are the
+     answer to it. They were close enough to read as part of the paragraph. */
+  margin-top: clamp(34px, 4vw, 52px);
   display: flex;
   gap: 12px;
   justify-content: center;

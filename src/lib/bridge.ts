@@ -1770,7 +1770,7 @@ function connect(): Bridge {
     closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
     startAfter: (text, after, where) => api.startAfter(text, after, where),
     putAfter: (id, after, where) => api.putAfter(id, after, where),
-    pageAt: (address, bounds) => api.pageAt(address, bounds),
+    pageAt: (address, bounds, again) => api.pageAt(address, bounds, again),
     pageHidden: (hidden) => api.pageHidden(hidden),
     watchStart: (says) => api.watchStart(says),
     watchStop: () => api.watchStop(),

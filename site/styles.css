@@ -264,6 +264,7 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   padding: 13px 22px;
   border: 1px solid transparent;
   border-radius: var(--r-sm);
@@ -276,8 +277,27 @@ a {
     color 180ms ease;
 }
 
+.btn__icon {
+  width: 1em;
+  height: 1em;
+}
+
 .btn:active {
   transform: scale(0.97);
+}
+
+/* The mark sits with the word rather than beside it: slightly optically raised,
+   because the apple's stem reads high, and sized to the cap height. */
+.btn__apple {
+  margin-inline-end: 8px;
+  margin-block-start: -2px;
+  flex: none;
+}
+
+.btn--small .btn__apple {
+  width: 13px;
+  height: 15px;
+  margin-inline-end: 6px;
 }
 
 .btn--primary {

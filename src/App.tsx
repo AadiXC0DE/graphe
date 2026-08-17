@@ -819,6 +819,20 @@ function Conversation() {
 
   /** Move the page between its modes, mirrored into `paneNow` so the one-shot
    *  event listener can tell whether it is open. */
+  /** The address the page is on, read inside a callback that must not be
+   *  rebuilt when it changes. */
+  const pageAtNow = useRef<string | null>(null);
+
+  /** Where the page is drawn. Stable on purpose: the pane reports its box from
+   *  an effect, and a callback rebuilt on every render made that effect run on
+   *  every render — which, while a turn was working, was constantly. */
+  const movedPage = useCallback(
+    (bounds: { x: number; y: number; width: number; height: number }) => {
+      void bridge.pageAt(pageAtNow.current, bounds);
+    },
+    [],
+  );
+
   const movePane = useCallback((next: PaneRoom) => {
     paneNow.current = next;
     setPane(next);
@@ -2948,6 +2962,7 @@ function Conversation() {
   // moment there is an address to go to — nothing here is worth a button before
   // the work is actually being served.
   const previewUrl = desk?.overview?.preview ?? null;
+  pageAtNow.current = pageAt ?? previewUrl;
   const pillShown = desk !== null && (previewUrl !== null || progress !== null);
   const pillLabel = progress !== null ? progress.says : PREVIEW;
 
@@ -3520,7 +3535,10 @@ function Conversation() {
       <BrowserPane
         room={pane}
         address={pageAt ?? previewUrl}
-        onAddress={setPageAt}
+        onAddress={(address) => {
+          setPageAt(address);
+          void bridge.pageAt(address, null, true);
+        }}
         onElsewhere={(address) => void bridge.openLink(address)}
         onRoom={movePane}
         onClose={() => movePane('off')}
@@ -3537,9 +3555,7 @@ function Conversation() {
           setPageAt(chosen.address);
           movePane('split');
         }}
-        onBounds={(bounds) => {
-          void bridge.pageAt(pageAt ?? previewUrl, bounds);
-        }}
+        onBounds={movedPage}
       />
 
       {/* Mode three keeps a way back that is one key and always the same key. */}

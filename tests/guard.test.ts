@@ -670,6 +670,44 @@ describe('S-22 a building block runs its own setup code', () => {
 /* Deny-by-default, and the rest of the adversarial pile                       */
 /* ========================================================================== */
 
+/* Ordinary shell that used to read as unreadable. Each of these is every word
+   in front of us, and refusing them taught people that the Guard was noise. */
+describe('plain shell stays plain', () => {
+  it('reads a command that follows another one, rather than calling it unreadable', () => {
+    for (const command of [
+      'cd site && python3 -m http.server 4321',
+      'npm run build && node scripts/after.mjs',
+      'echo starting; node server.js',
+      'npm run build & node scripts/after.mjs',
+    ]) {
+      expect(kindOf(bash(command))).not.toBe('deny');
+    }
+  });
+
+  it('still refuses an interpreter that is handed something down a pipe', () => {
+    for (const command of [
+      'echo "rm -rf /" | sh',
+      'cat setup.sh | bash',
+      'printf x |& python3',
+    ]) {
+      expect(kindOf(bash(command))).toBe('deny');
+    }
+  });
+
+  it('reads inside plain brackets instead of refusing them', () => {
+    expect(kindOf(bash('(cd src && ls)'))).toBe('allow');
+    expect(kindOf(bash('(npm run dev &)'))).toBe('allow');
+    // What the brackets cannot excuse: the words inside are judged like any other.
+    expect(kindOf(bash('(cd /etc && ls)'))).toBe('deny');
+    expect(kindOf(bash('(rm -rf src)'))).toBe('deny');
+  });
+
+  it('still refuses brackets that run whatever their own output says', () => {
+    expect(kindOf(bash('ls $(whoami)'))).toBe('deny');
+    expect(kindOf(bash('echo `date`'))).toBe('deny');
+  });
+});
+
 describe('deny-by-default', () => {
   it('never allows a command it cannot fully account for', () => {
     const puzzling = [
@@ -679,7 +717,6 @@ describe('deny-by-default', () => {
       'ls $(whoami)',
       'echo `date`',
       'ls ${PATH}',
-      '(cd src && ls)',
       'foo | bar | baz',
       'ls\u0000rm -rf /',
       'chmod 777 src',

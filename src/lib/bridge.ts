@@ -20,7 +20,7 @@
  * drifts away from the thing it is standing in for.
  */
 
-import type { AgentEvent } from '../agent/types';
+import type { AgentEvent, RunningPiece } from '../agent/types';
 import {
   findMoved,
   nameOfDesign,
@@ -556,7 +556,22 @@ function previewBridge(): Bridge {
    *  tidy button has something to undo. */
   let previewRoom: Room = { used: 36_000, total: 200_000, part: 0.18 };
   let previewQuiet = false;
-  let previewHowFar: HowFar = 'asking';
+  /** What the mock bridge pretends is running, so the band can be looked at
+ *  without a real server anywhere. */
+let previewRunning: readonly RunningPiece[] = [
+  {
+    id: 'run-1',
+    label: 'npm run dev',
+    command: 'npm run dev',
+    folder: '/a',
+    address: 'http://localhost:5173',
+    state: 'running',
+    since: Date.now(),
+    exitCode: null,
+  },
+];
+
+let previewHowFar: HowFar = 'asking';
   let previewCeiling: SpendLimit | null = null;
   let previewMade = 0;
   let previewCarried: readonly CarriedExtension[] = [
@@ -994,6 +1009,15 @@ function previewBridge(): Bridge {
     goAsFarAs(howFar: HowFar): Promise<Result<HowFar>> {
       previewHowFar = howFar;
       return Promise.resolve(done(previewHowFar));
+    },
+
+    running(): Promise<Result<readonly RunningPiece[]>> {
+      return Promise.resolve(done(previewRunning));
+    },
+
+    stopRunning(id: string): Promise<Result<readonly RunningPiece[]>> {
+      previewRunning = previewRunning.filter((one) => one.id !== id);
+      return Promise.resolve(done(previewRunning));
     },
 
     saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>> {
@@ -1711,6 +1735,8 @@ function connect(): Bridge {
     buildSave: (tasks, where) => api.buildSave(tasks, where),
     stopAsking: (on) => api.stopAsking(on),
     goAsFarAs: (howFar) => api.goAsFarAs(howFar),
+    running: () => api.running(),
+    stopRunning: (id) => api.stopRunning(id),
     carried: () => api.carried(),
     trustCarried: (id, trust) => api.trustCarried(id, trust),
     revealFolder: () => api.revealFolder(),
@@ -1744,7 +1770,7 @@ function connect(): Bridge {
     closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
     startAfter: (text, after, where) => api.startAfter(text, after, where),
     putAfter: (id, after, where) => api.putAfter(id, after, where),
-    pageAt: (address, bounds) => api.pageAt(address, bounds),
+    pageAt: (address, bounds, again) => api.pageAt(address, bounds, again),
     pageHidden: (hidden) => api.pageHidden(hidden),
     watchStart: (says) => api.watchStart(says),
     watchStop: () => api.watchStop(),

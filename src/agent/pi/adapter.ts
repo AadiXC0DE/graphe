@@ -43,13 +43,14 @@ import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
-import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools } from './tools';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
 import { McpRegistry, mcpTool, readMcpConfig } from './mcp';
 import { parseReview } from './review';
 import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
-import { heldShell, loginShell } from '../sandbox/shell';
+import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
+import { Running, type RunningPiece } from '../running';
 import {
   collectAccounts,
   credentialFor,
@@ -382,6 +383,11 @@ export type GrapheSession = {
   goAsFarAs(howFar: HowFar): void;
   /** Where the ladder is set right now. */
   readonly howFar: HowFar;
+  /** What this session has kept running — servers, watchers, anything started
+   *  to stay up. Empty for almost every sitting. */
+  readonly running: readonly RunningPiece[];
+  /** Stop one of them by name. False when there is no such thing. */
+  stopRunning(id: string): boolean;
   /** The extensions this folder brought with it, and which of them loaded.
    *  Empty for a project that carries none, which is almost all of them. */
   readonly carried: readonly Carried[];
@@ -1143,6 +1149,24 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   const debugRegistry = newDebugRegistry();
   customTools.push(...debugTools(debugRegistry));
 
+  /* Work that answers by staying up: servers, watchers, anything the ordinary
+     shell would either wait forever for or let die with the command that
+     started it. Held for as long as this session is, and stopped with it. */
+  const keptRunning = new Running();
+  customTools.push(
+    ...runningTools(keptRunning, {
+      folder: options.projectRoot,
+      parts: () => {
+        const config = pi.getShellConfig(settings.shell);
+        return { shell: config.shell, args: config.args };
+      },
+      writable: shellBounds(options.projectRoot, options.projectRoot).writable,
+      onChange: () => {
+        say({ type: 'running', pieces: keptRunning.list() });
+      },
+    }),
+  );
+
   /* The plugged-in tool servers (MCP), read from the project's own .pi/mcp.json.
      Nothing starts until the model actually calls one of them, and every call
      travels through the Guard like any other tool call. */
@@ -1503,6 +1527,9 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       void shell.close();
       void mcpRegistry.close();
       void memory?.close().catch(() => {});
+      // Nothing this session started outlives it. A port left held is a port
+      // the next sitting cannot use, and nobody would know what was holding it.
+      keptRunning.stopAll();
       for (const attached of debugRegistry.sessions.values()) {
         void debug.detach(attached).catch(() => {});
       }
@@ -1544,6 +1571,16 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
     get howFar(): HowFar {
       return facts.howFar ?? 'asking';
+    },
+
+    get running(): readonly RunningPiece[] {
+      return keptRunning.list();
+    },
+
+    stopRunning(id: string): boolean {
+      const stopped = keptRunning.stop(id);
+      if (stopped) say({ type: 'running', pieces: keptRunning.list() });
+      return stopped;
     },
 
     get carried(): readonly Carried[] {

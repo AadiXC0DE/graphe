@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { walkthrough } from '../diff/flow';
 import './BrowserPane.css';
 
 /** How the window is split between the conversation and the page. */
@@ -26,11 +25,9 @@ type Props = {
   variation?: string | null;
   /** Switch the page to another variation. */
   onVariation?: (id: string) => void;
-  /** Start watching how somebody uses the page, or stop and keep what was
-   *  seen. Left off, the pane does not offer it. */
-  onWatch?: (on: boolean) => void;
-  /** True while a walkthrough is being recorded. */
-  watching?: boolean;
+  /** Hand the address to the machine's own browser. Left off, the control is
+   *  not offered. */
+  onElsewhere?: (address: string) => void;
 };
 
 export const SAYS = {
@@ -38,6 +35,7 @@ export const SAYS = {
   address: 'Address',
   reload: 'Load it again',
   close: 'Close the page',
+  elsewhere: 'Open it in your browser',
   wider: 'Give the page the whole window',
   narrower: 'Show the conversation too',
   nothing: 'Nothing is being served yet. Press “See it” and the page will open here.',
@@ -69,6 +67,7 @@ export const SIZES: readonly { id: ScreenSize; label: string; title: string }[] 
 export default function BrowserPane({
   room,
   address,
+  onElsewhere,
   onAddress,
   onRoom,
   onClose,
@@ -76,8 +75,6 @@ export default function BrowserPane({
   variations,
   variation,
   onVariation,
-  onWatch,
-  watching,
 }: Props) {
   const stage = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLDivElement>(null);
@@ -152,20 +149,6 @@ export default function BrowserPane({
           </div>
         )}
 
-        {/* In the pane's own band, beside the address it is watching. Nobody
-            has to know it exists to find it. */}
-        {onWatch === undefined ? null : (
-          <button
-            type="button"
-            className={`pane__watch ${watching === true ? 'pane__watch--on' : ''}`}
-            onClick={() => onWatch(watching !== true)}
-            title={watching === true ? walkthrough.working : walkthrough.button}
-          >
-            <span className="pane__dot" aria-hidden="true" />
-            {watching === true ? walkthrough.stop : walkthrough.button}
-          </button>
-        )}
-
         {/* The width to look at the page in, in the band beside the address. */}
         <div className="pane__sizes" role="group" aria-label="Page width">
           {SIZES.map((one) => (
@@ -181,6 +164,31 @@ export default function BrowserPane({
             </button>
           ))}
         </div>
+
+        {/* Some things only a real browser does — an extension, a login already
+            signed in, a devtools panel. One press and the same address is there. */}
+        {onElsewhere === undefined ? null : (
+        <button
+          type="button"
+          className="pane__act"
+          onClick={() => {
+            if (address !== null) onElsewhere(address);
+          }}
+          disabled={address === null}
+          title={SAYS.elsewhere}
+          aria-label={SAYS.elsewhere}
+        >
+          <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden="true">
+            <path
+              d="M8 2h4v4M12 2 6.5 7.5M11 8.5V11a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 11V4.5A1.5 1.5 0 0 1 3 3h2.5"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        )}
 
         {/* A page you are working against is a page you reload constantly. */}
         <button

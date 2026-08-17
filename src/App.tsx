@@ -12,12 +12,10 @@ import HistoryView from "./components/HistoryView";
 import ReviewsView, { reviewPrompt } from "./components/ReviewsView";
 import ErrorCard from "./components/ErrorCard";
 import Files from "./components/Files";
-import EvidenceReel from "./components/EvidenceReel";
 import FileView from "./components/FileView";
 import HelperRail from "./components/HelperRail";
 import HelpersView from "./components/HelpersView";
 import InLine from "./components/InLine";
-import Inspector from "./components/Inspector";
 import Message from "./components/Message";
 import type { Outcome } from "./components/Landing";
 import Overview from "./components/Overview";
@@ -28,6 +26,9 @@ import AddMore from "./components/AddMore";
 import ProjectMenu from "./components/ProjectMenu";
 import ProjectPicker from "./components/ProjectPicker";
 import BrowserPane, { type Room as PaneRoom } from "./components/BrowserPane";
+import Running from "./components/Running";
+import { asksAbout } from "./preview/point";
+import type { RunningPiece } from "./agent/types";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Usage from "./components/Usage";
 import Sidebar from "./components/Sidebar";
@@ -90,8 +91,6 @@ import {
   type Workflow,
   type HowFar,
   type Money,
-  type PointedAt,
-  type Recording,
   type ShowProgress,
   type SpendLimit,
   type ThinkingLevel,
@@ -788,10 +787,6 @@ function Conversation() {
    *  avoid. */
   const [draft, setDraft] = useState("");
 
-  /** The last thing somebody pointed at, and what we could read about it.
-   *  Null until they point at something. */
-  const [pointed, setPointed] = useState<PointedAt | null>(null);
-
   /** How the window is split between the conversation and the project's own
    *  page. Off until somebody opens it. */
   const [pane, setPane] = useState<PaneRoom>('off');
@@ -800,6 +795,9 @@ function Conversation() {
   const paneNow = useRef<PaneRoom>('off');
   /** Where the page is pointed. Null until something is being served. */
   const [pageAt, setPageAt] = useState<string | null>(null);
+  /** Servers and watchers this conversation has kept up. Drawn from what the
+   *  shell last said rather than asked for on a clock. */
+  const [running, setRunning] = useState<readonly RunningPiece[]>([]);
   /** A set of designs being compared, each served on its own address. Null until
    *  somebody asks for variations. */
   const [variations, setVariations] = useState<{
@@ -821,6 +819,20 @@ function Conversation() {
 
   /** Move the page between its modes, mirrored into `paneNow` so the one-shot
    *  event listener can tell whether it is open. */
+  /** The address the page is on, read inside a callback that must not be
+   *  rebuilt when it changes. */
+  const pageAtNow = useRef<string | null>(null);
+
+  /** Where the page is drawn. Stable on purpose: the pane reports its box from
+   *  an effect, and a callback rebuilt on every render made that effect run on
+   *  every render — which, while a turn was working, was constantly. */
+  const movedPage = useCallback(
+    (bounds: { x: number; y: number; width: number; height: number }) => {
+      void bridge.pageAt(pageAtNow.current, bounds);
+    },
+    [],
+  );
+
   const movePane = useCallback((next: PaneRoom) => {
     paneNow.current = next;
     setPane(next);
@@ -833,9 +845,7 @@ function Conversation() {
     });
   }, []);
   /** True while a walkthrough is being recorded in the page. */
-  const [watching, setWatching] = useState(false);
   /** The last walkthrough, waiting to be looked through. */
-  const [walked, setWalked] = useState<Recording | null>(null);
 
   /** The ceiling somebody set on spending, or null when they have not set one.
    *  Read from the shell once, and again whenever it is changed here. */
@@ -862,12 +872,24 @@ function Conversation() {
     });
   const reducedMotion = usePrefersReducedMotion();
 
-  /* Somebody clicked something — in their own browser, or in the page beside
-     the conversation. The card goes in the rail; the sentence stays available
-     for the message, but is no longer put in the box on their behalf. */
+  /** Sending a note from the page, read inside a listener subscribed once. Set
+   *  below, where the sender and whether a turn is running are both known. */
+  const handNow = useRef<(text: string) => void>(() => undefined);
+
+  /* Somebody wrote a note on the page, at the thing it is about.
+     
+     It goes straight to the agent, the way any other message does: now when
+     nothing of theirs is running, behind the turn when something is. Writing a
+     note about a button and then having to find the message box, and read a
+     paragraph of measurements to check we knew which button, was the whole of
+     what made this feel like work. */
   useEffect(() => {
     return bridge.onPointed((at) => {
-      setPointed(at);
+      // A note with nothing in it is not a message. Nothing is written into the
+      // box either: somebody writing on the page is not writing in the box, and
+      // finding a paragraph about an element in there is how this felt broken.
+      if ((at.pointed.said ?? '').trim() === '') return;
+      handNow.current(asksAbout(at.pointed));
     });
   }, []);
 
@@ -1032,6 +1054,14 @@ function Conversation() {
     setHowFarHere(rung);
     void bridge.goAsFarAs(rung).then((answer) => {
       if (answer.ok) setHowFarHere(answer.value);
+    });
+  }, []);
+
+  /** What is already up. The band is kept in step by events afterwards, but a
+   *  window that has just opened has heard none of them yet. */
+  const refreshRunning = useCallback(() => {
+    void bridge.running().then((answer) => {
+      if (answer.ok) setRunning(answer.value);
     });
   }, []);
 
@@ -1215,6 +1245,7 @@ function Conversation() {
       void refreshOverview(opened.value.path);
       void refreshBuildPlan(opened.value.path);
       refreshRoom();
+      refreshRunning();
       void bridge.pages().then((answer) => {
         if (answer.ok) setPages(answer.value);
       });
@@ -1297,6 +1328,7 @@ function Conversation() {
         }),
       );
       refreshRoom();
+      refreshRunning();
       // A new session asks again, whatever the last one had been told.
       setHowFarHere('asking');
       const project = desksNow.current.current;
@@ -1444,6 +1476,7 @@ function Conversation() {
           void refreshOverview(where);
           void refreshFiles(where);
           refreshRoom();
+      refreshRunning();
           // A settle with real work behind it advances the build tracker one
           // task: the turn either finished the task it was on, or it got stuck.
           // Either way the plan on disk is the truth the next session resumes
@@ -1474,10 +1507,12 @@ function Conversation() {
         // Pi tidies on its own as well as when asked, and the ring says the
         // same thing either way — from where somebody is sitting it is one
         // event.
+        if (notice.event.type === 'running') setRunning(notice.event.pieces);
         if (notice.event.type === "tidying") setTidying(true);
         if (notice.event.type === "tidied") {
           setTidying(false);
           refreshRoom();
+      refreshRunning();
         }
       }),
     [
@@ -1485,6 +1520,7 @@ function Conversation() {
       refreshOverview,
       refreshFiles,
       refreshRoom,
+      refreshRunning,
       refreshBuildPlan,
       settledWell,
       movePane,
@@ -1934,6 +1970,14 @@ function Conversation() {
     },
     [deliver, desks, send],
   );
+
+  /* A note written on the page joins the line when a turn of mine is going, and
+     goes out now when none is — the same two answers the box gives. */
+  useEffect(() => {
+    handNow.current = (text: string) => {
+      hand(text, frontBusy ? 'followUp' : undefined);
+    };
+  }, [hand, frontBusy]);
 
   /** Fetch the open project's github pull requests and issues, and hold the
    *  reading for the reviews screen. Asked whenever that screen opens or its
@@ -2683,7 +2727,6 @@ function Conversation() {
   useEffect(() => {
     if (pane !== 'off') return;
     void bridge.pageAt(null, null);
-    setWatching(false);
   }, [pane]);
 
   /* ------------------------------------------------------------------ money */
@@ -2919,6 +2962,7 @@ function Conversation() {
   // moment there is an address to go to — nothing here is worth a button before
   // the work is actually being served.
   const previewUrl = desk?.overview?.preview ?? null;
+  pageAtNow.current = pageAt ?? previewUrl;
   const pillShown = desk !== null && (previewUrl !== null || progress !== null);
   const pillLabel = progress !== null ? progress.says : PREVIEW;
 
@@ -3210,13 +3254,6 @@ function Conversation() {
               ),
             )}
               {frontBusy && !runningNow ? <WorkingMark /> : null}
-              {walked === null ? null : (
-                <EvidenceReel
-                  recording={walked}
-                  width={260}
-                  height={180}
-                />
-              )}
               {pictures.last.map((one) => (
                 <Picture key={one.change.id} change={one.change} />
               ))}
@@ -3293,6 +3330,21 @@ function Conversation() {
             />
             <InLine waiting={desk?.waiting ?? []} onTake={takeBack} />
 
+            {/* Servers and watchers outlive the sentence that started them, so
+                they sit above the composer rather than inside the conversation. */}
+            <Running
+              pieces={running}
+              onOpen={(address) => {
+                setPageAt(address);
+                movePane('split');
+              }}
+              onStop={(id) => {
+                void bridge.stopRunning(id).then((answer) => {
+                  if (answer.ok) setRunning(answer.value);
+                });
+              }}
+            />
+
             <Composer
               onSend={hand}
               onQueue={hand}
@@ -3331,28 +3383,6 @@ function Conversation() {
           </div>
         )}
       </div>
-
-      {/* What was pointed at, in the rail. Never over the page: the page is a
-          native view and paints above everything this tree draws, so a card
-          there would be a card nobody could see.
-
-          No `onWidth` on purpose — photographing the page at another size means
-          resizing it under somebody mid-read. Left off, the card says which
-          size it was read at rather than offering a press that does nothing. */}
-      {pointed === null ? null : (
-        <aside className="pointedat" aria-label="What you pointed at">
-          <Inspector
-            reading={pointed.reading}
-            onClose={() => setPointed(null)}
-            onAsk={() => {
-              setDraft((was) =>
-                was.trim() === '' ? `${pointed.says} — ` : `${was} ${pointed.says}`,
-              );
-              setPointed(null);
-            }}
-          />
-        </aside>
-      )}
 
       {overviewed && desk !== null ? (
         <Overview
@@ -3505,7 +3535,11 @@ function Conversation() {
       <BrowserPane
         room={pane}
         address={pageAt ?? previewUrl}
-        onAddress={setPageAt}
+        onAddress={(address) => {
+          setPageAt(address);
+          void bridge.pageAt(address, null, true);
+        }}
+        onElsewhere={(address) => void bridge.openLink(address)}
         onRoom={movePane}
         onClose={() => movePane('off')}
         variations={
@@ -3521,23 +3555,7 @@ function Conversation() {
           setPageAt(chosen.address);
           movePane('split');
         }}
-        watching={watching}
-        onWatch={(on) => {
-          if (on) {
-            void bridge.watchStart(desk?.name).then((answer) => {
-              if (answer.ok) setWatching(true);
-              else troubleHere(answer.trouble);
-            });
-            return;
-          }
-          setWatching(false);
-          void bridge.watchStop().then((answer) => {
-            if (answer.ok) setWalked(answer.value);
-          });
-        }}
-        onBounds={(bounds) => {
-          void bridge.pageAt(pageAt ?? previewUrl, bounds);
-        }}
+        onBounds={movedPage}
       />
 
       {/* Mode three keeps a way back that is one key and always the same key. */}

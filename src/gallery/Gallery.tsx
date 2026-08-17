@@ -23,6 +23,7 @@ import Tabs, { type Tab } from '../components/Tabs';
 import type { StepTurn } from '../lib/steps';
 import type { HowFar } from '../agent/guard/policy';
 import Away from '../components/Away';
+import Running from '../components/Running';
 import InStep from '../components/InStep';
 import Landing from '../components/Landing';
 import ProjectMenu from '../components/ProjectMenu';
@@ -1685,6 +1686,48 @@ onCreateBranch={() => {}}
               timer — a tool that opens somebody's Figma file every ten minutes without being asked
               is a different product.
             </p>
+          </Section>
+
+          <Section
+            title="Running now"
+            note="Servers, watchers, anything started to stay up. It sits above the composer rather than in the conversation, because it outlives the sentence that started it — a server filed under that sentence is out of reach the moment the conversation moves on. Several at once is ordinary: a front end and two back ends. The dot pulses only while one is still coming up, which is the only moment the question is “waiting or stuck?”."
+          >
+            <Running
+              pieces={[
+                {
+                  id: 'run-1',
+                  label: 'npm run dev',
+                  command: 'npm run dev',
+                  folder: '/a',
+                  address: 'http://localhost:5173',
+                  state: 'running',
+                  since: Date.now(),
+                  exitCode: null,
+                },
+                {
+                  id: 'run-2',
+                  label: 'the API',
+                  command: 'npm run api',
+                  folder: '/a',
+                  address: 'http://localhost:8787',
+                  state: 'running',
+                  since: Date.now(),
+                  exitCode: null,
+                },
+                {
+                  id: 'run-3',
+                  label: 'the stylesheets',
+                  command: 'npm run watch:css',
+                  folder: '/a',
+                  address: null,
+                  state: 'starting',
+                  since: Date.now(),
+                  exitCode: null,
+                },
+              ]}
+              onOpen={noop}
+              onStop={noop}
+            />
           </Section>
 
           <Section

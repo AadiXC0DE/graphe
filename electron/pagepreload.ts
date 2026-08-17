@@ -24,6 +24,10 @@ const NAME_MAX = 2 * 1024;
 /** The click as a whole. Past this it is not a description of an element. */
 const WHOLE_MAX = 96 * 1024;
 
+/** What somebody wrote about the element. The same ceiling the server keeps,
+ *  because it is the same note arriving by a different road. */
+const SAID_MAX = 600;
+
 function words(value: unknown): Record<string, string> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
   const out: Record<string, string> = {};
@@ -137,6 +141,14 @@ function asPointed(value: unknown): Pointed | null {
   if (origin.length > 0) pointed.origin = origin;
   const view = asView(from['view']);
   if (view !== null) pointed.view = view;
+
+  // The note itself. Rebuilding field by field is what keeps a page from
+  // sending us anything it likes — and is why leaving this line out dropped
+  // every note somebody wrote and left the click looking like it did nothing.
+  const said = from['said'];
+  if (typeof said === 'string' && said.trim() !== '' && said.length <= SAID_MAX) {
+    pointed.said = said.trim();
+  }
 
   return pointed;
 }

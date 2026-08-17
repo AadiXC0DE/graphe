@@ -871,14 +871,11 @@ function Conversation() {
      what made this feel like work. */
   useEffect(() => {
     return bridge.onPointed((at) => {
-      const asks = asksAbout(at.pointed);
-      if ((at.pointed.said ?? '').trim() === '') {
-        // Picked, and nothing written. Their words go in the box rather than
-        // out to the agent, because there are none yet.
-        setDraft((was) => (was.trim() === '' ? `${asks}\n\n` : `${was}\n\n${asks}`));
-        return;
-      }
-      handNow.current(asks);
+      // A note with nothing in it is not a message. Nothing is written into the
+      // box either: somebody writing on the page is not writing in the box, and
+      // finding a paragraph about an element in there is how this felt broken.
+      if ((at.pointed.said ?? '').trim() === '') return;
+      handNow.current(asksAbout(at.pointed));
     });
   }, []);
 

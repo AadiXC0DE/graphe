@@ -1,6 +1,8 @@
 /** Clicking the thing you mean. Pure — no browser is started anywhere in here,
  *  which is the point of the module being shaped the way it is. */
 
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -151,6 +153,32 @@ describe('the script that runs on somebody else’s page', () => {
     expect(POINTER_SCRIPT).toContain('function leaveMark(');
     // Enter sends it, shift and enter does not.
     expect(POINTER_SCRIPT).toContain("event.key === 'Enter' && !event.shiftKey");
+  });
+
+  /* Two hand-written rebuilders stand between a page and the app: the server's,
+     for the POST, and the page view's preload, for the message. Both read a
+     click field by field and build a new object, which is what keeps a page from
+     sending anything it likes — and it means a field added to `Pointed` and
+     forgotten in one of them disappears without a word. That is exactly how
+     every note written on the page arrived empty. */
+  it('carries every part of a click along both roads it can take', () => {
+    const source = readFileSync(new URL('../src/preview/point.ts', import.meta.url), 'utf8');
+    const start = source.indexOf('export type Pointed = {');
+    const shape = source.slice(start, source.indexOf('\n};', start));
+    const fields = [...shape.matchAll(/^ {2}(\w+)\??:/gm)].map((found) => found[1]);
+
+    expect(fields).toContain('said');
+    expect(fields.length).toBeGreaterThan(5);
+
+    const roads = {
+      'the page view preload': readFileSync(new URL('../electron/pagepreload.ts', import.meta.url), 'utf8'),
+      'the preview server': readFileSync(new URL('../src/preview/serve.ts', import.meta.url), 'utf8'),
+    };
+    for (const [road, text] of Object.entries(roads)) {
+      for (const field of fields) {
+        expect(text, `${road} drops "${String(field)}"`).toContain(`'${String(field)}'`);
+      }
+    }
   });
 
   it('takes the whole overlay off when it is told to', () => {

@@ -55,6 +55,7 @@ import { arxivId, arxivMeta, readPdfPages, slicePages } from './pdf';
 import { REVIEW_ANGLES, reviewRequestFor, trimDiff } from './review';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet } from '../../cost/fleet';
+import { Running, type RunningPiece } from '../running';
 import { hold } from '../sandbox';
 import type { Money, SpendReason } from '../types';
 
@@ -1197,6 +1198,135 @@ export const figmaReadTool = (token: string): ToolDefinition => ({
     return { content: [{ type: 'text', text: said }], details: {} };
   },
 });
+
+/* -------------------------------------------------------------------------- */
+/* Things that keep running                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** How much of a server's own talking to hand back at once. Enough to see why
+ *  it would not start, short of pasting a log into the conversation. */
+const SAID_AT_ONCE = 4_000;
+
+function tail(text: string, most = SAID_AT_ONCE): string {
+  const trimmed = text.trimEnd();
+  return trimmed.length <= most ? trimmed : `…\n${trimmed.slice(-most)}`;
+}
+
+function describePiece(piece: RunningPiece): string {
+  const where = piece.address === null ? '' : ` — ${piece.address}`;
+  const how =
+    piece.state === 'stopped'
+      ? `stopped${piece.exitCode === null ? '' : ` (${String(piece.exitCode)})`}`
+      : piece.state;
+  return `${piece.id}  ${piece.label}${where}  [${how}]`;
+}
+
+/**
+ * The three tools for work that answers by staying up.
+ *
+ * A server is not a command with an answer at the end, so it does not go through
+ * the one that waits for one. It is started here, kept for as long as the
+ * project is open, and asked about afterwards.
+ */
+export function runningTools(
+  running: Running,
+  where: {
+    folder: string;
+    parts: () => { shell: string; args: readonly string[] };
+    writable: readonly string[];
+    /** Told whenever something starts, finds its address or falls over, so the
+     *  band above the composer is never out of date. */
+    onChange?: () => void;
+  },
+): ToolDefinition[] {
+  return [
+    {
+      name: 'keep_running',
+      label: 'Starting something up',
+      description:
+        'Start a command that is meant to stay up — a development server, an API, a watcher — and keep it running after this turn ends. Returns as soon as it says where it can be reached. Use this for anything that does not finish on its own; the ordinary shell is for commands that do.',
+      promptSnippet: 'keep_running(command, label?) — start a server and leave it running',
+      promptGuidelines: [
+        'Use keep_running for `npm run dev`, `vite`, `python3 -m http.server`, an API, a watcher — anything that stays up. Running one through bash cannot work: bash waits for a command to finish, and this kind never does.',
+        'Several can run at once — a front end and two back ends is ordinary. Each gets an id.',
+        'It comes back with the address it is reachable at, when it prints one. Give that address to the person; the window can open it.',
+        'Check on one later with running(), and end it with stop_running(id). Do not start a second copy of something already up — look first.',
+      ],
+      parameters: Type.Object({
+        command: Type.String({ description: 'The command to start, exactly as it would be typed.', minLength: 1 }),
+        label: Type.Optional(Type.String({ description: 'What to call it in a sentence — "the site", "the API".' })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { command: string; label?: string }): ToolResult => {
+        const command = params.command.trim();
+        if (command === '') throw new Error('I need a command to start.');
+        const piece = await running.start({
+          command,
+          folder: where.folder,
+          label: params.label,
+          parts: where.parts(),
+          writable: where.writable,
+          onChange: where.onChange,
+        });
+        const said = running.said(piece.id);
+        if (piece.state === 'stopped') {
+          throw new Error(
+            `It stopped straight away${piece.exitCode === null ? '' : ` (${String(piece.exitCode)})`}.\n\n${tail(said)}`,
+          );
+        }
+        const found =
+          piece.address === null
+            ? 'It is up. It has not printed an address, so either it is not one that listens or it is still starting — ask running() again in a moment.'
+            : `It is up at ${piece.address}.`;
+        return {
+          content: [{ type: 'text', text: `${describePiece(piece)}\n\n${found}\n\n${tail(said)}` }],
+          details: {},
+        };
+      },
+    },
+    {
+      name: 'running',
+      label: 'Checking what is running',
+      description:
+        'What is still running, and anything it has said since last time. With no id, lists everything. Use it before starting something, and after, to see whether it came up.',
+      promptSnippet: 'running(id?) — what is up, and what it has said',
+      parameters: Type.Object({
+        id: Type.Optional(Type.String({ description: 'One piece, by the id keep_running returned.' })),
+        all: Type.Optional(Type.Boolean({ description: 'Everything it has said, not only what is new.' })),
+      }),
+      execute: (_callId, params: { id?: string; all?: boolean }): ToolResult => {
+        const id = params.id?.trim();
+        if (id !== undefined && id !== '') {
+          const piece = running.at(id);
+          if (piece === null) throw new Error(`Nothing here is called ${id}. Ask running() for the list.`);
+          const said = running.said(id, { all: params.all === true });
+          const text = said.trim() === '' ? 'Nothing new since last time.' : tail(said);
+          return Promise.resolve({
+            content: [{ type: 'text', text: `${describePiece(piece)}\n\n${text}` }],
+            details: {},
+          });
+        }
+        const all = running.list();
+        const text = all.length === 0 ? 'Nothing is running.' : all.map(describePiece).join('\n');
+        return Promise.resolve({ content: [{ type: 'text', text }], details: {} });
+      },
+    },
+    {
+      name: 'stop_running',
+      label: 'Stopping something',
+      description: 'Stop something that keep_running started, and everything it started in turn.',
+      promptSnippet: 'stop_running(id) — stop one of the things that are up',
+      parameters: Type.Object({
+        id: Type.String({ description: 'The id keep_running returned.', minLength: 1 }),
+      }),
+      execute: (_callId, params: { id: string }): ToolResult => {
+        const stopped = running.stop(params.id.trim());
+        const text = stopped ? `${params.id} is stopped.` : `Nothing here is called ${params.id}.`;
+        return Promise.resolve({ content: [{ type: 'text', text }], details: {} });
+      },
+    },
+  ];
+}
 
 /**
  * Every tool Graphe adds, for one session.

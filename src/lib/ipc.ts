@@ -12,7 +12,9 @@
  * see.
  */
 
-import type { AgentEvent, Money, SpendSummary } from '../agent/types';
+import type { AgentEvent, Money, RunningPiece, SpendSummary } from '../agent/types';
+
+export type { RunningPiece } from '../agent/types';
 import type { HowFar } from '../agent/guard/policy';
 import type { Frame, Recording } from '../diff/flow';
 import type { SpendLimit } from '../cost/limits';
@@ -1058,6 +1060,8 @@ export const CHANNEL = {
   repoComment: 'graphe:repo-comment',
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
+  running: 'graphe:running',
+  stopRunning: 'graphe:stop-running',
   tidyNow: 'graphe:tidy-now',
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
@@ -1260,6 +1264,10 @@ export type GrapheApi = {
   /** Set how far it may go before it stops and asks. Answers with the rung it
    *  is actually on afterwards. */
   goAsFarAs(howFar: HowFar, where?: Where): Promise<Result<HowFar>>;
+  /** What is being kept running in this conversation — servers, watchers. */
+  running(where?: Where): Promise<Result<readonly RunningPiece[]>>;
+  /** Stop one of them. Answers with what is left. */
+  stopRunning(id: string, where?: Where): Promise<Result<readonly RunningPiece[]>>;
   /** What the open project carries, and whether each one is being loaded. */
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>>;
   /** Start loading one of them, or stop. Answers with the list as it stands. */

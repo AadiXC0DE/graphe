@@ -25,8 +25,15 @@
 
 import { homedir } from 'node:os';
 
-/** What may leave the machine. */
-export type Reach = 'nothing' | 'secure';
+/**
+ * What may leave the machine, and what may arrive.
+ *
+ * `serving` is `secure` plus the one thing a development server needs and the
+ * boundary otherwise refuses: a port on this machine, which a browser on this
+ * machine can knock on. Local only — nothing on the network outside can reach
+ * it, and it is asked for by name rather than being what every command gets.
+ */
+export type Reach = 'nothing' | 'secure' | 'serving';
 
 export type Bounds = {
   /** The folders work may write into. Everything else on the disk is read-only. */
@@ -146,11 +153,23 @@ export function seatbeltProfile(bounds: Bounds): Profile {
   lines.push(`(allow file-write* ${writes}${writes === '' ? '' : ' '}${literals(HARMLESS_DEVICES)})`);
   lines.push('(allow file-write-data (literal "/dev/stdout") (literal "/dev/stderr"))');
 
-  if (bounds.reach === 'secure') {
+  if (bounds.reach === 'secure' || bounds.reach === 'serving') {
     // Secure addresses and the name lookup they need, and nothing else. Port
     // rather than address is as far as this goes without a proxy in the middle.
     lines.push('(allow network-outbound (remote tcp "*:443") (remote unix-socket))');
     lines.push('(allow system-socket)');
+  }
+
+  if (bounds.reach === 'serving') {
+    // A port here, reachable from here. Everything a development server is for,
+    // and nothing an outside machine can use: `localhost` is the whole filter,
+    // so a bind to 0.0.0.0 — the one that would put it on the network — is
+    // refused by the kernel rather than by us noticing afterwards.
+    lines.push('(allow network-bind (local ip "localhost:*"))');
+    lines.push('(allow network-inbound (local ip "localhost:*"))');
+    // Servers talk to each other: a front end to its own API, an API to a
+    // database already running here.
+    lines.push('(allow network-outbound (remote ip "localhost:*"))');
   }
 
   return { text: `${lines.join('\n')}\n`, params };

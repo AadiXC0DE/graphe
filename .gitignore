@@ -19,3 +19,10 @@ CLAUDE.md
 
 release/
 build/icon.iconset/
+
+# The landing page's raw 2x captures. `site/scripts/shots.mjs` makes these again
+# from the running app, so only the ones it cannot make are kept: the whole-window
+# shots of the real desktop app, and the details cropped out of them by hand.
+site/assets/shots/*
+!site/assets/shots/app-*.png
+!site/assets/shots/crop-*.png

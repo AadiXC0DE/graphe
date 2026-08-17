@@ -648,7 +648,7 @@ a {
 .pillar {
   display: flex;
   flex-direction: column;
-  padding: 32px 30px 0;
+  padding: 30px 28px;
   border: 1px solid var(--edge);
   border-radius: var(--r-lg);
   background: linear-gradient(180deg, var(--night-raised), var(--night));
@@ -678,20 +678,24 @@ a {
 .pillar p {
   color: var(--haze);
   font-size: 1rem;
+  margin-bottom: 26px;
 }
 
-/* A peek at the real thing, cropped on purpose and faded out at the bottom so
-   the crop reads as a choice rather than as a picture that ran out of room. */
+/* A peek at the real thing, framed rather than bled. These are crops of an
+   interface that already has its own edges and padding; running them to the
+   card's edge put one of their margins against nothing and the other against
+   the card, which reads as a picture that slipped. */
 .pillar__shot {
-  margin: 28px -30px 0;
-  width: calc(100% + 60px);
-  max-width: none;
-  height: 280px;
+  margin-top: auto;
+  width: 100%;
+  height: 240px;
   object-fit: cover;
   object-position: top left;
-  border-top: 1px solid var(--edge);
-  -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
-  mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
+  background: var(--night-sunken);
+  -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
 }
 
 /* ─────────────────────────────────────────────────────────────── steps ── */
@@ -776,55 +780,72 @@ a {
   margin-inline-end: 6px;
 }
 
-/* The layers: pi at the middle, everything Graphe adds wrapped around it. */
-
-.layers {
+/* What comes from where, said as a list rather than drawn as rings. The rings
+   looked like an architecture diagram and carried no information; this is the
+   argument itself — pi is a serious harness, and this is the size of the layer
+   above it. */
+.from {
   display: grid;
-  place-items: center;
-  padding: 10px;
-}
-
-.layer {
-  width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 1px;
+  background: var(--edge);
   border: 1px solid var(--edge);
-  border-radius: var(--r-lg);
-  padding: 22px 22px 26px;
-  display: grid;
-  gap: 16px;
-  justify-items: center;
-  background: rgba(255, 255, 255, 0.012);
+  border-radius: var(--r-md);
+  overflow: hidden;
 }
 
-.layer--3 {
-  border-color: rgba(224, 118, 79, 0.18);
+.from__side {
+  background: var(--night);
+  padding: 24px 24px 28px;
 }
 
-.layer--2 {
-  border-color: rgba(224, 118, 79, 0.3);
+.from__side--ours {
+  background: linear-gradient(180deg, rgba(224, 118, 79, 0.06), transparent 55%), var(--night);
 }
 
-.layer--1 {
-  border-color: var(--coral);
-  background: var(--coral-soft);
-  padding: 34px;
-}
-
-.layer__label {
+.from__who {
   font-size: 0.6875rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--haze-dim);
+  margin-bottom: 16px;
 }
 
-.layer--2 > .layer__label {
+.from__side--ours .from__who {
+  color: var(--coral);
+}
+
+.from__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 11px;
+  font-size: 0.9375rem;
+  line-height: 1.45;
   color: var(--haze);
 }
 
-.layer__core {
-  font-size: clamp(2rem, 1.4rem + 2vw, 3rem);
-  font-weight: 900;
-  letter-spacing: -0.04em;
-  color: var(--coral);
+.from__list li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.from__list li::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin-top: 0.55em;
+  background: var(--edge-strong);
+}
+
+.from__side--ours .from__list {
+  color: #e6e0db;
+}
+
+.from__side--ours .from__list li::before {
+  background: var(--coral);
 }
 
 /* ─────────────────────────────────────────────────────── the board ── */
@@ -1309,11 +1330,6 @@ a {
     grid-template-columns: 1fr;
   }
 
-  .layers {
-    max-width: 520px;
-    margin-inline: auto;
-  }
-
   .nav__links {
     display: none;
   }
@@ -1348,11 +1364,6 @@ a {
 
   .pillar {
     padding-inline: 22px;
-  }
-
-  .pillar__shot {
-    margin-inline: -22px;
-    width: calc(100% + 44px);
   }
 
   .foot__links {

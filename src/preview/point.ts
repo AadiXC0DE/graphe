@@ -55,7 +55,14 @@ export type Pointed = {
   origin?: readonly Trace[];
   /** How wide the page was being looked at, so the other widths can be named. */
   view?: { width: number; height: number };
+  /** What somebody wrote about it, on the page, at the spot they wrote it.
+   *  Absent when they picked something and said nothing. */
+  said?: string;
 };
+
+/** As long as a note beside a button ever needs to be. Past this it is not a
+ *  note, and the box on the page is the wrong place to be writing it. */
+export const SAID_MAX = 600;
 
 /** A line of somebody's code, as a stack frame gives it. */
 export type Frame = { name: string | null; file: string; line: number; column: number };
@@ -101,11 +108,14 @@ const ACCENT = '#b8492c';
  * The old wording named the gesture and not the outcome, so nobody could tell
  * what pressing it would do. What it does is put whatever you click — its file,
  * its component, the values in scope on it — into the message you are writing. */
-const ASK = 'Ask about something here';
+const ASK = 'Comment on this page';
 const PICKING = 'Click anything · Esc to stop';
-/** Said on the launcher itself once something has been picked, because the
- *  message box it lands in may be behind this page. */
-const TOOK = 'Added to your message';
+/** Said on the launcher once a note has gone. The conversation it lands in may
+ *  be behind this page, so the page says so itself. */
+const TOOK = 'Sent';
+/** In the note box, where somebody is about to write. */
+const WRITE = 'What should change here?';
+const SEND = 'Send';
 
 /**
  * The whole judgement, as one closed function.
@@ -399,6 +409,27 @@ export function kindOf(el: { tagName: string; role?: string }): string {
 /** The sentence a designer reads after clicking. */
 export function describePointed(pointed: Pointed): string {
   return PURE.describePointed(pointed);
+}
+
+/**
+ * A note somebody wrote on the page, as a message to work from.
+ *
+ * Their words first, because that is the instruction. Then one line saying which
+ * element it was about, and where it was written when the page could tell us —
+ * enough to go and change it, and short enough that the instruction is still the
+ * first thing read. Everything else the page knows is a reading, and a reading
+ * is an answer to a question nobody asked here.
+ */
+export function asksAbout(pointed: Pointed): string {
+  const said = (pointed.said ?? '').replace(/\s+/g, ' ').trim();
+  const what = describePointed(pointed);
+  const written = (pointed.origin ?? []).find(
+    (trace): trace is Extract<Trace, { file: string; line: number }> =>
+      (trace.how === 'stamp' || trace.how === 'stack') && typeof trace.file === 'string',
+  );
+  const where = written === undefined ? '' : ` — ${written.file}:${String(written.line)}`;
+  const about = `About ${what.charAt(0).toLowerCase()}${what.slice(1)}${where}`;
+  return said === '' ? about : `${said}\n\n${about}`;
 }
 
 /**
@@ -798,6 +829,11 @@ function pointerScript(): string {
   var ASK = '${ASK}';
   var PICKING = '${PICKING}';
   var TOOK = '${TOOK}';
+  var WRITE = '${WRITE}';
+  var SEND = '${SEND}';
+  var SAID_MAX = ${SAID_MAX};
+  var noting = null;
+  var pins = 0;
   var live = false;
   var box = null;
   var chip = null;
@@ -1064,6 +1100,7 @@ function pointerScript(): string {
 
   function ours(el) {
     if (box !== null && (el === box || box.contains(el))) return true;
+    if (noting !== null && (el === noting || noting.contains(el))) return true;
     return launcher !== null && (el === launcher || launcher.contains(el));
   }
 
@@ -1120,12 +1157,108 @@ function pointerScript(): string {
     if (!el || el.nodeType !== 1 || ours(el)) return;
     swallow(event);
     var pointed = pointedFrom(el, true);
+    var at = { x: event.clientX, y: event.clientY };
     stop();
-    took();
-    originOf(el, pointed).then(function (traces) {
+    // The source map takes a moment. Ask for it now so it is ready by the time
+    // anybody has finished typing, and open the box straight away either way.
+    var found = originOf(el, pointed).then(function (traces) {
       if (traces && traces.length) pointed.origin = traces;
-      send(pointed);
-    }, function () { send(pointed); });
+      return pointed;
+    }, function () { return pointed; });
+    note(pointed, at, found);
+  }
+
+  /* A note, written where it is about.
+     
+     The alternative was putting what was clicked into the message box and
+     leaving somebody to describe the rest — which meant looking away from the
+     thing they were looking at, and reading a paragraph of measurements to find
+     out we already knew which button they meant. A box on the spot asks the only
+     question worth asking, and what was clicked travels with the answer. */
+  function note(pointed, at, found) {
+    closeNote();
+    var pin = document.createElement('div');
+    pin.setAttribute('data-graphe', 'note');
+    var left = Math.min(Math.max(at.x, 12), window.innerWidth - 292);
+    var top = Math.min(at.y + 12, window.innerHeight - 150);
+    pin.style.cssText =
+      'position:fixed;left:' + left + 'px;top:' + top + 'px;z-index:2147483647;' +
+      'width:280px;box-sizing:border-box;padding:10px;border-radius:10px;' +
+      'background:#fff;color:#1a1a19;box-shadow:0 8px 30px rgba(0,0,0,0.28);' +
+      'font:400 13px/1.45 ui-sans-serif,system-ui,-apple-system,sans-serif;';
+
+    var what = document.createElement('div');
+    what.setAttribute('data-graphe', 'note-what');
+    what.textContent = G.describePointed(pointed);
+    what.style.cssText =
+      'font-size:11px;color:#6e6e68;margin-bottom:7px;overflow:hidden;' +
+      'text-overflow:ellipsis;white-space:nowrap;';
+
+    var box = document.createElement('textarea');
+    box.setAttribute('data-graphe', 'note-box');
+    box.placeholder = WRITE;
+    box.rows = 2;
+    box.maxLength = SAID_MAX;
+    box.style.cssText =
+      'width:100%;box-sizing:border-box;resize:none;border:1px solid #e4e4e1;' +
+      'border-radius:7px;padding:7px 8px;font:inherit;color:inherit;outline:none;';
+    box.addEventListener('focus', function () { box.style.borderColor = ACCENT; });
+    box.addEventListener('blur', function () { box.style.borderColor = '#e4e4e1'; });
+
+    var go = document.createElement('button');
+    go.setAttribute('data-graphe', 'note-send');
+    go.type = 'button';
+    go.textContent = SEND;
+    go.style.cssText =
+      'margin-top:7px;float:right;border:0;cursor:pointer;padding:6px 13px;' +
+      'border-radius:7px;background:' + ACCENT + ';color:#fff;font:500 12px/1.2 inherit;';
+
+    var send_ = function () {
+      var said = (box.value || '').trim();
+      if (said === '') { box.focus(); return; }
+      closeNote();
+      leaveMark(at);
+      took();
+      found.then(function (ready) {
+        ready.said = said;
+        send(ready);
+      });
+    };
+
+    go.addEventListener('click', function (event) { swallow(event); send_(); });
+    box.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') { swallow(event); closeNote(); return; }
+      if (event.key === 'Enter' && !event.shiftKey) { swallow(event); send_(); }
+    });
+
+    pin.appendChild(what);
+    pin.appendChild(box);
+    pin.appendChild(go);
+    (document.body || document.documentElement).appendChild(pin);
+    noting = pin;
+    box.focus();
+  }
+
+  function closeNote() {
+    if (!noting) return;
+    if (noting.parentNode) noting.parentNode.removeChild(noting);
+    noting = null;
+  }
+
+  /** What is left behind: a small numbered mark, so a page somebody has walked
+   *  over shows where they have already said something. */
+  function leaveMark(at) {
+    pins += 1;
+    var mark = document.createElement('div');
+    mark.setAttribute('data-graphe', 'mark');
+    mark.textContent = String(pins);
+    mark.style.cssText =
+      'position:fixed;left:' + (at.x - 11) + 'px;top:' + (at.y - 11) + 'px;' +
+      'z-index:2147483646;width:22px;height:22px;border-radius:50% 50% 50% 2px;' +
+      'display:flex;align-items:center;justify-content:center;pointer-events:none;' +
+      'background:' + ACCENT + ';color:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);' +
+      'font:600 11px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;';
+    (document.body || document.documentElement).appendChild(mark);
   }
 
   /** Say it landed, then go back to offering. The message box is in the window
@@ -1140,7 +1273,7 @@ function pointerScript(): string {
   }
 
   function key(event) {
-    if (event.key === 'Escape') { swallow(event); stop(); }
+    if (event.key === 'Escape') { swallow(event); stop(); closeNote(); }
   }
 
   /* The POST back has a small body limit and a message does not. A click that
@@ -1227,7 +1360,20 @@ function pointerScript(): string {
     if (data.on === false) stop(); else start();
   });
   window.addEventListener('pagehide', stop);
-  window.__graphePointer = { start: start, stop: stop };
+  /** Take the whole overlay off: any note being written, and every mark left
+   *  behind. Called when the work a note asked for has been done — a pin that
+   *  outlives what it asked about is a page covered in old questions. */
+  function clear() {
+    stop();
+    closeNote();
+    pins = 0;
+    var marks = document.querySelectorAll('[data-graphe="mark"]');
+    for (var i = 0; i < marks.length; i++) {
+      if (marks[i].parentNode) marks[i].parentNode.removeChild(marks[i]);
+    }
+  }
+
+  window.__graphePointer = { start: start, stop: stop, clear: clear };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', mount);

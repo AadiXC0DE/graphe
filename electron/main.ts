@@ -621,6 +621,15 @@ function pageStore(): Electron.Session {
 /** Run once per document, however the page got here. A page we served already
  *  carries the script, and a second copy would put a second button on it. */
 const POINTER_ONCE = `if (!window.__graphePointer) { ${POINTER_SCRIPT} }`;
+/** Notes are questions about work that has not happened yet, so they come off
+ *  the page when it has. Guarded: the page may have navigated since. */
+const POINTER_CLEAR = 'try { window.__graphePointer && window.__graphePointer.clear(); } catch (e) {}';
+
+function clearNotesOnPage(): void {
+  const view = pageView;
+  if (view === null) return;
+  void view.webContents.executeJavaScript(POINTER_CLEAR, true).catch(() => undefined);
+}
 
 function makePageView(): WebContentsView | null {
   if (mainWindow === null || mainWindow.isDestroyed()) return null;
@@ -1492,6 +1501,7 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // running in the background is NOT brought back — that is what keeps two
     // parallel tabs from silently overwriting each other's files.
     if (said.type === 'settled') {
+      clearNotesOnPage();
       const inFront = held.sessions.current?.path === from.address;
       const checkout =
         !inFront || from.address === null ? null : held.checkouts.get(from.address) ?? null;

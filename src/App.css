@@ -961,19 +961,3 @@ p {
   right: var(--browser-take);
 }
 
-/* What somebody pointed at, held over the right-hand rail. It sits where the
-   panel does rather than beside the page, because the page is a native view and
-   paints above everything drawn here. */
-.pointedat {
-  position: fixed;
-  top: var(--topbar-height);
-  right: 0;
-  bottom: 0;
-  z-index: 7;
-  width: var(--rail-width);
-  overflow-y: auto;
-  padding: var(--space-3);
-  border-left: 1px solid var(--border);
-  background: var(--bg-raised);
-  scrollbar-width: thin;
-}

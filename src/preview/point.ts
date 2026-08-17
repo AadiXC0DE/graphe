@@ -96,9 +96,16 @@ export type ElementWords = {
 /** The app's own accent, so the highlight belongs to us on somebody else's page. */
 const ACCENT = '#b8492c';
 
-/** On the page itself, where the thing being pointed at is. */
-const ASK = 'Point at something';
+/** On the page itself, where the thing being pointed at is.
+ *
+ * The old wording named the gesture and not the outcome, so nobody could tell
+ * what pressing it would do. What it does is put whatever you click — its file,
+ * its component, the values in scope on it — into the message you are writing. */
+const ASK = 'Ask about something here';
 const PICKING = 'Click anything · Esc to stop';
+/** Said on the launcher itself once something has been picked, because the
+ *  message box it lands in may be behind this page. */
+const TOOK = 'Added to your message';
 
 /**
  * The whole judgement, as one closed function.
@@ -790,6 +797,7 @@ function pointerScript(): string {
   var ACCENT = '${ACCENT}';
   var ASK = '${ASK}';
   var PICKING = '${PICKING}';
+  var TOOK = '${TOOK}';
   var live = false;
   var box = null;
   var chip = null;
@@ -1113,10 +1121,22 @@ function pointerScript(): string {
     swallow(event);
     var pointed = pointedFrom(el, true);
     stop();
+    took();
     originOf(el, pointed).then(function (traces) {
       if (traces && traces.length) pointed.origin = traces;
       send(pointed);
     }, function () { send(pointed); });
+  }
+
+  /** Say it landed, then go back to offering. The message box is in the window
+   *  behind this page, and something that answers with nothing visible reads as
+   *  a button that did not work. */
+  function took() {
+    if (!launcher) return;
+    launcher.textContent = TOOK;
+    setTimeout(function () {
+      if (launcher && !live) launcher.textContent = ASK;
+    }, 1800);
   }
 
   function key(event) {

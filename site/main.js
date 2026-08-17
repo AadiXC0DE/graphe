@@ -97,23 +97,33 @@ if (steps.length > 0) {
   for (const step of steps) here.observe(step);
 }
 
-/* ── the window shows itself once, so the tabs read as tabs ──────────── */
+/* ── the window walks its own screens until somebody takes over ──────── */
 
+/* It used to nudge from the first tab to the second and back, which read as a
+   broken carousel rather than as a hint. It now walks all four, and the first
+   press stops it for good — a page that keeps moving the thing somebody is
+   trying to look at is worse than one that never moved. */
 if (!quiet.matches && tabs.length > 1) {
   const stage = document.querySelector('.stage');
-  let shown = false;
-  const teach = new IntersectionObserver((entries) => {
-    if (shown || !entries[0]?.isIntersecting) return;
-    shown = true;
-    teach.disconnect();
-    setTimeout(() => {
-      // Only if nobody has touched it — a page that overrides a person's choice
-      // to show off is worse than one that never showed off.
-      if (tabs[0].classList.contains('is-on')) show('design');
-      setTimeout(() => {
-        if (tabs[1].classList.contains('is-on')) show('work');
-      }, 1500);
-    }, 2600);
+  let walking = null;
+  let at = 0;
+
+  const stop = () => {
+    if (walking === null) return;
+    clearInterval(walking);
+    walking = null;
+  };
+
+  for (const tab of tabs) tab.addEventListener('click', stop, { once: true });
+
+  const start = new IntersectionObserver((entries) => {
+    if (!entries[0]?.isIntersecting) return;
+    start.disconnect();
+    walking = setInterval(() => {
+      if (document.hidden) return;
+      at = (at + 1) % tabs.length;
+      show(tabs[at].dataset.view);
+    }, 3200);
   });
-  if (stage) teach.observe(stage);
+  if (stage) start.observe(stage);
 }

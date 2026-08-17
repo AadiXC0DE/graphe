@@ -254,7 +254,14 @@ describe('the script that runs on their page', () => {
   });
 
   it('lets go of the cursor before it goes looking for the source map', () => {
-    const stopped = POINTER_SCRIPT.indexOf('stop();\n    originOf(el, pointed)');
+    // Order, not adjacency: what matters is that the crosshair and the click
+    // handlers are released before a lookup that can take a moment, not that
+    // nothing else happens in between. Saying "added to your message" does.
+    const clicked = POINTER_SCRIPT.indexOf('function clicked(');
+    const stopped = POINTER_SCRIPT.indexOf('stop();', clicked);
+    const looking = POINTER_SCRIPT.indexOf('originOf(el, pointed)', clicked);
+    expect(clicked).toBeGreaterThan(-1);
     expect(stopped).toBeGreaterThan(-1);
+    expect(looking).toBeGreaterThan(stopped);
   });
 });

@@ -419,7 +419,10 @@ a {
 /* ────────────────────────────────────────────────────────────── hero ── */
 
 .band--hero {
-  padding-top: clamp(48px, 8vh, 96px);
+  /* Tight enough that the window below is part of the first screen. The page
+     argues in one sentence and then shows the thing; a first screen that ends
+     before the thing is a page that has not shown anybody anything. */
+  padding-top: clamp(28px, 4.5vh, 60px);
   padding-bottom: clamp(60px, 8vh, 110px);
   text-align: center;
   overflow: hidden;
@@ -460,7 +463,7 @@ a {
 }
 
 .hero__title {
-  font-size: clamp(2.75rem, 1.1rem + 6.4vw, 5.75rem);
+  font-size: clamp(2.625rem, 1.1rem + 5.6vw, 5rem);
   font-weight: 900;
   letter-spacing: -0.045em;
   line-height: 0.97;
@@ -523,8 +526,8 @@ a {
 }
 
 .hero__lead {
-  margin: 26px auto 0;
-  max-width: 58ch;
+  margin: 22px auto 0;
+  max-width: 70ch;
   font-size: clamp(1.0625rem, 1rem + 0.4vw, 1.3125rem);
   color: var(--haze);
 }
@@ -540,7 +543,7 @@ a {
 }
 
 .hero__fine {
-  margin-top: 22px;
+  margin-top: 18px;
   font-family: var(--mono);
   font-size: 0.75rem;
   color: var(--haze-dim);
@@ -549,7 +552,7 @@ a {
 /* The window. One frame, four real screens. */
 
 .stage {
-  margin: clamp(48px, 7vw, 84px) auto 0;
+  margin: clamp(26px, 3.2vw, 42px) auto 0;
   max-width: var(--full);
 }
 

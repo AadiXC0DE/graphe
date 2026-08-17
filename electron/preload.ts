@@ -637,6 +637,7 @@ const api: GrapheApi = {
   pageAt(
     address: string | null,
     bounds: { x: number; y: number; width: number; height: number } | null,
+    again?: boolean,
   ): Promise<Result<null>> {
     const fine =
       bounds === null ||
@@ -647,7 +648,7 @@ const api: GrapheApi = {
     if ((address !== null && typeof address !== 'string') || !fine) {
       return Promise.resolve(refuse<null>('I could not tell where to put the page.'));
     }
-    return ipcRenderer.invoke(CHANNEL.pageAt, address, bounds) as Promise<Result<null>>;
+    return ipcRenderer.invoke(CHANNEL.pageAt, address, bounds, again === true) as Promise<Result<null>>;
   },
 
   pageHidden(hidden: boolean): Promise<Result<null>> {

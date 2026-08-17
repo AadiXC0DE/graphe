@@ -1312,7 +1312,14 @@ export type GrapheApi = {
   deleteConversation(path: string, where?: Where): Promise<Result<readonly Conversation[]>>;
   /** Point the page at an address and glue it to a rectangle in the window.
    *  A null rectangle closes it. */
-  pageAt(address: string | null, bounds: { x: number; y: number; width: number; height: number } | null): Promise<Result<null>>;
+  /** Where the page is drawn, and what it shows. Moving it never reloads it:
+   *  the box is reported whenever the window changes shape, and a turn full of
+   *  tool calls changes it many times. `again` is the reload press. */
+  pageAt(
+    address: string | null,
+    bounds: { x: number; y: number; width: number; height: number } | null,
+    again?: boolean,
+  ): Promise<Result<null>>;
   /** Take the page out of the way while something is drawn over it. */
   pageHidden(hidden: boolean): Promise<Result<null>>;
   /** Watch how somebody uses the page, capturing every state with the thing

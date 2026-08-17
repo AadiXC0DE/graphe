@@ -631,6 +631,23 @@ function clearNotesOnPage(): void {
   void view.webContents.executeJavaScript(POINTER_CLEAR, true).catch(() => undefined);
 }
 
+/**
+ * Show the work, once it is work and not a step on the way to it.
+ *
+ * A turn is many tool calls and the page is worth seeing after all of them, not
+ * between each one: reloading mid-run throws away the scroll position and the
+ * state somebody was looking at, over and over, to show them a page that is
+ * half-changed. A project with its own dev server reloads itself and this
+ * changes nothing for it; one being served as files does not, and this is the
+ * only moment it should.
+ */
+function showTheWorkOnPage(): void {
+  const view = pageView;
+  if (view === null || view.webContents.isDestroyed()) return;
+  if (view.webContents.getURL() === '') return;
+  view.webContents.reload();
+}
+
 function makePageView(): WebContentsView | null {
   if (mainWindow === null || mainWindow.isDestroyed()) return null;
   if (pageView !== null) return pageView;
@@ -1502,6 +1519,7 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // parallel tabs from silently overwriting each other's files.
     if (said.type === 'settled') {
       clearNotesOnPage();
+      showTheWorkOnPage();
       const inFront = held.sessions.current?.path === from.address;
       const checkout =
         !inFront || from.address === null ? null : held.checkouts.get(from.address) ?? null;
@@ -5264,32 +5282,44 @@ function register(): void {
      view that drifts from the space kept for it is worse than none. */
   handle<null>(CHANNEL.pageAt, async (_event, args) => {
     const [address, bounds] = args;
+    const again = args[2] === true;
     const box = bounds as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;
-    if (typeof address !== 'string' || address.trim() === '' || box === null) {
+    // No box and no press means there is nowhere to draw it, which is how the
+    // pane says it has closed. No box *with* a press means "the same place,
+    // again" — the one thing the reload button asks for.
+    if (typeof address !== 'string' || address.trim() === '' || (box === null && !again)) {
       dropPageView();
       return done(null);
     }
     if (
-      typeof box.x !== 'number' ||
-      typeof box.y !== 'number' ||
-      typeof box.width !== 'number' ||
-      typeof box.height !== 'number'
+      box !== null &&
+      (typeof box.x !== 'number' ||
+        typeof box.y !== 'number' ||
+        typeof box.width !== 'number' ||
+        typeof box.height !== 'number')
     ) {
       return done(null);
     }
     const view = makePageView();
     if (view === null) return done(null);
     pageProject = projectAt(whereIn(args))?.path ?? null;
-    view.setBounds({
-      x: Math.round(box.x),
-      y: Math.round(box.y),
-      width: Math.max(0, Math.round(box.width)),
-      height: Math.max(0, Math.round(box.height)),
-    });
-    // Asking for the address it is already on is asking for it again — which is
-    // what a reload is, and the only thing a person means by pressing it.
-    if (view.webContents.getURL() === address) view.webContents.reload();
-    else await view.webContents.loadURL(address).catch(() => undefined);
+    if (box !== null) {
+      view.setBounds({
+        x: Math.round(box.x as number),
+        y: Math.round(box.y as number),
+        width: Math.max(0, Math.round(box.width as number)),
+        height: Math.max(0, Math.round(box.height as number)),
+      });
+    }
+    // Moving the page is not reloading it. The box is reported every time the
+    // window changes shape — which a turn full of tool calls does over and over
+    // — and reloading on each of those threw the page away while somebody was
+    // reading it. Only a press asks for it again.
+    if (view.webContents.getURL() !== address) {
+      await view.webContents.loadURL(address).catch(() => undefined);
+    } else if (again) {
+      view.webContents.reload();
+    }
     return done(null);
   });
 

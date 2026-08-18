@@ -471,6 +471,46 @@ export class ProjectHistory {
     return id;
   }
 
+  /**
+   * Take everything one version changed into the project, alongside whatever is
+   * already there.
+   *
+   * Not `restoreTo`, which replaces the whole tree. Two pieces of work started
+   * from the same version and finished separately are not alternatives to each
+   * other, so keeping the second must not undo the first — and replacing the
+   * tree with the second one's copy did exactly that, silently, because the
+   * second copy never had the first one's changes in it.
+   *
+   * A file both of them changed is a real disagreement. It is reported and the
+   * project is left as it was, rather than one side quietly winning.
+   */
+  async carryIn(
+    versionId: string,
+    message: string,
+  ): Promise<{ ok: true; version: string } | { ok: false; conflicted: readonly string[] }> {
+    await this.ensureReady();
+    const target = await this.resolve(versionId);
+    if (await this.hasUnsavedChanges()) {
+      throw new HistoryError(historyProblems.unsavedFirst);
+    }
+
+    // `--squash` merges into the files and stops there, leaving no half-finished
+    // merge behind for the next save to trip over.
+    const merged = await this.attempt(['merge', '--squash', target]);
+    if (merged.code !== 0) {
+      const clashing = await this.attempt(['diff', '-z', '--name-only', '--diff-filter=U']);
+      const conflicted = clashing.stdout.split('\0').filter((one: string) => one !== '');
+      // Safe because nothing was unsaved: the precondition above is what makes
+      // putting the folder back exactly where it was a true statement.
+      await this.attempt(['reset', '--hard', 'HEAD']);
+      return { ok: false, conflicted };
+    }
+
+    const id = await this.snapshot(message, { evenIfNothingChanged: true });
+    if (!id) throw new HistoryError(historyProblems.goBackFailed);
+    return { ok: true, version: id };
+  }
+
   /* ------------------------------------------------- separate copies to try in */
 
   /**

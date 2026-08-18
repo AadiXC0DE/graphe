@@ -185,7 +185,7 @@ import { FollowedFile } from '../src/projects/followed';
 import { lookAtEveryWidth } from '../src/diff/capture';
 import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
-import { HeldWork, holdWords, Workbench, type PieceOfWork } from '../src/history/attempts';
+import { HeldWork, bothChanged, holdWords, Workbench, type PieceOfWork } from '../src/history/attempts';
 import { AT_A_TIME } from '../src/work/board';
 import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
 import {
@@ -4448,7 +4448,12 @@ function register(): void {
       // Anything unfinished in the folder becomes a version first, the same way
       // going back does, so keeping this can never write over it.
       await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
-      await desk.bench.keep(id, saysHeldWork(piece.doing));
+      const kept = await desk.bench.keep(id, saysHeldWork(piece.doing));
+      // A file two pieces both changed is the one case somebody has to look at.
+      // The piece stays on the board, so the work is still there to open.
+      if (kept !== null && kept.version === null) {
+        return fail(plainTrouble(bothChanged(kept.conflicted)));
+      }
       desk.runs.delete(id);
       forgetNote(desk, id);
     } catch (cause) {

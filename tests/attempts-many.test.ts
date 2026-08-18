@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { ProjectHistory } from '../src/history/repo';
-import { Workbench, folderForWork } from '../src/history/attempts';
+import { bothChanged, Workbench, folderForWork } from '../src/history/attempts';
 import { AT_A_TIME, saysBoard } from '../src/work/board';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
@@ -383,5 +383,75 @@ describe('M-05 throwing one away', () => {
     await bench.clear();
     expect(await there(folder)).toBe(false);
     expect(await get(root, 'hero.css')).toBe('.hero { padding: 16px; }\n');
+  });
+});
+
+/* ========================================================================== */
+/* Keeping two pieces of work, one after the other                             */
+/* ========================================================================== */
+
+describe('two pieces kept in a row', () => {
+  /**
+   * The failure this exists for: every piece starts from the same version, so
+   * one copy has no idea what another did. Putting a copy back whole therefore
+   * undid the piece kept before it — silently, with no conflict and no
+   * sentence, because from git's point of view nothing was wrong.
+   */
+  it('does not undo the first one when the second is kept', async () => {
+    const { history, root, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const one = bench.ask('Warm up the hero');
+    const two = bench.ask('Add a footer');
+    await bench.begin();
+
+    await put(one.folder ?? '', 'hero.css', '.hero { padding: 24px; }\n');
+    await put(two.folder ?? '', 'footer.css', '.footer { padding: 8px; }\n');
+    await bench.settle(one.id, 'Warmed the hero');
+    await bench.settle(two.id, 'Added a footer');
+
+    const first = await bench.keep(one.id, 'Kept the hero');
+    expect(first?.version).not.toBeNull();
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 24px; }\n');
+
+    const second = await bench.keep(two.id, 'Kept the footer');
+    expect(second?.version).not.toBeNull();
+    expect(second?.conflicted).toEqual([]);
+
+    // Both, together. This is the whole test.
+    expect(await get(root, 'footer.css')).toBe('.footer { padding: 8px; }\n');
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 24px; }\n');
+  });
+
+  it('leaves the project alone and says so when both changed one file', async () => {
+    const { history, root, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const one = bench.ask('Warm up the hero');
+    const two = bench.ask('Tighten the hero');
+    await bench.begin();
+
+    await put(one.folder ?? '', 'hero.css', '.hero { padding: 24px; }\n');
+    await put(two.folder ?? '', 'hero.css', '.hero { padding: 4px; }\n');
+    await bench.settle(one.id, 'Warmed the hero');
+    await bench.settle(two.id, 'Tightened the hero');
+
+    await bench.keep(one.id, 'Kept the first');
+    const second = await bench.keep(two.id, 'Kept the second');
+
+    expect(second?.version).toBeNull();
+    expect(second?.conflicted).toContain('hero.css');
+    // Left exactly as it was, rather than one side quietly winning.
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 24px; }\n');
+    // And nothing half-merged left behind for the next save to trip over.
+    expect(await history.hasUnsavedChanges()).toBe(false);
+  });
+
+  it('says which files, and what to do about them', () => {
+    expect(bothChanged(['hero.css'])).toContain('hero.css');
+    expect(bothChanged(['hero.css'])).toMatch(/left your project as it was/i);
+    const many = bothChanged(['a.css', 'b.css', 'c.css', 'd.css', 'e.css', 'f.css']);
+    expect(many).toContain('and 2 more');
+    expect(many).toMatch(/6 of the same files/);
   });
 });

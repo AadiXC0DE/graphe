@@ -67,6 +67,20 @@ export function saysKept(name: string, asked: string | null): string {
     : `${asked.trim()} — kept the ${which}`;
 }
 
+/** What came of keeping one. A version and nothing held back is the ordinary
+ *  answer; anything in `conflicted` means the project was left as it was. */
+export type Kept = { version: string | null; conflicted: readonly string[] };
+
+/** When two pieces of work changed the same file. The project is left as it
+ *  was, so the sentence has to say what to do next rather than what failed. */
+export function bothChanged(files: readonly string[]): string {
+  const named = files.slice(0, 4).join(', ');
+  const rest = files.length > 4 ? ` and ${String(files.length - 4)} more` : '';
+  return files.length === 1
+    ? `Another piece of work has already changed ${named}, so I have left your project as it was. Open this one and decide which version of that file you want.`
+    : `Another piece of work has already changed ${String(files.length)} of the same files, so I have left your project as it was: ${named}${rest}. Open this one and decide which versions you want.`;
+}
+
 export const tryWords = {
   start: 'Try it two ways',
   keep: 'Use this one',
@@ -495,18 +509,25 @@ export class Workbench {
   }
 
   /**
-   * Keep one, and put the project's files where that piece of work left them.
+   * Keep one, bringing what it changed into the project alongside everything
+   * else that is already there.
    *
-   * `restoreTo` again, so this is a version like any other and undoable like any
-   * other. The rest of the board carries on: they were never alternatives to
-   * this one, they were other work.
+   * The rest of the board carries on: they were never alternatives to this one,
+   * they were other work — which is exactly why this cannot replace the
+   * project's files with this piece's copy. Every piece starts from the same
+   * version, so one copy has no idea what another one did, and putting the
+   * whole of it back used to undo the piece kept before it without a word.
+   *
+   * A file two pieces both changed is reported rather than resolved: it is the
+   * one case where somebody has to look.
    */
-  async keep(id: string, title: string): Promise<string | null> {
+  async keep(id: string, title: string): Promise<Kept | null> {
     const piece = this.find(id);
     if (piece === undefined || piece.version === null) return null;
-    const version = await this.history.restoreTo(piece.version, title);
+    const carried = await this.history.carryIn(piece.version, title);
+    if (!carried.ok) return { version: null, conflicted: carried.conflicted };
     await this.drop(id);
-    return version;
+    return { version: carried.version, conflicted: [] };
   }
 
   /** Let one go, whatever state it was in. Safe to call twice. */

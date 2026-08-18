@@ -389,8 +389,11 @@ a {
   color: var(--brick);
 }
 
+/* Every band shares one left edge. The page had two container widths, so a
+   heading and the grid beneath it began in different places — which is the kind
+   of thing nobody names and everybody sees. */
 .head {
-  max-width: var(--wide);
+  max-width: var(--full);
   margin: 0 auto clamp(48px, 6vw, 84px);
 }
 
@@ -730,7 +733,7 @@ a {
    badge on a rail — a step is a line in a list of instructions, and drawing it
    as a station on a track is decoration standing in for structure. */
 .steps {
-  max-width: var(--wide);
+  max-width: var(--full);
   margin: 0 auto;
   padding: 0;
   list-style: none;
@@ -1039,7 +1042,7 @@ a {
 /* Two columns, one row per event: the left is what anybody reads, the right is
    what actually ran. Reading across a row is the whole argument. */
 .both {
-  max-width: var(--wide);
+  max-width: var(--full);
   margin: 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1098,6 +1101,25 @@ a {
   border: 1px solid var(--edge);
   border-radius: var(--r-lg);
   overflow: hidden;
+}
+
+/* Four of them, so they are told to be four across rather than left to fill
+   whatever the auto grid works out — which at this width was five slots and one
+   of them empty. */
+.sheet--four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1080px) {
+  .sheet--four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .sheet--four {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .cell {
@@ -1159,7 +1181,7 @@ a {
 /* ────────────────────────────────────────────────────── promises ── */
 
 .promises {
-  max-width: var(--wide);
+  max-width: var(--full);
   margin: 0 auto;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

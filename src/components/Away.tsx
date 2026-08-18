@@ -145,8 +145,10 @@ export default function Away({
   const repeats = away?.repeats ?? [];
   const asked = showing.filter((one) => one.question !== null);
   /* Only work that has not finished can be waited for — waiting for something
-     already done would start straight away, which is not what was asked. */
-  const canWaitFor = pieces.filter(
+     already done would start straight away, which is not what was asked.
+     And only this folder's, whatever the board is showing: new work starts
+     where you are, and nothing here can wait for another folder's piece. */
+  const canWaitFor = here.filter(
     (one) => one.state === 'running' || one.state === 'waiting' || one.state === 'needs-you',
   );
 

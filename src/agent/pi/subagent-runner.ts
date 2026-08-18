@@ -29,7 +29,7 @@
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { roleSpec, safeChildWords, type HelperRole } from './child';
+import { mayRun, roleSpec, safeChildWords, type HelperRole } from './child';
 import { patchWorkerThreads } from './node-shim';
 import type { HelperPace } from './tools';
 import type { GuardFacts } from '../guard/policy';
@@ -112,12 +112,6 @@ function readJob(): Promise<Job> {
   });
 }
 
-/** What the model is told when the helper will not do something. The same words
- *  come back as the tool's error text, the same way a denial in the main
- *  session does. */
-const DECLINED =
-  'This could not be done by a helper: helpers cannot ask questions or change anything. Report what you found and let the main agent decide.';
-
 /** No account reached the child. Said as a failure rather than an empty answer:
  *  the parent turns this into the tool's error text, so the model reads it and
  *  says something true instead of reporting a finding it never made. */
@@ -190,14 +184,8 @@ async function work(
    * before anything runs. A `deny` — credentials, anywhere outside the project
    * folder, a key on its way out — is still a deny.
    */
-  const allowed = new Set(spec.tools);
-  const review = async (call: { id: string; name: string; input: Record<string, unknown> }) => {
-    if (!allowed.has(call.name.toLowerCase())) return { block: true, reason: DECLINED };
-    const verdict = evaluate(call, facts);
-    if (verdict.kind === 'deny') return { block: true, reason: verdict.reason };
-    if (changesAnything(call, facts)) return { block: true, reason: DECLINED };
-    return undefined;
-  };
+  const review = async (call: { id: string; name: string; input: Record<string, unknown> }) =>
+    mayRun(spec, call, evaluate(call, facts), changesAnything(call, facts));
 
   // The helper's Guard is a resource-layer hook rather than a session option:
   // extension factories plug into the resource loader, exactly as the main

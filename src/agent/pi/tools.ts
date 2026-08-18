@@ -39,7 +39,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // One line on purpose: the boundary test in tests/adapter.test.ts reads the
 // line that names Pi and expects `import type` on it.
@@ -1054,7 +1054,7 @@ export const taskTool = (
   name: 'task',
   label: 'Task',
   description:
-    'Send a piece of work to a helper agent with its own fresh context window. The helper can read the project and search the web, and cannot change anything. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context. Call it several times in one reply to put several helpers on separate pieces of work at the same time. A helper can be asked to act as a reviewer (finding problems with file and line references) or a researcher (gathering facts), or left as a general helper.',
+    'Send a piece of work to a helper agent with its own fresh context window. Most helpers read the project and search the web and cannot change anything; a builder is handed its own copy of the project, makes one self-contained change in it, and hands back the change for you to look at and apply. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context. Call it several times in one reply to put several helpers on separate pieces of work at the same time. A helper can be asked to act as a reviewer (finding problems with file and line references) or a researcher (gathering facts), or left as a general helper.',
   promptSnippet: 'task(task, role?) — send a piece of work to a read-only helper',
   promptGuidelines: [
     'Give the helper one whole piece of work: a question it can answer without this conversation.',
@@ -1071,7 +1071,7 @@ export const taskTool = (
     cwd: Type.Optional(Type.String({ description: 'The folder the helper should work in. Defaults to the project folder.' })),
     role: Type.Optional(
       Type.String({
-        description: "What kind of helper: 'reviewer' finds problems in the work with file and line references; 'researcher' gathers facts from the web and the project; anything else is a general helper.",
+        description: "What kind of helper: 'reviewer' finds problems in the work with file and line references; 'researcher' gathers facts from the web and the project; 'builder' makes one self-contained change in its own copy of the project and hands the change back; anything else is a general helper.",
       }),
     ),
   }),
@@ -1101,6 +1101,19 @@ export const taskTool = (
       return { content: [{ type: 'text', text: admitted.because }], details: {} };
     }
 
+    // A builder gets its own copy of the project and nothing else. Every path
+    // rule is measured from the folder it is given, so the copy is not a
+    // convenience — it is the entire reason a helper may write at all.
+    let copy: BuilderCopy | null = null;
+    if (spec.needsCopy) {
+      copy = await makeBuilderCopy(project, callId);
+      if (copy === null) {
+        fleet.ended(callId);
+        return { content: [{ type: 'text', text: NO_COPY_TO_BUILD_IN }], details: {} };
+      }
+    }
+    const where = copy?.folder ?? project;
+
     // The child's progress goes out as Pi's partial tool result, which is the
     // only way anything a custom tool learns mid-run can reach the session.
     let progress = '';
@@ -1112,7 +1125,7 @@ export const taskTool = (
         // and must never decide where a helper starts: previously it was used
         // for accounting but accidentally dropped here, so helpers fell back
         // to Graphe's application directory and could not resolve the project.
-        { ...params, role: spec.name, cwd: project, agentDir, model, thinking },
+        { ...params, role: spec.name, cwd: where, agentDir, model, thinking },
         signal,
         (text) => {
           progress += text;
@@ -1135,8 +1148,14 @@ export const taskTool = (
     // Said out loud rather than left to be inferred from a helper that started
     // cleanly: a run with less than usual around it says so alongside its answer.
     const note = boundaryNote(boundary);
+    if (copy !== null && !outcome.ok) await copy.letGo();
     if (!outcome.ok) throw new Error(note === null ? outcome.error : `${outcome.error}\n\n${note}`);
-    const said = note === null ? outcome.text : `${outcome.text}\n\n${note}`;
+    // What a builder actually did, rather than what it says it did. The words
+    // and the diff are both here because one of them is checkable.
+    const built = copy === null ? '' : await copy.changeMade();
+    if (copy !== null) await copy.letGo();
+    const whole = built === '' ? outcome.text : `${outcome.text}\n\n${built}`;
+    const said = note === null ? whole : `${whole}\n\n${note}`;
     // One last update with the whole of it. The throttle above means the final
     // few hundred milliseconds of a helper's answer would otherwise never reach
     // the window, which is the difference between a finding and half of one.
@@ -1144,6 +1163,58 @@ export const taskTool = (
     return { content: [{ type: 'text', text: said }], details: {} };
   },
 });
+
+/* -------------------------------------------------------------------------- */
+/* A copy for a helper that builds                                            */
+/* -------------------------------------------------------------------------- */
+
+const NO_COPY_TO_BUILD_IN =
+  'I could not make a copy of the project for that helper to work in, so nothing was changed. A helper only ever builds in a copy, never in your folder.';
+
+/** Where builders' copies live: outside the project, so nothing they write
+ *  appears in the folder somebody is looking at. */
+export function builderFolder(project: string, id: string): string {
+  const safe = id.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 24) || 'one';
+  return join(project, '..', `.graphe-builders`, `${basename(project)}-${safe}`);
+}
+
+export type BuilderCopy = {
+  folder: string;
+  /** What it changed, as a diff somebody can read. */
+  changeMade: () => Promise<string>;
+  /** Give the copy back, whatever state it was left in. */
+  letGo: () => Promise<void>;
+};
+
+/**
+ * A copy of the project for one builder, and nothing shared with anybody.
+ *
+ * Two builders on one folder is two agents editing one file, which is the
+ * failure this whole arrangement exists to avoid. Returns null rather than
+ * falling back to the real project — a builder with nowhere of its own does
+ * not build.
+ */
+export async function makeBuilderCopy(project: string, id: string): Promise<BuilderCopy | null> {
+  const history = new ProjectHistory(project);
+  const folder = resolve(builderFolder(project, id));
+  try {
+    await history.addWorkspace(folder);
+  } catch {
+    return null;
+  }
+  return {
+    folder,
+    changeMade: async () => {
+      const diff = await new ProjectHistory(folder).diffFor({ kind: 'working' }).catch(() => '');
+      return diff.trim() === '' ? BUILT_NOTHING : `What it changed:\n\n${trimDiff(diff, 20_000)}`;
+    },
+    letGo: async () => {
+      await history.removeWorkspace(folder).catch(() => undefined);
+    },
+  };
+}
+
+const BUILT_NOTHING = 'It changed no files.';
 
 /* -------------------------------------------------------------------------- */
 /* Reading a Figma file                                                        */

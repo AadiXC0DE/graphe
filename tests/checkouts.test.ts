@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { bringBackWords, nextCheckoutName } from '../src/history/worktree';
+import { bringBackWords, nextCheckoutName, worktreeWords } from '../src/history/worktree';
 
 describe('naming a parallel checkout', () => {
   it('counts up, one name per checkout', () => {
@@ -68,5 +68,19 @@ describe('work that stayed behind', () => {
     const said = bringBackWords.heldBack(['a.ts']);
     expect(said).not.toMatch(/\b(merge|conflict|branch|worktree|checkout|git|HEAD)\b/i);
     expect(said).toMatch(/[.!]$/);
+  });
+});
+
+describe('a merge that could not be made', () => {
+  it('says what happened, not something else that also fails', () => {
+    // It used to answer "you have unsaved work" — advice for a different
+    // problem, given while the repository sat half-merged.
+    expect(worktreeWords.clashed).toMatch(/changed the same lines/);
+    expect(worktreeWords.clashed).toMatch(/left everything exactly as it was/);
+    expect(worktreeWords.clashed).not.toBe(worktreeWords.dirty);
+  });
+
+  it('keeps the machinery out of it', () => {
+    expect(worktreeWords.clashed).not.toMatch(/\b(merge|conflict|branch|HEAD|git|rebase)\b/i);
   });
 });

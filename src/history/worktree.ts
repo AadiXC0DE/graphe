@@ -45,6 +45,12 @@ export const worktreeWords = {
   notRepo: 'This folder is not a git repository, so a conversation cannot work on its own checkout of it.',
   dirty: 'You have unsaved work here that a merge could squash. Save it first, and this will finish.',
   noWorktree: 'This conversation has no checkout to merge back.',
+  /** A real conflict, said as itself. It used to be reported as "you have
+   *  unsaved work", which is advice nobody can act on when what actually
+   *  happened is that both sides changed the same lines — and the repository is
+   *  left mid-merge, which that sentence gives no hint of. */
+  clashed:
+    'This conversation and your own work changed the same lines, so I could not put them together. I have left everything exactly as it was.',
 } as const;
 
 /** What an Apply carried back, and where it could not. */
@@ -162,7 +168,14 @@ export async function landWorktree(run: RunGit, repo: string, folder: string): P
   if (await isDirty(run, repo)) return no(worktreeWords.dirty);
 
   const merged = await run(['merge', '--no-edit', branch], { cwd: repo });
-  if (merged.code !== 0) return no(worktreeWords.dirty);
+  if (merged.code !== 0) {
+    // Put the repository back before saying anything. A failed merge leaves it
+    // half-merged with markers in the files, and the sentence people used to
+    // get — "you have unsaved work" — sent them looking for the wrong thing
+    // entirely while the project sat in a state they had not asked for.
+    await run(['merge', '--abort'], { cwd: repo });
+    return no(worktreeWords.clashed);
+  }
   await dropWorktree(run, repo, folder);
   return ok();
 }

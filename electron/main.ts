@@ -1691,7 +1691,16 @@ async function checkItFirst(
 
   // Work starts from a version. Anything unfinished becomes one first, silently
   // and without a question, exactly as going back does.
-  await held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
+  //
+  // If that cannot be done, nothing starts. The copy would otherwise be taken
+  // from the last saved version — without whatever is on disk right now — and
+  // letting the result back in later would write over it. Swallowing this was
+  // the quiet way to lose an afternoon's edits.
+  try {
+    await held.timeline.snapshot({ boundary: 'turn-ended' });
+  } catch (cause) {
+    return fail(historyTrouble(cause));
+  }
 
   let waiting: HeldWork;
   try {
@@ -2954,6 +2963,13 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
     return;
   }
 
+  // Outside the try, and cleared in the finally. Declared inside it, a throw
+  // from the turn jumped straight past the line that cleared it and left a
+  // four-hour timer pointing at a disposed session — which fired long after,
+  // announced a stop for a piece that had already failed, and repainted the
+  // board with it.
+  let goalTimer: ReturnType<typeof setTimeout> | undefined;
+
   try {
     session = await createSession({
       projectRoot: folder,
@@ -2968,7 +2984,6 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
     // keeps asking when it should.
     const untilDone = desk.goals.has(piece.id);
     if (untilDone) session.goAsFarAs('doing');
-    let goalTimer: ReturnType<typeof setTimeout> | undefined;
     if (untilDone) {
       goalTimer = setTimeout(() => {
         held.stop();
@@ -2991,11 +3006,11 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
         await desk.bench.settle(piece.id, saysHeldWork(piece.doing));
       }
     }
-    if (goalTimer !== undefined) clearTimeout(goalTimer);
   } catch (cause) {
     const raw = cause instanceof Error ? cause.message : String(cause);
     desk.bench.stopped(piece.id, plainMessage(raw));
   } finally {
+    if (goalTimer !== undefined) clearTimeout(goalTimer);
     desk.goals.delete(piece.id);
     // Whatever happened, nothing is left parked on a question nobody can reach.
     // Turned down, never up: the run ending is not a person saying yes.

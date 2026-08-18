@@ -30,6 +30,7 @@ import Running from "./components/Running";
 import { asksAbout } from "./preview/point";
 import { PLAN_WORDS } from "./agent/plan";
 import { reviewAsMarkdown } from "./agent/pi/review";
+import { saysUseYours } from "./design/drift";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Usage from "./components/Usage";
@@ -3510,6 +3511,13 @@ function Conversation() {
           onClose={() => setDesignAt(null)}
           onNudge={nudge}
           onNudgeMotion={nudgeMotion}
+          onUseYours={(finding) => {
+            // Through the agent rather than straight to disk: the edit is then
+            // snapshotted, photographed and undoable like any other change.
+            const text = saysUseYours(finding, designStyles?.file ?? "");
+            setDesignAt(null);
+            void deliver(text, sizeUp(text), { lookFirst: true });
+          }}
           onFixColour={(finding) => {
             const token = design.repairs.get(finding.id);
             if (token === undefined || finding.fix === null) return;

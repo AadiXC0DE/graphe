@@ -22,6 +22,7 @@ import {
   readColour,
   readLength,
   saysAll,
+  saysUseYours,
   saysDrift,
   toOklab,
   toOklch,
@@ -724,6 +725,32 @@ describe('D-10 one sentence a designer can act on', () => {
     for (const [colour, word] of Object.entries(said)) {
       expect(colourWord(rgb(colour))).toBe(word);
     }
+  });
+
+  /* "Use yours" used to be a button wired to nothing. What it sends has to be
+     exact: a near-miss is by definition almost the same as other values in the
+     same file, so a vague instruction gets acted on in the wrong place. */
+  it('names the one place to change, and says to leave the rest alone', () => {
+    const [finding] = findDrift('.a { color: #2a68ee; }', PALETTE);
+    expect(finding).toBeDefined();
+    if (finding === undefined) return;
+
+    const said = saysUseYours(finding, 'styles/app.css');
+    expect(said).toContain('styles/app.css');
+    expect(said).toContain(`line ${String(finding.line)}`);
+    expect(said).toContain(finding.wrote);
+    expect(said).toContain(finding.use);
+    expect(said).toContain(finding.mine.name);
+    expect(said).toMatch(/leave every other .* alone/i);
+  });
+
+  it('still says where when the stylesheet has no name', () => {
+    const [finding] = findDrift('.a { color: #2a68ee; }', PALETTE);
+    if (finding === undefined) return;
+    const said = saysUseYours(finding, '');
+    expect(said).toContain(`line ${String(finding.line)}`);
+    expect(said).not.toContain('In , ');
+    expect(said).not.toContain('undefined');
   });
 
   it('counts the section in words', () => {

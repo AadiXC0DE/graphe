@@ -160,6 +160,7 @@ import { promptFor } from '../src/work/workflows';
 import {
   bringBack,
   createWorktree,
+  nextCheckoutName,
   dropWorktree,
   landWorktree,
   type RunGit,
@@ -853,6 +854,10 @@ type Held = {
   variations: readonly Serving[];
   /** The before-and-after (BACKLOG F2). */
   looking: Looking;
+  /** How many parallel checkouts this project has ever opened. Only ever
+   *  increases: naming one after how many are open right now gives the same
+   *  name to two live conversations the moment an earlier one is closed. */
+  checkoutsMade: number;
   /** A conversation's own checkout, by its address. Present only for the ones
    *  running isolated in a worktree — the primary conversation works directly
    *  on the project folder. */
@@ -1976,6 +1981,23 @@ function sessionsFolder(): string {
   return join(app.getPath('userData'), 'sessions');
 }
 
+/**
+ * A name no live conversation is already using, and the folder it names.
+ *
+ * The deciding is in `nextCheckoutName`, where it can be tested without a disk;
+ * this is only the two things it needs to know — what this project has already
+ * handed out, and what an earlier sitting left behind.
+ */
+function freshCheckout(held: Held, project: string): { name: string; folder: string } {
+  const mine = new Set([...held.checkouts.values()].map((one) => one.folder));
+  const chosen = nextCheckoutName(held.checkoutsMade, (name) => {
+    const folder = join(worktreesFolder(project), name);
+    return mine.has(folder) || existsSync(folder);
+  });
+  held.checkoutsMade = chosen.made;
+  return { name: chosen.name, folder: join(worktreesFolder(project), chosen.name) };
+}
+
 /** Where a project's conversation checkouts live — outside the project, like a
  *  copy, so nothing the worktree writes ever appears in the folder the person
  *  is looking at. Keyed by the project's own path so repos never collide. */
@@ -2036,13 +2058,10 @@ async function startConversation(
   const primary = held.sessions.open.length === 0;
   let checkout: { folder: string } | null = null;
   if (!primary) {
-    const made = await createWorktree(
-      gitRunHereFor(),
-      open.path,
-      `conversation-${held.sessions.open.length + 1}`,
-      null,
-      { folder: join(worktreesFolder(open.path), `conversation-${held.sessions.open.length + 1}`) },
-    );
+    const named = freshCheckout(held, open.path);
+    const made = await createWorktree(gitRunHereFor(), open.path, named.name, null, {
+      folder: named.folder,
+    });
     if (made.ok && made.value !== null) checkout = { folder: made.value.folder };
   }
   let session: GrapheSession;
@@ -2127,6 +2146,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     serving: null,
     variations: [],
     looking: nothingSeenYet(),
+    checkoutsMade: 0,
     checkouts: new Map(),
     waiting: null,
     pictures: null,

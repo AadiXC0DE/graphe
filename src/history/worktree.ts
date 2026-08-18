@@ -265,3 +265,39 @@ export async function bringBack(
   }
   return { ok: true, value: { applied, conflicted } };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Naming one                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** How many names to try before giving up on counting and taking the moment. */
+const ENOUGH = 200;
+
+/**
+ * A name for a parallel checkout that nothing else is using.
+ *
+ * Naming one after how many conversations are open right now is the bug this
+ * replaces: open three, close the second, open another, and the count says two
+ * while conversation three is still working — so both are handed
+ * `conversation-3`, the same branch and the same folder, and two agents write
+ * one checkout.
+ *
+ * `made` only ever goes up. Anything already on disk from an earlier sitting is
+ * stepped over rather than reused, because what is in it was somebody's work.
+ * Pure: the caller says what exists, so this can be checked without a disk.
+ */
+export function nextCheckoutName(
+  made: number,
+  taken: (name: string) => boolean,
+  now: number = Date.now(),
+): { name: string; made: number } {
+  let at = made;
+  for (let tries = 0; tries < ENOUGH; tries += 1) {
+    at += 1;
+    const name = `conversation-${String(at)}`;
+    if (!taken(name)) return { name, made: at };
+  }
+  // Two hundred in use is not a real project. The moment cannot collide with a
+  // count, so this can never loop and never hands back a name in use.
+  return { name: `conversation-${now.toString(36)}`, made: at };
+}

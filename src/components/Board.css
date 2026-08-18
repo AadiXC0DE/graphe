@@ -155,6 +155,16 @@
   color: var(--text-faint);
 }
 
+/* Which of the goes this is. Reads with the folder label above it, in the same
+   quiet register — both answer "which one am I looking at?" */
+.work__oneof {
+  margin: 0 0 2px;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
 .work__doing {
   margin: 0;
   font-size: var(--text-sm);

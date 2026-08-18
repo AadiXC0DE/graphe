@@ -28,6 +28,8 @@ import './Board.css';
  */
 
 export type BoardPiece = OnBoard & {
+  /** One of several goes at the same thing, and which one. */
+  oneOf?: { of: number; at: number } | null;
   /** Which folder this belongs to, when the board is showing more than one.
    *  `where` is the path an action needs; `project` is what a person calls it. */
   where?: string;
@@ -92,12 +94,17 @@ function Card({
       </div>
 
       <div className="work__said">
-        {picture === null ? null : <p className="work__doing">{piece.doing}</p>}
-        {/* Only when the board is showing more than one folder. On a board of
-            one it would be the same word on every card, which is noise. */}
+        {/* Both of these answer "which one am I looking at?", so they come
+            before the sentence whether or not there is a picture above it.
+            The folder only when the board is showing more than one: on a board
+            of one it would be the same word on every card. */}
         {piece.project === undefined ? null : (
           <p className="work__where">{piece.project}</p>
         )}
+        {piece.oneOf === null || piece.oneOf === undefined ? null : (
+          <p className="work__oneof">{boardWords.oneOf(piece.oneOf.at, piece.oneOf.of)}</p>
+        )}
+        {picture === null ? null : <p className="work__doing">{piece.doing}</p>}
         <p className="work__state">
           <span className="work__dot" aria-hidden="true" />
           {saysState(piece.state)}
@@ -125,6 +132,11 @@ function Card({
             className="work__keep"
             onClick={() => onKeep(piece.id, piece.where)}
             aria-label={`${boardWords.keep} — ${piece.doing}`}
+            title={
+              piece.oneOf === null || piece.oneOf === undefined
+                ? undefined
+                : boardWords.insteadOfOthers(piece.oneOf.of)
+            }
           >
             {boardWords.keep}
           </button>

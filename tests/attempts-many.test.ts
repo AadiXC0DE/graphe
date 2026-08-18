@@ -455,3 +455,53 @@ describe('two pieces kept in a row', () => {
     expect(many).toMatch(/6 of the same files/);
   });
 });
+
+/* ========================================================================== */
+/* Two goes at the same thing                                                  */
+/* ========================================================================== */
+
+describe('alternatives rather than other work', () => {
+  it('keeping one throws the other away, and leaves everything else alone', async () => {
+    const { history, root, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const quiet = bench.ask('Rework the hero — quieter', { ways: 'ways-1' });
+    const bold = bench.ask('Rework the hero — bolder', { ways: 'ways-1' });
+    // Ordinary work going on at the same time, which must survive the choice.
+    const other = bench.ask('Add a footer');
+    await bench.begin();
+
+    await put(quiet.folder ?? '', 'hero.css', '.hero { padding: 48px; }\n');
+    await put(bold.folder ?? '', 'hero.css', '.hero { padding: 4px; }\n');
+    await put(other.folder ?? '', 'footer.css', '.footer { padding: 8px; }\n');
+    await bench.settle(quiet.id, 'The quiet one');
+    await bench.settle(bold.id, 'The bold one');
+    await bench.settle(other.id, 'The footer');
+
+    const kept = await bench.keep(quiet.id, 'Kept the quiet one');
+    expect(kept?.version).not.toBeNull();
+    expect(kept?.insteadOf).toEqual([bold.id]);
+
+    // The chosen one is in; the one it was chosen over is gone from the board.
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 48px; }\n');
+    expect(bench.pieces.map((one) => one.id)).toEqual([other.id]);
+
+    // And the unrelated work is still there to be kept on its own.
+    const also = await bench.keep(other.id, 'Kept the footer');
+    expect(also?.conflicted).toEqual([]);
+    expect(await get(root, 'footer.css')).toBe('.footer { padding: 8px; }\n');
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 48px; }\n');
+  });
+
+  it('ordinary work has no others to throw away', async () => {
+    const { history, under } = await aProject();
+    const bench = new Workbench({ history, under });
+    const one = bench.ask('Add a footer');
+    await bench.begin();
+    await put(one.folder ?? '', 'footer.css', '.footer { padding: 8px; }\n');
+    await bench.settle(one.id, 'The footer');
+
+    const kept = await bench.keep(one.id, 'Kept it');
+    expect(kept?.insteadOf).toEqual([]);
+  });
+});

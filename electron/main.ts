@@ -2219,7 +2219,8 @@ async function startConversation(
       // The board, so a request that breaks into pieces can be set going all at
       // once. Only the conversation in front gets this: the runs on the board
       // must not be able to fill the board they are running on.
-      putOnBoard: (doing, after) => keepGoing(open.path, basename(open.path), doing, after),
+      putOnBoard: (doing, after, ways) =>
+        keepGoing(open.path, basename(open.path), doing, after, false, ways ?? null),
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -2774,9 +2775,17 @@ function afterFor(desk: AwayDesk, id: string): AwayAfter | null {
 }
 
 function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
+  // Goes at the same thing, counted once so each of them can say which it is.
+  const sameThing = new Map<string, string[]>();
+  for (const piece of desk.bench.pieces) {
+    if (piece.ways == null) continue;
+    sameThing.set(piece.ways, [...(sameThing.get(piece.ways) ?? []), piece.id]);
+  }
+
   const on: AwayPiece[] = desk.bench.pieces.map((piece) => {
     const run = desk.runs.get(piece.id);
     const asked = run?.held.first ?? null;
+    const group = piece.ways == null ? undefined : sameThing.get(piece.ways);
     return {
       id: piece.id,
       doing: piece.doing,
@@ -2796,6 +2805,10 @@ function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
               consequence: asked.consequence,
             },
       after: afterFor(desk, piece.id),
+      oneOf:
+        group === undefined || group.length < 2
+          ? null
+          : { of: group.length, at: group.indexOf(piece.id) + 1 },
     };
   });
   // Waiting for another is waiting, so it is drawn in the same band as anything
@@ -3166,6 +3179,7 @@ async function keepGoing(
   doing: string,
   after: string | null = null,
   untilDone = false,
+  ways: string | null = null,
 ): Promise<WentOn> {
   const desk = deskFor(path, name);
   const id = nextName(desk);
@@ -3188,7 +3202,7 @@ async function keepGoing(
     }
   }
 
-  const piece = desk.bench.ask(doing, { id, at });
+  const piece = desk.bench.ask(doing, { id, at, ways });
   // Written down before it starts, so a machine that loses power between the
   // asking and the first word still comes back to something waiting its turn.
   await notes().note(

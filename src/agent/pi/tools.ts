@@ -1462,7 +1462,20 @@ export const MOST_APART = 8;
 export type PutOnBoard = (
   doing: string,
   after: string | null,
+  ways?: string | null,
 ) => Promise<{ ok: true; id: string } | { ok: false; because: string }>;
+
+/** How many goes at one thing are worth comparing. Past three nobody looks at
+ *  the fourth, and each one costs what the first one did. */
+export const MOST_WAYS = 3;
+
+export const WAYS_WORDS = {
+  none: 'Say what to make, and two or three different ways of going about it.',
+  one: 'Two ways at least, or it is not a choice. One way is ordinary work.',
+  tooMany: `Three ways at most — past that nobody looks at the fourth, and each one costs what the first did.`,
+  went: (count: number): string =>
+    `${count === 2 ? 'Two' : String(count)} goes at the same thing are running, each in its own copy. They finish as pictures on the board, side by side, with what each one cost. Keeping one throws the others away — say what you set going and stop.`,
+} as const;
 
 export const APART_WORDS = {
   none: 'Nothing to set going — say what each piece of work is.',
@@ -1548,6 +1561,56 @@ export const setGoingTool = (put: PutOnBoard): ToolDefinition => ({
   },
 });
 
+/**
+ * Two or three goes at one thing, to be compared and chosen between.
+ *
+ * Not the same as several pieces of work: these are alternatives. They run at
+ * the same time in their own copies, they finish as pictures beside each other,
+ * and keeping one throws the rest away. On anything with taste in it the second
+ * attempt is usually the good one, and this is the only way to have both.
+ */
+export const tryWaysTool = (put: PutOnBoard): ToolDefinition => ({
+  name: 'try_ways',
+  label: 'Trying it more than one way',
+  description:
+    'Make the same thing two or three different ways at once, so they can be compared side by side and one of them kept. Use it when the request has taste in it and there is no single right answer — a layout, a colour, a piece of writing, the shape of a page — rather than when there is a correct result to arrive at. Each way runs in its own copy of the project; keeping one throws the others away.',
+  promptSnippet: 'try_ways(doing, ways) — make the same thing two or three ways, and compare them',
+  promptGuidelines: [
+    'Use it where taste decides and there is no single right answer. Where there is one correct result, do the work instead.',
+    'Make the ways genuinely different from each other — three versions of one idea is one idea, and the comparison is worthless.',
+    'Say what each way is in a sentence the person can tell apart from the others at a glance, because that is what they will read under the pictures.',
+  ],
+  parameters: Type.Object({
+    doing: Type.String({ description: 'What is being made, the same for every way.', minLength: 1 }),
+    ways: Type.Array(Type.String({ minLength: 1 }), {
+      description: 'How each go should differ — two or three genuinely different approaches.',
+    }),
+  }),
+  executionMode: 'sequential',
+  execute: async (callId: string, params: { doing?: string; ways?: readonly string[] }): ToolResult => {
+    const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
+    const doing = (params.doing ?? '').trim();
+    const ways = (params.ways ?? []).map((one) => one.trim()).filter((one) => one !== '');
+    if (doing === '' || ways.length === 0) return say(WAYS_WORDS.none);
+    if (ways.length === 1) return say(WAYS_WORDS.one);
+    if (ways.length > MOST_WAYS) return say(WAYS_WORDS.tooMany);
+
+    const group = `ways-${callId}`;
+    const went: string[] = [];
+    const refused: string[] = [];
+    for (const way of ways) {
+      const answer = await put(`${doing} — ${way}`, null, group);
+      if (answer.ok) went.push(way);
+      else refused.push(`${way} — ${answer.because}`);
+    }
+
+    if (went.length === 0) return say(`Nothing went on the board.\n${refused.join('\n')}`);
+    const lines = [WAYS_WORDS.went(went.length), ...went.map((one) => `\u2022 ${one}`)];
+    if (refused.length > 0) lines.push('These did not go on:', ...refused.map((one) => `\u2022 ${one}`));
+    return say(lines.join('\n'));
+  },
+});
+
 export const grapheTools = (
   agentDir: string,
   figmaToken?: string | null,
@@ -1561,6 +1624,6 @@ export const grapheTools = (
   if (token !== '') tools.push(figmaReadTool(token));
   // Only where there is a board to put work on. The runs on the board must not
   // hold this tool: a piece that can fill the board it is running on is a loop.
-  if (putOnBoard !== undefined) tools.push(setGoingTool(putOnBoard));
+  if (putOnBoard !== undefined) tools.push(setGoingTool(putOnBoard), tryWaysTool(putOnBoard));
   return tools;
 };

@@ -9,7 +9,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { APART_WORDS, MOST_APART, setGoingTool, type PutOnBoard } from '../src/agent/pi/tools';
+import {
+  APART_WORDS,
+  MOST_APART,
+  WAYS_WORDS,
+  setGoingTool,
+  tryWaysTool,
+  type PutOnBoard,
+} from '../src/agent/pi/tools';
 
 /** A board that says yes and remembers what it was asked. */
 function board(): { put: PutOnBoard; asked: { doing: string; after: string | null }[] } {
@@ -148,5 +155,69 @@ describe('SG-03 what it tells the model', () => {
     for (const said of [APART_WORDS.none, APART_WORDS.tooMany, APART_WORDS.went(2)]) {
       expect(said).not.toMatch(/\b(worktree|branch|commit|git|process|thread)\b/i);
     }
+  });
+});
+
+/* ========================================================================== */
+/* SG-04 two or three goes at the same thing                                   */
+/* ========================================================================== */
+
+describe('SG-04 trying it more than one way', () => {
+  async function ways(
+    put: PutOnBoard,
+    doing: string,
+    list: readonly string[],
+  ): Promise<string> {
+    const tool = tryWaysTool(put);
+    const call = tool.execute as unknown as (
+      id: string,
+      params: { doing: string; ways: readonly string[] },
+    ) => Promise<unknown>;
+    const answer = await call('call-7', { doing, ways: list });
+    const first = (answer as { content: readonly { text?: string }[] }).content[0];
+    return first?.text ?? '';
+  }
+
+  it('puts each way on under one name they all share', async () => {
+    const asked: { doing: string; ways: string | null | undefined }[] = [];
+    const put: PutOnBoard = (doing, _after, group) => {
+      asked.push({ doing, ways: group });
+      return Promise.resolve({ ok: true as const, id: `work-${String(asked.length)}` });
+    };
+
+    await ways(put, 'Rework the hero', ['quieter, more white space', 'bolder, the photograph doing the work']);
+
+    expect(asked).toHaveLength(2);
+    // The same thing, said each way, so the cards can be told apart at a glance.
+    expect(asked[0]?.doing).toBe('Rework the hero — quieter, more white space');
+    expect(asked[1]?.doing).toBe('Rework the hero — bolder, the photograph doing the work');
+    // One name shared between them is what makes keeping one throw the rest away.
+    expect(asked[0]?.ways).toBe(asked[1]?.ways);
+    expect(asked[0]?.ways).not.toBeNull();
+  });
+
+  it('refuses one way, because one way is not a choice', async () => {
+    const { put, asked } = board();
+    expect(await ways(put, 'Rework the hero', ['quieter'])).toBe(WAYS_WORDS.one);
+    expect(asked).toHaveLength(0);
+  });
+
+  it('refuses more than three, and starts none of them', async () => {
+    const { put, asked } = board();
+    expect(await ways(put, 'Rework the hero', ['a', 'b', 'c', 'd'])).toBe(WAYS_WORDS.tooMany);
+    expect(asked).toHaveLength(0);
+  });
+
+  it('has nothing to do without both a thing and the ways to do it', async () => {
+    const { put, asked } = board();
+    expect(await ways(put, '', ['a', 'b'])).toBe(WAYS_WORDS.none);
+    expect(await ways(put, 'Rework the hero', [])).toBe(WAYS_WORDS.none);
+    expect(asked).toHaveLength(0);
+  });
+
+  it('says that keeping one is a choice against the others', () => {
+    expect(WAYS_WORDS.went(2)).toMatch(/Keeping one throws the others away/);
+    expect(WAYS_WORDS.went(2)).toMatch(/^Two goes/);
+    expect(WAYS_WORDS.went(3)).toMatch(/^3 goes/);
   });
 });

@@ -69,7 +69,12 @@ export function saysKept(name: string, asked: string | null): string {
 
 /** What came of keeping one. A version and nothing held back is the ordinary
  *  answer; anything in `conflicted` means the project was left as it was. */
-export type Kept = { version: string | null; conflicted: readonly string[] };
+export type Kept = {
+  version: string | null;
+  conflicted: readonly string[];
+  /** The other goes at the same thing, thrown away with the decision. */
+  insteadOf?: readonly string[];
+};
 
 /** When two pieces of work changed the same file. The project is left as it
  *  was, so the sentence has to say what to do next rather than what failed. */
@@ -370,6 +375,11 @@ export type PieceOfWork = {
   at: number;
   /** Why it stopped, in a sentence somebody can read. */
   trouble: string | null;
+  /** When this is one of several goes at the same thing, the name they share.
+   *  Keeping one of those throws the rest away — they were alternatives, not
+   *  other work, and that is the whole difference. Absent on ordinary work,
+   *  which is almost all of it. */
+  ways?: string | null;
 };
 
 /** Where one piece of work's copy lives: its own folder inside the room, so
@@ -425,7 +435,7 @@ export class Workbench {
 
   /** Ask for another piece of work. Past the cap it waits its turn rather than
    *  being refused — nobody's request is ever thrown away. */
-  ask(doing: string, options: { id?: string; at?: number } = {}): PieceOfWork {
+  ask(doing: string, options: { id?: string; at?: number; ways?: string | null } = {}): PieceOfWork {
     this.asked += 1;
     const piece: PieceOfWork = {
       id: this.freeId(options.id ?? `work-${String(this.asked)}`),
@@ -436,6 +446,7 @@ export class Workbench {
       picture: null,
       at: options.at ?? Date.now(),
       trouble: null,
+      ...(options.ways == null ? {} : { ways: options.ways }),
     };
     this.work.push(piece);
     return piece;
@@ -527,7 +538,13 @@ export class Workbench {
     const carried = await this.history.carryIn(piece.version, title);
     if (!carried.ok) return { version: null, conflicted: carried.conflicted };
     await this.drop(id);
-    return { version: carried.version, conflicted: [] };
+    // The other goes at the same thing go with it. They were alternatives to
+    // this one rather than other work, so leaving them on the board would be
+    // offering somebody the two answers they have just decided against.
+    const others =
+      piece.ways == null ? [] : this.work.filter((one) => one.ways === piece.ways && one.id !== id);
+    for (const other of others) await this.drop(other.id);
+    return { version: carried.version, conflicted: [], insteadOf: others.map((one) => one.id) };
   }
 
   /** Let one go, whatever state it was in. Safe to call twice. */

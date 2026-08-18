@@ -538,6 +538,9 @@ export type AwayPiece = {
   /** What this one cost on its own. Null when nothing has been spent on it, or
    *  when it comes from somewhere that does not count. */
   spent?: Money | null;
+  /** One of several goes at the same thing, and how many there are. Absent on
+   *  ordinary work, which is almost all of it. */
+  oneOf?: { of: number; at: number } | null;
   /** What it is waiting to be told, or null. */
   question: AwayQuestion | null;
   /** What has to finish before it starts, or null when nothing does. */

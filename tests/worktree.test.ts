@@ -203,6 +203,37 @@ describe('bringBack — Cursor-style Apply, files come home uncommitted', () => 
     }
   });
 
+  /* The names git quotes. Read the ordinary way, `café.css` comes back as
+     `"caf\303\251.css"` — quotes and all — and points at no file on disk, so
+     the work was silently left behind while the person was told it came over. */
+  it('carries files whose names git would quote', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'accents', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      const tricky = ['café.css', 'a file with spaces.txt', 'naïve—dash.md'];
+      for (const name of tricky) await writeFile(path.join(made.value.folder, name), `${name} body\n`);
+      // One of them tracked as well, so both the diff and the untracked list
+      // are exercised.
+      await raw(made.value.folder, 'add', 'café.css');
+      await raw(made.value.folder, 'commit', '-m', 'accented');
+
+      const applied = await bringBack(git(), repo, made.value.folder);
+      expect(applied.ok).toBe(true);
+      if (!applied.ok) return;
+      for (const name of tricky) {
+        expect(applied.value.applied).toContain(name);
+        expect(readFileContent(repo, name)).toBe(`${name} body\n`);
+      }
+      // Nothing arrived under a name with quotes or escapes still in it.
+      for (const name of applied.value.applied) expect(name).not.toContain('"');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
   it('leaves a file alone when the main checkout changed it too', async () => {
     const repo = await freshRepo();
     try {

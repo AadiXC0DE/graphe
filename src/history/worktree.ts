@@ -188,33 +188,58 @@ export async function dropWorktree(run: RunGit, repo: string, folder: string): P
   return ok();
 }
 
-/** The names and statuses git reports, as `{ kind, path }` rows. */
+/**
+ * Give the folder back without throwing the work away.
+ *
+ * Used when a conversation ends rather than when somebody discards it: the
+ * checkout is a whole second copy of the project on disk and there is no reason
+ * to keep it, but the branch is where the work is, and a conversation being put
+ * down is not a decision to lose it.
+ */
+export async function releaseWorktree(run: RunGit, repo: string, folder: string): Promise<Result> {
+  await run(['worktree', 'remove', '--force', folder], { cwd: repo });
+  return ok();
+}
+
+/** The names and statuses git reports, as `{ kind, path }` rows.
+ *
+ * Always asked for with `-z`. Git's ordinary output quotes any path that is not
+ * plain ASCII — `"caf\303\251.css"` — and a name read with the quotes still on
+ * it points at no file on disk, so those files were dropped on the way back and
+ * the person was told their work had been carried over. NUL-separated output is
+ * never quoted and never escaped.
+ */
 async function changedAgainst(
   run: RunGit,
   dir: string,
   args: string[],
+  shape: 'status' | 'paths' = 'status',
 ): Promise<Array<{ kind: 'A' | 'D' | 'M'; path: string }>> {
-  const { code, out } = await run(args, { cwd: dir });
+  // Right after the subcommand: appended at the end it would land after a `--`
+  // and be read as the name of a file to look for.
+  const { code, out } = await run([args[0] ?? '', '-z', ...args.slice(1)], { cwd: dir });
   if (code !== 0 || out === undefined) return [];
+  const parts = out.split('\0').filter((part) => part !== '');
   const seen = new Map<string, 'A' | 'D' | 'M'>();
-  for (const line of out.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed === '') continue;
-    // A bare path (from `ls-files --others`) is a brand-new file.
-    const match = /^([AMD])\s+(.+)$/.exec(trimmed);
-    if (match === null) {
-      if (trimmed !== '.' && !trimmed.startsWith('"')) seen.set(trimmed, 'A');
-      continue;
-    }
-    const kind = match[1] ?? 'A';
-    const path = (match[2] ?? '').trim();
-    if (path !== '' && path !== '.') seen.set(path, kind === 'D' ? 'D' : 'A');
+
+  if (shape === 'paths') {
+    // `ls-files --others` names files and says nothing about them; every one is
+    // new to the main checkout.
+    for (const path of parts) if (path !== '.') seen.set(path, 'A');
+    return [...seen.entries()].map(([path, kind]) => ({ kind, path }));
+  }
+
+  // `--name-status -z` alternates: a status, then the path it belongs to.
+  for (let at = 0; at + 1 < parts.length; at += 2) {
+    const kind = (parts[at] ?? '').trim().charAt(0);
+    const path = parts[at + 1] ?? '';
+    if (path === '' || path === '.') continue;
+    if (kind !== 'A' && kind !== 'M' && kind !== 'D') continue;
+    seen.set(path, kind === 'D' ? 'D' : 'A');
   }
   return [...seen.entries()].map(([path, kind]) => ({ kind, path }));
 }
 
-/** The worktree's own changes: committed since the base, uncommitted, and
- *  brand-new (untracked). A new file is a change too — Apply carries it. */
 async function worktreeChanges(
   run: RunGit,
   folder: string,
@@ -222,7 +247,7 @@ async function worktreeChanges(
 ): Promise<Array<{ kind: 'A' | 'D' | 'M'; path: string }>> {
   const committed = await changedAgainst(run, folder, ['diff', '--name-status', '--no-renames', base]);
   const working = await changedAgainst(run, folder, ['diff', '--name-status', '--no-renames']);
-  const untracked = await changedAgainst(run, folder, ['ls-files', '--others', '--exclude-standard']);
+  const untracked = await changedAgainst(run, folder, ['ls-files', '--others', '--exclude-standard'], 'paths');
   const byPath = new Map<string, 'A' | 'D' | 'M'>();
   for (const row of [...committed, ...working, ...untracked]) byPath.set(row.path, row.kind);
   return [...byPath.entries()].map(([path, kind]) => ({ kind, path }));

@@ -163,6 +163,7 @@ import {
   nextCheckoutName,
   dropWorktree,
   landWorktree,
+  releaseWorktree,
   type RunGit,
 } from '../src/history/worktree';
 import {
@@ -2047,7 +2048,7 @@ const NO_CHECKOUT_HERE =
  * background work in flight, that is somebody else's branch — and one of the two
  * callers deletes what it is given.
  */
-function checkoutFor(open: Workspace<Held>, where: Where): string | null {
+function checkoutEntryFor(open: Workspace<Held>, where: Where): { address: string; folder: string } | null {
   // Only ever the conversation actually named. Left out, `conversationAt` hands
   // back whichever is in front — and one of the two callers deletes what it is
   // given, so a call that forgot to say which would delete somebody's work.
@@ -2057,8 +2058,10 @@ function checkoutFor(open: Workspace<Held>, where: Where): string | null {
   // `found.path` is the address the checkout was filed under. Not
   // `held.conversation`: that is null until the conversation's first write and
   // a transcript path afterwards, so it matches the key exactly never.
-  return open.held.checkouts.get(found.path)?.folder ?? null;
+  const folder = open.held.checkouts.get(found.path)?.folder;
+  return folder === undefined ? null : { address: found.path, folder };
 }
+
 
 /** Where a project's conversation checkouts live — outside the project, like a
  *  copy, so nothing the worktree writes ever appears in the folder the person
@@ -4538,7 +4541,19 @@ function register(): void {
     // still opens and its work stays in its checkout until it settles.
     const checkout = open.held.checkouts.get(started.value.address) ?? null;
     if (checkout !== null) {
-      await bringBack(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
+      const carried = await bringBack(gitRunHereFor(), open.path, checkout.folder).catch(() => null);
+      // Said here as well as when a turn settles: opening a conversation and
+      // reading a file that never changed, with nothing on screen to explain
+      // it, is the same silence either way round.
+      if (carried !== null && carried.ok && carried.value.conflicted.length > 0) {
+        const which = [...carried.value.conflicted].sort().join('\u0000');
+        if (which !== open.held.saidHeldBack) {
+          open.held.saidHeldBack = which;
+          const at = started.value.address;
+          send(open.path, { type: 'message-delta', text: bringBackWords.heldBack(carried.value.conflicted) }, at);
+          send(open.path, { type: 'message-end' }, at);
+        }
+      }
     }
     return done({
       path: open.path,
@@ -4593,6 +4608,14 @@ function register(): void {
       const file = one.held.conversation;
       if (one.path === target || (file !== null && resolve(file) === target)) {
         await one.held.stop().catch(() => undefined);
+        // A whole second copy of the project on disk, kept for a conversation
+        // that no longer exists. The branch stays: putting a conversation down
+        // is not a decision to lose what it wrote.
+        const checkout = open.held.checkouts.get(one.path);
+        if (checkout !== undefined) {
+          await releaseWorktree(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
+          open.held.checkouts.delete(one.path);
+        }
         open.held.sessions.close(one.path);
       }
     }
@@ -4940,9 +4963,12 @@ function register(): void {
     // This conversation's own checkout. It used to be whichever one git listed
     // first, so with a second conversation open — or background work in flight —
     // this landed somebody else's branch.
-    const folder = checkoutFor(open, whereIn(args));
-    if (folder === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
-    const landed = await landWorktree(gitRunHereFor(), open.path, folder);
+    const entry = checkoutEntryFor(open, whereIn(args));
+    if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    const landed = await landWorktree(gitRunHereFor(), open.path, entry.folder);
+    // The folder is gone once it lands; a note still pointing at it would send
+    // the next press somewhere that no longer exists.
+    if (landed.ok) open.held.checkouts.delete(entry.address);
     return landed.ok ? done(null) : fail(worktreeTrouble(landed.because));
   });
 
@@ -4950,9 +4976,10 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     // The same rule as landing, and it matters more here: this one deletes.
-    const folder = checkoutFor(open, whereIn(args));
-    if (folder === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
-    const dropped = await dropWorktree(gitRunHereFor(), open.path, folder);
+    const entry = checkoutEntryFor(open, whereIn(args));
+    if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
+    if (dropped.ok) open.held.checkouts.delete(entry.address);
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
   });
 

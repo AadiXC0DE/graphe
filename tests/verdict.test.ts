@@ -10,7 +10,7 @@ import * as path from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { parseReview, reviewRequestFor, REVIEW_ANGLES, trimDiff } from '../src/agent/pi/review';
+import { parseReview, reviewAsMarkdown, reviewRequestFor, REVIEW_ANGLES, REVIEW_WORDS, trimDiff } from '../src/agent/pi/review';
 import { ProjectHistory, type ReviewTarget } from '../src/history/repo';
 import type { ReviewVerdict } from '../src/agent/types';
 
@@ -156,3 +156,55 @@ async function put(root: string, file: string, contents: string): Promise<void> 
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, contents, 'utf8');
 }
+/* ========================================================================== */
+/* Sending a verdict back to the pull request it is about                      */
+/* ========================================================================== */
+
+describe('a verdict that knows which pull request it is about', () => {
+  const block = (body: string): string => `Read it all.\n\n\`\`\`review\n${body}\n\`\`\``;
+  const finding =
+    '{"priority":0,"file":"src/pay.ts","line":42,"issue":"The refund runs twice","impact":"Customers are paid back twice","confidence":90}';
+
+  it('carries the number, so the card can offer to post it', () => {
+    const verdict = parseReview(block(`{"verdict":"needs-work","pull":8,"findings":[${finding}]}`));
+    expect(verdict?.pull).toBe(8);
+  });
+
+  /* Absence is the signal the card reads: no number, no button. A nonsense one
+     must not become a real pull request number by rounding. */
+  it('says nothing rather than guessing a number', () => {
+    expect(parseReview(block(`{"verdict":"needs-work","findings":[${finding}]}`))?.pull).toBeUndefined();
+    expect(parseReview(block(`{"verdict":"needs-work","pull":"eight","findings":[${finding}]}`))?.pull).toBeUndefined();
+    expect(parseReview(block(`{"verdict":"needs-work","pull":0,"findings":[${finding}]}`))?.pull).toBe(1);
+  });
+
+  it('writes the same review the card shows, as ordinary markdown', () => {
+    const verdict = parseReview(
+      block(`{"verdict":"do-not-land","summary":"The refund path is wrong.","checks":["Correctness"],"pull":8,"findings":[${finding}]}`),
+    );
+    expect(verdict).not.toBeNull();
+    if (verdict === null) return;
+    const said = reviewAsMarkdown(verdict);
+    expect(said).toContain(REVIEW_WORDS['do-not-land']);
+    expect(said).toContain('The refund path is wrong.');
+    expect(said).toContain('Correctness');
+    expect(said).toContain('src/pay.ts:42');
+    expect(said).toContain('The refund runs twice');
+    expect(said).toContain('90%');
+    // Priorities read as words: nobody outside this app knows what P0 means.
+    expect(said).toContain('Blocks shipping');
+    expect(said).not.toMatch(/\bP0\b/);
+  });
+
+  it('holds together when a finding names no file', () => {
+    const verdict = parseReview(
+      block('{"verdict":"needs-work","pull":2,"findings":[{"priority":2,"issue":"No test covers the empty case","confidence":60}]}'),
+    );
+    expect(verdict).not.toBeNull();
+    if (verdict === null) return;
+    const said = reviewAsMarkdown(verdict);
+    expect(said).toContain('No test covers the empty case');
+    expect(said).not.toContain('undefined');
+    expect(said).not.toContain('``');
+  });
+});

@@ -143,6 +143,50 @@
   outline-offset: 2px;
 }
 
+/* Beside the fix, not instead of it: a review can be worth posting whether or
+   not the blocking findings are being fixed here. */
+.review__post {
+  margin: var(--space-3) 0 0 var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  transition: transform var(--dur-micro) var(--ease-out-quart), border-color var(--dur-micro) var(--ease-hover);
+}
+
+.review__post:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+/* Both actions on one line, sharing a baseline. */
+.review__fix,
+.review__post {
+  vertical-align: top;
+}
+
+.review__post:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.review__post:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.review__post:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review__post {
+    transition: none;
+  }
+}
+
 .review__ondone {
   margin: var(--space-3) 0 0;
   font-size: var(--text-xs);

@@ -32,6 +32,8 @@ export type ReviewVerdict = {
   findings: readonly ReviewFinding[];
   /** What the change was held up against, by name. */
   checks?: readonly string[];
+  /** The pull request this verdict is about, when it is about one. */
+  pull?: number;
 };
 
 export type Verdict =

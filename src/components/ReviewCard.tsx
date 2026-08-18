@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ReviewVerdict } from "../agent/types";
 import { REVIEW_WORDS } from "../agent/pi/review";
 import "./ReviewCard.css";
@@ -7,6 +8,9 @@ type Props = {
   /** Whether the fix is already on its way. */
   asked: boolean;
   onFix: () => void;
+  /** Send the findings back to where the change came from. Absent when the
+   *  verdict is not about a pull request. */
+  onPost?: () => Promise<boolean>;
 };
 
 const SEVERITY = {
@@ -23,9 +27,16 @@ const SEVERITY_WORDS = {
   3: "a note",
 } as const;
 
-export default function ReviewCard({ verdict, asked, onFix }: Props) {
+export default function ReviewCard({ verdict, asked, onFix, onPost }: Props) {
   const heading = REVIEW_WORDS[verdict.kind];
   const blocking = verdict.findings.some((finding) => finding.priority <= 1);
+  const [posting, setPosting] = useState<"no" | "going" | "done" | "failed">("no");
+
+  const post = (): void => {
+    if (onPost === undefined || posting === "going" || posting === "done") return;
+    setPosting("going");
+    void onPost().then((landed) => setPosting(landed ? "done" : "failed"));
+  };
 
   return (
     <section className={`review review--${verdict.kind}`}>
@@ -80,6 +91,18 @@ export default function ReviewCard({ verdict, asked, onFix }: Props) {
       {verdict.kind !== "ships" && asked && (
         <p className="review__ondone">On it — fixing the blocking findings now.</p>
       )}
+      {verdict.pull !== undefined && onPost !== undefined && posting !== "done" && (
+        <button
+          type="button"
+          className="review__post"
+          onClick={post}
+          disabled={posting === "going"}
+        >
+          {posting === "going" ? REVIEW_WORDS.posting : REVIEW_WORDS.post}
+        </button>
+      )}
+      {posting === "done" && <p className="review__ondone">{REVIEW_WORDS.posted}</p>}
+      {posting === "failed" && <p className="review__ondone">{REVIEW_WORDS.postFailed}</p>}
     </section>
   );
 }

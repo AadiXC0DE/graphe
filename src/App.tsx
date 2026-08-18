@@ -29,7 +29,8 @@ import BrowserPane, { type Room as PaneRoom } from "./components/BrowserPane";
 import Running from "./components/Running";
 import { asksAbout } from "./preview/point";
 import { PLAN_WORDS } from "./agent/plan";
-import type { RunningPiece } from "./agent/types";
+import { reviewAsMarkdown } from "./agent/pi/review";
+import type { ReviewVerdict, RunningPiece } from "./agent/types";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Usage from "./components/Usage";
 import Sidebar from "./components/Sidebar";
@@ -2197,6 +2198,21 @@ function Conversation() {
    * the blocking ones fixed. Nothing is sent on anybody's behalf beyond the
    * ask itself — the agent goes and reads the findings it wrote.
    */
+  /** Send the findings back to the pull request they are about. The app posts
+   *  it rather than the agent, so no shell and no question stand between a
+   *  finished review and the people waiting on it. */
+  const postReview = useCallback(
+    async (verdict: ReviewVerdict): Promise<boolean> => {
+      if (verdict.pull === undefined) return false;
+      const path = desks.current;
+      const sent = await bridge.repoComment(verdict.pull, reviewAsMarkdown(verdict), {
+        project: path ?? undefined,
+      });
+      return sent.ok;
+    },
+    [],
+  );
+
   const fixReview = useCallback(
     (turnId: string) => {
       setDesks((current) =>
@@ -3258,6 +3274,7 @@ function Conversation() {
                     onAnswerEstimate={answerEstimate}
                     onAnswerPlan={answerPlan}
                     onFixReview={fixReview}
+                    onPostReview={postReview}
                     showMe={preferences.showMe}
                   />
                   {(pictures.under.get(row.turn.id) ?? []).map((one) => (
@@ -3712,6 +3729,7 @@ function Turnstile({
   onAnswerEstimate,
   onAnswerPlan,
   onFixReview,
+  onPostReview,
   showMe,
 }: {
   turn: Turn;
@@ -3724,6 +3742,7 @@ function Turnstile({
     chosen?: { kept: readonly string[]; dropped: readonly string[] },
   ) => void;
   onFixReview: (turnId: string) => void;
+  onPostReview: (verdict: ReviewVerdict) => Promise<boolean>;
   /** Name the real command, path or operation under each step (BACKLOG D1).
    *  The words themselves were recorded when the step happened, so turning this
    *  on explains the conversation you already had. */
@@ -3794,6 +3813,7 @@ function Turnstile({
           verdict={turn.verdict}
           asked={turn.asked}
           onFix={() => onFixReview(turn.id)}
+          onPost={() => onPostReview(turn.verdict)}
         />
       );
 

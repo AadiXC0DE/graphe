@@ -60,10 +60,7 @@ Review it like a senior engineer on the team, not a checklist:
 - Whether names, shapes and structure match the rest of the codebase
 Be specific: name file paths and lines, and give a one-line reason for every point. Separate “must change” from “could be nicer”. If it is genuinely good to merge, say so plainly.
 
-When you are done, post the review on the PR itself. Write it to a temporary file, then:
-\`gh pr comment ${item.number} -R ${full} --body-file <file>\`
-
-Start your comment with the heading “## Automated PR review” so it reads clearly as a machine review. If you truly cannot post (github is not reachable from your terminal), leave the full review here in the conversation instead so nothing is lost.`;
+Finish with a short plain summary followed by a fenced review block — a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, \`"pull": ${item.number}\`, and the findings, each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact and confidence (0-100). The findings then appear as a card with a button that posts them on the pull request, so do not post them yourself.`;
 }
 
 export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview }: Props) {

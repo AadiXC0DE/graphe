@@ -41,6 +41,11 @@ export const REVIEW_WORDS = {
   confidence: 'sure',
   /** Before the names of what the change was held up against. */
   against: 'Held up against',
+  /** Sending the findings back to where the change came from. */
+  post: 'Post this on the pull request',
+  posting: 'Posting…',
+  posted: 'Posted on the pull request.',
+  postFailed: 'I could not post it. Check that github is set up on your terminal, and try again.',
 } as const;
 
 export type ReviewVerdict = {
@@ -51,6 +56,9 @@ export type ReviewVerdict = {
   findings: readonly ReviewFinding[];
   /** What the change was held up against, by name. */
   checks?: readonly string[];
+  /** The pull request this verdict is about, when it is about one. Its
+   *  presence is what lets the findings be posted back to it. */
+  pull?: number;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -113,9 +121,12 @@ export function parseReview(text: string): ReviewVerdict | null {
     ? body.checks.filter((one): one is string => typeof one === 'string' && one.trim() !== '').map((one) => one.trim())
     : [];
 
+  const pull = clampInt(body.pull ?? body.number, 1, 1_000_000);
+
   return {
     kind: kind as ReviewVerdict['kind'],
     checks: checks.length === 0 ? undefined : checks,
+    pull: pull ?? undefined,
     summary:
       typeof body.summary === 'string' && body.summary !== ''
         ? body.summary
@@ -165,4 +176,41 @@ ${diff}`;
 export function trimDiff(diff: string, cap = 60_000): string {
   if (diff.length <= cap) return diff;
   return `${diff.slice(0, cap)}\n\n(Only the first part of the change is here — it was longer than one review can hold. The reviewers read what they can and the rest is noted.)`;
+}
+/* -------------------------------------------------------------------------- */
+/* Sending it back                                                            */
+/* -------------------------------------------------------------------------- */
+
+const PRIORITY_WORDS: Readonly<Record<ReviewPriority, string>> = {
+  0: 'Blocks shipping',
+  1: 'Fix before shipping',
+  2: 'Can wait',
+  3: 'A note',
+};
+
+/**
+ * The verdict as the text posted where the change came from.
+ *
+ * The card and the comment say the same things in the same order, so nobody
+ * has to hold two versions of one review in their head. Written as ordinary
+ * markdown because it is read by people who never open this app.
+ */
+export function reviewAsMarkdown(verdict: ReviewVerdict): string {
+  const lines: string[] = [`**${REVIEW_WORDS[verdict.kind]}**`, ''];
+  if (verdict.summary !== '') lines.push(verdict.summary, '');
+  if (verdict.checks !== undefined && verdict.checks.length > 0) {
+    lines.push(`${REVIEW_WORDS.against} ${verdict.checks.join(', ')}.`, '');
+  }
+  lines.push(REVIEW_WORDS.heading, '');
+  for (const finding of verdict.findings) {
+    const place =
+      finding.file === undefined
+        ? ''
+        : ` \`${finding.file}${finding.line === undefined ? '' : `:${String(finding.line)}`}\``;
+    const impact = finding.impact === undefined ? '' : ` ${finding.impact}`;
+    lines.push(
+      `- **${PRIORITY_WORDS[finding.priority]}**${place} — ${finding.issue}${impact} (${REVIEW_WORDS.confidence} ${String(finding.confidence)}%)`,
+    );
+  }
+  return `${lines.join('\n')}\n`;
 }

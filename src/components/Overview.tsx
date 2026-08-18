@@ -2,14 +2,12 @@ import { useMemo, useState } from 'react';
 import Away from './Away';
 import CostMeter from './CostMeter';
 import { SAYS as DESIGN, type DesignPart } from './DesignView';
-import Helpers from './Helpers';
 import History from './History';
 import Landing, { type Outcome } from './Landing';
 import Swatches from './Swatches';
 import type {
   Artifact,
   Away as AwayState,
-  ChangedFile,
   Decision,
   EveryKind,
   GitSnapshot,
@@ -17,6 +15,8 @@ import type {
   Landing as LandingState,
   PutBack,
   SavedVersion,
+  Money,
+  SpendLimit,
   StyleToken,
   Swatch,
 } from '../lib/ipc';
@@ -39,6 +39,11 @@ export type OverviewView = {
   kept: readonly string[];
   putBack: PutBack | null;
   spent: SpendView | null;
+  /** The account in use is paid for by its own plan, so the figure beside it is
+   *  a count rather than a bill. */
+  onAPlan: boolean;
+  /** The ceiling somebody set, or null when they have not set one. */
+  ceiling: SpendLimit | null;
   busy: boolean;
   showMe: boolean;
   /** Things the last turn made that are worth looking at. */
@@ -64,6 +69,11 @@ export type OverviewView = {
   /** What is happening whether or not this window is open. Null until the shell
    *  has answered. */
   away: AwayState | null;
+  /** The other folders with work of their own, so the board can show all of it
+   *  at once. Empty on the ordinary day. */
+  elsewhere: readonly { where: string; project: string; away: AwayState }[];
+  /** What the folder in front is called. */
+  project: string;
   /** Now, epoch ms, so the board draws the same twice. */
   clock: number;
 };
@@ -76,24 +86,26 @@ type Props = {
   onKeep: (versionId: string, keep: boolean) => void;
   onDismissPutBack: () => void;
   onShowSplit: () => void;
-  /** Open one changed file where the person actually edits things. */
-  onOpenFile: (path: string) => void;
-  /** Keep where the project stands right now, so it can be come back to. */
+  /** Set the ceiling, raise it, or take it away with null. */
+  onLimit: (ceiling: Money | null) => void;
+  /** Save where the project stands right now, so it can be come back to. This
+   is the commit: the one thing the hand can do with the changed set as a whole. */
   onSave: () => void;
   /** Open everything about how the project looks, at one of its bands. */
   onOpenDesign: (part: DesignPart) => void;
   /** Open the whole history, drawn as lines. */
   onOpenGraph: () => void;
+  /** Move the project onto another of its lines of work. */
+  onSwitchBranch: (name: string) => void;
+  /** Start a new line of work and move the project onto it. */
+  onCreateBranch: (name: string) => void;
   /** Write a page of what changed, for somebody who is not you. */
   onShare: () => void;
-  /** Check work in a copy before it reaches the files, or stop. */
-  onHoldBack: (on: boolean) => void;
+
   /** Let the work that is waiting in, or set it aside. */
   onDecide: (letIn: boolean) => void;
   /** Write the work up and put it where a developer picks it up. */
   onHandOver: () => void;
-  /** Put the finished project on the internet. */
-  onPutOnline: () => void;
   /** Open an address in the person's own browser. */
   onOpenLink: (address: string) => void;
 
@@ -101,6 +113,8 @@ type Props = {
 
   /** Get on with something whether or not this window stays open. */
   onKeepGoing: (text: string) => void;
+  /** Ask for work that waits until another piece has finished. */
+  onStartAfter: (text: string, after: string) => void;
   /** Take one of those results into the project. */
   onKeepAway: (id: string) => void;
   /** Stop one, or let its result go. */
@@ -164,18 +178,6 @@ function countOf(part: DesignPart, counts: Counts): number | null {
   return counts[part];
 }
 
-/** The last part of a path is what people call the file. The rest is filing. */
-function leaf(path: string): string {
-  const parts = path.split('/').filter((part) => part !== '');
-  return parts[parts.length - 1] ?? path;
-}
-
-/** Where it lives, for the second line. Empty at the top of the project. */
-function folder(path: string): string {
-  const parts = path.split('/').filter((part) => part !== '');
-  return parts.slice(0, -1).join('/');
-}
-
 /**
  * The panel on the right: what is going on, what changed, what can be gone back
  * to, and what it cost — in that order, because that is the order the questions
@@ -192,17 +194,19 @@ export default function Overview({
   onKeep,
   onDismissPutBack,
   onShowSplit,
-  onOpenFile,
+  onLimit,
   onSave,
   onOpenDesign,
   onOpenGraph,
+  onSwitchBranch,
+  onCreateBranch,
   onShare,
-  onHoldBack,
+
   onDecide,
   onHandOver,
-  onPutOnline,
   onOpenLink,
   onKeepGoing,
+  onStartAfter,
   onKeepAway,
   onDropAway,
   onAnswerAway,
@@ -210,7 +214,7 @@ export default function Overview({
   onSwitchRepeat,
   onForgetRepeat,
 }: Props) {
-  const { now, git, research, references, versions, pictures, kept, putBack, spent, busy, showMe } =
+  const { now, git, research, references, versions, pictures, kept, putBack, spent, onAPlan, ceiling, busy, showMe } =
     view;
   const { artifacts, swatches } = view;
 
@@ -228,9 +232,7 @@ export default function Overview({
 
   const shownResearch = research.slice(-WINDOW);
   const moreResearch = research.length - shownResearch.length;
-  const files: readonly ChangedFile[] = git?.files ?? [];
-  const shownFiles = files.slice(0, WINDOW);
-  const moreFiles = (git === null ? 0 : git.unstaged + git.staged + git.untracked) - shownFiles.length;
+  const changedCount = git === null ? 0 : git.unstaged + git.staged + git.untracked;
 
   return (
     <aside className="overview" aria-label="What is going on">
@@ -283,54 +285,42 @@ export default function Overview({
         </section>
       ) : null}
 
-      {/* Every helper, what it was asked and what it has said. Nobody else
-          shows this, and it is the most interesting thing in a long sitting. */}
-      {now.helpers.length === 0 ? null : (
-        <section className="overview__block">
-          <Helpers helpers={now.helpers} />
-        </section>
-      )}
+      {/* Helpers used to be a band here. They belong beside the composer: this
+          panel is a reading of what has already happened, and a helper is now. */}
 
-      <section className="overview__block">
-        <h2 className="overview__title">Changes</h2>
-        {git === null ? (
-          <p className="overview__quiet">
-            Nothing is being kept for this folder yet. The first time I change
-            something, I will start saving moments you can come back to.
+      {/* Only while there is something to do with it. An empty "changes" band
+          is a list of filenames nobody needed. The files themselves live in the
+          project's own place now; what belongs here is the one thing the hand
+          can do with them — save the changed set and step it forward — so the
+          band is a single commit, said the way git says it and the way people
+          say it. */}
+      {git !== null && changedCount > 0 ? (
+        <section className="overview__block">
+          <h2 className="overview__title">Save / commit</h2>
+          <p className="overview__summary">
+            {changedCount === 1
+              ? 'One change is waiting to be saved.'
+              : `${changedCount} changes are waiting to be saved.`}
           </p>
-        ) : shownFiles.length === 0 ? (
-          <p className="overview__quiet">Everything here is saved.</p>
-        ) : (
-          <>
-            <ul className="overview__files">
-              {shownFiles.map((file) => (
-                <li key={file.path}>
-                  <button
-                    type="button"
-                    className="overview__file"
-                    onClick={() => onOpenFile(file.path)}
-                    title={`Open ${file.path}`}
-                  >
-                    <span className="overview__filetext">
-                      <span className="overview__filename">{leaf(file.path)}</span>
-                      {folder(file.path) === '' ? null : (
-                        <span className="overview__filewhere">{folder(file.path)}</span>
-                      )}
-                    </span>
-                    {file.kind === 'new' ? <span className="overview__filenew">new</span> : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {moreFiles > 0 ? <p className="overview__more">{`and ${moreFiles} more`}</p> : null}
-            {/* The one thing worth doing about unsaved work, named after what
-                it makes: another row in the timeline below. */}
+          <p className="overview__line">
+            <span
+              className="overview__lineterm"
+              title="The line of work this project is on — git calls it a branch"
+            >
+              {git.branch === null ? 'main' : git.branch}
+            </span>
+            <span className="overview__plainsay">
+              the line of work it sits on — git calls this a “branch”
+            </span>
+          </p>
+          <div className="overview__actions">
             <button type="button" className="overview__do" onClick={onSave} disabled={busy}>
-              Save a version now
+              Commit
+              <span className="overview__plainsay">Save it now</span>
             </button>
-          </>
-        )}
-      </section>
+          </div>
+        </section>
+      ) : null}
 
       <section className="overview__block">
         <h2 className="overview__title">Looked up</h2>
@@ -424,9 +414,12 @@ export default function Overview({
       <section className="overview__block">
         <Away
           away={view.away}
+          elsewhere={view.elsewhere}
+          project={view.project}
           now={view.clock}
           busy={busy}
           onKeepGoing={onKeepGoing}
+          onStartAfter={onStartAfter}
           onKeep={onKeepAway}
           onDrop={onDropAway}
           onAnswer={onAnswerAway}
@@ -490,6 +483,8 @@ export default function Overview({
           onKeep={onKeep}
           onDismissPutBack={onDismissPutBack}
           onOpenGraph={onOpenGraph}
+          onSwitchBranch={onSwitchBranch}
+          onCreateBranch={onCreateBranch}
           busy={busy}
           showMe={showMe}
           git={git}
@@ -506,17 +501,26 @@ export default function Overview({
           going={view.going}
           outcome={view.landed}
           decided={view.decided}
-          onHoldBack={onHoldBack}
           onDecide={onDecide}
           onUndo={onPutBack}
           onHandOver={onHandOver}
-          onPutOnline={onPutOnline}
           onShare={onShare}
           onOpenLink={onOpenLink}
         />
       </div>
 
-      {spent === null ? null : <CostMeter spent={spent.total} corner onDetails={onShowSplit} />}
+      {spent === null ? null : (
+        <CostMeter
+          spent={spent.total}
+          corner="panel"
+          onAPlan={onAPlan}
+          split={spent.split}
+          usage={spent.usage}
+          {...(ceiling === null ? {} : { limit: ceiling })}
+          onDetails={onShowSplit}
+          onLimit={onLimit}
+        />
+      )}
     </aside>
   );
 }

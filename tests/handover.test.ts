@@ -20,6 +20,7 @@ import {
   safeToWriteTo,
   titleOf,
   whereAPictureLives,
+  worthTelling,
   type Handover,
   type Piece,
 } from '../src/share/handover';
@@ -61,16 +62,18 @@ function handover(over: Partial<Handover> = {}): Handover {
 /* ========================================================================== */
 
 describe('HO-01 naming the work', () => {
-  it('reads as what was asked for', () => {
+  it('reads as what was asked for, with its conventional type', () => {
     expect(nameForWork('Gave the pricing cards more room', AT)).toMatch(
-      /^graphe\/gave-the-pricing-cards-more-room-[a-z0-9]+$/,
+      /^feat\/gave-the-pricing-cards-more-room-[a-z0-9]+$/,
     );
+    // A title about fixing lands on fix/.
+    expect(nameForWork('Fixed the nav alignment', AT)).toMatch(/^fix\//);
   });
 
   it('survives a title that is punctuation, accents or nothing at all', () => {
-    expect(nameForWork('Café — “20% off” banner!', AT)).toMatch(/^graphe\/cafe-20-off-banner-/);
-    expect(nameForWork('', AT)).toMatch(/^graphe\/work-/);
-    expect(nameForWork('///', AT)).toMatch(/^graphe\/work-/);
+    expect(nameForWork('Café — “20% off” banner!', AT)).toMatch(/^feat\/cafe-20-off-banner-/);
+    expect(nameForWork('', AT)).toMatch(/^feat\/work-/);
+    expect(nameForWork('///', AT)).toMatch(/^feat\/work-/);
   });
 
   it('never runs away with a very long title', () => {
@@ -86,18 +89,19 @@ describe('HO-01 naming the work', () => {
   it('never lands on what everybody else is working from', () => {
     for (const theirs of ['main', 'master', 'trunk', 'develop', 'default', 'release-2026']) {
       expect(safeToWriteTo(theirs, theirs)).toBe(false);
-      expect(safeToWriteTo(`graphe/${theirs}`, theirs)).toBe(theirs === 'release-2026');
+      expect(safeToWriteTo(`feat/${theirs}`, theirs)).toBe(theirs === 'release-2026');
     }
     expect(safeToWriteTo(nameForWork('anything', AT), 'main')).toBe(true);
   });
 
   it('refuses a name that could be a path, a walk upwards, or somebody else’s', () => {
     for (const bad of [
-      'graphe/../evil',
-      'graphe/a/b',
-      'graphe/',
-      'graphe/-leading',
-      'graphe/UPPER',
+      'feat/../evil',
+      'feat/a/b',
+      'feat/',
+      'feat/-leading',
+      'feat/UPPER',
+      'bugfix/work', // a type this app never writes
       'someone-else/work',
       '',
       'HEAD',
@@ -112,11 +116,11 @@ describe('HO-01 naming the work', () => {
 /* ========================================================================== */
 
 describe('HO-02 the pictures have somewhere to be', () => {
-  const name = 'graphe/work-abc';
+  const name = 'feat/work-abc';
 
   it('points at the pictures carried along with the work', () => {
     expect(whereAPictureLives('kettle/site', name, '.graphe/what-changed/01-before.png')).toBe(
-      'https://raw.githubusercontent.com/kettle/site/graphe/work-abc/.graphe/what-changed/01-before.png',
+      'https://raw.githubusercontent.com/kettle/site/feat/work-abc/.graphe/what-changed/01-before.png',
     );
   });
 
@@ -170,12 +174,43 @@ describe('HO-03 the description', () => {
     expect(other).toContain('How it looked before');
   });
 
-  it('says there are none rather than showing a broken one', () => {
+  it('shows nothing rather than a broken picture, and stops promising one', () => {
     const said = describeForReview(
       handover({ pieces: [piece({ pictures: { before: null, after: null } })] }),
     );
-    expect(said).toContain(handoverWords.noPictures);
     expect(said).not.toContain('<img');
+    expect(said).toContain('One change.');
+    // No line apologising for the missing picture, and no note about how
+    // pictures travel when none of them did.
+    expect(said).not.toMatch(/no pictures|nothing was photographed/i);
+    expect(said).not.toContain(handoverWords.picturesTravel);
+  });
+
+  it('lists a change it only knows the name of, rather than heading an empty section', () => {
+    const said = describeForReview(
+      handover({
+        pieces: [
+          piece({ says: '', where: null, pictures: { before: null, after: null } }),
+          piece({ title: 'Made the header sticky', says: '', where: null, pictures: { before: null, after: null } }),
+        ],
+      }),
+    );
+    expect(said).toContain('- Gave the pricing cards more room');
+    expect(said).toContain('- Made the header sticky');
+    expect(said).not.toContain('###');
+    expect(said).toContain('Two changes.');
+  });
+
+  it('keeps the pictures and the bare names apart, and counts both', () => {
+    const said = describeForReview(
+      handover({
+        pieces: [piece(), piece({ title: 'Made the header sticky', says: '', where: null, pictures: { before: null, after: null } })],
+      }),
+    );
+    expect(said).toContain('Two changes, one of them with pictures.');
+    expect(said).toContain('- Made the header sticky');
+    expect(said).toContain('### Gave the pricing cards more room');
+    expect(said).toContain(handoverWords.picturesTravel);
   });
 
   it('never repeats the heading back as its own description', () => {
@@ -216,6 +251,46 @@ describe('HO-03 the description', () => {
     const empty = describeForReview(handover({ pieces: [] }));
     expect(empty).toContain('Nothing changed.');
     expect(empty.endsWith('\n')).toBe(true);
+  });
+});
+
+/* ========================================================================== */
+/* HO-03b the timeline's housekeeping stays in the timeline                    */
+/* ========================================================================== */
+
+describe('HO-03b what is worth telling somebody', () => {
+  it('keeps the moments that name a change', () => {
+    for (const title of [
+      'Gave the pricing cards more room',
+      'Made the header sticky',
+      'Shorten the second-thought buttons to one word each',
+      'Remove the merge field from the form', // says merge, is not one
+    ]) {
+      expect(worthTelling(title)).toBe(true);
+    }
+  });
+
+  it('drops what the timeline wrote about itself', () => {
+    for (const title of [
+      'Merge pull request #7 from someone/a-line-of-work',
+      'Merge branch main into work',
+      'Revert "Made the header sticky"',
+      'Bump the version to 0.2.0',
+      'Initial commit',
+      'Save point',
+      'Made a few changes',
+      'A working version',
+      'Saved what you had before going back',
+      'Went back to “Made the header sticky”',
+      '   ',
+    ]) {
+      expect(worthTelling(title)).toBe(false);
+    }
+  });
+
+  it('never titles the request with housekeeping', () => {
+    expect(titleOf(handover({ title: 'Merge pull request #7 from someone/work' }))).toBe('Kettle');
+    expect(titleOf(handover({ title: 'Save point', project: '' }))).toBe('Design changes');
   });
 });
 

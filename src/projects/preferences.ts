@@ -17,10 +17,11 @@
  * product is that we make them.
  */
 
+import type { Money } from '../agent/types';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import type { ModelChoice } from '../lib/ipc';
+import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { asTrusted, sameTrusted, type Trusted } from './carried';
 import { asKept, sameKept, type Kept } from './kept';
 
@@ -45,6 +46,10 @@ export type Preferences = {
    * full list so a choice is never more than one click away.
    */
   model: ModelChoice | null;
+  /** How much time each model should take before it answers. The map is keyed
+   * by its provider and model id because different models support different
+   * choices. */
+  thinking: Readonly<Record<string, ThinkingLevel>>;
   /**
    * Versions somebody chose to keep at the top of the rail, by project folder.
    *
@@ -75,23 +80,36 @@ export type Preferences = {
    */
   showFiles: boolean;
   /**
-   * Do the work in a copy first, and show it before it reaches the files.
+   * Whether each project holds work back to be looked at first, keyed by its
+   * path.
    *
-   * Off by default because the promise the product already keeps — every moment
-   * is saved, going back is one press — makes work landing straight away safe.
-   * On, for the people whose files are shared with somebody else and who would
-   * rather look first.
+   * Per project, so saying "ask me first" in one folder never changes another:
+   * what a designer decides for a shared codebase they do not own is not what
+   * they want for their own. Off by default because the promise the product
+   * already keeps — every moment is saved, going back is one press — makes work
+   * landing straight away safe.
    */
-  holdBack: boolean;
+  heldBack: Readonly<Record<string, boolean>>;
+  /**
+   * The ceiling on spending, or null when nobody has set one.
+   *
+   * Remembered across launches, because a ceiling that forgets itself the
+   * moment you close the window is not a ceiling. What has been spent is not
+   * remembered with it — that is per sitting, and measuring a month against one
+   * afternoon would hold nobody to anything.
+   */
+  ceiling: Money | null;
 };
 
 export const defaultPreferences: Preferences = {
   showMe: false,
   model: null,
+  thinking: {},
   kept: {},
   trusted: {},
   showFiles: false,
-  holdBack: false,
+  heldBack: {},
+  ceiling: null,
 };
 
 type Stored = { version: 1; preferences: Preferences };
@@ -103,6 +121,16 @@ function asPreferences(value: unknown): Preferences {
   const record = raw as Record<string, unknown>;
   const showMe = record['showMe'];
   const model = record['model'];
+  const rawThinking = record['thinking'];
+  const thinking: Record<string, ThinkingLevel> = {};
+  const levels = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+  if (typeof rawThinking === 'object' && rawThinking !== null && !Array.isArray(rawThinking)) {
+    for (const [key, level] of Object.entries(rawThinking)) {
+      if (typeof level === 'string' && levels.has(level as ThinkingLevel)) {
+        thinking[key] = level as ThinkingLevel;
+      }
+    }
+  }
   return {
     showMe: showMe === true,
     model:
@@ -115,11 +143,54 @@ function asPreferences(value: unknown): Preferences {
             modelId: (model as Record<string, unknown>)['modelId'] as string,
           }
         : null,
+    thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
     showFiles: record['showFiles'] === true,
-    holdBack: record['holdBack'] === true,
+    heldBack: asHeldBack(record['heldBack']),
+    ceiling: asCeiling(record['ceiling']),
   };
+}
+
+/** Read back defensively: a file edited by hand must not become a ceiling of
+ *  NaN, which would hold nobody to anything. */
+function asCeiling(value: unknown): Money | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const money = value as Record<string, unknown>;
+  const minor = money['minor'];
+  const currency = money['currency'];
+  if (typeof minor !== 'number' || !Number.isFinite(minor) || minor <= 0) return null;
+  if (typeof currency !== 'string' || currency === '') return null;
+  return { minor: Math.round(minor), currency };
+}
+
+/** True entries of a held-back map, from whatever a file held. Anything that is
+ *  not a folder-name/true pair is dropped rather than refused — a preference
+ *  that will not load is worse than one that loads short. */
+function asHeldBack(value: unknown): Readonly<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    for (const [path, on] of Object.entries(value)) {
+      if (path !== '' && on === true) out[path] = true;
+    }
+  }
+  return out;
+}
+
+/** Two held-back maps are the same when every project is held the same way. */
+function sameHeldBack(one: Readonly<Record<string, boolean>>, other: Readonly<Record<string, boolean>>): boolean {
+  const left = Object.keys(one).filter((key) => one[key]);
+  const right = Object.keys(other).filter((key) => other[key]);
+  return left.length === right.length && left.every((key) => other[key] === true);
+}
+
+function sameThinking(
+  left: Readonly<Record<string, ThinkingLevel>>,
+  right: Readonly<Record<string, ThinkingLevel>>,
+): boolean {
+  const leftEntries = Object.entries(left);
+  if (leftEntries.length !== Object.keys(right).length) return false;
+  return leftEntries.every(([key, level]) => right[key] === level);
 }
 
 export class PreferenceFile {
@@ -146,9 +217,10 @@ export class PreferenceFile {
     const unchanged =
       next.showMe === this.#preferences.showMe &&
       next.showFiles === this.#preferences.showFiles &&
-      next.holdBack === this.#preferences.holdBack &&
+      sameHeldBack(next.heldBack, this.#preferences.heldBack) &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
+      sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted);
     if (unchanged) return this.all();

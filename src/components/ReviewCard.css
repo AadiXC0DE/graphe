@@ -1,0 +1,194 @@
+/* The verdict card a change comes back with.
+   Findings rank P0 through P3; the colour of the card follows the verdict — the
+   three of them are the whole scheme. Nothing here animates on arrival. */
+
+.review {
+  margin: var(--space-3) 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.review__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.review__verdict {
+  font-size: var(--text-base);
+}
+
+.review__tag {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.review__summary {
+  margin: var(--space-2) 0 var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* The project's own standards, named. Quiet: it answers "against what?" for
+   anyone who wonders, and is skippable for everyone else. */
+.review__against {
+  margin: calc(var(--space-2) * -1) 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.review__findings {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review__finding {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+}
+
+.review__finding:first-child {
+  border-top: 0;
+}
+
+.review__sev {
+  flex: none;
+  width: 34px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+}
+
+.review__sev--0 {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.review__sev--1 {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.review__body {
+  min-width: 0;
+}
+
+.review__issue {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.review__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.review__place {
+  font-size: var(--text-xs);
+  color: var(--text);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+.review__confidence {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.review__level {
+  margin-left: var(--space-2);
+}
+
+.review__fix {
+  margin-top: var(--space-3);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.review__fix:active {
+  transform: scale(0.98);
+}
+
+.review__fix:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Beside the fix, not instead of it: a review can be worth posting whether or
+   not the blocking findings are being fixed here. */
+.review__post {
+  margin: var(--space-3) 0 0 var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  transition: transform var(--dur-micro) var(--ease-out-quart), border-color var(--dur-micro) var(--ease-hover);
+}
+
+.review__post:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+/* Both actions on one line, sharing a baseline. */
+.review__fix,
+.review__post {
+  vertical-align: top;
+}
+
+.review__post:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.review__post:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.review__post:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review__post {
+    transition: none;
+  }
+}
+
+.review__ondone {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}

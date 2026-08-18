@@ -377,8 +377,10 @@ describe('estimating before, not billing after', () => {
     const big = history.plan({ kind: 'contact-form', size: 'feature' });
     expect(small.warn).toBe(false);
     expect(big.warn).toBe(true);
+    // The threshold is still money — it is what makes this a bigger job. What
+    // is said out loud is the time, because that is the part we measure.
     expect(phrasing.biggerJob(big.estimate, { locale: 'en-IN' }).body).toBe(
-      'About ₹35 and roughly four minutes. Want me to go ahead?',
+      'It should take roughly four minutes. Want me to go ahead?',
     );
   });
 

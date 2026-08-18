@@ -11,7 +11,7 @@
 
 import type { ActivityState } from '../components/ActivityLine';
 import type { MessageAuthor } from '../components/Message';
-import type { AgentEvent } from '../agent/types';
+import type { AgentEvent, ReviewVerdict } from '../agent/types';
 import type { Prompt } from '../cost/phrasing';
 import { PLAN_WORDS } from '../agent/plan';
 import { describeCall } from './describe';
@@ -108,7 +108,15 @@ export type Turn =
       answered: 'went-ahead' | 'changing' | null;
     }
   | { kind: 'tidying'; id: string; state: ActivityState }
-  | { kind: 'trouble'; id: string; trouble: Trouble };
+  | { kind: 'trouble'; id: string; trouble: Trouble }
+  /** "I checked the change: here is the verdict." Draws the review card. */
+  | {
+      kind: 'review';
+      id: string;
+      verdict: ReviewVerdict;
+      /** Whether the fix is already on its way; the card asks once. */
+      asked: boolean;
+    };
 
 /** The turn that holds a message back until somebody has seen what it will
  *  cost. Named because the window passes one around. */
@@ -130,6 +138,22 @@ export function said(from: MessageAuthor, text: string): Turn {
 
 export function estimated(text: string, prompt: Prompt): Turn {
   return { kind: 'estimate', id: newId(), text, prompt, answered: null };
+}
+
+/** Whether the conversation is waiting on a person rather than on the agent.
+ *  Anything held back until somebody answers is the next thing to happen, so
+ *  a message waiting in line waits for it too. */
+export function askingYou(turns: readonly Turn[]): boolean {
+  const last = turns[turns.length - 1];
+  if (last === undefined) return false;
+  switch (last.kind) {
+    case 'asked':
+    case 'estimate':
+    case 'plan':
+      return last.answered === null;
+    default:
+      return false;
+  }
 }
 
 /** Close off the most recent activity for a call. Returns the same array when
@@ -246,7 +270,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       );
 
     case 'tool-end':
-      return closeActivity(turns, event.id, event.ok ? 'done' : 'failed');
+      return closeActivity(turns, event.id, event.ok ? 'done' : 'failed', event.detail);
 
     case 'blocked': {
       const closed = closeActivity(turns, event.call.id, 'failed', event.reason);
@@ -338,23 +362,33 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       return already ? turns : [...turns, { kind: 'tidying', id: newId(), state: 'running' }];
     }
 
+    case 'reviewed': {
+      return [...turns, { kind: 'review', id: newId(), verdict: event.verdict, asked: false }];
+    }
+
     case 'tidied': {
       const index = turns.findLastIndex(
         (turn) => turn.kind === 'tidying' && turn.state === 'running',
       );
       if (index === -1) return turns;
       const next = [...turns];
-      // A tidy that could not be done leaves the line saying it was tried and
-      // nothing else. Nothing was lost, so there is nothing to apologise for.
+      // A compaction can discover there is not enough settled conversation yet.
+      // Do not leave behind a claim that notes were shortened when they were
+      // not: the completed line says plainly that the conversation stayed put.
       next[index] = { kind: 'tidying', id: turns[index]!.id, state: event.ok ? 'done' : 'failed' };
       return next;
     }
 
     // Money says nothing in the thread. It is furniture in the corner, and the
     // split behind it is shown only when somebody asks for it — a running
-    // commentary on cost is the anxiety this design exists to avoid.
+    // commentary on cost is the anxiety this design exists to avoid. `running`
+    // is furniture too, in its own band above the composer: a server outlives
+    // the sentence that started it, so filing it under that sentence would put
+    // it out of reach the moment the conversation moved on.
     case 'spend':
     case 'spend-summary':
+    case 'model-reading':
+    case 'running':
     case 'settled':
       return turns;
   }

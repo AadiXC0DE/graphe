@@ -17,6 +17,7 @@ import path from 'node:path';
 import { mkdir, rm } from 'node:fs/promises';
 
 import { ProjectHistory, HistoryError, historyProblems } from './repo';
+import { carryOver } from './newcopy';
 import { AT_A_TIME, nextUp, roomLeft, type WorkState } from '../work/board';
 
 /** The window says these too, and it has no folders — see src/share/holding.ts. */
@@ -64,6 +65,54 @@ export function saysKept(name: string, asked: string | null): string {
   return asked === null || asked.trim() === ''
     ? `Kept the ${which}`
     : `${asked.trim()} — kept the ${which}`;
+}
+
+/** What came of keeping one. A version and nothing held back is the ordinary
+ *  answer; anything in `conflicted` means the project was left as it was. */
+export type Kept = {
+  version: string | null;
+  conflicted: readonly string[];
+  /** The other goes at the same thing, thrown away with the decision. */
+  insteadOf?: readonly string[];
+};
+
+/** When two pieces of work changed the same file. Nothing failed and nothing
+ *  stopped part way — the project was deliberately left alone — so this is said
+ *  as its own thing rather than passed through the sentences written for a
+ *  failure. */
+/** A piece that finished without changing a file. There is nothing to take,
+ *  which is a real answer and not a failure. */
+export function nothingToTake(doing: string): {
+  what: string;
+  because: string;
+  actionLabel: string;
+} {
+  return {
+    what: 'There is nothing to take from this one.',
+    because: `“${doing}” finished without changing any files — it answered rather than edited. Read what it said; there is nothing to bring into your project.`,
+    actionLabel: 'Got it',
+  };
+}
+
+export function bothChanged(files: readonly string[]): {
+  what: string;
+  because: string;
+  actionLabel: string;
+} {
+  const named = files.slice(0, 4).join(', ');
+  const rest = files.length > 4 ? ` and ${String(files.length - 4)} more` : '';
+  return {
+    what: 'I left your project exactly as it was.',
+    because:
+      // Nothing named at all: the merge refused for a reason git did not put a
+      // file against. Naming none of them is the honest version of that.
+      files.length === 0
+        ? 'This one could not be brought in alongside what is already there, so nothing was changed. Open it and take across what you want by hand.'
+        : files.length === 1
+        ? `Another piece of work has already changed ${named}, so taking this one would write over it. Open this one and decide which version of that file you want.`
+        : `Another piece of work has already changed ${String(files.length)} of the same files, so taking this one would write over them: ${named}${rest}.`,
+    actionLabel: 'Got it',
+  };
 }
 
 export const tryWords = {
@@ -122,6 +171,7 @@ export class Tries {
         const folder = folderForTry(options.under, options.id, index);
         await mkdir(path.dirname(folder), { recursive: true });
         await options.history.addWorkspace(folder, from);
+        await carryOver(options.history.root, folder);
         made.push({
           id: `${options.id}-${index + 1}`,
           name: nameOfTry(index),
@@ -254,6 +304,7 @@ export class HeldWork {
     const folder = folderForHeld(options.under, options.id);
     await mkdir(path.dirname(folder), { recursive: true });
     await options.history.addWorkspace(folder, from);
+    await carryOver(options.history.root, folder);
 
     return new HeldWork(options.history, folder, {
       id: options.id,
@@ -353,6 +404,11 @@ export type PieceOfWork = {
   at: number;
   /** Why it stopped, in a sentence somebody can read. */
   trouble: string | null;
+  /** When this is one of several goes at the same thing, the name they share.
+   *  Keeping one of those throws the rest away — they were alternatives, not
+   *  other work, and that is the whole difference. Absent on ordinary work,
+   *  which is almost all of it. */
+  ways?: string | null;
 };
 
 /** Where one piece of work's copy lives: its own folder inside the room, so
@@ -368,6 +424,10 @@ export function folderForWork(under: string, id: string): string {
  * at once, who is next when a slot frees up, which copy belongs to which piece
  * of work, and — the part that has to be right — that letting one go can only
  * ever remove that one's copy.
+ *
+ * One writer each, and never two in a copy. What makes that hold is the caller
+ * judging its agent against `folder` rather than against the project: a copy is
+ * isolation only if the Guard is told the copy is the world.
  */
 export class Workbench {
   private readonly history: ProjectHistory;
@@ -404,7 +464,7 @@ export class Workbench {
 
   /** Ask for another piece of work. Past the cap it waits its turn rather than
    *  being refused — nobody's request is ever thrown away. */
-  ask(doing: string, options: { id?: string; at?: number } = {}): PieceOfWork {
+  ask(doing: string, options: { id?: string; at?: number; ways?: string | null } = {}): PieceOfWork {
     this.asked += 1;
     const piece: PieceOfWork = {
       id: this.freeId(options.id ?? `work-${String(this.asked)}`),
@@ -415,6 +475,7 @@ export class Workbench {
       picture: null,
       at: options.at ?? Date.now(),
       trouble: null,
+      ...(options.ways == null ? {} : { ways: options.ways }),
     };
     this.work.push(piece);
     return piece;
@@ -444,6 +505,7 @@ export class Workbench {
       try {
         await mkdir(path.dirname(folder), { recursive: true });
         await this.history.addWorkspace(folder, from);
+        await carryOver(this.history.root, folder);
       } catch (cause) {
         // One copy failing is that piece's problem and not the board's — the
         // others carry on, and this one says so rather than disappearing.
@@ -487,18 +549,31 @@ export class Workbench {
   }
 
   /**
-   * Keep one, and put the project's files where that piece of work left them.
+   * Keep one, bringing what it changed into the project alongside everything
+   * else that is already there.
    *
-   * `restoreTo` again, so this is a version like any other and undoable like any
-   * other. The rest of the board carries on: they were never alternatives to
-   * this one, they were other work.
+   * The rest of the board carries on: they were never alternatives to this one,
+   * they were other work — which is exactly why this cannot replace the
+   * project's files with this piece's copy. Every piece starts from the same
+   * version, so one copy has no idea what another one did, and putting the
+   * whole of it back used to undo the piece kept before it without a word.
+   *
+   * A file two pieces both changed is reported rather than resolved: it is the
+   * one case where somebody has to look.
    */
-  async keep(id: string, title: string): Promise<string | null> {
+  async keep(id: string, title: string): Promise<Kept | null> {
     const piece = this.find(id);
     if (piece === undefined || piece.version === null) return null;
-    const version = await this.history.restoreTo(piece.version, title);
+    const carried = await this.history.carryIn(piece.version, title);
+    if (!carried.ok) return { version: null, conflicted: carried.conflicted };
     await this.drop(id);
-    return version;
+    // The other goes at the same thing go with it. They were alternatives to
+    // this one rather than other work, so leaving them on the board would be
+    // offering somebody the two answers they have just decided against.
+    const others =
+      piece.ways == null ? [] : this.work.filter((one) => one.ways === piece.ways && one.id !== id);
+    for (const other of others) await this.drop(other.id);
+    return { version: carried.version, conflicted: [], insteadOf: others.map((one) => one.id) };
   }
 
   /** Let one go, whatever state it was in. Safe to call twice. */

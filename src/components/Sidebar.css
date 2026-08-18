@@ -21,11 +21,10 @@
   padding: var(--space-2) var(--space-2) var(--space-3);
   background: var(--bg);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
-  /* Reserved, so the rows do not reflow narrower the first time the list grows
-     past the window. */
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
+  /* The shelf itself does not scroll: only the conversations band inside it
+     does, so the projects, the pinned work and the foot keep their places
+     while a long history ends in one quiet moving strip. */
+  overflow: hidden;
 }
 
 /* Collapsed, it is a strip of the same width as the mark's hit area. Nothing
@@ -87,6 +86,8 @@
    strip this narrow: everything else in the product is quiet furniture, and
    this is the one thing that may carry the colour. */
 .shelf__thin {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -129,6 +130,12 @@
 
 .shelf__act:active {
   transform: scale(0.97);
+}
+
+/* The one persistent control on the folded shelf: it stays at the lower edge,
+   separate from the places somebody moves between. */
+.shelf__act--settings {
+  margin-top: auto;
 }
 
 .shelf__mark {
@@ -190,6 +197,22 @@
   border-top: 1px solid var(--border);
 }
 
+/* The one band that scrolls: the conversations. It takes whatever height the
+   fixed bands above and below leave it, and scrolls inside itself. The bar is
+   hidden so the column reads as clean as the rest of the shelf — wheel,
+   trackpad and keyboard still scroll it, but nothing paints down its side. */
+.shelf__band--scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.shelf__band--scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .shelf__band .shelf__caption {
   display: block;
   padding: 0 var(--space-3) var(--space-2);
@@ -199,6 +222,70 @@
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.shelf__convo {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-radius: var(--radius-md);
+}
+
+.shelf__convo .shelf__row {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The same shape and the same reveal as throwing one away: two things you can
+   do to a conversation, sitting where the pointer already is. */
+.shelf__copy,
+.shelf__forget {
+  flex: none;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  margin-right: var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.shelf__convo:hover .shelf__copy,
+.shelf__convo:hover .shelf__forget,
+.shelf__convo:focus-within .shelf__copy,
+.shelf__convo:focus-within .shelf__forget,
+.shelf__copy:focus-visible,
+.shelf__forget:focus-visible {
+  opacity: 1;
+}
+
+.shelf__copy {
+  margin-right: 0;
+}
+
+.shelf__copy:hover,
+.shelf__copy:focus-visible,
+.shelf__forget:hover,
+.shelf__forget:focus-visible {
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+.shelf__copy:focus-visible,
+.shelf__forget:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf__copy,
+  .shelf__forget {
+    transition: none;
+  }
 }
 
 .shelf__row {
@@ -368,6 +455,30 @@
 }
 
 .shelf__row--here .shelf__rowname {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* The current project is a destination, not a hidden heading. It stays in the
+   project list and receives the same quiet selection treatment as the current
+   conversation, plus the small accent edge that distinguishes the two lists. */
+.shelf__row--project-here {
+  position: relative;
+  background: var(--bg-sunken);
+}
+
+.shelf__row--project-here::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  bottom: var(--space-2);
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+
+.shelf__row--project-here .shelf__rowname {
   color: var(--text);
   font-weight: 500;
 }

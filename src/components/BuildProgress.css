@@ -1,0 +1,130 @@
+/* A lightweight build progress tracker above the box.
+   One quiet line collapsed; the checklist itself expanded. It never competes
+   with the conversation for attention — left-aligned, small, and muted until
+   something is actually running. */
+
+.buildprogress {
+  max-width: 520px;
+  margin: var(--space-2) 0 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.buildprogress__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 6px var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .buildprogress__head:hover {
+    color: var(--text);
+  }
+}
+
+.buildprogress__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+/* Live: something is running, so the dot says so without a row of motion. */
+.buildprogress__dot--live {
+  background: var(--accent);
+}
+
+.buildprogress__name {
+  font-weight: 600;
+}
+
+.buildprogress__count {
+  margin-left: auto;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.buildprogress__caret {
+  display: inline-flex;
+  color: var(--text-faint);
+  transition: transform var(--dur-micro) var(--ease-hover);
+}
+
+.buildprogress--open .buildprogress__caret {
+  transform: rotate(90deg);
+}
+
+.buildprogress__list {
+  list-style: none;
+  margin: 0;
+  padding: 2px var(--space-2) var(--space-2);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.buildprogress__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.buildprogress__row--done {
+  color: var(--text-faint);
+}
+
+.buildprogress__row--done .buildprogress__glyph {
+  color: var(--accent);
+}
+
+.buildprogress__row--doing {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+.buildprogress__row--doing .buildprogress__glyph {
+  color: var(--accent);
+}
+
+.buildprogress__row--failed .buildprogress__glyph {
+  color: var(--accent);
+}
+
+.buildprogress__glyph {
+  flex: none;
+  width: 1em;
+  font-weight: 700;
+}
+
+.buildprogress__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.buildprogress__tag {
+  margin-left: auto;
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}

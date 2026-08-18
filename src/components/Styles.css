@@ -1,16 +1,20 @@
-/* The values that need no judgement.
+/* The design system, shown as itself.
 
-   A slider writes the token and the page reloads — no model, no round trip, no
-   bill. It sits in the panel rather than in the conversation because it is not
-   something you say, it is something you do while looking at your work.
+   This is the whole point of the design screen: not a list of boxes you can
+   tweak but the project's visual language read aloud. Each discipline is drawn
+   with its own shape — colour as swatches, type as letters at size, spacing as
+   bars at their own width, corners as curves, shadows as cards — so a visitor
+   reads how things actually look, then finds the slider where the shape is.
 
-   Density is the whole design here: a colour is a square, not a row, so a real
-   palette arrives whole in the space a handful of rows used to take. */
+   The app's own restraint carries: the paper background, the two-grey ink, the
+   one terracotta accent. Specimen shapes take the room, and the labels are
+   small mono annotations rather than names shouting over the work.
+   --------------------------------------------------------------------------- */
 
 .styles {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-6);
 }
 
 .styles__none {
@@ -20,7 +24,75 @@
   color: var(--text-faint);
 }
 
-/* ------------------------------------------------------------------ shelves */
+/* The head names the file and carries the one switch that turns the spec
+   sheet into knobs. The two sit on one line, so the Edit control is where the
+   hand already is when it has read enough. */
+.styles__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.styles__where {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.styles__edit {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.styles__edit:active {
+  transform: scale(0.97);
+}
+
+.styles__edit--on {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.styles__edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .styles__edit:hover:not(.styles__edit--on) {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .styles__edit:active {
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------------------------ groups
+   One discipline per section. The header is a title and a count over a hairline;
+   the body is the discipline drawn as itself.
+   --------------------------------------------------------------------------- */
 
 .styles__group {
   display: flex;
@@ -31,35 +103,28 @@
 .styles__band {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
   width: 100%;
-  padding: var(--space-1) 0;
+  padding: 0 0 var(--space-2);
   background: none;
   border: 0;
+  border-bottom: 1px solid var(--border);
   text-align: left;
   cursor: pointer;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
-
-.styles__caret {
-  flex: none;
-  width: 0;
-  height: 0;
-  border-top: 3.5px solid transparent;
-  border-bottom: 3.5px solid transparent;
-  border-left: 5px solid currentColor;
-  opacity: 0.7;
-  transition: transform var(--dur-micro) var(--ease-out-quart);
-}
-
-.styles__band--open .styles__caret {
-  transform: rotate(90deg) translateX(1px);
+  color: var(--text);
 }
 
 .styles__shelf {
   flex: 1;
   min-width: 0;
+  /* The discipline title carries the weight of an upstream — a heading, not a
+     quiet shelf. */
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  transition: color var(--dur-micro) var(--ease-hover);
 }
 
 .styles__count {
@@ -70,41 +135,80 @@
   font-variant-numeric: tabular-nums;
 }
 
-.styles__body {
-  padding-bottom: var(--space-2);
+.styles__caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  border-left: 5px solid currentColor;
+  opacity: 0.5;
+  transform: rotate(90deg);
+  transition: transform var(--dur-micro) var(--ease-out-quart);
 }
 
-.styles__rest {
-  margin: var(--space-1) 0 0;
+.styles__group:not(.styles__group--open) .styles__caret {
+  transform: none;
+}
+
+.styles__body {
+  padding-top: var(--space-3);
+}
+
+/* One line under the heading that names the discipline in a human way, so the
+   shapes below are read rather than puzzled at. */
+.styles__intro {
+  margin: 0 0 var(--space-3);
   font-size: var(--text-2xs);
   color: var(--text-faint);
 }
 
-/* ------------------------------------------------------------------ palette */
+.styles__rest {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------------ palette
+   Colour as a family. Each swatch is a column: a square of the value, the name,
+   and the value itself. Four across reads as a set that belongs together.
+   --------------------------------------------------------------------------- */
 
 .styles__palette {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: var(--space-4) var(--space-3);
+}
+
+.styles__swatch {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
 }
 
-.styles__wells {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(26px, 1fr));
-  gap: var(--space-1);
-}
-
-/* The well is the control: the value is painted on it as written, so a blend
-   or a near-white reads as itself. Its own hairline, or a white swatch on the
-   light page is a blank square. */
+/* A well that reads as a swatch on a card, not a colour well on a paint
+   screen: 2:1, so a whole palette sits in a couple of rows instead of taking
+   over the sheet. */
 .styles__well {
   position: relative;
   display: block;
-  aspect-ratio: 1;
-  min-height: 26px;
+  height: 46px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   overflow: hidden;
+  /* The swatch is the invitation to change it: the quiet lift tells the hand
+     it can press the colour, the way a real swatch card would. */
+  transition:
+    box-shadow var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.styles__well:active {
+  transform: scale(0.97);
 }
 
 .styles__pick {
@@ -128,19 +232,137 @@
   outline-offset: 1px;
 }
 
-/* One line for the whole grid, so nothing has to be written beside a square. */
-.styles__read {
+@media (hover: hover) and (pointer: fine) {
+  .styles__swatch:hover .styles__well {
+    box-shadow: var(--shadow-sm);
+  }
+}
+
+.styles__swname {
+  min-width: 0;
+  font-size: var(--text-2xs);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The value a swatch writes back to, with a dot of the colour beside it so a
+   value reads as a colour rather than as a string. */
+.styles__swmeta {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin: 0;
-  min-height: 1.2em;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--text-faint);
 }
 
-/* ------------------------------------------------------------------- scales */
+.styles__swdot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+
+.styles__swvalue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- measures
+   Spacing as bars. Each row is one step: a track the width of the card, with a
+   fill whose width is the step itself. 4px is a hair, 48px is a room — the
+   scale reads as what it is before you read the number.
+   --------------------------------------------------------------------------- */
+
+.styles__measures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-4) var(--space-5);
+}
+
+.styles__measure {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.styles__measuretrack {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  height: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.styles__measurebar {
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  /* The inner swatch reads the accent on the soft tint, so the width is the
+     thing you see and the colour stays quiet. */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.styles__measuremeta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.styles__measure--editable .styles__slider {
+  grid-column: 1 / -1;
+}
+
+/* ------------------------------------------------------------------ corners
+   Radius as curves. Each corner is a square rounded with its own value, so a
+   6px corner and a 24px corner are visibly different shapes rather than two
+   numbers.
+   --------------------------------------------------------------------------- */
+
+.styles__corners {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-4);
+}
+
+.styles__corner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.styles__cornerbox {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1.6;
+  border: 1px solid var(--border-strong);
+  background:
+    linear-gradient(135deg, transparent 48%, var(--border) 49%, var(--border) 51%, transparent 52%),
+    var(--bg-raised);
+}
+
+.styles__cornerhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------- scale
+   Numeric stairs (sizes, and the rest). Reading, a row is name and value;
+   editing, the slider slips in between them.
+   --------------------------------------------------------------------------- */
 
 .styles__scale {
   display: flex;
@@ -148,15 +370,15 @@
   gap: var(--space-1);
 }
 
-.styles__scale--type {
-  gap: var(--space-2);
-}
-
 .styles__row {
   display: grid;
-  grid-template-columns: minmax(0, 6em) 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
+}
+
+.styles__row--editable {
+  grid-template-columns: minmax(0, 6em) 1fr auto;
 }
 
 .styles__name {
@@ -185,31 +407,46 @@
   accent-color: var(--accent);
 }
 
-/* --------------------------------------------------------------------- type */
+/* --------------------------------------------------------------------- type
+   The scale as letters, in order, so the climb is the story. The specimen sits
+   at its own size; the name and value travel with it as a small mono note.
+   --------------------------------------------------------------------------- */
+
+.styles__scale--type {
+  gap: var(--space-4);
+}
 
 .styles__type {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-2);
+  grid-template-columns: minmax(3.2em, 7.5em) minmax(0, 1fr);
+  align-items: end;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.styles__type:last-child {
+  border-bottom: 0;
 }
 
 /* A number says nothing about type. The letters do, and they move with the
-   slider — clamped only so one loud step cannot push the panel around. */
+   slider — clamped only so one loud step cannot push the column around. */
 .styles__specimen {
   display: flex;
   align-items: baseline;
-  justify-content: center;
-  min-width: 2.2em;
   line-height: 1;
   color: var(--text);
   font-family: var(--font-ui);
+  /* The largest specimen is a target, not a given; trim the whole visual so a
+     big display size does not dominate the sheet. */
+  max-height: 1.6em;
+  overflow: hidden;
 }
 
 .styles__typebody {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
@@ -221,39 +458,69 @@
   min-width: 0;
 }
 
-/* ------------------------------------------------------------------ shadows */
+/* A font family is drawn as itself: the letters in that face, and the stack
+   written beneath as the small mono note that names it. */
+.styles__family {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.styles__family:last-child {
+  border-bottom: 0;
+}
+
+.styles__familysample {
+  font-size: var(--text-xl);
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.styles__familyvalue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ shadows
+   Elevation as cards. Each is a raised square casting its own shadow, labelled
+   with the small name that says how high it sits.
+   --------------------------------------------------------------------------- */
 
 .styles__lifts {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--space-3) var(--space-2);
 }
 
 .styles__lift {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-1);
   min-width: 0;
-  padding: var(--space-1) var(--space-1) 0;
 }
 
 .styles__card {
   display: block;
-  height: 26px;
+  width: 100%;
+  height: 56px;
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
 }
 
-/* -------------------------------------------------------------------- where */
-
-.styles__where {
-  margin: 0;
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
+.styles__lift .styles__name {
+  text-align: center;
+  max-width: 100%;
 }
+
+/* -------------------------------------------------------------------- focus */
 
 .styles__slider:focus-visible,
 .styles__band:focus-visible {
@@ -262,13 +529,18 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .styles__band:hover {
+  .styles__band:hover .styles__shelf {
     color: var(--text);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .styles__caret {
+  .styles__caret,
+  .styles__well {
     transition: none;
+  }
+
+  .styles__well:active {
+    transform: none;
   }
 }

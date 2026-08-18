@@ -13,6 +13,29 @@ export type ToolCall = {
 };
 
 /** What the Guard decided about a tool call. */
+/** One problem a reviewer found, in the shape the review card draws. */
+export type ReviewFinding = {
+  /** P0 blocks shipping, P1 should be fixed first, P2 can wait, P3 is a note. */
+  priority: 0 | 1 | 2 | 3;
+  file?: string;
+  line?: number;
+  issue: string;
+  impact?: string;
+  /** How sure the reviewer is, 0–100. */
+  confidence: number;
+};
+
+/** The whole call on whether a change ships. */
+export type ReviewVerdict = {
+  kind: 'ships' | 'needs-work' | 'do-not-land';
+  summary: string;
+  findings: readonly ReviewFinding[];
+  /** What the change was held up against, by name. */
+  checks?: readonly string[];
+  /** The pull request this verdict is about, when it is about one. */
+  pull?: number;
+};
+
 export type Verdict =
   | { kind: 'allow' }
   /** Run it, but snapshot first. Used for anything destructive. */
@@ -25,6 +48,30 @@ export type Verdict =
 export type GuardContext = {
   /** Absolute path of the project the user is working in. Nothing may escape it. */
   projectRoot: string;
+};
+
+/** Whether something kept running is on its way up, up, or over. */
+export type RunState = 'starting' | 'running' | 'stopped';
+
+/**
+ * One thing being kept running: a server, a watcher, an API.
+ *
+ * Declared here rather than beside the register that owns it, because the
+ * window draws these and nothing the window imports may drag a process module
+ * in behind it.
+ */
+export type RunningPiece = {
+  id: string;
+  /** What to call it in a sentence. The person's own words when they gave any. */
+  label: string;
+  command: string;
+  folder: string;
+  /** Where it can be reached, once it has said. Null until then. */
+  address: string | null;
+  state: RunState;
+  since: number;
+  /** Null while it is up; the code it ended with once it is not. */
+  exitCode: number | null;
 };
 
 /** Money, in the smallest unit of the user's currency, to avoid float drift. */
@@ -95,11 +142,23 @@ export type SpendSummary = {
   largestRetry: LabelTotal | null;
 };
 
+/** How this sitting used the model, said without counts a designer has no
+ *  intuition for. Built from Pi's own usage block (cache reads, model ids). */
+export type SittingUsage = {
+  /** Share of the prompt that came back from cache, 0–1. Null when the account
+   *  never reports caching, so a zero would mean the wrong thing. */
+  reusedShare: number | null;
+  /** The model that took the largest share of the bill this sitting. */
+  mostUsed: string | null;
+  /** Models ordered by spend share, largest first. Empty until something ran. */
+  byModel: readonly { name: string; share: number }[];
+};
+
 export type AgentEvent =
   | { type: 'message-delta'; text: string }
   | { type: 'message-end' }
   | { type: 'tool-start'; call: ToolCall }
-  | { type: 'tool-end'; id: string; ok: boolean }
+  | { type: 'tool-end'; id: string; ok: boolean; detail?: string }
   /** A tool that is still running has something to say — the helper the `task`
    *  tool spawns, reporting as it reads. Replaces the step's own detail line. */
   | { type: 'tool-progress'; id: string; text: string }
@@ -150,6 +209,20 @@ export type AgentEvent =
   /** The agent has finished everything it was doing, tool calls included. The
    *  moment the session split is worth working out. */
   | { type: 'settled' }
+  /** A change was checked, and the verdict is in. Carries the same findings
+   *  the reply showed as words, so the window can draw them as a card. */
+  | { type: 'reviewed'; verdict: ReviewVerdict }
   /** The split, from the shell's ledger. Emitted after `settled`, and only when
    *  there is something to split — no spend, no summary, no zero state. */
-  | { type: 'spend-summary'; summary: SpendSummary };
+  | { type: 'spend-summary'; summary: SpendSummary }
+  /** How the model was used this sitting — cache reuse and which model most.
+   *  Updated as turns land; never carries raw counts. */
+  | { type: 'model-reading'; reading: SittingUsage }
+  /**
+   * What is being kept running right now.
+   *
+   * Sent whenever one starts, says where it is, or stops — not on a clock. The
+   * window draws the band from this and nothing else, so a server that fell
+   * over stops claiming to be up without anybody having to ask it.
+   */
+  | { type: 'running'; pieces: readonly RunningPiece[] };

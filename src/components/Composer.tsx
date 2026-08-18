@@ -7,12 +7,14 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import Annotate from './Annotate';
 import Attachments, { type Attachment } from './Attachments';
 import Asking from './Asking';
+import type { HowFar } from '../agent/guard/policy';
 import HowToWork, { type Plans } from './HowToWork';
 import Room from './Room';
 import ThinkingWith from './ThinkingWith';
-import type { ConnectionState, ModelChoice, Room as RoomState } from '../lib/ipc';
+import type { ConnectionState, ModelChoice, Room as RoomState, Skill, ThinkingLevel } from '../lib/ipc';
 import {
   NOT_DRAGGING,
   carriesSomething,
@@ -44,6 +46,9 @@ type Props = {
    *  other state (BACKLOG A1). Send and Stop are one affordance in opposite
    *  states — swapping in place is why the layout does not jump. */
   onStop?: () => void;
+  /** A second thought while a turn is running is a choice, asked quietly:
+   *  interrupt the run with this message, or queue it behind the turn. */
+  onQueue?: (text: string, mode: 'steer' | 'followUp') => void;
   placeholder?: string;
   autoFocus?: boolean;
   busy?: boolean;
@@ -69,6 +74,8 @@ type Props = {
   onPlans?: (plans: Plans) => void;
   onSelectModel?: (choice: ModelChoice) => void;
   onConnect?: () => void;
+  /** How long the chosen model should take before answering. */
+  onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
   /** Whether a drop anywhere in the window lands here. On by default: people
    *  drag at the picture they are talking about, not at a box. */
   anywhere?: boolean;
@@ -82,9 +89,12 @@ type Props = {
   tidying?: boolean;
   /** Shorten it now, by hand. */
   onTidy?: () => void;
-  /** True while the Guard is not stopping to ask. */
-  quiet?: boolean;
-  onQuiet?: (quiet: boolean) => void;
+  /** How far it may go before it stops and asks. */
+  howFar?: HowFar;
+  onHowFar?: (howFar: HowFar) => void;
+  /** Skills the open project can use. `@` turns this quiet library into an
+   * explicit per-turn choice instead of a command someone has to memorise. */
+  skills?: readonly Skill[];
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -127,6 +137,7 @@ function resize(el: HTMLTextAreaElement | null): void {
 export default function Composer({
   onSend,
   onStop,
+  onQueue,
   placeholder,
   autoFocus,
   busy,
@@ -138,13 +149,15 @@ export default function Composer({
   onPlans,
   onSelectModel,
   onConnect,
+  onThinking,
   anywhere = true,
   outLoud = true,
   room,
   tidying,
   onTidy,
-  quiet,
-  onQuiet,
+  howFar,
+  onHowFar,
+  skills = [],
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -154,6 +167,13 @@ export default function Composer({
   /** Why the last thing was turned away. One sentence, and never the user's
    *  fault. Cleared as soon as anything else happens. */
   const [refused, setRefused] = useState<string | null>(null);
+  /** The picture open in the drawing surface, by its chip id. */
+  const [drawingOn, setDrawingOn] = useState<string | null>(null);
+  /** What was drawn on the last picture, in sentences. It goes out with the
+   *  message, because a box with no words beside it is half a thought. */
+  const [drawn, setDrawn] = useState<string | null>(null);
+  const [mention, setMention] = useState<{ from: number; query: string } | null>(null);
+  const [mentionAt, setMentionAt] = useState(0);
 
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -164,6 +184,23 @@ export default function Composer({
 
   const attachedRef = useRef(attachments);
   attachedRef.current = attachments;
+
+  const mentions = mention === null ? [] : skills
+    .filter((skill) => `${skill.name} ${skill.handle}`.toLowerCase().includes(mention.query.toLowerCase()))
+    .slice(0, 6);
+
+  const chooseMention = (skill: Skill) => {
+    const current = mention;
+    if (current === null) return;
+    const before = value.slice(0, current.from);
+    const after = value.slice(areaRef.current?.selectionStart ?? value.length);
+    const next = `${before}@${skill.handle} ${after}`;
+    const caretAt = before.length + skill.handle.length + 2;
+    setValue(next);
+    setCaret(caretAt);
+    setMention(null);
+    setMentionAt(0);
+  };
 
   const change = useCallback(
     (next: readonly Attachment[]) => {
@@ -244,17 +281,43 @@ export default function Composer({
     [change],
   );
 
-  const submit = () => {
+  const submit = (mode?: 'steer' | 'followUp') => {
     const text = value.trim();
-    if (!text || busy) return;
+    if (!text) return;
     ears.current?.stop();
-    onSend(text);
+    const said = drawn === null ? text : `${text}\n\n${drawn}`;
+    // The marks travel as words as well as pixels: coordinates the model can
+    // act on, beside a picture it can see.
+    if (mode !== undefined && onQueue !== undefined) {
+      onQueue(said, mode);
+    } else {
+      onSend(said);
+    }
+    setDrawn(null);
     setValue('');
     setRefused(null);
     if (areaRef.current) areaRef.current.style.height = 'auto';
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mention !== null && mentions.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionAt((was) => (e.key === 'ArrowDown' ? (was + 1) % mentions.length : (was + mentions.length - 1) % mentions.length));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const chosen = mentions[mentionAt] ?? mentions[0];
+        if (chosen !== undefined) chooseMention(chosen);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMention(null);
+        return;
+      }
+    }
     if (e.key === 'Escape' && listening) {
       e.preventDefault();
       stopListening();
@@ -262,6 +325,10 @@ export default function Composer({
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      // While a turn is running and words are in the box, Enter does not guess
+      // between interrupting and queueing — the two quiet buttons beside the
+      // box are the choice. (BACKLOG A1's Stop still owns the empty box.)
+      if (busy && onQueue !== undefined && value.trim() !== '') return;
       submit();
     }
   };
@@ -439,9 +506,47 @@ export default function Composer({
     field?.focus();
   };
 
+  /** Stop is what the button does only when there is nothing written. With
+   *  words in the box the same press sends them, whatever is running. */
+  const stopping = busy === true && onStop !== undefined && value.trim() === '';
+
+  /** The picture being drawn on, if the chip is still there. Read rather than
+   *  held, so removing a chip mid-draw closes the surface instead of stranding
+   *  it over a picture that no longer exists. */
+  const open = attachments.find((one) => one.id === drawingOn && one.kind === 'image') ?? null;
+
   return (
     <div className={`composer ${dropping ? 'composer--dropping' : ''}`}>
-      <Attachments items={attachments} onRemove={remove} />
+      <Attachments items={attachments} onRemove={remove} onDrawOn={setDrawingOn} />
+
+      {/* Drawn on rather than described. The marked picture replaces the one it
+          came from, so the chip stays the same chip and the message still has
+          exactly one of it. */}
+      {open === null ? null : (
+        <Annotate
+          source={open.preview ?? ''}
+          name={open.name}
+          onClose={() => setDrawingOn(null)}
+          onDone={(marked) => {
+            change(
+              attachedRef.current.map((one) =>
+                one.id === open.id
+                  ? {
+                      ...one,
+                      name: marked.file.name,
+                      note: ['PNG', readableSize(marked.file.size)].join(' · '),
+                      preview: marked.dataUrl,
+                      file: marked.file,
+                    }
+                  : one,
+              ),
+            );
+            setDrawn(marked.said);
+            setDrawingOn(null);
+            areaRef.current?.focus();
+          }}
+        />
+      )}
 
       <textarea
         ref={areaRef}
@@ -455,12 +560,29 @@ export default function Composer({
           // thing heard land on top of what was just written.
           if (listening) stopListening();
           setValue(e.target.value);
+          const cursor = e.target.selectionStart;
+          const before = e.target.value.slice(0, cursor);
+          const match = before.match(/(?:^|\s)@([a-z0-9-]*)$/i);
+          const query = match?.[1];
+          setMention(query === undefined ? null : { from: cursor - (query.length + 1), query });
+          setMentionAt(0);
           resize(e.target);
         }}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         aria-label="What do you want to make?"
       />
+
+      {mention === null || mentions.length === 0 ? null : (
+        <div className="composer__skills" role="listbox" aria-label="Skills">
+          <p><span>@</span> Use a skill for this turn</p>
+          {mentions.map((skill, index) => (
+            <button key={skill.id} type="button" role="option" aria-selected={index === mentionAt} className={index === mentionAt ? 'composer__skill--active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseMention(skill)}>
+              <span><strong>{skill.name}</strong><small>@{skill.handle}</small></span><em>{skill.source === 'project' ? 'This project' : 'Your computer'}</em>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="composer__row">
         <button
@@ -521,13 +643,16 @@ export default function Composer({
           <HowToWork plans={plans} onPlans={onPlans} />
         )}
 
-        {onQuiet === undefined ? null : <Asking quiet={quiet === true} onQuiet={onQuiet} />}
+        {onHowFar === undefined ? null : (
+          <Asking howFar={howFar ?? 'asking'} onHowFar={onHowFar} />
+        )}
 
         {onSelectModel === undefined || onConnect === undefined ? null : (
           <ThinkingWith
             state={connection ?? null}
             onSelect={onSelectModel}
             onConnect={onConnect}
+            onThinking={onThinking}
           />
         )}
 
@@ -556,48 +681,71 @@ export default function Composer({
         {/* The same button in two states (BACKLOG A1): an arrow that sends, or a
             square that stops. They swap in place so the layout does not jump
             when a turn begins, and the Stop half is never disabled — a run that
-            has been started must always be stoppable, even with an empty box. */}
-        <button
-          className="composer__send"
-          onClick={busy && onStop !== undefined ? onStop : submit}
-          disabled={busy && onStop !== undefined ? false : !value.trim() || busy}
-          aria-label={busy && onStop !== undefined ? 'Stop' : 'Send'}
-        >
-          {busy && onStop !== undefined ? (
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              fill="none"
-              aria-hidden="true"
+            has been started must always be stoppable, even with an empty box.
+
+            Words in the box while a turn is running are a second thought, and a
+            second thought is a choice: queue it behind the run, or interrupt
+            with it. Two quiet buttons, asked once, never guessed. */}
+        {busy && onQueue !== undefined && value.trim() !== '' ? (
+          <span className="composer__queue">
+            <button
+              type="button"
+              className="composer__queuebtn composer__queuebtn--safe"
+              onClick={() => submit('followUp')}
             >
-              <rect
-                x="1.5"
-                y="1.5"
-                width="9"
-                height="9"
-                rx="1.5"
-                fill="currentColor"
-              />
-            </svg>
-          ) : (
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              aria-hidden="true"
+              Queue
+            </button>
+            <button
+              type="button"
+              className="composer__queuebtn"
+              onClick={() => submit('steer')}
             >
-              <path
-                d="M8 12.75V3.5M8 3.5 4 7.5M8 3.5l4 4"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          )}
-        </button>
+              Interrupt
+            </button>
+          </span>
+        ) : (
+          <button
+            className="composer__send"
+            onClick={stopping ? onStop : () => submit()}
+            disabled={stopping ? false : !value.trim()}
+            aria-label={stopping ? 'Stop' : busy ? 'Send when it is free' : 'Send'}
+          >
+            {stopping ? (
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                aria-hidden="true"
+              >
+                <rect
+                  x="1.5"
+                  y="1.5"
+                  width="9"
+                  height="9"
+                  rx="1.5"
+                  fill="currentColor"
+                />
+              </svg>
+            ) : (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M8 12.75V3.5M8 3.5 4 7.5M8 3.5l4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Always in the document, empty most of the time. A live region that is

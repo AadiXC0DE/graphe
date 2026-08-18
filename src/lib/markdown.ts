@@ -184,6 +184,14 @@ export function languageOf(info: string | null | undefined): string | null {
   return LANGUAGES[first] ?? null;
 }
 
+/** A fence that asks for a diagram: ```mermaid. Deliberately not in LANGUAGES —
+ *  the diagram engine owns it, not the highlighter, so a mermaid fence must not
+ *  be coloured like code on the way past. */
+export function isMermaid(info: string | null | undefined): boolean {
+  if (typeof info !== 'string') return false;
+  return info.trim().split(/\s+/)[0]?.toLowerCase() === 'mermaid';
+}
+
 const LABELS: Readonly<Record<string, string>> = {
   ts: 'TypeScript',
   typescript: 'TypeScript',

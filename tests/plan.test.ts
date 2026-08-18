@@ -261,3 +261,52 @@ describe('PLAN_WORDS', () => {
     for (const line of everything) expect(line).not.toMatch(jargon);
   });
 });
+
+/* ========================================================================== */
+/* Agreeing to some of a plan                                                  */
+/* ========================================================================== */
+
+describe('a plan somebody edited before agreeing to it', () => {
+  it('says what to do and what not to, because a model finishes what it proposed', () => {
+    const said = PLAN_WORDS.doThese(['Move the button', 'Match the spacing'], ['Rewrite the nav']);
+    expect(said).toContain('1. Move the button');
+    expect(said).toContain('2. Match the spacing');
+    expect(said).toContain('Rewrite the nav');
+    expect(said).toMatch(/only these/i);
+    expect(said).toMatch(/Leave these out/i);
+  });
+
+  it('numbers what is kept from one, not from where it used to sit', () => {
+    // The third and fourth steps of a plan, agreed on their own, are this
+    // person's first and second — anything else invites "step 3" to mean two
+    // different things in one conversation.
+    const said = PLAN_WORDS.doThese(['Third thing', 'Fourth thing'], ['First', 'Second']);
+    expect(said).toContain('1. Third thing');
+    expect(said).toContain('2. Fourth thing');
+    expect(said).not.toContain('3. Third thing');
+  });
+
+  it('counts what is left out, and what will be done', () => {
+    expect(PLAN_WORDS.dropped(1)).toBe('One step left out.');
+    expect(PLAN_WORDS.dropped(3)).toBe('3 steps left out.');
+    expect(PLAN_WORDS.confirmSome(1)).toBe('Do that one');
+    expect(PLAN_WORDS.confirmSome(4)).toBe('Do those 4');
+  });
+
+  it('has somewhere to go when every step is struck out', () => {
+    expect(PLAN_WORDS.nothingLeft).toMatch(/Put a step back/);
+    expect(PLAN_WORDS.nothingLeft).toMatch(/[.!]$/);
+  });
+
+  it('keeps the machinery out of every one of them', () => {
+    for (const said of [
+      PLAN_WORDS.drop,
+      PLAN_WORDS.undrop,
+      PLAN_WORDS.nothingLeft,
+      PLAN_WORDS.dropped(2),
+      PLAN_WORDS.confirmSome(2),
+    ]) {
+      expect(said).not.toMatch(/\b(commit|branch|token|prompt|context|API)\b/i);
+    }
+  });
+});

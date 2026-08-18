@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { ProjectHistory } from '../src/history/repo';
-import { Workbench, folderForWork } from '../src/history/attempts';
+import { bothChanged, nothingToTake, Workbench, folderForWork } from '../src/history/attempts';
 import { AT_A_TIME, saysBoard } from '../src/work/board';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
@@ -84,6 +84,25 @@ describe('M-01 several at once', () => {
     }
     expect(folders.size).toBe(3);
 
+    await bench.clear();
+  });
+
+  /** The history deliberately does not keep a project's keys, so a copy made
+   *  from it arrives without them and every piece of work fails on whatever it
+   *  talks to. They are carried across instead. */
+  it('gives every copy the private files the history never kept', async () => {
+    const { history, root, under } = await aProject();
+    await put(root, '.env', 'API_KEY=abc\n');
+    const bench = new Workbench({ history, under });
+    bench.ask('Calm the hero');
+    bench.ask('Tighten the nav');
+
+    await bench.begin();
+    for (const piece of bench.pieces) {
+      expect(await get(piece.folder ?? '', '.env')).toBe('API_KEY=abc\n');
+    }
+    // And the project itself is untouched by any of it.
+    expect(await get(root, '.env')).toBe('API_KEY=abc\n');
     await bench.clear();
   });
 
@@ -364,5 +383,173 @@ describe('M-05 throwing one away', () => {
     await bench.clear();
     expect(await there(folder)).toBe(false);
     expect(await get(root, 'hero.css')).toBe('.hero { padding: 16px; }\n');
+  });
+});
+
+/* ========================================================================== */
+/* Keeping two pieces of work, one after the other                             */
+/* ========================================================================== */
+
+describe('two pieces kept in a row', () => {
+  /**
+   * The failure this exists for: every piece starts from the same version, so
+   * one copy has no idea what another did. Putting a copy back whole therefore
+   * undid the piece kept before it — silently, with no conflict and no
+   * sentence, because from git's point of view nothing was wrong.
+   */
+  it('does not undo the first one when the second is kept', async () => {
+    const { history, root, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const one = bench.ask('Warm up the hero');
+    const two = bench.ask('Add a footer');
+    await bench.begin();
+
+    await put(one.folder ?? '', 'hero.css', '.hero { padding: 24px; }\n');
+    await put(two.folder ?? '', 'footer.css', '.footer { padding: 8px; }\n');
+    await bench.settle(one.id, 'Warmed the hero');
+    await bench.settle(two.id, 'Added a footer');
+
+    const first = await bench.keep(one.id, 'Kept the hero');
+    expect(first?.version).not.toBeNull();
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 24px; }\n');
+
+    const second = await bench.keep(two.id, 'Kept the footer');
+    expect(second?.version).not.toBeNull();
+    expect(second?.conflicted).toEqual([]);
+
+    // Both, together. This is the whole test.
+    expect(await get(root, 'footer.css')).toBe('.footer { padding: 8px; }\n');
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 24px; }\n');
+  });
+
+  it('leaves the project alone and says so when both changed one file', async () => {
+    const { history, root, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const one = bench.ask('Warm up the hero');
+    const two = bench.ask('Tighten the hero');
+    await bench.begin();
+
+    await put(one.folder ?? '', 'hero.css', '.hero { padding: 24px; }\n');
+    await put(two.folder ?? '', 'hero.css', '.hero { padding: 4px; }\n');
+    await bench.settle(one.id, 'Warmed the hero');
+    await bench.settle(two.id, 'Tightened the hero');
+
+    await bench.keep(one.id, 'Kept the first');
+    const second = await bench.keep(two.id, 'Kept the second');
+
+    expect(second?.version).toBeNull();
+    expect(second?.conflicted).toContain('hero.css');
+    // Left exactly as it was, rather than one side quietly winning.
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 24px; }\n');
+    // And nothing half-merged left behind for the next save to trip over.
+    expect(await history.hasUnsavedChanges()).toBe(false);
+  });
+
+  /* A refusal has to leave nothing behind, including the files git had never
+     seen. Otherwise the project is reported untouched with somebody else's
+     half-finished work sitting in it. */
+  it('leaves nothing behind at all when it refuses', async () => {
+    const { history, root, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const one = bench.ask('Warm up the hero');
+    const two = bench.ask('Tighten the hero and add a footer');
+    await bench.begin();
+
+    await put(one.folder ?? '', 'hero.css', '.hero { padding: 24px; }\n');
+    await put(two.folder ?? '', 'hero.css', '.hero { padding: 4px; }\n');
+    await put(two.folder ?? '', 'footer.css', '.footer { padding: 8px; }\n');
+    await bench.settle(one.id, 'Warmed the hero');
+    await bench.settle(two.id, 'Tightened it');
+
+    await bench.keep(one.id, 'Kept the first');
+    const second = await bench.keep(two.id, 'Kept the second');
+    expect(second?.version).toBeNull();
+
+    // The file it clashed on is ours, and the file it would have added is gone.
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 24px; }\n');
+    expect(await there(path.join(root, 'footer.css'))).toBe(false);
+    expect(await history.hasUnsavedChanges()).toBe(false);
+  });
+
+  it('has something true to say when git refused for a reason it named no file for', () => {
+    const none = bothChanged([]);
+    expect(none.because).not.toContain('0 of the same files');
+    expect(none.because).not.toMatch(/:\s*\./);
+    expect(none.because).toMatch(/nothing was changed/i);
+  });
+
+  it('says plainly when a piece finished without changing anything', () => {
+    const said = nothingToTake('Check the site still builds');
+    expect(said.because).toContain('Check the site still builds');
+    expect(said.what).toMatch(/nothing to take/i);
+    expect(said.what).not.toMatch(/failed|stopped|error/i);
+  });
+
+  it('says which files, and what to do about them', () => {
+    const one = bothChanged(['hero.css']);
+    expect(one.because).toContain('hero.css');
+    // Nothing failed and nothing stopped part way, so it must not be said as
+    // though something had.
+    expect(one.what).toMatch(/left your project exactly as it was/i);
+    expect(one.what).not.toMatch(/stopped|could not|failed/i);
+
+    const many = bothChanged(['a.css', 'b.css', 'c.css', 'd.css', 'e.css', 'f.css']);
+    expect(many.because).toContain('and 2 more');
+    expect(many.because).toMatch(/6 of the same files/);
+    // Short enough to be shown rather than swallowed for length.
+    expect(many.because.length).toBeLessThan(220);
+  });
+});
+
+/* ========================================================================== */
+/* Two goes at the same thing                                                  */
+/* ========================================================================== */
+
+describe('alternatives rather than other work', () => {
+  it('keeping one throws the other away, and leaves everything else alone', async () => {
+    const { history, root, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const quiet = bench.ask('Rework the hero — quieter', { ways: 'ways-1' });
+    const bold = bench.ask('Rework the hero — bolder', { ways: 'ways-1' });
+    // Ordinary work going on at the same time, which must survive the choice.
+    const other = bench.ask('Add a footer');
+    await bench.begin();
+
+    await put(quiet.folder ?? '', 'hero.css', '.hero { padding: 48px; }\n');
+    await put(bold.folder ?? '', 'hero.css', '.hero { padding: 4px; }\n');
+    await put(other.folder ?? '', 'footer.css', '.footer { padding: 8px; }\n');
+    await bench.settle(quiet.id, 'The quiet one');
+    await bench.settle(bold.id, 'The bold one');
+    await bench.settle(other.id, 'The footer');
+
+    const kept = await bench.keep(quiet.id, 'Kept the quiet one');
+    expect(kept?.version).not.toBeNull();
+    expect(kept?.insteadOf).toEqual([bold.id]);
+
+    // The chosen one is in; the one it was chosen over is gone from the board.
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 48px; }\n');
+    expect(bench.pieces.map((one) => one.id)).toEqual([other.id]);
+
+    // And the unrelated work is still there to be kept on its own.
+    const also = await bench.keep(other.id, 'Kept the footer');
+    expect(also?.conflicted).toEqual([]);
+    expect(await get(root, 'footer.css')).toBe('.footer { padding: 8px; }\n');
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 48px; }\n');
+  });
+
+  it('ordinary work has no others to throw away', async () => {
+    const { history, under } = await aProject();
+    const bench = new Workbench({ history, under });
+    const one = bench.ask('Add a footer');
+    await bench.begin();
+    await put(one.folder ?? '', 'footer.css', '.footer { padding: 8px; }\n');
+    await bench.settle(one.id, 'The footer');
+
+    const kept = await bench.keep(one.id, 'Kept it');
+    expect(kept?.insteadOf).toEqual([]);
   });
 });

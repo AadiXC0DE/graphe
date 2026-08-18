@@ -23,6 +23,17 @@
  * sentence: Replit's agent wiped a production database during a code freeze,
  * with no way back.
  *
+ * ## One agent, one folder
+ *
+ * `projectRoot` is not always the project on screen. When work is given its own
+ * copy to make a mess in, that copy is the root this agent is judged against,
+ * and the folder somebody is looking at is *outside* it like anywhere else on
+ * the disk. Which means the escapes worth worrying about are the ones that never
+ * look like a path: pointing the history tool at another copy, handing it a
+ * setting on the way in, or stepping into another folder first. Anything of that
+ * shape is refused rather than reasoned about — if we cannot say where a command
+ * will write, it does not run.
+ *
  * ## Why confirmations are rare
  *
  * Confirmation fatigue is what created "Accept All" (research/03 §7). Reading,
@@ -33,10 +44,14 @@
  */
 
 import type { GuardContext, ToolCall, Verdict } from '../types';
+import type { PathCheck } from './paths';
 import {
   containsPath,
+  isAgentFolder,
   isCredentialPath,
+  isHistoryStore,
   isProjectRoot,
+  isSignInStore,
   shipsToBrowser,
   toPosix,
 } from './paths';
@@ -50,6 +65,27 @@ import {
  * first" instruction to live outside the conversation, and S-05 needs a row
  * count to say "this deletes the 1,240 rows in it" instead of something vague.
  */
+/**
+ * How far the agent may go before it stops and asks.
+ *
+ * A ladder rather than a switch. The first three rungs are ceilings on what
+ * happens without a question. The final rung is deliberately different: it is
+ * explicit full-computer access for the current sitting, equivalent to the
+ * "dangerously skip permissions" modes in other coding agents. It removes the
+ * Guard's project boundary as well as its questions and restore-point work.
+ */
+export type HowFar =
+  /** Reads and reports. Anything that would change something is turned down. */
+  | 'looking'
+  /** Stops before anything risky and waits. The one it has always been. */
+  | 'asking'
+  /** Changes files without asking; still stops before running a command or
+   *  reaching the internet. */
+  | 'changing'
+  /** Runs things too, with the person's full computer access for this sitting.
+   *  This deliberately bypasses the Guard and its project boundary. */
+  | 'doing';
+
 export type GuardFacts = GuardContext & {
   /**
    * The user said something like "don't change anything without asking".
@@ -71,6 +107,25 @@ export type GuardFacts = GuardContext & {
    * project, and a switch in a toolbar does not get to overrule it.
    */
   stopAsking?: boolean;
+  /**
+   * How far it may go on its own. Four rungs rather than a switch, because
+   * "check with me" and "get on with it" are not the only two things anybody
+   * ever wants — and because the difference between changing a file and running
+   * a command is exactly the difference people care about.
+   *
+   * Left off, it is `asking`, which is what the app has always done.
+   */
+  howFar?: HowFar;
+  /**
+   * Where the agent's own skills, extensions and packages live.
+   *
+   * Those sit outside the project and have to be readable anyway: a feature
+   * somebody installed cannot work if the thing it is made of is refused. Left
+   * out, the usual folder is still recognised by its shape, so a caller that
+   * never mentions it reads its own instructions too. Reading only — the agent
+   * does not get to rewrite what it runs on.
+   */
+  agentFolder?: string;
   /** Rows currently in each table, so a confirmation can name a real number. */
   rowCounts?: Readonly<Record<string, number>>;
   /** The user's real secret values, so we can spot one being pasted somewhere public. */
@@ -168,6 +223,18 @@ const SAY = {
     "This would put a private key into a file that gets sent to everyone who opens your site, so anyone could copy it and run up charges on your account. I've stopped it. Save it as a project secret and I will read it from there.",
   sendKeyOut:
     "This would send one of your private keys out to another website. I've stopped it.",
+  elsewhere:
+    "This would work on another copy of your project instead of the one I'm in, and I can't tell what it would change over there. I've stopped it.",
+  pointedElsewhere:
+    'This would quietly point the work at somewhere else on your computer before it even starts. I\'ve stopped it.',
+  wanderingOff:
+    "This would step out of the folder I'm working in before doing anything else, so I couldn't tell where the rest of it would land. I've stopped it.",
+  historyStore:
+    "This reaches into the private record your project's history is kept in, which nothing should be writing to by hand. I've stopped it.",
+  historyRules:
+    "This would change the rules your project's history runs by, and those rules can quietly run things later on. I've stopped it.",
+  ownInstructions:
+    "This would rewrite the instructions I work from. I can read those, and I leave them exactly as you installed them. I've stopped it.",
   restorePoint: 'I will save a restore point first, so you can put this back the way it was.',
 } as const;
 
@@ -180,7 +247,7 @@ const SAY = {
  *  branches ever part company. A read left out of them falls to the
  *  deny-by-default floor and starts asking permission, which is how `find`
  *  behaved until it was listed here. */
-const READ_TOOLS = new Set(['read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat']);
+const READ_TOOLS = new Set(['read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff']);
 /** Pi's `find` is `glob` under another name: it runs `fd` and returns file names
  *  without opening any of them. The shell command of the same word is a
  *  different program entirely — see `judgeFind`. */
@@ -206,7 +273,25 @@ const WRITE_TOOLS = new Set([
   'copy',
 ]);
 const DELETE_TOOLS = new Set(['delete', 'deletefile', 'remove', 'removefile', 'rm', 'rmdir', 'trash']);
-const SHELL_TOOLS = new Set(['bash', 'shell', 'sh', 'terminal', 'exec', 'execute', 'runcommand', 'command', 'run']);
+/** Anything that runs a command somebody typed. `keeprunning` starts one that
+ *  stays up rather than one that finishes, which changes how long it lasts and
+ *  nothing at all about what it is allowed to be. */
+const SHELL_TOOLS = new Set([
+  'bash',
+  'shell',
+  'sh',
+  'terminal',
+  'exec',
+  'execute',
+  'runcommand',
+  'command',
+  'run',
+  'keeprunning',
+]);
+
+/** Asking after something already agreed to, and ending it. Neither runs
+ *  anything new, and a stop is the one action nobody should have to ask for. */
+const RUNNING_TOOLS = new Set(['running', 'stoprunning']);
 const SQL_TOOLS = new Set(['sql', 'query', 'dbquery', 'runsql', 'executesql', 'database', 'db', 'migrate']);
 const NETWORK_TOOLS = new Set(['fetch', 'http', 'httprequest', 'request', 'webfetch', 'download', 'upload', 'post', 'apicall']);
 /** Search engines. Their whole job is sending words out and bringing the
@@ -218,6 +303,12 @@ const WEB_TOOLS = new Set(['websearch', 'searchweb', 'googlesearch', 'ddgsearch'
  *  without the person knowing — this is the one tool that spends money on
  *  another context window. */
 const TASK_TOOLS = new Set(['task', 'subagent', 'delegate', 'handoff']);
+
+/** The project's own memory. It writes only to the app's own data folder — a
+ *  note beside the conversation, never a file in the project — so it is silent
+ *  like any read: the whole point of a memory is that it is written without
+ *  ceremony. */
+const MEMORY_TOOLS = new Set(['retain', 'remember', 'recall', 'reflect', 'memoryedit', 'memory', 'forget', 'updatenote', 'update']);
 const PUBLISH_TOOLS = new Set(['deploy', 'publish', 'release', 'ship']);
 const SESSION_EXPORT_TOOLS = new Set(['export', 'exportsession', 'share', 'sharesession', 'sendlog', 'uploadlogs']);
 /** Our own design tools. Read-only by construction, so they stay silent.
@@ -283,6 +374,13 @@ const INTERPRETERS = new Set([
 ]);
 
 const INLINE_CODE_FLAGS = new Set(['-c', '-e', '--eval', '-E', '--command', '-p', '--exec']);
+
+/** The interpreters whose inline text we can actually read, because it is the
+ *  same language this file already reads. Handed a script, they are judged as
+ *  that script — which is stricter than the ask a script *file* gets, since we
+ *  never see inside the file. Everything else in `INTERPRETERS` runs a language
+ *  we cannot parse, and unreadable stays refused. */
+const READABLE_INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 
 const DOWNLOADERS = new Set(['curl', 'wget', 'fetch', 'aria2c', 'httpie', 'http']);
 
@@ -579,11 +677,16 @@ type Parse =
   | {
       ok: true;
       segments: Token[][];
+      /** For each segment, whether a `|` handed it the one before it. Only a
+       *  real pipe counts: `&&`, `;` and `&` run a command, they do not feed it. */
+      piped: boolean[];
       /** A `$VAR` the shell would swap out. We cannot see the result, so we do not run it. */
       expansion: boolean;
       /** A `$(...)` or backtick: a command hidden inside a command. */
       substitution: boolean;
-      /** A subshell. Same problem. */
+      /** Plain `( … )`. Every word inside one is still right there to be read,
+       *  so this is recorded rather than refused — unlike a substitution, which
+       *  runs whatever its own output turns out to say. */
       grouping: boolean;
     }
   | { ok: false };
@@ -599,12 +702,16 @@ type Parse =
  */
 function parseCommand(command: string): Parse {
   const segments: Token[][] = [];
+  const piped: boolean[] = [];
   let tokens: Token[] = [];
   let current = '';
   let started = false;
   let expansion = false;
   let substitution = false;
   let grouping = false;
+  /** Whether the separator just read was a pipe, and so whether whatever comes
+   *  next is being handed the output of what came before. */
+  let fed = false;
 
   const endToken = (): void => {
     if (started) {
@@ -617,6 +724,7 @@ function parseCommand(command: string): Parse {
     endToken();
     if (tokens.length > 0) {
       segments.push(tokens);
+      piped.push(fed);
       tokens = [];
     }
   };
@@ -700,7 +808,19 @@ function parseCommand(command: string): Parse {
     if (character === ';' || character === '\n' || character === '&' || character === '|') {
       endSegment();
       const next = command[index + 1];
-      if ((character === '&' || character === '|') && next === character) index += 1;
+      let feeds = false;
+      if (character === '|') {
+        // `||` is a choice between two commands. `|` and `|&` hand the first
+        // one's output to the second, which is the only case that matters.
+        if (next === '|') index += 1;
+        else {
+          if (next === '&') index += 1;
+          feeds = true;
+        }
+      } else if (character === '&' && next === '&') {
+        index += 1;
+      }
+      fed = feeds;
       continue;
     }
 
@@ -725,7 +845,7 @@ function parseCommand(command: string): Parse {
   }
 
   endSegment();
-  return { ok: true, segments, expansion, substitution, grouping };
+  return { ok: true, segments, piped, expansion, substitution, grouping };
 }
 
 function baseName(command: string): string {
@@ -775,8 +895,36 @@ function looksLikeLocation(text: string): boolean {
   );
 }
 
-/** Every location a command mentions has to stay inside the project. */
-function judgeSegmentPaths(tokens: Token[], ctx: GuardFacts): Judgement {
+/**
+ * The agent's own skills, extensions and packages: what it was installed with,
+ * rather than anything of the user's.
+ *
+ * Reading these is the agent reading its own instructions, so it is allowed
+ * however careful the settings are — a feature that was installed and then
+ * silently does nothing is worse than a question. Only reading: the sign-ins
+ * kept alongside them are not instructions, and neither is anybody's key.
+ */
+function readsOwnFolder(resolved: string | null, ctx: GuardFacts): boolean {
+  if (resolved === null) return false;
+  if (!isAgentFolder(resolved, ctx.agentFolder)) return false;
+  return !isSignInStore(resolved) && !isCredentialPath(resolved) && !isHistoryStore(resolved);
+}
+
+/** Outside the project, in more than one way. Something we would have read
+ *  happily, and something that holds keys, each deserve their own sentence
+ *  rather than the one about the project folder. */
+function refuseOutside(check: PathCheck, ctx: GuardFacts): Judgement {
+  const resolved = check.resolved;
+  if (resolved !== null && isAgentFolder(resolved, ctx.agentFolder)) {
+    if (readsOwnFolder(resolved, ctx)) return deny(SAY.ownInstructions);
+    if (isSignInStore(resolved) || isCredentialPath(resolved)) return deny(SAY.credentials);
+  }
+  return deny(check.reason ?? SAY.outsideProject);
+}
+
+/** Every location a command mentions has to stay inside the project, or be
+ *  something the agent is only reading out of its own folder. */
+function judgeSegmentPaths(tokens: Token[], ctx: GuardFacts, reading = false): Judgement {
   let judgement = allow();
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index];
@@ -797,8 +945,12 @@ function judgeSegmentPaths(tokens: Token[], ctx: GuardFacts): Judgement {
     if (!looksLikeLocation(text) && !isCredentialPath(text)) continue;
 
     const check = containsPath(ctx.projectRoot, text);
-    if (!check.inside) return deny(check.reason ?? SAY.outsideProject);
+    if (!check.inside) {
+      if (reading && !isWriteTarget && readsOwnFolder(check.resolved, ctx)) continue;
+      return refuseOutside(check, ctx);
+    }
     if (check.resolved !== null && isCredentialPath(check.resolved)) return deny(SAY.credentials);
+    if (isHistoryStore(text)) return deny(SAY.historyStore);
     if (isWriteTarget) {
       judgement = strictest(judgement, snapshotFirst('Writing over a file in your project.'));
     }
@@ -847,9 +999,63 @@ function judgeFind(tokens: Token[]): Judgement {
   return allow();
 }
 
-function judgeGit(tokens: Token[]): Judgement {
-  const sub = (tokens[1]?.text ?? '').toLowerCase();
+/** The handful of options before a subcommand that cannot move anything: they
+ *  change what gets printed and nothing else. Everything else in that position
+ *  aims the tool at another copy, another record or another configuration, and
+ *  none of it can be traced from the line alone. */
+const HARMLESS_GIT_OPTIONS = new Set(['--no-pager', '--paginate', '--no-optional-locks', '--version', '--help']);
+
+/** Verbs that only look. Every one of these is a read on the online copy. */
+const GH_READS = new Set(['list', 'view', 'diff', 'status', 'checks']);
+
+/** Anything on an `api` call that turns a look into a change. */
+const GH_API_WRITES = new Set(['-x', '--method', '-f', '--field', '-F', '--raw-field', '--input']);
+
+/**
+ * `gh`, which is two different commands wearing one name.
+ *
+ * Reading what is on the online copy — the list of open work, one item, its
+ * change — alters nothing and used to be met with "Publish your project so it
+ * is live on the internet?", a question about something else entirely that a
+ * person had to answer three or four times to read one page.
+ */
+function judgeGh(tokens: Token[]): Judgement {
   const texts = tokens.map((token) => token.text.toLowerCase());
+  const words = texts.slice(1).filter((text) => !text.startsWith('-'));
+  const group = words[0] ?? '';
+  const verb = words[1] ?? '';
+
+  if (group === 'api') {
+    // A plain `api` call is a GET. A method or a field on it is a write, and
+    // which one is not ours to guess.
+    const writes = texts.some((text) => GH_API_WRITES.has(text) || text.startsWith('--method='));
+    if (!writes) return allow();
+  } else if (GH_READS.has(verb) || (group === 'repo' && verb === 'view')) {
+    return allow();
+  }
+
+  return ask(
+    'Put this on the online copy of your project?',
+    'This writes to where your project lives online, where other people can see it.',
+    'Nothing on your own machine changes.',
+  );
+}
+
+function judgeGit(tokens: Token[]): Judgement {
+  // Options come before the subcommand or they do not count, which is exactly
+  // where `-C`, `--git-dir`, `--work-tree` and an inline `-c` setting sit.
+  let at = 1;
+  while (at < tokens.length && (tokens[at]?.text ?? '').startsWith('-')) {
+    if (!HARMLESS_GIT_OPTIONS.has((tokens[at]?.text ?? '').toLowerCase())) return deny(SAY.elsewhere);
+    at += 1;
+  }
+  const sub = (tokens[at]?.text ?? '').toLowerCase();
+  const texts = tokens.map((token) => token.text.toLowerCase());
+
+  // Making, moving or removing another copy of the project is ours to do, and
+  // only ever from outside the copy the work is happening in.
+  if (sub === 'worktree') return deny(SAY.elsewhere);
+  if (sub === 'config') return deny(SAY.historyRules);
 
   if (['status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-files', 'blame'].includes(sub)) {
     return allow();
@@ -960,10 +1166,79 @@ function judgeDatabaseCli(tokens: Token[], ctx: GuardFacts): Judgement {
  *  judged as `rm -rf`, not as a friendly-looking `xargs`. */
 const WRAPPER_COMMANDS = new Set(['xargs', 'time', 'nohup', 'nice', 'timeout', 'watch', 'command', 'builtin', 'stdbuf']);
 
+/** Names set in front of a command that move where it reads and writes: another
+ *  history, another home, another set of programs. `GIT_DIR=… git save` is the
+ *  whole reason this list exists — it reads as an ordinary save and is not one. */
+const REDIRECTING_NAMES = new Set([
+  'home',
+  'path',
+  'shell',
+  'editor',
+  'visual',
+  'pager',
+  'cdpath',
+  'ifs',
+  'env',
+  'bash_env',
+  'zdotdir',
+  'tmpdir',
+  'prefix',
+  'manpath',
+  'rubyopt',
+  'node_options',
+  'node_path',
+  'node_extra_ca_certs',
+]);
+const REDIRECTING_PREFIXES = ['git_', 'xdg_', 'ld_', 'dyld_', 'npm_config_', 'yarn_', 'pnpm_', 'bun_', 'python', 'perl5'];
+
+function redirectsWork(name: string): boolean {
+  const lower = name.toLowerCase();
+  return REDIRECTING_NAMES.has(lower) || REDIRECTING_PREFIXES.some((prefix) => lower.startsWith(prefix));
+}
+
+/** Only a run of them at the very front is a setting; a `key=value` anywhere
+ *  later is an argument, and the shell reads it the same way. */
+function leadingAssignments(tokens: Token[]): Token[] {
+  let at = 0;
+  while (at < tokens.length && ASSIGNMENT.test(tokens[at]?.text ?? '')) at += 1;
+  return tokens.slice(0, at);
+}
+
+function judgeAssignments(assignments: Token[], ctx: GuardFacts): Judgement {
+  let judgement = allow();
+  for (const token of assignments) {
+    const split = token.text.indexOf('=');
+    const name = token.text.slice(0, split);
+    const value = token.text.slice(split + 1);
+    if (redirectsWork(name)) return deny(SAY.pointedElsewhere);
+    if (looksLikeLocation(value)) {
+      const check = containsPath(ctx.projectRoot, value);
+      if (!check.inside) return deny(check.reason ?? SAY.outsideProject);
+    }
+    // One we do not know the meaning of is not one we can promise anything about.
+    judgement = strictest(judgement, UNKNOWN_COMMAND());
+  }
+  return judgement;
+}
+
+/** Stepping into another folder is safe only when we can see which one. A folder
+ *  inside this one keeps every later location inside it too, because everything
+ *  relative resolves deeper from there; anything else, or nothing at all, is the
+ *  shell quietly going somewhere of its own choosing. */
+function judgeCd(tokens: Token[], ctx: GuardFacts): Judgement {
+  const where = tokens.slice(1).filter((token) => !token.text.startsWith('-'));
+  if (where.length !== 1) return deny(SAY.wanderingOff);
+  const check = containsPath(ctx.projectRoot, where[0]?.text ?? '');
+  if (!check.inside) return deny(check.reason ?? SAY.outsideProject);
+  return allow();
+}
+
 function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgement {
-  const meaningful = tokens.filter((token) => !ASSIGNMENT.test(token.text));
+  const assignments = leadingAssignments(tokens);
+  const settings = judgeAssignments(assignments, ctx);
+  const meaningful = tokens.slice(assignments.length);
   const first = meaningful[0];
-  if (first === undefined) return allow();
+  if (first === undefined) return settings;
 
   const name = baseName(first.text);
 
@@ -980,11 +1255,15 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
     }
     const inner = rest.slice(start);
     if (inner.length === 0) return UNKNOWN_COMMAND();
-    return judgeShellSegment(inner, ctx, depth + 1);
+    return strictest(settings, judgeShellSegment(inner, ctx, depth + 1));
   }
   const flags = flagsOf(meaningful);
-  const paths = judgeSegmentPaths(meaningful, ctx);
+  const paths = strictest(settings, judgeSegmentPaths(meaningful, ctx, READ_ONLY_COMMANDS.has(name)));
   const decide = (judgement: Judgement): Judgement => strictest(paths, judgement);
+
+  if (name === 'cd' || name === 'chdir' || name === 'pushd' || name === 'popd') {
+    return decide(judgeCd(meaningful, ctx));
+  }
 
   if (ELEVATION.has(name)) return deny(SAY.fullControl);
   if (ALWAYS_DENY_COMMANDS.has(name)) {
@@ -1003,8 +1282,14 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
     return decide(UNKNOWN_COMMAND());
   }
   if (INTERPRETERS.has(name)) {
-    const inline = meaningful.some((token) => INLINE_CODE_FLAGS.has(token.text));
-    if (inline) return deny(SAY.unreadable);
+    const inline = meaningful.findIndex((token) => INLINE_CODE_FLAGS.has(token.text));
+    if (inline !== -1) {
+      const script = meaningful[inline + 1]?.text;
+      if (READABLE_INTERPRETERS.has(name) && script !== undefined && depth < 3) {
+        return decide(judgeShellCommand(script, ctx, depth + 1));
+      }
+      return deny(SAY.unreadable);
+    }
     return decide(
       ask(
         'Run a small program inside your project?',
@@ -1029,6 +1314,7 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
       ),
     );
   }
+  if (name === 'gh') return decide(judgeGh(meaningful));
   if (PUBLISH_CLIS.has(name)) {
     return decide(
       ask(
@@ -1113,7 +1399,7 @@ function redirectTargets(segments: Token[][]): string[] {
   return targets;
 }
 
-function judgeShellCommand(command: string, ctx: GuardFacts): Judgement {
+function judgeShellCommand(command: string, ctx: GuardFacts, depth = 0): Judgement {
   if (command.trim() === '') return UNKNOWN_COMMAND();
   const hidingSomethingDestructive = DESTRUCTIVE_WORDS.test(command);
   if (looksObfuscated(command)) {
@@ -1123,29 +1409,34 @@ function judgeShellCommand(command: string, ctx: GuardFacts): Judgement {
   const parsed = parseCommand(command);
   // Quotes that never close, brackets that never balance: we do not guess.
   if (!parsed.ok) return deny(hidingSomethingDestructive ? SAY.wipe : SAY.unreadable);
-  // `$(...)`, backticks and subshells are a command hidden inside a command.
-  // `rm -$FLAGS "$TARGET"` reads as harmless and is not. If we cannot see the
-  // final command, we do not run the command.
-  if (parsed.substitution || parsed.grouping || parsed.expansion) {
+  // `$(...)` and backticks are a command hidden inside a command, and `$VAR`
+  // is a word we never get to see. `rm -$FLAGS "$TARGET"` reads as harmless and
+  // is not. If we cannot see the final command, we do not run the command.
+  //
+  // Plain `( … )` is not that. Every word inside one is in front of us and gets
+  // judged like any other, so refusing it only cost people the ordinary way of
+  // backgrounding something.
+  if (parsed.substitution || parsed.expansion) {
     return deny(hidingSomethingDestructive ? SAY.wipe : SAY.unreadable);
   }
 
-  const names = parsed.segments.map((segment) => {
-    const meaningful = segment.filter((token) => !ASSIGNMENT.test(token.text));
-    return baseName(meaningful[0]?.text ?? '');
-  });
+  const names = parsed.segments.map((segment) =>
+    baseName(segment[leadingAssignments(segment).length]?.text ?? ''),
+  );
   const downloads = names.some((name) => DOWNLOADERS.has(name));
   const interprets = names.some((name) => INTERPRETERS.has(name) || DECODERS.has(name));
   if (downloads && interprets) return deny(SAY.downloadAndRun);
   // `echo <something> | sh` and `printf ... | bash` hand an interpreter a script
   // we never get to look at. Anything downstream of a pipe that can run code is
-  // refused on sight.
-  const fedByPipe = names.some((name, index) => index > 0 && INTERPRETERS.has(name));
+  // refused on sight — but only downstream of a *pipe*: this used to refuse any
+  // interpreter that was not the first command, which made `cd site && python3
+  // -m http.server` unreadable when every word of it is right there.
+  const fedByPipe = names.some((name, index) => parsed.piped[index] === true && INTERPRETERS.has(name));
   if (fedByPipe) return deny(hidingSomethingDestructive ? SAY.wipe : SAY.unreadable);
 
   let judgement = allow();
   for (const segment of parsed.segments) {
-    judgement = strictest(judgement, judgeShellSegment(segment, ctx));
+    judgement = strictest(judgement, judgeShellSegment(segment, ctx, depth));
   }
 
   const secret = findSecret(command) ?? (findKnownSecret(command, ctx) ? 'key' : null);
@@ -1349,7 +1640,8 @@ function judgeFileTargets(
   const resolved: string[] = [];
   for (const path of paths) {
     const check = containsPath(ctx.projectRoot, path);
-    if (!check.inside) return deny(check.reason ?? SAY.outsideProject);
+    if (!check.inside) return refuseOutside(check, ctx);
+    if (check.resolved !== null && isHistoryStore(check.resolved)) return deny(SAY.historyStore);
     if (check.resolved !== null) resolved.push(check.resolved);
   }
   for (const path of resolved) {
@@ -1393,6 +1685,8 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   // Nothing gets to turn the Guard off, however politely it asks.
   if (GUARD_SWITCH.test(name)) return deny(SAY.guardOff);
 
+  if (RUNNING_TOOLS.has(name)) return allow();
+
   if (SHELL_TOOLS.has(name)) {
     // A command's relative locations are only safe if the folder it starts from
     // is. `cwd: '../..'` would quietly move the whole command out of the project.
@@ -1427,8 +1721,14 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     // No location given means the project folder, which is always fine to read.
     for (const path of collectPaths(input)) {
       const check = containsPath(ctx.projectRoot, path);
-      if (!check.inside) return deny(check.reason ?? SAY.outsideProject);
+      if (!check.inside) {
+        // The skills and extensions somebody installed are the agent's own, and
+        // reading them is how they work at all.
+        if (readsOwnFolder(check.resolved, ctx)) continue;
+        return refuseOutside(check, ctx);
+      }
       if (check.resolved !== null && isCredentialPath(check.resolved)) return deny(SAY.credentials);
+      if (check.resolved !== null && isHistoryStore(check.resolved)) return deny(SAY.historyStore);
     }
     return allow();
   }
@@ -1439,7 +1739,8 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     for (const path of paths) {
       if (isProjectRoot(ctx.projectRoot, path)) return deny(SAY.deleteProject);
       const check = containsPath(ctx.projectRoot, path);
-      if (!check.inside) return deny(check.reason ?? SAY.outsideProject);
+      if (!check.inside) return refuseOutside(check, ctx);
+      if (check.resolved !== null && isHistoryStore(check.resolved)) return deny(SAY.historyStore);
     }
     const targets = Math.max(paths.length, countChangeTargets(input));
     return snapshotFirst(
@@ -1534,6 +1835,49 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
 
   if (DESIGN_READ_TOOLS.has(name)) return allow();
 
+  if (MEMORY_TOOLS.has(name)) {
+    // Memory takes ids and words, never paths, so there is nothing to check
+    // outside the project for. It stays a read of the app's own notes.
+    return allow();
+  }
+
+  if (name === 'mcp') {
+    // A plugged-in tool runs with its own powers, and the call may
+    // change anything it can change. Same shape as the task question:
+    // a plain sentence, answered once per call.
+    return ask(
+      'Run this through the plugged-in tool?',
+      'I start the tool you connected and ask it to do this, then bring back what it answers.',
+      'The connected tool has its own powers, so this can change things on its side.',
+      { mutates: true },
+    );
+  }
+
+  if (name === 'debugattach') {
+    return ask(
+      'Attach to a running program and pause it?',
+      'I start the debugger and take hold of the program so its frames and values can be read.',
+      'The program is paused while it is attached, and letting it run on needs a detach.',
+      { mutates: true },
+    );
+  }
+
+  if (name === 'debugeval') {
+    return ask(
+      'Evaluate this in the paused program?',
+      'I ask the debugger to run the expression inside the program, in the frame it is paused in.',
+      'An expression can run code inside that program.',
+      { mutates: true },
+    );
+  }
+
+  // Stepping, reading frames and detaching work on a program the person has
+  // already agreed to let us attach to, and change nothing the target did not
+  // ask for — detach lets it run on. They are silent like reads.
+  if (name === 'debugstep' || name === 'debugframes' || name === 'debugdetach') {
+    return allow();
+  }
+
   // An unfamiliar tool is never silent. This is the deny-by-default floor.
   return UNKNOWN_COMMAND();
 }
@@ -1586,8 +1930,62 @@ function withoutQuestions(judgement: Judgement, ctx: GuardFacts): Judgement {
   };
 }
 
+/** Reaching out or running something: the line the middle rung draws, and the
+ *  one people actually feel. Changing a file is undoable; a command is not. */
+function leavesTheFiles(call: ToolCall): boolean {
+  const name = normalizeToolName(call.name);
+  return SHELL_TOOLS.has(name) || NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name);
+}
+
+/**
+ * How far it may go on its own.
+ *
+ * A ceiling, never a licence: this only ever makes a `confirm` quieter or a
+ * change refused. `deny` is untouched on every rung, and `snapshot` survives
+ * whatever happens to the verdict, so nobody loses their way back.
+ *
+ * A standing "ask me first" outranks the whole ladder — that one was said out
+ * loud, and a control in a toolbar does not get to overrule it.
+ */
+function asFarAs(judgement: Judgement, ctx: GuardFacts): Judgement {
+  const rung = ctx.howFar ?? 'asking';
+  if (rung === 'asking' || ctx.askBeforeEveryChange === true) return judgement;
+  if (judgement.verdict.kind === 'deny' || !judgement.mutates) return judgement;
+
+  if (rung === 'looking') {
+    return {
+      verdict: {
+        kind: 'deny',
+        reason:
+          'You asked me to look and not touch anything, so I have left it alone. Tell me to go further and I will.',
+      },
+      snapshot: false,
+      mutates: false,
+    };
+  }
+
+  return judgement;
+}
+
 function judge(call: ToolCall, ctx: GuardFacts): Judgement {
-  return withoutQuestions(applyStandingInstruction(judgeCall(call, ctx), ctx), ctx);
+  const raw = judgeCall(call, ctx);
+  // "Get on with it" is an explicit full-access choice, not merely fewer
+  // questions. The terminal runner is widened for this same mode; leaving this
+  // earlier policy gate in place was why harmless uses of /tmp were still
+  // rejected before the shell ever saw them.
+  if (ctx.howFar === 'doing') return allow(raw.mutates);
+
+  const first = asFarAs(applyStandingInstruction(raw, ctx), ctx);
+  return withoutQuestions(first, { ...ctx, stopAsking: quietFor(call, ctx) });
+}
+
+/** Whether the questions are off for *this* call. The top rung means all of
+ *  them; the middle one means the ones that only touch files. */
+function quietFor(call: ToolCall, ctx: GuardFacts): boolean {
+  const rung = ctx.howFar ?? 'asking';
+  if (rung === 'doing') return true;
+  if (rung === 'changing') return !leavesTheFiles(call);
+  return ctx.stopAsking === true;
 }
 
 /**

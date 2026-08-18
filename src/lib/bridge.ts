@@ -20,7 +20,7 @@
  * drifts away from the thing it is standing in for.
  */
 
-import type { AgentEvent } from '../agent/types';
+import type { AgentEvent, RunningPiece } from '../agent/types';
 import {
   findMoved,
   nameOfDesign,
@@ -31,12 +31,15 @@ import {
 import { pagesIn, type Page } from '../preview/pages';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
+import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
 import { nextRun, saysNext, saysRepeat, type Repeat } from '../work/schedule';
 import {
   showWords,
+  modelKey,
   type AgentNotice,
   type Away,
+  type AwayNotice,
   type AwayPiece,
   type EveryKind,
   type Repeating,
@@ -63,13 +66,26 @@ import {
   type PromptAttachment,
   type ProviderMethod,
   type PutBack,
+  type RepoLook,
   type RecentProject,
   type CarriedExtension,
   type Result,
   type Room,
+  type Skill,
+  type Workflow,
+  type BuildPlan,
+  type BuildAdvance,
   type SavedVersion,
   type ShowOutcome,
+  type VariationsOutcome,
+  type HowFar,
+  type Money,
+  type Recording,
   type ShowProgress,
+  type Where,
+  type SpendLimit,
+  type SpendSummary,
+  type ThinkingLevel,
   type VisualChange,
   type VisualFrames,
   type VisualNotice,
@@ -89,6 +105,23 @@ export type Bridge = GrapheApi & {
 
 function done<T>(value: T): Result<T> {
   return { ok: true, value };
+}
+
+/** Whether this project is set to hold work back for a look first. */
+function heldBackOf(preferred: { heldBack: Readonly<Record<string, boolean>> }, project: string | null): boolean {
+  return project === null ? false : preferred.heldBack[project] === true;
+}
+
+/** A browser tab cannot make a checkout; say so the way every real reading does. */
+function previewFail<T>(): Result<T> {
+  return {
+    ok: false,
+    trouble: {
+      what: 'A conversation needs its own checkout.',
+      because: 'This is Graphe in a browser tab, so there is no folder underneath to branch from.',
+      actionLabel: 'Got it',
+    },
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -524,6 +557,24 @@ function previewBridge(): Bridge {
    *  tidy button has something to undo. */
   let previewRoom: Room = { used: 36_000, total: 200_000, part: 0.18 };
   let previewQuiet = false;
+  /** What the mock bridge pretends is running, so the band can be looked at
+ *  without a real server anywhere. */
+let previewRunning: readonly RunningPiece[] = [
+  {
+    id: 'run-1',
+    label: 'npm run dev',
+    command: 'npm run dev',
+    folder: '/a',
+    address: 'http://localhost:5173',
+    state: 'running',
+    since: Date.now(),
+    exitCode: null,
+  },
+];
+
+let previewHowFar: HowFar = 'asking';
+  let previewCeiling: SpendLimit | null = null;
+  let previewMade = 0;
   let previewCarried: readonly CarriedExtension[] = [
     {
       id: 'storybook-tools@1a2b3c4d5e6f7a8b',
@@ -547,9 +598,11 @@ function previewBridge(): Bridge {
   let preferred: Preferences = {
     showMe: false,
     model: null,
+    thinking: {},
     kept: {},
     showFiles: true,
-    holdBack: false,
+    heldBack: {},
+    ceiling: null,
   };
 
   const send = (event: AgentEvent): void => {
@@ -583,6 +636,7 @@ function previewBridge(): Bridge {
    *  agent doing work, and there is no agent here. Everything else in this
    *  preview waits to be asked for. */
   let spendAnnounced = false;
+  let split: SpendSummary | null = null;
   const announceSpend = (): void => {
     if (spendAnnounced) return;
     spendAnnounced = true;
@@ -596,7 +650,8 @@ function previewBridge(): Bridge {
       send({ type: 'spend', amount, label: entry.label, reason: entry.reason });
     }
     send({ type: 'settled' });
-    send({ type: 'spend-summary', summary: ledger.summary() });
+    split = ledger.summary();
+    send({ type: 'spend-summary', summary: split });
   };
 
   return {
@@ -615,7 +670,9 @@ function previewBridge(): Bridge {
       }, 500);
       // No saved conversation in a browser tab — there is no disk. The window
       // therefore greets the folder the way it greets a new one (B1.1).
-      return Promise.resolve(done({ path, name, history: [], conversation: null }));
+      return Promise.resolve(
+        done({ path, name, history: [], conversation: null, address: `first-${name}` }),
+      );
     },
 
     async prompt(
@@ -636,6 +693,11 @@ function previewBridge(): Bridge {
     },
 
     stop(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    // No live agent in the preview, so steering is a no-op that still answers.
+    steer(): Promise<Result<null>> {
       return Promise.resolve(done(null));
     },
 
@@ -670,6 +732,9 @@ function previewBridge(): Bridge {
           untracked: 1,
           ahead: 0,
           behind: 2,
+          branches: [
+            { name: 'main', current: true, upstream: 'origin/main', ahead: 0, behind: 2, message: 'The preview line' },
+          ],
           files: PREVIEW_CHANGED.map((path) => ({
             path,
             kind: path.startsWith('public/') ? ('new' as const) : ('changed' as const),
@@ -721,6 +786,16 @@ function previewBridge(): Bridge {
 
     versions(): Promise<Result<readonly SavedVersion[]>> {
       return Promise.resolve(done(openPath === null ? [] : versionsFor(openPath)));
+    },
+
+    repoLook(): Promise<Result<RepoLook>> {
+      // The preview has no github behind it; a repository with nothing in it is
+      // the honest answer.
+      return Promise.resolve(done(null));
+    },
+
+    repoComment(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
     },
 
     putBack(versionId: string): Promise<Result<PutBack>> {
@@ -837,11 +912,7 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(null));
     },
 
-    nudgeToken(): Promise<Result<readonly SavedVersion[]>> {
-      const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
-      return Promise.resolve(done(previewVersions(path)));
-    },
-    nudgeMotion(): Promise<Result<readonly SavedVersion[]>> {
+    designCommit(): Promise<Result<readonly SavedVersion[]>> {
       const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
       return Promise.resolve(done(previewVersions(path)));
     },
@@ -868,6 +939,56 @@ function previewBridge(): Bridge {
       });
     },
 
+    skills(): Promise<Result<readonly Skill[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    skillText(): Promise<Result<string>> {
+      return Promise.resolve(done(''));
+    },
+
+    workflows(): Promise<Result<readonly Workflow[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    branchSwitch(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+    branchCreate(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+    worktreeStart(): Promise<Result<{ folder: string; branch: string }>> {
+      return Promise.resolve(previewFail<{ folder: string; branch: string }>());
+    },
+
+    worktreeLand(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
+    worktreeDrop(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
+    buildStart(): Promise<Result<BuildPlan>> {
+      return Promise.resolve(previewFail<BuildPlan>());
+    },
+
+    buildPlan(): Promise<Result<BuildPlan | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    buildAdvance(_op: BuildAdvance): Promise<Result<BuildPlan | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    chooseDocument(): Promise<Result<{ name: string; text: string } | null>> {
+      return Promise.resolve(previewFail<{ name: string; text: string } | null>());
+    },
+
+    buildSave(): Promise<Result<BuildPlan | null>> {
+      return Promise.resolve(done(null));
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -884,6 +1005,20 @@ function previewBridge(): Bridge {
     stopAsking(on: boolean): Promise<Result<boolean>> {
       previewQuiet = on;
       return Promise.resolve(done(previewQuiet));
+    },
+
+    goAsFarAs(howFar: HowFar): Promise<Result<HowFar>> {
+      previewHowFar = howFar;
+      return Promise.resolve(done(previewHowFar));
+    },
+
+    running(): Promise<Result<readonly RunningPiece[]>> {
+      return Promise.resolve(done(previewRunning));
+    },
+
+    stopRunning(id: string): Promise<Result<readonly RunningPiece[]>> {
+      previewRunning = previewRunning.filter((one) => one.id !== id);
+      return Promise.resolve(done(previewRunning));
     },
 
     saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>> {
@@ -926,6 +1061,18 @@ function previewBridge(): Bridge {
         question:
           'This is Graphe running in a browser tab, so there is no folder underneath and nothing for me to get ready. Open the desktop app and this button will show you your own site.',
       });
+    },
+
+    /** Same honest answer as “See it”: no folder behind a browser tab, so there
+     *  is nowhere for variations to come from. */
+    variationsServe(): Promise<Result<VariationsOutcome>> {
+      return Promise.resolve(
+        done({
+          kind: 'unsure',
+          question:
+            'This is Graphe running in a browser tab, so there is no folder underneath and nothing for me to get ready. Open the desktop app and it can make you a few designs.',
+        }),
+      );
     },
 
     /** A folder somebody made up, with the shape of a real one, so the rail's
@@ -997,13 +1144,27 @@ function previewBridge(): Bridge {
      *  path exists to avoid. */
     openConversation(path: string | null): Promise<Result<OpenedProject>> {
       const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
+      // A name of its own even before anything has been written down, which is
+      // what lets a brand new conversation have a tab.
+      previewMade += 1;
       return Promise.resolve(
         done({
           path: here?.path ?? '',
           name: here?.name ?? '',
           history: [],
           conversation: path,
+          address: path ?? `new-${String(previewMade)}`,
         }),
+      );
+    },
+
+    deleteConversation(path: string): Promise<Result<readonly Conversation[]>> {
+      return Promise.resolve(
+        done([
+          { id: 'c1', path: 'a', title: 'Make the header sticky on scroll', at: Date.now() - 40 * 60_000, messages: 14 },
+          { id: 'c2', path: 'b', title: 'Rebuild the hero from the Figma frame', at: Date.now() - 3 * 3_600_000, messages: 31 },
+          { id: 'c3', path: 'c', title: 'Yesterday afternoon', at: Date.now() - 26 * 3_600_000, messages: 6 },
+        ].filter((one) => one.path !== path)),
       );
     },
 
@@ -1066,7 +1227,20 @@ function previewBridge(): Bridge {
     /** The sample connection above, with whatever model the visitor chose
      *  worn over it. */
     connection(): Promise<Result<ConnectionState>> {
-      return Promise.resolve(done({ ...PREVIEW_CONNECTION, chosen: preferred.model }));
+      // The shell picks one the first time it finds none, so a visitor who has
+      // chosen nothing still sees the app as it actually is rather than with
+      // half the row missing.
+      const chosen = preferred.model ?? PREVIEW_CONNECTION.chosen;
+      return Promise.resolve(
+        done({
+          ...PREVIEW_CONNECTION,
+          chosen,
+          chosenThinking:
+            chosen === null
+              ? 'off'
+              : (preferred.thinking[modelKey(chosen)] ?? PREVIEW_CONNECTION.chosenThinking),
+        }),
+      );
     },
 
     /** A pretend connection: the steps are real, the browser tab is not. The
@@ -1104,6 +1278,48 @@ function previewBridge(): Bridge {
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setThinking(choice: ModelChoice, level: ThinkingLevel): Promise<Result<Preferences>> {
+      preferred = { ...preferred, thinking: { ...preferred.thinking, [modelKey(choice)]: level } };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    spendSplit(): Promise<Result<SpendSummary | null>> {
+      return Promise.resolve(done(split));
+    },
+
+    closeConversation(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    /** A browser tab has nowhere to put a page, and says nothing rather than
+     *  pretending it did. */
+    pageAt(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    pageHidden(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    /** A browser tab has no page of ours to watch, and says so rather than
+     *  handing back an empty run that would read as "nothing happened". */
+    watchStart(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    watchStop(): Promise<Result<Recording | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    spendLimit(): Promise<Result<SpendLimit | null>> {
+      return Promise.resolve(done(previewCeiling));
+    },
+
+    setSpendLimit(ceiling: Money | null): Promise<Result<SpendLimit | null>> {
+      previewCeiling = ceiling === null ? null : createLimit(ceiling, 'session');
+      return Promise.resolve(done(previewCeiling));
+    },
+
     onConnectStep(listener: (step: ConnectStep) => void): () => void {
       connecting.add(listener);
       return () => {
@@ -1128,34 +1344,38 @@ function previewBridge(): Bridge {
     /* Landing work somewhere needs a folder, a computer and somebody's account.
        A browser tab has none of the three, so the band draws itself and says
        exactly why each thing is out of reach rather than pretending. */
-    landing(): Promise<Result<Landing>> {
+    landing(_where?: Where): Promise<Result<Landing>> {
       return Promise.resolve(
         done({
           waiting: null,
-          holdBack: preferred.holdBack,
+          holdBack: heldBackOf(preferred, openPath),
           canHandOver: false,
           handOverSays: PREVIEW_LANDING,
           canPutOnline: false,
           onlineSays: PREVIEW_LANDING,
+          held: null,
         }),
       );
     },
 
-    setHoldBack(on: boolean): Promise<Result<Preferences>> {
-      preferred = { ...preferred, holdBack: on };
+    setHoldBack(on: boolean, _where?: Where): Promise<Result<Preferences>> {
+      if (openPath !== null) {
+        preferred = { ...preferred, heldBack: { ...preferred.heldBack, [openPath]: on } };
+      }
       return Promise.resolve(done({ ...preferred }));
     },
 
-    decideOnWork(letIn: boolean): Promise<Result<Decided>> {
+    decideOnWork(letIn: boolean, _where?: Where): Promise<Result<Decided>> {
       return Promise.resolve(
         done({
           landing: {
             waiting: null,
-            holdBack: preferred.holdBack,
+            holdBack: heldBackOf(preferred, openPath),
             canHandOver: false,
             handOverSays: PREVIEW_LANDING,
             canPutOnline: false,
             onlineSays: PREVIEW_LANDING,
+            held: null,
           },
           versions: [],
           letIn,
@@ -1176,11 +1396,45 @@ function previewBridge(): Bridge {
 
     /* Real state for as long as the tab is open: pressing the buttons moves the
        board, so what a person does to one of these can actually be looked at. */
-    away(): Promise<Result<Away>> {
+    away(_where?: Where): Promise<Result<Away>> {
       return Promise.resolve(done(atWork));
     },
 
-    keepGoing(text: string): Promise<Result<Away>> {
+    copyConversation(path: string): Promise<Result<string>> {
+      return Promise.resolve(done(`${path}-copy`));
+    },
+
+    awayEverywhere(): Promise<Result<readonly AwayNotice[]>> {
+      return Promise.resolve(done([{ project: '/work/this-project', away: atWork }]));
+    },
+
+    startAfter(text: string, after: string, _where?: Where): Promise<Result<Away>> {
+      const waited = atWork.pieces.find((one) => one.id === after);
+      return this.keepGoing(text).then((answer) => {
+        if (!answer.ok || waited === undefined) return answer;
+        const last = answer.value.pieces[answer.value.pieces.length - 1];
+        if (last === undefined) return answer;
+        atWork = {
+          ...atWork,
+          pieces: atWork.pieces.map((one) =>
+            one.id === last.id
+              ? {
+                  ...one,
+                  state: 'waiting' as const,
+                  after: { id: waited.id, doing: waited.doing, says: `After “${waited.doing}”` },
+                }
+              : one,
+          ),
+        };
+        return done({ ...atWork });
+      });
+    },
+
+    putAfter(_id?: unknown, _after?: unknown, _where?: Where): Promise<Result<Away>> {
+      return Promise.resolve(done({ ...atWork }));
+    },
+
+    keepGoing(text: string, _untilDone?: boolean, _where?: Where): Promise<Result<Away>> {
       atWork = {
         ...atWork,
         pieces: [
@@ -1200,19 +1454,24 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(atWork));
     },
 
-    stopAway(id: string): Promise<Result<Away>> {
+    stopAway(id: string, _where?: Where): Promise<Result<Away>> {
       atWork = { ...atWork, pieces: atWork.pieces.filter((one) => one.id !== id) };
       return Promise.resolve(done(atWork));
     },
 
-    keepAway(id: string): Promise<Result<Away>> {
+    keepAway(id: string, _where?: Where): Promise<Result<Away>> {
       atWork = { ...atWork, pieces: atWork.pieces.filter((one) => one.id !== id) };
       return Promise.resolve(done(atWork));
     },
 
     /* The same rule a browser tab can still demonstrate: nothing answers itself,
        and answering moves that one on. */
-    answerAway(id: string, _callId: string, decision: Decision): Promise<Result<Away>> {
+    answerAway(
+      id: string,
+      _callId: string,
+      decision: Decision,
+      _where?: Where,
+    ): Promise<Result<Away>> {
       atWork = {
         ...atWork,
         pieces: atWork.pieces.map((one) =>
@@ -1237,6 +1496,7 @@ function previewBridge(): Bridge {
       every: EveryKind,
       at: { hour: number; minute: number },
       on?: number,
+      _where?: Where,
     ): Promise<Result<Away>> {
       const repeat: Repeat =
         every === 'week'
@@ -1261,7 +1521,7 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(atWork));
     },
 
-    switchRepeat(id: string, on: boolean): Promise<Result<Away>> {
+    switchRepeat(id: string, on: boolean, _where?: Where): Promise<Result<Away>> {
       atWork = {
         ...atWork,
         repeats: atWork.repeats.map((one) => (one.id === id ? { ...one, on } : one)),
@@ -1269,7 +1529,7 @@ function previewBridge(): Bridge {
       return Promise.resolve(done(atWork));
     },
 
-    forgetRepeat(id: string): Promise<Result<Away>> {
+    forgetRepeat(id: string, _where?: Where): Promise<Result<Away>> {
       atWork = { ...atWork, repeats: atWork.repeats.filter((one) => one.id !== id) };
       return Promise.resolve(done(atWork));
     },
@@ -1384,10 +1644,11 @@ const PREVIEW_CONNECTION: ConnectionState = {
       apiKeyLabel: 'Anthropic API key',
       connected: true,
       available: true,
+      subscription: false,
       models: [
-        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000 },
-        { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', available: true, rates: { input: 5, output: 25 }, contextWindow: 200000 },
-        { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', available: true, rates: { input: 1, output: 5 }, contextWindow: 200000 },
+        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
+        { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', available: true, rates: { input: 5, output: 25 }, contextWindow: 200000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
+        { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', available: true, rates: { input: 1, output: 5 }, contextWindow: 200000, thinking: ['off'] },
       ],
     },
     {
@@ -1398,9 +1659,10 @@ const PREVIEW_CONNECTION: ConnectionState = {
       apiKeyLabel: null,
       connected: false,
       available: false,
+      subscription: false,
       models: [
-        { id: 'gpt-5', label: 'GPT-5', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 400000 },
-        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: false, rates: { input: 0.25, output: 2 }, contextWindow: 400000 },
+        { id: 'gpt-5', label: 'GPT-5', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 400000, thinking: ['off', 'low', 'medium', 'high', 'xhigh'] },
+        { id: 'gpt-5-mini', label: 'GPT-5 mini', available: false, rates: { input: 0.25, output: 2 }, contextWindow: 400000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
       ],
     },
     {
@@ -1411,14 +1673,16 @@ const PREVIEW_CONNECTION: ConnectionState = {
       apiKeyLabel: 'OpenCode API key',
       connected: false,
       available: false,
+      subscription: false,
       models: [
-        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: false, rates: { input: 3, output: 15 }, contextWindow: 1000000 },
-        { id: 'deepseek-v3.1', label: 'DeepSeek V3.1', available: false, rates: { input: 0.435, output: 0.87 }, contextWindow: 1000000 },
-        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 1048576 },
+        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', available: false, rates: { input: 3, output: 15 }, contextWindow: 1000000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
+        { id: 'deepseek-v3.1', label: 'DeepSeek V3.1', available: false, rates: { input: 0.435, output: 0.87 }, contextWindow: 1000000, thinking: ['off'] },
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', available: false, rates: { input: 1.25, output: 10 }, contextWindow: 1048576, thinking: ['off', 'low', 'high'] },
       ],
     },
   ],
   chosen: { providerId: 'anthropic', modelId: 'claude-sonnet-4-5' },
+  chosenThinking: 'medium',
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1432,14 +1696,25 @@ function connect(): Bridge {
   return {
     desktop: true,
     openProject: (path) => api.openProject(path),
-    prompt: (text, attachments) => api.prompt(text, attachments),
-    stop: () => api.stop(),
+    // The `where` is what names *which conversation* this message belongs to.
+    // Dropping it — as a bare `(text, attachments) =>` call but that left them
+    // extra and ignored — sent every prompt to whatever the shell happened to
+    // have in front, so with two tabs open a message typed into one ran in the
+    // other. The where rides through with the options.
+    prompt: (text, attachments, options, where) => api.prompt(text, attachments, options, where),
+    // Same complaint, same fix: stop must say *which* conversation it is
+    // stopping, or press Stop ends the shell's front conversation instead of
+    // the one on screen.
+    stop: (where) => api.stop(where),
+    steer: (text, where) => api.steer(text, where),
     answer: (callId, decision) => api.answer(callId, decision),
     chooseFolder: () => api.chooseFolder(),
     recentProjects: () => api.recentProjects(),
     overview: () => api.overview(),
     forgetProject: (path) => api.forgetProject(path),
     versions: () => api.versions(),
+    repoLook: (where) => api.repoLook(where),
+    repoComment: (number, body, where) => api.repoComment(number, body, where),
     putBack: (versionId) => api.putBack(versionId),
     nameVersion: (versionId, name) => api.nameVersion(versionId, name),
     versionPictures: () => api.versionPictures(),
@@ -1454,20 +1729,38 @@ function connect(): Bridge {
     saveVersion: (name) => api.saveVersion(name),
     room: () => api.room(),
     tidyNow: () => api.tidyNow(),
+    skills: () => api.skills(),
+    skillText: (id) => api.skillText(id),
+    workflows: () => api.workflows(),
+    branchSwitch: (name, where) => api.branchSwitch(name, where),
+    branchCreate: (name, where) => api.branchCreate(name, where),
+    worktreeStart: (where) => api.worktreeStart(where),
+    worktreeLand: (where) => api.worktreeLand(where),
+    worktreeDrop: (where) => api.worktreeDrop(where),
+    buildStart: (source, where) => api.buildStart(source, where),
+    buildPlan: (where) => api.buildPlan(where),
+    buildAdvance: (op, where) => api.buildAdvance(op, where),
+    chooseDocument: (where) => api.chooseDocument(where),
+    buildSave: (tasks, where) => api.buildSave(tasks, where),
     stopAsking: (on) => api.stopAsking(on),
+    goAsFarAs: (howFar) => api.goAsFarAs(howFar),
+    running: () => api.running(),
+    stopRunning: (id) => api.stopRunning(id),
     carried: () => api.carried(),
     trustCarried: (id, trust) => api.trustCarried(id, trust),
     revealFolder: () => api.revealFolder(),
     show: (at, point) => api.show(at, point),
+    variationsServe: (parts, where) => api.variationsServe(parts, where),
     onPointed: (listener) => api.onPointed(listener),
     pages: () => api.pages(),
     shareReview: () => api.shareReview(),
     checkWidths: () => api.checkWidths(),
     conversations: () => api.conversations(),
-    openConversation: (path) => api.openConversation(path),
+    openConversation: (path, where) => api.openConversation(path, where),
+    deleteConversation: (path, where) =>
+      api.deleteConversation?.(path, where) ?? Promise.resolve(done([])),
     packages: (term) => api.packages(term),
-    nudgeToken: (name, value) => api.nudgeToken(name, value),
-    nudgeMotion: (places, change) => api.nudgeMotion(places, change),
+    designCommit: (changes) => api.designCommit(changes),
     addPackage: (id) => api.addPackage(id),
     removePackage: (id) => api.removePackage(id),
     explainPackage: (id) => api.explainPackage(id),
@@ -1482,23 +1775,36 @@ function connect(): Bridge {
     cancelConnect: () => api.cancelConnect(),
     disconnect: (providerId) => api.disconnect(providerId),
     selectModel: (choice) => api.selectModel(choice),
+    setThinking: (choice, level) => api.setThinking(choice, level),
+    closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
+    startAfter: (text, after, where) => api.startAfter(text, after, where),
+    putAfter: (id, after, where) => api.putAfter(id, after, where),
+    pageAt: (address, bounds, again) => api.pageAt(address, bounds, again),
+    pageHidden: (hidden) => api.pageHidden(hidden),
+    watchStart: (says) => api.watchStart(says),
+    watchStop: () => api.watchStop(),
+    spendSplit: () => api.spendSplit(),
+    spendLimit: () => api.spendLimit(),
+    setSpendLimit: (ceiling) => api.setSpendLimit(ceiling),
     onConnectStep: (listener) => api.onConnectStep(listener),
     discoveredAccounts: () => api.discoveredAccounts(),
     importAccount: (account) => api.importAccount(account),
     openLink: (url) => api.openLink(url),
     landing: () => api.landing(),
-    setHoldBack: (on) => api.setHoldBack(on),
+    setHoldBack: (on, where) => api.setHoldBack(on, where),
     decideOnWork: (letIn) => api.decideOnWork(letIn),
     handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
     putOnline: (confirmed) => api.putOnline(confirmed),
-    away: () => api.away(),
-    keepGoing: (text) => api.keepGoing(text),
-    stopAway: (id) => api.stopAway(id),
-    keepAway: (id) => api.keepAway(id),
-    answerAway: (id, callId, decision) => api.answerAway(id, callId, decision),
-    addRepeat: (doing, every, at, on) => api.addRepeat(doing, every, at, on),
-    switchRepeat: (id, on) => api.switchRepeat(id, on),
-    forgetRepeat: (id) => api.forgetRepeat(id),
+    away: (where) => api.away(where),
+    copyConversation: (path, where) => api.copyConversation(path, where),
+    awayEverywhere: () => api.awayEverywhere(),
+    keepGoing: (text, untilDone, where) => api.keepGoing(text, untilDone, where),
+    stopAway: (id, where) => api.stopAway(id, where),
+    keepAway: (id, where) => api.keepAway(id, where),
+    answerAway: (id, callId, decision, where) => api.answerAway(id, callId, decision, where),
+    addRepeat: (doing, every, at, on, where) => api.addRepeat(doing, every, at, on, where),
+    switchRepeat: (id, on, where) => api.switchRepeat(id, on, where),
+    forgetRepeat: (id, where) => api.forgetRepeat(id, where),
     onAway: (listener) => api.onAway(listener),
     inStep: () => api.inStep(),
     followDesign: (address) => api.followDesign(address),

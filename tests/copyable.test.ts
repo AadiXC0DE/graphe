@@ -408,7 +408,7 @@ describe('what the page itself gathers', () => {
   });
 
   it('gathers on a click, and never while the cursor is only passing over', () => {
-    expect(POINTER_SCRIPT).toContain('send(pointedFrom(el, true))');
+    expect(POINTER_SCRIPT).toContain('var pointed = pointedFrom(el, true);');
     expect(POINTER_SCRIPT).toContain('chip.textContent = G.describePointed(pointedFrom(el))');
   });
 

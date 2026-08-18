@@ -22,25 +22,11 @@
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
 
-  /* The rail's old arrival, once, and only once: this panel appears the first
-     time there is something to tell and then stays. */
-  animation: overview-arrives var(--dur-ui) var(--ease-out-quart) both;
-}
-
-@keyframes overview-arrives {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
 }
 
 /* Nothing sits above this panel — no strip, and no traffic lights on this side
    of the window — so it starts at the glass with only its own breathing room. */
-.overview {
-  padding-top: var(--space-3);
-}
+.overview { padding-top: 0; }
 
 .overview__block {
   padding: var(--space-3) var(--space-4) var(--space-4);
@@ -57,8 +43,8 @@
   z-index: 1;
   display: flex;
   gap: var(--space-1);
-  margin-bottom: var(--space-3);
-  padding: 0 var(--space-3) var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-3) var(--space-2);
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
@@ -116,6 +102,13 @@
   font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--text-faint);
+}
+
+.overview__summary {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 
 /* ---------------------------------------------------------------------------
@@ -185,66 +178,40 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Changes
-   Files by name, because a name is a place and a count is not.
+   Save / commit
+   The changed set as one thing, named the way git names it and said the way
+   people say it. The individual files are a project-place's job now; here is
+   the one thing the hand does with them as a whole.
    --------------------------------------------------------------------------- */
 
-.overview__files {
-  list-style: none;
+/* The branch, then the plain note under it: git's word on its own line (the
+   term somebody technical recognises), the everyday sentence beneath. */
+.overview__line {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
   margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
 }
 
-.overview__file {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.overview__filetext {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.overview__filename {
-  font-size: var(--text-sm);
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.overview__filewhere {
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  /* The end of a path is the useful end. */
-  direction: rtl;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.overview__filenew {
+.overview__lineterm {
   flex: none;
-  font-size: var(--text-2xs);
-  color: var(--accent-ink);
-  background: var(--accent-soft);
-  border-radius: 999px;
-  padding: 1px var(--space-2);
-}
-
-/* The branch, under Show me and nowhere else. */
-.overview__real {
-  margin: var(--space-3) 0 0;
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border-radius: 999px;
+  padding: 1px var(--space-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.overview__plainsay {
+  font-size: var(--text-xs);
+  line-height: 1.45;
   color: var(--text-faint);
 }
 
@@ -404,21 +371,21 @@
 /* The panel is a flex column that ends with the meter, which docks into its
    foot: the versions list scrolls above it and the meter sits on the bottom
    edge whether the list above it is one row or forty. */
-.overview {
-  padding-bottom: var(--space-3);
-}
+.overview { padding-bottom: 0; }
 
 /* The meter, docked. The panel's own foot — flush to the glass, one hairline
    between it and the timeline above it. */
 .overview .cost-meter--corner {
-  position: static;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   width: auto;
   border: none;
   border-top: 1px solid var(--border);
   border-radius: 0;
   box-shadow: none;
   background: var(--bg);
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  padding: var(--space-2) var(--space-4);
   margin: 0;
 }
 
@@ -435,34 +402,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .overview {
-    animation: none;
-  }
-}
-/* A changed file is a place you can go, not a line of type. */
-.overview__file {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  width: 100%;
-  min-width: 0;
-  padding: var(--space-1) var(--space-2);
-  margin-left: calc(var(--space-2) * -1);
-  border-radius: var(--radius-sm);
-  text-align: left;
-  transition: background-color var(--dur-micro) var(--ease-hover);
-}
-
-.overview__file:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .overview__file:hover {
-    background: var(--bg-sunken);
-  }
+  .overview { animation: none; }
 }
 
 /* The band's own action. One per band at most — a panel of buttons is a
@@ -480,6 +420,35 @@
     color var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.overview__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.overview__actions .overview__do { margin-top: 0; }
+
+/* Two voices in one control: the git word, then the plain translation. A thin
+   pipe separates them so the pair reads as term + note rather than one blurry
+   button. */
+.overview__do .overview__plainsay {
+  position: relative;
+  margin-left: var(--space-2);
+  padding-left: var(--space-2);
+}
+
+.overview__do .overview__plainsay::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1px;
+  height: 12px;
+  transform: translateY(-50%);
+  background: var(--border);
 }
 
 .overview__do:active {

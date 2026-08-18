@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { canHighlight, highlight } from '../lib/highlight';
+import Clipped, { howMuch } from './Clipped';
 import './CodeBlock.css';
 
 type Props = {
@@ -96,6 +97,25 @@ export default function CodeBlock({ code, language, label, tail }: Props) {
     );
   };
 
+  const block =
+    html === null ? (
+      <div className="codeblock__code">
+        <pre tabIndex={0}>
+          <code>
+            {code}
+            {tail}
+          </code>
+        </pre>
+      </div>
+    ) : (
+      <div
+        className="codeblock__code"
+        // Shiki's output, never the model's. The code went in as text and
+        // came back as spans around that same text.
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+
   return (
     <div className="codeblock">
       <div className="codeblock__bar">
@@ -105,22 +125,14 @@ export default function CodeBlock({ code, language, label, tail }: Props) {
         </button>
       </div>
 
-      {html === null ? (
-        <div className="codeblock__code">
-          <pre tabIndex={0}>
-            <code>
-              {code}
-              {tail}
-            </code>
-          </pre>
-        </div>
+      {/* A thousand-line dump is not a reply somebody reads. Cut it, say how
+          much there is, and leave the full thing one press away. */}
+      {tail === undefined ? (
+        <Clipped how={howMuch(code)} label="Show all of it" height={280}>
+          {block}
+        </Clipped>
       ) : (
-        <div
-          className="codeblock__code"
-          // Shiki's output, never the model's. The code went in as text and
-          // came back as spans around that same text.
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        block
       )}
     </div>
   );

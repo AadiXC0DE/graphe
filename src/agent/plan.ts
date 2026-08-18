@@ -51,11 +51,34 @@ export const PLAN_WORDS = {
   /** Directly above the numbered steps. */
   heading: 'Here’s what I’d do:',
   confirm: 'Do it',
+  /** On the button once some steps have been dropped, so the press names what
+   *  it will actually do rather than what was first proposed. */
+  confirmSome(kept: number): string {
+    return kept === 1 ? 'Do that one' : `Do those ${String(kept)}`;
+  },
   alternative: 'Change something first',
+  /** Beside each step. Dropping one is a decision, not a deletion — it comes
+   *  straight back, so nobody has to be sure before they try it. */
+  drop: 'Leave this out',
+  undrop: 'Put it back',
+  /** Under the list once anything is dropped. */
+  dropped(many: number): string {
+    return many === 1 ? 'One step left out.' : `${String(many)} steps left out.`;
+  },
+  /** When every step has been dropped there is nothing to agree to. */
+  nothingLeft: 'Nothing left to do. Put a step back, or ask for something else.',
   /** Handed back to the model when it reaches for something that would change
    *  the project while it is only supposed to be looking. */
   withheld:
     'Not yet — this is the looking-around pass. Do not change anything. Say what you would do, as a short numbered list, and it will be put to the person to approve.',
+  /** Sent when somebody agreed to some of the plan but not all of it. The
+   *  dropped ones are named as well as the kept ones: a model told only what to
+   *  do will helpfully do the rest of what it proposed. */
+  doThese(kept: readonly string[], dropped: readonly string[]): string {
+    const list = kept.map((step, at) => `${String(at + 1)}. ${step}`).join('\n');
+    const not = dropped.map((step) => `- ${step}`).join('\n');
+    return `Do these, and only these:\n\n${list}\n\nLeave these out — I do not want them:\n\n${not}`;
+  },
   /** Added under the person's own words on a looking-around pass. */
   asked:
     'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet.',

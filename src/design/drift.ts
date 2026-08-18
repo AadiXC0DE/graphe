@@ -493,6 +493,19 @@ export function saysAll(findings: readonly Finding[]): string {
   return `${count} values here are not quite yours.`;
 }
 
+/**
+ * The instruction behind "Use yours": put the project's own value where a hand
+ * -written near-miss is.
+ *
+ * Named exactly — file, line and both values — because a near-miss is by
+ * definition almost the same as three other things in the file, and "make the
+ * blue right" would be acted on somewhere else.
+ */
+export function saysUseYours(finding: Finding, file: string): string {
+  const where = file === '' ? `line ${String(finding.line)}` : `${file}, line ${String(finding.line)}`;
+  return `In ${where} the value ${finding.wrote} is written by hand. Put ${finding.use} there instead — it is this project's own ${finding.mine.name} (${finding.mine.value}). Change only that one value, and leave every other ${finding.wrote} in the project alone.`;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Where to look                                                               */
 /* -------------------------------------------------------------------------- */
@@ -612,7 +625,7 @@ function sameColour(one: Rgb, other: Rgb): boolean {
   );
 }
 
-function useOf(known: Known): string {
+function inUse(known: Known): string {
   return known.name.startsWith('--') ? `var(${known.name})` : known.value;
 }
 
@@ -696,7 +709,7 @@ export function findDrift(
       kind: 'colour',
       wrote,
       mine: { name: theirs.name, value: theirs.value },
-      use: useOf(theirs),
+      use: inUse(theirs),
       line: place.line,
       column: place.column,
       distance: round(best.distance, 4),
@@ -726,7 +739,7 @@ export function findDrift(
       kind: 'length',
       wrote,
       mine: { name: theirs.name, value: theirs.value },
-      use: useOf(theirs),
+      use: inUse(theirs),
       line: place.line,
       column: place.column,
       distance: round(best.distance, 4),

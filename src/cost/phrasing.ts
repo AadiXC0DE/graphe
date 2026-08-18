@@ -109,6 +109,22 @@ export const meter = {
     return `Spent so far today: ${amount(total, voice)}`;
   },
   detailsLink: 'See where it went',
+  /** The account is paid for by its own plan, so nothing here is a bill. Said
+   *  rather than left to be assumed: a running figure beside a plan somebody
+   *  already paid for is the meter making a confident claim it cannot check. */
+  onAPlan: 'This account is on a plan you already pay for, so this is a rough count and not a bill.',
+  /** Share of the prompt that came back free from earlier work. Never "tokens". */
+  reused(share: number): string {
+    const pct = Math.round(Math.min(1, Math.max(0, share)) * 100);
+    if (pct <= 0) return 'Nothing reused from earlier yet';
+    if (pct >= 95) return 'Almost everything reused from earlier';
+    return `Reused ${pct}% from earlier`;
+  },
+  /** Which model took most of the bill. The real name is fine here — this is
+   *  the details surface, not the ordinary corner. */
+  mostUsed(name: string): string {
+    return `Mostly ${name}`;
+  },
 };
 
 /* -------------------------------------------------------- before a bigger job */
@@ -122,36 +138,44 @@ export type Prompt = {
   alternative: string;
 };
 
-/** "This is a bigger job — about ₹35 and roughly four minutes. Want me to go
- *  ahead?" Only ever shown above the user's own threshold, because a confirm on
- *  every small change is noise, and noise gets dismissed without reading. */
-export function biggerJob(estimate: Estimate, voice: Voice = {}): Prompt {
-  const cost = amount(estimate.expected, voice);
+/**
+ * "This is a bigger job — it will take roughly four minutes. Want me to go
+ * ahead?"
+ *
+ * No number with a currency in front of it, ever. A subscription account is not
+ * metered per token, catalogue rates are a guess about somebody else's billing,
+ * and a confident price we cannot actually check is worse than no price at all.
+ * What is left is the part that was always doing the work: a pause before
+ * something big, so nobody watches forty files change without having agreed to
+ * it. Time is kept because we measure it ourselves.
+ *
+ * Only ever shown above the user's own threshold, because a confirm on every
+ * small change is noise, and noise gets dismissed without reading.
+ */
+export function biggerJob(estimate: Estimate, _voice: Voice = {}): Prompt {
   const time =
     estimate.expectedDurationMs === null ? null : roughDuration(estimate.expectedDurationMs);
-  const note = estimateNote(estimate, voice);
+  const note = estimateNote(estimate);
   return {
     title: 'This is a bigger job',
-    body: time
-      ? `About ${cost} and ${time}. Want me to go ahead?`
-      : `About ${cost}. Want me to go ahead?`,
+    body: time ? `It should take ${time}. Want me to go ahead?` : 'Want me to go ahead?',
     ...(note ? { note } : {}),
     confirm: 'Go ahead',
     alternative: 'Do a smaller version first',
   };
 }
 
-/** Where the estimate came from, said plainly. An estimate built from nothing is
- *  a guess and gets described as one. */
-export function estimateNote(estimate: Estimate, voice: Voice = {}): string | null {
-  const range = `${amount(estimate.low, voice)} to ${amount(estimate.high, voice)}`;
+/** How much this is a guess, said plainly and without a number. A job we have
+ *  never done is a job we cannot time either, and saying so is the whole
+ *  content of the note. */
+export function estimateNote(estimate: Estimate): string | null {
   switch (estimate.confidence) {
     case 'no-history':
-      return `I haven’t done one of these with you yet, so treat that as a rough guide. It could be anywhere from ${range}.`;
+      return 'I haven’t done one of these with you yet, so that is a rough guide.';
     case 'few-examples':
-      return `I’ve only done a couple of these so far. Similar ones have landed between ${range}.`;
+      return 'I’ve only done a couple of these so far.';
     case 'measured':
-      return `Jobs like this have come in between ${range}.`;
+      return null;
   }
 }
 
@@ -183,6 +207,11 @@ export function sessionSummary(summary: SessionSummary, voice: Voice = {}): Summ
 
   return { headline, work, retry, lines: [headline, work, retry] };
 }
+
+/** When there is no split to show yet. Said rather than left silent: a button
+ *  that answers nothing teaches people it is broken. */
+export const nothingSpentYet =
+  'Nothing has been spent in this project yet, so there is nothing to break down.';
 
 /** Shown beside the split, once, so the number is never mistaken for a charge
  *  from us. It is also the reason we can show it at all. */
@@ -227,6 +256,16 @@ export const limitSetup = {
   body: 'I’ll say something when you’re getting close, and stop and ask before going past it. You can change it whenever you like.',
   confirm: 'Set the limit',
   alternative: 'Not right now',
+  /** On the meter itself, which is where somebody is already looking at the
+   *  number when they decide they want a ceiling on it. */
+  open: 'Set a limit',
+  change: 'Change the limit',
+  field: 'Stop at',
+  save: 'Set it',
+  clear: 'No limit',
+  /** What the ceiling actually binds. Said plainly, because "per session" is
+   *  the sort of phrase people read past and then feel misled by. */
+  scope: 'It holds for this sitting, and starts again next time you open this.',
 };
 
 export function limitSaved(limit: SpendLimit, voice: Voice = {}): string {
@@ -268,6 +307,8 @@ export function choseStyle(style: 'quick' | 'careful'): string {
 export const longConversation = {
   tidying:
     'We’ve covered a lot in here. I’ll tidy up my notes so things stay quick — nothing gets lost, and you can still scroll back through everything.',
+  stayedAsIs:
+    'I kept this conversation as it is for now. Nothing was changed or lost.',
   newThing: {
     title: 'This looks like a new thing',
     body: 'Starting fresh will be faster and cheaper. I’ll bring everything I know about the project with me, so you won’t have to explain it again.',
@@ -309,11 +350,19 @@ export function unusualRate(recent: Money, voice: Voice = {}): Prompt {
  *  is enormously cheaper than losing trust later. */
 export const connectBilling = {
   title: 'How this gets paid for',
-  body: 'This uses the account you connect, and it’s billed separately from any monthly plan you already have — you pay per use, like a taxi meter rather than a travel pass.',
+  /* Two kinds of account bill in completely different ways, and the person
+     choosing between them was told neither. Signing in spends a plan somebody
+     already pays monthly; a key is a meter that runs. */
+  body: 'Whatever you connect is billed by them, not by us. Signing in uses the plan you already pay for each month. A key is a meter that runs while you work.',
   reassurance:
-    'We’ll show you what it costs as you go, and you can set a limit right now. We take no cut of it.',
+    'We show what a key is spending as you go, and you can set a limit right now. A plan we cannot read, so we say so rather than guess. We take no cut of either.',
   confirm: 'Set a monthly limit',
   alternative: 'I understand',
+  /** Under the sign-in button, so the difference is read where the choice is
+   *  made rather than in a paragraph above it. */
+  signIn: 'Uses the plan you pay for monthly.',
+  /** Under the paste-a-key button, for the same reason. */
+  apiKey: 'Billed by use, by them.',
 };
 
 /* --------------------------------------------------------------- the sweep */
@@ -393,6 +442,9 @@ export function auditableStrings(voice: Voice = {}): string[] {
 
   push(meter.label);
   push(meter.detailsLink);
+  push(meter.onAPlan);
+  push(meter.reused(0.72));
+  push(nothingSpentYet);
   push(meter.today(inr(12_000), voice));
   push(meter.screenReaderLabel(inr(12_000), voice));
   push(retryHonesty);
@@ -407,7 +459,7 @@ export function auditableStrings(voice: Voice = {}): string[] {
   push(unusualRate(inr(4000), voice));
   for (const estimate of estimates) {
     push(biggerJob(estimate, voice));
-    push(estimateNote(estimate, voice));
+    push(estimateNote(estimate));
     for (const status of statuses) push(limitWouldBePassed(status, estimate, voice));
   }
   for (const status of statuses) {

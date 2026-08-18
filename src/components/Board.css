@@ -58,7 +58,10 @@
    without a breakpoint per width. */
 .board__sheet {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  /* 228px is the width a card wants; `min()` is what stops it insisting on it
+     in a panel narrower than that, where the whole sheet used to hang over the
+     edge rather than draw one narrow column. */
+  grid-template-columns: repeat(auto-fill, minmax(min(228px, 100%), 1fr));
   gap: var(--space-3);
   margin: 0;
   padding: 0;
@@ -143,6 +146,26 @@
   flex-direction: column;
   gap: 2px;
   padding: var(--space-3) var(--space-3) var(--space-2);
+}
+
+/* Which folder this one belongs to. Above the sentence and quieter than it:
+   on a board of several projects it is what you scan by, not what you read. */
+.work__where {
+  margin: 0 0 2px;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Which of the goes this is. Reads with the folder label above it, in the same
+   quiet register — both answer "which one am I looking at?" */
+.work__oneof {
+  margin: 0 0 2px;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .work__doing {
@@ -306,4 +329,21 @@
   .work__drop:active {
     transform: none;
   }
+}
+
+/* What a piece came to, at the end of its own state line. Tabular so a column
+   of them lines up, and quiet: the picture is the point of the card. */
+.work__spent {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+/* What this one is waiting for. Quiet, and never louder than the sentence that
+   says what it is: the plan is context, the work is the point. */
+.work__after {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-faint);
 }

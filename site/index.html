@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Graphe — send in a team, not a prompt</title>
+    <meta
+      name="description"
+      content="An agentic coding platform with a real workspace. Helpers in parallel, jobs that run for hours, a plan before anything big, and a design system it reads before it writes. Built on pi."
+    />
+    <meta name="theme-color" content="#131110" />
+
+    <meta property="og:title" content="Graphe — send in a team, not a prompt" />
+    <meta
+      property="og:description"
+      content="An agentic coding platform with a real workspace. Helpers in parallel, jobs that run for hours, a plan before anything big, and a design system it reads before it writes. Built on pi."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="assets/web/app-start-dark.webp" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="preload" href="assets/fonts/Satoshi-Variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23E0764F'/%3E%3Ccircle cx='22' cy='9' r='3' fill='%23131110'/%3E%3Ccircle cx='22' cy='23' r='3' fill='%23131110'/%3E%3Ccircle cx='10' cy='16' r='3.4' fill='%23131110'/%3E%3Cpath d='M12.8 14.4 19.2 10.6M12.8 17.6l6.4 3.8' stroke='%23131110' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+  </head>
+
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <!-- ─────────────────────────────────────────────────────── nav ── -->
+    <header class="nav" id="nav">
+      <div class="nav__inner">
+        <a class="mark" href="#top" aria-label="Graphe, home">
+          <svg class="mark__glyph" viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="9" />
+            <g class="mark__nodes">
+              <circle cx="22" cy="9" r="3" />
+              <circle cx="22" cy="23" r="3" />
+              <circle cx="10" cy="16" r="3.4" />
+              <path d="M12.8 14.4 19.2 10.6M12.8 17.6l6.4 3.8" stroke-width="2" stroke-linecap="round" />
+            </g>
+          </svg>
+          <span class="mark__word">Graphe</span>
+          <span class="mark__beta mono">beta</span>
+        </a>
+
+        <nav class="nav__links" aria-label="Sections">
+          <a href="#see">What it does</a>
+          <a href="#everything">Everything else</a>
+          <a href="#page">The browser</a>
+          <a href="#how">How it works</a>
+          <a href="#pi">Built on pi</a>
+          <a href="#away">Long jobs</a>
+        </nav>
+
+        <div class="nav__end">
+          <a class="chip" href="https://github.com/earendil-works/pi" rel="noopener">
+            <span class="chip__dot" aria-hidden="true"></span> built on pi
+          </a>
+          <a class="btn btn--small" href="https://github.com/AadiXC0DE/graphe/releases" rel="noopener"
+            ><svg class="btn__apple" viewBox="0 0 16 20" width="15" height="18" fill="currentColor" aria-hidden="true"><path d="M13.2 10.6c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.7.8-3.3.8-.7 0-1.7-.8-2.8-.8-1.5 0-2.8.8-3.6 2.1-1.5 2.6-.4 6.5 1.1 8.6.7 1 1.6 2.2 2.7 2.2 1.1 0 1.5-.7 2.8-.7 1.3 0 1.6.7 2.8.7 1.2 0 1.9-1 2.6-2.1.8-1.2 1.2-2.4 1.2-2.5-.1 0-2.2-.9-2.2-3.2zM11 4.1c.6-.7 1-1.7.9-2.7-.9 0-2 .6-2.6 1.3-.6.6-1.1 1.7-.9 2.6 1 .1 2-.5 2.6-1.2z"/></svg>Download</a
+          >
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- ───────────────────────────────────────────────────── hero ── -->
+      <section class="band band--hero" id="top">
+        <div class="glow" aria-hidden="true"></div>
+
+        <div class="hero">
+          <p class="eyebrow reveal" data-reveal>Agentic coding platform · Desktop · Built on pi</p>
+
+          <h1 class="hero__title reveal" data-reveal style="--i: 1">
+            Send in a team.<br />
+            <span class="shot"
+              ><em>Not a prompt.</em
+              ><i class="shot__c shot__c--tl" aria-hidden="true"></i
+              ><i class="shot__c shot__c--tr" aria-hidden="true"></i
+              ><i class="shot__c shot__c--bl" aria-hidden="true"></i
+              ><i class="shot__c shot__c--br" aria-hidden="true"></i
+            ></span>
+          </h1>
+
+          <p class="hero__lead reveal" data-reveal style="--i: 2">
+            A full coding agent with a workspace around it: helpers in parallel, jobs that run for
+            hours without you, and a design system it reads before it writes. Built on pi — your
+            keys, any model, the meter in plain sight.
+          </p>
+
+          <div class="hero__actions reveal" data-reveal style="--i: 3">
+            <a class="btn btn--primary" href="https://github.com/AadiXC0DE/graphe/releases" rel="noopener"
+              ><svg class="btn__apple" viewBox="0 0 16 20" width="15" height="18" fill="currentColor" aria-hidden="true"><path d="M13.2 10.6c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.7.8-3.3.8-.7 0-1.7-.8-2.8-.8-1.5 0-2.8.8-3.6 2.1-1.5 2.6-.4 6.5 1.1 8.6.7 1 1.6 2.2 2.7 2.2 1.1 0 1.5-.7 2.8-.7 1.3 0 1.6.7 2.8.7 1.2 0 1.9-1 2.6-2.1.8-1.2 1.2-2.4 1.2-2.5-.1 0-2.2-.9-2.2-3.2zM11 4.1c.6-.7 1-1.7.9-2.7-.9 0-2 .6-2.6 1.3-.6.6-1.1 1.7-.9 2.6 1 .1 2-.5 2.6-1.2z"/></svg>Download for Mac</a
+            >
+            <a class="btn btn--ghost" href="#see">What it does</a>
+          </div>
+
+          <p class="hero__fine reveal" data-reveal style="--i: 4">
+            Open source, MIT · Any provider, your own key · Nothing leaves this computer
+          </p>
+        </div>
+
+        <!-- the window itself: four real screens, one frame -->
+        <figure class="stage reveal" data-reveal style="--i: 5">
+          <div class="stage__tabs" role="tablist" aria-label="Screens">
+            <button class="tab is-on" role="tab" aria-selected="true" data-view="work" id="tab-work">
+              Work
+            </button>
+            <button class="tab" role="tab" aria-selected="false" data-view="design" id="tab-design">
+              Design
+            </button>
+            <button class="tab" role="tab" aria-selected="false" data-view="history" id="tab-history">
+              History
+            </button>
+            <button class="tab" role="tab" aria-selected="false" data-view="skills" id="tab-skills">
+              Skills
+            </button>
+          </div>
+
+          <div class="frame">
+            <div class="frame__bar">
+              <span class="frame__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="frame__name mono" data-frame-name>graphe</span>
+            </div>
+            <div class="frame__screens">
+              <img
+                class="screen is-on"
+                data-screen="work"
+                src="assets/web/app-start-dark.webp"
+                width="2880"
+                height="1800"
+                alt="The Graphe window: the project's files on the left, things to start from in the middle, and a rail on the right holding what is waiting to be saved, what is running in the background, what is on a schedule, and the handover."
+                fetchpriority="high"
+              />
+              <img
+                class="screen"
+                data-screen="design"
+                src="assets/web/app-design-dark.webp"
+                width="2880"
+                height="1800"
+                alt="The design view, reading the project's own tokens.css: sixty-six styles, every colour named with its value beside it."
+                loading="lazy"
+              />
+              <img
+                class="screen"
+                data-screen="history"
+                src="assets/web/app-history-dark.webp"
+                width="2880"
+                height="1800"
+                alt="The history view: every saved moment drawn as lines, with short ids, parents and the names on each."
+                loading="lazy"
+              />
+              <img
+                class="screen"
+                data-screen="skills"
+                src="assets/web/app-skills-dark.webp"
+                width="2880"
+                height="1800"
+                alt="The skills view: craft installed off the shelf, each one described, ready to bring into a request."
+                loading="lazy"
+              />
+            </div>
+          </div>
+
+          <figcaption class="stage__cap mono">
+            Real screens, taken from the app · <span data-frame-cap>a plan, waiting for a yes</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ─────────────────────────────────────────── the three things ── -->
+      <section class="band" id="see">
+        <div class="head">
+          <p class="eyebrow reveal" data-reveal>What you actually get</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1">
+            The whole agent. Not a chat box with tools bolted on.
+          </h2>
+          <p class="head__lead reveal" data-reveal style="--i: 2">
+            pi is a serious coding harness and deliberately ships without sub-agents or plan mode.
+            Graphe is what it becomes with both, plus everything else an interface makes possible.
+          </p>
+        </div>
+
+        <div class="pillars">
+          <article class="pillar reveal" data-reveal>
+            <p class="pillar__no mono">01</p>
+            <h3>It works in parallel, and it keeps working</h3>
+            <p>
+              Send three helpers into a codebase at once — reviewer, researcher, builder — each its
+              own process with its own context. Run conversations side by side, each in its own
+              checkout. Set a job going and close the window: it carries on, and you come back to a
+              board of what finished, what's waiting, and what it cost.
+            </p>
+            <img
+              class="pillar__shot"
+              src="assets/web/see-it-before-you-say-yes-dark.webp"
+              width="1400"
+              height="1375"
+              alt="A finished piece of work waiting for a decision, with how it looks now beside how it would look if it were let in."
+              loading="lazy"
+            />
+          </article>
+
+          <article class="pillar reveal" data-reveal style="--i: 1">
+            <p class="pillar__no mono">02</p>
+            <h3>It reads your design system first</h3>
+            <p>
+              Colours, spacing and type are read as a spec before a file is touched, so the work
+              lands inside your system instead of on top of it. Figma frames come in as pictures and
+              variables as tokens. Every change is checked at phone, desktop and wide, and anything
+              that drifted from your own styles is named out loud.
+            </p>
+            <img
+              class="pillar__shot"
+              src="assets/web/crop-tokens-dark.webp"
+              width="1400"
+              height="574"
+              alt="A project's own colour tokens, each swatch named with its value beside it, read straight out of the project's stylesheet."
+              loading="lazy"
+            />
+          </article>
+
+          <article class="pillar reveal" data-reveal style="--i: 2">
+            <p class="pillar__no mono">03</p>
+            <h3>You can see the bill before it lands</h3>
+            <p>
+              pi does real work to keep a prompt cacheable — one stable session, cache points where
+              the provider needs them, every read and write recorded. Graphe puts the result on
+              screen: how much of each turn came back from cache, what the sitting cost in your own
+              currency, an estimate before a big job, and a ceiling that ends it.
+            </p>
+            <img
+              class="pillar__shot"
+              src="assets/web/crop-cost-dark.webp"
+              width="400"
+              height="250"
+              alt="The meter in the corner of the window: today's total, and a way to see where it went."
+              loading="lazy"
+            />
+          </article>
+        </div>
+      </section>
+
+      <!-- ───────────────────────────────────────────── everything else ── -->
+      <section class="band" id="everything">
+        <div class="head">
+          <p class="eyebrow reveal" data-reveal>The rest of it</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1">
+            None of this is an add-on.
+          </h2>
+          <p class="head__lead reveal" data-reveal style="--i: 2">
+            pi ships lean on purpose and expects you to bring the rest. Every one of these is in the
+            window the moment you open a folder — nothing to install, nothing to switch on, nothing
+            behind a tier.
+          </p>
+        </div>
+
+        <div class="sheet reveal" data-reveal>
+          <article class="cell">
+            <h3>Memory between sittings</h3>
+            <p>Facts kept per project on your machine, ranked by meaning, loaded at the next start.</p>
+          </article>
+          <article class="cell">
+            <h3>Helpers in parallel</h3>
+            <p>Send three at once — reviewer, researcher, helper — each read-only, under a budget.</p>
+          </article>
+          <article class="cell">
+            <h3>A review with a verdict</h3>
+            <p>Ships, needs work, or do not land. Findings ranked, with file, line and confidence.</p>
+          </article>
+          <article class="cell">
+            <h3>A real debugger</h3>
+            <p>Attaches lldb, dlv or debugpy to a stuck program. Reads frames, steps, evaluates.</p>
+          </article>
+          <article class="cell">
+            <h3>Bring your own tools</h3>
+            <p>Your MCP servers plug in through one file. Started on use, stopped with the sitting.</p>
+          </article>
+          <article class="cell">
+            <h3>Papers and PDFs</h3>
+            <p>An arxiv address comes back as words — title, authors, abstract, then page by page.</p>
+          </article>
+          <article class="cell">
+            <h3>Diagrams in the conversation</h3>
+            <p>Mermaid fences become pictures in your own palette, or stay code when they can't.</p>
+          </article>
+          <article class="cell">
+            <h3>Edits that cannot land blind</h3>
+            <p>A file that changed underneath is refused before a single byte is written.</p>
+          </article>
+          <article class="cell">
+            <h3>Figma, both directions</h3>
+            <p>Frames as pictures, variables as tokens, and drift detection that keeps you in step.</p>
+          </article>
+          <article class="cell">
+            <h3>Every width, checked</h3>
+            <p>Phone, tablet, desktop and wide — photographed, so you never decide from one size.</p>
+          </article>
+          <article class="cell">
+            <h3>Money, in your currency</h3>
+            <p>Every turn accounted for, and a split that separates your work from our own retries.</p>
+          </article>
+          <article class="cell">
+            <h3>Skills off the shelf</h3>
+            <p><span class="mono">@skill</span> brings in craft you installed; <span class="mono">/command</span> expands a prompt you wrote.</p>
+          </article>
+          <article class="cell">
+            <h3>Second thoughts, mid-run</h3>
+            <p>Queue it behind the turn or steer it into the turn. Asked quietly, never an error.</p>
+          </article>
+          <article class="cell">
+            <h3>History as lines</h3>
+            <p>The whole timeline drawn out — short ids, parents, branches — for when you want it.</p>
+          </article>
+          <article class="cell">
+            <h3>The folder as a tree</h3>
+            <p>Walk it, see what changed, open anything in the editor you already use.</p>
+          </article>
+          <article class="cell">
+            <h3>Name it, mark it, fork it</h3>
+            <p>Name a conversation, mark a moment worth returning to, fork a direction and try both.</p>
+          </article>
+        </div>
+      </section>
+      <!-- ────────────────────────────────────────── the page, in here ── -->
+      <section class="band band--away" id="page">
+        <div class="head">
+          <p class="eyebrow reveal" data-reveal>The page lives in the window</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1">
+            A browser, beside the conversation.
+          </h2>
+          <p class="head__lead reveal" data-reveal style="--i: 2">
+            Not a screenshot of your work, and not a tab you go and find. The running project sits
+            in the window next to the agent building it — which is what makes the four things below
+            possible at all.
+          </p>
+        </div>
+
+        <div class="sheet sheet--four reveal" data-reveal>
+          <article class="cell">
+            <h3>Servers that stay up</h3>
+            <p>
+              A dev server, an API, a watcher — several at once. They keep running after the turn
+              that started them and say where they can be reached, with a band above the composer
+              showing what is up and a press to stop it.
+            </p>
+          </article>
+          <article class="cell">
+            <h3>Comment on it, like a design</h3>
+            <p>
+              Click anything and write what should change, right where it is. It goes to the agent
+              as an instruction carrying the element and the line it was written on — no describing
+              which button you meant.
+            </p>
+          </article>
+          <article class="cell">
+            <h3>Point at anything</h3>
+            <p>
+              Which component made it, which of your tokens it uses, what drifted from them, and
+              where it was written — read off the running page rather than guessed from the source.
+            </p>
+          </article>
+          <article class="cell">
+            <h3>Every width, and your own browser</h3>
+            <p>
+              Phone, tablet and desktop without resizing anything. One press hands the same address
+              to Chrome when you want the devtools you already know.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────────────────────── how it works ── -->
+      <section class="band band--paper" id="how">
+        <div class="head">
+          <p class="eyebrow reveal" data-reveal>How a sitting goes</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1">
+            Open a folder. Ask for something.<br />Watch it happen.
+          </h2>
+        </div>
+
+        <ol class="steps" data-steps>
+          <li class="step reveal" data-reveal>
+            <span class="step__no mono">01</span>
+            <div class="step__body">
+              <h3>Point it at a project</h3>
+              <p>
+                No config file, no setup wizard. Open a folder and it is a project — recent ones sit
+                on a shelf with what each cost you last time.
+              </p>
+            </div>
+          </li>
+          <li class="step reveal" data-reveal>
+            <span class="step__no mono">02</span>
+            <div class="step__body">
+              <h3>Say what you want, however you have it</h3>
+              <p>
+                Type it, paste a screenshot of it, or drop in a Figma frame. Speak it if your hands
+                are busy. There is no syntax to learn.
+              </p>
+            </div>
+          </li>
+          <li class="step reveal" data-reveal>
+            <span class="step__no mono">03</span>
+            <div class="step__body">
+              <h3>Big jobs come back as a plan</h3>
+              <p>
+                A numbered plan, an estimate of what it will cost, and a wait for “Go ahead”. Small
+                jobs just get done.
+              </p>
+            </div>
+          </li>
+          <li class="step reveal" data-reveal>
+            <span class="step__no mono">04</span>
+            <div class="step__body">
+              <h3>It works where you can see it</h3>
+              <p>
+                The file tree marks what changed. The rail names what it is doing right now, what it
+                looked up, and what it has made so far.
+              </p>
+            </div>
+          </li>
+          <li class="step reveal" data-reveal>
+            <span class="step__no mono">05</span>
+            <div class="step__body">
+              <h3>You look, then you decide</h3>
+              <p>
+                Before and after, at phone, desktop and wide. Let it in, or set it aside — setting
+                aside keeps the work reachable rather than throwing it away.
+              </p>
+            </div>
+          </li>
+          <li class="step reveal" data-reveal>
+            <span class="step__no mono">06</span>
+            <div class="step__body">
+              <h3>Hand it to your team</h3>
+              <p>
+                A write-up with the before-and-after pictures in it, a properly named line of work,
+                and a request ready for whoever reviews. Or a page of what changed for somebody who
+                is not a developer at all.
+              </p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ───────────────────────────────────────────── built on pi ── -->
+      <section class="band" id="pi">
+        <div class="split">
+          <div class="split__words">
+            <p class="eyebrow reveal" data-reveal>The foundation</p>
+            <h2 class="head__title reveal" data-reveal style="--i: 1">
+              Everything pi gives you.<br />Everything a terminal can't.
+            </h2>
+            <p class="lead reveal" data-reveal style="--i: 2">
+              <span class="mono">pi</span> is a serious coding harness: any provider, any model,
+              real extensions, and prompt caching engineered properly rather than hoped for. It
+              ships deliberately without sub-agents or plan mode, and it ships in a terminal.
+            </p>
+            <p class="lead reveal" data-reveal style="--i: 3">
+              Graphe is everything around it — sub-agents and plan mode among them, plus the window,
+              the guard, the version history, the design panel, the memory, the money and the
+              handover. One module owns every pi import, so an upgrade breaks one file rather than
+              fifty.
+            </p>
+
+            <ul class="facts reveal" data-reveal style="--i: 4">
+              <li><span class="mono">Any</span> provider, any model, your own key</li>
+              <li><span class="mono">MCP</span> servers and pi extensions, both</li>
+              <li><span class="mono">Local</span> memory and embeddings, offline</li>
+              <li><span class="mono">MIT</span> licensed, all of it readable</li>
+            </ul>
+          </div>
+
+          <div class="from reveal" data-reveal style="--i: 2">
+            <div class="from__side">
+              <p class="from__who mono">pi gives you</p>
+              <ul class="from__list">
+                <li>Any provider, any model, your own key</li>
+                <li>Prompt caching engineered, not hoped for</li>
+                <li>Extensions, skills and prompt templates</li>
+                <li>Sessions, branching and compaction</li>
+                <li>Read, write, edit, find, grep, bash</li>
+              </ul>
+            </div>
+
+            <div class="from__side from__side--ours">
+              <p class="from__who mono">Graphe adds</p>
+              <ul class="from__list">
+                <li>Sub-agents, several at once</li>
+                <li>Plan mode, with what it will cost</li>
+                <li>A window: projects, tabs, rails, two themes</li>
+                <li>Your design system, read as a spec</li>
+                <li>Version history, with a picture of each change</li>
+                <li>A guard that asks in plain words</li>
+                <li>Background jobs, schedules and servers</li>
+                <li>Code review with a verdict, and the handover</li>
+                <li>Memory between sittings, kept on your machine</li>
+                <li>The money, on screen, in your own currency</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────────────────────────────────── long-horizon work ── -->
+      <section class="band band--away" id="away">
+        <div class="head">
+          <p class="eyebrow reveal" data-reveal>Work that outlasts your attention</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1">
+            Send it away.<br />Come back to a board.
+          </h2>
+          <p class="head__lead reveal" data-reveal style="--i: 2">
+            A job that takes four hours does not need you watching it for four hours. Set it running
+            in a copy of your project, close the window, go to lunch. It carries on.
+          </p>
+        </div>
+
+        <div class="away">
+          <div class="board reveal" data-reveal>
+            <p class="board__head mono">Background work · 3 pieces</p>
+
+            <article class="piece piece--running">
+              <div class="piece__top">
+                <h3>Rebuild the pricing page from the Figma library</h3>
+                <span class="piece__state mono">still going</span>
+              </div>
+              <p class="piece__says">On step 4 of 9 — rewriting the cards against your spacing scale.</p>
+              <div class="bar" aria-hidden="true"><span class="bar__fill"></span></div>
+            </article>
+
+            <article class="piece piece--waiting">
+              <div class="piece__top">
+                <h3>Add the pricing table to the home page</h3>
+                <span class="piece__state mono">waiting on you</span>
+              </div>
+              <p class="piece__says">
+                It wants to add something from the internet that runs its own setup steps. It has not.
+              </p>
+              <div class="piece__asks">
+                <button class="btn btn--tiny" type="button">Let it in</button>
+                <button class="btn btn--tiny btn--quiet" type="button">Not this time</button>
+              </div>
+            </article>
+
+            <article class="piece piece--done">
+              <div class="piece__top">
+                <h3>Fix every heading that broke on a phone</h3>
+                <span class="piece__state mono">ready to look at</span>
+              </div>
+              <p class="piece__says">Eleven pages, each photographed before and after. $0.41.</p>
+              <div class="piece__thumbs" aria-hidden="true">
+                <span></span><span></span><span></span><span></span>
+              </div>
+            </article>
+          </div>
+
+          <div class="away__points">
+            <div class="point reveal" data-reveal>
+              <h3>Every conversation gets its own copy</h3>
+              <p>
+                Two, three, four jobs run at the same time without treading on each other, each in its
+                own checkout, and the work comes home when it is done. Running at once is the point,
+                not a queue.
+              </p>
+            </div>
+            <div class="point reveal" data-reveal style="--i: 1">
+              <h3>Put it on a schedule</h3>
+              <p>
+                Some work should happen without being asked — a nightly pass over the design system, a
+                weekly check that nothing drifted. Set it once.
+              </p>
+            </div>
+            <div class="point reveal" data-reveal style="--i: 2">
+              <h3>A document becomes a shipped change</h3>
+              <p>
+                Hand it a PRD and it comes back as a build plan with acceptance and a tracked
+                checklist. Say “get on with it” and it runs the whole thing without stopping to ask.
+              </p>
+            </div>
+            <div class="point reveal" data-reveal style="--i: 3">
+              <h3>Under a ceiling you set</h3>
+              <p>
+                Long jobs are where money goes quietly. There is an estimate before it starts, a
+                running total while it works, and a ceiling that ends the sitting rather than the
+                month.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <figure class="wide reveal" data-reveal>
+          <img
+            src="assets/web/app-start-dark.webp"
+            width="1800"
+            height="1125"
+            alt="A new conversation, with things to start from, and a rail showing background work, what is on a schedule, and what to do when the work is done."
+            loading="lazy"
+          />
+          <figcaption class="mono">
+            The rail keeps background work, schedules and the handover in one column
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ───────────────────────────────────────────── two audiences ── -->
+      <section class="band band--paper" id="both">
+        <div class="head">
+          <p class="eyebrow reveal" data-reveal>Both audiences, one app</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1">
+            Plain words on top.<br />The real thing underneath.
+          </h2>
+          <p class="head__lead reveal" data-reveal style="--i: 2">
+            A designer never has to learn what a branch is. A developer never has to guess what just
+            happened. It is one switch, in the row where your hand already is.
+          </p>
+        </div>
+
+        <!-- Side by side rather than a switch. The claim is that these are the
+             same events said twice, and a toggle asks somebody to remember the
+             other half instead of showing it to them. -->
+        <div class="both reveal" data-reveal>
+          <p class="both__head both__head--plain">What you read</p>
+          <p class="both__head both__head--real">What it ran</p>
+
+          <p class="both__plain">Sent. Your team can pick it up from here.</p>
+          <p class="both__real mono">gh pr create --head feat/pricing-cards-2f9x</p>
+
+          <p class="both__plain">Four changes are waiting to be saved.</p>
+          <p class="both__real mono">git status --porcelain</p>
+
+          <p class="both__plain">Saved before a big change — you can put it back.</p>
+          <p class="both__real mono">git commit -m "save point before restore"</p>
+
+          <p class="both__plain">The line of work this sits on.</p>
+          <p class="both__real mono">build-from-main → origin/main</p>
+
+          <p class="both__plain">It read your colours and sizes before it started.</p>
+          <p class="both__real mono">read src/styles/tokens.css · 66 properties</p>
+        </div>
+
+        <p class="both__note reveal" data-reveal>
+          One switch in the composer moves every line in this project from the left column to the
+          right. Nothing is hidden from the person who wants it, and nothing is imposed on the
+          person who doesn't.
+        </p>
+      </section>
+
+
+      <!-- ─────────────────────────────────────────── quiet promises ── -->
+      <section class="band band--promises">
+        <div class="promises">
+          <article class="promise reveal" data-reveal>
+            <h2>Nothing leaves this computer.</h2>
+            <p>
+              Your code, your keys and your pictures stay on the machine. Exactly one feature in the
+              whole app sends anything anywhere, it says so before it does, and it refuses outright if
+              a private key is written into what would be sent.
+            </p>
+            <p class="promise__fine mono">
+              deny by default · tested against prompt injection · a snapshot before anything
+              destructive
+            </p>
+          </article>
+
+          <article class="promise reveal" data-reveal style="--i: 1">
+            <h2>You always know what it cost.</h2>
+            <p>
+              An estimate before a big job, a running total while it works, and an end-of-sitting
+              split that shows what your work cost and what our own retries cost. In your currency,
+              not in tokens.
+            </p>
+            <p class="promise__fine mono">
+              your key · your account · no subscription in the middle
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ────────────────────────────────────────────────── where it is ── -->
+      <section class="band band--where">
+        <div class="where reveal" data-reveal>
+          <p class="eyebrow">Where it is up to</p>
+          <h2 class="where__title">
+            In beta, in the open, and built by one person.
+          </h2>
+          <p class="where__says">
+            Everything on this page works today — it is what the app does, photographed from the app.
+            What beta means here is that the rough edges are mine to find and yours to report: the
+            interface still moves, the first release is recent, and the fastest way to change
+            something is to say so. The whole thing is MIT, so nothing about it is a black box.
+          </p>
+          <div class="where__row">
+            <a class="btn btn--ghost btn--small" href="https://github.com/AadiXC0DE/graphe/issues" rel="noopener"
+              >Tell me what broke</a
+            >
+            <a class="btn btn--ghost btn--small" href="https://github.com/AadiXC0DE/graphe" rel="noopener"
+              >Read every line</a
+            >
+          </div>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────── the ask ── -->
+      <section class="band band--cta">
+        <div class="glow glow--cta" aria-hidden="true"></div>
+        <div class="cta reveal" data-reveal>
+          <h2 class="cta__title">
+            Open a folder.<br />Ask for something.<br /><em>Watch it happen.</em>
+          </h2>
+          <div class="hero__actions">
+            <a class="btn btn--primary" href="https://github.com/AadiXC0DE/graphe/releases" rel="noopener"
+              ><svg class="btn__apple" viewBox="0 0 16 20" width="15" height="18" fill="currentColor" aria-hidden="true"><path d="M13.2 10.6c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.7.8-3.3.8-.7 0-1.7-.8-2.8-.8-1.5 0-2.8.8-3.6 2.1-1.5 2.6-.4 6.5 1.1 8.6.7 1 1.6 2.2 2.7 2.2 1.1 0 1.5-.7 2.8-.7 1.3 0 1.6.7 2.8.7 1.2 0 1.9-1 2.6-2.1.8-1.2 1.2-2.4 1.2-2.5-.1 0-2.2-.9-2.2-3.2zM11 4.1c.6-.7 1-1.7.9-2.7-.9 0-2 .6-2.6 1.3-.6.6-1.1 1.7-.9 2.6 1 .1 2-.5 2.6-1.2z"/></svg>Download for Mac</a
+            >
+            <a class="btn btn--ghost" href="https://github.com/AadiXC0DE/graphe" rel="noopener"
+              >Read the source</a
+            >
+          </div>
+          <p class="cta__fine mono">Apple silicon and Intel · macOS · bring your own model key</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot__inner">
+        <a class="mark mark--foot" href="#top" aria-label="Graphe, back to the top">
+          <svg class="mark__glyph" viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="9" />
+            <g class="mark__nodes">
+              <circle cx="22" cy="9" r="3" />
+              <circle cx="22" cy="23" r="3" />
+              <circle cx="10" cy="16" r="3.4" />
+              <path d="M12.8 14.4 19.2 10.6M12.8 17.6l6.4 3.8" stroke-width="2" stroke-linecap="round" />
+            </g>
+          </svg>
+          <span class="mark__word">Graphe</span>
+        </a>
+        <p class="foot__says">An agentic coding platform for the desktop. Built on pi.</p>
+        <nav class="foot__links" aria-label="Elsewhere">
+          <a href="https://github.com/AadiXC0DE/graphe" rel="noopener">Graphe on GitHub</a>
+          <a href="https://github.com/AadiXC0DE" rel="noopener">Aaditya Chowdhury</a>
+          <a href="https://github.com/AadiXC0DE/graphe/releases" rel="noopener">Releases</a>
+          <a href="https://github.com/AadiXC0DE/graphe/blob/main/LICENSE" rel="noopener">MIT</a>
+          <a href="https://github.com/earendil-works/pi" rel="noopener">pi</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script src="main.js" type="module"></script>
+  </body>
+</html>

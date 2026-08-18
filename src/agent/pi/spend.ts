@@ -50,9 +50,15 @@
  * should be described to users as "roughly", never as an audit.
  */
 
-import type { Money, SpendReason, ToolCall } from '../types';
+import type { Money, SittingUsage, SpendReason, ToolCall } from '../types';
 import { describeCall } from '../../lib/describe';
-import { PI_CURRENCY, Purse, priceOfPiMessage } from './usage';
+import {
+  PI_CURRENCY,
+  Purse,
+  cacheHitShare,
+  shortModelName,
+  usageOfPiMessage,
+} from './usage';
 
 /** What we call a stretch of work when nothing more specific has happened yet.
  *  Reads correctly both on its own and spliced into "mostly me retrying …". */
@@ -115,6 +121,15 @@ export class SpendWatch {
   #retrying = false;
   /** The last thing we were seen doing, for a turn with no tool calls in it. */
   #doing: string = DEFAULT_SPEND_LABEL;
+  /** Prompt-side counts from Pi, for the cache-hit share. Never shown as counts. */
+  #input = 0;
+  #cacheRead = 0;
+  #cacheWrite = 0;
+  /** True once any turn reported a non-zero cache field — otherwise a 0% hit
+   *  would mean "this provider does not cache", not "nothing hit". */
+  #sawCache = false;
+  /** Whole currency units billed per model name, for "which model most". */
+  readonly #byModel = new Map<string, number>();
 
   constructor(options: { currency?: string } = {}) {
     this.#purse = new Purse(options.currency ?? PI_CURRENCY);
@@ -122,6 +137,31 @@ export class SpendWatch {
 
   get currency(): string {
     return this.#purse.currency;
+  }
+
+  /** How this sitting used the model so far. Safe to call any time. */
+  usage(): SittingUsage {
+    const reused = cacheHitShare({
+      input: this.#input,
+      cacheRead: this.#cacheRead,
+      cacheWrite: this.#cacheWrite,
+    });
+    const rows = [...this.#byModel.entries()]
+      .map(([name, major]) => ({ name, major }))
+      .sort((a, b) => b.major - a.major || a.name.localeCompare(b.name));
+    const total = rows.reduce((sum, one) => sum + one.major, 0);
+    const byModel =
+      total <= 0
+        ? []
+        : rows.map((one) => ({
+            name: one.name,
+            share: one.major / total,
+          }));
+    return {
+      reusedShare: this.#sawCache ? reused : null,
+      mostUsed: byModel[0]?.name ?? null,
+      byModel,
+    };
   }
 
   /** A call the Guard allowed. */
@@ -204,7 +244,18 @@ export class SpendWatch {
   }
 
   #turnPriced(event: unknown): SpendReport | null {
-    const price = priceOfPiMessage(event);
+    const usage = usageOfPiMessage(event);
+    if (usage !== null) {
+      this.#input += usage.input;
+      this.#cacheRead += usage.cacheRead;
+      this.#cacheWrite += usage.cacheWrite;
+      if (usage.cacheRead > 0 || usage.cacheWrite > 0) this.#sawCache = true;
+      if (usage.model !== null && usage.costTotal !== null && usage.costTotal > 0) {
+        const name = shortModelName(usage.model);
+        this.#byModel.set(name, (this.#byModel.get(name) ?? 0) + usage.costTotal);
+      }
+    }
+    const price = usage?.costTotal ?? null;
     const blaming = this.#retrying || this.#unresolved.length > 0;
     const label = blaming ? this.#worstOf(this.#unresolved) : this.#doing;
     // Whatever failed has now been answered. If the answer fails in its turn,

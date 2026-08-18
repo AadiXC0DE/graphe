@@ -6,6 +6,11 @@
 
 .away {
   display: grid;
+  /* A grid column is as wide as the widest thing in it and will not shrink
+     below that on its own, so in a narrow window every row of this panel hung
+     over the edge together. `minmax(0, …)` lets the column be narrower than its
+     contents want, and the contents wrap instead. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   padding: var(--space-4) 0 0;
 }
@@ -43,6 +48,39 @@
   color: var(--text-faint);
   font-size: var(--text-xs);
   line-height: 1.45;
+}
+
+.away__goal {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  cursor: pointer;
+}
+
+.away__goal input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.away__goal span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.away__goalname {
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--text);
+}
+
+.away__goal .away__hint {
+  display: block;
 }
 
 .away__spent {
@@ -253,17 +291,103 @@
   gap: var(--space-2);
 }
 
+/* Two words, one of them true. Sits under the title because it changes what
+   the whole panel is about, not what one control in it does. */
+.away__scope {
+  display: inline-flex;
+  /* The panel is narrow at small window widths, and two words plus padding do
+     not fit in it. Shrink rather than hang over the edge. */
+  max-width: 100%;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+
+.away__scopeone {
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  padding: 0 var(--space-2);
+  min-height: 26px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.away__scopeone:hover {
+  color: var(--text);
+}
+
+.away__scopeone--on {
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+
+.away__scopeone:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.away__across {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* On a question from another folder, the folder is the first thing to read:
+   answering the wrong project's question is the mistake this prevents. */
+.away__wherefrom {
+  margin: 0 0 2px;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .away__scopeone {
+    transition: none;
+  }
+}
+
+.away__plus {
+  flex: none;
+  color: currentColor;
+}
+
 .away__new {
   flex: none;
-  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 26px;
   padding: 0 var(--space-2);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
   font-size: var(--text-2xs);
   color: var(--text-muted);
   white-space: nowrap;
   transition:
     color var(--dur-micro) var(--ease-hover),
-    background-color var(--dur-micro) var(--ease-hover);
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.away__new:active {
+  transform: scale(0.97);
 }
 
 .away__new:focus-visible {
@@ -273,7 +397,27 @@
 
 @media (hover: hover) and (pointer: fine) {
   .away__new:hover {
-    background: var(--bg-sunken);
+    border-color: var(--border-strong);
     color: var(--text);
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .away__new:active {
+    transform: none;
+  }
+}
+
+/* Order, offered where the work is asked for rather than in a screen of its
+   own. Quiet: most work waits for nothing, and this is the uncommon case. */
+.away__after {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.away__afterlabel {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
 }

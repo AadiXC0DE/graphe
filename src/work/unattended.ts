@@ -39,7 +39,22 @@ export const awayWords = {
   no: 'No, leave it',
   /** When a piece of work was let go with a question still open. */
   turnedDown: 'I stopped rather than deciding for you, and then this was let go.',
+  /** Work that carries on unwatched is where spend multiplies fastest, so the
+   *  ceiling holds here before it holds anywhere else. */
+  overTheLimit: 'This didn’t start: you’ve reached the limit you set.',
   nothing: 'Nothing is running.',
+  /** Two words for one board. Work does not stop because somebody opened
+   *  another folder, and until this there was nowhere to see that. */
+  here: 'This project',
+  everywhere: 'Everywhere',
+  /** Above the board when it is showing every folder at once. */
+  acrossSays(projects: number, running: number): string {
+    const where = projects === 1 ? 'one project' : `${String(projects)} projects`;
+    if (running === 0) return `Nothing running, across ${where}.`;
+    return `${running === 1 ? 'One thing' : `${String(running)} things`} running, across ${where}.`;
+  },
+  /** When the only work anywhere is here. */
+  onlyHere: 'Nothing is running in your other projects.',
   keepGoing: 'Set something running',
   keepGoingHint:
     'I carry on with this in a copy of your project, even if you close the window. Whatever it makes is waiting for you, as a picture, when you come back.',
@@ -48,6 +63,11 @@ export const awayWords = {
   /** Under the heading, once, so nobody has to press something to find out
    *  what it does. */
   what: 'Work that carries on in a copy of your project, whether or not this window stays open.',
+  /** Overnight mode: one switch, full access, no questions, wall clock. */
+  untilDone: 'Until it’s done',
+  untilDoneHint:
+    'Full computer access for this run. I will not stop to ask, and I stop myself after four hours if something is stuck. Your project stays in a copy until you keep the result.',
+  startUntilDone: 'Start and keep going',
 } as const;
 
 const NUMBERS = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];

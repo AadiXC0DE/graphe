@@ -12,15 +12,12 @@ type Props = {
   technicalDetails?: string;
 };
 
-/** Something went wrong, said calmly.
+/** Something went wrong, said in the thread rather than dropped on it.
  *
- * Slower than everything else in the app: 280ms, no shake, no red flash, no
- * jolt. Panic is contagious, and a steady interface during a failure is what
- * keeps a nervous user in the product (notes/strategy/UI-DESIGN.md). Colour carries the
- * severity; motion stays gentle.
- *
- * Three sentences at most before the one button, and the stack trace stays
- * folded away until someone asks for it. */
+ * A failure is usually one small interruption in a much larger conversation.
+ * This is deliberately a compact recovery note, not a modal-sized dark card:
+ * it keeps the useful next action within reach without making a routine
+ * failure look like the application has fallen apart. */
 export default function ErrorCard({
   what,
   because,
@@ -40,20 +37,19 @@ export default function ErrorCard({
         <h2 className="errorcard__what">{what}</h2>
       </div>
 
-      <p className="errorcard__because">{because}</p>
-
-      <div className="errorcard__actions">
+      <div className="errorcard__body">
+        <p className="errorcard__because">{because}</p>
         <button type="button" className="errorcard__button" onClick={onAction}>
           {actionLabel}
         </button>
-      </div>
 
-      {technicalDetails ? (
-        <details className="errorcard__tech">
-          <summary className="errorcard__summary">Show technical details</summary>
-          <pre className="errorcard__pre">{technicalDetails}</pre>
-        </details>
-      ) : null}
+        {technicalDetails ? (
+          <details className="errorcard__tech">
+            <summary className="errorcard__summary">Technical details</summary>
+            <pre className="errorcard__pre">{technicalDetails}</pre>
+          </details>
+        ) : null}
+      </div>
     </section>
   );
 }

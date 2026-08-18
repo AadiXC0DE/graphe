@@ -6,6 +6,7 @@ import type {
   ModelChoice,
   ProviderMethod,
 } from '../lib/ipc';
+import { connectBilling } from '../cost/phrasing';
 import './ConnectModal.css';
 
 type Props = {
@@ -124,6 +125,14 @@ export default function ConnectModal({
           </button>
         </header>
 
+        {/* Before the click, not after the first bill. Losing a few sign-ups
+            here is enormously cheaper than losing trust later. */}
+        <section className="connectmodal__billing">
+          <h3 className="connectmodal__billingtitle">{connectBilling.title}</h3>
+          <p className="connectmodal__billingbody">{connectBilling.body}</p>
+          <p className="connectmodal__billingnote">{connectBilling.reassurance}</p>
+        </section>
+
         {busy ? <StepLine step={step ?? null} onAnswer={onAnswer} /> : null}
 
         {state === null || state.providers.length <= 6 ? null : (
@@ -233,22 +242,28 @@ export default function ConnectModal({
                   ) : (
                     <div className="connectmodal__connectrow">
                       {provider.methods.map((method) => (
-                        <button
-                          key={method}
-                          type="button"
-                          className="connectmodal__action"
-                          onClick={() => onConnect(provider.providerId, method)}
-                          disabled={busy}
-                        >
-                          {method === 'oauth'
-                            ? (provider.oauthLabel ?? `Sign in with ${provider.name}`)
-                            : /* The provider's own wording when it has one — the
-                                 thing you go and fetch is called an API key on
-                                 their site, and renaming it here would only make
-                                 it harder to find. Ours is the fallback, and it
-                                 says what you do rather than what it is. */
-                              (provider.apiKeyLabel ?? `Paste a key from ${provider.name}`)}
-                        </button>
+                        <span key={method} className="connectmodal__way">
+                          <button
+                            type="button"
+                            className="connectmodal__action"
+                            onClick={() => onConnect(provider.providerId, method)}
+                            disabled={busy}
+                          >
+                            {method === 'oauth'
+                              ? (provider.oauthLabel ?? `Sign in with ${provider.name}`)
+                              : /* The provider's own wording when it has one — the
+                                   thing you go and fetch is called an API key on
+                                   their site, and renaming it here would only make
+                                   it harder to find. Ours is the fallback, and it
+                                   says what you do rather than what it is. */
+                                (provider.apiKeyLabel ?? `Paste a key from ${provider.name}`)}
+                          </button>
+                          {/* The difference between the two, where the choice is
+                              actually made. */}
+                          <span className="connectmodal__how">
+                            {method === 'oauth' ? connectBilling.signIn : connectBilling.apiKey}
+                          </span>
+                        </span>
                       ))}
                       {provider.methods.length === 0 ? (
                         <span className="connectmodal__emptymethods">

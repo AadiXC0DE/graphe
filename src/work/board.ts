@@ -53,6 +53,13 @@ export const boardWords = {
   ready: 'Ready to look at',
   broke: 'Didn’t work',
   needsYou: 'Waiting for your answer',
+  /** On a card that is one of several goes at the same thing. Keeping one of
+   *  these is a choice between them, not a choice about it. */
+  oneOf: (at: number, of: number): string => `Way ${String(at)} of ${String(of)}`,
+  /** Said on the card that takes the decision, so nobody presses it expecting
+   *  the others to still be there. */
+  insteadOfOthers: (of: number): string =>
+    `Using this one throws away the other ${of === 2 ? 'way' : `${String(of - 1)} ways`}.`,
 } as const;
 
 /** What wants a person comes first, then what is happening, then what has not

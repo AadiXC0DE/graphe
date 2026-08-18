@@ -37,8 +37,8 @@ export type Handover = {
  *  can be read whole and swept. */
 export const handoverWords = {
   /** The control itself. */
-  label: 'Send it for review',
-  hint: 'Puts the work, the pictures and a written summary of what changed where your team picks it up.',
+  label: 'Hand it to your team',
+  hint: 'Puts the work, the pictures and a written summary where your team already keeps this project.',
   /** Said before anything leaves. */
   aboutTo:
     'This is the only part of Graphe that sends anything off this computer. Your work, the pictures of it and the description below go to the place your team already keeps this project.',
@@ -51,11 +51,10 @@ export const handoverWords = {
   nothingToHandOver:
     'There is nothing to send yet. Ask me for a change first, and this will have something to send.',
   couldNotSend: 'I could not send it, so nothing has left this computer.',
-  /** The picture problem, said honestly rather than shipped broken. */
+  /** The picture problem, said honestly rather than shipped broken. Only said
+   *  when there are pictures to say it about. */
   picturesTravel:
     'The pictures go along with the work, so they show up in the write-up rather than being links to somewhere they might not stay.',
-  noPictures:
-    'There are no pictures of this one — nothing was photographed while it was being made.',
 } as const;
 
 /** The plain sentence somebody gets instead of their key being sent anywhere. */
@@ -66,9 +65,7 @@ const REFUSAL =
 /* Naming the work                                                             */
 /* -------------------------------------------------------------------------- */
 
-/** Ours, so a project full of somebody else's names never collides with one of
- *  these and nobody has to wonder where it came from. */
-const PREFIX = 'graphe/';
+import { CONVENTIONAL_TYPES, conventionalType } from '../lib/conventional';
 
 /** Long enough to recognise, short enough to read in a list. */
 const MOST = 48;
@@ -79,6 +76,7 @@ const THE_PROJECT_ITSELF = new Set(['main', 'master', 'trunk', 'develop', 'defau
 
 const MARKS = /[\u0300-\u036f]/g;
 /** Anything that would make a line of somebody's own words behave as markup. */
+// eslint-disable-next-line no-control-regex -- control characters are exactly what this strips
 const CONTROL = /[\u0000-\u001f\u007f]/g;
 
 function slug(text: string): string {
@@ -106,8 +104,9 @@ function tail(at: number): string {
  * can never be a name somebody else is already using.
  */
 export function nameForWork(title: string, at: number): string {
+  const type = conventionalType(title);
   const middle = slug(title);
-  return `${PREFIX}${middle === '' ? 'work' : middle}-${tail(at)}`;
+  return `${type}/${middle === '' ? 'work' : middle}-${tail(at)}`;
 }
 
 /**
@@ -119,10 +118,13 @@ export function nameForWork(title: string, at: number): string {
  * itself" can wear that prefix.
  */
 export function safeToWriteTo(name: string, theProjectItself: string | null): boolean {
-  if (!name.startsWith(PREFIX)) return false;
-  const rest = name.slice(PREFIX.length);
-  if (rest === '' || rest.includes('/') || rest.includes('..')) return false;
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(rest)) return false;
+  // Ours is always one known type, one slash, one slug — never a path, never a
+  // walk upwards, never somebody else's name.
+  const shape = /^([a-z]+)\/([a-z0-9][a-z0-9-]*)$/.exec(name);
+  if (shape === null) return false;
+  if (!(CONVENTIONAL_TYPES as readonly string[]).includes(shape[1] ?? '')) return false;
+  const rest = shape[2] ?? '';
+  if (rest.includes('..')) return false;
   if (THE_PROJECT_ITSELF.has(rest)) return false;
   if (theProjectItself !== null && name === theProjectItself) return false;
   return true;
@@ -158,30 +160,71 @@ function cell(text: string): string {
   return plain(text).replace(/\|/g, '\\|');
 }
 
+/** Titles that are the timeline talking about its own housekeeping rather than
+ *  naming something somebody asked for. The timeline is a view in the window;
+ *  none of its bookkeeping belongs in front of a reviewer. */
+const HOUSEKEEPING =
+  /^(merge\b|revert\b|bump\b|initial commit\b|wip\b|save point$|saved (what you had|before)\b|made a few changes$|a working version$|went back to\b)/i;
+
+/**
+ * Does this title say anything a reviewer needs?
+ *
+ * The write-up is built from titles that describe a change. Everything else the
+ * timeline holds — the moments it saved on its own, the housekeeping that came
+ * back from elsewhere — is for the window that shows the timeline, not for a
+ * description somebody has to read before approving.
+ */
+export function worthTelling(title: string): boolean {
+  const one = plain(title);
+  return one !== '' && !HOUSEKEEPING.test(one);
+}
+
 const COUNTS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'] as const;
 
 function counted(many: number): string {
   return COUNTS[many] ?? String(many);
 }
 
-/** The one-line answer before anybody scrolls. */
+function anyPicture(piece: Piece): boolean {
+  return piece.pictures.before !== null || piece.pictures.after !== null;
+}
+
+function bothPictures(piece: Piece): boolean {
+  return piece.pictures.before !== null && piece.pictures.after !== null;
+}
+
+/** The one-line answer before anybody scrolls. It promises pictures only when
+ *  there are pictures, because the line right under it is the first thing a
+ *  reader checks it against. */
 export function opening(handover: Handover): string {
   const many = handover.pieces.length;
   if (many === 0) return 'Nothing changed.';
-  if (many === 1) return 'One change, with a picture of it before and after.';
-  return `${counted(many)} changes, each with a picture of it before and after.`;
+
+  const shown = handover.pieces.filter(anyPicture).length;
+  const paired = handover.pieces.every(bothPictures);
+  if (many === 1) {
+    if (paired) return 'One change, with a picture of it before and after.';
+    return shown === 1 ? 'One change, with a picture of it.' : 'One change.';
+  }
+  if (paired) return `${counted(many)} changes, each with a picture of it before and after.`;
+  if (shown === 0) return `${counted(many)} changes.`;
+  return `${counted(many)} changes, ${counted(shown).toLowerCase()} of them with pictures.`;
 }
 
-/** The title on the request itself. */
+/** The title on the request itself. Never the timeline's own housekeeping —
+ *  what the team sees at the top of the list has to name the work. */
 export function titleOf(handover: Handover): string {
   const named = plain(handover.title);
-  return named === '' ? plain(handover.project) || 'Design changes' : named;
+  if (named === '' || !worthTelling(named)) return plain(handover.project) || 'Design changes';
+  return named;
 }
 
 function shownPictures(pictures: Pictures, title: string): string {
   const before = pictures.before;
   const after = pictures.after;
-  if (before === null && after === null) return `_${handoverWords.noPictures}_`;
+  // Nothing at all rather than a line apologising for it: the opening line
+  // already stopped promising a picture that was never taken.
+  if (before === null && after === null) return '';
   if (before !== null && after !== null) {
     return [
       '| Before | After |',
@@ -194,14 +237,28 @@ function shownPictures(pictures: Pictures, title: string): string {
   return `<img src="${only ?? ''}" alt="${cell(title)}" width="420">\n\n_${label}._`;
 }
 
+/** The sentences a piece adds under its own heading, which may be none. A
+ *  description that repeats the heading underneath it reads like a machine
+ *  filling a template, so an empty sentence stays empty. */
+function saidAbout(piece: Piece): string[] {
+  const said: string[] = [];
+  const says = plain(piece.says);
+  if (says !== '' && says !== plain(piece.title)) said.push(says);
+  if (piece.where !== null && piece.where.trim() !== '') said.push(plain(piece.where));
+  return said;
+}
+
+/** A piece that is only a name. Worth listing; not worth a heading with nothing
+ *  underneath it. */
+function nameOnly(piece: Piece): boolean {
+  return !anyPicture(piece) && saidAbout(piece).length === 0;
+}
+
 function sectionFor(piece: Piece): string {
   const lines = [`### ${plain(piece.title)}`];
-  // A description that repeats the heading underneath it reads like a machine
-  // filling a template, so an empty sentence stays empty.
-  const says = plain(piece.says);
-  if (says !== '' && says !== plain(piece.title)) lines.push('', says);
-  if (piece.where !== null && piece.where.trim() !== '') lines.push('', plain(piece.where));
-  lines.push('', shownPictures(piece.pictures, piece.title));
+  for (const said of saidAbout(piece)) lines.push('', said);
+  const pictures = shownPictures(piece.pictures, piece.title);
+  if (pictures !== '') lines.push('', pictures);
   return lines.join('\n');
 }
 
@@ -213,26 +270,24 @@ function sectionFor(piece: Piece): string {
  * person approving this actually needs: what it looks like now, and why.
  */
 export function describeForReview(handover: Handover): string {
-  const parts: string[] = [
+  const blocks: string[] = [
     `## What changed in ${plain(handover.project) || 'this project'}`,
-    '',
     opening(handover),
   ];
 
-  if (handover.pieces.length > 0) {
-    parts.push('', ...handover.pieces.map(sectionFor).flatMap((one) => [one, '']));
-    parts.pop();
+  // Changes we watched happen get their heading and their pictures. Changes we
+  // only know the name of get one line each — a heading over an empty section
+  // is a template announcing that it had nothing to fill itself with.
+  const named = handover.pieces.filter(nameOnly);
+  if (named.length > 0) blocks.push(named.map((one) => `- ${plain(one.title)}`).join('\n'));
+  for (const piece of handover.pieces) {
+    if (!nameOnly(piece)) blocks.push(sectionFor(piece));
   }
 
-  parts.push(
-    '',
-    '---',
-    '',
-    `_${handoverWords.picturesTravel}_`,
-    '',
-    '_Written by Graphe from the work itself, not from the changed lines._',
-  );
-  return `${parts.join('\n')}\n`;
+  blocks.push('---');
+  if (handover.pieces.some(anyPicture)) blocks.push(`_${handoverWords.picturesTravel}_`);
+  blocks.push('_Written by Graphe from the work itself, not from the changed lines._');
+  return `${blocks.join('\n\n')}\n`;
 }
 
 /** Every word the description would put in front of a reader. Pictures are left

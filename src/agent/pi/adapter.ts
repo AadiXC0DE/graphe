@@ -36,13 +36,21 @@
 
 import type { GuardFacts } from '../guard/policy';
 import { evaluate, requiresSnapshot } from '../guard/policy';
+import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
-import { grapheTools } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type PutOnBoard } from './tools';
+import { anchorEditTool, taggedReadTool } from './anchor-edit';
+import * as debug from './debug';
+import { McpRegistry, mcpTool, readMcpConfig } from './mcp';
+import { parseReview } from './review';
+import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
+import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
+import { Running, type RunningPiece } from '../running';
 import {
   collectAccounts,
   credentialFor,
@@ -54,6 +62,7 @@ import { readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
 import { idFor } from '../../projects/carried';
+import type { ThinkingLevel } from '../../lib/ipc';
 
 /** Yes or no, from a person. There is deliberately no third answer: no "always",
  *  no "for this session", no "don't ask again". Confirmation fatigue is what
@@ -202,6 +211,15 @@ export function createGuardInterceptor(
   };
 
   return async function review(call: ToolCall): Promise<Interception> {
+    // The explicit top autonomy rung is full access for this sitting. Keep this
+    // before planning too: otherwise a leftover plan-only state silently turns
+    // "Get on with it" back into a restricted mode. `evaluate` mirrors this
+    // rule for every other policy consumer.
+    if (facts.howFar === 'doing') {
+      relay.started(call);
+      return undefined;
+    }
+
     // Looking only. Withheld rather than refused-as-an-error: the model is told
     // to put it in the plan, which is the answer we actually want back.
     if (planning?.() === true && readOnlyTools([call.name]).length === 0) {
@@ -244,7 +262,8 @@ export function createGuardInterceptor(
 /* -------------------------------------------------------------------------- */
 
 export type CreateSessionOptions = {
-  /** The project folder. Also the Guard's boundary: nothing may reach outside it. */
+  /** The project folder. The Guard's boundary in the normal autonomy modes;
+   *  the explicit "Get on with it" mode deliberately lifts that boundary. */
   projectRoot: string;
   /** Every event the app shows, in order. */
   onEvent: (event: AgentEvent) => void;
@@ -261,6 +280,11 @@ export type CreateSessionOptions = {
    *  is a conversation continued, not one started again (BACKLOG B1.1). When
    *  neither this nor `sessionPath` is given, nothing is ever written. */
   sessionDir?: string;
+  /** Told about every server this session starts and stops, so a crash can be
+   *  cleaned up on the way back in. A server is whatever somebody asked to be
+   *  started, so the only way to recognise one afterwards is to have written it
+   *  down at the time. */
+  noteServers?: { began: (pid: number, command: string) => void; ended: (pid: number) => void };
   /** Start a conversation rather than carrying the last one on. Only means
    *  anything alongside `sessionDir`: without somewhere to write, every session
    *  is already a fresh one. */
@@ -280,9 +304,16 @@ export type CreateSessionOptions = {
    *  id is Pi's own — resolved inside this file, where the model objects
    *  live, and never heard of outside it. */
   model?: { providerId: string; modelId: string } | null;
+  /** The selected model's remembered depth. Pi clamps it again, so a stale
+   *  choice can never be sent to a model that does not support it. */
+  thinking?: ThinkingLevel;
   /** Whether one of the extensions this folder carries has been said yes to.
    *  Left out, none of them are: a folder's own code never loads by default. */
   trusts?: (id: string) => boolean;
+  /** Somewhere to put a piece of background work. Given, the agent can break a
+   *  request into pieces that run side by side; left out, it cannot — which is
+   *  what keeps a run on the board from filling the board it is running on. */
+  putOnBoard?: PutOnBoard;
 };
 
 /**
@@ -317,7 +348,7 @@ export type GrapheSession = {
   prompt(
     text: string,
     images?: readonly ImageCard[],
-    options?: { lookFirst?: boolean },
+    options?: { lookFirst?: boolean; queue?: 'followUp' },
   ): Promise<void>;
   /** Work with a different model from now on, keeping the conversation. False
    *  when the choice does not resolve to a model this computer can use; the
@@ -325,8 +356,20 @@ export type GrapheSession = {
   useModel(choice: { providerId: string; modelId: string } | null): Promise<boolean>;
   /** Which model is answering, or null for "whatever the account offers". */
   readonly model: { providerId: string; modelId: string } | null;
+  /** How much time this model is taking before it answers. */
+  readonly thinking: ThinkingLevel;
+  /** The levels this exact model supports, in its own capability map. */
+  readonly thinkingLevels: readonly ThinkingLevel[];
+  /** Change the depth for this conversation. The model clamps unsupported
+   *  choices, and the resulting level is returned. */
+  setThinking(level: ThinkingLevel): ThinkingLevel;
   /** Stop what it is doing now. Open questions are answered no. */
   stop(): Promise<void>;
+  /** Put a message into a turn already in flight, without stopping it — the
+   *  agent hears it between tool calls and carries on. This is the "insert
+   *  into the loop" move other coding agents offer; Pi calls it steering.
+   *  Safe to call at any time: when nothing is running it simply joins. */
+  steer(text: string, images?: readonly ImageCard[]): Promise<void>;
   /** Finish with this session. Safe to call twice. */
   dispose(): void;
   /** Answer a `needs-confirmation`. False if there was no such question. */
@@ -344,6 +387,16 @@ export type GrapheSession = {
   stopAsking(on: boolean): void;
   /** Whether it is currently not asking. */
   readonly quiet: boolean;
+  /** How far it may go on its own, for as long as this session lives. A
+   *  ceiling on questions, never on what is refused. */
+  goAsFarAs(howFar: HowFar): void;
+  /** Where the ladder is set right now. */
+  readonly howFar: HowFar;
+  /** What this session has kept running — servers, watchers, anything started
+   *  to stay up. Empty for almost every sitting. */
+  readonly running: readonly RunningPiece[];
+  /** Stop one of them by name. False when there is no such thing. */
+  stopRunning(id: string): boolean;
   /** The extensions this folder brought with it, and which of them loaded.
    *  Empty for a project that carries none, which is almost all of them. */
   readonly carried: readonly Carried[];
@@ -417,6 +470,9 @@ export type ProviderSummary = {
   apiKeyLabel: string | null;
   connected: boolean;
   available: boolean;
+  /** True when the connected account is paid for by its own plan rather than
+   *  by use, so no per-use figure about it can be honest. */
+  subscription: boolean;
   models: readonly ModelSummary[];
 };
 
@@ -428,6 +484,7 @@ export type ModelSummary = {
   available: boolean;
   rates: { input: number; output: number } | null;
   contextWindow: number | null;
+  thinking: readonly ThinkingLevel[];
 };
 
 /** The app's own copy of Pi's auth interaction. The shapes match on purpose —
@@ -517,7 +574,7 @@ function firstUsable(runtime: PiRuntime): { providerId: string; modelId: string 
 export async function connection(agentDir: string): Promise<readonly ProviderSummary[]> {
   const runtime = await runtimeFor(agentDir);
 
-  let connected = new Set<string>();
+  const connected = new Set<string>();
   try {
     for (const one of await runtime.listCredentials()) connected.add(one.providerId);
   } catch {
@@ -534,6 +591,7 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
         available: false,
         rates: ratesOf(model),
         contextWindow: typeof model.contextWindow === 'number' ? model.contextWindow : null,
+        thinking: thinkingLevelsOf(model),
       }));
     } catch {
       // Unreadable providers are not offered at all.
@@ -543,7 +601,10 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
     const methods: ProviderMethod[] = [];
     let oauthLabel: string | null = null;
     let apiKeyLabel: string | null = null;
-    if (provider.auth.oauth?.login !== undefined) {
+    // Anthropic's own terms forbid another app signing people in with their
+    // Claude plan, so only its key is offered. No other provider is filtered.
+    const signInAllowed = provider.id !== 'anthropic';
+    if (signInAllowed && provider.auth.oauth?.login !== undefined) {
       methods.push('oauth');
       oauthLabel = provider.auth.oauth.loginLabel ?? provider.auth.oauth.name ?? null;
     }
@@ -556,7 +617,7 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
     // Which of its models can actually be used right now. Read through the
     // runtime's own judgement — it knows how the stored credential resolves
     // per model, and the window should not have to guess.
-    let usable = new Set<string>();
+    const usable = new Set<string>();
     try {
       for (const model of await runtime.getAvailable(provider.id)) usable.add(model.id);
     } catch {
@@ -571,6 +632,7 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
       apiKeyLabel,
       connected: connected.has(provider.id),
       available: safeConfigured(runtime, provider.id),
+      subscription: safeSubscription(runtime, provider.id),
       models: models.map((model) =>
         usable.has(model.id) ? { ...model, available: true } : model,
       ),
@@ -693,6 +755,27 @@ export async function packageHost(agentDir: string, projectRoot: string) {
 
 /** Read defensively: a provider that quotes nothing gets null rather than a
  *  zero, because free and unpriced are not the same claim. */
+const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+/** Pi keeps this capability on the model. Reading it here means Codex and
+ * every custom provider get their own real set instead of a guessed one. */
+function thinkingLevelsOf(model: { reasoning?: unknown; thinkingLevelMap?: unknown }): readonly ThinkingLevel[] {
+  const map = model.thinkingLevelMap;
+  if (map !== null && typeof map === 'object' && !Array.isArray(map)) {
+    const values = map as Record<string, unknown>;
+    return THINKING_LEVELS.filter((level) => values[level] !== null);
+  }
+  return model.reasoning === true ? ['off', 'minimal', 'low', 'medium', 'high'] : ['off'];
+}
+
 function ratesOf(model: { cost?: unknown }): { input: number; output: number } | null {
   const cost = model.cost;
   if (cost === null || typeof cost !== 'object') return null;
@@ -705,6 +788,14 @@ function ratesOf(model: { cost?: unknown }): { input: number; output: number } |
 function safeConfigured(runtime: PiRuntime, providerId: string): boolean {
   try {
     return runtime.hasConfiguredAuth(providerId);
+  } catch {
+    return false;
+  }
+}
+
+function safeSubscription(runtime: PiRuntime, providerId: string): boolean {
+  try {
+    return runtime.isUsingSubscription(providerId);
   } catch {
     return false;
   }
@@ -753,7 +844,7 @@ export async function discoveredAccounts(
   const known = new Map<string, string>();
   for (const provider of runtime.getProviders()) known.set(provider.id, provider.name);
 
-  let connected = new Set<string>();
+  const connected = new Set<string>();
   try {
     for (const one of await runtime.listCredentials()) connected.add(one.providerId);
   } catch {
@@ -832,6 +923,16 @@ function plainly(cause: unknown): string {
   return 'Something went wrong on my side, and I have stopped where I was.';
 }
 
+/** Pi refuses a second prompt while a turn is still running unless it is told
+ *  how to queue it. Recognised by its own sentence, so an upgrade that renames
+ *  the error cannot take the queue with it. */
+function isAlreadyProcessing(cause: unknown): boolean {
+  return (
+    cause instanceof Error &&
+    /already processing|streamingBehavior/i.test(cause.message)
+  );
+}
+
 /**
  * All seven of Pi's tools, named rather than inherited.
  *
@@ -864,7 +965,16 @@ const WORKING_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as
 export async function createSession(options: CreateSessionOptions): Promise<GrapheSession> {
   const pi = await loadPi();
 
-  const facts: GuardFacts = { ...options.guard, projectRoot: options.projectRoot };
+  // Worked out before the Guard's facts rather than beside the runtime, because
+  // the agent has to be able to read the skills and extensions it runs on — a
+  // feature somebody installed failing silently is the bug this prevents.
+  const agentDir = options.agentDir ?? (await defaultAgentDir());
+
+  const facts: GuardFacts = {
+    ...options.guard,
+    projectRoot: options.projectRoot,
+    agentFolder: agentDir,
+  };
 
   /**
    * Pi's own running total for this session, in whole currency units.
@@ -902,11 +1012,23 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
   /** True only for the length of a looking-around pass. */
   let planning = false;
+  /** Whether this sitting has had its first question yet — the moment the most
+   *  relevant notes are handed over, so memory works without being asked. */
+  let firstTurn = true;
   /** What was said during one, kept so the proposal can be read out of it. */
   let proposed = '';
+  /** Everything said since the last settled moment, so a review verdict can be
+   *  read out of the final reply and shown as its own card. */
+  let tape = '';
   const say = (event: AgentEvent): void => {
     if (planning && event.type === 'message-delta') proposed += event.text;
+    if (event.type === 'message-delta') tape += event.text;
     options.onEvent(event);
+    if (event.type === 'settled') {
+      const verdict = parseReview(tape);
+      tape = '';
+      if (verdict !== null) options.onEvent({ type: 'reviewed', verdict });
+    }
   };
 
   const relay = new EventRelay(say, { billedSoFar });
@@ -919,7 +1041,6 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     planning: () => planning,
   });
 
-  const agentDir = options.agentDir ?? (await defaultAgentDir());
   const runtime = await runtimeFor(agentDir);
   /** Filled while the loader runs, which is before anything below can read it. */
   let carried: readonly Carried[] = [];
@@ -979,7 +1100,140 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       ? firstUsable(runtime)
       : { providerId: model.provider, modelId: model.id };
 
-  const customTools = grapheTools(agentDir, options.figmaToken, forHelpers);
+  const customTools = grapheTools(
+    agentDir,
+    options.figmaToken,
+    forHelpers,
+    options.thinking,
+    options.projectRoot,
+  );
+
+  /* The anchored edit and its read: the model reads a file, the read's reply
+     carries the file's fingerprint, and an edit can name lines plus that
+     fingerprint instead of retyping the old text — refused cleanly if the
+     file has moved on. Both keep the built-in names, so the model sees one
+     `read` and one `edit` and the Guard's rows hold. Pi's own tools stay
+     underneath as the exact-text path and the actual reading. */
+  const piRead = pi.createReadToolDefinition(options.projectRoot);
+  const piEdit = pi.createEditToolDefinition(options.projectRoot);
+  customTools.push(
+    taggedReadTool({
+      cwd: options.projectRoot,
+      delegate: (params, signal) =>
+        piRead.execute('graphe-read', params, signal, undefined, undefined as never),
+    }),
+    anchorEditTool({
+      cwd: options.projectRoot,
+      delegate: (params, signal) =>
+        piEdit.execute(
+          'graphe-edit',
+          params as Parameters<typeof piEdit.execute>[1],
+          signal,
+          undefined,
+          undefined as never,
+        ),
+    }),
+    readDiffTool(options.projectRoot),
+  );
+
+  /* The project's memory: a note store beside the conversation, one database
+     per project, opened with the app's embedding engine when it can load. A
+     machine that cannot (no model yet, no network for the first download)
+     still gets word-based recall — the engine degrades, never fails. */
+  let memory: MemoryStore | null = null;
+  try {
+    memory = await openMemory({
+      dbPath: join(agentDir, 'memory', memoryFileName(options.projectRoot)),
+      embedder: defaultEmbedder(),
+    });
+    customTools.push(...memoryTools(memory));
+  } catch {
+    // No memory, no ceremony: the tools simply are not there, and nothing else
+    // in the session cares.
+    memory = null;
+  }
+
+  /* The debugger sessions this sitting holds: attached programs, closed with
+     the session so nothing is left paused or held. */
+  const debugRegistry = newDebugRegistry();
+  customTools.push(...debugTools(debugRegistry));
+
+  /* Work that answers by staying up: servers, watchers, anything the ordinary
+     shell would either wait forever for or let die with the command that
+     started it. Held for as long as this session is, and stopped with it. */
+  const keptRunning = new Running();
+  customTools.push(
+    ...runningTools(keptRunning, {
+      folder: options.projectRoot,
+      parts: () => {
+        const config = pi.getShellConfig(settings.shell);
+        return { shell: config.shell, args: config.args };
+      },
+      writable: shellBounds(options.projectRoot, options.projectRoot).writable,
+      ...(options.noteServers === undefined ? {} : { noted: options.noteServers }),
+      onChange: () => {
+        say({ type: 'running', pieces: keptRunning.list() });
+      },
+    }),
+  );
+
+  /* The plugged-in tool servers (MCP), read from the project's own .pi/mcp.json.
+     Nothing starts until the model actually calls one of them, and every call
+     travels through the Guard like any other tool call. */
+  const mcpRegistry = new McpRegistry(await readMcpConfig(options.projectRoot));
+  if (mcpRegistry.config.servers.length > 0) {
+    customTools.push(mcpTool(mcpRegistry));
+  }
+
+  // The shell is Pi's tool, not ours, and it is the one that can change
+  // anything on this disk. Pi builds it from `createBashToolDefinition`, whose
+  // `operations` seam is where a command is actually run — so the same
+  // definition, built here with a runner that wraps every command in the
+  // computer's own boundary first, and handed over as a custom tool. A custom
+  // tool of the same name replaces the built-in in Pi's registry, so the model
+  // sees one `bash`, described exactly as Pi describes it, and the Guard's hook
+  // fires on it exactly as before.
+  //
+  // The folder held is the one this session was opened on. That may be a copy
+  // rather than the project on screen, which is precisely why it is read from
+  // the options rather than worked out here.
+  //
+  // The shell somebody chose for themselves is still the shell: it is read the
+  // same way Pi reads it and put inside the boundary, rather than replaced by
+  // one of ours.
+  const settings = ((): { shell?: string; prefix?: string } => {
+    try {
+      const chosenShell = pi.SettingsManager.create(options.projectRoot, agentDir);
+      return { shell: chosenShell.getShellPath(), prefix: chosenShell.getShellCommandPrefix() };
+    } catch {
+      return {};
+    }
+  })();
+  const localShell = pi.createLocalBashOperations({ shellPath: settings.shell }).exec;
+  const fullAccessShell = loginShell(
+    process.env['SHELL'] ?? settings.shell ?? (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash'),
+    localShell,
+  );
+  const shell = heldShell({
+    folder: options.projectRoot,
+    // The runner reads this immediately before every command, so changing the
+    // session's autonomy setting applies to the next command without replacing
+    // the current conversation.
+    unrestricted: () => facts.howFar === 'doing',
+    parts: () => {
+      const config = pi.getShellConfig(settings.shell);
+      // A shell fed its command down a pipe is not one we can name on a command
+      // line, so it runs unheld rather than wrongly.
+      if (config.commandTransport === 'stdin') throw new Error('nothing to name');
+      return { shell: config.shell, args: config.args };
+    },
+    plain: localShell,
+    unrestrictedPlain: fullAccessShell,
+  });
+  const boundShell = pi.createBashToolDefinition(options.projectRoot, {
+    operations: shell,
+    ...(settings.prefix === undefined ? {} : { commandPrefix: settings.prefix }),
+  });
 
   /* Our own ids rather than Pi's `Model`, so no Pi shape leaves this file. */
   let inUse: { providerId: string; modelId: string } | null =
@@ -1012,9 +1266,12 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         // custom tool" to "exactly this list", so ours have to be in it or they
         // vanish. Taken off the tools themselves rather than written twice.
         tools: [...WORKING_TOOLS, ...customTools.map((tool) => tool.name)],
-        customTools,
+        // Cast because Pi's own bash definition is narrower in its schema than
+        // the list it goes into; Pi assigns it the same way internally.
+        customTools: [...customTools, boundShell as (typeof customTools)[number]],
         modelRuntime: runtime,
         model,
+        ...(options.thinking === undefined ? {} : { thinkingLevel: options.thinking }),
         sessionManager: manager,
       })
     ).session;
@@ -1118,7 +1375,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     async prompt(
       text: string,
       images?: readonly ImageCard[],
-      options?: { lookFirst?: boolean },
+      options?: { lookFirst?: boolean; queue?: 'followUp' },
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
       const looking = options?.lookFirst === true;
@@ -1141,7 +1398,52 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
                   mimeType: picture.mimeType,
                 })),
               };
-        await session.prompt(looking ? `${text}\n\n${PLAN_WORDS.asked}` : text, withPictures);
+        // A sitting starts with the notes it will need, so the memory is used
+        // without anyone having to know it exists. Only the first question of
+        // a sitting carries them, and only when there is something to carry.
+        let said = looking ? `${text}\n\n${PLAN_WORDS.asked}` : text;
+        if (firstTurn) {
+          firstTurn = false;
+          if (memory !== null) {
+            try {
+              const notes = await memory.recall('', { limit: 4 });
+              if (notes.length > 0) {
+                said = `A few notes I keep about this project, most relevant first:\n${notes
+                  .map((note) => `- ${note.content}`)
+                  .join('\n')}\n\n${said}`;
+              }
+            } catch {
+              // A memory that will not answer is a memory not worth a sentence.
+            }
+          }
+        }
+        // The window chose to queue this message behind the run in flight
+        // (the composer's "queue it" option). Pi delivers a prompt marked
+        // followUp after the current turn finishes, without interrupting it.
+        if (options?.queue === 'followUp') {
+          const queued =
+            withPictures === undefined
+              ? { streamingBehavior: 'followUp' as const }
+              : { ...withPictures, streamingBehavior: 'followUp' as const };
+          await session.prompt(said, queued);
+        } else {
+          try {
+            await session.prompt(said, withPictures);
+          } catch (cause) {
+            // Pi refuses a second prompt while a turn is still running unless
+            // it is told how to queue it. The window can ask while the agent
+            // is mid-turn (the gap between "sent" and the first visible step),
+            // so a message that arrives like that is queued as a follow-up
+            // rather than thrown back as a raw error. See the steer path for
+            // the interrupt choice.
+            if (!isAlreadyProcessing(cause)) throw cause;
+            const queued =
+              withPictures === undefined
+                ? { streamingBehavior: 'followUp' as const }
+                : { ...withPictures, streamingBehavior: 'followUp' as const };
+            await session.prompt(said, queued);
+          }
+        }
       } catch (cause) {
         const message = plainly(cause);
         relay.failed(message);
@@ -1151,11 +1453,17 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
           planning = false;
           say({ type: 'planned', ...parseProposal(proposed) });
         }
+        // After the reply, never during it: `compact()` aborts whatever is
+        // running first, so calling it mid-turn would abandon the answer
+        // somebody is waiting for in order to tidy the notes about it.
+        //
+        // In the finally rather than after the try, because the turn that most
+        // needs tidying is the one that failed *because* the window was full —
+        // and rethrowing before this line left it exactly as full, so the next
+        // turn failed the same way, and the one after that. It only acts when
+        // the conversation really has grown long, and it never throws.
+        await tidyIfItHasGrownLong();
       }
-      // After the reply, never during it: `compact()` aborts whatever is running
-      // first, so calling it mid-turn would abandon the answer somebody is
-      // waiting for in order to tidy the notes about it.
-      await tidyIfItHasGrownLong();
     },
 
     async useModel(next): Promise<boolean> {
@@ -1180,9 +1488,50 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       return inUse;
     },
 
+    get thinking(): ThinkingLevel {
+      return session.thinkingLevel as ThinkingLevel;
+    },
+
+    get thinkingLevels(): readonly ThinkingLevel[] {
+      try {
+        return session.getAvailableThinkingLevels() as ThinkingLevel[];
+      } catch {
+        return ['off'];
+      }
+    },
+
+    setThinking(level: ThinkingLevel): ThinkingLevel {
+      if (closed) return session.thinkingLevel as ThinkingLevel;
+      session.setThinkingLevel(level);
+      return session.thinkingLevel as ThinkingLevel;
+    },
+
     async stop(): Promise<void> {
       confirmations.abandonAll();
       await session.abort();
+    },
+
+    async steer(text: string, images?: readonly ImageCard[]): Promise<void> {
+      if (closed) throw new AdapterError('That project is no longer open.');
+      // Same envelope the prompt makes: nobody outside this file hears the
+      // word `ImageContent`. Pi's steer lands the message mid-turn and lets
+      // the current run carry on — it does not start a separate one.
+      const withPictures =
+        images === undefined || images.length === 0
+          ? undefined
+          : {
+              images: images.map((picture) => ({
+                type: 'image' as const,
+                data: picture.bytes,
+                mimeType: picture.mimeType,
+              })),
+            };
+      await session.steer(
+        text,
+        withPictures === undefined || withPictures.images.length === 0
+          ? undefined
+          : withPictures.images,
+      );
     },
 
     dispose(): void {
@@ -1191,6 +1540,15 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       confirmations.abandonAll();
       unsubscribe();
       session.dispose();
+      void shell.close();
+      void mcpRegistry.close();
+      void memory?.close().catch(() => {});
+      // Nothing this session started outlives it. A port left held is a port
+      // the next sitting cannot use, and nobody would know what was holding it.
+      keptRunning.stopAll();
+      for (const attached of debugRegistry.sessions.values()) {
+        void debug.detach(attached).catch(() => {});
+      }
     },
 
     answer(callId: string, decision: Decision): boolean {
@@ -1221,6 +1579,24 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
     get quiet(): boolean {
       return facts.stopAsking === true;
+    },
+
+    goAsFarAs(howFar: HowFar): void {
+      facts.howFar = howFar;
+    },
+
+    get howFar(): HowFar {
+      return facts.howFar ?? 'asking';
+    },
+
+    get running(): readonly RunningPiece[] {
+      return keptRunning.list();
+    },
+
+    stopRunning(id: string): boolean {
+      const stopped = keptRunning.stop(id);
+      if (stopped) say({ type: 'running', pieces: keptRunning.list() });
+      return stopped;
     },
 
     get carried(): readonly Carried[] {

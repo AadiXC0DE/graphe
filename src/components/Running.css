@@ -1,0 +1,113 @@
+/* The band above the composer. Quiet: it is a standing fact, not an event, and
+   it sits directly above the thing somebody is typing into. */
+
+.running {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  flex-wrap: wrap;
+}
+
+.running__title {
+  margin: 0;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  flex: none;
+}
+
+.running__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.running__one {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.running__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+  align-self: center;
+}
+
+/* Still coming up. The one place a pulse earns itself: it is the difference
+   between "waiting" and "stuck", which is the only question being asked. */
+.running__one--starting .running__dot {
+  animation: running-wait 1.4s var(--ease-in-out-cubic) infinite;
+}
+
+.running__one--stopped .running__dot {
+  background: var(--border-strong);
+}
+
+@keyframes running-wait {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.running__name {
+  font-size: var(--text-sm);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22ch;
+}
+
+.running__where {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.running__act {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.running__act:hover {
+  color: var(--text);
+}
+
+.running__act--stop:hover {
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .running__one--starting .running__dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}

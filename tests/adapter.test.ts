@@ -43,7 +43,11 @@ function bash(command: string): ToolCall {
 
 /** A session's worth of wiring, with everything the Guard leans on replaced by
  *  something that writes down what happened to it. */
-function harness(options: { failSnapshot?: boolean; withTimeline?: boolean } = {}) {
+function harness(options: {
+  failSnapshot?: boolean;
+  withTimeline?: boolean;
+  guardFacts?: GuardFacts;
+} = {}) {
   const order: string[] = [];
   const events: AgentEvent[] = [];
   const relay = new EventRelay((event) => {
@@ -61,7 +65,7 @@ function harness(options: { failSnapshot?: boolean; withTimeline?: boolean } = {
   };
 
   const review = createGuardInterceptor({
-    facts,
+    facts: options.guardFacts ?? facts,
     relay,
     confirmations,
     timeline: options.withTimeline === false ? undefined : timeline,
@@ -123,6 +127,23 @@ describe('a call the Guard denies', () => {
     const { order, runThroughPi } = harness();
     await runThroughPi(call('write', { path: '../../../etc/hosts', content: 'x' }));
     expect(order).toEqual(['blocked']);
+  });
+});
+
+describe('the explicit full-access mode', () => {
+  it('does not reintroduce a project boundary or restore-point check in the adapter', async () => {
+    const { order, events, runThroughPi } = harness({
+      failSnapshot: true,
+      guardFacts: { ...facts, howFar: 'doing' },
+    });
+    const outcome = await runThroughPi(
+      bash('nohup npm run dev -- --host 127.0.0.1 --port 5173 >/tmp/site.log 2>&1 &'),
+    );
+
+    expect(outcome).toBeUndefined();
+    expect(order).toEqual(['tool-start', 'executed']);
+    expect(events.some((event) => event.type === 'blocked')).toBe(false);
+    expect(events.some((event) => event.type === 'needs-confirmation')).toBe(false);
   });
 });
 
@@ -397,6 +418,76 @@ describe('translating one event', () => {
     expect(
       translatePiEvent({ type: 'tool_execution_end', toolCallId: 'c1', toolName: 'read', isError: true }),
     ).toEqual({ type: 'tool-end', id: 'c1', ok: false });
+  });
+
+  it('keeps a failed tool call’s explanation beside its status', () => {
+    expect(
+      translatePiEvent({
+        type: 'tool_execution_end',
+        toolCallId: 'c1',
+        toolName: 'bash',
+        isError: true,
+        result: { content: [{ type: 'text', text: 'git push: authentication failed' }] },
+      }),
+    ).toEqual({
+      type: 'tool-end',
+      id: 'c1',
+      ok: false,
+      detail: 'git push: authentication failed',
+    });
+  });
+
+  /* E5. A helper's words travel as the tool's partial result, which Pi sends in
+     the same shape a tool result takes — an object with a `content` list, not a
+     string. Reading only the string form is what made every helper come back
+     "Nothing said yet" while having answered in full. */
+  it('reads a helper\'s progress out of the object-form partial result', () => {
+    expect(
+      translatePiEvent({
+        type: 'tool_execution_update',
+        toolCallId: 'c2',
+        toolName: 'task',
+        args: {},
+        partialResult: {
+          content: [{ type: 'text', text: 'Reading the layout files…' }],
+          details: {},
+        },
+      }),
+    ).toEqual({ type: 'tool-progress', id: 'c2', text: 'Reading the layout files…' });
+  });
+
+  it('reads a helper\'s progress out of a plain-string partial result too', () => {
+    expect(
+      translatePiEvent({
+        type: 'tool_execution_update',
+        toolCallId: 'c2',
+        toolName: 'task',
+        args: {},
+        partialResult: 'Two of them do: the blog and the changelog.',
+      }),
+    ).toEqual({ type: 'tool-progress', id: 'c2', text: 'Two of them do: the blog and the changelog.' });
+  });
+
+  /* Whole, not a line of it: the helper board shows everything a helper has
+     said, and only the feed row is short. Trimming here threw away the findings
+     before anything had a chance to show them. */
+  it('keeps everything the step has said so far', () => {
+    expect(
+      translatePiEvent({
+        type: 'tool_execution_update',
+        toolCallId: 'c3',
+        toolName: 'task',
+        args: {},
+        partialResult: {
+          content: [{ type: 'text', text: '  Two pages use it.\n\nThe blog and the changelog.\n' }],
+          details: {},
+        },
+      }),
+    ).toEqual({
+      type: 'tool-progress',
+      id: 'c3',
+      text: 'Two pages use it.\n\nThe blog and the changelog.',
+    });
   });
 
   /* F8. Tidying a long conversation is Pi's own compaction and never ours

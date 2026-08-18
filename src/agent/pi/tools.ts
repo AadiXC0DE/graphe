@@ -36,8 +36,12 @@
  * that touches Pi is inside this one folder.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
+import { readdir, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // One line on purpose: the boundary test in tests/adapter.test.ts reads the
 // line that names Pi and expects `import type` on it.
@@ -45,12 +49,41 @@ import type { AgentToolResult, AgentToolUpdateCallback, ToolDefinition } from '@
 import { Type } from 'typebox';
 
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
+import { ProjectHistory, type ReviewTarget } from '../../history/repo';
+import { mapFrom, saysMap, type SourceFile } from '../../files/map';
+import type { MemoryStore } from '../memory';
+import * as debug from './debug';
+import { roleSpec, type HelperRole } from './child';
+import { arxivId, arxivMeta, readPdfPages, slicePages } from './pdf';
+import { REVIEW_ANGLES, reviewRequestFor, trimDiff } from './review';
+import { checksBrief, projectChecks, usualChecks } from './checks';
+import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
+import { ceilingWords, fleet } from '../../cost/fleet';
+import { Running, type RunningPiece } from '../running';
+import { hold } from '../sandbox';
+import type { Money, SpendReason } from '../types';
 
 /** The result envelope every tool here returns: the model's answer in text.
  *  Failures are *thrown*, not tucked into the envelope — Pi marks a thrown
  *  execute as a genuine error, which is what tells the activity feed that the
  *  call failed rather than finished. */
 type ToolResult = Promise<AgentToolResult<unknown>>;
+
+/**
+ * How long one helper may go without saying anything before it is ended.
+ *
+ * Quiet, not total: what this is for is a provider that stalls the stream, and
+ * a helper doing real work says something as it goes. An absolute deadline
+ * would end a healthy one mid-sentence for the crime of having a lot to say.
+ * Background work gets four hours because nobody is waiting; a helper runs
+ * inside somebody's turn and they are sitting there.
+ */
+export const HELPER_PATIENCE_MS = 5 * 60 * 1000;
+
+/** What the model is told when one runs out of time. Written for the model:
+ *  one that understands it was cut off asks a smaller question next. */
+export const HELPER_TOOK_TOO_LONG =
+  'This helper was ended after five minutes without a word. Do not send the same piece of work again — either split it into smaller pieces, or do it yourself.';
 
 /** The results the child keeps on its own. Plain data; nothing crosses the wire
  *  except this. */
@@ -61,68 +94,25 @@ export type SubagentOutcome =
 /** One line in the child's report, as JSON on stdout. */
 export type SubagentLine =
   | { type: 'delta'; text: string }
+  /** What the child found when it tried to write outside the folder it was
+   *  given. The boundary we asked for, checked from inside rather than assumed
+   *  from a clean start. */
+  | { type: 'boundary'; held: boolean }
+  /** What the helper's own turn cost. Nothing upstream can see this — the
+   *  helper is a separate process with its own account calls — so a fan-out to
+   *  six helpers is money nobody counted until it travels this line. */
+  | { type: 'spend'; amount: Money; label: string; reason: SpendReason }
   | { type: 'done'; outcome: SubagentOutcome };
 
 /* -------------------------------------------------------------------------- */
 /* Web search                                                                  */
 /* -------------------------------------------------------------------------- */
 
-/** How many results are worth returning. Ten results of five thousand characters
- *  is a wall of text; ten titles and their first two lines is a search. */
-const RESULT_COUNT = 8;
 /** The line somebody reads while this runs. Also what the activity feed shows. */
 const SEARCH_TOOL_LABEL = 'Searching the web';
 
-/** DuckDuckGo's HTML endpoint, scraped defensively. No key, no account, and the
- *  page is plain enough to read without a parser — which matters, because the
- *  alternative is depending on a paragraph of HTML in a dependency with its own
- *  ideas about what a search result is. */
-const SEARCH_ENDPOINT = 'https://html.duckduckgo.com/html/';
-
 /** One name for both web tools, so a site that wants to refuse us can. */
 const USER_AGENT = 'graphe/0.1 (a design workspace; contact: the user)';
-
-function stripTags(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** The results block, as plain text the model can read straight into its
- *  context. Titles and the address, then the first two lines of the snippet —
- *  enough to know whether a result is worth a `webfetch`, not a copy of the
- *  page. */
-function searchText(query: string, html: string): string {
-  const blocks = [...html.matchAll(/<div[^>]*class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>/g)];
-  const results: string[] = [];
-  for (const block of blocks.slice(0, RESULT_COUNT)) {
-    const body = block[1] ?? '';
-    const link = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(body);
-    const snippet = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i.exec(body);
-    if (link === null) continue;
-    // DuckDuckGo hands back its own redirect address. The real one is the
-    // `uddg=` query parameter, restored before it is shown.
-    let address = decodeURIComponent(
-      /[?&]uddg=([^&]+)/.exec(link[1] ?? '')?.[1] ?? link[1] ?? '',
-    );
-    if (address === '' || !address.includes('://')) address = link[1] ?? '';
-    const title = stripTags(link[2] ?? '');
-    const words = stripTags(snippet?.[1] ?? '');
-    if (title !== '' && address !== '') {
-      results.push(`- ${title}\n  ${address}\n  ${words.length > 180 ? `${words.slice(0, 180)}…` : words}`);
-    }
-  }
-  if (results.length === 0) return `I could not find anything for "${query}".`;
-  return results.join('\n\n');
-}
 
 export const websearchTool: ToolDefinition = {
   name: 'websearch',
@@ -137,7 +127,6 @@ export const websearchTool: ToolDefinition = {
   parameters: Type.Object({
     query: Type.String({ description: 'What to search for, in plain words.', minLength: 1 }),
   }),
-  executionMode: 'sequential',
   execute: async (
     _callId: string,
     params: { query: string },
@@ -148,15 +137,15 @@ export const websearchTool: ToolDefinition = {
       return { content: [{ type: 'text', text: 'I need something to search for.' }], details: {} };
     }
     try {
-      const response = await fetch(`${SEARCH_ENDPOINT}?q=${encodeURIComponent(query)}`, {
-        signal,
-        headers: { 'User-Agent': USER_AGENT },
-      });
-      if (!response.ok) {
-        throw new Error(`The search provider answered with ${String(response.status)}. Try again in a moment, or ask the person to check the connection.`);
+      const aborted = new AbortController();
+      const stop = (): void => aborted.abort();
+      signal?.addEventListener('abort', stop, { once: true });
+      try {
+        const outcome = await chainSearch(SEARCH_PROVIDERS, query, aborted.signal);
+        return { content: [{ type: 'text', text: formatSearch(query, outcome) }], details: {} };
+      } finally {
+        signal?.removeEventListener('abort', stop);
       }
-      const page = await response.text();
-      return { content: [{ type: 'text', text: searchText(query, page) }], details: {} };
     } catch (cause) {
       const aborted = signal?.aborted === true;
       if (aborted) throw new Error('Search stopped.');
@@ -184,7 +173,25 @@ const MAX_PAGE_CHARACTERS = 20_000;
 
 /** Content types that are words. A picture, a font or an archive is a file, and
  *  fetching a file off the internet is not what this tool is for. */
+/** Content types that are words. A picture, a font or an archive is a file, and
+ *  fetching a file off the internet is not what this tool is for. */
 const READABLE_KIND = /^\s*(?:text\/|application\/(?:json|xml|xhtml|javascript|ld\+json))/i;
+
+/** Tags to spaces, entities to letters, the way a reader skims. Search's own
+ *  copy in search.ts handles a few more entities; this one is for pages. */
+function stripTags(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 /** A page as words. Scripts and styles go first — they are instructions to a
  *  browser, not anything a person reads — and the tags that end a block become
@@ -212,7 +219,7 @@ async function openPage(
     const response = await fetch(address, {
       signal,
       redirect: 'manual',
-      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,text/plain,*/*;q=0.5' },
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,text/plain,application/pdf,*/*;q=0.5' },
     });
     if (response.status < 300 || response.status >= 400) return { response, address };
 
@@ -261,6 +268,43 @@ async function bodyText(response: Response): Promise<{ text: string; capped: boo
   return { text: text + decoder.decode(), capped };
 }
 
+/** Papers are bigger than pages — a paper is a few megabytes where a page is a
+ *  few thousand characters — so the byte cap for a PDF is its own number. It
+ *  still stops at a real cap: nobody is reading a hundred-megabyte scan. */
+const MAX_PAPER_BYTES = 30_000_000;
+
+/** The bytes of a paper, read to the cap. */
+async function bodyBytes(response: Response): Promise<{ bytes: Uint8Array; capped: boolean }> {
+  const body = response.body;
+  if (body === null) return { bytes: new Uint8Array(0), capped: false };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let capped = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined) continue;
+      total += value.byteLength;
+      if (total > MAX_PAPER_BYTES) {
+        capped = true;
+        break;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0));
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return { bytes, capped };
+}
+
 /** The name is `webfetch` rather than `web_fetch` because that is what the
  *  search tool's guidelines have always told the model to call. Both spellings
  *  reach the same Guard row — it strips the underscore — so the one the model
@@ -269,8 +313,8 @@ export const webfetchTool: ToolDefinition = {
   name: 'webfetch',
   label: 'Reading a page',
   description:
-    'Open one page on the internet and read it as plain text. Use it after a search, when the titles and snippets are not enough and you need what the page actually says.',
-  promptSnippet: 'webfetch(url) — read one page from the internet as plain text',
+    'Open one page on the internet and read it as plain text. Use it after a search, when the titles and snippets are not enough and you need what the page actually says. A paper — an arxiv address or any PDF — comes back as its text, one page at a time.',
+  promptSnippet: 'webfetch(url) — read one page from the internet as plain text (papers too, page by page)',
   promptGuidelines: [
     'Only secure addresses, the ones beginning https://, can be opened.',
     'You get the words of the page, not its layout, its pictures or anything it would have run in a browser.',
@@ -278,11 +322,12 @@ export const webfetchTool: ToolDefinition = {
   ],
   parameters: Type.Object({
     url: Type.String({ description: 'The full address of the page, beginning https://.', minLength: 1 }),
+    fromPage: Type.Optional(Type.Number({ description: 'The first page to read, when the address is a paper. Starts at 1.' })),
+    toPage: Type.Optional(Type.Number({ description: 'The last page to read, when the address is a paper.' })),
   }),
-  executionMode: 'sequential',
   execute: async (
     _callId: string,
-    params: { url: string },
+    params: { url: string; fromPage?: number; toPage?: number },
     signal: AbortSignal | undefined,
   ): ToolResult => {
     const say = (text: string): AgentToolResult<unknown> => ({
@@ -317,6 +362,37 @@ export const webfetchTool: ToolDefinition = {
         throw new Error(`it answered with ${String(response.status)} rather than a page.`);
       }
       const kind = response.headers.get('content-type') ?? '';
+
+      /* A paper, by intent or by kind: an arxiv address, an address that ends
+         in .pdf, or a response that says it is a PDF. It gets the paper path —
+         front matter first, then the body a page range at a time. */
+      const id = arxivId(address.href);
+      const isPaper =
+        id !== null || target.pathname.toLowerCase().endsWith('.pdf') || /pdf/i.test(kind);
+      if (isPaper) {
+        const { bytes, capped } = await bodyBytes(response);
+        if (bytes.length === 0) {
+          return say('That paper came back empty, so there was nothing for me to read.');
+        }
+        const { pages } = await readPdfPages(bytes);
+        if (pages.length === 0) {
+          return say('That paper is pictures, not words — I could not read any text out of it.');
+        }
+        const meta = id === null ? null : await arxivMeta(id, patience.signal);
+        const front =
+          meta === null
+            ? ''
+            : `${meta.title}\n${meta.authors}${meta.abstract === '' ? '' : `\n\nAbstract: ${meta.abstract}`}\n\n`;
+        const { text, note } = slicePages(pages, MAX_PAGE_CHARACTERS, {
+          fromPage: params.fromPage,
+          toPage: params.toPage,
+        });
+        const tooLong = capped
+          ? '\n\n(This paper is larger than I read in one go; I read what I could of it.)'
+          : '';
+        return say(`${address.href}${front === '' ? '' : `\n\n${front}`}${text}${note}${tooLong}`);
+      }
+
       if (kind !== '' && !READABLE_KIND.test(kind)) {
         await response.body?.cancel().catch(() => {});
         return say('That address is a file rather than a page of words, so there is nothing there for me to read.');
@@ -345,6 +421,365 @@ export const webfetchTool: ToolDefinition = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Reading a change for a review                                             */
+/* -------------------------------------------------------------------------- */
+
+/** The change a review will point at, as git text. The model names the target
+ *  — the work not saved yet, one saved version, or a named piece of work — and
+ *  the diff comes back for the reviewer helpers to look at. */
+export const readDiffTool = (cwd: string): ToolDefinition => ({
+  name: 'read_diff',
+  label: 'Reading a change',
+  description:
+    "Read the change you have been asked to check, as a diff. Targets: 'working' — everything not saved yet; 'version' — one saved version (give its id); 'line' — a named piece of work (give its name). Used when someone asks for a change to be checked before it ships.",
+  promptSnippet: 'read_diff(target) — read the change being checked, as a diff',
+  promptGuidelines: [
+    "When asked to check a change before it ships, first read it with read_diff — 'working' unless a saved version or a named piece of work is the thing being checked.",
+    'Then send the change to reviewer helpers (task with role reviewer) in parallel — one per check listed with the change, all at once — and combine their findings into a verdict.',
+    'When somebody asks for something to be checked every time from now on, write it down as a check — one file in .agents/checks, its name and what to look for — so every later review runs it without being asked again.',
+    'Finish with a short plain summary followed by a fenced review block: a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, the names of the checks you ran, and the findings — each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact, and confidence (0-100).',
+  ],
+  parameters: Type.Object({
+    target: Type.String({
+      description: "Which change to read: 'working' for the work not yet saved, 'version' for one saved version, 'line' for a named piece of work.",
+    }),
+    id: Type.Optional(Type.String({ description: "The saved version's id, when the target is 'version'." })),
+    name: Type.Optional(Type.String({ description: "The named piece of work, when the target is 'line'." })),
+  }),
+  executionMode: 'sequential',
+  execute: async (
+    _callId: string,
+    params: { target: string; id?: string; name?: string },
+    _signal: AbortSignal | undefined,
+  ): ToolResult => {
+    const say = (text: string): AgentToolResult<unknown> => ({
+      content: [{ type: 'text', text }],
+      details: {},
+    });
+
+    let target: ReviewTarget;
+    if (params.target === 'version') {
+      if (params.id === undefined || params.id === '') {
+        return say('To read one saved version, tell me which one — its id from the versions list.');
+      }
+      target = { kind: 'version', id: params.id };
+    } else if (params.target === 'line') {
+      if (params.name === undefined || params.name === '') {
+        return say('To read a named piece of work, tell me its name.');
+      }
+      target = { kind: 'line', name: params.name };
+    } else {
+      target = { kind: 'working' };
+    }
+
+    try {
+      const diff = await new ProjectHistory(cwd).diffFor(target);
+      if (diff.trim() === '') {
+        return say('There is no change at that target to check — nothing has changed there to look at.');
+      }
+      const own = await projectChecks(cwd);
+      const checks = own.length > 0 ? own : usualChecks();
+      return say(`${trimDiff(diff)}\n\n${checksBrief(checks, own.length > 0)}`);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'the change could not be read.';
+      throw new Error(`I could not read the change: ${message}`);
+    }
+  },
+});
+
+/** The briefs the reviewers are handed when work is checked: one per angle,
+ *  all carrying the same diff. The main agent gathers the replies and writes
+ *  the verdict. */
+export function reviewerBriefs(
+  diff: string,
+  checks: readonly { key: string; line: string }[] = REVIEW_ANGLES,
+): readonly { key: string; task: string }[] {
+  return checks.map((check) => ({
+    key: check.key,
+    task: reviewRequestFor(diff, check.line),
+  }));
+}
+
+/* -------------------------------------------------------------------------- */
+/* The project's memory                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** One tool per memory verb, all talking to the same store. The names are the
+ *  plain words a person would use: write a fact down (retain), pull it back
+ *  (recall), think across what you know (reflect), revise a note (memory_edit),
+ *  let one go (forget). */
+export function memoryTools(store: MemoryStore): ToolDefinition[] {
+  return [
+    {
+      name: 'retain',
+      label: 'Writing a note',
+      description:
+        'Write a fact about the project or the person down, so a later sitting remembers it. Use it for the decisions, constraints and names that would cost time to rediscover — not for ordinary conversation.',
+      promptSnippet: 'retain(content, importance?, tags?) — write a fact down for later sittings',
+      promptGuidelines: [
+        'Write down the things a future sitting would need and would have to rediscover: decisions made, names agreed, constraints, traps in this project.',
+        'Mark importance 5 for anything that must never be lost. Keep each note one fact, in plain words.',
+      ],
+      parameters: Type.Object({
+        content: Type.String({ description: 'The fact, in plain words, one fact per note.', minLength: 1 }),
+        importance: Type.Optional(Type.Number({ description: '1–5. 5 means never lose this. Default 3.' })),
+        tags: Type.Optional(Type.Array(Type.String(), { description: 'A few words to find the note by.' })),
+        scope: Type.Optional(Type.String({ description: "'project' by default; 'global' follows the person across projects." })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { content: string; importance?: number; tags?: readonly string[]; scope?: string }): ToolResult => {
+        if (params.content.trim() === '') {
+          return { content: [{ type: 'text', text: 'I need a fact to write down.' }], details: {} };
+        }
+        const saved = await store.remember({
+          content: params.content,
+          importance: params.importance,
+          tags: params.tags,
+          scope: params.scope === 'global' ? 'global' : 'project',
+        });
+        return {
+          content: [{ type: 'text', text: `Noted: \u201c${saved.content}\u201d (kept for later sittings).` }],
+          details: {},
+        };
+      },
+    },
+    {
+      name: 'recall',
+      label: 'Pulling a note back',
+      description:
+        'Bring back what you remember about a topic — the notes written down in this project, closest in meaning first. Use it when a fact from an earlier sitting would help now.',
+      promptSnippet: 'recall(query) — bring back what you remember about a topic',
+      promptGuidelines: [
+        'Use recall before rediscovering: if an earlier sitting may have written it down, ask.',
+        'The closest notes come first; how recent and how important the note was also counts.',
+      ],
+      parameters: Type.Object({
+        query: Type.String({ description: 'What you need to remember, in plain words.', minLength: 1 }),
+        limit: Type.Optional(Type.Number({ description: 'How many notes to bring back. Default 6.' })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { query: string; limit?: number }): ToolResult => {
+        const found = await store.recall(params.query, { limit: params.limit });
+        if (found.length === 0) {
+          return { content: [{ type: 'text', text: 'I have nothing written down about that.' }], details: {} };
+        }
+        const lines = found.map((memory) => `- ${memory.content}`);
+        return {
+          content: [{ type: 'text', text: `What I have written down:\n${lines.join('\n')}` }],
+          details: {},
+        };
+      },
+    },
+    {
+      name: 'reflect',
+      label: 'Thinking across the notes',
+      description:
+        "Pull together everything the notes say about a question — across the project and the person's global notes. Use it when the answer may be spread over several notes.",
+      promptSnippet: 'reflect(question) — think across all the notes at once',
+      parameters: Type.Object({
+        question: Type.String({ description: 'The question to think across the notes about.', minLength: 1 }),
+        limit: Type.Optional(Type.Number({ description: 'How many notes to bring back. Default 8.' })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { question: string; limit?: number }): ToolResult => {
+        const found = await store.recall(params.question, { limit: params.limit ?? 8 });
+        if (found.length === 0) {
+          return { content: [{ type: 'text', text: 'Across everything I have written down, there is nothing about that.' }], details: {} };
+        }
+        const lines = found.map((memory) => `- ${memory.content}`);
+        return {
+          content: [{ type: 'text', text: `Across all my notes:\n${lines.join('\n')}` }],
+          details: {},
+        };
+      },
+    },
+    {
+      name: 'memory_edit',
+      label: 'Revising a note',
+      description:
+        "Revise a note you have written down — its words, its importance, or its tags — by the note's id. Use it when a fact changed or a note is wrong.",
+      promptSnippet: 'memory_edit(id, content?) — revise a note by its id',
+      parameters: Type.Object({
+        id: Type.String({ description: "The note's id, as recall or the note itself reports it." }),
+        content: Type.Optional(Type.String({ description: 'The corrected fact.' })),
+        importance: Type.Optional(Type.Number({ description: '1–5. 5 means never lose this.' })),
+        tags: Type.Optional(Type.Array(Type.String(), { description: "The note's tags, all of them." })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { id: string; content?: string; importance?: number; tags?: readonly string[] }): ToolResult => {
+        const revised = await store.update(params.id, {
+          content: params.content,
+          importance: params.importance,
+          tags: params.tags,
+        });
+        if (revised === null) {
+          return { content: [{ type: 'text', text: 'I have no note with that id.' }], details: {} };
+        }
+        return { content: [{ type: 'text', text: `Revised: \u201c${revised.content}\u201d` }], details: {} };
+      },
+    },
+    {
+      name: 'forget',
+      label: 'Letting a note go',
+      description: 'Let one note go, by its id. The note is gone and later sittings will not see it.',
+      promptSnippet: 'forget(id) — let one note go',
+      parameters: Type.Object({
+        id: Type.String({ description: "The note's id." }),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { id: string }): ToolResult => {
+        const gone = await store.forget(params.id);
+        return {
+          content: [{ type: 'text', text: gone ? 'That note is gone.' : 'I have no note with that id.' }],
+          details: {},
+        };
+      },
+    },
+  ];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Driving a real debugger                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** The sessions this sitting holds: one per attached process, pid-keyed. The
+ *  registry lives in the adapter so the tools can reach it and the session can
+ *  close every attached process when the sitting ends. */
+export type DebugRegistry = {
+  sessions: Map<number, debug.DebuggerSession>;
+};
+
+export function newDebugRegistry(): DebugRegistry {
+  return { sessions: new Map() };
+}
+
+function framesText(frames: readonly debug.Frame[]): string {
+  const lines = frames.map((frame, index) => {
+    const place = frame.file !== undefined ? `${frame.file}${frame.line !== undefined ? `:${frame.line}` : ''}` : frame.source ?? '?';
+    const head = `${index === 0 ? '\u25b8 ' : '  '}${frame.name} — ${place}`;
+    if (index === 0 && frame.variables !== undefined && frame.variables.length > 0) {
+      const values = frame.variables.map((variable) => `${variable.name} = ${variable.value}`).join(', ');
+      return `${head}\n    ${values}`;
+    }
+    return head;
+  });
+  return lines.join('\n');
+}
+
+/** The five tools that drive a debugger. Attach and evaluate ask the person
+ *  first (the Guard decides); step, frames and detach work on what was already
+ *  agreed. */
+export function debugTools(registry: DebugRegistry): ToolDefinition[] {
+  const sessionOf = (pid: number): debug.DebuggerSession => {
+    const session = registry.sessions.get(pid);
+    if (session === undefined) throw new Error('I am not attached to that program. Attach to it first (debug_attach), then ask again.');
+    return session;
+  };
+
+  return [
+    {
+      name: 'debug_attach',
+      label: 'Attaching to a program',
+      description:
+        'Attach the real debugger to a running program: pause it, read its frames and variables, step through it, and evaluate in it. Use it when a program is stuck, crashing, or misbehaving and reading its state would say why.',
+      promptSnippet: 'debug_attach(pid, kind?) — attach to a running program and read inside it',
+      promptGuidelines: [
+        'Attach by the process id (pid, from a process listing). Kind: c (C-family via lldb), go (dlv), python (debugpy); leave it out and I will look at what is running.',
+        'Attaching pauses the program. After attach, read frames with debug_frames, move with debug_step, and evaluate with debug_eval.',
+        'When a real attach is refused or impossible, fall back to a one-shot reading: a stack dump of a stuck Python program (py-spy dump --pid <pid>) or running a crashing program under lldb from the start.',
+      ],
+      parameters: Type.Object({
+        pid: Type.Number({ description: 'The process id to attach to.' }),
+        kind: Type.Optional(Type.String({ description: "What the program is: 'c' (C, Swift, Rust), 'go', or 'python'. Defaults to whatever is running." })),
+        program: Type.Optional(Type.String({ description: "The program's path, for attach targets that need it." })),
+      }),
+      executionMode: 'sequential',
+      execute: async (
+        _callId,
+        params: { pid: number; kind?: string; program?: string },
+      ): ToolResult => {
+        try {
+          const session = await debug.attach({ pid: params.pid, kind: params.kind, program: params.program });
+          registry.sessions.set(params.pid, session);
+          const seen = await debug.frames(session);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Attached to ${String(params.pid)}; it is paused.\n\n${framesText(seen)}`,
+              },
+            ],
+            details: {},
+          };
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : 'the attach failed.';
+          const hint = /permission|taskgated|not allowed|denied/i.test(message) ? `\n\n${debug.permissionHint()}` : '';
+          const fallback = `\n\nIf a real attach is not possible: ${debug.ONESHOT.join(' ')}`;
+          throw new Error(`${message}${hint}${fallback}`);
+        }
+      },
+    },
+    {
+      name: 'debug_frames',
+      label: 'Reading the frames',
+      description: 'Read the frames of the attached program — where it is and what the top frame holds.',
+      promptSnippet: 'debug_frames(pid) — read where the attached program is',
+      parameters: Type.Object({ pid: Type.Number({ description: 'The attached process id.' }) }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { pid: number }): ToolResult => {
+        const seen = await debug.frames(sessionOf(params.pid));
+        return { content: [{ type: 'text', text: framesText(seen) }], details: {} };
+      },
+    },
+    {
+      name: 'debug_step',
+      label: 'Stepping the program',
+      description: 'Step the attached program one line: over, into, or out. It pauses again where it lands.',
+      promptSnippet: 'debug_step(pid, direction) — move the attached program one line',
+      parameters: Type.Object({
+        pid: Type.Number({ description: 'The attached process id.' }),
+        direction: Type.String({ description: "'over', 'into' or 'out'." }),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { pid: number; direction: string }): ToolResult => {
+        const direction = params.direction === 'into' || params.direction === 'out' ? params.direction : 'over';
+        const seen = await debug.step(sessionOf(params.pid), direction);
+        return { content: [{ type: 'text', text: framesText(seen) }], details: {} };
+      },
+    },
+    {
+      name: 'debug_eval',
+      label: 'Asking the program a question',
+      description: 'Evaluate an expression in the attached program, in the frame it is paused in.',
+      promptSnippet: 'debug_eval(pid, expression) — evaluate in the paused program',
+      parameters: Type.Object({
+        pid: Type.Number({ description: 'The attached process id.' }),
+        expression: Type.String({ description: "The expression to evaluate, in the program's own language." }),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { pid: number; expression: string }): ToolResult => {
+        const value = await debug.evaluate(sessionOf(params.pid), params.expression);
+        return { content: [{ type: 'text', text: `${params.expression} = ${value}` }], details: {} };
+      },
+    },
+    {
+      name: 'debug_detach',
+      label: 'Letting the program go',
+      description: 'Detach from the attached program and let it run on, unharmed.',
+      promptSnippet: 'debug_detach(pid) — let the attached program run on',
+      parameters: Type.Object({ pid: Type.Number({ description: 'The attached process id.' }) }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { pid: number }): ToolResult => {
+        const session = sessionOf(params.pid);
+        await debug.detach(session);
+        registry.sessions.delete(params.pid);
+        return { content: [{ type: 'text', text: `Detached from ${String(params.pid)}; it is running on its own.` }], details: {} };
+      },
+    },
+  ];
+}
+
+/* -------------------------------------------------------------------------- */
 /* The task (subagent) tool                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -360,13 +795,72 @@ const STDERR_TAIL = 4000;
  *  per token for nothing anybody can read that fast. */
 const PROGRESS_EVERY_MS = 400;
 
-type TaskParams = { task: string; cwd?: string };
+type TaskParams = { task: string; cwd?: string; role?: HelperRole };
+
+/** The session owns the helper's folder. A helper may be asked to look beneath
+ * it, but model-supplied `cwd` must never replace the project it was launched
+ * from. Kept as a small pure seam because this value is used for both the child
+ * process and the cost record. */
+export function helperWorkingDirectory(projectRoot?: string, requested?: string): string {
+  return projectRoot ?? requested ?? process.cwd();
+}
+
+/* -------------------------------------------------------------------------- */
+/* The boundary around a helper                                                */
+/* -------------------------------------------------------------------------- */
+
+/** How a helper's run was held, as intended and as observed. */
+export type BoundaryFacts = {
+  /** True when the computer's own boundary was applied to this run. */
+  asked: boolean;
+  /** What the helper found from inside. Null when it never got that far. */
+  observed: boolean | null;
+  /** Why there was no boundary, in plain words, when there was none. */
+  because: string | null;
+};
+
+const BOUNDARY_BROKEN =
+  'I asked this computer to keep that helper inside your project folder and it did not, so the helper ran with only the Guard around it.';
+
+/** A path a held helper cannot possibly write to, so its own answer means
+ *  something. Home rather than a temporary folder: a temporary folder is the one
+ *  place a boundary is likely to hand back a fresh writable copy of. */
+let checks = 0;
+function outsidePath(): string {
+  checks += 1;
+  return join(homedir(), `.graphe-boundary-check-${String(process.pid)}-${String(Date.now())}-${String(checks)}`);
+}
+
+/**
+ * The sentence to put alongside a helper's answer, or null when there is
+ * nothing to say.
+ *
+ * Never silent about a missing boundary, and never quiet about one that was
+ * supposed to be there and was not — that second case is the one a clean start
+ * would otherwise hide completely.
+ */
+export function boundaryNote(facts: BoundaryFacts): string | null {
+  if (facts.observed === true) return null;
+  if (facts.asked) return facts.observed === false ? BOUNDARY_BROKEN : null;
+  return facts.because;
+}
+
+/** What a helper may write to: the folder it works in, and the app's own folder
+ *  — the account it thinks with is kept there, along with the small records Pi
+ *  keeps for itself, and a helper that cannot write them will not start. */
+function helperBounds(cwd: string, agentDir: string): { writable: string[]; reach: 'secure' } {
+  return { writable: agentDir === '' ? [cwd] : [cwd, agentDir], reach: 'secure' };
+}
 
 /** Who the helper thinks with. The child has no window, no settings of its own
  *  and no way to ask, so the model the person chose has to travel with the job
  *  — without it Pi falls back to whatever its own settings say, which in this
  *  app is nothing, and the helper answers with silence. */
 export type HelperModel = { providerId: string; modelId: string } | null;
+
+/** How long the helper thinks first. The same reasoning as the model: the
+ *  child has no preferences of its own, so the chosen pace travels with it. */
+export type HelperPace = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /** A missing helper otherwise arrives as ENOENT on the child's error event,
  *  which reads exactly like a helper that crashed. Under vitest this module is
@@ -388,37 +882,97 @@ function lastLine(text: string): string | null {
   return last;
 }
 
+/** How long a child gets to leave politely before it is made to. */
+const GIVE_UP_AFTER_MS = 3000;
+
+/**
+ * End a helper's process.
+ *
+ * The polite signal, then the one it cannot ignore. Nothing is lost by it: a
+ * helper reads and reports and cannot change anything, which is what makes this
+ * safe to call the moment a ceiling is reached.
+ */
+export function stopChild(child: ChildProcess): void {
+  if (!child.killed) child.kill('SIGTERM');
+  setTimeout(() => {
+    if (!child.killed) child.kill('SIGKILL');
+  }, GIVE_UP_AFTER_MS).unref();
+}
+
+/** What one run tells the fleet about itself while it is going. */
+type Watching = {
+  /** Given the way to end this child, for as long as it is alive. */
+  begun: (stop: () => void) => void;
+  spent: (line: { amount: Money; label: string; reason: SpendReason }) => void;
+};
+
+/** One run: what the helper said, and how it was held while saying it. */
+type Ran = { outcome: SubagentOutcome; boundary: BoundaryFacts };
+
 /** One run: spawn the child, feed it its job, relay what it says, and answer
  *  Pi with the finished text. The `signal` is Pi's own abort signal — pressing
- *  Stop in the window kills the helper too. */
-function runSubagent(
-  job: TaskParams & { agentDir: string; model: HelperModel },
+ *  Stop in the window kills the helper too.
+ *
+ *  The child is wrapped in whatever boundary this computer can hold around it
+ *  before it starts. When there is none it still runs — a helper reads and
+ *  reports, and the Guard covers it — but never quietly: the reason travels back
+ *  with the answer. */
+async function runSubagent(
+  job: TaskParams & { agentDir: string; model: HelperModel; thinking?: HelperPace },
   signal: AbortSignal | undefined,
   onProgress: (text: string) => void,
-): Promise<SubagentOutcome> {
+  watching?: Watching,
+): Promise<Ran> {
   const missing = whyNoHelper();
-  if (missing !== null) return Promise.resolve({ ok: false, error: missing });
+  const cwd = job.cwd ?? process.cwd();
+  const boundary: BoundaryFacts = { asked: false, observed: null, because: null };
+  if (missing !== null) return { outcome: { ok: false, error: missing }, boundary };
+
+  const bound = await hold(process.execPath, [SUBAGENT_RUNNER], helperBounds(cwd, job.agentDir));
+  boundary.asked = bound.held;
+  if (!bound.held) boundary.because = bound.sentence;
 
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [SUBAGENT_RUNNER], {
-      cwd: job.cwd ?? process.cwd(),
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const child = spawn(
+      bound.held ? bound.command : process.execPath,
+      bound.held ? [...bound.args] : [SUBAGENT_RUNNER],
+      {
+        cwd,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
 
     let buffer = '';
     let done = false;
+
+    // A helper that never answers used to hold the whole turn open: it resolves
+    // on a report, a close, an error, a stop or the person's own abort, and a
+    // provider that stalls the stream is none of those. Background work has had
+    // a wall clock all along; this is the same idea at the size of one helper.
+    //
+    // Started before `finish` exists so that `finish` can always clear it — the
+    // fleet can stop this run on the way in, before the clock would otherwise
+    // have been set. The callback only ever runs later, by which time `finish`
+    // is there.
+    const patience = setTimeout(() => {
+      finish({ ok: false, error: HELPER_TOOK_TOO_LONG });
+    }, HELPER_PATIENCE_MS);
+    patience.unref?.();
+
     const finish = (outcome: SubagentOutcome): void => {
       if (done) return;
       done = true;
-      resolve(outcome);
+      clearTimeout(patience);
+      resolve({ outcome, boundary });
       // Never leave a live child behind a resolved promise: the helper may not
       // have noticed its own report arrived.
-      if (!child.killed) child.kill('SIGTERM');
-      setTimeout(() => {
-        if (!child.killed) child.kill('SIGKILL');
-      }, 3000).unref();
+      stopChild(child);
     };
+
+    // The same ending the ceiling uses, so stopping the fleet is the stop this
+    // run already knows how to do rather than a second way of dying.
+    watching?.begun(() => finish({ ok: false, error: ceilingWords.stopped }));
 
     const abort = (): void => {
       if (signal?.aborted === true) finish({ ok: false, error: 'This piece of work was stopped.' });
@@ -427,6 +981,7 @@ function runSubagent(
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (data: string) => {
+      patience.refresh();
       buffer += data;
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
@@ -439,6 +994,8 @@ function runSubagent(
           continue;
         }
         if (received.type === 'delta') onProgress(received.text);
+        if (received.type === 'boundary') boundary.observed = received.held;
+        if (received.type === 'spend') watching?.spent(received);
         if (received.type === 'done') finish(received.outcome);
       }
     });
@@ -486,32 +1043,47 @@ function runSubagent(
     // The one message in. Nothing else ever touches the pipe once the job is
     // written — a child that tries to read more has nowhere to go.
     child.stdin.on('error', () => {});
-    child.stdin.write(JSON.stringify(job));
+    child.stdin.write(JSON.stringify({ ...job, outside: outsidePath() }));
     child.stdin.end();
   });
 }
 
-export const taskTool = (agentDir: string, model: HelperModel = null): ToolDefinition => ({
+export const taskTool = (
+  agentDir: string,
+  model: HelperModel = null,
+  thinking?: HelperPace,
+  projectRoot?: string,
+): ToolDefinition => ({
   name: 'task',
   label: 'Task',
   description:
-    'Send a piece of work to a helper agent with its own fresh context window. The helper can read the project and search the web, and cannot change anything. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context.',
-  promptSnippet: 'task(task) — send a piece of work to a read-only helper',
+    'Send a piece of work to a helper agent with its own fresh context window. Most helpers read the project and search the web and cannot change anything; a builder is handed its own copy of the project, makes one self-contained change in it, and hands back the change for you to look at and apply. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context. Call it several times in one reply to put several helpers on separate pieces of work at the same time. A helper can be asked to act as a reviewer (finding problems with file and line references) or a researcher (gathering facts), or left as a general helper.',
+  promptSnippet: 'task(task, role?) — send a piece of work to a read-only helper',
   promptGuidelines: [
     'Give the helper one whole piece of work: a question it can answer without this conversation.',
+    // Without this the model sends one helper, waits for its answer, and sends
+    // the next — which is a queue wearing a fan-out's clothes.
+    'To send several helpers, put every task call in the same reply. They then work at once instead of queueing, and you get all the answers together.',
+    'Split the work so no helper needs another helper\'s answer. Anything that has to happen in order belongs in one helper, or in a second round after the first answers.',
     'The helper cannot make changes. Ask it for findings, not fixes.',
     'A small piece of work is not worth the help: the helper reads the same files and searches the same web you would.',
+    "To have work checked, send it to a 'reviewer' helper and ask it to find genuine problems with file and line references. To gather facts, send a 'researcher'. A helper that needs a decision stops and says what it needs, starting with 'To continue I need to know:' — pass that question to the person, then send the work again with the answer.",
   ],
   parameters: Type.Object({
     task: Type.String({ description: 'The piece of work for the helper, in plain words.', minLength: 1 }),
     cwd: Type.Optional(Type.String({ description: 'The folder the helper should work in. Defaults to the project folder.' })),
+    role: Type.Optional(
+      Type.String({
+        description: "What kind of helper: 'reviewer' finds problems in the work with file and line references; 'researcher' gathers facts from the web and the project; 'builder' makes one self-contained change in its own copy of the project and hands the change back; anything else is a general helper.",
+      }),
+    ),
   }),
-  /* Helpers are the one tool worth running side by side: each is its own
-     process with its own context, and the whole reason to send three is that
-     they work at once. Sequential turned "send in a team" into a queue. */
+  /* Pi runs a whole batch of calls one after another as soon as a single tool
+     in it says `sequential`, so this is the setting nothing else here may
+     contradict: the reason to send three helpers is that they work at once. */
   executionMode: 'parallel',
   execute: async (
-    _callId: string,
+    callId: string,
     params: TaskParams,
     signal: AbortSignal | undefined,
     onUpdate: AgentToolUpdateCallback<unknown> | undefined,
@@ -519,25 +1091,150 @@ export const taskTool = (agentDir: string, model: HelperModel = null): ToolDefin
     if (params.task.trim() === '') {
       return { content: [{ type: 'text', text: 'I need a piece of work to hand over.' }], details: {} };
     }
+    // The role is the helper's remit: who it is, which tools it may hold, and
+    // the instructions it reads first. Anything unfamiliar is the plain helper.
+    const spec = roleSpec(params.role as HelperRole);
+    // Asked before anything is spawned: a helper refused costs nothing, and one
+    // refused halfway through has already been paid for.
+    // The project this helper's spending belongs to. The model's `cwd` is a
+    // suggestion; the folder the session was opened on is the fact.
+    const project = helperWorkingDirectory(projectRoot, params.cwd);
+    const admitted = fleet.begin({ id: callId, kind: 'helper', stop: () => {} });
+    if (!admitted.ok) {
+      return { content: [{ type: 'text', text: admitted.because }], details: {} };
+    }
+
+    // A builder gets its own copy of the project and nothing else. Every path
+    // rule is measured from the folder it is given, so the copy is not a
+    // convenience — it is the entire reason a helper may write at all.
+    let copy: BuilderCopy | null = null;
+    if (spec.needsCopy) {
+      copy = await makeBuilderCopy(project, callId);
+      if (copy === null) {
+        fleet.ended(callId);
+        return { content: [{ type: 'text', text: NO_COPY_TO_BUILD_IN }], details: {} };
+      }
+    }
+    const where = copy?.folder ?? project;
+
     // The child's progress goes out as Pi's partial tool result, which is the
     // only way anything a custom tool learns mid-run can reach the session.
     let progress = '';
     let sentAt = 0;
-    const outcome = await runSubagent({ ...params, agentDir, model }, signal, (text) => {
-      progress += text;
-      const now = Date.now();
-      if (now - sentAt < PROGRESS_EVERY_MS) return;
-      sentAt = now;
-      onUpdate?.({ content: [{ type: 'text', text: progress }], details: {} });
-    });
-    if (!outcome.ok) throw new Error(outcome.error);
+    let built = '';
+    let ran: Ran;
+    try {
+      ran = await runSubagent(
+        // `project` is the session's real folder. `params.cwd` is model input
+        // and must never decide where a helper starts: previously it was used
+        // for accounting but accidentally dropped here, so helpers fell back
+        // to Graphe's application directory and could not resolve the project.
+        { ...params, role: spec.name, cwd: where, agentDir, model, thinking },
+        signal,
+        (text) => {
+          progress += text;
+          const now = Date.now();
+          if (now - sentAt < PROGRESS_EVERY_MS) return;
+          sentAt = now;
+          onUpdate?.({ content: [{ type: 'text', text: progress }], details: {} });
+        },
+        {
+          begun: (stop) => fleet.watch(callId, stop),
+          spent: (line) => fleet.spentUnseen(callId, { ...line, project }),
+        },
+      );
+    } finally {
+      // However this ended, its share goes back. A helper that never got as far
+      // as a process would otherwise hold a slice of the ceiling for good.
+      fleet.ended(callId);
+      // And so does the copy. Read out of it first: a thrown run still made
+      // whatever it made, and the diff is the only account of it.
+      if (copy !== null) {
+        built = await copy.changeMade().catch(() => '');
+        await copy.letGo();
+      }
+    }
+    const { outcome, boundary } = ran;
+    // Said out loud rather than left to be inferred from a helper that started
+    // cleanly: a run with less than usual around it says so alongside its answer.
+    const note = boundaryNote(boundary);
+    if (!outcome.ok) throw new Error(note === null ? outcome.error : `${outcome.error}\n\n${note}`);
+    // What a builder actually did, rather than what it says it did. The words
+    // and the diff are both here because one of them is checkable.
+    const whole = built === '' ? outcome.text : `${outcome.text}\n\n${built}`;
+    const said = note === null ? whole : `${whole}\n\n${note}`;
     // One last update with the whole of it. The throttle above means the final
     // few hundred milliseconds of a helper's answer would otherwise never reach
     // the window, which is the difference between a finding and half of one.
-    onUpdate?.({ content: [{ type: 'text', text: outcome.text }], details: {} });
-    return { content: [{ type: 'text', text: outcome.text }], details: {} };
+    onUpdate?.({ content: [{ type: 'text', text: said }], details: {} });
+    return { content: [{ type: 'text', text: said }], details: {} };
   },
 });
+
+/* -------------------------------------------------------------------------- */
+/* A copy for a helper that builds                                            */
+/* -------------------------------------------------------------------------- */
+
+const NO_COPY_TO_BUILD_IN =
+  'I could not make a copy of the project for that helper to work in, so nothing was changed. A helper only ever builds in a copy, never in your folder.';
+
+/**
+ * Where a builder's copy lives: out of the way entirely.
+ *
+ * Not inside the project, because nothing a builder writes may appear in the
+ * folder somebody is looking at. Not beside it either — that leaves our
+ * scaffolding in whatever folder the person keeps their work in. The name
+ * carries the project so two projects never share one, and the call so two
+ * builders never share one.
+ */
+export function builderFolder(project: string, id: string): string {
+  const safe = (text: string, most: number): string =>
+    text.replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, most);
+  const whose = safe(basename(resolve(project)), 24) || 'project';
+  const which = safe(id, 24) || 'one';
+  // The whole path, shortened, so two folders of the same name in different
+  // places cannot land on one copy.
+  const where = createHash('sha1').update(resolve(project)).digest('hex').slice(0, 8);
+  return join(tmpdir(), 'graphe-builders', `${whose}-${where}`, which);
+}
+
+export type BuilderCopy = {
+  folder: string;
+  /** What it changed, as a diff somebody can read. */
+  changeMade: () => Promise<string>;
+  /** Give the copy back, whatever state it was left in. */
+  letGo: () => Promise<void>;
+};
+
+/**
+ * A copy of the project for one builder, and nothing shared with anybody.
+ *
+ * Two builders on one folder is two agents editing one file, which is the
+ * failure this whole arrangement exists to avoid. Returns null rather than
+ * falling back to the real project — a builder with nowhere of its own does
+ * not build.
+ */
+export async function makeBuilderCopy(project: string, id: string): Promise<BuilderCopy | null> {
+  const history = new ProjectHistory(project);
+  const folder = resolve(builderFolder(project, id));
+  try {
+    await history.addWorkspace(folder);
+  } catch {
+    return null;
+  }
+  return {
+    folder,
+    changeMade: async () => {
+      const diff = await new ProjectHistory(folder).diffFor({ kind: 'working' }).catch(() => '');
+      return diff.trim() === '' ? BUILT_NOTHING : `What it changed:\n\n${trimDiff(diff, 20_000)}`;
+    },
+    letGo: async () => {
+      await history.removeWorkspace(folder).catch(() => undefined);
+    },
+  };
+}
+
+const BUILT_NOTHING = 'It changed no files.';
 
 /* -------------------------------------------------------------------------- */
 /* Reading a Figma file                                                        */
@@ -578,7 +1275,6 @@ export const figmaReadTool = (token: string): ToolDefinition => ({
   parameters: Type.Object({
     url: Type.String({ description: 'The Figma address, copied from Figma.', minLength: 1 }),
   }),
-  executionMode: 'sequential',
   execute: async (
     _callId: string,
     params: { url: string },
@@ -634,6 +1330,139 @@ export const figmaReadTool = (token: string): ToolDefinition => ({
   },
 });
 
+/* -------------------------------------------------------------------------- */
+/* Things that keep running                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** How much of a server's own talking to hand back at once. Enough to see why
+ *  it would not start, short of pasting a log into the conversation. */
+const SAID_AT_ONCE = 4_000;
+
+function tail(text: string, most = SAID_AT_ONCE): string {
+  const trimmed = text.trimEnd();
+  return trimmed.length <= most ? trimmed : `…\n${trimmed.slice(-most)}`;
+}
+
+function describePiece(piece: RunningPiece): string {
+  const where = piece.address === null ? '' : ` — ${piece.address}`;
+  const how =
+    piece.state === 'stopped'
+      ? `stopped${piece.exitCode === null ? '' : ` (${String(piece.exitCode)})`}`
+      : piece.state;
+  return `${piece.id}  ${piece.label}${where}  [${how}]`;
+}
+
+/**
+ * The three tools for work that answers by staying up.
+ *
+ * A server is not a command with an answer at the end, so it does not go through
+ * the one that waits for one. It is started here, kept for as long as the
+ * project is open, and asked about afterwards.
+ */
+export function runningTools(
+  running: Running,
+  where: {
+    folder: string;
+    parts: () => { shell: string; args: readonly string[] };
+    writable: readonly string[];
+    /** Passed straight to the register: what was started, so a crash can be
+     *  cleaned up next time. */
+    noted?: { began: (pid: number, command: string) => void; ended: (pid: number) => void };
+    /** Told whenever something starts, finds its address or falls over, so the
+     *  band above the composer is never out of date. */
+    onChange?: () => void;
+  },
+): ToolDefinition[] {
+  return [
+    {
+      name: 'keep_running',
+      label: 'Starting something up',
+      description:
+        'Start a command that is meant to stay up — a development server, an API, a watcher — and keep it running after this turn ends. Returns as soon as it says where it can be reached. Use this for anything that does not finish on its own; the ordinary shell is for commands that do.',
+      promptSnippet: 'keep_running(command, label?) — start a server and leave it running',
+      promptGuidelines: [
+        'Use keep_running for `npm run dev`, `vite`, `python3 -m http.server`, an API, a watcher — anything that stays up. Running one through bash cannot work: bash waits for a command to finish, and this kind never does.',
+        'Several can run at once — a front end and two back ends is ordinary. Each gets an id.',
+        'It comes back with the address it is reachable at, when it prints one. Give that address to the person; the window can open it.',
+        'Check on one later with running(), and end it with stop_running(id). Do not start a second copy of something already up — look first.',
+      ],
+      parameters: Type.Object({
+        command: Type.String({ description: 'The command to start, exactly as it would be typed.', minLength: 1 }),
+        label: Type.Optional(Type.String({ description: 'What to call it in a sentence — "the site", "the API".' })),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { command: string; label?: string }): ToolResult => {
+        const command = params.command.trim();
+        if (command === '') throw new Error('I need a command to start.');
+        const piece = await running.start({
+          command,
+          folder: where.folder,
+          label: params.label,
+          parts: where.parts(),
+          writable: where.writable,
+          ...(where.noted === undefined ? {} : { noted: where.noted }),
+          onChange: where.onChange,
+        });
+        const said = running.said(piece.id);
+        if (piece.state === 'stopped') {
+          throw new Error(
+            `It stopped straight away${piece.exitCode === null ? '' : ` (${String(piece.exitCode)})`}.\n\n${tail(said)}`,
+          );
+        }
+        const found =
+          piece.address === null
+            ? 'It is up. It has not printed an address, so either it is not one that listens or it is still starting — ask running() again in a moment.'
+            : `It is up at ${piece.address}.`;
+        return {
+          content: [{ type: 'text', text: `${describePiece(piece)}\n\n${found}\n\n${tail(said)}` }],
+          details: {},
+        };
+      },
+    },
+    {
+      name: 'running',
+      label: 'Checking what is running',
+      description:
+        'What is still running, and anything it has said since last time. With no id, lists everything. Use it before starting something, and after, to see whether it came up.',
+      promptSnippet: 'running(id?) — what is up, and what it has said',
+      parameters: Type.Object({
+        id: Type.Optional(Type.String({ description: 'One piece, by the id keep_running returned.' })),
+        all: Type.Optional(Type.Boolean({ description: 'Everything it has said, not only what is new.' })),
+      }),
+      execute: (_callId, params: { id?: string; all?: boolean }): ToolResult => {
+        const id = params.id?.trim();
+        if (id !== undefined && id !== '') {
+          const piece = running.at(id);
+          if (piece === null) throw new Error(`Nothing here is called ${id}. Ask running() for the list.`);
+          const said = running.said(id, { all: params.all === true });
+          const text = said.trim() === '' ? 'Nothing new since last time.' : tail(said);
+          return Promise.resolve({
+            content: [{ type: 'text', text: `${describePiece(piece)}\n\n${text}` }],
+            details: {},
+          });
+        }
+        const all = running.list();
+        const text = all.length === 0 ? 'Nothing is running.' : all.map(describePiece).join('\n');
+        return Promise.resolve({ content: [{ type: 'text', text }], details: {} });
+      },
+    },
+    {
+      name: 'stop_running',
+      label: 'Stopping something',
+      description: 'Stop something that keep_running started, and everything it started in turn.',
+      promptSnippet: 'stop_running(id) — stop one of the things that are up',
+      parameters: Type.Object({
+        id: Type.String({ description: 'The id keep_running returned.', minLength: 1 }),
+      }),
+      execute: (_callId, params: { id: string }): ToolResult => {
+        const stopped = running.stop(params.id.trim());
+        const text = stopped ? `${params.id} is stopped.` : `Nothing here is called ${params.id}.`;
+        return Promise.resolve({ content: [{ type: 'text', text }], details: {} });
+      },
+    },
+  ];
+}
+
 /**
  * Every tool Graphe adds, for one session.
  *
@@ -642,13 +1471,251 @@ export const figmaReadTool = (token: string): ToolDefinition => ({
  * answer "no account is connected" is worse than no tool, because it spends a
  * turn teaching the model something the prompt could have said for nothing.
  */
+/* -------------------------------------------------------------------------- */
+/* The shape of the project                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** Deep enough for any project laid out the ordinary way, shallow enough not to
+ *  walk a dependency folder somebody forgot to name. */
+const MAP_DEEPEST = 8;
+const MAP_MOST = 4000;
+const MAP_SKIP = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', 'vendor', '.git']);
+const MAP_READ = /\.(?:tsx?|jsx?|mjs|cjs|svelte|vue|astro|css|scss|sass|less)$/i;
+
+async function filesUnder(root: string): Promise<SourceFile[]> {
+  const found: SourceFile[] = [];
+  const walk = async (folder: string, prefix: string, depth: number): Promise<void> => {
+    if (depth > MAP_DEEPEST || found.length >= MAP_MOST) return;
+    const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (found.length >= MAP_MOST) return;
+      if (entry.name.startsWith('.') || MAP_SKIP.has(entry.name)) continue;
+      const path = `${prefix}${entry.name}`;
+      if (entry.isDirectory()) {
+        await walk(join(folder, entry.name), `${path}/`, depth + 1);
+        continue;
+      }
+      if (!MAP_READ.test(entry.name)) continue;
+      const text = await readFile(join(folder, entry.name), 'utf8').catch(() => null);
+      if (text !== null) found.push({ path, text });
+    }
+  };
+  await walk(root, '', 0);
+  return found;
+}
+
+/**
+ * A map of the project, worked out from the files.
+ *
+ * The one thing needed to break a request into pieces that do not collide, and
+ * until now guesswork done again from scratch every time out of whatever files
+ * happened to be read first.
+ */
+export const readMapTool = (cwd: string): ToolDefinition => ({
+  name: 'read_map',
+  label: 'Reading the shape of the project',
+  description:
+    'How this project is put together: its folders, how many files are in each, which folders reach into which, where a change starts from, and where the styles are. Read it before breaking a big request into pieces, so the pieces touch different areas rather than colliding.',
+  promptSnippet: 'read_map() — how the project is put together, by folder',
+  promptGuidelines: [
+    'Read it before setting several pieces of work going, so each piece can be given an area of its own.',
+    'It is the shape, not the contents. Open the files themselves for anything it does not answer.',
+  ],
+  parameters: Type.Object({}),
+  executionMode: 'sequential',
+  execute: async (): ToolResult => ({
+    content: [{ type: 'text', text: saysMap(mapFrom(await filesUnder(cwd))) }],
+    details: {},
+  }),
+});
+
+/* -------------------------------------------------------------------------- */
+/* Several pieces at once                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** How many pieces one request may put on the board. Past this it is not a
+ *  plan, it is a machine, and nobody reads the results of a machine. */
+export const MOST_APART = 8;
+
+export type PutOnBoard = (
+  doing: string,
+  after: string | null,
+  ways?: string | null,
+) => Promise<{ ok: true; id: string } | { ok: false; because: string }>;
+
+/** How many goes at one thing are worth comparing. Past three nobody looks at
+ *  the fourth, and each one costs what the first one did. */
+export const MOST_WAYS = 3;
+
+export const WAYS_WORDS = {
+  none: 'Say what to make, and two or three different ways of going about it.',
+  one: 'Two ways at least, or it is not a choice. One way is ordinary work.',
+  tooMany: `Three ways at most — past that nobody looks at the fourth, and each one costs what the first did.`,
+  went: (count: number): string =>
+    `${count === 2 ? 'Two' : String(count)} goes at the same thing are running, each in its own copy. They finish as pictures on the board, side by side, with what each one cost. Keeping one throws the others away — say what you set going and stop.`,
+} as const;
+
+export const APART_WORDS = {
+  none: 'Nothing to set going — say what each piece of work is.',
+  tooMany: `That is more than ${String(MOST_APART)} pieces at once. Put the biggest ${String(MOST_APART)} on and ask again when they are done.`,
+  /** What comes back to the model once the pieces are on the board. */
+  went: (count: number): string =>
+    count === 1
+      ? 'One piece of work is on the board, in its own copy of the project. It runs whether or not this conversation carries on.'
+      : `${String(count)} pieces of work are on the board, each in its own copy of the project. Four run at a time and the rest wait their turn; they carry on whether or not this conversation does.`,
+  /** Said alongside, so the model does not sit and wait for them. */
+  dontWait:
+    'Do not wait for them or ask about them again — the person watches them finish on the board and decides which to keep. Say what you set going and stop.',
+  /** When the piece it could not start without never went on itself. */
+  lostItsTurn: 'the piece it waits for did not go on, so this one did not either.',
+} as const;
+
+/**
+ * Break one request into pieces that run at the same time, each in its own copy.
+ *
+ * The board already ran several pieces side by side, each isolated, with a way
+ * to say one waits for another — but only a person could put anything on it, so
+ * a big request was one agent walking a list alone. This is the same board,
+ * asked for by the agent that just worked out what the list is.
+ *
+ * A piece may wait for one earlier piece in the same call, named by its place
+ * in the list. Anything else is refused rather than guessed at.
+ */
+export const setGoingTool = (put: PutOnBoard): ToolDefinition => ({
+  name: 'set_going',
+  label: 'Setting work going',
+  description:
+    'Put several separate pieces of work on the board at once. Each gets its own copy of the project and its own agent, four run at a time, and they carry on whether or not this conversation does. Use it when a request genuinely breaks into pieces that touch different files — one piece per area — rather than one long list you walk yourself. A piece can be told to wait for an earlier one in the same call.',
+  promptSnippet: 'set_going(pieces) — put several pieces of work on the board, each in its own copy',
+  promptGuidelines: [
+    'Use it when a request breaks into pieces that touch different files. Two pieces changing one file will collide, and only one of them can be kept.',
+    'Say what each piece is in the words the person used, whole enough to be worked on by somebody who cannot see this conversation.',
+    'Give a piece `after` only when it genuinely cannot start until another has finished — a piece that waits is a piece not running.',
+    'Having set them going, say what you set going and stop. They are watched on the board, not here.',
+  ],
+  parameters: Type.Object({
+    pieces: Type.Array(
+      Type.Object({
+        doing: Type.String({ description: 'What this piece of work is, in plain words.', minLength: 1 }),
+        after: Type.Optional(
+          Type.Number({
+            description: 'The place in this list (1 for the first) of the piece this one waits for. Leave it out unless it truly cannot start first.',
+          }),
+        ),
+      }),
+      { description: 'The separate pieces of work, in the order they should be started.' },
+    ),
+  }),
+  executionMode: 'sequential',
+  execute: async (
+    _callId: string,
+    params: { pieces?: readonly { doing: string; after?: number }[] },
+  ): ToolResult => {
+    const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
+    const asked = (params.pieces ?? []).filter((one) => one.doing.trim() !== '');
+    if (asked.length === 0) return say(APART_WORDS.none);
+    if (asked.length > MOST_APART) return say(APART_WORDS.tooMany);
+
+    // Names as the board gave them, by place in the list, so "after: 2" can be
+    // turned into the real name of the second piece.
+    const names: (string | null)[] = [];
+    const went: string[] = [];
+    const refused: string[] = [];
+    for (const [index, piece] of asked.entries()) {
+      const doing = piece.doing.trim();
+      const waitsFor = piece.after;
+      // Only ever an earlier one in this same list. A number pointing forwards,
+      // at itself, or at nothing is refused rather than turned into "waits for
+      // nothing in particular".
+      const wanted = waitsFor !== undefined && waitsFor >= 1 && waitsFor <= index ? waitsFor : null;
+      const after = wanted === null ? null : names[wanted - 1] ?? null;
+      // The one it was told it could not start without never went on. Starting
+      // it now is the opposite of what was asked for.
+      if (wanted !== null && after === null) {
+        names.push(null);
+        refused.push(`${doing} — ${APART_WORDS.lostItsTurn}`);
+        continue;
+      }
+      const answer = await put(doing, after);
+      names.push(answer.ok ? answer.id : null);
+      if (answer.ok) went.push(doing);
+      else refused.push(`${doing} — ${answer.because}`);
+    }
+
+    if (went.length === 0) {
+      return say(`Nothing went on the board.\n${refused.join('\n')}`);
+    }
+    const lines = [APART_WORDS.went(went.length), ...went.map((one) => `\u2022 ${one}`)];
+    if (refused.length > 0) lines.push('These did not go on:', ...refused.map((one) => `\u2022 ${one}`));
+    lines.push(APART_WORDS.dontWait);
+    return say(lines.join('\n'));
+  },
+});
+
+/**
+ * Two or three goes at one thing, to be compared and chosen between.
+ *
+ * Not the same as several pieces of work: these are alternatives. They run at
+ * the same time in their own copies, they finish as pictures beside each other,
+ * and keeping one throws the rest away. On anything with taste in it the second
+ * attempt is usually the good one, and this is the only way to have both.
+ */
+export const tryWaysTool = (put: PutOnBoard): ToolDefinition => ({
+  name: 'try_ways',
+  label: 'Trying it more than one way',
+  description:
+    'Make the same thing two or three different ways at once, so they can be compared side by side and one of them kept. Use it when the request has taste in it and there is no single right answer — a layout, a colour, a piece of writing, the shape of a page — rather than when there is a correct result to arrive at. Each way runs in its own copy of the project; keeping one throws the others away.',
+  promptSnippet: 'try_ways(doing, ways) — make the same thing two or three ways, and compare them',
+  promptGuidelines: [
+    'Use it where taste decides and there is no single right answer. Where there is one correct result, do the work instead.',
+    'Make the ways genuinely different from each other — three versions of one idea is one idea, and the comparison is worthless.',
+    'Say what each way is in a sentence the person can tell apart from the others at a glance, because that is what they will read under the pictures.',
+  ],
+  parameters: Type.Object({
+    doing: Type.String({ description: 'What is being made, the same for every way.', minLength: 1 }),
+    ways: Type.Array(Type.String({ minLength: 1 }), {
+      description: 'How each go should differ — two or three genuinely different approaches.',
+    }),
+  }),
+  executionMode: 'sequential',
+  execute: async (callId: string, params: { doing?: string; ways?: readonly string[] }): ToolResult => {
+    const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
+    const doing = (params.doing ?? '').trim();
+    const ways = (params.ways ?? []).map((one) => one.trim()).filter((one) => one !== '');
+    if (doing === '' || ways.length === 0) return say(WAYS_WORDS.none);
+    if (ways.length === 1) return say(WAYS_WORDS.one);
+    if (ways.length > MOST_WAYS) return say(WAYS_WORDS.tooMany);
+
+    const group = `ways-${callId}`;
+    const went: string[] = [];
+    const refused: string[] = [];
+    for (const way of ways) {
+      const answer = await put(`${doing} — ${way}`, null, group);
+      if (answer.ok) went.push(way);
+      else refused.push(`${way} — ${answer.because}`);
+    }
+
+    if (went.length === 0) return say(`Nothing went on the board.\n${refused.join('\n')}`);
+    const lines = [WAYS_WORDS.went(went.length), ...went.map((one) => `\u2022 ${one}`)];
+    if (refused.length > 0) lines.push('These did not go on:', ...refused.map((one) => `\u2022 ${one}`));
+    return say(lines.join('\n'));
+  },
+});
+
 export const grapheTools = (
   agentDir: string,
   figmaToken?: string | null,
   model: HelperModel = null,
+  thinking?: HelperPace,
+  projectRoot?: string,
+  putOnBoard?: PutOnBoard,
 ): ToolDefinition[] => {
-  const tools = [websearchTool, webfetchTool, taskTool(agentDir, model)];
+  const tools = [websearchTool, webfetchTool, taskTool(agentDir, model, thinking, projectRoot)];
+  if (projectRoot !== undefined && projectRoot !== '') tools.push(readMapTool(projectRoot));
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));
+  // Only where there is a board to put work on. The runs on the board must not
+  // hold this tool: a piece that can fill the board it is running on is a loop.
+  if (putOnBoard !== undefined) tools.push(setGoingTool(putOnBoard), tryWaysTool(putOnBoard));
   return tools;
 };

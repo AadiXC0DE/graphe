@@ -249,6 +249,15 @@ export function shouldWarn(estimate: Estimate, threshold: Money): boolean {
   return compareAgainst.minor >= threshold.minor;
 }
 
+/** How much of a ceiling to set aside for a job before it runs.
+ *
+ *  Measured, the number we would quote. Unmeasured, the top of the band — a
+ *  ceiling only binds if it is wrong in the direction that protects it, and the
+ *  same reasoning is why `shouldWarn` compares against `high`. */
+export function reserveFor(estimate: Estimate): Money {
+  return estimate.confidence === 'measured' ? estimate.expected : estimate.high;
+}
+
 /** Measured history of similar jobs, kept in memory for the session. */
 export class TaskHistory {
   readonly currency: string;

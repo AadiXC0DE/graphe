@@ -48,12 +48,13 @@
  * requires nowhere. */
 
 import { execFile } from 'node:child_process';
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { devNull } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { ChangeKind } from './titles';
+import { stripType } from '../lib/conventional';
 
 const run = promisify(execFile);
 
@@ -97,7 +98,23 @@ export type StoredVersion = {
   refs: readonly string[];
 };
 
+/** What a review can point at: the work not yet saved, one saved version, or
+ *  a named piece of work on its own line. Every one is read-only. */
+export type ReviewTarget =
+  | { kind: 'working' }
+  | { kind: 'version'; id: string }
+  | { kind: 'line'; name: string };
+
 export type UnsavedChange = { path: string; kind: ChangeKind };
+
+/** The most recent version that touched one file. */
+export type LastChange = {
+  id: string;
+  /** The version's title, as it reads in the timeline. */
+  name: string;
+  /** Milliseconds since the epoch. */
+  when: number;
+};
 
 /** Every sentence this module can put in front of someone, in one place so it
  *  can be swept for retired vocabulary. */
@@ -308,6 +325,46 @@ export class ProjectHistory {
     return parseVersions(listed.stdout);
   }
 
+  /**
+   * What last touched each file, by path as the folder spells it.
+   *
+   * Newest first, so the first mention of a path wins and everything older is
+   * passed over. Bounded by `limit` versions rather than by paths: this is asked
+   * for while somebody waits, and a project's whole history is not worth reading
+   * to answer "when did this last change".
+   */
+  async lastChangeByFile(limit = 300): Promise<Map<string, LastChange>> {
+    await this.ensureReady();
+    const listed = await this.attempt([
+      'log',
+      '-n',
+      String(Math.max(1, Math.floor(limit))),
+      '--name-only',
+      '--no-renames',
+      `--pretty=format:${RECORD}%H${FIELD}%at${FIELD}%s${FIELD}`,
+    ]);
+    if (listed.code !== 0) return new Map();
+
+    const found = new Map<string, LastChange>();
+    for (const record of listed.stdout.split(RECORD)) {
+      const [id = '', at = '', title = '', names = ''] = record.split(FIELD);
+      if (!VERSION_ID.test(id)) continue;
+      const seconds = Number.parseInt(at, 10);
+      const change: LastChange = {
+        id,
+        // The write-up this feeds is the plain surface; the typed subject
+        // stays in git log and the branch list.
+        name: stripType(title.trim()),
+        when: Number.isFinite(seconds) ? seconds * 1000 : 0,
+      };
+      for (const line of names.split('\n')) {
+        const file = line.trim();
+        if (file !== '' && !found.has(file)) found.set(file, change);
+      }
+    }
+    return found;
+  }
+
   /** One version by id, or null if this project has never heard of it. */
   async version(versionId: string): Promise<StoredVersion | null> {
     await this.ensureReady();
@@ -414,6 +471,48 @@ export class ProjectHistory {
     return id;
   }
 
+  /**
+   * Take everything one version changed into the project, alongside whatever is
+   * already there.
+   *
+   * Not `restoreTo`, which replaces the whole tree. Two pieces of work started
+   * from the same version and finished separately are not alternatives to each
+   * other, so keeping the second must not undo the first — and replacing the
+   * tree with the second one's copy did exactly that, silently, because the
+   * second copy never had the first one's changes in it.
+   *
+   * A file both of them changed is a real disagreement. It is reported and the
+   * project is left as it was, rather than one side quietly winning.
+   */
+  async carryIn(
+    versionId: string,
+    message: string,
+  ): Promise<{ ok: true; version: string } | { ok: false; conflicted: readonly string[] }> {
+    await this.ensureReady();
+    const target = await this.resolve(versionId);
+    if (await this.hasUnsavedChanges()) {
+      throw new HistoryError(historyProblems.unsavedFirst);
+    }
+
+    // `--squash` merges into the files and stops there, leaving no half-finished
+    // merge behind for the next save to trip over.
+    const merged = await this.attempt(['merge', '--squash', target]);
+    if (merged.code !== 0) {
+      const clashing = await this.attempt(['diff', '-z', '--name-only', '--diff-filter=U']);
+      const conflicted = clashing.stdout.split('\0').filter((one: string) => one !== '');
+      // Safe because nothing was unsaved: the precondition above is what makes
+      // putting the folder back exactly where it was a true statement. A squash
+      // merge stages what it could apply, so this takes the files it would have
+      // added away with everything else it did.
+      await this.attempt(['reset', '--hard', 'HEAD']);
+      return { ok: false, conflicted };
+    }
+
+    const id = await this.snapshot(message, { evenIfNothingChanged: true });
+    if (!id) throw new HistoryError(historyProblems.goBackFailed);
+    return { ok: true, version: id };
+  }
+
   /* ------------------------------------------------- separate copies to try in */
 
   /**
@@ -513,6 +612,69 @@ export class ProjectHistory {
   async dropLine(name: string): Promise<void> {
     await this.ensureReady();
     await this.attempt(['branch', '--delete', '--force', name]);
+  }
+
+  /* ----------------------------------------------------------- checking work */
+
+  /** The empty tree, so the very first saved version can show its whole self. */
+  private static readonly EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+  /** Run one read-only git command and return its stdout, or a plain sentence
+   *  when git says no. */
+  private async readOnly(args: readonly string[]): Promise<string> {
+    const done = await this.attempt(['--no-pager', ...args]);
+    if (done.code !== 0) throw new HistoryError(historyProblems.notSetUp);
+    return done.stdout;
+  }
+
+  /** The change in front of the person right now: everything not saved yet,
+   *  including files never saved before. */
+  async diffWorking(): Promise<string> {
+    await this.ensureReady();
+    const changed = await this.readOnly(['diff', 'HEAD', '--no-ext-diff']);
+    const untracked = await this.readOnly(['ls-files', '--others', '--exclude-standard']);
+    const neverSaved = untracked
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+      .slice(0, 10)
+      .map(async (file) => {
+        // An untracked file is not in the index, so it is read off the disk —
+        // and only when it looks like words. Nobody reviews a picture.
+        const absolute = path.resolve(this.root, file);
+        try {
+          const size = await stat(absolute);
+          if (size.size > 200_000) return `# ${file} (new, too big to show here)`;
+          const contents = await readFile(absolute, 'utf8');
+          return `# ${file} (new)\n${contents}`;
+        } catch {
+          return `# ${file} (new, could not be read)`;
+        }
+      });
+    const extras = await Promise.all(neverSaved);
+    return [changed.trim(), ...extras].filter((part) => part !== '').join('\n\n');
+  }
+
+  /** What one saved version changed, against the version before it. */
+  async diffVersion(versionId: string): Promise<string> {
+    await this.ensureReady();
+    const resolved = await this.resolve(versionId);
+    const parent = await this.attempt(['rev-parse', '--quiet', '--verify', `${resolved}^`]);
+    const base = parent.code === 0 ? `${resolved}^` : ProjectHistory.EMPTY_TREE;
+    return this.readOnly(['diff', base, resolved, '--no-ext-diff']);
+  }
+
+  /** Everything a named piece of work keeps that where we are now does not. */
+  async diffLine(name: string): Promise<string> {
+    await this.ensureReady();
+    return this.readOnly(['diff', 'HEAD', name, '--no-ext-diff']);
+  }
+
+  /** The change a review target points at, as git text. */
+  async diffFor(target: ReviewTarget): Promise<string> {
+    if (target.kind === 'working') return this.diffWorking();
+    if (target.kind === 'version') return this.diffVersion(target.id);
+    return this.diffLine(target.name);
   }
 
   /** Where this project is kept as well as here, or null when it is only here. */

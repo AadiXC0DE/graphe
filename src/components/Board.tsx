@@ -8,6 +8,8 @@ import {
   saysWhen,
   type OnBoard,
 } from '../work/board';
+import type { Money } from '../agent/types';
+import { formatMoney } from '../cost/money';
 import './Board.css';
 
 /**
@@ -26,20 +28,32 @@ import './Board.css';
  */
 
 export type BoardPiece = OnBoard & {
+  /** One of several goes at the same thing, and which one. */
+  oneOf?: { of: number; at: number } | null;
+  /** Which folder this belongs to, when the board is showing more than one.
+   *  `where` is the path an action needs; `project` is what a person calls it. */
+  where?: string;
+  project?: string;
   /** Said when it did not work. */
   trouble?: string | null;
+  /** What this one is waiting for, already a sentence. Null when it waits for
+   *  nothing, which is almost all of them. */
+  after?: { id: string; doing: string; says: string } | null;
+  /** What this one came to. Null until anything has been spent on it. */
+  spent?: Money | null;
 };
 
 export type BoardProps = {
   pieces: readonly BoardPiece[];
   /** Now, epoch ms. Passed in so the board draws the same twice. */
   now: number;
-  /** Take this one's result into the project. Offered once it has finished. */
-  onKeep?: (id: string) => void;
+  /** Take this one's result into the project. Offered once it has finished.
+   *  The folder comes with it, because a board can be showing several. */
+  onKeep?: (id: string, where?: string) => void;
   /** Let one go. */
-  onDrop?: (id: string) => void;
+  onDrop?: (id: string, where?: string) => void;
   /** Look at one's result properly. */
-  onLook?: (id: string) => void;
+  onLook?: (id: string, where?: string) => void;
   /** How many go side by side, for the line under the summary. */
   atOnce?: number;
 };
@@ -53,9 +67,9 @@ function Card({
 }: {
   piece: BoardPiece;
   now: number;
-  onKeep?: (id: string) => void;
-  onDrop?: (id: string) => void;
-  onLook?: (id: string) => void;
+  onKeep?: (id: string, where?: string) => void;
+  onDrop?: (id: string, where?: string) => void;
+  onLook?: (id: string, where?: string) => void;
 }) {
   const picture = piece.picture ?? null;
   const alt = `What ${piece.doing} ended up looking like`;
@@ -71,7 +85,7 @@ function Card({
           <button
             type="button"
             className="work__open"
-            onClick={() => onLook(piece.id)}
+            onClick={() => onLook(piece.id, piece.where)}
             aria-label={`${boardWords.look} — ${piece.doing}`}
           >
             <img className="work__picture" src={picture} alt={alt} />
@@ -80,12 +94,32 @@ function Card({
       </div>
 
       <div className="work__said">
+        {/* Both of these answer "which one am I looking at?", so they come
+            before the sentence whether or not there is a picture above it.
+            The folder only when the board is showing more than one: on a board
+            of one it would be the same word on every card. */}
+        {piece.project === undefined ? null : (
+          <p className="work__where">{piece.project}</p>
+        )}
+        {piece.oneOf === null || piece.oneOf === undefined ? null : (
+          <p className="work__oneof">{boardWords.oneOf(piece.oneOf.at, piece.oneOf.of)}</p>
+        )}
         {picture === null ? null : <p className="work__doing">{piece.doing}</p>}
         <p className="work__state">
           <span className="work__dot" aria-hidden="true" />
           {saysState(piece.state)}
           <span className="work__when">{saysWhen(piece.at, now)}</span>
+          {/* A row is a picture, a sentence and what it cost. Absent until
+              there is a number, like the meter — nothing spent, nothing said. */}
+          {piece.spent === null || piece.spent === undefined ? null : (
+            <span className="work__spent">{formatMoney(piece.spent)}</span>
+          )}
         </p>
+        {/* A plan is only a plan if you can see it. Under the state line,
+            because it is a fact about when this starts, not about what it is. */}
+        {piece.after === null || piece.after === undefined ? null : (
+          <p className="work__after">{piece.after.says}</p>
+        )}
         {piece.trouble === null || piece.trouble === undefined ? null : (
           <p className="work__trouble">{piece.trouble}</p>
         )}
@@ -96,8 +130,13 @@ function Card({
           <button
             type="button"
             className="work__keep"
-            onClick={() => onKeep(piece.id)}
+            onClick={() => onKeep(piece.id, piece.where)}
             aria-label={`${boardWords.keep} — ${piece.doing}`}
+            title={
+              piece.oneOf === null || piece.oneOf === undefined
+                ? undefined
+                : boardWords.insteadOfOthers(piece.oneOf.of)
+            }
           >
             {boardWords.keep}
           </button>
@@ -106,7 +145,7 @@ function Card({
           <button
             type="button"
             className="work__drop"
-            onClick={() => onDrop(piece.id)}
+            onClick={() => onDrop(piece.id, piece.where)}
             aria-label={`${saysDrop(piece.state)} — ${piece.doing}`}
           >
             {saysDrop(piece.state)}
@@ -132,8 +171,10 @@ export default function Board({ pieces, now, onKeep, onDrop, onLook, atOnce }: B
         <section key={band.key} className="board__band" aria-label={band.label}>
           <h3 className="board__band-name">{band.label}</h3>
           <ul className="board__sheet">
+            {/* Names are handed out per folder, so two projects both have a
+                "work-1". On a board showing several, the id alone is not a name. */}
             {band.items.map((piece) => (
-              <li key={piece.id} className="board__cell">
+              <li key={`${piece.where ?? ''}\u0000${piece.id}`} className="board__cell">
                 <Card piece={piece} now={now} onKeep={onKeep} onDrop={onDrop} onLook={onLook} />
               </li>
             ))}

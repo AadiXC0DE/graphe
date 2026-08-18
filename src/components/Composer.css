@@ -1,5 +1,9 @@
 .composer {
   position: relative;
+  /* The row below measures itself against this, not against the window. How
+     much room the composer has depends on the rails and the page beside it, so
+     the window's width is the wrong number to ask. */
+  container-type: inline-size;
   width: 100%;
   background: var(--bg-raised);
   border: 1px solid var(--border);
@@ -39,11 +43,29 @@
   color: var(--text-faint);
 }
 
+/* The menu grows from the word that opened it, but sits above the composer so
+   it never hides the controls someone was already using. */
+.composer__skills {
+  position: absolute;
+  left: var(--space-3);
+  bottom: calc(100% + var(--space-2));
+  z-index: 4;
+  width: min(360px, calc(100vw - var(--space-6)));
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-lg);
+  animation: composer-skills-in 160ms var(--ease-out-quart) both;
+}
+@keyframes composer-skills-in { from { opacity: 0; transform: translateY(4px) scale(.99); } to { opacity: 1; transform: none; } }
+.composer__skills > p { margin: 0; padding: var(--space-1) var(--space-2) var(--space-2); font-size: var(--text-xs); color: var(--text-faint); }.composer__skills > p span { color: var(--accent); font-family: var(--font-mono); }.composer__skills button { display:flex; align-items:center; justify-content:space-between; width:100%; gap:var(--space-3); padding:var(--space-2); border-radius:var(--radius-sm); text-align:left; color:var(--text-faint); }.composer__skills button > span { display:flex; align-items:baseline; min-width:0; gap:var(--space-2); }.composer__skills strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-sm); font-weight:520; color:var(--text); }.composer__skills small,.composer__skills em { flex:none; font-family:var(--font-mono); font-size:var(--text-2xs); font-style:normal; color:var(--accent); }.composer__skills em { color:var(--text-faint); }.composer__skill--active { background:var(--accent-soft); }@media (hover:hover) and (pointer:fine) { .composer__skills button:hover { background:var(--bg-sunken); } }.composer__skills button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }@media (prefers-reduced-motion:reduce) { .composer__skills { animation:none; } }
+
 .composer__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  justify-content: flex-start;
+  gap: var(--space-1);
   padding: var(--space-1) var(--space-2) 0;
 }
 
@@ -68,6 +90,14 @@
 .composer__row .thinking {
   display: flex;
   align-items: center;
+  min-width: 0;
+}
+
+/* The message controls read as a compact working strip, not a row whose
+   * available width is redistributed into arbitrary gaps. The quiet hint takes
+   * the flexible space and keeps the room/send pair parked at the far edge. */
+.composer__row .composer__hint {
+  margin-left: var(--space-1);
 }
 
 .composer__hint {
@@ -321,5 +351,98 @@
   .composer__say--on::before {
     animation: none;
     opacity: 1;
+  }
+}
+
+/* A second thought while a turn is running: two quiet choices instead of a
+   guessed send. The safe one (queue it) carries the weight, like every other
+   pair in the app. */
+.composer__queue {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.composer__queuebtn {
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  /* One word each — a wrapped label is a tall button. */
+  white-space: nowrap;
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.composer__queuebtn:hover {
+  color: var(--text);
+}
+
+.composer__queuebtn--safe {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.composer__queuebtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+
+/* ─────────────────────────────────────────────────── a narrower composer ──
+
+   Only when the conversation is sharing the window — a rail open, the page
+   beside it. At full width none of this applies and nothing below changes what
+   anybody already knows.
+
+   The row is a fixed strip of chips, and a model with a long name is what
+   pushes it past its own edge. In order: the hint goes, because it is the one
+   thing there that nobody needs; then the model's name gives up width, because
+   it is the only label long enough to matter and it already truncates. */
+
+@container (max-width: 620px) {
+  .composer__row .composer__hint {
+    display: none;
+  }
+
+  /* The hint was the flexible middle, so hiding it would let the send pair
+     drift back down the row. The meter takes the job of pushing them right. */
+  .composer__row .room {
+    margin-left: auto;
+  }
+
+  .composer__row .thinking {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .composer__row .thinking__chip {
+    min-width: 0;
+  }
+
+  .composer__row .thinking__label {
+    max-width: 14ch;
+  }
+}
+
+@container (max-width: 480px) {
+  .composer__row {
+    gap: 2px;
+  }
+
+  .composer__row .thinking__label {
+    max-width: 8ch;
+  }
+}
+
+/* Past this there is no width left to take from anything, so the strip is
+   allowed a second line rather than running off the edge. */
+@container (max-width: 380px) {
+  .composer__row {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
   }
 }

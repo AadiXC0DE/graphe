@@ -1,4 +1,4 @@
-// Compiles the desktop shell — electron/main.ts, electron/preload.ts and the
+// Compiles the desktop shell — electron/main.ts, the two preloads and the
 // subagent helper — into dist-electron/, which is what package.json's "main"
 // points at. The helper is spawned at runtime by the `task` tool, and it must
 // sit where the shell expects it: beside itself, so packaged and unpackaged
@@ -17,7 +17,8 @@
 //
 //   preload → CommonJS (.cjs). Electron does not load ES modules in a sandboxed
 //             preload, and we are not giving up the sandbox to have nicer
-//             syntax there.
+//             syntax there. Two of them: the window's, and the one for the
+//             project's own page held beside the conversation.
 //
 //   runner  → ESM (.mjs). The subagent child runs under `ELECTRON_RUN_AS_NODE`,
 //             which is Electron's Node: it reads ESM fine, and the child needs
@@ -40,7 +41,18 @@ const watch = process.argv.includes('--watch');
  *  dynamic import — which is that nothing about Pi is loaded, or can fail, until
  *  somebody actually opens a project. Node's own builtins are external already,
  *  by virtue of platform: 'node'. */
-const external = ['electron', '@earendil-works/pi-coding-agent'];
+const external = [
+  'electron',
+  '@earendil-works/pi-coding-agent',
+  // sql.js reads its wasm beside itself at runtime; bundling moves that file
+  // somewhere the loader cannot see, so it stays a runtime dependency.
+  'sql.js',
+  // The meaning engine carries a native onnx runtime for Node. We force the
+  // wasm backend at load time (memory.ts), but esbuild must not try to bundle
+  // the native binaries either way.
+  '@huggingface/transformers',
+  'onnxruntime-node',
+];
 
 /** @type {import('esbuild').BuildOptions} */
 const shared = {
@@ -78,6 +90,12 @@ const builds = [
   },
   {
     ...shared,
+    entryPoints: [`${root}electron/pagepreload.ts`],
+    outfile: `${root}dist-electron/pagepreload.cjs`,
+    format: 'cjs',
+  },
+  {
+    ...shared,
     entryPoints: [`${root}src/agent/pi/subagent-runner.ts`],
     outfile: `${root}dist-electron/subagent-runner.mjs`,
     format: 'esm',
@@ -98,5 +116,7 @@ if (watch) {
   console.log('watching electron/ — ctrl-c to stop');
 } else {
   await Promise.all(builds.map((options) => build(options)));
-  console.log('built dist-electron/main.mjs, dist-electron/preload.cjs and dist-electron/subagent-runner.mjs');
+  console.log(
+    'built dist-electron/main.mjs, dist-electron/preload.cjs, dist-electron/pagepreload.cjs and dist-electron/subagent-runner.mjs',
+  );
 }

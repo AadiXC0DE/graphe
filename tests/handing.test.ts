@@ -158,7 +158,7 @@ describe('HD-02 the ordinary machine', () => {
     expect(handed.sent).toBe(false);
     expect(handed.address).toBeNull();
     expect(handed.says).toContain('your own folder');
-    expect(handed.name).toMatch(/^graphe\//);
+    expect(handed.name).toMatch(/^(feat|fix|refactor|docs|chore)\//);
     expect(await history.lineExists(handed.name)).toBe(true);
   });
 
@@ -254,6 +254,38 @@ describe('HD-02 the ordinary machine', () => {
     });
     expect(handed.sent).toBe(false);
     expect(await history.lineExists(handed.name)).toBe(true);
+  });
+
+  it('adds nothing of its own to work that was never photographed', async () => {
+    const { history, root, under } = await aProject();
+    const handed = await handToDeveloper({
+      history,
+      folder: root,
+      name: 'Kettle',
+      under,
+      title: 'Something',
+      changes: [change()],
+      at: Date.now(),
+    });
+    // The line points at the work as it stands. No folder of ours, no page of
+    // headings with nothing under them, nothing extra for a reviewer to scroll.
+    expect(await history.diffLine(handed.name)).toBe('');
+  });
+
+  it('carries the pictures along when there are some', async () => {
+    const { history, root, under, pictures } = await aProject();
+    const handed = await handToDeveloper({
+      history,
+      folder: root,
+      name: 'Kettle',
+      under,
+      title: 'Something',
+      changes: [change({ before: pictures.before, after: pictures.after })],
+      at: Date.now(),
+    });
+    const diff = await history.diffLine(handed.name);
+    expect(diff).toContain('.graphe/what-changed/01-before.png');
+    expect(diff).toContain('.graphe/what-changed/what-changed.html');
   });
 
   it('gives two goes at the same work two different names', async () => {

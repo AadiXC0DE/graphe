@@ -96,7 +96,6 @@ describe('B-02 its own copy of the project', () => {
       expect(existsSync(copy.folder)).toBe(false);
     } finally {
       await rm(repo, { recursive: true, force: true });
-      await rm(resolve(repo, '..', '.graphe-builders'), { recursive: true, force: true });
     }
   }, 30_000);
 
@@ -118,7 +117,6 @@ describe('B-02 its own copy of the project', () => {
       await copy.letGo();
     } finally {
       await rm(repo, { recursive: true, force: true });
-      await rm(resolve(repo, '..', '.graphe-builders'), { recursive: true, force: true });
     }
   }, 30_000);
 
@@ -131,13 +129,30 @@ describe('B-02 its own copy of the project', () => {
       await copy.letGo();
     } finally {
       await rm(repo, { recursive: true, force: true });
-      await rm(resolve(repo, '..', '.graphe-builders'), { recursive: true, force: true });
     }
   }, 30_000);
 
-  it('two builders never share a folder', () => {
+  it('two builders never share a folder, and two projects never do either', () => {
     expect(builderFolder('/work/site', 'call-1')).not.toBe(builderFolder('/work/site', 'call-2'));
-    expect(builderFolder('/work/site', '../../etc')).not.toContain('..');
+    // Same folder name, different places. Sharing one copy between them would
+    // be one project's work appearing in another's.
+    expect(builderFolder('/work/site', 'call-1')).not.toBe(builderFolder('/elsewhere/site', 'call-1'));
+  });
+
+  it('cannot be talked into a folder somewhere else by its name', () => {
+    for (const id of ['../../etc', '../..', '/absolute', 'a/b/c']) {
+      const folder = builderFolder('/work/site', id);
+      expect(folder).not.toContain('..');
+      expect(folder.startsWith(tmpdir())).toBe(true);
+    }
+  });
+
+  /* Not beside the project either: that leaves our scaffolding in whatever
+     folder somebody keeps their own work in. */
+  it('is nowhere near the folder somebody is looking at', () => {
+    const folder = builderFolder('/work/site', 'call-1');
+    expect(folder.startsWith('/work/')).toBe(false);
+    expect(folder).toContain('graphe-builders');
   });
 
   it('refuses rather than falling back to the real project', async () => {

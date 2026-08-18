@@ -38,9 +38,10 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { readdir, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // One line on purpose: the boundary test in tests/adapter.test.ts reads the
 // line that names Pi and expects `import type` on it.
@@ -1173,11 +1174,24 @@ export const taskTool = (
 const NO_COPY_TO_BUILD_IN =
   'I could not make a copy of the project for that helper to work in, so nothing was changed. A helper only ever builds in a copy, never in your folder.';
 
-/** Where builders' copies live: outside the project, so nothing they write
- *  appears in the folder somebody is looking at. */
+/**
+ * Where a builder's copy lives: out of the way entirely.
+ *
+ * Not inside the project, because nothing a builder writes may appear in the
+ * folder somebody is looking at. Not beside it either — that leaves our
+ * scaffolding in whatever folder the person keeps their work in. The name
+ * carries the project so two projects never share one, and the call so two
+ * builders never share one.
+ */
 export function builderFolder(project: string, id: string): string {
-  const safe = id.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 24) || 'one';
-  return join(project, '..', `.graphe-builders`, `${basename(project)}-${safe}`);
+  const safe = (text: string, most: number): string =>
+    text.replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, most);
+  const whose = safe(basename(resolve(project)), 24) || 'project';
+  const which = safe(id, 24) || 'one';
+  // The whole path, shortened, so two folders of the same name in different
+  // places cannot land on one copy.
+  const where = createHash('sha1').update(resolve(project)).digest('hex').slice(0, 8);
+  return join(tmpdir(), 'graphe-builders', `${whose}-${where}`, which);
 }
 
 export type BuilderCopy = {

@@ -43,7 +43,7 @@ import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
-import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type PutOnBoard } from './tools';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
 import { McpRegistry, mcpTool, readMcpConfig } from './mcp';
@@ -310,6 +310,10 @@ export type CreateSessionOptions = {
   /** Whether one of the extensions this folder carries has been said yes to.
    *  Left out, none of them are: a folder's own code never loads by default. */
   trusts?: (id: string) => boolean;
+  /** Somewhere to put a piece of background work. Given, the agent can break a
+   *  request into pieces that run side by side; left out, it cannot — which is
+   *  what keeps a run on the board from filling the board it is running on. */
+  putOnBoard?: PutOnBoard;
 };
 
 /**

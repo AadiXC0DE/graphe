@@ -2216,6 +2216,10 @@ async function startConversation(
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
       noteServers,
+      // The board, so a request that breaks into pieces can be set going all at
+      // once. Only the conversation in front gets this: the runs on the board
+      // must not be able to fill the board they are running on.
+      putOnBoard: (doing, after) => keepGoing(open.path, basename(open.path), doing, after),
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -3151,13 +3155,18 @@ async function runWhatCan(desk: AwayDesk): Promise<void> {
  * something that is waiting for it, there would be nothing left to start. Said
  * as a sentence rather than thrown: it is a decision, not a failure.
  */
+/** What came of asking for one piece of background work: the name it went on
+ *  the board under, or the sentence saying why it did not. The name matters
+ *  because a second piece can be asked to wait for this one. */
+type WentOn = { ok: true; id: string } | { ok: false; because: string };
+
 async function keepGoing(
   path: string,
   name: string,
   doing: string,
   after: string | null = null,
   untilDone = false,
-): Promise<string | null> {
+): Promise<WentOn> {
   const desk = deskFor(path, name);
   const id = nextName(desk);
   const at = Date.now();
@@ -3165,7 +3174,7 @@ async function keepGoing(
 
   if (after !== null) {
     const asked = desk.chain.hold({ id, doing, at, after });
-    if (!asked.ok) return asked.because;
+    if (!asked.ok) return { ok: false, because: asked.because };
     desk.after.set(id, after);
     if (asked.waits) {
       // Written down straight away, so a quit leaves the whole plan behind and
@@ -3175,7 +3184,7 @@ async function keepGoing(
         await notes().note(noteOf(held, { project: path, name, owner: us, after }));
       }
       pushAway(path);
-      return null;
+      return { ok: true, id };
     }
   }
 
@@ -3187,7 +3196,7 @@ async function keepGoing(
   );
   pushAway(path);
   await runWhatCan(desk);
-  return null;
+  return { ok: true, id };
 }
 
 /* --------------------------------------------------------- picking it up */
@@ -4368,8 +4377,8 @@ function register(): void {
     if (typeof text !== 'string' || text.trim() === '' || typeof after !== 'string') {
       return done(awayNow(open.path));
     }
-    const because = await keepGoing(open.path, open.name, text, after);
-    if (because !== null) return fail(couldNotWait(because));
+    const went = await keepGoing(open.path, open.name, text, after);
+    if (!went.ok) return fail(couldNotWait(went.because));
     return done(awayNow(open.path));
   });
 

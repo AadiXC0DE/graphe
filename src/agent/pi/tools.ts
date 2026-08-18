@@ -1451,15 +1451,116 @@ export function runningTools(
  * answer "no account is connected" is worse than no tool, because it spends a
  * turn teaching the model something the prompt could have said for nothing.
  */
+/* -------------------------------------------------------------------------- */
+/* Several pieces at once                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** How many pieces one request may put on the board. Past this it is not a
+ *  plan, it is a machine, and nobody reads the results of a machine. */
+export const MOST_APART = 8;
+
+export type PutOnBoard = (
+  doing: string,
+  after: string | null,
+) => Promise<{ ok: true; id: string } | { ok: false; because: string }>;
+
+export const APART_WORDS = {
+  none: 'Nothing to set going — say what each piece of work is.',
+  tooMany: `That is more than ${String(MOST_APART)} pieces at once. Put the biggest ${String(MOST_APART)} on and ask again when they are done.`,
+  /** What comes back to the model once the pieces are on the board. */
+  went: (count: number): string =>
+    count === 1
+      ? 'One piece of work is on the board, in its own copy of the project. It runs whether or not this conversation carries on.'
+      : `${String(count)} pieces of work are on the board, each in its own copy of the project. Four run at a time and the rest wait their turn; they carry on whether or not this conversation does.`,
+  /** Said alongside, so the model does not sit and wait for them. */
+  dontWait:
+    'Do not wait for them or ask about them again — the person watches them finish on the board and decides which to keep. Say what you set going and stop.',
+} as const;
+
+/**
+ * Break one request into pieces that run at the same time, each in its own copy.
+ *
+ * The board already ran several pieces side by side, each isolated, with a way
+ * to say one waits for another — but only a person could put anything on it, so
+ * a big request was one agent walking a list alone. This is the same board,
+ * asked for by the agent that just worked out what the list is.
+ *
+ * A piece may wait for one earlier piece in the same call, named by its place
+ * in the list. Anything else is refused rather than guessed at.
+ */
+export const setGoingTool = (put: PutOnBoard): ToolDefinition => ({
+  name: 'set_going',
+  label: 'Setting work going',
+  description:
+    'Put several separate pieces of work on the board at once. Each gets its own copy of the project and its own agent, four run at a time, and they carry on whether or not this conversation does. Use it when a request genuinely breaks into pieces that touch different files — one piece per area — rather than one long list you walk yourself. A piece can be told to wait for an earlier one in the same call.',
+  promptSnippet: 'set_going(pieces) — put several pieces of work on the board, each in its own copy',
+  promptGuidelines: [
+    'Use it when a request breaks into pieces that touch different files. Two pieces changing one file will collide, and only one of them can be kept.',
+    'Say what each piece is in the words the person used, whole enough to be worked on by somebody who cannot see this conversation.',
+    'Give a piece `after` only when it genuinely cannot start until another has finished — a piece that waits is a piece not running.',
+    'Having set them going, say what you set going and stop. They are watched on the board, not here.',
+  ],
+  parameters: Type.Object({
+    pieces: Type.Array(
+      Type.Object({
+        doing: Type.String({ description: 'What this piece of work is, in plain words.', minLength: 1 }),
+        after: Type.Optional(
+          Type.Number({
+            description: 'The place in this list (1 for the first) of the piece this one waits for. Leave it out unless it truly cannot start first.',
+          }),
+        ),
+      }),
+      { description: 'The separate pieces of work, in the order they should be started.' },
+    ),
+  }),
+  executionMode: 'sequential',
+  execute: async (
+    _callId: string,
+    params: { pieces?: readonly { doing: string; after?: number }[] },
+  ): ToolResult => {
+    const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
+    const asked = (params.pieces ?? []).filter((one) => one.doing.trim() !== '');
+    if (asked.length === 0) return say(APART_WORDS.none);
+    if (asked.length > MOST_APART) return say(APART_WORDS.tooMany);
+
+    // Names as the board gave them, by place in the list, so "after: 2" can be
+    // turned into the real name of the second piece.
+    const names: (string | null)[] = [];
+    const went: string[] = [];
+    const refused: string[] = [];
+    for (const [index, piece] of asked.entries()) {
+      const waitsFor = piece.after;
+      const after =
+        waitsFor === undefined || waitsFor < 1 || waitsFor > index ? null : names[waitsFor - 1] ?? null;
+      const answer = await put(piece.doing.trim(), after);
+      names.push(answer.ok ? answer.id : null);
+      if (answer.ok) went.push(piece.doing.trim());
+      else refused.push(`${piece.doing.trim()} — ${answer.because}`);
+    }
+
+    if (went.length === 0) {
+      return say(`Nothing went on the board.\n${refused.join('\n')}`);
+    }
+    const lines = [APART_WORDS.went(went.length), ...went.map((one) => `\u2022 ${one}`)];
+    if (refused.length > 0) lines.push('These did not go on:', ...refused.map((one) => `\u2022 ${one}`));
+    lines.push(APART_WORDS.dontWait);
+    return say(lines.join('\n'));
+  },
+});
+
 export const grapheTools = (
   agentDir: string,
   figmaToken?: string | null,
   model: HelperModel = null,
   thinking?: HelperPace,
   projectRoot?: string,
+  putOnBoard?: PutOnBoard,
 ): ToolDefinition[] => {
   const tools = [websearchTool, webfetchTool, taskTool(agentDir, model, thinking, projectRoot)];
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));
+  // Only where there is a board to put work on. The runs on the board must not
+  // hold this tool: a piece that can fill the board it is running on is a loop.
+  if (putOnBoard !== undefined) tools.push(setGoingTool(putOnBoard));
   return tools;
 };

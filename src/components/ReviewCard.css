@@ -35,6 +35,14 @@
   font-size: var(--text-sm);
 }
 
+/* The project's own standards, named. Quiet: it answers "against what?" for
+   anyone who wonders, and is skippable for everyone else. */
+.review__against {
+  margin: calc(var(--space-2) * -1) 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
 .review__findings {
   display: grid;
   gap: var(--space-2);

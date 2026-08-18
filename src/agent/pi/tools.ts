@@ -53,6 +53,7 @@ import * as debug from './debug';
 import { roleSpec, type HelperRole } from './child';
 import { arxivId, arxivMeta, readPdfPages, slicePages } from './pdf';
 import { REVIEW_ANGLES, reviewRequestFor, trimDiff } from './review';
+import { checksBrief, projectChecks, usualChecks } from './checks';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
@@ -431,8 +432,9 @@ export const readDiffTool = (cwd: string): ToolDefinition => ({
   promptSnippet: 'read_diff(target) — read the change being checked, as a diff',
   promptGuidelines: [
     "When asked to check a change before it ships, first read it with read_diff — 'working' unless a saved version or a named piece of work is the thing being checked.",
-    'Then send the change to reviewer helpers (task with role reviewer) in parallel, one angle each, and combine their findings into a verdict.',
-    'Finish with a short plain summary followed by a fenced review block: a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, and the findings — each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact, and confidence (0-100).',
+    'Then send the change to reviewer helpers (task with role reviewer) in parallel — one per check listed with the change, all at once — and combine their findings into a verdict.',
+    'When somebody asks for something to be checked every time from now on, write it down as a check — one file in .agents/checks, its name and what to look for — so every later review runs it without being asked again.',
+    'Finish with a short plain summary followed by a fenced review block: a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, the names of the checks you ran, and the findings — each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact, and confidence (0-100).',
   ],
   parameters: Type.Object({
     target: Type.String({
@@ -472,7 +474,9 @@ export const readDiffTool = (cwd: string): ToolDefinition => ({
       if (diff.trim() === '') {
         return say('There is no change at that target to check — nothing has changed there to look at.');
       }
-      return say(trimDiff(diff));
+      const own = await projectChecks(cwd);
+      const checks = own.length > 0 ? own : usualChecks();
+      return say(`${trimDiff(diff)}\n\n${checksBrief(checks, own.length > 0)}`);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'the change could not be read.';
       throw new Error(`I could not read the change: ${message}`);
@@ -483,10 +487,13 @@ export const readDiffTool = (cwd: string): ToolDefinition => ({
 /** The briefs the reviewers are handed when work is checked: one per angle,
  *  all carrying the same diff. The main agent gathers the replies and writes
  *  the verdict. */
-export function reviewerBriefs(diff: string): readonly { key: string; task: string }[] {
-  return REVIEW_ANGLES.map((angle) => ({
-    key: angle.key,
-    task: reviewRequestFor(diff, angle.line),
+export function reviewerBriefs(
+  diff: string,
+  checks: readonly { key: string; line: string }[] = REVIEW_ANGLES,
+): readonly { key: string; task: string }[] {
+  return checks.map((check) => ({
+    key: check.key,
+    task: reviewRequestFor(diff, check.line),
   }));
 }
 

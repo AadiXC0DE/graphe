@@ -38,6 +38,11 @@ export default function ReviewCard({ verdict, asked, onFix }: Props) {
         )}
       </div>
       {verdict.summary !== "" && <p className="review__summary">{verdict.summary}</p>}
+      {verdict.checks !== undefined && verdict.checks.length > 0 && (
+        <p className="review__against">
+          {REVIEW_WORDS.against} {verdict.checks.join(" \u00b7 ")}
+        </p>
+      )}
 
       <ul className="review__findings">
         {verdict.findings.map((finding, index) => (

@@ -39,6 +39,8 @@ export const REVIEW_WORDS = {
   /** What the fix button does, in the person's own words. */
   fix: 'Fix the blocking ones',
   confidence: 'sure',
+  /** Before the names of what the change was held up against. */
+  against: 'Held up against',
 } as const;
 
 export type ReviewVerdict = {
@@ -47,6 +49,8 @@ export type ReviewVerdict = {
   /** One plain sentence of the reviewer's own before the list. */
   summary: string;
   findings: readonly ReviewFinding[];
+  /** What the change was held up against, by name. */
+  checks?: readonly string[];
 };
 
 /* -------------------------------------------------------------------------- */
@@ -105,8 +109,13 @@ export function parseReview(text: string): ReviewVerdict | null {
   }
   if (findings.length === 0) return null;
 
+  const checks = Array.isArray(body.checks)
+    ? body.checks.filter((one): one is string => typeof one === 'string' && one.trim() !== '').map((one) => one.trim())
+    : [];
+
   return {
     kind: kind as ReviewVerdict['kind'],
+    checks: checks.length === 0 ? undefined : checks,
     summary:
       typeof body.summary === 'string' && body.summary !== ''
         ? body.summary

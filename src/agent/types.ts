@@ -30,6 +30,8 @@ export type ReviewVerdict = {
   kind: 'ships' | 'needs-work' | 'do-not-land';
   summary: string;
   findings: readonly ReviewFinding[];
+  /** What the change was held up against, by name. */
+  checks?: readonly string[];
 };
 
 export type Verdict =

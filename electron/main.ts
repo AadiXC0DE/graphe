@@ -38,7 +38,7 @@ import {
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
@@ -200,7 +200,12 @@ import {
 import type { Repeat, TimeOfDay, Weekday } from '../src/work/schedule';
 import { keyFor, Notebook } from '../src/work/notebook';
 import { afterWords, Following } from '../src/work/after';
-import { endStrays } from '../src/work/strays';
+import {
+  endStrays,
+  listRunningPrograms,
+  whichServersAreStray,
+  type NotedServer,
+} from '../src/work/strays';
 import {
   addSpend,
   asPiece,
@@ -2037,6 +2042,79 @@ function checkoutFor(open: Workspace<Held>, where: Where): string | null {
 /** Where a project's conversation checkouts live — outside the project, like a
  *  copy, so nothing the worktree writes ever appears in the folder the person
  *  is looking at. Keyed by the project's own path so repos never collide. */
+/* ------------------------------------------------- servers left running -- */
+
+/** Where the note of what this app started is kept. Outside every project, like
+ *  everything else of ours. */
+function serversNoted(): string {
+  return join(app.getPath('userData'), 'servers-running.json');
+}
+
+/** What the note says right now. Unreadable or absent is an empty list: a note
+ *  we cannot read is not a licence to end anything. */
+function readNotedServers(): NotedServer[] {
+  try {
+    const raw = JSON.parse(readFileSync(serversNoted(), 'utf8')) as unknown;
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((one) => {
+      if (typeof one !== 'object' || one === null) return [];
+      const row = one as { pid?: unknown; command?: unknown };
+      if (typeof row.pid !== 'number' || !Number.isInteger(row.pid) || row.pid <= 0) return [];
+      if (typeof row.command !== 'string' || row.command.trim() === '') return [];
+      return [{ pid: row.pid, command: row.command }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeNotedServers(all: readonly NotedServer[]): void {
+  try {
+    writeFileSync(serversNoted(), JSON.stringify(all), 'utf8');
+  } catch {
+    // A note we cannot write costs a port after a crash, which is worth far
+    // less than the turn this would otherwise interrupt.
+  }
+}
+
+/** Told by the register when a server starts and when it ends. */
+const noteServers = {
+  began: (pid: number, command: string): void => {
+    const all = readNotedServers().filter((one) => one.pid !== pid);
+    writeNotedServers([...all, { pid, command }]);
+  },
+  ended: (pid: number): void => {
+    writeNotedServers(readNotedServers().filter((one) => one.pid !== pid));
+  },
+};
+
+/**
+ * End servers a copy of the app left holding a port.
+ *
+ * A helper can be recognised by its own filename; a server is whatever somebody
+ * asked to be started, so it has to have been written down at the time. The
+ * number alone is not enough to act on — the machine may have handed it to
+ * somebody else since — so the command has to still match too.
+ */
+async function endStrayServers(): Promise<number> {
+  const noted = readNotedServers();
+  if (noted.length === 0) return 0;
+  const stray = whichServersAreStray(noted, await listRunningPrograms());
+  for (const pid of stray) {
+    try {
+      process.kill(-pid, 'SIGTERM');
+    } catch {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        // Already gone, or not ours to signal. Either way it is not ours to fix.
+      }
+    }
+  }
+  writeNotedServers([]);
+  return stray.length;
+}
+
 function worktreesFolder(project: string): string {
   const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
   return join(app.getPath('userData'), 'worktrees', key);
@@ -2109,6 +2187,7 @@ async function startConversation(
       model: prefs.model,
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
+      noteServers,
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -5532,6 +5611,9 @@ if (!app.requestSingleInstanceLock()) {
     // that went away. Nothing above them to report to, nothing to stop them, and
     // they spend until they are done.
     await endStrays().catch(() => 0);
+    // And servers. A helper is known by its filename; a server is whatever
+    // somebody asked for, so it is known only because we wrote it down.
+    await endStrayServers().catch(() => 0);
     // Work that was going when this last closed, back on its board.
     await pickUpWhereWeLeftOff().catch(() => undefined);
     // What somebody asked for over and over, picked up where it left off. One

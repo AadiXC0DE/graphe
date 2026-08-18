@@ -98,6 +98,11 @@ type Entry = {
 export type StartOptions = {
   command: string;
   folder: string;
+  /** Told the process id and the command of everything started here, and told
+   *  again when it ends. A server is whatever somebody asked for, so the only
+   *  way to recognise one after a crash is to have written it down at the
+   *  time. Left out, nothing is written and a crash leaves it holding its port. */
+  noted?: { began: (pid: number, command: string) => void; ended: (pid: number) => void };
   /** What the person or the agent calls it. Left out, the command names itself. */
   label?: string;
   /** The shell to run it through, as the sandbox already resolves one. */
@@ -181,6 +186,7 @@ export class Running {
       detached: process.platform !== 'win32',
     });
     entry.child = child;
+    if (child.pid !== undefined) options.noted?.began(child.pid, options.command);
 
     const heard = (chunk: Buffer): void => {
       entry.said = `${entry.said}${chunk.toString('utf8')}`.slice(-KEEP);
@@ -204,6 +210,7 @@ export class Running {
     child.once('close', (code) => {
       entry.piece.state = 'stopped';
       entry.piece.exitCode = code;
+      if (child.pid !== undefined) options.noted?.ended(child.pid);
       entry.child = null;
       options.onChange?.();
     });
@@ -222,8 +229,9 @@ export class Running {
     const entry = this.#entries.get(id);
     if (entry === undefined) return false;
     end(entry.child);
-    entry.child = null;
-    entry.piece.state = 'stopped';
+    // Not marked stopped here. Signalling a process is asking it to go, and the
+    // one that knows it went is the `close` handler above — saying so the
+    // instant we asked told people a port was free while it was still held.
     return true;
   }
 

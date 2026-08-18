@@ -280,6 +280,11 @@ export type CreateSessionOptions = {
    *  is a conversation continued, not one started again (BACKLOG B1.1). When
    *  neither this nor `sessionPath` is given, nothing is ever written. */
   sessionDir?: string;
+  /** Told about every server this session starts and stops, so a crash can be
+   *  cleaned up on the way back in. A server is whatever somebody asked to be
+   *  started, so the only way to recognise one afterwards is to have written it
+   *  down at the time. */
+  noteServers?: { began: (pid: number, command: string) => void; ended: (pid: number) => void };
   /** Start a conversation rather than carrying the last one on. Only means
    *  anything alongside `sessionDir`: without somewhere to write, every session
    *  is already a fresh one. */
@@ -1161,6 +1166,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         return { shell: config.shell, args: config.args };
       },
       writable: shellBounds(options.projectRoot, options.projectRoot).writable,
+      ...(options.noteServers === undefined ? {} : { noted: options.noteServers }),
       onChange: () => {
         say({ type: 'running', pieces: keptRunning.list() });
       },

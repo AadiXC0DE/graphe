@@ -19,6 +19,13 @@ export type Alive = { pid: number; ppid: number; command: string };
  *  somebody else's business. */
 const HELPER = 'subagent-runner.mjs';
 
+/** One server this app started, written down while it runs.
+ *
+ * A helper can be recognised by its own filename. A server cannot — it is
+ * whatever somebody asked to be started, `npm run dev` or a python one-liner —
+ * so the only way to know it was ours is to have said so at the time. */
+export type NotedServer = { pid: number; command: string };
+
 /** How long one gets to leave politely before it is made to. */
 const GIVE_UP_AFTER_MS = 3000;
 
@@ -54,6 +61,30 @@ export function whichAreStray(
     .map((one) => one.pid);
 }
 
+/**
+ * Which written-down servers are still running, and still the thing we wrote down.
+ *
+ * A process id on its own is not enough: the app may have been away long enough
+ * for the machine to hand that number to somebody else, and ending a stranger's
+ * program because it inherited a number is far worse than leaving a port busy.
+ * So the command has to match too — the whole of what we recorded has to still
+ * be there in what the machine reports.
+ */
+export function whichServersAreStray(
+  noted: readonly NotedServer[],
+  running: readonly Alive[],
+): readonly number[] {
+  const byPid = new Map(running.map((one) => [one.pid, one.command]));
+  const stray: number[] = [];
+  for (const one of noted) {
+    const command = byPid.get(one.pid);
+    if (command === undefined) continue;
+    if (one.command.trim() === '' || !command.includes(one.command.trim())) continue;
+    stray.push(one.pid);
+  }
+  return stray;
+}
+
 /** Whether a program with this number is still running. */
 export function stillRunning(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -64,6 +95,12 @@ export function stillRunning(pid: number): boolean {
     // Running but not ours to signal is still running.
     return (cause as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+/** What the machine says is running. Empty where it cannot say: nothing is
+ *  ended on a guess. */
+export function listRunningPrograms(): Promise<readonly Alive[]> {
+  return running();
 }
 
 function running(): Promise<readonly Alive[]> {

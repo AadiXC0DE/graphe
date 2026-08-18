@@ -1265,6 +1265,9 @@ export function runningTools(
     folder: string;
     parts: () => { shell: string; args: readonly string[] };
     writable: readonly string[];
+    /** Passed straight to the register: what was started, so a crash can be
+     *  cleaned up next time. */
+    noted?: { began: (pid: number, command: string) => void; ended: (pid: number) => void };
     /** Told whenever something starts, finds its address or falls over, so the
      *  band above the composer is never out of date. */
     onChange?: () => void;
@@ -1297,6 +1300,7 @@ export function runningTools(
           label: params.label,
           parts: where.parts(),
           writable: where.writable,
+          ...(where.noted === undefined ? {} : { noted: where.noted }),
           onChange: where.onChange,
         });
         const said = running.said(piece.id);

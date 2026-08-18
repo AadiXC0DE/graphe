@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { Running, addressIn, labelFor } from '../src/agent/running';
+import { whichServersAreStray } from '../src/work/strays';
 
 const PARTS = { shell: '/bin/bash', args: ['-c'] as const };
 const kept: Running[] = [];
@@ -171,4 +172,39 @@ describe('RU-02 something that stays up', () => {
     expect(running.stop(piece.id)).toBe(true);
     expect(running.stop('run-nothing')).toBe(false);
   }, 30_000);
+});
+
+/* ========================================================================== */
+/* RU-03 servers a crash left behind                                           */
+/* ========================================================================== */
+
+describe('RU-03 what a crash leaves holding a port', () => {
+  const alive = (pid: number, command: string) => ({ pid, ppid: 1, command });
+
+  it('picks out the ones still running that are still what we wrote down', () => {
+    const noted = [
+      { pid: 101, command: 'npm run dev' },
+      { pid: 102, command: 'python3 -m http.server 4321' },
+    ];
+    const running = [alive(101, '/bin/bash -lc npm run dev'), alive(999, 'Finder')];
+    expect(whichServersAreStray(noted, running)).toEqual([101]);
+  });
+
+  /* The one that matters: a number on its own is not evidence. The machine may
+     have handed it to somebody else while the app was away. */
+  it('never ends a stranger that inherited the number', () => {
+    const noted = [{ pid: 101, command: 'npm run dev' }];
+    const running = [alive(101, '/Applications/Safari.app/Contents/MacOS/Safari')];
+    expect(whichServersAreStray(noted, running)).toEqual([]);
+  });
+
+  it('leaves alone what is no longer running at all', () => {
+    const noted = [{ pid: 101, command: 'npm run dev' }];
+    expect(whichServersAreStray(noted, [])).toEqual([]);
+  });
+
+  it('acts on nothing when the note says nothing', () => {
+    expect(whichServersAreStray([], [alive(1, 'anything')])).toEqual([]);
+    expect(whichServersAreStray([{ pid: 5, command: '   ' }], [alive(5, 'x')])).toEqual([]);
+  });
 });

@@ -41,7 +41,6 @@ const execFileAsync = promisify(execFile);
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
-import * as path from 'node:path';
 import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -159,6 +158,7 @@ import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor } from '../src/work/workflows';
 import {
   bringBack,
+  bringBackWords,
   createWorktree,
   nextCheckoutName,
   dropWorktree,
@@ -1088,23 +1088,6 @@ async function gitRun(cwd: string, args: string[]): Promise<{ code: number; out?
   }
 }
 
-/** The checkouts this project has opened, main one excluded. */
-async function listWorktrees(repo: string): Promise<string[]> {
-  const { code, out } = await gitRun(repo, ['worktree', 'list', '--porcelain']);
-  if (code !== 0 || out === undefined) return [];
-  const folders: string[] = [];
-  for (const line of out.split('\n')) {
-    if (!line.startsWith('worktree ')) continue;
-    const folder = line.slice('worktree '.length).trim();
-    if (path.resolve(folder) !== path.resolve(repo)) folders.push(folder);
-  }
-  return folders;
-}
-
-function firstWorktree(list: string[]): string | null {
-  return list[0] ?? null;
-}
-
 /** A mistake to hold the window by, in the shape a reading makes. */
 function worktreeTrouble(because: string): Trouble {
   return { what: 'This conversation needs its own checkout.', because, actionLabel: 'Got it' };
@@ -1528,9 +1511,21 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       const inFront = held.sessions.current?.path === from.address;
       const checkout =
         !inFront || from.address === null ? null : held.checkouts.get(from.address) ?? null;
-      const applied =
-        checkout === null ? Promise.resolve() : bringBack(gitRunHereFor(), path, checkout.folder);
-      void applied.then(() => look(path, held));
+      // What came back, and what did not. A file both sides changed is left as
+      // this checkout has it — which is right, and used to happen in silence:
+      // the person saw a finished turn and a file that had not changed.
+      const carried =
+        checkout === null ? null : bringBack(gitRunHereFor(), path, checkout.folder);
+      void (carried ?? Promise.resolve(null))
+        .then((outcome) => {
+          if (outcome !== null && outcome.ok && outcome.value.conflicted.length > 0) {
+            const at = from.address ?? undefined;
+            send(path, { type: 'message-delta', text: `\n\n${bringBackWords.heldBack(outcome.value.conflicted)}` }, at);
+            send(path, { type: 'message-end' }, at);
+          }
+          look(path, held);
+        })
+        .catch(() => look(path, held));
     }
 
     // Against the ceiling as well as into the ledger. This is the conversation
@@ -1996,6 +1991,25 @@ function freshCheckout(held: Held, project: string): { name: string; folder: str
   });
   held.checkoutsMade = chosen.made;
   return { name: chosen.name, folder: join(worktreesFolder(project), chosen.name) };
+}
+
+/** Said when a conversation is asked about a checkout it does not have. Naming
+ *  it plainly beats acting on one belonging to somebody else. */
+const NO_CHECKOUT_HERE =
+  'This conversation is working in the project folder itself, so there is no separate copy of it to bring back or throw away.';
+
+/**
+ * The checkout belonging to the conversation being asked about.
+ *
+ * Never "whichever one git lists first": with a second conversation open, or
+ * background work in flight, that is somebody else's branch — and one of the two
+ * callers deletes what it is given.
+ */
+function checkoutFor(open: Workspace<Held>, where: Where): string | null {
+  const found = conversationAt(open.held, where);
+  const address = found?.held.conversation ?? found?.path ?? null;
+  if (address === null) return null;
+  return open.held.checkouts.get(address)?.folder ?? null;
 }
 
 /** Where a project's conversation checkouts live — outside the project, like a
@@ -4790,8 +4804,11 @@ function register(): void {
   handle<null>(CHANNEL.worktreeLand, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    const folder = firstWorktree(await listWorktrees(open.path));
-    if (folder === null) return fail(worktreeTrouble('No checkout of this project to bring back.'));
+    // This conversation's own checkout. It used to be whichever one git listed
+    // first, so with a second conversation open — or background work in flight —
+    // this landed somebody else's branch.
+    const folder = checkoutFor(open, whereIn(args));
+    if (folder === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
     const landed = await landWorktree(gitRunHereFor(), open.path, folder);
     return landed.ok ? done(null) : fail(worktreeTrouble(landed.because));
   });
@@ -4799,8 +4816,9 @@ function register(): void {
   handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    const folder = firstWorktree(await listWorktrees(open.path));
-    if (folder === null) return fail(worktreeTrouble('No checkout of this project to throw away.'));
+    // The same rule as landing, and it matters more here: this one deletes.
+    const folder = checkoutFor(open, whereIn(args));
+    if (folder === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
     const dropped = await dropWorktree(gitRunHereFor(), open.path, folder);
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
   });

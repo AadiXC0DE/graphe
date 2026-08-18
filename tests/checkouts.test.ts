@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { nextCheckoutName } from '../src/history/worktree';
+import { bringBackWords, nextCheckoutName } from '../src/history/worktree';
 
 describe('naming a parallel checkout', () => {
   it('counts up, one name per checkout', () => {
@@ -50,5 +50,23 @@ describe('naming a parallel checkout', () => {
     const next = nextCheckoutName(0, () => true, 1_700_000_000_000);
     expect(next.name).toBe(`conversation-${(1_700_000_000_000).toString(36)}`);
     expect(next.name).not.toMatch(/conversation-\d+$/);
+  });
+});
+
+describe('work that stayed behind', () => {
+  it('names the files, and says whose version is on disk', () => {
+    const one = bringBackWords.heldBack(['src/App.tsx']);
+    expect(one).toContain('src/App.tsx');
+    expect(one).toContain('left yours alone');
+
+    const many = bringBackWords.heldBack(['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts']);
+    expect(many).toContain('6 files');
+    expect(many).toContain('and 2 more');
+  });
+
+  it('says it in words a person can act on, with no machinery in it', () => {
+    const said = bringBackWords.heldBack(['a.ts']);
+    expect(said).not.toMatch(/\b(merge|conflict|branch|worktree|checkout|git|HEAD)\b/i);
+    expect(said).toMatch(/[.!]$/);
   });
 });

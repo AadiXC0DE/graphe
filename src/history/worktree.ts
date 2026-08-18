@@ -62,6 +62,15 @@ const no = (because: string): Result => ({ ok: false, because });
 
 export const bringBackWords = {
   notRepo: 'This folder is not a git repository, so a conversation cannot bring its work back here.',
+  /** Said when work stayed behind. Both sides changed the same file, so keeping
+   *  either one would have thrown the other away without asking. */
+  heldBack: (files: readonly string[]): string => {
+    const named = files.slice(0, 4).join(', ');
+    const rest = files.length > 4 ? ` and ${String(files.length - 4)} more` : '';
+    return files.length === 1
+      ? `One file was changed here and in this conversation at the same time, so I left yours alone: ${named}. Ask me to bring that one over if you want mine instead.`
+      : `${String(files.length)} files were changed here and in this conversation at the same time, so I left yours alone: ${named}${rest}. Ask me to bring those over if you want mine instead.`;
+  },
 } as const;
 
 /** Whether `folder` is a git checkout itself. */

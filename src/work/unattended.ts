@@ -43,6 +43,18 @@ export const awayWords = {
    *  ceiling holds here before it holds anywhere else. */
   overTheLimit: 'This didn’t start: you’ve reached the limit you set.',
   nothing: 'Nothing is running.',
+  /** Two words for one board. Work does not stop because somebody opened
+   *  another folder, and until this there was nowhere to see that. */
+  here: 'This project',
+  everywhere: 'Everywhere',
+  /** Above the board when it is showing every folder at once. */
+  acrossSays(projects: number, running: number): string {
+    const where = projects === 1 ? 'one project' : `${String(projects)} projects`;
+    if (running === 0) return `Nothing running, across ${where}.`;
+    return `${running === 1 ? 'One thing' : `${String(running)} things`} running, across ${where}.`;
+  },
+  /** When the only work anywhere is here. */
+  onlyHere: 'Nothing is running in your other projects.',
   keepGoing: 'Set something running',
   keepGoingHint:
     'I carry on with this in a copy of your project, even if you close the window. Whatever it makes is waiting for you, as a picture, when you come back.',

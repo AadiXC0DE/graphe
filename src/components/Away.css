@@ -286,6 +286,68 @@
   gap: var(--space-2);
 }
 
+/* Two words, one of them true. Sits under the title because it changes what
+   the whole panel is about, not what one control in it does. */
+.away__scope {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+
+.away__scopeone {
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  padding: 0 var(--space-2);
+  min-height: 26px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.away__scopeone:hover {
+  color: var(--text);
+}
+
+.away__scopeone--on {
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+
+.away__scopeone:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.away__across {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* On a question from another folder, the folder is the first thing to read:
+   answering the wrong project's question is the mistake this prevents. */
+.away__wherefrom {
+  margin: 0 0 2px;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .away__scopeone {
+    transition: none;
+  }
+}
+
 .away__plus {
   flex: none;
   color: currentColor;

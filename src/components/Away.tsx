@@ -26,6 +26,12 @@ import './Away.css';
 export type AwayProps = {
   /** Null until the shell has answered, so nothing flashes on the way in. */
   away: AwayState | null;
+  /** The other folders that have work of their own. Empty is the ordinary
+   *  case, and the board stays a board of one when it is. */
+  elsewhere?: readonly { where: string; project: string; away: AwayState }[];
+  /** What this folder is called. Only used once the board is showing more than
+   *  one, where an unlabelled card would mean "this one" by inference. */
+  project?: string;
   /** Now, epoch ms. Passed in so the band draws the same twice. */
   now: number;
   busy: boolean;
@@ -35,12 +41,13 @@ export type AwayProps = {
   /** Ask for work that waits until another piece has finished. Left off, the
    *  offer is not made — there is nothing to wait for on an empty board. */
   onStartAfter?: (text: string, after: string) => void;
-  /** Take one's result into the project. */
-  onKeep: (id: string) => void;
+  /** Take one's result into the project. The folder comes with it: this board
+   *  can be showing work from several. */
+  onKeep: (id: string, where?: string) => void;
   /** Stop one, or let its result go. */
-  onDrop: (id: string) => void;
+  onDrop: (id: string, where?: string) => void;
   /** Answer the question one of them stopped on. The only thing that can. */
-  onAnswer: (id: string, callId: string, decision: Decision) => void;
+  onAnswer: (id: string, callId: string, decision: Decision, where?: string) => void;
   onAddRepeat: (
     doing: string,
     every: EveryKind,
@@ -82,6 +89,8 @@ function readTime(value: string): { hour: number; minute: number } {
 
 export default function Away({
   away,
+  elsewhere,
+  project,
   now,
   busy,
   onKeepGoing,
@@ -99,6 +108,9 @@ export default function Away({
   const [starting, setStarting] = useState(false);
   /** Overnight: full access, no questions, keep going until the goal lands. */
   const [untilDone, setUntilDone] = useState(false);
+  /** One board or all of them. Off by default: most of the time there is only
+   *  one folder with anything in it, and the answer would be the same. */
+  const [across, setAcross] = useState(false);
   /** Which piece this one should wait for, or empty for none. */
   const [waitFor, setWaitFor] = useState('');
   const [asking, setAsking] = useState(false);
@@ -107,9 +119,31 @@ export default function Away({
   const [at, setAt] = useState('07:00');
   const [onDay, setOnDay] = useState(1);
 
-  const pieces = away?.pieces ?? [];
+  const others = elsewhere ?? [];
+  const mine = away?.pieces ?? [];
+  /* Every folder's work as one list, each piece carrying the folder it belongs
+     to so a press lands where it was meant to. */
+  // Labelled only once there is something to tell it apart from. On a board of
+  // one folder the same word on every card is noise.
+  const here = mine.map((one) => ({
+    ...one,
+    where: undefined as string | undefined,
+    project: (across ? project : undefined) as string | undefined,
+  }));
+  const all = [
+    ...here,
+    ...others.flatMap((one) =>
+      one.away.pieces.map((piece) => ({
+        ...piece,
+        where: one.where as string | undefined,
+        project: one.project as string | undefined,
+      })),
+    ),
+  ];
+  const showing = across ? all : here;
+  const pieces = showing;
   const repeats = away?.repeats ?? [];
-  const asked = pieces.filter((one) => one.question !== null);
+  const asked = showing.filter((one) => one.question !== null);
   /* Only work that has not finished can be waited for — waiting for something
      already done would start straight away, which is not what was asked. */
   const canWaitFor = pieces.filter(
@@ -151,6 +185,30 @@ export default function Away({
           {awayWords.keepGoing}
         </button>
       </div>
+
+      {/* Offered only when another folder actually has work in it. A switch
+          with nothing on the other side of it is noise on every other day. */}
+      {others.length === 0 ? null : (
+        <div className="away__scope" role="group" aria-label="Which projects to show">
+          {[false, true].map((wide) => (
+            <button
+              key={String(wide)}
+              type="button"
+              className={`away__scopeone ${across === wide ? 'away__scopeone--on' : ''}`}
+              aria-pressed={across === wide}
+              onClick={() => setAcross(wide)}
+            >
+              {wide ? awayWords.everywhere : awayWords.here}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {across ? (
+        <p className="away__across">
+          {awayWords.acrossSays(others.length + 1, all.filter((one) => one.state === 'running').length)}
+        </p>
+      ) : null}
 
       {/* Where the hand already is: one box, and it carries on without you. */}
       {starting ? (
@@ -235,6 +293,9 @@ export default function Away({
       {asked.map((piece) =>
         piece.question === null ? null : (
           <div key={piece.id} className="away__asked" role="group" aria-label={piece.question.question}>
+            {piece.project === undefined ? null : (
+              <p className="away__wherefrom">{piece.project}</p>
+            )}
             <p className="away__doing">{piece.doing}</p>
             <p className="away__question">{piece.question.question}</p>
             {piece.question.detail === null ? null : (
@@ -250,7 +311,7 @@ export default function Away({
                 className="away__do away__do--first"
                 disabled={busy}
                 onClick={() => {
-                  if (piece.question !== null) onAnswer(piece.id, piece.question.callId, 'yes');
+                  if (piece.question !== null) onAnswer(piece.id, piece.question.callId, 'yes', piece.where);
                 }}
               >
                 {awayWords.yes}
@@ -260,7 +321,7 @@ export default function Away({
                 className="away__quietdo"
                 disabled={busy}
                 onClick={() => {
-                  if (piece.question !== null) onAnswer(piece.id, piece.question.callId, 'no');
+                  if (piece.question !== null) onAnswer(piece.id, piece.question.callId, 'no', piece.where);
                 }}
               >
                 {awayWords.no}

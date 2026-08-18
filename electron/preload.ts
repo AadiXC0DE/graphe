@@ -757,6 +757,9 @@ const api: GrapheApi = {
 
   /* ---------------------------------------------- while you are not looking */
 
+  awayEverywhere(): Promise<Result<readonly AwayNotice[]>> {
+    return ipcRenderer.invoke(CHANNEL.awayEverywhere) as Promise<Result<readonly AwayNotice[]>>;
+  },
   away(where?: Where): Promise<Result<Away>> {
     return ipcRenderer.invoke(CHANNEL.away, named(where)) as Promise<Result<Away>>;
   },

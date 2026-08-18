@@ -28,6 +28,10 @@ import './Board.css';
  */
 
 export type BoardPiece = OnBoard & {
+  /** Which folder this belongs to, when the board is showing more than one.
+   *  `where` is the path an action needs; `project` is what a person calls it. */
+  where?: string;
+  project?: string;
   /** Said when it did not work. */
   trouble?: string | null;
   /** What this one is waiting for, already a sentence. Null when it waits for
@@ -41,12 +45,13 @@ export type BoardProps = {
   pieces: readonly BoardPiece[];
   /** Now, epoch ms. Passed in so the board draws the same twice. */
   now: number;
-  /** Take this one's result into the project. Offered once it has finished. */
-  onKeep?: (id: string) => void;
+  /** Take this one's result into the project. Offered once it has finished.
+   *  The folder comes with it, because a board can be showing several. */
+  onKeep?: (id: string, where?: string) => void;
   /** Let one go. */
-  onDrop?: (id: string) => void;
+  onDrop?: (id: string, where?: string) => void;
   /** Look at one's result properly. */
-  onLook?: (id: string) => void;
+  onLook?: (id: string, where?: string) => void;
   /** How many go side by side, for the line under the summary. */
   atOnce?: number;
 };
@@ -60,9 +65,9 @@ function Card({
 }: {
   piece: BoardPiece;
   now: number;
-  onKeep?: (id: string) => void;
-  onDrop?: (id: string) => void;
-  onLook?: (id: string) => void;
+  onKeep?: (id: string, where?: string) => void;
+  onDrop?: (id: string, where?: string) => void;
+  onLook?: (id: string, where?: string) => void;
 }) {
   const picture = piece.picture ?? null;
   const alt = `What ${piece.doing} ended up looking like`;
@@ -78,7 +83,7 @@ function Card({
           <button
             type="button"
             className="work__open"
-            onClick={() => onLook(piece.id)}
+            onClick={() => onLook(piece.id, piece.where)}
             aria-label={`${boardWords.look} — ${piece.doing}`}
           >
             <img className="work__picture" src={picture} alt={alt} />
@@ -88,6 +93,11 @@ function Card({
 
       <div className="work__said">
         {picture === null ? null : <p className="work__doing">{piece.doing}</p>}
+        {/* Only when the board is showing more than one folder. On a board of
+            one it would be the same word on every card, which is noise. */}
+        {piece.project === undefined ? null : (
+          <p className="work__where">{piece.project}</p>
+        )}
         <p className="work__state">
           <span className="work__dot" aria-hidden="true" />
           {saysState(piece.state)}
@@ -113,7 +123,7 @@ function Card({
           <button
             type="button"
             className="work__keep"
-            onClick={() => onKeep(piece.id)}
+            onClick={() => onKeep(piece.id, piece.where)}
             aria-label={`${boardWords.keep} — ${piece.doing}`}
           >
             {boardWords.keep}
@@ -123,7 +133,7 @@ function Card({
           <button
             type="button"
             className="work__drop"
-            onClick={() => onDrop(piece.id)}
+            onClick={() => onDrop(piece.id, piece.where)}
             aria-label={`${saysDrop(piece.state)} — ${piece.doing}`}
           >
             {saysDrop(piece.state)}

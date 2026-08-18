@@ -205,6 +205,13 @@ function blankDesk(path: string, name: string): Desk {
  * The one that was in front is parked whole, so coming back to it finds it as
  * it was rather than as a thread that has to be read off disk again.
  */
+/** What somebody calls a folder: its last part, never the whole path. Used
+ *  where a board is showing work from more than one at a time. */
+export function folderCalled(path: string): string {
+  const parts = path.split(/[\\/]+/).filter((part) => part !== '');
+  return parts[parts.length - 1] ?? path;
+}
+
 export function showThread(desks: Desks, project: string, address: string): Desks {
   return changeDesk(desks, project, (desk) => {
     if (desk.address === address) return desk;

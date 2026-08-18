@@ -39,6 +39,7 @@ import {
   modelKey,
   type AgentNotice,
   type Away,
+  type AwayNotice,
   type AwayPiece,
   type EveryKind,
   type Repeating,
@@ -1399,6 +1400,10 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(atWork));
     },
 
+    awayEverywhere(): Promise<Result<readonly AwayNotice[]>> {
+      return Promise.resolve(done([{ project: '/work/this-project', away: atWork }]));
+    },
+
     startAfter(text: string, after: string, _where?: Where): Promise<Result<Away>> {
       const waited = atWork.pieces.find((one) => one.id === after);
       return this.keepGoing(text).then((answer) => {
@@ -1787,6 +1792,7 @@ function connect(): Bridge {
     handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
     putOnline: (confirmed) => api.putOnline(confirmed),
     away: (where) => api.away(where),
+    awayEverywhere: () => api.awayEverywhere(),
     keepGoing: (text, untilDone, where) => api.keepGoing(text, untilDone, where),
     stopAway: (id, where) => api.stopAway(id, where),
     keepAway: (id, where) => api.keepAway(id, where),

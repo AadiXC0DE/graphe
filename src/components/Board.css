@@ -145,6 +145,16 @@
   padding: var(--space-3) var(--space-3) var(--space-2);
 }
 
+/* Which folder this one belongs to. Above the sentence and quieter than it:
+   on a board of several projects it is what you scan by, not what you read. */
+.work__where {
+  margin: 0 0 2px;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
 .work__doing {
   margin: 0;
   font-size: var(--text-sm);

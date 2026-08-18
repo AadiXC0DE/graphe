@@ -120,6 +120,7 @@ import {
   type Desk,
   type Desks,
   type Reference,
+  folderCalled,
 } from "./lib/projects";
 import {
   applyEvent,
@@ -2520,6 +2521,17 @@ function Conversation() {
   const [away, setAway] = useState<Readonly<Record<string, AwayState>>>({});
   const awayHere = desks.current === null ? null : (away[desks.current] ?? null);
 
+  /* Every other folder that has anything of its own going on. Work does not
+     stop because somebody opened another project, and this is the only place
+     that says so. */
+  const awayElsewhere = useMemo(
+    () =>
+      Object.entries(away)
+        .filter(([path, state]) => path !== desks.current && state.pieces.length > 0)
+        .map(([path, state]) => ({ where: path, project: folderCalled(path), away: state })),
+    [away, desks.current],
+  );
+
   /* The board says how long ago each thing was, so the window needs a clock of
      its own. Half a minute is finer than anything it draws. */
   const [now, setNow] = useState(() => Date.now());
@@ -2550,6 +2562,20 @@ function Conversation() {
       }),
     [],
   );
+
+  /* Every folder's board, once, on the way in. Notices arrive as things happen;
+     without this first read, work already running in a project nobody has
+     opened yet would be invisible until it next moved. */
+  useEffect(() => {
+    void bridge.awayEverywhere().then((answer) => {
+      if (!answer.ok) return;
+      setAway((current) => {
+        const next = { ...current };
+        for (const notice of answer.value) next[notice.project] = notice.away;
+        return next;
+      });
+    });
+  }, []);
 
   /** Everything the band can do comes back with the whole state, so the window
    *  never has to work out what its own press did. */
@@ -2586,8 +2612,8 @@ function Conversation() {
   );
 
   const keepAway = useCallback(
-    (id: string) => {
-      const path = desks.current;
+    (id: string, where?: string) => {
+      const path = where ?? desks.current;
       if (path === null) return;
       void bridge.keepAway(id, { project: path }).then((answer) => {
         afterAway(path)(answer);
@@ -2600,8 +2626,8 @@ function Conversation() {
   );
 
   const dropAway = useCallback(
-    (id: string) => {
-      const path = desks.current;
+    (id: string, where?: string) => {
+      const path = where ?? desks.current;
       if (path === null) return;
       void bridge.stopAway(id, { project: path }).then(afterAway(path));
     },
@@ -2611,8 +2637,8 @@ function Conversation() {
   /** The one press that can answer a question a run stopped on. Nothing else in
    *  this window, and nothing at all on the other side, can. */
   const answerAway = useCallback(
-    (id: string, callId: string, decision: Decision) => {
-      const path = desks.current;
+    (id: string, callId: string, decision: Decision, where?: string) => {
+      const path = where ?? desks.current;
       if (path === null) return;
       void bridge.answerAway(id, callId, decision, { project: path }).then(afterAway(path));
     },
@@ -3441,6 +3467,8 @@ function Conversation() {
             landed,
             decided,
             away: awayHere,
+            elsewhere: awayElsewhere,
+            project: desks.current === null ? "" : folderCalled(desks.current),
             clock: now,
           }}
           onPutBack={(versionId) => void putBack(versionId)}

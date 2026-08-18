@@ -1113,6 +1113,7 @@ export const CHANNEL = {
   handToDeveloper: 'graphe:hand-to-developer',
   putOnline: 'graphe:put-online',
   away: 'graphe:away',
+  awayEverywhere: 'graphe:away-everywhere',
   keepGoing: 'graphe:keep-going',
   startAfter: 'graphe:start-after',
   putAfter: 'graphe:put-after',
@@ -1414,6 +1415,10 @@ export type GrapheApi = {
 
   /** Everything happening for this project whether or not the window is open. */
   away(where?: Where): Promise<Result<Away>>;
+
+  /** The same, for every project at once — work does not stop because somebody
+   *  switched folders, and until this there was nowhere to see that. */
+  awayEverywhere(): Promise<Result<readonly AwayNotice[]>>;
   /** Start a piece of work that carries on with the window closed. It runs in
    *  its own copy, so the folder on screen is untouched until it is kept.
    *  `untilDone` is the overnight mode: full access, no questions, wall clock. */

@@ -671,6 +671,49 @@ const AWAY: AwayState = {
   sinceYouWere: 'One thing waiting on you, one thing ready to look at, one thing still going.',
 };
 
+/** A second folder with work of its own, so the board can be seen doing the
+ *  thing it exists for: one place for everything, wherever it is running. */
+const AWAY_ELSEWHERE: readonly { where: string; project: string; away: AwayState }[] = [
+  {
+    where: '/work/almanac',
+    project: 'almanac',
+    away: {
+      pieces: [
+        {
+          id: 'away-b1',
+          doing: 'Rebuild the archive page from the new grid',
+          state: 'running',
+          at: NOW - 9 * 60_000,
+          picture: null,
+          says: null,
+          trouble: null,
+          spent: inr(1100),
+          question: null,
+        },
+        {
+          id: 'away-b2',
+          doing: 'Replace the placeholder photographs',
+          state: 'needs-you',
+          at: NOW - 30 * 60_000,
+          picture: null,
+          says: 'I need one more thing before I can carry on.',
+          trouble: null,
+          question: {
+            callId: 'call-9',
+            question: 'Use the photographs in “shoot-april” for the archive?',
+            detail: 'They are the only ones in the folder at the right size.',
+            consequence: 'Nothing else changes.',
+          },
+        },
+      ],
+      repeats: [],
+      atOnce: 4,
+      spent: { minor: 11, currency: 'USD' },
+      sinceYouWere: null,
+    },
+  },
+];
+
 const RESEARCH: readonly ResearchEntry[] = [
   { id: 'r1', query: 'css clamp() fluid type best practices', state: 'done' },
   { id: 'r2', query: 'framer motion vs css animations 2026', state: 'done' },
@@ -1630,6 +1673,8 @@ export default function Gallery() {
                   landed: null,
                   decided: null,
                   away: AWAY,
+                  elsewhere: AWAY_ELSEWHERE,
+                  project: 'paper-street',
                   clock: NOW,
                 }}
                 onPutBack={noop}

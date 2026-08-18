@@ -69,6 +69,11 @@ export type OverviewView = {
   /** What is happening whether or not this window is open. Null until the shell
    *  has answered. */
   away: AwayState | null;
+  /** The other folders with work of their own, so the board can show all of it
+   *  at once. Empty on the ordinary day. */
+  elsewhere: readonly { where: string; project: string; away: AwayState }[];
+  /** What the folder in front is called. */
+  project: string;
   /** Now, epoch ms, so the board draws the same twice. */
   clock: number;
 };
@@ -409,6 +414,8 @@ export default function Overview({
       <section className="overview__block">
         <Away
           away={view.away}
+          elsewhere={view.elsewhere}
+          project={view.project}
           now={view.clock}
           busy={busy}
           onKeepGoing={onKeepGoing}

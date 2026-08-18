@@ -421,3 +421,23 @@ describe('U-06 the notice that arrives on screen', () => {
     return { doing: 'Two', state: 'needs-you' };
   }
 });
+
+/* ========================================================================== */
+/* One board for everything, wherever it is running                            */
+/* ========================================================================== */
+
+describe('a board showing more than one folder', () => {
+  it('counts the folders and what is running across them', () => {
+    expect(awayWords.acrossSays(3, 2)).toBe('2 things running, across 3 projects.');
+    expect(awayWords.acrossSays(2, 1)).toBe('One thing running, across 2 projects.');
+    expect(awayWords.acrossSays(1, 0)).toBe('Nothing running, across one project.');
+  });
+
+  it('names the two scopes in words nobody has to learn', () => {
+    expect(awayWords.here).toBe('This project');
+    expect(awayWords.everywhere).toBe('Everywhere');
+    for (const said of [awayWords.here, awayWords.everywhere, awayWords.onlyHere]) {
+      expect(said).not.toMatch(/\b(workspace|repo|repository|session|path)\b/i);
+    }
+  });
+});

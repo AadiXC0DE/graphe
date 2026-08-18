@@ -34,6 +34,7 @@ import {
   openDesk,
   receive,
   researchLog,
+  folderCalled,
 } from '../src/lib/projects';
 import type { Turn } from '../src/lib/thread';
 import { MOST_REMEMBERED, Recents, nameOf } from '../src/projects/recents';
@@ -495,5 +496,22 @@ describe('P-04 the research log, derived from the thread', () => {
 
     expect(researchLog([turn])[0]?.state).toBe('running');
     expect(researchLog([finished])[0]?.state).toBe('done');
+  });
+});
+
+/* ========================================================================== */
+/* What a folder is called                                                     */
+/* ========================================================================== */
+
+describe('naming a folder on a board of several', () => {
+  it('is the last part, never the whole path', () => {
+    expect(folderCalled('/Users/mira/Projects/portfolio')).toBe('portfolio');
+    expect(folderCalled('/work/almanac/')).toBe('almanac');
+    expect(folderCalled('C:\\work\\almanac')).toBe('almanac');
+  });
+
+  it('has something to say about a path with no parts', () => {
+    expect(folderCalled('/')).toBe('/');
+    expect(folderCalled('')).toBe('');
   });
 });

@@ -82,6 +82,7 @@ import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
   type Away,
+  type AwayNotice,
   type AwayAfter,
   type AwayPiece,
   type EveryKind,
@@ -4328,6 +4329,15 @@ function register(): void {
   });
 
   /* ------------------------------------------- while you are not looking */
+
+  /* Every project's board at once. The desks are already kept per folder and
+     pushed at the window as they change; this is the first read, so a board
+     opened before anything has happened is not empty for the wrong reason. */
+  handle<readonly AwayNotice[]>(CHANNEL.awayEverywhere, async () => {
+    await standingFile().catch(() => null);
+    const everywhere = [...awayDesks.keys()].map((path) => ({ project: path, away: awayNow(path) }));
+    return done(everywhere);
+  });
 
   handle<Away>(CHANNEL.away, async (_event, args) => {
     const open = projectAt(whereIn(args));

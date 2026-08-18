@@ -76,14 +76,25 @@ export type Kept = {
   insteadOf?: readonly string[];
 };
 
-/** When two pieces of work changed the same file. The project is left as it
- *  was, so the sentence has to say what to do next rather than what failed. */
-export function bothChanged(files: readonly string[]): string {
+/** When two pieces of work changed the same file. Nothing failed and nothing
+ *  stopped part way — the project was deliberately left alone — so this is said
+ *  as its own thing rather than passed through the sentences written for a
+ *  failure. */
+export function bothChanged(files: readonly string[]): {
+  what: string;
+  because: string;
+  actionLabel: string;
+} {
   const named = files.slice(0, 4).join(', ');
   const rest = files.length > 4 ? ` and ${String(files.length - 4)} more` : '';
-  return files.length === 1
-    ? `Another piece of work has already changed ${named}, so I have left your project as it was. Open this one and decide which version of that file you want.`
-    : `Another piece of work has already changed ${String(files.length)} of the same files, so I have left your project as it was: ${named}${rest}. Open this one and decide which versions you want.`;
+  return {
+    what: 'I left your project exactly as it was.',
+    because:
+      files.length === 1
+        ? `Another piece of work has already changed ${named}, so taking this one would write over it. Open this one and decide which version of that file you want.`
+        : `Another piece of work has already changed ${String(files.length)} of the same files, so taking this one would write over them: ${named}${rest}.`,
+    actionLabel: 'Got it',
+  };
 }
 
 export const tryWords = {

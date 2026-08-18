@@ -4490,7 +4490,7 @@ function register(): void {
       // A file two pieces both changed is the one case somebody has to look at.
       // The piece stays on the board, so the work is still there to open.
       if (kept !== null && kept.version === null) {
-        return fail(plainTrouble(bothChanged(kept.conflicted)));
+        return fail(bothChanged(kept.conflicted));
       }
       desk.runs.delete(id);
       forgetNote(desk, id);

@@ -475,11 +475,18 @@ describe('two pieces kept in a row', () => {
   });
 
   it('says which files, and what to do about them', () => {
-    expect(bothChanged(['hero.css'])).toContain('hero.css');
-    expect(bothChanged(['hero.css'])).toMatch(/left your project as it was/i);
+    const one = bothChanged(['hero.css']);
+    expect(one.because).toContain('hero.css');
+    // Nothing failed and nothing stopped part way, so it must not be said as
+    // though something had.
+    expect(one.what).toMatch(/left your project exactly as it was/i);
+    expect(one.what).not.toMatch(/stopped|could not|failed/i);
+
     const many = bothChanged(['a.css', 'b.css', 'c.css', 'd.css', 'e.css', 'f.css']);
-    expect(many).toContain('and 2 more');
-    expect(many).toMatch(/6 of the same files/);
+    expect(many.because).toContain('and 2 more');
+    expect(many.because).toMatch(/6 of the same files/);
+    // Short enough to be shown rather than swallowed for length.
+    expect(many.because.length).toBeLessThan(220);
   });
 });
 

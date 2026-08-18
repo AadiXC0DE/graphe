@@ -70,6 +70,14 @@ export const ceilingWords = {
   stopped: 'This helper was stopped: the limit the person set has been reached. Tell them so rather than trying again.',
 };
 
+/** Said to the *person*, once, when their ceiling is in one currency and the
+ *  account bills in another. There is no exchange rate in this codebase and
+ *  inventing one would be worse — but a limit that cannot stop anything must
+ *  never be a limit that says nothing. */
+export function ceilingCannotBind(ceiling: string, spending: string): string {
+  return `The limit you set is in ${ceiling} and this account is billed in ${spending}, so it cannot stop anything. Set one in ${spending} and it will.`;
+}
+
 /**
  * Everything running, and the ceiling over all of it.
  *
@@ -91,10 +99,30 @@ export class Fleet {
   /** True while the stops are being called, so a run that ends itself on the
    *  way out cannot start the round again. */
   #stopping = false;
+  /** A currency that was spent while a ceiling in a different one was set. The
+   *  ceiling cannot measure it, so it cannot stop it — and saying nothing about
+   *  that leaves somebody believing they are capped when they are not. */
+  #cannotMeasure: string | null = null;
 
   /** The ceiling, or null when nobody has set one. */
   get ceiling(): SpendLimit | null {
     return this.#allotment?.limit ?? null;
+  }
+
+  /**
+   * The sentence to show when the ceiling cannot do its job, or null.
+   *
+   * Read after spend has been counted. Answers once and then stays quiet: this
+   * is a fact about the setting, not an event, and saying it every turn would
+   * make it furniture.
+   */
+  takeCannotBind(locale?: string): string | null {
+    const allotment = this.#allotment;
+    const spending = this.#cannotMeasure;
+    if (allotment === null || spending === null) return null;
+    this.#cannotMeasure = null;
+    void locale;
+    return ceilingCannotBind(allotment.currency, spending);
   }
 
   get status(): LimitStatus | null {
@@ -248,12 +276,17 @@ export class Fleet {
     this.#before.clear();
     this.#unseen.clear();
     this.#reached.clear();
+    this.#cannotMeasure = null;
   }
 
   #count(id: string | null, amount: Money): void {
     const allotment = this.#allotment;
     if (allotment === null || amount.currency !== allotment.currency) {
       this.#before.set(amount.currency, (this.#before.get(amount.currency) ?? 0) + amount.minor);
+      // Money is going out that the ceiling will never see. Remember it so
+      // somebody can be told; a limit that quietly measures nothing is worse
+      // than no limit, because it is believed.
+      if (allotment !== null) this.#cannotMeasure = amount.currency;
       return;
     }
     const update = allotment.record(id, amount);

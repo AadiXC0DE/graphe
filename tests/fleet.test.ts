@@ -313,3 +313,54 @@ describe('a ceiling somebody wrote down', () => {
     expect(readCeiling('20 DOLLARS')).toBeNull();
   });
 });
+
+/* ========================================================================== */
+/* A ceiling that cannot measure what is being spent                           */
+/* ========================================================================== */
+
+describe('a ceiling in the wrong currency', () => {
+  it('says so rather than quietly measuring nothing', () => {
+    const one = new Fleet();
+    one.hold(createLimit(fromMajor(20, 'EUR'), 'session'));
+
+    // What the account actually bills in.
+    one.spent(null, fromMajor(5, 'USD'));
+
+    const says = one.takeCannotBind();
+    expect(says).not.toBeNull();
+    expect(says).toContain('EUR');
+    expect(says).toContain('USD');
+    expect(says).toMatch(/cannot stop anything/);
+  });
+
+  it('says it once, because it is a fact about the setting and not an event', () => {
+    const one = new Fleet();
+    one.hold(createLimit(fromMajor(20, 'EUR'), 'session'));
+    one.spent(null, fromMajor(5, 'USD'));
+
+    expect(one.takeCannotBind()).not.toBeNull();
+    expect(one.takeCannotBind()).toBeNull();
+  });
+
+  it('stays quiet when the ceiling can do its job', () => {
+    const one = new Fleet();
+    one.hold(createLimit(fromMajor(20, 'USD'), 'session'));
+    one.spent(null, fromMajor(5, 'USD'));
+    expect(one.takeCannotBind()).toBeNull();
+  });
+
+  it('stays quiet when nobody set a ceiling at all', () => {
+    const one = new Fleet();
+    one.spent(null, fromMajor(5, 'USD'));
+    expect(one.takeCannotBind()).toBeNull();
+  });
+
+  it('says it in words a person can act on', () => {
+    const one = new Fleet();
+    one.hold(createLimit(fromMajor(20, 'GBP'), 'session'));
+    one.spent(null, fromMajor(1, 'USD'));
+    const says = one.takeCannotBind() ?? '';
+    expect(says).toMatch(/Set one in USD/);
+    expect(says).toMatch(/[.!]$/);
+  });
+});

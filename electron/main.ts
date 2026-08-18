@@ -1532,7 +1532,10 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // somebody is sitting in front of, so it is never registered as something
     // the ceiling may stop — it finishes and is saved, and what is refused is
     // the next thing asked for.
-    if (said.type === 'spend') fleet.spent(null, said.amount);
+    if (said.type === 'spend') {
+      fleet.spent(null, said.amount);
+      sayIfCeilingIsBlind(path, from.address ?? undefined);
+    }
 
     // Recorded whether or not there is a window to tell: a reload must not lose
     // money that was already spent.
@@ -1560,7 +1563,10 @@ function forwardHeld(path: string, held: Held, from: Speaking): (event: AgentEve
     const said: AgentEvent =
       event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
     send(path, said, from.address ?? undefined);
-    if (said.type === 'spend') fleet.spent(null, said.amount);
+    if (said.type === 'spend') {
+      fleet.spent(null, said.amount);
+      sayIfCeilingIsBlind(path, from.address ?? undefined);
+    }
     for (const also of held.spend.observe(said)) {
       send(path, also, from.address ?? undefined);
       if (also.type === 'spend-summary') {
@@ -1991,6 +1997,22 @@ function freshCheckout(held: Held, project: string): { name: string; folder: str
   });
   held.checkoutsMade = chosen.made;
   return { name: chosen.name, folder: join(worktreesFolder(project), chosen.name) };
+}
+
+/**
+ * Tell somebody once when their ceiling cannot see what is being spent.
+ *
+ * A limit set in one currency while the account bills in another measures
+ * nothing, and there is no exchange rate anywhere in this app to make it
+ * measure something. Believing you are capped when you are not is the version
+ * of this that costs money, so it is said out loud rather than left to be
+ * discovered on a bill.
+ */
+function sayIfCeilingIsBlind(project: string, at: string | undefined): void {
+  const says = fleet.takeCannotBind();
+  if (says === null) return;
+  send(project, { type: 'message-delta', text: `\n\n${says}` }, at);
+  send(project, { type: 'message-end' }, at);
 }
 
 /** Said when a conversation is asked about a checkout it does not have. Naming

@@ -132,6 +132,14 @@
   overflow-wrap: anywhere;
 }
 
+/* The count comes before the list of files, because it is the answer and the
+   list is only the evidence — and the list is capped where this is not. */
+.inspector__reach {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
 .inspector__aside {
   display: flex;
   flex-wrap: wrap;

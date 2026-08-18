@@ -27,6 +27,7 @@ export const SAYS = {
   changed: 'The last change',
   widths: 'At other sizes',
   unsure: 'What I could not tell',
+  reach: 'Used',
   also: 'Also used in',
   screens: 'Appears on',
   find: 'Look for',
@@ -146,6 +147,12 @@ export default function Inspector({
             {SAYS.open}
           </button>
         ) : null}
+
+        {made.reach === undefined ? null : (
+          <p className="inspector__reach">
+            {SAYS.reach} {made.reach}
+          </p>
+        )}
 
         {made.alsoIn === undefined ? null : (
           <p className="inspector__aside">

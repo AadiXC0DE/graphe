@@ -84,7 +84,7 @@ function usage(): Usage {
           { route: '/', name: 'Home' },
         ],
         unsure: [],
-        says: 'Buy is used on two screens.',
+        says: '3 times in 3 files, on 2 screens.',
       },
     ],
     read: 9,
@@ -163,6 +163,15 @@ describe('which component made it', () => {
     expect(reading.made.where).toEqual({ file: 'src/ui/Buy.tsx', line: 12 });
     expect(reading.made.alsoIn).toEqual(['src/pages/Pricing.tsx', 'src/pages/Home.tsx']);
     expect(reading.made.screens).toEqual(['Pricing', 'Home']);
+    // How far a change to it reaches. The file list below it is capped; this
+    // is the count, and it is the honest answer to "will this break anything
+    // else?" — which was worked out and then never shown to anybody.
+    expect(reading.made.reach).toBe('3 times in 3 files, on 2 screens.');
+  });
+
+  it('has no reach to show when the project was never read', () => {
+    const reading = read(clicked({ origin: [...FLOOR, { how: 'owner', component: 'Buy' }] }));
+    expect(reading.made.reach).toBeUndefined();
   });
 
   it('falls to something to go looking for on a page that answers nothing', () => {

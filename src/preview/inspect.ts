@@ -49,6 +49,10 @@ export type Made = {
   sure: Sureness;
   component?: string;
   where?: { file: string; line: number; column?: number };
+  /** How far a change to it would reach, counted: "34 times in 9 files, on 3
+   *  screens." The list below is capped; this is not, and it is the honest
+   *  answer to "will this break something else?" */
+  reach?: string;
   /** The other files that component turns up in, most-used first. */
   alsoIn?: readonly string[];
   /** The screens it appears on. */
@@ -284,6 +288,7 @@ function madeFrom(pointed: Pointed, material: Material, unsure: string[]): Made 
     made.says = whereSays(component, known.file, known.line);
     made.sure = 'likely';
   }
+  made.reach = known.says;
   const alsoIn = placesOf(known);
   if (alsoIn.length > 0) made.alsoIn = alsoIn;
   const screens = screensOf(known);
@@ -667,6 +672,9 @@ export function saysValues(reading: Reading): string {
 export function saysReading(reading: Reading): string {
   const lines: string[] = [reading.title, reading.made.says];
 
+  if (reading.made.reach !== undefined) {
+    lines.push(`Used ${reading.made.reach.charAt(0).toLowerCase()}${reading.made.reach.slice(1)}`);
+  }
   if (reading.made.alsoIn !== undefined) {
     lines.push(`Also used in ${listOf([...reading.made.alsoIn])}.`);
   }

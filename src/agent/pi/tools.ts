@@ -40,6 +40,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 // One line on purpose: the boundary test in tests/adapter.test.ts reads the
 // line that names Pi and expects `import type` on it.
@@ -48,6 +49,7 @@ import { Type } from 'typebox';
 
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
 import { ProjectHistory, type ReviewTarget } from '../../history/repo';
+import { mapFrom, saysMap, type SourceFile } from '../../files/map';
 import type { MemoryStore } from '../memory';
 import * as debug from './debug';
 import { roleSpec, type HelperRole } from './child';
@@ -1452,6 +1454,64 @@ export function runningTools(
  * turn teaching the model something the prompt could have said for nothing.
  */
 /* -------------------------------------------------------------------------- */
+/* The shape of the project                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** Deep enough for any project laid out the ordinary way, shallow enough not to
+ *  walk a dependency folder somebody forgot to name. */
+const MAP_DEEPEST = 8;
+const MAP_MOST = 4000;
+const MAP_SKIP = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', 'vendor', '.git']);
+const MAP_READ = /\.(?:tsx?|jsx?|mjs|cjs|svelte|vue|astro|css|scss|sass|less)$/i;
+
+async function filesUnder(root: string): Promise<SourceFile[]> {
+  const found: SourceFile[] = [];
+  const walk = async (folder: string, prefix: string, depth: number): Promise<void> => {
+    if (depth > MAP_DEEPEST || found.length >= MAP_MOST) return;
+    const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (found.length >= MAP_MOST) return;
+      if (entry.name.startsWith('.') || MAP_SKIP.has(entry.name)) continue;
+      const path = `${prefix}${entry.name}`;
+      if (entry.isDirectory()) {
+        await walk(join(folder, entry.name), `${path}/`, depth + 1);
+        continue;
+      }
+      if (!MAP_READ.test(entry.name)) continue;
+      const text = await readFile(join(folder, entry.name), 'utf8').catch(() => null);
+      if (text !== null) found.push({ path, text });
+    }
+  };
+  await walk(root, '', 0);
+  return found;
+}
+
+/**
+ * A map of the project, worked out from the files.
+ *
+ * The one thing needed to break a request into pieces that do not collide, and
+ * until now guesswork done again from scratch every time out of whatever files
+ * happened to be read first.
+ */
+export const readMapTool = (cwd: string): ToolDefinition => ({
+  name: 'read_map',
+  label: 'Reading the shape of the project',
+  description:
+    'How this project is put together: its folders, how many files are in each, which folders reach into which, where a change starts from, and where the styles are. Read it before breaking a big request into pieces, so the pieces touch different areas rather than colliding.',
+  promptSnippet: 'read_map() — how the project is put together, by folder',
+  promptGuidelines: [
+    'Read it before setting several pieces of work going, so each piece can be given an area of its own.',
+    'It is the shape, not the contents. Open the files themselves for anything it does not answer.',
+  ],
+  parameters: Type.Object({}),
+  executionMode: 'sequential',
+  execute: async (): ToolResult => ({
+    content: [{ type: 'text', text: saysMap(mapFrom(await filesUnder(cwd))) }],
+    details: {},
+  }),
+});
+
+/* -------------------------------------------------------------------------- */
 /* Several pieces at once                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -1620,6 +1680,7 @@ export const grapheTools = (
   putOnBoard?: PutOnBoard,
 ): ToolDefinition[] => {
   const tools = [websearchTool, webfetchTool, taskTool(agentDir, model, thinking, projectRoot)];
+  if (projectRoot !== undefined && projectRoot !== '') tools.push(readMapTool(projectRoot));
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));
   // Only where there is a board to put work on. The runs on the board must not

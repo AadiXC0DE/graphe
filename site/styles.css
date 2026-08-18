@@ -952,30 +952,35 @@ a {
 
 .bar {
   height: 4px;
-  border-radius: 100px;
+  border-radius: 2px;
   background: var(--edge);
   overflow: hidden;
 }
 
+/* Four of nine, which is what the line above it says. It used to drift a few
+   percent forward and then the same few percent back — a progress bar going
+   backwards, which is the one thing a progress bar must never do and why it
+   read as broken rather than as busy. Then it swept end to end like a bar that
+   knows nothing, next to a sentence that names the step. It fills to where the
+   work actually is.
+
+   Once, as the board arrives, and never again: a thing that moves forever in
+   the corner of the eye is a thing you end up reading past. `transform` only,
+   from the left, so it costs a compositor and not a layout. */
 .bar__fill {
   display: block;
   height: 100%;
   width: 44%;
   border-radius: inherit;
   background: var(--coral);
-  animation: creep 5.5s linear infinite;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 820ms var(--ease-expo);
+  transition-delay: 220ms;
 }
 
-@keyframes creep {
-  0% {
-    transform: translateX(-6%);
-  }
-  50% {
-    transform: translateX(4%);
-  }
-  100% {
-    transform: translateX(-6%);
-  }
+.reveal.is-in .bar__fill {
+  transform: scaleX(1);
 }
 
 .piece__asks {
@@ -1411,9 +1416,14 @@ a {
     transform: none;
   }
 
-  .glow,
-  .bar__fill {
+  .glow {
     animation: none;
+  }
+
+  /* No growing. It is simply at four of nine, which is all it ever said. */
+  .bar__fill {
+    transform: none;
+    transition: none;
   }
 
   .screen {

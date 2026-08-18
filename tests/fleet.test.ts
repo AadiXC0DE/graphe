@@ -15,9 +15,14 @@ import { spawn } from 'node:child_process';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { stopChild, taskTool } from '../src/agent/pi/tools';
+import {
+  HELPER_PATIENCE_MS,
+  HELPER_TOOK_TOO_LONG,
+  stopChild,
+  taskTool,
+} from '../src/agent/pi/tools';
 import type { Money } from '../src/agent/types';
-import { ceilingWords, Fleet, fleet, readCeiling, type UnseenSpend } from '../src/cost/fleet';
+import { ceilingWords, Fleet, fleet, MOST_AT_ONCE, readCeiling, type UnseenSpend } from '../src/cost/fleet';
 import { Allotment, createLimit } from '../src/cost/limits';
 import { fromMajor, money } from '../src/cost/money';
 
@@ -120,10 +125,15 @@ describe('a fan-out that runs out', () => {
     expect(refused?.ok === false && refused.because).toContain('$10');
   });
 
-  it('binds nothing at all when nobody has set a ceiling', () => {
+  it('binds no money at all when nobody has set a ceiling', () => {
     const many = new Fleet();
+    // Admitted, ended, admitted again: twenty runs pass through without a
+    // ceiling ever refusing one. How many run *at once* is a separate limit,
+    // and a count is not a cost.
     for (let n = 0; n < 20; n += 1) {
-      expect(many.begin({ id: `helper-${String(n)}`, kind: 'helper', stop: () => {} }).ok).toBe(true);
+      const id = `helper-${String(n)}`;
+      expect(many.begin({ id, kind: 'helper', stop: () => {} }).ok).toBe(true);
+      many.ended(id);
     }
     expect(many.allowsNewWork).toBe(true);
   });
@@ -362,5 +372,62 @@ describe('a ceiling in the wrong currency', () => {
     const says = one.takeCannotBind() ?? '';
     expect(says).toMatch(/Set one in USD/);
     expect(says).toMatch(/[.!]$/);
+  });
+});
+
+/* ========================================================================== */
+/* How many at once                                                            */
+/* ========================================================================== */
+
+describe('a cap on how many run at once', () => {
+  const start = (one: Fleet, id: string, kind: 'helper' | 'away' = 'helper') =>
+    one.begin({ id, kind, stop: () => {} });
+
+  it('lets a turn fan out, and stops it short of a swarm', () => {
+    const one = new Fleet();
+    for (let i = 0; i < MOST_AT_ONCE.helper; i += 1) {
+      expect(start(one, `h${String(i)}`).ok).toBe(true);
+    }
+    const refused = start(one, 'one-too-many');
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.because).toContain('as many as run at once');
+  });
+
+  it('counts each kind against its own cap', () => {
+    const one = new Fleet();
+    for (let i = 0; i < MOST_AT_ONCE.helper; i += 1) start(one, `h${String(i)}`);
+    // Helpers are full; background work has its own budget and is unaffected.
+    expect(start(one, 'a1', 'away').ok).toBe(true);
+    expect(one.runningOf('helper')).toBe(MOST_AT_ONCE.helper);
+    expect(one.runningOf('away')).toBe(1);
+  });
+
+  it('lets the next one in once somebody answers', () => {
+    const one = new Fleet();
+    for (let i = 0; i < MOST_AT_ONCE.helper; i += 1) start(one, `h${String(i)}`);
+    expect(start(one, 'blocked').ok).toBe(false);
+    one.ended('h0');
+    expect(start(one, 'now-fine').ok).toBe(true);
+  });
+
+  it('caps even with no ceiling set, because a ceiling is about money', () => {
+    const one = new Fleet();
+    expect(one.ceiling).toBeNull();
+    for (let i = 0; i < MOST_AT_ONCE.helper; i += 1) start(one, `h${String(i)}`);
+    expect(start(one, 'over').ok).toBe(false);
+  });
+});
+
+describe('a helper that never answers', () => {
+  it('has a clock, and it is shorter than a night', () => {
+    // Background work gets four hours because nobody is waiting. A helper runs
+    // inside somebody's turn, and they are sitting there.
+    expect(HELPER_PATIENCE_MS).toBeGreaterThan(60_000);
+    expect(HELPER_PATIENCE_MS).toBeLessThan(4 * 60 * 60 * 1000);
+  });
+
+  it('tells the model what to do instead of trying again', () => {
+    expect(HELPER_TOOK_TOO_LONG).toMatch(/not send the same piece of work again/i);
+    expect(HELPER_TOOK_TOO_LONG).toMatch(/smaller pieces|yourself/i);
   });
 });

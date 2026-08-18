@@ -68,7 +68,21 @@ export const ceilingWords = {
     return `This has reached the ${amount} limit the person set, so no more helpers can start. Tell them so, and carry on with what you can do yourself.`;
   },
   stopped: 'This helper was stopped: the limit the person set has been reached. Tell them so rather than trying again.',
+  tooMany(most: number): string {
+    return `${String(most)} helpers are already working, which is as many as run at once. Wait for one to answer and send this again, or do this piece yourself.`;
+  },
 };
+
+/**
+ * How many of each kind run at once.
+ *
+ * Helpers are whole processes with their own runtime, and the model is told to
+ * send them all in one reply — so the ceiling on money is not the only ceiling
+ * needed. Six is more parallelism than a single turn has ever usefully had, and
+ * far short of what a reply asking for twelve would have started. Away work
+ * keeps its own four, set where the board is.
+ */
+export const MOST_AT_ONCE: Readonly<Record<RunKind, number>> = { helper: 6, away: 4 };
 
 /** Said to the *person*, once, when their ceiling is in one currency and the
  *  account bills in another. There is no exchange rate in this codebase and
@@ -138,6 +152,14 @@ export class Fleet {
     return this.#running.size;
   }
 
+  /** How many of one kind are running right now. The cap is per kind: a turn's
+   *  helpers and the board's background work are different budgets. */
+  runningOf(kind: RunKind): number {
+    let many = 0;
+    for (const one of this.#running.values()) if (one.kind === kind) many += 1;
+    return many;
+  }
+
   /** Set the ceiling, or take it away. What has already been spent in this
    *  currency carries over, and so does what runs have been measured to cost —
    *  raising a ceiling is not a reason to start guessing again. */
@@ -169,6 +191,14 @@ export class Fleet {
    * put one, and a refusal is a decision rather than a failure.
    */
   begin(run: Running): Admitted {
+    // How many, before how much. A ceiling only binds once somebody sets one,
+    // and the model is told to put every helper call in one reply — so without
+    // this a reply asking for twelve helpers started twelve whole processes,
+    // each loading the agent runtime. This is the same idea as the four pieces
+    // background work allows, at the size of a turn.
+    if (this.runningOf(run.kind) >= MOST_AT_ONCE[run.kind]) {
+      return { ok: false, because: ceilingWords.tooMany(MOST_AT_ONCE[run.kind]) };
+    }
     const allotment = this.#allotment;
     if (allotment === null) {
       this.#running.set(run.id, run);

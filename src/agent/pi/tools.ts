@@ -65,6 +65,21 @@ import type { Money, SpendReason } from '../types';
  *  call failed rather than finished. */
 type ToolResult = Promise<AgentToolResult<unknown>>;
 
+/**
+ * How long one helper may take before it is ended.
+ *
+ * Long enough for a real piece of research on a slow provider, short enough that
+ * a stalled stream cannot hold a turn open all afternoon. Background work has
+ * had four hours; a helper is one question inside somebody's turn, and the
+ * person is sitting there.
+ */
+export const HELPER_PATIENCE_MS = 10 * 60 * 1000;
+
+/** What the model is told when one runs out of time. Written for the model:
+ *  one that understands it was cut off asks a smaller question next. */
+export const HELPER_TOOK_TOO_LONG =
+  'This helper was ended after ten minutes without finishing. Do not send the same piece of work again — either split it into smaller pieces, or do it yourself.';
+
 /** The results the child keeps on its own. Plain data; nothing crosses the wire
  *  except this. */
 export type SubagentOutcome =
@@ -919,9 +934,25 @@ async function runSubagent(
 
     let buffer = '';
     let done = false;
+
+    // A helper that never answers used to hold the whole turn open: it resolves
+    // on a report, a close, an error, a stop or the person's own abort, and a
+    // provider that stalls the stream is none of those. Background work has had
+    // a wall clock all along; this is the same idea at the size of one helper.
+    //
+    // Started before `finish` exists so that `finish` can always clear it — the
+    // fleet can stop this run on the way in, before the clock would otherwise
+    // have been set. The callback only ever runs later, by which time `finish`
+    // is there.
+    const patience = setTimeout(() => {
+      finish({ ok: false, error: HELPER_TOOK_TOO_LONG });
+    }, HELPER_PATIENCE_MS);
+    patience.unref?.();
+
     const finish = (outcome: SubagentOutcome): void => {
       if (done) return;
       done = true;
+      clearTimeout(patience);
       resolve({ outcome, boundary });
       // Never leave a live child behind a resolved promise: the helper may not
       // have noticed its own report arrived.

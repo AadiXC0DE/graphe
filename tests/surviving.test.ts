@@ -390,3 +390,34 @@ describe('what it says about work it came back to', () => {
     }
   });
 });
+
+/* ========================================================================== */
+/* Goes at the same thing, after a restart                                     */
+/* ========================================================================== */
+
+describe('several goes at one thing, written down', () => {
+  /**
+   * Without this they come back as unrelated pieces: no "Way 2 of 3" on the
+   * cards, and keeping one carries it in and leaves the other two sitting
+   * there — which is the one thing the feature exists to prevent.
+   */
+  it('carries the name they share across a restart', () => {
+    const note = noteOf(piece({ id: 'work-1', ways: 'ways-call-7' }), {
+      project: '/work/site',
+      name: 'site',
+      owner: OURS,
+    });
+    expect(note.ways).toBe('ways-call-7');
+    expect(asPiece(note).ways).toBe('ways-call-7');
+  });
+
+  it('says nothing about ordinary work, which is almost all of it', () => {
+    const note = noteOf(piece(), { project: '/work/site', name: 'site', owner: OURS });
+    expect(note.ways).toBeUndefined();
+    expect(asPiece(note).ways).toBeUndefined();
+    // A note written before any of this existed still reads.
+    const older = { ...note };
+    delete (older as { ways?: unknown }).ways;
+    expect(asPiece(older).ways).toBeUndefined();
+  });
+});

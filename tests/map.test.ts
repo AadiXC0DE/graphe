@@ -59,6 +59,15 @@ describe('MP-01 what one file says about itself', () => {
     expect(landsAt('src/App.tsx', 'react')).toBeNull();
     expect(landsAt('src/App.tsx', '@earendil-works/pi-coding-agent')).toBeNull();
   });
+
+  /* A sibling package in a monorepo is not this project's own folder of the
+     same name. Clamping at the top turned one into the other, and then the real
+     one was reported as reached by nobody. */
+  it('says nothing about an address that leaves the project', () => {
+    expect(landsAt('src/a.ts', '../../lib/x')).toBeNull();
+    expect(landsAt('a.ts', '../../../etc/passwd')).toBeNull();
+    expect(landsAt('src/deep/a.ts', '../../lib/x')).toBe('lib/x');
+  });
 });
 
 /* ========================================================================== */

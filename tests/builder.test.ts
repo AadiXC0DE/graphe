@@ -236,6 +236,41 @@ describe('B-04 what a helper is allowed to run', () => {
     expect(mayRun(builder, { name: 'WRITE' }, allow, true)).toBeUndefined();
   });
 
+  /* A copy made this way shares refs, the object store and the stash with the
+     project it came from, and a git subcommand names no path — so the rules
+     that keep a builder inside its folder cannot see it. `git stash pop` in the
+     copy takes the person's own stashed work out of their real project. */
+  it('never lets a builder run git, whatever the Guard made of the command', () => {
+    for (const command of [
+      'git stash pop',
+      'git switch -c mine',
+      'git commit -am done',
+      'npm test && git stash',
+      'echo hi; git push',
+      '(git init)',
+    ]) {
+      const blocked = mayRun(builder, { name: 'bash', input: { command } }, allow, true);
+      expect(blocked?.reason, command).toBe(HELPER_DECLINED.noGit);
+    }
+  });
+
+  it('leaves ordinary commands alone, including ones that merely say the word', () => {
+    for (const command of ['npm test', 'node build.mjs', 'echo digital', 'ls .github']) {
+      expect(mayRun(builder, { name: 'bash', input: { command } }, allow, true), command).toBeUndefined();
+    }
+  });
+
+  /* Role names come off model output, and a lookup with a fallback finds these
+     on the prototype instead of falling back. */
+  it('is the plain helper for a role that is really a property of every object', () => {
+    for (const role of ['toString', 'constructor', 'hasOwnProperty', '__proto__']) {
+      const spec = roleSpec(role as never);
+      expect(spec.name, role).toBe('helper');
+      expect(spec.mayChange, role).toBe(false);
+      expect(Array.isArray(spec.tools), role).toBe(true);
+    }
+  });
+
   it('never tells a builder it cannot change anything, because it can', () => {
     expect(HELPER_DECLINED.building).not.toMatch(/cannot .*change anything/i);
     expect(HELPER_DECLINED.reading).toMatch(/change anything/i);

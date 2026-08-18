@@ -86,6 +86,25 @@ describe('SG-01 several pieces at once', () => {
     expect(asked.map((one) => one.after)).toEqual([null, null, null]);
   });
 
+  /* Starting it anyway is the opposite of what was asked for: the model said
+     this one cannot begin until that one has finished. */
+  it('does not start a piece whose predecessor never went on', async () => {
+    const asked: string[] = [];
+    const put: PutOnBoard = (doing) => {
+      asked.push(doing);
+      return Promise.resolve(
+        doing === 'First'
+          ? { ok: false as const, because: 'No room.' }
+          : { ok: true as const, id: `work-${String(asked.length)}` },
+      );
+    };
+
+    const said = await run(put, [{ doing: 'First' }, { doing: 'Second', after: 1 }]);
+    expect(asked).toEqual(['First']);
+    expect(said).toContain(APART_WORDS.lostItsTurn);
+    expect(said).toContain('Nothing went on the board.');
+  });
+
   it('never lets a piece wait for itself', async () => {
     const { put, asked } = board();
     await run(put, [{ doing: 'Only one', after: 1 }]);

@@ -41,6 +41,11 @@ export type Written = {
   /** The piece of work it waits for before it starts, or null. A plan lives on
    *  the disk with the work it is a plan for, or it is not a plan next launch. */
   after: string | null;
+  /** When it is one of several goes at the same thing, the name they share.
+   *  Written down for the same reason: goes that come back as unrelated pieces
+   *  are not goes at the same thing any more, and keeping one would leave the
+   *  others sitting there. */
+  ways?: string | null;
   owner: Owner;
 };
 
@@ -106,6 +111,7 @@ export function asPiece(one: Written): PieceOfWork {
     picture: one.picture,
     at: one.at,
     trouble: one.trouble,
+    ...(one.ways == null ? {} : { ways: one.ways }),
   };
 }
 
@@ -136,6 +142,7 @@ export function noteOf(
     spent: about.spent ?? null,
     after: about.after ?? null,
     owner: about.owner,
+    ...(piece.ways == null ? {} : { ways: piece.ways }),
   };
 }
 

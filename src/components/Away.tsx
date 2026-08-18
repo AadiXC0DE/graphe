@@ -294,7 +294,12 @@ export default function Away({
           this panel is something only they can do. */}
       {asked.map((piece) =>
         piece.question === null ? null : (
-          <div key={piece.id} className="away__asked" role="group" aria-label={piece.question.question}>
+          <div
+            key={`${piece.where ?? ''}\u0000${piece.id}`}
+            className="away__asked"
+            role="group"
+            aria-label={piece.question.question}
+          >
             {piece.project === undefined ? null : (
               <p className="away__wherefrom">{piece.project}</p>
             )}

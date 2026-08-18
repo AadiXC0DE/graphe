@@ -58,7 +58,10 @@
    without a breakpoint per width. */
 .board__sheet {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  /* 228px is the width a card wants; `min()` is what stops it insisting on it
+     in a panel narrower than that, where the whole sheet used to hang over the
+     edge rather than draw one narrow column. */
+  grid-template-columns: repeat(auto-fill, minmax(min(228px, 100%), 1fr));
   gap: var(--space-3);
   margin: 0;
   padding: 0;

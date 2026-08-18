@@ -171,8 +171,10 @@ export default function Board({ pieces, now, onKeep, onDrop, onLook, atOnce }: B
         <section key={band.key} className="board__band" aria-label={band.label}>
           <h3 className="board__band-name">{band.label}</h3>
           <ul className="board__sheet">
+            {/* Names are handed out per folder, so two projects both have a
+                "work-1". On a board showing several, the id alone is not a name. */}
             {band.items.map((piece) => (
-              <li key={piece.id} className="board__cell">
+              <li key={`${piece.where ?? ''}\u0000${piece.id}`} className="board__cell">
                 <Card piece={piece} now={now} onKeep={onKeep} onDrop={onDrop} onLook={onLook} />
               </li>
             ))}

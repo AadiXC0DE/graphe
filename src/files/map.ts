@@ -68,8 +68,15 @@ export function landsAt(from: string, address: string): string | null {
   if (!address.startsWith('.')) return null;
   const here = parts(from).slice(0, -1);
   for (const step of parts(address)) {
-    if (step === '..') here.pop();
-    else here.push(step);
+    if (step !== '..') {
+      here.push(step);
+      continue;
+    }
+    // Off the top is out of the project. Popping an empty list quietly instead
+    // would turn `../../lib/x` — a sibling package in a monorepo — into this
+    // project's own `lib/x`, and then report the real one as reached by nobody.
+    if (here.length === 0) return null;
+    here.pop();
   }
   return here.length === 0 ? null : here.join('/');
 }

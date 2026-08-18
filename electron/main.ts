@@ -186,7 +186,7 @@ import { FollowedFile } from '../src/projects/followed';
 import { lookAtEveryWidth } from '../src/diff/capture';
 import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
-import { HeldWork, bothChanged, holdWords, Workbench, type PieceOfWork } from '../src/history/attempts';
+import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceOfWork } from '../src/history/attempts';
 import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
 import { AT_A_TIME } from '../src/work/board';
 import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
@@ -3262,7 +3262,7 @@ async function pickUpWhereWeLeftOff(): Promise<void> {
       });
       if (next.do === 'leave' || next.do === 'carry-on') continue;
 
-      const piece = desk.bench.ask(one.doing, { id: one.id, at: one.at });
+      const piece = desk.bench.ask(one.doing, { id: one.id, at: one.at, ways: one.ways ?? null });
       Object.assign(piece, asPiece(one));
       if (one.spent !== null) desk.costs.set(piece.id, one.spent);
       if (one.says !== null) desk.saids.set(piece.id, one.says);
@@ -4474,6 +4474,19 @@ function register(): void {
     return done(awayNow(open.path));
   });
 
+  /** End one run and everything hanging off it. The same five things throwing
+   *  a piece away does, so a piece ended any other way is not left half-ended. */
+  function letGoOfRun(desk: AwayDesk, id: string, because: string): void {
+    const run = desk.runs.get(id);
+    run?.held.stop();
+    void run?.session?.stop();
+    run?.session?.dispose();
+    desk.runs.delete(id);
+    desk.chain.take(id);
+    forgetNote(desk, id);
+    stopWhatFollows(desk, id, because);
+  }
+
   handle<Away>(CHANNEL.keepAway, async (_event, args) => {
     const [id] = args;
     const open = projectAt(whereIn(args));
@@ -4487,13 +4500,22 @@ function register(): void {
       // going back does, so keeping this can never write over it.
       await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
       const kept = await desk.bench.keep(id, saysHeldWork(piece.doing));
+      // Finished without changing a file — an answer rather than an edit. There
+      // is nothing to take, and saying so is better than a press that appears
+      // to do nothing while quietly losing the piece.
+      if (kept === null) return fail(nothingToTake(piece.doing));
       // A file two pieces both changed is the one case somebody has to look at.
       // The piece stays on the board, so the work is still there to open.
-      if (kept !== null && kept.version === null) {
-        return fail(bothChanged(kept.conflicted));
-      }
+      if (kept.version === null) return fail(bothChanged(kept.conflicted));
+      // The other goes at the same thing went with the decision. Their copies
+      // are already gone, so their agents have to be ended too — otherwise they
+      // carry on writing into a folder that is not there, spending against the
+      // ceiling with nothing left to stop them.
+      for (const other of kept.insteadOf ?? []) letGoOfRun(desk, other, afterWords.thrownAway);
       desk.runs.delete(id);
+      desk.chain.take(id);
       forgetNote(desk, id);
+      await runWhatCan(desk);
     } catch (cause) {
       return fail(historyTrouble(cause));
     }

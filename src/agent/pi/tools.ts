@@ -1121,6 +1121,7 @@ export const taskTool = (
     // only way anything a custom tool learns mid-run can reach the session.
     let progress = '';
     let sentAt = 0;
+    let built = '';
     let ran: Ran;
     try {
       ran = await runSubagent(
@@ -1146,17 +1147,20 @@ export const taskTool = (
       // However this ended, its share goes back. A helper that never got as far
       // as a process would otherwise hold a slice of the ceiling for good.
       fleet.ended(callId);
+      // And so does the copy. Read out of it first: a thrown run still made
+      // whatever it made, and the diff is the only account of it.
+      if (copy !== null) {
+        built = await copy.changeMade().catch(() => '');
+        await copy.letGo();
+      }
     }
     const { outcome, boundary } = ran;
     // Said out loud rather than left to be inferred from a helper that started
     // cleanly: a run with less than usual around it says so alongside its answer.
     const note = boundaryNote(boundary);
-    if (copy !== null && !outcome.ok) await copy.letGo();
     if (!outcome.ok) throw new Error(note === null ? outcome.error : `${outcome.error}\n\n${note}`);
     // What a builder actually did, rather than what it says it did. The words
     // and the diff are both here because one of them is checkable.
-    const built = copy === null ? '' : await copy.changeMade();
-    if (copy !== null) await copy.letGo();
     const whole = built === '' ? outcome.text : `${outcome.text}\n\n${built}`;
     const said = note === null ? whole : `${whole}\n\n${note}`;
     // One last update with the whole of it. The throttle above means the final
@@ -1562,6 +1566,8 @@ export const APART_WORDS = {
   /** Said alongside, so the model does not sit and wait for them. */
   dontWait:
     'Do not wait for them or ask about them again — the person watches them finish on the board and decides which to keep. Say what you set going and stop.',
+  /** When the piece it could not start without never went on itself. */
+  lostItsTurn: 'the piece it waits for did not go on, so this one did not either.',
 } as const;
 
 /**
@@ -1616,13 +1622,24 @@ export const setGoingTool = (put: PutOnBoard): ToolDefinition => ({
     const went: string[] = [];
     const refused: string[] = [];
     for (const [index, piece] of asked.entries()) {
+      const doing = piece.doing.trim();
       const waitsFor = piece.after;
-      const after =
-        waitsFor === undefined || waitsFor < 1 || waitsFor > index ? null : names[waitsFor - 1] ?? null;
-      const answer = await put(piece.doing.trim(), after);
+      // Only ever an earlier one in this same list. A number pointing forwards,
+      // at itself, or at nothing is refused rather than turned into "waits for
+      // nothing in particular".
+      const wanted = waitsFor !== undefined && waitsFor >= 1 && waitsFor <= index ? waitsFor : null;
+      const after = wanted === null ? null : names[wanted - 1] ?? null;
+      // The one it was told it could not start without never went on. Starting
+      // it now is the opposite of what was asked for.
+      if (wanted !== null && after === null) {
+        names.push(null);
+        refused.push(`${doing} — ${APART_WORDS.lostItsTurn}`);
+        continue;
+      }
+      const answer = await put(doing, after);
       names.push(answer.ok ? answer.id : null);
-      if (answer.ok) went.push(piece.doing.trim());
-      else refused.push(`${piece.doing.trim()} — ${answer.because}`);
+      if (answer.ok) went.push(doing);
+      else refused.push(`${doing} — ${answer.because}`);
     }
 
     if (went.length === 0) {

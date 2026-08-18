@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { ProjectHistory } from '../src/history/repo';
-import { bothChanged, Workbench, folderForWork } from '../src/history/attempts';
+import { bothChanged, nothingToTake, Workbench, folderForWork } from '../src/history/attempts';
 import { AT_A_TIME, saysBoard } from '../src/work/board';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
@@ -472,6 +472,20 @@ describe('two pieces kept in a row', () => {
     expect(await get(root, 'hero.css')).toBe('.hero { padding: 24px; }\n');
     expect(await there(path.join(root, 'footer.css'))).toBe(false);
     expect(await history.hasUnsavedChanges()).toBe(false);
+  });
+
+  it('has something true to say when git refused for a reason it named no file for', () => {
+    const none = bothChanged([]);
+    expect(none.because).not.toContain('0 of the same files');
+    expect(none.because).not.toMatch(/:\s*\./);
+    expect(none.because).toMatch(/nothing was changed/i);
+  });
+
+  it('says plainly when a piece finished without changing anything', () => {
+    const said = nothingToTake('Check the site still builds');
+    expect(said.because).toContain('Check the site still builds');
+    expect(said.what).toMatch(/nothing to take/i);
+    expect(said.what).not.toMatch(/failed|stopped|error/i);
   });
 
   it('says which files, and what to do about them', () => {

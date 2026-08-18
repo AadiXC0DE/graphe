@@ -92,7 +92,11 @@ export const ROLES: Readonly<Record<HelperRole, RoleSpec>> = {
 /** The spec for a role name handed in by the model; anything it does not know
  *  is the plain helper, so a wild role can never widen the tool set. */
 export function roleSpec(role: HelperRole | null | undefined): RoleSpec {
-  return ROLES[role ?? 'helper'] ?? ROLES.helper;
+  // `Object.hasOwn`, not a lookup with a fallback: a lookup finds `toString` and
+  // `constructor` on the prototype, so a role of either name came back as a
+  // spec with no tools at all rather than as the plain helper.
+  const wanted = role ?? 'helper';
+  return Object.hasOwn(ROLES, wanted) ? ROLES[wanted] : ROLES.helper;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -108,6 +112,8 @@ export const HELPER_DECLINED = {
     'This could not be done by a helper: helpers cannot ask questions or change anything. Report what you found and let the main agent decide.',
   building:
     'This could not be done here: a builder works only inside the copy it was given, cannot ask questions, and cannot run anything destructive. Make the change another way, or say what stopped you.',
+  noGit:
+    'A builder does not run git. Your copy shares its history with the real project, so anything you did there would reach out of it. Change the files; saving and history are handled for you.',
 } as const;
 
 function declined(spec: RoleSpec): string {
@@ -123,9 +129,21 @@ function declined(spec: RoleSpec): string {
  * behalf, because nothing it does is worth asking about. A helper that writes
  * may not — there is still nobody to ask, and yes is no longer free.
  */
+/**
+ * A copy made by `git worktree` shares refs, the object store and the stash
+ * with the project it came from, and a git subcommand names no path — so the
+ * path rules that keep a builder inside its folder cannot see it. `git stash
+ * pop` in the copy takes the person's own stashed work out of their real
+ * project; `git switch -c` writes a branch into it.
+ *
+ * A builder edits files. Saving, branching and history are this app's to do,
+ * and it does them. So git is simply not a builder's to run.
+ */
+const REACHES_THE_REAL_ONE = /(?:^|[\s;&|(`])git(?:[\s;&|)`]|$)/;
+
 export function mayRun(
   spec: RoleSpec,
-  call: { name: string },
+  call: { name: string; input?: Record<string, unknown> },
   verdict: { kind: 'allow' | 'deny' | 'confirm' | 'snapshot-first'; reason?: string },
   mutates: boolean,
 ): { block: true; reason: string } | undefined {
@@ -134,7 +152,12 @@ export function mayRun(
   if (!spec.mayChange) {
     return mutates ? { block: true, reason: declined(spec) } : undefined;
   }
-  return verdict.kind === 'allow' ? undefined : { block: true, reason: declined(spec) };
+  if (verdict.kind !== 'allow') return { block: true, reason: declined(spec) };
+  const command = call.input?.['command'];
+  if (typeof command === 'string' && REACHES_THE_REAL_ONE.test(command)) {
+    return { block: true, reason: HELPER_DECLINED.noGit };
+  }
+  return undefined;
 }
 
 /* -------------------------------------------------------------------------- */

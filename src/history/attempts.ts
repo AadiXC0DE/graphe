@@ -80,6 +80,20 @@ export type Kept = {
  *  stopped part way — the project was deliberately left alone — so this is said
  *  as its own thing rather than passed through the sentences written for a
  *  failure. */
+/** A piece that finished without changing a file. There is nothing to take,
+ *  which is a real answer and not a failure. */
+export function nothingToTake(doing: string): {
+  what: string;
+  because: string;
+  actionLabel: string;
+} {
+  return {
+    what: 'There is nothing to take from this one.',
+    because: `“${doing}” finished without changing any files — it answered rather than edited. Read what it said; there is nothing to bring into your project.`,
+    actionLabel: 'Got it',
+  };
+}
+
 export function bothChanged(files: readonly string[]): {
   what: string;
   because: string;
@@ -90,7 +104,11 @@ export function bothChanged(files: readonly string[]): {
   return {
     what: 'I left your project exactly as it was.',
     because:
-      files.length === 1
+      // Nothing named at all: the merge refused for a reason git did not put a
+      // file against. Naming none of them is the honest version of that.
+      files.length === 0
+        ? 'This one could not be brought in alongside what is already there, so nothing was changed. Open it and take across what you want by hand.'
+        : files.length === 1
         ? `Another piece of work has already changed ${named}, so taking this one would write over it. Open this one and decide which version of that file you want.`
         : `Another piece of work has already changed ${String(files.length)} of the same files, so taking this one would write over them: ${named}${rest}.`,
     actionLabel: 'Got it',

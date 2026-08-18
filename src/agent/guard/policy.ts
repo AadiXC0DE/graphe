@@ -1005,6 +1005,42 @@ function judgeFind(tokens: Token[]): Judgement {
  *  none of it can be traced from the line alone. */
 const HARMLESS_GIT_OPTIONS = new Set(['--no-pager', '--paginate', '--no-optional-locks', '--version', '--help']);
 
+/** Verbs that only look. Every one of these is a read on the online copy. */
+const GH_READS = new Set(['list', 'view', 'diff', 'status', 'checks']);
+
+/** Anything on an `api` call that turns a look into a change. */
+const GH_API_WRITES = new Set(['-x', '--method', '-f', '--field', '-F', '--raw-field', '--input']);
+
+/**
+ * `gh`, which is two different commands wearing one name.
+ *
+ * Reading what is on the online copy — the list of open work, one item, its
+ * change — alters nothing and used to be met with "Publish your project so it
+ * is live on the internet?", a question about something else entirely that a
+ * person had to answer three or four times to read one page.
+ */
+function judgeGh(tokens: Token[]): Judgement {
+  const texts = tokens.map((token) => token.text.toLowerCase());
+  const words = texts.slice(1).filter((text) => !text.startsWith('-'));
+  const group = words[0] ?? '';
+  const verb = words[1] ?? '';
+
+  if (group === 'api') {
+    // A plain `api` call is a GET. A method or a field on it is a write, and
+    // which one is not ours to guess.
+    const writes = texts.some((text) => GH_API_WRITES.has(text) || text.startsWith('--method='));
+    if (!writes) return allow();
+  } else if (GH_READS.has(verb) || (group === 'repo' && verb === 'view')) {
+    return allow();
+  }
+
+  return ask(
+    'Put this on the online copy of your project?',
+    'This writes to where your project lives online, where other people can see it.',
+    'Nothing on your own machine changes.',
+  );
+}
+
 function judgeGit(tokens: Token[]): Judgement {
   // Options come before the subcommand or they do not count, which is exactly
   // where `-C`, `--git-dir`, `--work-tree` and an inline `-c` setting sit.
@@ -1278,6 +1314,7 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
       ),
     );
   }
+  if (name === 'gh') return decide(judgeGh(meaningful));
   if (PUBLISH_CLIS.has(name)) {
     return decide(
       ask(

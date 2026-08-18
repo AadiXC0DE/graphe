@@ -795,6 +795,43 @@ describe('deny-by-default', () => {
     expect(kindOf(bash('git push --force'))).toBe('confirm');
   });
 
+  /* Reading what is on the online copy changes nothing, and used to be met with
+     "Publish your project so it is live on the internet?" — a question about
+     something else, asked three or four times to read one page. */
+  it('lets a look at the online copy through, and still asks before writing to it', () => {
+    for (const command of [
+      'gh pr list',
+      'gh pr view 8',
+      'gh pr diff 8',
+      'gh issue list --limit 50',
+      'gh issue view 3',
+      'gh pr checks 8',
+      'gh repo view',
+      'gh api repos/someone/thing/pulls/8',
+    ]) {
+      expect(kindOf(bash(command)), command).toBe('allow');
+    }
+
+    for (const command of [
+      'gh pr comment 8 --body-file review.md',
+      'gh pr create --fill',
+      'gh pr merge 8',
+      'gh release create v1',
+      'gh auth login',
+      'gh api -X PATCH repos/someone/thing/pulls/8',
+      'gh api --method POST repos/someone/thing/issues',
+      'gh api repos/someone/thing/issues -f title=hi',
+    ]) {
+      expect(kindOf(bash(command)), command).toBe('confirm');
+    }
+  });
+
+  it('asks the question that is actually being answered', () => {
+    const verdict = evaluate(bash('gh pr comment 8 --body-file review.md'), ctx);
+    expect(spoken(verdict)).not.toMatch(/live on the internet/i);
+    expect(spoken(verdict)).toMatch(/online copy of your project/i);
+  });
+
   it('stays quiet for the things that happen a hundred times a session', () => {
     for (const command of [
       'ls src',

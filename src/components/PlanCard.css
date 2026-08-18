@@ -50,6 +50,73 @@
   color: var(--text);
 }
 
+.plan__what {
+  min-width: 0;
+}
+
+/* Left out. Struck and dimmed rather than removed: the number beside it still
+   says where it sat, so putting it back is obvious and losing your place is
+   not possible. Colour and opacity only — nothing here moves, because the list
+   under the pointer must not shift while somebody is reading down it. */
+.plan__step--out .plan__what {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  color: var(--text-faint);
+}
+
+.plan__step--out .plan__number {
+  opacity: 0.5;
+}
+
+.plan__what,
+.plan__number {
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    opacity var(--dur-micro) var(--ease-hover);
+}
+
+/* Quiet until wanted. Most plans are agreed whole, so this is the rare press —
+   it earns its place by being there when somebody reaches, not by advertising. */
+.plan__drop {
+  flex: none;
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0 0 0 var(--space-3);
+  font: inherit;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  cursor: pointer;
+  /* Quiet, but never hidden: somebody who has not been told the plan can be
+     edited has to be able to see that it can. */
+  opacity: 0.55;
+  transition: opacity var(--dur-micro) var(--ease-hover), color var(--dur-micro) var(--ease-hover);
+}
+
+.plan__step:hover .plan__drop,
+.plan__drop:focus-visible,
+.plan__step--out .plan__drop {
+  opacity: 1;
+}
+
+.plan__drop:hover {
+  color: var(--accent);
+}
+
+.plan__left {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan__what,
+  .plan__number,
+  .plan__drop {
+    transition: none;
+  }
+}
+
 /* Tabular so a two-digit step does not shove its sentence sideways. */
 .plan__number {
   flex: none;
@@ -137,4 +204,11 @@
   .plan__button:active {
     transform: none;
   }
+}
+
+/* Nothing left to agree to. Dimmed rather than hidden: the button staying where
+   it was is what makes it obvious that putting a step back is the way on. */
+.plan__button--go:disabled {
+  opacity: 0.45;
+  cursor: default;
 }

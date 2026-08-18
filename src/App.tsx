@@ -28,6 +28,7 @@ import ProjectPicker from "./components/ProjectPicker";
 import BrowserPane, { type Room as PaneRoom } from "./components/BrowserPane";
 import Running from "./components/Running";
 import { asksAbout } from "./preview/point";
+import { PLAN_WORDS } from "./agent/plan";
 import type { RunningPiece } from "./agent/types";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Usage from "./components/Usage";
@@ -2142,7 +2143,11 @@ function Conversation() {
    * edited — nothing is sent on anybody's behalf.
    */
   const answerPlan = useCallback(
-    (turnId: string, go: boolean) => {
+    (
+      turnId: string,
+      go: boolean,
+      chosen?: { kept: readonly string[]; dropped: readonly string[] },
+    ) => {
       const text = asked.current;
       // The steps the agent proposed for this plan, read before the answer is
       // written — the build-plan store wants the real task list.
@@ -2164,14 +2169,22 @@ function Conversation() {
       if (go) {
         // A build plan keeps the real task list the agent proposed, so a
         // resumed session knows each step and where it got to.
+        // Only what was agreed to. The build plan tracks the same list, so a
+        // resumed session does not carry on with a step somebody struck out.
+        const dropped = chosen?.dropped ?? [];
+        const agreed = dropped.length === 0 ? steps : (chosen?.kept ?? steps);
         const path = desks.current;
-        if (path !== null && steps.length > 0) {
+        if (path !== null && agreed.length > 0) {
           void bridge.buildSave(
-            steps.map((step) => ({ title: step, acceptance: "" })),
+            agreed.map((step) => ({ title: step, acceptance: "" })),
             { project: path },
           ).then(() => void refreshBuildPlan(path));
         }
-        void deliver(text, sizeUp(text), { lookFirst: false });
+        // Saying which steps to leave out as well as which to do: a model told
+        // only what to do will helpfully do the rest of what it proposed.
+        const say =
+          dropped.length === 0 ? text : `${text}\n\n${PLAN_WORDS.doThese(agreed, dropped)}`;
+        void deliver(say, sizeUp(say), { lookFirst: false });
       } else setDraft(text);
     },
     [deliver, desk, desks, refreshBuildPlan],
@@ -3705,7 +3718,11 @@ function Turnstile({
   onRespond: (turnId: string, callId: string, decision: Decision) => void;
   onDismiss: (turnId: string) => void;
   onAnswerEstimate: (turn: EstimateTurn, go: boolean) => void;
-  onAnswerPlan: (turnId: string, go: boolean) => void;
+  onAnswerPlan: (
+    turnId: string,
+    go: boolean,
+    chosen?: { kept: readonly string[]; dropped: readonly string[] },
+  ) => void;
   onFixReview: (turnId: string) => void;
   /** Name the real command, path or operation under each step (BACKLOG D1).
    *  The words themselves were recorded when the step happened, so turning this
@@ -3766,7 +3783,7 @@ function Turnstile({
           steps={turn.steps}
           caveats={turn.caveats}
           answered={turn.answered}
-          onGo={() => onAnswerPlan(turn.id, true)}
+          onGo={(kept, dropped) => onAnswerPlan(turn.id, true, { kept, dropped })}
           onChange={() => onAnswerPlan(turn.id, false)}
         />
       );

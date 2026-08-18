@@ -56,6 +56,11 @@ export default function SeeFirst({
   const reading = held === null ? null : readsHeld(held);
   const blank = held !== null && nothingCameOut(held);
   const settled = waiting.state === 'waiting';
+  /* The pictures came out and one of them is wrong. Everything below this line
+     is the same two answers the other way round — the safe one carries the
+     weight and the other says what it is. Nobody is stopped: a photograph is
+     evidence, not a veto, and the reading itself is already on screen. */
+  const doubt = reading !== null && !reading.ok && !blank && chosen !== null;
 
   return (
     <section className="seefirst" aria-label="Work waiting for you">
@@ -100,24 +105,24 @@ export default function SeeFirst({
       </div>
 
       {settled ? (
-        <div className="seefirst__row">
-          <button
-            type="button"
-            className="seefirst__do seefirst__do--first"
-            onClick={() => onDecide(true)}
-            disabled={busy}
-          >
-            {holdWords.approve}
-          </button>
-          <button
-            type="button"
-            className="seefirst__quietdo"
-            onClick={() => onDecide(false)}
-            disabled={busy}
-          >
-            {holdWords.setAside}
-          </button>
-        </div>
+        <>
+          {doubt ? <p className="seefirst__caution">{holdWords.lookAgain}</p> : null}
+          {/* The one that carries the weight comes first, in the order somebody
+              reads as well as in the way it looks. */}
+          <div className="seefirst__row">
+            {(doubt ? [false, true] : [true, false]).map((letIn, at) => (
+              <button
+                key={String(letIn)}
+                type="button"
+                className={at === 0 ? 'seefirst__do seefirst__do--first' : 'seefirst__quietdo'}
+                onClick={() => onDecide(letIn)}
+                disabled={busy}
+              >
+                {letIn ? (doubt ? holdWords.approveAnyway : holdWords.approve) : holdWords.setAside}
+              </button>
+            ))}
+          </div>
+        </>
       ) : null}
     </section>
   );

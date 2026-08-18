@@ -154,6 +154,15 @@
 
 /* -------------------------------------------------------------- answering */
 
+/* Said directly above the two answers, because it is about which one to press.
+   Not a warning colour: the pictures are already on screen saying it. */
+.seefirst__caution {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
 .seefirst__row {
   display: flex;
   flex-wrap: wrap;

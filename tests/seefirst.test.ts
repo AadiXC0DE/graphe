@@ -253,6 +253,45 @@ describe('S-04 the answer is never withheld', () => {
   });
 
   it('ends the sentences it says, so none of them read as a fragment', () => {
-    for (const one of [holdWords.decideAnyway, NOTHING_CAME_OUT]) expect(one).toMatch(/[.!]$/);
+    for (const one of [holdWords.decideAnyway, NOTHING_CAME_OUT, holdWords.lookAgain]) {
+      expect(one).toMatch(/[.!]$/);
+    }
+  });
+
+  /* The reading used to be worked out and then ignored: whatever the pictures
+     showed, "Let it in" carried the weight. It now decides which of the two
+     answers is the obvious one — and never which of them is possible. */
+  it('has a second pair of words for when the pictures show a problem', () => {
+    expect(holdWords.approveAnyway).toBe('Let it in anyway');
+    // The same answer, said with what it costs attached.
+    expect(holdWords.approveAnyway).toContain(holdWords.approve);
+    // The caution names the button rather than describing it in other words.
+    expect(holdWords.lookAgain.toLowerCase()).toContain(holdWords.setAside.toLowerCase());
+  });
+
+  it('knows which sets of pictures are the ones to hesitate over', () => {
+    const set = (changed: readonly (string | null)[]): Held => ({
+      id: 'held-1',
+      doing: 'Make the header stick',
+      at: 1000,
+      sights: changed.map((shot, at) => ({
+        id: at === 0 ? 'phone' : 'desktop',
+        name: at === 0 ? 'phone' : 'desktop',
+        width: at === 0 ? 390 : 1440,
+        now: 'before',
+        changed: shot,
+        missing: shot === null ? 'The project would not build at this width.' : null,
+        trouble: null,
+      })),
+      note: null,
+    });
+
+    expect(readsHeld(set(['a', 'b'])).ok).toBe(true);
+
+    // One width that did not come out is enough: somebody is about to say yes
+    // on the strength of this.
+    const lost = readsHeld(set(['a', null]));
+    expect(lost.ok).toBe(false);
+    expect(lost.says).toContain('desktop');
   });
 });

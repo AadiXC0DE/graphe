@@ -447,6 +447,33 @@ describe('two pieces kept in a row', () => {
     expect(await history.hasUnsavedChanges()).toBe(false);
   });
 
+  /* A refusal has to leave nothing behind, including the files git had never
+     seen. Otherwise the project is reported untouched with somebody else's
+     half-finished work sitting in it. */
+  it('leaves nothing behind at all when it refuses', async () => {
+    const { history, root, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const one = bench.ask('Warm up the hero');
+    const two = bench.ask('Tighten the hero and add a footer');
+    await bench.begin();
+
+    await put(one.folder ?? '', 'hero.css', '.hero { padding: 24px; }\n');
+    await put(two.folder ?? '', 'hero.css', '.hero { padding: 4px; }\n');
+    await put(two.folder ?? '', 'footer.css', '.footer { padding: 8px; }\n');
+    await bench.settle(one.id, 'Warmed the hero');
+    await bench.settle(two.id, 'Tightened it');
+
+    await bench.keep(one.id, 'Kept the first');
+    const second = await bench.keep(two.id, 'Kept the second');
+    expect(second?.version).toBeNull();
+
+    // The file it clashed on is ours, and the file it would have added is gone.
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 24px; }\n');
+    expect(await there(path.join(root, 'footer.css'))).toBe(false);
+    expect(await history.hasUnsavedChanges()).toBe(false);
+  });
+
   it('says which files, and what to do about them', () => {
     expect(bothChanged(['hero.css'])).toContain('hero.css');
     expect(bothChanged(['hero.css'])).toMatch(/left your project as it was/i);

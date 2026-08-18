@@ -501,7 +501,9 @@ export class ProjectHistory {
       const clashing = await this.attempt(['diff', '-z', '--name-only', '--diff-filter=U']);
       const conflicted = clashing.stdout.split('\0').filter((one: string) => one !== '');
       // Safe because nothing was unsaved: the precondition above is what makes
-      // putting the folder back exactly where it was a true statement.
+      // putting the folder back exactly where it was a true statement. A squash
+      // merge stages what it could apply, so this takes the files it would have
+      // added away with everything else it did.
       await this.attempt(['reset', '--hard', 'HEAD']);
       return { ok: false, conflicted };
     }

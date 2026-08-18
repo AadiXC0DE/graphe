@@ -1449,11 +1449,17 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
           planning = false;
           say({ type: 'planned', ...parseProposal(proposed) });
         }
+        // After the reply, never during it: `compact()` aborts whatever is
+        // running first, so calling it mid-turn would abandon the answer
+        // somebody is waiting for in order to tidy the notes about it.
+        //
+        // In the finally rather than after the try, because the turn that most
+        // needs tidying is the one that failed *because* the window was full —
+        // and rethrowing before this line left it exactly as full, so the next
+        // turn failed the same way, and the one after that. It only acts when
+        // the conversation really has grown long, and it never throws.
+        await tidyIfItHasGrownLong();
       }
-      // After the reply, never during it: `compact()` aborts whatever is running
-      // first, so calling it mid-turn would abandon the answer somebody is
-      // waiting for in order to tidy the notes about it.
-      await tidyIfItHasGrownLong();
     },
 
     async useModel(next): Promise<boolean> {

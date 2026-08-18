@@ -431,3 +431,32 @@ describe('a helper that never answers', () => {
     expect(HELPER_TOOK_TOO_LONG).toMatch(/smaller pieces|yourself/i);
   });
 });
+
+describe('a warning that stops being true', () => {
+  it('goes quiet once a spend the ceiling can measure arrives', () => {
+    const one = new Fleet();
+    one.hold(createLimit(fromMajor(20, 'USD'), 'session'));
+    one.spent(null, fromMajor(1, 'EUR'));
+    one.spent(null, fromMajor(1, 'USD'));
+    expect(one.takeCannotBind()).toBeNull();
+  });
+
+  /* The nonsense this prevents: "your limit is in EUR and the account bills in
+     EUR, so it cannot stop anything." */
+  it('does not carry over to the ceiling that replaced it', () => {
+    const one = new Fleet();
+    one.hold(createLimit(fromMajor(20, 'USD'), 'session'));
+    one.spent(null, fromMajor(1, 'EUR'));
+    one.hold(createLimit(fromMajor(20, 'EUR'), 'session'));
+    expect(one.takeCannotBind()).toBeNull();
+  });
+
+  it('leaves background work to the board that already counts it', () => {
+    const one = new Fleet();
+    // Two projects, four pieces each. A cap here would be a cap across every
+    // project at once, and the board holds one per project.
+    for (let i = 0; i < 12; i += 1) {
+      expect(one.begin({ id: `away-${String(i)}`, kind: 'away', stop: () => {} }).ok).toBe(true);
+    }
+  });
+});

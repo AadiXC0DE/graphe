@@ -82,7 +82,13 @@ export const ceilingWords = {
  * far short of what a reply asking for twelve would have started. Away work
  * keeps its own four, set where the board is.
  */
-export const MOST_AT_ONCE: Readonly<Record<RunKind, number>> = { helper: 6, away: 4 };
+export const MOST_AT_ONCE: Readonly<Record<RunKind, number>> = {
+  helper: 6,
+  // Background work is already capped per project by the board that holds it,
+  // and this fleet is one for the whole app: capping it here as well would mean
+  // a second project could not start anything while the first was busy.
+  away: Number.POSITIVE_INFINITY,
+};
 
 /** Said to the *person*, once, when their ceiling is in one currency and the
  *  account bills in another. There is no exchange rate in this codebase and
@@ -130,12 +136,11 @@ export class Fleet {
    * is a fact about the setting, not an event, and saying it every turn would
    * make it furniture.
    */
-  takeCannotBind(locale?: string): string | null {
+  takeCannotBind(): string | null {
     const allotment = this.#allotment;
     const spending = this.#cannotMeasure;
     if (allotment === null || spending === null) return null;
     this.#cannotMeasure = null;
-    void locale;
     return ceilingCannotBind(allotment.currency, spending);
   }
 
@@ -164,6 +169,9 @@ export class Fleet {
    *  currency carries over, and so does what runs have been measured to cost —
    *  raising a ceiling is not a reason to start guessing again. */
   hold(limit: SpendLimit | null): void {
+    // A new ceiling is a new question. Anything unsaid about the last one is
+    // about a setting that no longer exists.
+    this.#cannotMeasure = null;
     if (limit === null) {
       this.#allotment = null;
       this.#history = null;
@@ -319,6 +327,10 @@ export class Fleet {
       if (allotment !== null) this.#cannotMeasure = amount.currency;
       return;
     }
+    // Something the ceiling *can* measure. Whatever was true before is not now,
+    // and a warning kept past the thing it was about is how somebody ends up
+    // told their limit is in the currency it is already in.
+    this.#cannotMeasure = null;
     const update = allotment.record(id, amount);
     if (update.status.state !== 'stop' || !update.announce) return;
     // The order matters: stop first, then say so. Telling somebody the fleet has

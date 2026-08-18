@@ -66,19 +66,20 @@ import type { Money, SpendReason } from '../types';
 type ToolResult = Promise<AgentToolResult<unknown>>;
 
 /**
- * How long one helper may take before it is ended.
+ * How long one helper may go without saying anything before it is ended.
  *
- * Long enough for a real piece of research on a slow provider, short enough that
- * a stalled stream cannot hold a turn open all afternoon. Background work has
- * had four hours; a helper is one question inside somebody's turn, and the
- * person is sitting there.
+ * Quiet, not total: what this is for is a provider that stalls the stream, and
+ * a helper doing real work says something as it goes. An absolute deadline
+ * would end a healthy one mid-sentence for the crime of having a lot to say.
+ * Background work gets four hours because nobody is waiting; a helper runs
+ * inside somebody's turn and they are sitting there.
  */
-export const HELPER_PATIENCE_MS = 10 * 60 * 1000;
+export const HELPER_PATIENCE_MS = 5 * 60 * 1000;
 
 /** What the model is told when one runs out of time. Written for the model:
  *  one that understands it was cut off asks a smaller question next. */
 export const HELPER_TOOK_TOO_LONG =
-  'This helper was ended after ten minutes without finishing. Do not send the same piece of work again — either split it into smaller pieces, or do it yourself.';
+  'This helper was ended after five minutes without a word. Do not send the same piece of work again — either split it into smaller pieces, or do it yourself.';
 
 /** The results the child keeps on its own. Plain data; nothing crosses the wire
  *  except this. */
@@ -970,6 +971,7 @@ async function runSubagent(
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (data: string) => {
+      patience.refresh();
       buffer += data;
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';

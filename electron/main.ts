@@ -859,6 +859,10 @@ type Held = {
   variations: readonly Serving[];
   /** The before-and-after (BACKLOG F2). */
   looking: Looking;
+  /** What was last said to have stayed behind, so an overlap that persists —
+   *  and it does persist until somebody resolves it — is mentioned once rather
+   *  than at the end of every turn from then on. */
+  saidHeldBack: string;
   /** How many parallel checkouts this project has ever opened. Only ever
    *  increases: naming one after how many are open right now gives the same
    *  name to two live conversations the moment an earlier one is closed. */
@@ -1511,6 +1515,7 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // running in the background is NOT brought back — that is what keeps two
     // parallel tabs from silently overwriting each other's files.
     if (said.type === 'settled') {
+      sayIfCeilingIsBlind(path, from.address ?? undefined);
       clearNotesOnPage();
       showTheWorkOnPage();
       const inFront = held.sessions.current?.path === from.address;
@@ -1524,9 +1529,15 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       void (carried ?? Promise.resolve(null))
         .then((outcome) => {
           if (outcome !== null && outcome.ok && outcome.value.conflicted.length > 0) {
-            const at = from.address ?? undefined;
-            send(path, { type: 'message-delta', text: `\n\n${bringBackWords.heldBack(outcome.value.conflicted)}` }, at);
-            send(path, { type: 'message-end' }, at);
+            const which = [...outcome.value.conflicted].sort().join('\u0000');
+            if (which !== held.saidHeldBack) {
+              held.saidHeldBack = which;
+              const at = from.address ?? undefined;
+              send(path, { type: 'message-delta', text: `\n\n${bringBackWords.heldBack(outcome.value.conflicted)}` }, at);
+              send(path, { type: 'message-end' }, at);
+            }
+          } else if (outcome !== null && outcome.ok) {
+            held.saidHeldBack = '';
           }
           look(path, held);
         })
@@ -1537,10 +1548,7 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // somebody is sitting in front of, so it is never registered as something
     // the ceiling may stop — it finishes and is saved, and what is refused is
     // the next thing asked for.
-    if (said.type === 'spend') {
-      fleet.spent(null, said.amount);
-      sayIfCeilingIsBlind(path, from.address ?? undefined);
-    }
+    if (said.type === 'spend') fleet.spent(null, said.amount);
 
     // Recorded whether or not there is a window to tell: a reload must not lose
     // money that was already spent.
@@ -1568,10 +1576,8 @@ function forwardHeld(path: string, held: Held, from: Speaking): (event: AgentEve
     const said: AgentEvent =
       event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
     send(path, said, from.address ?? undefined);
-    if (said.type === 'spend') {
-      fleet.spent(null, said.amount);
-      sayIfCeilingIsBlind(path, from.address ?? undefined);
-    }
+    if (said.type === 'spend') fleet.spent(null, said.amount);
+    if (said.type === 'settled') sayIfCeilingIsBlind(path, from.address ?? undefined);
     for (const also of held.spend.observe(said)) {
       send(path, also, from.address ?? undefined);
       if (also.type === 'spend-summary') {
@@ -2042,10 +2048,16 @@ const NO_CHECKOUT_HERE =
  * callers deletes what it is given.
  */
 function checkoutFor(open: Workspace<Held>, where: Where): string | null {
+  // Only ever the conversation actually named. Left out, `conversationAt` hands
+  // back whichever is in front — and one of the two callers deletes what it is
+  // given, so a call that forgot to say which would delete somebody's work.
+  if (where.conversation === undefined) return null;
   const found = conversationAt(open.held, where);
-  const address = found?.held.conversation ?? found?.path ?? null;
-  if (address === null) return null;
-  return open.held.checkouts.get(address)?.folder ?? null;
+  if (found === null) return null;
+  // `found.path` is the address the checkout was filed under. Not
+  // `held.conversation`: that is null until the conversation's first write and
+  // a transcript path afterwards, so it matches the key exactly never.
+  return open.held.checkouts.get(found.path)?.folder ?? null;
 }
 
 /** Where a project's conversation checkouts live — outside the project, like a
@@ -2109,6 +2121,7 @@ async function endStrayServers(): Promise<number> {
   const noted = readNotedServers();
   if (noted.length === 0) return 0;
   const stray = whichServersAreStray(noted, await listRunningPrograms());
+  const ended = new Set(stray);
   for (const pid of stray) {
     try {
       process.kill(-pid, 'SIGTERM');
@@ -2120,7 +2133,9 @@ async function endStrayServers(): Promise<number> {
       }
     }
   }
-  writeNotedServers([]);
+  // Only the ones ended. Clearing the whole note would forget a server started
+  // by this copy of the app while the machine was being asked what is running.
+  writeNotedServers(readNotedServers().filter((one) => !ended.has(one.pid)));
   return stray.length;
 }
 
@@ -2270,6 +2285,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     serving: null,
     variations: [],
     looking: nothingSeenYet(),
+    saidHeldBack: '',
     checkoutsMade: 0,
     checkouts: new Map(),
     waiting: null,
@@ -2977,6 +2993,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       timeline: await Timeline.open(folder),
       model: (await preferences()).all().model,
       thinking: thinkingFor((await preferences()).all()),
+      noteServers,
     });
     run.session = session;
     // "Until it's done": full access for this run, no questions, and a wall

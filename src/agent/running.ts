@@ -207,13 +207,21 @@ export class Running {
       entry.piece.exitCode = null;
       options.onChange?.();
     });
-    child.once('close', (code) => {
+    // Both, because they are different questions. `exit` is the process going;
+    // `close` also waits for every pipe it handed on, and something that
+    // double-forked out of the group keeps those open for as long as it lives —
+    // so waiting only for `close` left the band saying "running" forever and the
+    // note of it never cleared.
+    const ended = (code: number | null): void => {
+      if (entry.piece.state === 'stopped') return;
       entry.piece.state = 'stopped';
       entry.piece.exitCode = code;
       if (child.pid !== undefined) options.noted?.ended(child.pid);
       entry.child = null;
       options.onChange?.();
-    });
+    };
+    child.once('exit', (code) => ended(code));
+    child.once('close', (code) => ended(code));
 
     await settled(entry, options.settle ?? SETTLE);
     // Still up and saying nothing about an address is ordinary: a background

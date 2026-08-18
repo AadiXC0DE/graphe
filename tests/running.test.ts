@@ -208,3 +208,24 @@ describe('RU-03 what a crash leaves holding a port', () => {
     expect(whichServersAreStray([{ pid: 5, command: '   ' }], [alive(5, 'x')])).toEqual([]);
   });
 });
+
+describe('RU-04 a piece that will not close', () => {
+  it('stops saying "running" when the process itself has gone', async () => {
+    const running = register();
+    const folder = mkdtempSync(join(tmpdir(), 'graphe-running-'));
+
+    // Hands its output to a child that outlives it, so the pipes stay open and
+    // `close` never fires. `exit` still does, and that is the question being
+    // asked: is the thing we started still there?
+    const piece = await running.start({
+      command: 'sleep 60 & echo "handed on"; exit 0',
+      folder,
+      parts: PARTS,
+      writable: [folder],
+      settle: 2_000,
+    });
+
+    expect(piece.state).toBe('stopped');
+    expect(running.at(piece.id)?.state).toBe('stopped');
+  }, 20_000);
+});

@@ -2218,6 +2218,10 @@ async function startConversation(
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
       noteServers,
+      // Without this the agent's own way into Figma is never built, so pasting
+      // a link got its text read back while the panel beside it could open the
+      // file. The panel and the agent read the same credential now.
+      figmaToken: figmaCredential(),
       // The board, so a request that breaks into pieces can be set going all at
       // once. Only the conversation in front gets this: the runs on the board
       // must not be able to fill the board they are running on.
@@ -3017,6 +3021,9 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       model: (await preferences()).all().model,
       thinking: thinkingFor((await preferences()).all()),
       noteServers,
+      // Background work gets the same way into Figma as the conversation does:
+      // "match this to the design" is exactly the kind of thing left running.
+      figmaToken: figmaCredential(),
     });
     run.session = session;
     // "Until it's done": full access for this run, no questions, and a wall
@@ -3690,8 +3697,14 @@ function followed(): Promise<FollowedFile> {
  * rather than papered over — an invented finding about somebody's design is
  * worse than no finding at all.
  */
+/** The credential this computer has for Figma, or nothing. Read in one place
+ *  so the panel and the agent are never connected to different things. */
+function figmaCredential(): string {
+  return (process.env['FIGMA_TOKEN'] ?? process.env['FIGMA_ACCESS_TOKEN'] ?? '').trim();
+}
+
 function figmaReading(): ReadDesign | null {
-  const credential = (process.env['FIGMA_TOKEN'] ?? process.env['FIGMA_ACCESS_TOKEN'] ?? '').trim();
+  const credential = figmaCredential();
   return credential === '' ? null : throughFigma(createReader({ token: credential }));
 }
 

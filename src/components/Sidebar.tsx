@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { Conversation, RecentProject } from '../lib/ipc';
+import { COPY_WORDS } from '../agent/pi/fork';
 import { ago } from '../lib/when';
 import type { Reference } from '../lib/projects';
 import { byDay, matching, needsDayLabels, needsSearch } from '../lib/shelf';
@@ -20,6 +21,8 @@ type Props = {
   onNewConversation: () => void;
   /** Throw one away. Optional so a shelf that cannot yet is still whole. */
   onDeleteConversation?: (path: string) => void;
+  /** A second copy of one, to take somewhere else. */
+  onCopyConversation?: (path: string) => void;
   /** Open the quieter controls — skills, spend, the rest. */
   onSettings?: () => void;
   /** Whether the shelf is expanded or reduced to its mark. ⌘B does the same
@@ -70,6 +73,7 @@ export default function Sidebar({
   onOpenConversation,
   onNewConversation,
   onDeleteConversation,
+  onCopyConversation,
   onSettings,
   open,
   onToggle,
@@ -208,6 +212,23 @@ export default function Sidebar({
                           <span className="shelf__rowname">{one.title}</span>
                           <span className="shelf__rowsub">{ago(one.at)}</span>
                         </button>
+                        {onCopyConversation === undefined ? null : (
+                          <button
+                            type="button"
+                            className="shelf__copy"
+                            title={COPY_WORDS.hint}
+                            aria-label={`${COPY_WORDS.make} of “${one.title}”`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onCopyConversation(one.path);
+                            }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                              <rect x="1.6" y="1.6" width="6" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.2" />
+                              <path d="M4.4 10.4h4a2 2 0 0 0 2-2v-4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                            </svg>
+                          </button>
+                        )}
                         {onDeleteConversation === undefined ? null : (
                           <button
                             type="button"

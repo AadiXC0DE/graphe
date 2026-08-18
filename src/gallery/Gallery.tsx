@@ -738,6 +738,13 @@ const AWAY_ELSEWHERE: readonly { where: string; project: string; away: AwayState
   },
 ];
 
+/** A shelf with something on it, so the two things you can do to a conversation
+ *  can be seen where they actually sit. */
+const SHELF_CONVERSATIONS = [
+  { id: 'c1', path: '/sessions/one.jsonl', title: 'Rebuild the pricing page', at: NOW - 20 * 60_000, messages: 4 },
+  { id: 'c2', path: '/sessions/two.jsonl', title: 'Match the footer to the header', at: NOW - 3 * 3600_000, messages: 9 },
+];
+
 const RESEARCH: readonly ResearchEntry[] = [
   { id: 'r1', query: 'css clamp() fluid type best practices', state: 'done' },
   { id: 'r2', query: 'framer motion vs css animations 2026', state: 'done' },
@@ -1591,10 +1598,12 @@ export default function Gallery() {
                 onOpen={noop}
                 onBrowse={noop}
                 pinned={REFERENCES}
-                conversations={[]}
-                openConversation={null}
+                conversations={SHELF_CONVERSATIONS}
+                openConversation={SHELF_CONVERSATIONS[0]?.path ?? null}
                 onOpenConversation={noop}
                 onNewConversation={noop}
+                onDeleteConversation={noop}
+                onCopyConversation={noop}
                 open
                 onToggle={noop}
               />

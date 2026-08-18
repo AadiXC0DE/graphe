@@ -1364,6 +1364,22 @@ function Conversation() {
     [busy, inConversation, swapConversation, troubleHere],
   );
 
+  /** A second copy of a conversation, opened straight away: copying one and
+   *  then having to find it is two steps for one thought. */
+  const copyConversation = useCallback(
+    async (path: string) => {
+      const made = await bridge.copyConversation(path);
+      if (!made.ok) {
+        troubleHere(made.trouble);
+        return;
+      }
+      await swapConversation(made.value);
+      const listed = await bridge.conversations();
+      if (listed.ok) setConversations(listed.value);
+    },
+    [swapConversation, troubleHere],
+  );
+
   const browse = useCallback(async () => {
     const picked = await bridge.chooseFolder();
     if (!picked.ok) {
@@ -3180,6 +3196,7 @@ function Conversation() {
           }}
           onFiles={filesShown ? () => setFilesOpen(true) : undefined}
           onDeleteConversation={(path) => void deleteConversation(path)}
+          onCopyConversation={(path) => void copyConversation(path)}
           onSettings={() => {
             goToScreen("settings");
             setSettingsOpen(true);

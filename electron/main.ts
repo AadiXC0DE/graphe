@@ -40,6 +40,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -186,6 +187,7 @@ import { lookAtEveryWidth } from '../src/diff/capture';
 import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
 import { HeldWork, bothChanged, holdWords, Workbench, type PieceOfWork } from '../src/history/attempts';
+import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
 import { AT_A_TIME } from '../src/work/board';
 import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
 import {
@@ -4615,6 +4617,42 @@ function register(): void {
     const found = conversationAt(open.held, where);
     if (found !== null) open.held.sessions.close(found.path);
     return Promise.resolve(done(null));
+  });
+
+  /**
+   * A second copy of a conversation, so another direction can be tried without
+   * losing the one it came from.
+   *
+   * Going back over a conversation destroys the direction it was already going
+   * in. This is the other answer: everything up to now happened in both, and
+   * from here they are two conversations.
+   */
+  handle<string>(CHANNEL.copyConversation, async (_event, args) => {
+    const [path] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof path !== 'string' || path.trim() === '') return fail(plainTrouble(COPY_WORDS.cannot));
+
+    // The same rule copying as throwing away: only files this app wrote.
+    const target = resolve(path);
+    const root = resolve(sessionsFolder());
+    if (target !== root && !target.startsWith(`${root}${sep}`)) {
+      return fail(plainTrouble(COPY_WORDS.cannot));
+    }
+
+    const raw = await readFile(target, 'utf8').catch(() => null);
+    if (raw === null) return fail(plainTrouble(COPY_WORDS.cannot));
+    const at = new Date();
+    const copied = copyOfConversation(raw.split('\n'), randomUUID(), at);
+    if (copied === null) return fail(plainTrouble(COPY_WORDS.cannot));
+
+    const where = join(root, copyFileName(copied.id, at));
+    try {
+      await writeFile(where, `${copied.lines.join('\n')}\n`, 'utf8');
+    } catch {
+      return fail(plainTrouble(COPY_WORDS.cannot));
+    }
+    return done(where);
   });
 
   /** Throw a conversation away. Closing only puts the view down; this removes

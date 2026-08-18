@@ -1400,6 +1400,10 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(atWork));
     },
 
+    copyConversation(path: string): Promise<Result<string>> {
+      return Promise.resolve(done(`${path}-copy`));
+    },
+
     awayEverywhere(): Promise<Result<readonly AwayNotice[]>> {
       return Promise.resolve(done([{ project: '/work/this-project', away: atWork }]));
     },
@@ -1792,6 +1796,7 @@ function connect(): Bridge {
     handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
     putOnline: (confirmed) => api.putOnline(confirmed),
     away: (where) => api.away(where),
+    copyConversation: (path, where) => api.copyConversation(path, where),
     awayEverywhere: () => api.awayEverywhere(),
     keepGoing: (text, untilDone, where) => api.keepGoing(text, untilDone, where),
     stopAway: (id, where) => api.stopAway(id, where),

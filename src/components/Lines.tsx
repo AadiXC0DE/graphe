@@ -17,9 +17,11 @@ type Props = {
 /**
  * The line of work, and the one press that changes it.
  *
- * The name was a label for a long time, which meant the answer to "how do I get
- * onto the other one?" was to open a different view and find a list. It is the
- * thing people reach for, so it is the thing that opens.
+ * Opens downward in the band rather than as a card floating over it. The panel
+ * is a narrow column of stacked bands: anything absolutely positioned in here
+ * is either wider than the column or covering the band underneath, and it was
+ * both. In flow it cannot do either, and the panel keeps working the way the
+ * rest of it does — a heading, then what is under it.
  */
 export default function Lines({ branches, fallback, busy = false, onSwitch, onCreate }: Props) {
   const [open, setOpen] = useState(false);
@@ -29,7 +31,10 @@ export default function Lines({ branches, fallback, busy = false, onSwitch, onCr
 
   const here = branches.find((one) => one.current) ?? null;
   const name = here?.name ?? fallback ?? 'main';
-  const showing = useMemo(() => linesMatching(branches, naming ? '' : typed), [branches, typed, naming]);
+  const showing = useMemo(
+    () => linesMatching(branches, naming ? '' : typed),
+    [branches, typed, naming],
+  );
   const refused = naming ? refuseName(typed, branches) : null;
 
   useEffect(() => {
@@ -40,20 +45,13 @@ export default function Lines({ branches, fallback, busy = false, onSwitch, onCr
 
   useEffect(() => {
     if (!open) return;
-    const away = (event: MouseEvent) => {
-      if (root.current?.contains(event.target as Node) === false) setOpen(false);
-    };
     const shut = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.stopPropagation();
       setOpen(false);
     };
-    document.addEventListener('mousedown', away);
     document.addEventListener('keydown', shut);
-    return () => {
-      document.removeEventListener('mousedown', away);
-      document.removeEventListener('keydown', shut);
-    };
+    return () => document.removeEventListener('keydown', shut);
   }, [open]);
 
   const make = (): void => {
@@ -69,21 +67,19 @@ export default function Lines({ branches, fallback, busy = false, onSwitch, onCr
         type="button"
         className="lines__now"
         aria-expanded={open}
-        aria-haspopup="dialog"
         aria-label={LINE_WORDS.open}
         disabled={busy}
         onClick={() => setOpen((was) => !was)}
       >
         <span className="lines__dot" aria-hidden="true" />
         <span className="lines__name">{name}</span>
-        <span className="lines__caret" aria-hidden="true">
+        <span className={`lines__caret ${open ? 'lines__caret--open' : ''}`} aria-hidden="true">
           ⌄
         </span>
       </button>
-      <span className="lines__plainly">{LINE_WORDS.plainly}</span>
 
       {!open ? null : (
-        <div className="lines__menu" role="dialog" aria-label={LINE_WORDS.open}>
+        <div className="lines__open">
           {naming ? (
             <div className="lines__make">
               <input
@@ -113,7 +109,7 @@ export default function Lines({ branches, fallback, busy = false, onSwitch, onCr
             </div>
           ) : (
             <>
-              {/* Worth a box only once the list is long enough to scan badly. */}
+              {/* A box only once the list is long enough to scan badly. */}
               {branches.length > 6 ? (
                 <input
                   className="lines__box"
@@ -142,20 +138,9 @@ export default function Lines({ branches, fallback, busy = false, onSwitch, onCr
                             setOpen(false);
                             onSwitch(one.name);
                           }}
+                          title={one.message === '' ? undefined : one.message}
                         >
-                          <span className="lines__tick" aria-hidden="true">
-                            {one.current ? '✓' : ''}
-                          </span>
-                          <span className="lines__what">
-                            <span className="lines__oneName">{one.name}</span>
-                            <span className="lines__said">
-                              {one.current
-                                ? LINE_WORDS.onThisOne
-                                : one.message === ''
-                                  ? (one.upstream ?? '')
-                                  : one.message}
-                            </span>
-                          </span>
+                          <span className="lines__oneName">{one.name}</span>
                           {standing === null ? null : (
                             <span className="lines__standing">{standing}</span>
                           )}
@@ -166,7 +151,14 @@ export default function Lines({ branches, fallback, busy = false, onSwitch, onCr
                 </ul>
               )}
 
-              <button type="button" className="lines__new" onClick={() => { setNaming(true); setTyped(''); }}>
+              <button
+                type="button"
+                className="lines__new"
+                onClick={() => {
+                  setNaming(true);
+                  setTyped('');
+                }}
+              >
                 {LINE_WORDS.newLine}
               </button>
             </>

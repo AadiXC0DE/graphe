@@ -6,6 +6,7 @@
  * what makes the answer informed, never what makes it possible.
  */
 
+import type { Change } from '../design/gate';
 import { WIDTHS, type Look, type Width } from '../design/widths';
 
 /** One folder, at every width somebody's camera could manage. */
@@ -13,12 +14,16 @@ export type Looking = {
   looks: readonly Look[];
   /** Why there are no pictures. Already a sentence. */
   trouble?: string | null;
+  /** How far each width has moved since the picture that was agreed to. Absent
+   *  when no comparison was asked for, which is not the same as nothing moved. */
+  changes?: readonly Change[];
 };
 
 /** Whatever can photograph a folder. Handed in so everything below can be run
- *  without a browser. */
+ *  without a browser. `compare` asks for the changes as well; only the copy is
+ *  worth comparing, and only once. */
 export type Photographer = {
-  look: (folder: string) => Promise<Looking>;
+  look: (folder: string, compare?: boolean) => Promise<Looking>;
 };
 
 /** One width, with the two states somebody is choosing between. */
@@ -49,6 +54,10 @@ export type Held = {
   sights: readonly Sight[];
   /** Something true about the whole set that is not any one width. */
   note: string | null;
+  /** How far each width has moved since the one that was agreed to. Empty when
+   *  nothing was compared, and read as "no gate" rather than as "nothing
+   *  moved" — see `src/design/gate.ts`. */
+  changes: readonly Change[];
 };
 
 /* --------------------------------------------------------------------- words */
@@ -148,7 +157,7 @@ export async function photographHeld(request: HoldshotRequest): Promise<Held> {
   const sizes = request.sizes ?? WIDTHS;
   const clock = request.clock ?? Date.now;
 
-  const changed = await request.photographer.look(request.copy);
+  const changed = await request.photographer.look(request.copy, true);
   const project = tidy(request.project ?? null);
   const now =
     project === null || !anyPictures(changed) ? null : await request.photographer.look(project);
@@ -186,7 +195,35 @@ export async function photographHeld(request: HoldshotRequest): Promise<Held> {
     at: clock(),
     sights,
     note: nothing ? stopgap : null,
+    changes: changesFor(sights, changed.changes, stopgap),
   };
+}
+
+/**
+ * One reading per width somebody is being shown, however few came back.
+ *
+ * A folder that will not build photographs nothing and so compares nothing, and
+ * an empty set reads as "nothing moved" — which would let a project that does
+ * not build through without a word. Every width the person can see gets an
+ * answer, and a width with no picture says so.
+ */
+function changesFor(
+  sights: readonly Sight[],
+  compared: readonly Change[] | undefined,
+  stopgap: string,
+): readonly Change[] {
+  if (compared === undefined) return [];
+  const found = new Map(compared.map((one) => [one.id, one]));
+  return sights.map(
+    (sight) =>
+      found.get(sight.id) ?? {
+        kind: 'nopicture',
+        id: sight.id,
+        name: sight.name,
+        width: sight.width,
+        why: sight.missing ?? stopgap,
+      },
+  );
 }
 
 /* ------------------------------------------------------------------- reading */

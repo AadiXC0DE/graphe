@@ -85,11 +85,22 @@ export type Preferences = {
    *
    * Per project, so saying "ask me first" in one folder never changes another:
    * what a designer decides for a shared codebase they do not own is not what
-   * they want for their own. Off by default because the promise the product
-   * already keeps — every moment is saved, going back is one press — makes work
-   * landing straight away safe.
+   * they want for their own. On where nothing has been said: work that has not
+   * moved the page is let through without a word, so being asked means
+   * something moved rather than that a turn finished.
+   *
+   * Read it through `holdsBack`, never by hand — absent is on, and a `false`
+   * here is somebody having turned it off.
    */
   heldBack: Readonly<Record<string, boolean>>;
+  /**
+   * How much a picture has to move before work is stopped, by id.
+   *
+   * One of `HOW_MUCH` in `src/design/gate.ts`, or null for the middle one. Not
+   * per project: it is a reading of how fussy somebody is, and they are the
+   * same person in every folder.
+   */
+  howMuch: string | null;
   /**
    * The ceiling on spending, or null when nobody has set one.
    *
@@ -109,6 +120,7 @@ export const defaultPreferences: Preferences = {
   trusted: {},
   showFiles: false,
   heldBack: {},
+  howMuch: null,
   ceiling: null,
 };
 
@@ -148,6 +160,7 @@ function asPreferences(value: unknown): Preferences {
     trusted: asTrusted(record['trusted']),
     showFiles: record['showFiles'] === true,
     heldBack: asHeldBack(record['heldBack']),
+    howMuch: typeof record['howMuch'] === 'string' ? record['howMuch'] : null,
     ceiling: asCeiling(record['ceiling']),
   };
 }
@@ -164,24 +177,28 @@ function asCeiling(value: unknown): Money | null {
   return { minor: Math.round(minor), currency };
 }
 
-/** True entries of a held-back map, from whatever a file held. Anything that is
- *  not a folder-name/true pair is dropped rather than refused — a preference
- *  that will not load is worse than one that loads short. */
+
+/** A held-back map from whatever a file held. Both answers are kept: a `false`
+ *  is somebody having turned it off, and dropping it would turn it back on at
+ *  the next launch. Anything that is not a folder-name/boolean pair is dropped
+ *  rather than refused — a preference that will not load is worse than one that
+ *  loads short. */
 function asHeldBack(value: unknown): Readonly<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     for (const [path, on] of Object.entries(value)) {
-      if (path !== '' && on === true) out[path] = true;
+      if (path !== '' && typeof on === 'boolean') out[path] = on;
     }
   }
   return out;
 }
 
-/** Two held-back maps are the same when every project is held the same way. */
+/** Two held-back maps are the same when they say the same about every project.
+ *  Literally: a choice that happens to match the default is still a choice
+ *  somebody made, and is written down so it survives the default changing. */
 function sameHeldBack(one: Readonly<Record<string, boolean>>, other: Readonly<Record<string, boolean>>): boolean {
-  const left = Object.keys(one).filter((key) => one[key]);
-  const right = Object.keys(other).filter((key) => other[key]);
-  return left.length === right.length && left.every((key) => other[key] === true);
+  const every = new Set([...Object.keys(one), ...Object.keys(other)]);
+  return [...every].every((key) => one[key] === other[key]);
 }
 
 function sameThinking(
@@ -217,6 +234,7 @@ export class PreferenceFile {
     const unchanged =
       next.showMe === this.#preferences.showMe &&
       next.showFiles === this.#preferences.showFiles &&
+      next.howMuch === this.#preferences.howMuch &&
       sameHeldBack(next.heldBack, this.#preferences.heldBack) &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&

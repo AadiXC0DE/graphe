@@ -64,7 +64,8 @@
   transition:
     background var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
-    color var(--dur-micro) var(--ease-hover);
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
 }
 
 .seefirst__size:hover {
@@ -180,9 +181,10 @@
   font-size: var(--text-xs);
   cursor: pointer;
   transition:
-    background var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
-    color var(--dur-micro) var(--ease-hover);
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
 }
 
 .seefirst__do--first {
@@ -211,6 +213,103 @@
   cursor: not-allowed;
 }
 
+/* --------------------------------------------------------------- the gate */
+
+/* What is being held, said above the pictures it is about. Carried by the
+   accent and full ink and a sentence — never by colour on its own. */
+.seefirst__stopped {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  animation: seefirst-arrive var(--dur-ui) var(--ease-out-quart) both;
+}
+
+/* Beside the width's own name, so the list of sizes is also the list of what
+   moved. */
+.seefirst__mark {
+  margin-left: var(--space-1);
+  color: var(--accent-ink);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+}
+
+.seefirst__size--on .seefirst__mark {
+  color: var(--accent-ink);
+}
+
+/* Where the line sits, behind the pictures it draws. Not a settings screen. */
+.seefirst__line {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.seefirst__lineopen {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-2xs);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.seefirst__lineopen:hover {
+  color: var(--text);
+}
+
+.seefirst__lineinner {
+  display: grid;
+  gap: var(--space-1);
+  animation: seefirst-arrive var(--dur-ui) var(--ease-out-quart) both;
+}
+
+.seefirst__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.seefirst__choice {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.seefirst__choice:hover {
+  border-color: var(--border-strong);
+}
+
+.seefirst__choice--on {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.seefirst__choice:active,
+.seefirst__size:active,
+.seefirst__do:active:not(:disabled),
+.seefirst__quietdo:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
 @keyframes seefirst-arrive {
   from {
     opacity: 0;
@@ -219,8 +318,17 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .seefirst__picture {
+  .seefirst__picture,
+  .seefirst__stopped,
+  .seefirst__lineinner {
     animation: none;
+  }
+
+  .seefirst__choice:active,
+  .seefirst__size:active,
+  .seefirst__do:active:not(:disabled),
+  .seefirst__quietdo:active:not(:disabled) {
+    transform: none;
   }
 }
 

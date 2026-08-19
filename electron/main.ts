@@ -83,7 +83,10 @@ import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
   type Away,
+  type SideOfWork,
   type AwayNotice,
+  type ConnectedHealth,
+  type ConnectedState,
   type AwayAfter,
   type AwayPiece,
   type EveryKind,
@@ -188,7 +191,11 @@ import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
 import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceOfWork } from '../src/history/attempts';
 import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
-import { AT_A_TIME } from '../src/work/board';
+import { checkServer, inProject, mcpFile, readMcpConfig, savingFrom, writeMcpConfig } from '../src/agent/pi/mcp';
+import { holdsBack } from '../src/projects/heldback';
+import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
+import { saysTook } from '../src/work/stack';
+import { formatMoney } from '../src/cost/money';
 import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
 import {
   addStanding,
@@ -222,7 +229,14 @@ import {
 import { StandingFile } from '../src/projects/standing';
 import { HandoverError, handToDeveloper, whatIsHere, type Change } from '../src/share/developer';
 import { handoverWords, worthTelling } from '../src/share/handover';
-import type { RunningPiece } from '../src/agent/types';
+import type {
+  LivePage,
+  PageAct,
+  PageDone,
+  PageReading,
+  RunningPiece,
+} from '../src/agent/types';
+import { holdPage } from '../src/agent/pi/tools';
 import { OnlineError, putOnline, whatIsHereForOnline } from '../src/share/publish';
 import { onlineWords } from '../src/share/online';
 import { canPutOnline, canSendItOn } from '../src/share/tools';
@@ -238,7 +252,8 @@ import {
 } from '../src/preview/inspect';
 import { readUsage } from '../src/design/usage';
 import { photographHeld, type Held as HeldPictures } from '../src/diff/holdshot';
-import { holdCamera } from '../src/diff/holdcamera';
+import { dropShots, holdCamera, keepShots } from '../src/diff/holdcamera';
+import { howMuchBy, nextAccepted } from '../src/design/gate';
 import { knownTrouble, plainMessage, plainTrouble } from './plainly';
 
 /**
@@ -381,11 +396,67 @@ function movedOrGone(name: string): Trouble {
   };
 }
 
+/** A model the window has already switched to on screen, that the conversation
+ *  would not take. Named rather than swallowed: the alternative is a chip that
+ *  says one thing while the answers come from another. */
+function couldNotUseModel(named: string, many: number): Trouble {
+  return {
+    what:
+      many === 1
+        ? 'One conversation is still answering as the model it had.'
+        : `${String(many)} conversations are still answering as the model they had.`,
+    because: `${named} could not be brought into ${many === 1 ? 'it' : 'them'} — usually the account for it is not connected. It is saved as your choice, so a new conversation will use it.`,
+    actionLabel: 'Got it',
+  };
+}
+
 const NOTHING_OPEN: Trouble = {
   what: 'I do not have a folder to work in yet.',
   because: 'Pick the folder your project lives in and I will start there.',
   actionLabel: 'Got it',
 };
+
+/** A set that could not be put in an order at all — a round trip, or something
+ *  in it that has not finished. The sentence is stack.ts's; this only puts it
+ *  where the window draws one. */
+function couldNotTakeSet(because: string): Trouble {
+  return { what: because, because: '', actionLabel: 'Got it' };
+}
+
+/**
+ * The files moved under every conversation in this project.
+ *
+ * Not through a tool call — the interceptor already catches those. This is for
+ * the three ways the project changes with nobody's tool involved: work taken
+ * off the board, a person's own editor, and going back to an earlier moment.
+ * A check that passed did so against files that are no longer there.
+ */
+function filesMovedIn(open: Workspace<Held>): void {
+  for (const one of open.held.sessions.open) one.held.forgetChecks();
+}
+
+const NOT_GOING_ANY_MORE: Trouble = {
+  what: 'That one is not going any more.',
+  because: 'It finished, or it was stopped, so there is nothing left to hear you.',
+  actionLabel: 'Got it',
+};
+
+/** It is between turns, not mid-turn. A sentence handed over now would be put
+ *  on a queue that only a run already going ever reads, and lost when the run
+ *  is packed away — so it is refused out loud instead. */
+const DID_NOT_HEAR: Trouble = {
+  what: 'It did not hear that.',
+  because: 'It had just finished the step it was on, so there was nothing left mid-turn to take the sentence. Your words are still where you typed them.',
+  actionLabel: 'Got it',
+};
+
+function couldNotSay(cause: unknown): Trouble {
+  return {
+    what: 'I could not get that through to it.',
+    because: cause instanceof Error ? cause.message : 'It did not take the message.',
+    actionLabel: 'Got it',
+  };
+}
 
 const COULD_NOT_TIDY: Trouble = {
   what: 'I could not tidy this conversation just now.',
@@ -397,6 +468,16 @@ const COULD_NOT_TIDY: Trouble = {
  *  this does is put it where the window already knows to draw one. */
 function couldNotWait(because: string): Trouble {
   return { what: 'I did not set that up.', because, actionLabel: 'Got it' };
+}
+
+/** The line stays where it is, and says so. */
+function couldNotTakeBack(because: string): Trouble {
+  return {
+    what: 'I could not take the line back.',
+    because: 'It is still waiting behind what is running, so nothing has been lost. Try again in a moment.',
+    actionLabel: 'Got it',
+    ...(because.trim() === '' ? {} : { details: because }),
+  };
 }
 
 const PICKER_FAILED: Trouble = {
@@ -681,6 +762,18 @@ function makePageView(): WebContentsView | null {
   view.webContents.on('dom-ready', () => {
     void view.webContents.executeJavaScript(POINTER_ONCE, true).catch(() => undefined);
   });
+  // What the page complains about, kept as it happens: by the time anybody
+  // thinks to ask, the message has already been printed and gone.
+  view.webContents.on('console-message', (_event, level, message, line, source) => {
+    const where = source === '' ? '' : ` (${source}${line > 0 ? `:${String(line)}` : ''})`;
+    pageSaid = noteTrouble(pageSaid, `${LEVELS[level] ?? 'a note'}: ${message}${where}`);
+  });
+  // A new page starts with nothing against it. Only the main frame counts —
+  // an advert in a frame changing has nothing to do with the work.
+  view.webContents.on('did-navigate', () => {
+    forgetTrouble();
+  });
+  watchPageRequests(pageStore());
   mainWindow.contentView.addChildView(view);
   pageView = view;
   return view;
@@ -698,6 +791,465 @@ function dropPageView(): void {
   }
   view.webContents.close();
 }
+
+/* -------------------------------------------------------------------------- */
+/* Letting the agent work on that page                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A world of our own inside the page.
+ *
+ * The script below runs in an isolated world rather than the page's own, so it
+ * cannot be read, replaced or leaned on by anything the site loads, and the
+ * site keeps every prototype it started with. Nothing is added to the page's
+ * own world, the preload still hands out nothing, and the store stays the
+ * pane's own — this reads and drives the page from outside it. Electron keeps
+ * 0 and 999 for itself.
+ */
+const PAGE_WORLD = 1207;
+
+/**
+ * How the page is read and driven, as the page itself sees it.
+ *
+ * Written for a model rather than a person: things come back named the way a
+ * screen reader would say them — a role, the words on them, a handle — because
+ * that is what survives the markup being rewritten underneath, and because a
+ * model can aim at "Get started" and cannot aim at a pixel.
+ *
+ * Raw on purpose. A template literal would eat every backslash in here, and
+ * every regular expression with it.
+ */
+const PAGE_SCRIPT = String.raw`
+if (!window.__graphePage) { window.__graphePage = (function () {
+  var HANDLES = [];
+  var MOST_NAME = 120;
+  var MOST_LINES = 600;
+  var DEEPEST = 30;
+  var SKIP = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, HEAD: 1, META: 1, LINK: 1, TITLE: 1 };
+  var ROLE = {
+    A: 'link', BUTTON: 'button', SELECT: 'combobox', TEXTAREA: 'textbox', IMG: 'image',
+    H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading',
+    NAV: 'navigation', HEADER: 'banner', FOOTER: 'contentinfo', MAIN: 'main',
+    ASIDE: 'complementary', FORM: 'form', UL: 'list', OL: 'list', LI: 'listitem',
+    TABLE: 'table', SUMMARY: 'summary', LABEL: 'label'
+  };
+  var HOLDS = { navigation: 1, banner: 1, contentinfo: 1, main: 1, complementary: 1, form: 1, list: 1, listitem: 1, table: 1 };
+  var TAKES_A_PRESS = {
+    link: 1, button: 1, textbox: 1, checkbox: 1, radio: 1, combobox: 1,
+    tab: 1, menuitem: 1, switch: 1, option: 1, summary: 1
+  };
+
+  function attr(el, name) { try { return el.getAttribute(name) || ''; } catch (e) { return ''; } }
+  function tidy(text) { return String(text || '').replace(/\s+/g, ' ').trim(); }
+  function pad(depth) { return new Array(depth + 1).join('  '); }
+
+  function roleOf(el) {
+    var given = attr(el, 'role').trim().toLowerCase();
+    if (given) return given;
+    var tag = el.tagName;
+    if (tag === 'INPUT') {
+      var kind = (attr(el, 'type') || 'text').toLowerCase();
+      if (kind === 'checkbox') return 'checkbox';
+      if (kind === 'radio') return 'radio';
+      if (kind === 'submit' || kind === 'button' || kind === 'reset' || kind === 'image') return 'button';
+      if (kind === 'hidden') return '';
+      return 'textbox';
+    }
+    if (tag === 'A' && !attr(el, 'href')) return '';
+    return ROLE[tag] || '';
+  }
+
+  function actionable(el) {
+    if (el.disabled === true) return false;
+    if (TAKES_A_PRESS[roleOf(el)]) return true;
+    if (el.isContentEditable) return true;
+    if (el.hasAttribute && el.hasAttribute('onclick')) return true;
+    var stop = attr(el, 'tabindex');
+    return stop !== '' && stop !== '-1';
+  }
+
+  function visible(el) {
+    if (attr(el, 'aria-hidden') === 'true') return false;
+    if (el.hidden === true) return false;
+    var style = null;
+    try { style = window.getComputedStyle(el); } catch (e) { style = null; }
+    if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+    var box = null;
+    try { box = el.getBoundingClientRect(); } catch (e) { box = null; }
+    if (box && box.width === 0 && box.height === 0) return false;
+    return true;
+  }
+
+  function labelOf(el) {
+    try {
+      if (el.labels && el.labels.length) return tidy(el.labels[0].innerText || el.labels[0].textContent);
+    } catch (e) {}
+    var around = el.closest ? el.closest('label') : null;
+    return around ? tidy(around.innerText || around.textContent) : '';
+  }
+
+  /** Structural things are named only by what somebody wrote on them. Letting a
+      landmark take its name from everything inside it names the whole page. */
+  function nameOf(el, structural) {
+    var aria = tidy(attr(el, 'aria-label'));
+    if (aria) return aria.slice(0, MOST_NAME);
+    var by = attr(el, 'aria-labelledby');
+    if (by) {
+      var words = [];
+      var ids = by.split(/\s+/);
+      for (var i = 0; i < ids.length; i++) {
+        var other = document.getElementById(ids[i]);
+        if (other) words.push(tidy(other.innerText || other.textContent));
+      }
+      var joined = tidy(words.join(' '));
+      if (joined) return joined.slice(0, MOST_NAME);
+    }
+    var tag = el.tagName;
+    if (tag === 'IMG') return tidy(attr(el, 'alt')).slice(0, MOST_NAME);
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      var written = labelOf(el) || tidy(attr(el, 'placeholder')) || tidy(attr(el, 'title')) || tidy(attr(el, 'name'));
+      return written.slice(0, MOST_NAME);
+    }
+    if (structural) return '';
+    return tidy(el.innerText || el.textContent).slice(0, MOST_NAME);
+  }
+
+  function valueOf(el) {
+    var tag = el.tagName;
+    if (tag === 'INPUT') {
+      var kind = (attr(el, 'type') || 'text').toLowerCase();
+      if (kind === 'checkbox' || kind === 'radio') return el.checked ? 'ticked' : 'not ticked';
+      if (kind === 'password') return el.value ? 'something in it' : 'empty';
+      return tidy(el.value);
+    }
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return tidy(el.value);
+    return '';
+  }
+
+  function handle(el) { HANDLES.push(el); return 'e' + HANDLES.length; }
+  function quoted(text) { return text ? ' ' + JSON.stringify(text) : ''; }
+
+  function describe(el) {
+    var name = nameOf(el, false);
+    return (roleOf(el) || 'thing') + (name ? ' ' + JSON.stringify(name) : ' with nothing written on it');
+  }
+
+  function line(el, depth, role, name) {
+    var value = valueOf(el);
+    return pad(depth) + '- ' + role + quoted(name) + (value ? ' [' + value + ']' : '') + ' [ref=' + handle(el) + ']';
+  }
+
+  function walk(el, depth, lines) {
+    if (depth > DEEPEST) return;
+    var kids = el.children;
+    for (var i = 0; i < kids.length && lines.length < MOST_LINES; i++) {
+      var kid = kids[i];
+      if (SKIP[kid.tagName] || !visible(kid)) continue;
+      var role = roleOf(kid);
+      if (actionable(kid)) {
+        var named = nameOf(kid, false);
+        lines.push(line(kid, depth, role || 'button', named));
+        if (!named) walk(kid, depth + 1, lines);
+        continue;
+      }
+      if (role === 'heading' || role === 'image') {
+        lines.push(line(kid, depth, role, nameOf(kid, false)));
+        continue;
+      }
+      if (HOLDS[role]) {
+        lines.push(line(kid, depth, role, nameOf(kid, true)));
+        walk(kid, depth + 1, lines);
+        continue;
+      }
+      if (kid.children.length === 0) {
+        var words = tidy(kid.innerText || kid.textContent);
+        if (words) lines.push(pad(depth) + '- text ' + JSON.stringify(words.slice(0, MOST_NAME)));
+        continue;
+      }
+      walk(kid, depth, lines);
+    }
+  }
+
+  function read() {
+    HANDLES = [];
+    var lines = [];
+    walk(document.body || document.documentElement, 0, lines);
+    if (!lines.length) lines.push('(nothing on the page is showing)');
+    if (lines.length >= MOST_LINES) lines.push('(the page carries on past this; scroll to it and read again)');
+    return lines.join('\n');
+  }
+
+  function worthNaming() {
+    var out = [];
+    var all = document.querySelectorAll('a, button, input, select, textarea, summary, label, [role], [onclick], [tabindex], h1, h2, h3, h4, h5, h6, img, [aria-label]');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (SKIP[el.tagName] || !visible(el)) continue;
+      out.push({ el: el, name: nameOf(el, false), act: actionable(el) });
+    }
+    return out;
+  }
+
+  /** One match is the answer. Several, and the one that takes a press wins,
+      because a box and the label above it read exactly the same. */
+  function pick(list, matches) {
+    var found = [];
+    for (var i = 0; i < list.length; i++) if (matches(list[i])) found.push(list[i]);
+    if (!found.length) return null;
+    if (found.length === 1) return { one: found[0].el };
+    var doers = [];
+    for (var j = 0; j < found.length; j++) if (found[j].act) doers.push(found[j]);
+    if (doers.length === 1) return { one: doers[0].el };
+    return { many: (doers.length ? doers : found).slice(0, 8) };
+  }
+
+  function find(target) {
+    var want = String(target || '').trim();
+    if (!want) return { none: true };
+    if (/^e[0-9]+$/i.test(want)) {
+      var held = HANDLES[parseInt(want.slice(1), 10) - 1];
+      if (held && held.isConnected) return { one: held };
+      return { stale: true };
+    }
+    var low = want.toLowerCase();
+    var list = worthNaming();
+    var hit = pick(list, function (one) { return one.name.toLowerCase() === low; });
+    if (!hit) hit = pick(list, function (one) { return one.name.toLowerCase().indexOf(low) !== -1; });
+    if (hit) return hit;
+    var wider = [];
+    var all = document.body ? document.body.querySelectorAll('*') : [];
+    for (var i = 0; i < all.length && i < 4000 && wider.length < 40; i++) {
+      var el = all[i];
+      if (SKIP[el.tagName] || el.children.length || !visible(el)) continue;
+      var words = tidy(el.innerText || el.textContent);
+      if (words && words.toLowerCase().indexOf(low) !== -1) wider.push({ el: el, name: words, act: false });
+    }
+    return pick(wider, function () { return true; }) || { none: true };
+  }
+
+  function tooMany(target, many) {
+    var said = [];
+    for (var i = 0; i < many.length; i++) {
+      said.push(describe(many[i].el) + ' [ref=' + handle(many[i].el) + ']');
+    }
+    return 'Several things on the page read like ' + JSON.stringify(target) + ': ' + said.join('; ') +
+      '. Nothing was touched. Aim at one of those handles instead.';
+  }
+
+  function fire(el, name) {
+    try { el.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
+  }
+
+  function press(el) {
+    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+    try { if (el.focus) el.focus(); } catch (e) {}
+    try { el.click(); } catch (e) {
+      return { ok: false, because: 'The page would not take a press on ' + describe(el) + '.' };
+    }
+    return { ok: true, did: 'Pressed ' + describe(el) + '.' };
+  }
+
+  function write(el, text, submit) {
+    var tag = el.tagName;
+    var editable = el.isContentEditable;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !editable) {
+      return { ok: false, because: describe(el) + ' is not something words can be typed into. Read the page and name the box itself.' };
+    }
+    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+    try { el.focus(); } catch (e) {}
+    if (editable) el.textContent = text; else el.value = text;
+    fire(el, 'input');
+    fire(el, 'change');
+    var did = 'Typed ' + JSON.stringify(text) + ' into ' + describe(el) + '.';
+    if (!submit) return { ok: true, did: did + ' Nothing was sent.' };
+    var wanted = true;
+    try {
+      wanted = el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+    } catch (e) {}
+    var form = el.form || (el.closest ? el.closest('form') : null);
+    if (wanted && form) {
+      try { form.requestSubmit ? form.requestSubmit() : form.submit(); } catch (e) {}
+      return { ok: true, did: did + ' Sent the form.' };
+    }
+    return { ok: true, did: did + ' Pressed enter on it.' };
+  }
+
+  function moveTo(el) {
+    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+    return { ok: true, did: 'Scrolled to ' + describe(el) + '.' };
+  }
+
+  function moveBy(way) {
+    var tall = document.body ? document.body.scrollHeight : 0;
+    var step = Math.round(window.innerHeight * 0.85);
+    if (way === 'top') window.scrollTo(0, 0);
+    else if (way === 'bottom') window.scrollTo(0, tall);
+    else window.scrollBy(0, way === 'up' ? -step : step);
+    var down = Math.round(window.scrollY);
+    var most = Math.max(0, tall - window.innerHeight);
+    return { ok: true, did: 'Scrolled ' + way + '. The page is ' + down + ' down out of ' + most + '.' };
+  }
+
+  function act(what) {
+    if (what.kind === 'move' && !what.target) return moveBy(what.way);
+    var found = find(what.target);
+    if (found.stale) return { ok: false, because: 'That handle is gone from the page. Read the page again and aim at what is on it now.' };
+    if (found.none) return { ok: false, because: 'Nothing on the page reads like ' + JSON.stringify(what.target) + '. Nothing was touched. Read the page and use words that are really on it.' };
+    if (found.many) return { ok: false, because: tooMany(what.target, found.many) };
+    if (what.kind === 'press') return press(found.one);
+    if (what.kind === 'write') return write(found.one, what.text, what.submit === true);
+    return moveTo(found.one);
+  }
+
+  return { read: read, act: act };
+})(); }
+`;
+
+/** Kept per page, thrown away when it goes somewhere else. Capped because a
+ *  page in a loop prints thousands, and the last few are the ones worth
+ *  reading. */
+const MOST_TROUBLE = 60;
+const LEVELS = ['a note', 'a note', 'a warning', 'a problem'];
+let pageSaid: string[] = [];
+let pageUnanswered: string[] = [];
+/** The store is per partition and outlives any one view, so its listeners are
+ *  hung once rather than on every open. */
+let watchingRequests = false;
+
+function noteTrouble(kept: string[], line: string): string[] {
+  kept.push(line);
+  return kept.length > MOST_TROUBLE ? kept.slice(kept.length - MOST_TROUBLE) : kept;
+}
+
+function forgetTrouble(): void {
+  pageSaid = [];
+  pageUnanswered = [];
+}
+
+function watchPageRequests(store: Electron.Session): void {
+  if (watchingRequests) return;
+  watchingRequests = true;
+  store.webRequest.onCompleted((details) => {
+    if (details.statusCode < 400) return;
+    pageUnanswered = noteTrouble(
+      pageUnanswered,
+      `${String(details.statusCode)} — ${details.method} ${details.url}`,
+    );
+  });
+  store.webRequest.onErrorOccurred((details) => {
+    pageUnanswered = noteTrouble(pageUnanswered, `${details.method} ${details.url} — ${details.error}`);
+  });
+}
+
+/** Everything that happens in the page happens in our own world there. A page
+ *  that has gone, or one that refuses the script, answers null rather than
+ *  throwing: the tools turn that into a sentence. */
+async function inPage<T>(expression: string): Promise<T | null> {
+  const view = pageView;
+  if (view === null || view.webContents.isDestroyed()) return null;
+  try {
+    const answer: unknown = await view.webContents.executeJavaScriptInIsolatedWorld(PAGE_WORLD, [
+      { code: `${PAGE_SCRIPT}\nwindow.__graphePage.${expression}` },
+    ]);
+    return answer as T;
+  } catch {
+    return null;
+  }
+}
+
+/** An argument on its way into the page. JSON is already valid there, apart
+ *  from the two separators JSON allows raw inside a string and JavaScript does
+ *  not. */
+function asArgument(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+async function readPage(): Promise<PageReading | null> {
+  const view = pageView;
+  if (view === null || view.webContents.isDestroyed()) return null;
+  const address = view.webContents.getURL();
+  if (address === '' || address === 'about:blank') return null;
+  const outline = await inPage<string>('read()');
+  if (outline === null) return null;
+  return { address, title: view.webContents.getTitle(), outline };
+}
+
+/** A press is worth nothing until the page has answered it. Long enough for
+ *  the ordinary case, and a hard ceiling so a page that never settles cannot
+ *  hold a turn open. */
+const PAGE_SETTLES_MS = 350;
+const PAGE_WAITS_MS = 8_000;
+
+async function pageSettles(view: WebContentsView): Promise<void> {
+  await new Promise((wake) => setTimeout(wake, PAGE_SETTLES_MS));
+  if (view.webContents.isDestroyed() || !view.webContents.isLoading()) return;
+  await new Promise<void>((wake) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      view.webContents.removeListener('did-stop-loading', done);
+      wake();
+    };
+    const timer = setTimeout(done, PAGE_WAITS_MS);
+    view.webContents.on('did-stop-loading', done);
+  });
+}
+
+async function actOnPage(what: PageAct): Promise<PageDone> {
+  const view = pageView;
+  if (view === null || view.webContents.isDestroyed()) {
+    return { ok: false, because: 'The page beside the conversation has closed, so nothing was done to it.' };
+  }
+  const done = await inPage<{ ok: boolean; did?: string; because?: string }>(
+    `act(${asArgument(what)})`,
+  );
+  if (done === null) {
+    return { ok: false, because: 'The page did not answer, so nothing was done to it. It may still be loading.' };
+  }
+  if (!done.ok) return { ok: false, because: done.because ?? 'The page would not do that, and did not say why.' };
+  await pageSettles(view);
+  const now = await readPage();
+  if (now === null) {
+    return { ok: false, because: `${done.did ?? 'Done.'} The page then went blank, so there is nothing on it to read.` };
+  }
+  return { ok: true, did: done.did ?? 'Done.', now };
+}
+
+/**
+ * The page beside the conversation, handed to the agent's tools.
+ *
+ * Registered once, at start, and it looks the view up every time rather than
+ * holding one: the pane opens and closes with a press, and a held view would be
+ * a stale answer the moment somebody closed it. Five answers, all plain data —
+ * the tools never get the view, so nothing the model says reaches past here.
+ */
+holdPage({
+  open: () => {
+    const view = pageView;
+    if (view === null || view.webContents.isDestroyed()) return null;
+    return { project: pageProject, address: view.webContents.getURL() };
+  },
+  read: () => readPage(),
+  act: (what) => actOnPage(what),
+  trouble: () => {
+    const view = pageView;
+    if (view === null || view.webContents.isDestroyed()) return Promise.resolve(null);
+    return Promise.resolve({ said: [...pageSaid], unanswered: [...pageUnanswered] });
+  },
+  picture: async (): Promise<ImageCard | null> => {
+    const view = pageView;
+    if (view === null || view.webContents.isDestroyed()) return null;
+    if (view.webContents.getURL() === '') return null;
+    const shot = await view.webContents.capturePage().catch(() => null);
+    if (shot === null || shot.isEmpty()) return null;
+    // A pane picture is read once and then paid for in every later turn that
+    // carries it, so it goes back at a size worth reading and no more.
+    const sized = shot.getSize().width > 1000 ? shot.resize({ width: 1000 }) : shot;
+    return { mimeType: 'image/jpeg', bytes: sized.toJPEG(80).toString('base64') };
+  },
+} satisfies LivePage);
 
 /** A click in the page beside the conversation. It arrives from the page's own
  *  world, so it is only listened to while that view is the one that sent it. */
@@ -1601,6 +2153,13 @@ function workFolder(): string {
   return join(app.getPath('temp'), 'graphe-work');
 }
 
+/** Where a project's agreed pictures are kept, one per width. Images, so beside
+ *  the rest of what this app keeps rather than in the settings file — and per
+ *  project, because a mark is a reading of one page. */
+function agreedFolder(path: string): string {
+  return join(app.getPath('userData'), 'agreed', keyFor(path));
+}
+
 /** One line for the version a held piece of work ends at. Their own words, so
  *  the timeline reads the same whether work was checked first or not. */
 function saysHeldWork(doing: string): string {
@@ -1650,7 +2209,7 @@ async function landingNow(folder: string, held: Held): Promise<Landing> {
     // Only ever beside the work it is of. Nothing is waiting, so there is
     // nothing for a picture to be a picture of.
     held: held.waiting === null ? null : held.pictures,
-    holdBack: chosen.heldBack[folder] === true,
+    holdBack: holdsBack(chosen.heldBack, folder),
     canHandOver: reach.canHandOver,
     handOverSays: reach.handOverSays,
     canPutOnline: reach.canPutOnline,
@@ -1671,7 +2230,7 @@ async function photographWaiting(project: string, work: HeldWork): Promise<HeldP
     .then(sizesFor)
     .catch(() => undefined);
   return photographHeld({
-    photographer: holdCamera(sizes),
+    photographer: holdCamera(sizes, agreedFolder(project)),
     copy: work.folder,
     project,
     id: work.waiting.id,
@@ -2212,6 +2771,10 @@ async function startConversation(
   try {
     session = await createSession({
       projectRoot: checkout?.folder ?? open.path,
+      // Named only when this conversation is running in a copy, so the copy
+      // takes a preview address of its own and the project on screen keeps the
+      // ordinary one.
+      mainFolder: open.path,
       onEvent: forwardTo(open.path, held, from),
       timeline: held.timeline,
       model: prefs.model,
@@ -2781,17 +3344,13 @@ function afterFor(desk: AwayDesk, id: string): AwayAfter | null {
 }
 
 function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
-  // Goes at the same thing, counted once so each of them can say which it is.
-  const sameThing = new Map<string, string[]>();
-  for (const piece of desk.bench.pieces) {
-    if (piece.ways == null) continue;
-    sameThing.set(piece.ways, [...(sameThing.get(piece.ways) ?? []), piece.id]);
-  }
+  // One numbering for the whole board, shared with the comparison sheet, so a
+  // go is called the same thing in both places.
+  const numbering = waysNumbering(desk.bench.pieces);
 
   const on: AwayPiece[] = desk.bench.pieces.map((piece) => {
     const run = desk.runs.get(piece.id);
     const asked = run?.held.first ?? null;
-    const group = piece.ways == null ? undefined : sameThing.get(piece.ways);
     return {
       id: piece.id,
       doing: piece.doing,
@@ -2801,6 +3360,9 @@ function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
       says: saidBriefly(lastSaidBy(desk, piece.id)),
       trouble: piece.trouble,
       spent: desk.costs.get(piece.id) ?? null,
+      // What it changed, so two pieces meeting on one file can be said before
+      // a set goes in rather than discovered part way through it.
+      touches: piece.touches ?? null,
       question:
         asked === null
           ? null
@@ -2811,10 +3373,7 @@ function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
               consequence: asked.consequence,
             },
       after: afterFor(desk, piece.id),
-      oneOf:
-        group === undefined || group.length < 2
-          ? null
-          : { of: group.length, at: group.indexOf(piece.id) + 1 },
+      oneOf: numbering.get(piece.id) ?? null,
     };
   });
   // Waiting for another is waiting, so it is drawn in the same band as anything
@@ -2851,6 +3410,21 @@ function awayRepeats(path: string, now: number): readonly Repeating[] {
 }
 
 /** Everything this project has going, as the window draws it. */
+async function connectedNow(path: string): Promise<ConnectedState> {
+  const config = await readMcpConfig(path);
+  return {
+    tools: config.servers.map((one) => ({
+      name: one.name,
+      command: one.command,
+      args: one.args === undefined ? [] : [...one.args],
+      ...(one.address === undefined ? {} : { address: one.address }),
+    })),
+    file: mcpFile(path),
+    trouble: config.trouble ?? null,
+    skipped: config.skipped === undefined ? [] : [...config.skipped],
+  };
+}
+
 function awayNow(path: string): Away {
   const repeats = awayRepeats(path, Date.now());
   const desk = awayDesks.get(path);
@@ -3016,6 +3590,9 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
   try {
     session = await createSession({
       projectRoot: folder,
+      // The folder this is a copy of, so the copy takes a preview address of
+      // its own and leaves the ordinary one to the project on screen.
+      mainFolder: desk.path,
       onEvent: hear,
       timeline: await Timeline.open(folder),
       model: (await preferences()).all().model,
@@ -3928,6 +4505,7 @@ function register(): void {
     if (typeof versionId !== 'string' || versionId.trim() === '') return fail(NO_SUCH_VERSION);
     try {
       const restored = await open.held.timeline.restoreTo(versionId);
+      filesMovedIn(open);
       return done({
         title: restored.wentBackTo.title,
         at: restored.wentBackTo.at,
@@ -4241,6 +4819,13 @@ function register(): void {
     return done(await landingNow(open.path, open.held));
   });
 
+  handle<Preferences>(CHANNEL.setHowMuch, async (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string') return fail(NOTHING_OPEN);
+    // Whatever arrives, what is stored is one of the three.
+    return done(await (await preferences()).change({ howMuch: howMuchBy(id).id }));
+  });
+
   handle<Preferences>(CHANNEL.setHoldBack, async (_event, args) => {
     const [on] = args;
     if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
@@ -4267,12 +4852,18 @@ function register(): void {
       return done(await asItStands(null));
     }
 
+    // The pictures go with the answer, so read them before either branch
+    // clears them.
+    const changes = open.held.pictures?.changes ?? [];
+    const agreed = agreedFolder(open.path);
+
     if (letIn !== true) {
       // Nothing moves. The work is kept reachable rather than thrown away, so
       // "bring it back" is the ordinary put-back and nothing special.
       const version = waiting.setAside();
       open.held.waiting = null;
       open.held.pictures = null;
+      await dropShots(agreed).catch(() => undefined);
       return done(await asItStands(version));
     }
 
@@ -4283,6 +4874,9 @@ function register(): void {
       const outcome = await waiting.approve(saysHeldWork(waiting.waiting.doing));
       open.held.waiting = null;
       open.held.pictures = null;
+      // The same press that takes the work moves what the next change is read
+      // against, so nobody is asked about this one twice.
+      await keepShots(agreed, nextAccepted(changes, true)).catch(() => undefined);
       return done(await asItStands(outcome?.undoTo ?? null));
     } catch (cause) {
       return fail(historyTrouble(cause));
@@ -4376,6 +4970,105 @@ function register(): void {
     const everywhere = [...awayDesks.keys()].map((path) => ({ project: path, away: awayNow(path) }));
     return done(everywhere);
   });
+
+  /* The other tools a project has plugged in. Reading the list is free; asking
+     whether one works starts a real process, so it happens once, on a press. */
+  handle<ConnectedState>(CHANNEL.connectedLook, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    return done(await connectedNow(open.path));
+  });
+
+  handle<ConnectedHealth>(CHANNEL.connectedCheck, async (_event, args) => {
+    const [name] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof name !== 'string' || name.trim() === '') return done({ state: 'unknown' });
+    const config = inProject(await readMcpConfig(open.path), open.path);
+    const server = config.servers.find((one: { name: string }) => one.name === name);
+    if (server === undefined) return done({ state: 'unknown' });
+    return done(await checkServer(server));
+  });
+
+  handle<ConnectedState>(CHANNEL.connectedSave, async (_event, args) => {
+    const [tools] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (!Array.isArray(tools)) return done(await connectedNow(open.path));
+    const wanted: { name: string; command: string; args?: readonly string[]; address?: string }[] = [];
+    for (const entry of tools) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const one = entry as Record<string, unknown>;
+      if (typeof one.name !== 'string' || one.name.trim() === '') continue;
+      const command = typeof one.command === 'string' ? one.command.trim() : '';
+      const address = typeof one.address === 'string' ? one.address.trim() : '';
+      // One or the other is enough: a tool we start, or one already listening.
+      // Insisting on a command dropped every listening tool on the floor.
+      if (command === '' && address === '') continue;
+      wanted.push({
+        name: one.name.trim(),
+        command,
+        ...(address === '' ? {} : { address }),
+        args: Array.isArray(one.args) ? (one.args as string[]).filter((x) => typeof x === 'string') : undefined,
+      });
+    }
+    try {
+      // The file as it stands, not the aimed copy: keys and folders never go out
+      // to the window, so they are carried over from here. Aiming it first would
+      // write a folder into the file that nobody put there. A file that would
+      // not read has nothing to carry across, and is refused rather than
+      // replaced — whatever any window offered.
+      const current = await readMcpConfig(open.path);
+      const saving = savingFrom(wanted, current);
+      if (!saving.ok) return fail(saving.refused);
+      await writeMcpConfig(open.path, saving.servers);
+    } catch (cause) {
+      return fail(plainTrouble(cause instanceof Error ? cause.message : 'The list could not be saved.'));
+    }
+    return done(await connectedNow(open.path));
+  });
+
+  handle<string>(CHANNEL.changesLook, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    try {
+      return done(await new ProjectHistory(open.path).diffFor({ kind: 'working' }));
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  handle<null>(CHANNEL.changesDrop, async (_event, args) => {
+    const [patch] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof patch !== 'string') return done(null);
+    try {
+      // A version first, so taking part of a change back out is one press from
+      // undone like everything else here.
+      await open.held.timeline.snapshot({ boundary: 'before-risky-change' }).catch(() => null);
+      const answer = await new ProjectHistory(open.path).dropChanges(patch);
+      if (!answer.ok) return fail(plainTrouble(answer.because));
+      return done(null);
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  handle<{ steering: readonly string[]; followUp: readonly string[] }>(
+    CHANNEL.takeBackQueue,
+    (_event, args) => {
+      const where = whereIn(args);
+      const open = projectAt(where);
+      const session = open === null ? null : sessionAt(open, where);
+      if (session === null) return Promise.resolve(done({ steering: [], followUp: [] }));
+      const taken = session.takeBackQueue();
+      // A line that would not come back is still queued. Answering with an
+      // empty one took the words off the screen while the agent still had them.
+      if (!taken.ok) return Promise.resolve(fail(couldNotTakeBack(taken.because)));
+      return Promise.resolve(done({ steering: taken.steering, followUp: taken.followUp }));
+    },
+  );
 
   handle<Away>(CHANNEL.away, async (_event, args) => {
     const open = projectAt(whereIn(args));
@@ -4474,6 +5167,21 @@ function register(): void {
     return done(awayNow(open.path));
   });
 
+  /** Stop what is working in one copy, and wait for it to actually be stopped.
+   *
+   *  Its own step of the way for one reason: the copy is about to be deleted,
+   *  and an agent still mid-tool-call writes into a folder that has gone. The
+   *  board bookkeeping is deliberately left out — that happens after the work
+   *  has landed, and this has to happen before. */
+  async function stopWorkIn(desk: AwayDesk, id: string): Promise<void> {
+    const run = desk.runs.get(id);
+    if (run === undefined) return;
+    run.held.stop();
+    await run.session?.stop().catch(() => undefined);
+    run.session?.dispose();
+    desk.runs.delete(id);
+  }
+
   /** End one run and everything hanging off it. The same five things throwing
    *  a piece away does, so a piece ended any other way is not left half-ended. */
   function letGoOfRun(desk: AwayDesk, id: string, because: string): void {
@@ -4487,6 +5195,54 @@ function register(): void {
     stopWhatFollows(desk, id, because);
   }
 
+  /**
+   * Take several finished pieces in, in the order they need to be in.
+   *
+   * One press rather than several: they were meant to arrive in an order, and
+   * taking them one at a time by hand is exactly how that order gets lost.
+   * Whatever happens — the whole set in, or a stop part way — the run is one
+   * version away from never having happened, and the sentence says which.
+   */
+  handle<Away>(CHANNEL.keepSet, async (_event, args) => {
+    const [ids] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const desk = awayDesks.get(open.path);
+    if (desk === undefined || !Array.isArray(ids) || ids.length === 0) {
+      return done(awayNow(open.path));
+    }
+    const wanted = (ids as unknown[]).filter((one): one is string => typeof one === 'string');
+    try {
+      // A version first, the same way keeping one does, so the whole run has
+      // somewhere to be undone to even before the first piece goes in.
+      await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
+      const took = await desk.bench.keepSet(wanted, (piece) => saysHeldWork(piece.doing), {
+        after: (id) => desk.after.get(id) ?? null,
+        lettingGo: async (going) => {
+          for (const one of going) await stopWorkIn(desk, one);
+        },
+      });
+      if (took.ok !== true) return fail(couldNotTakeSet(took.because));
+      filesMovedIn(open);
+
+      for (const other of took.insteadOf) letGoOfRun(desk, other, afterWords.thrownAway);
+      for (const id of took.landed) {
+        desk.runs.delete(id);
+        desk.chain.take(id);
+        forgetNote(desk, id);
+      }
+      await runWhatCan(desk);
+
+      // Said whichever way it went: how many went in, and — when one stopped —
+      // which one, over which file, and that the rest are still there.
+      const said = saysTook(took, (id: string) => desk.bench.pieces.find((one) => one.id === id)?.doing ?? id);
+      if (took.stoppedAt !== null) return fail({ ...said, actionLabel: 'Got it' });
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+    return done(awayNow(open.path));
+  });
+
   handle<Away>(CHANNEL.keepAway, async (_event, args) => {
     const [id] = args;
     const open = projectAt(whereIn(args));
@@ -4495,11 +5251,20 @@ function register(): void {
     if (desk === undefined || typeof id !== 'string') return done(awayNow(open.path));
     const piece = desk.bench.pieces.find((one) => one.id === id);
     if (piece === undefined) return done(awayNow(open.path));
+    // Nothing to hand over until it has finished, and saying which of the two
+    // reasons it is matters: "it changed nothing" about work still going is a
+    // lie about work somebody was just watching.
+    const cannot = saysCannotKeep(piece.doing, piece.state);
+    if (cannot !== null) return fail(cannot);
     try {
       // Anything unfinished in the folder becomes a version first, the same way
       // going back does, so keeping this can never write over it.
       await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
-      const kept = await desk.bench.keep(id, saysHeldWork(piece.doing));
+      const kept = await desk.bench.keep(id, saysHeldWork(piece.doing), {
+        lettingGo: async (ids) => {
+          for (const one of ids) await stopWorkIn(desk, one);
+        },
+      });
       // Finished without changing a file — an answer rather than an edit. There
       // is nothing to take, and saying so is better than a press that appears
       // to do nothing while quietly losing the piece.
@@ -4507,6 +5272,7 @@ function register(): void {
       // A file two pieces both changed is the one case somebody has to look at.
       // The piece stays on the board, so the work is still there to open.
       if (kept.version === null) return fail(bothChanged(kept.conflicted));
+      filesMovedIn(open);
       // The other goes at the same thing went with the decision. Their copies
       // are already gone, so their agents have to be ended too — otherwise they
       // carry on writing into a folder that is not there, spending against the
@@ -4550,6 +5316,86 @@ function register(): void {
     if (!run.held.isWaiting && piece.state === 'needs-you') piece.state = 'running';
     noteDown(desk, id);
     return done(awayNow(open.path));
+  });
+
+  /**
+   * Say something to a piece of work without stopping it.
+   *
+   * The whole point is that it does not interrupt: the agent hears this between
+   * one step and the next, so nothing half-done is thrown away. A piece that has
+   * already finished has nothing left to hear, and says so rather than swallowing
+   * the sentence.
+   */
+  handle<Away>(CHANNEL.sayToAway, async (_event, args) => {
+    const [id, text] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || typeof text !== 'string' || text.trim() === '') {
+      return done(awayNow(open.path));
+    }
+    const desk = awayDesks.get(open.path);
+    const run = desk?.runs.get(id);
+    if (desk === undefined || run?.session == null) return fail(NOT_GOING_ANY_MORE);
+    // Asked of the session rather than the card: the board paints "Going" from
+    // the moment a turn settles until the copy has been read and put away,
+    // which is seconds in which nothing is listening.
+    if (!run.session.listening) return fail(DID_NOT_HEAR);
+    try {
+      await run.session.steer(text.trim());
+    } catch (cause) {
+      return fail(couldNotSay(cause));
+    }
+    noteDown(desk, id);
+    return done(awayNow(open.path));
+  });
+
+  /**
+   * The several goes at one job, each with what it actually changed.
+   *
+   * Read on the press rather than kept: a go still working has a different
+   * answer a minute later, and a stale patch shown beside a fresh one is worse
+   * than no comparison at all.
+   *
+   * Every go in the group comes back, whether or not it has a copy of its own
+   * yet. One that has not started has nothing to show and says so; leaving it
+   * out instead would renumber the ones that did, and somebody choosing between
+   * columns would be reading names that no card on the board agrees with.
+   */
+  handle<readonly SideOfWork[]>(CHANNEL.compareWays, async (_event, args) => {
+    const [ways] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const desk = awayDesks.get(open.path);
+    if (desk === undefined || typeof ways !== 'string') return done([]);
+
+    const numbering = waysNumbering(desk.bench.pieces);
+    const group = desk.bench.pieces.filter((one) => one.ways === ways);
+    const sides: SideOfWork[] = [];
+    for (const piece of group) {
+      const named = numbering.get(piece.id);
+      if (named === undefined) continue;
+      let diff = '';
+      if (piece.folder !== null) {
+        try {
+          diff = await new ProjectHistory(piece.folder).diffFor({ kind: 'working' });
+        } catch {
+          // A copy we cannot read is still one of the goes; it is shown as having
+          // changed nothing rather than dropped, which would silently narrow the
+          // choice somebody is about to make.
+        }
+      }
+      const spent = desk.costs.get(piece.id) ?? null;
+      sides.push({
+        id: piece.id,
+        name: boardWords.oneOf(named.at, named.of),
+        state: piece.state,
+        diff,
+        picture: piece.picture,
+        spent: spent === null ? null : formatMoney(spent),
+        folder: piece.folder,
+      });
+    }
+    return done(sides);
   });
 
   handle<Away>(CHANNEL.addRepeat, async (_event, args) => {
@@ -4636,6 +5482,9 @@ function register(): void {
       history: started.value.session.history,
       conversation: started.value.session.conversation,
       address: started.value.address,
+      // Only this side knows which conversations work in a copy, and without
+      // being told the window cannot offer to bring that work back.
+      ownCopy: checkout !== null,
     });
   });
 
@@ -5055,18 +5904,19 @@ function register(): void {
     return done(null);
   });
 
-  handle<{ folder: string; branch: string }>(CHANNEL.worktreeStart, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const made = await createWorktree(
-      gitRunHereFor(),
-      open.path,
-      `conversation-${Date.now().toString(36)}`,
-      null,
-    );
-    if (!made.ok) return fail(worktreeTrouble(made.because));
-    return made.value === null ? fail(worktreeTrouble('Could not make a checkout.')) : done(made.value);
-  });
+  /**
+   * Put down the conversation that lives in a copy, before the copy goes.
+   *
+   * Its session is rooted in that folder: left open, the next thing it was
+   * asked to do would run somewhere that no longer exists. The same order the
+   * board uses when it throws a piece of work away — stop first, delete after.
+   */
+  async function putDownCopyConversation(open: Workspace<Held>, address: string): Promise<void> {
+    const found = open.held.sessions.open.find((one) => one.path === address);
+    if (found === undefined) return;
+    await found.held.stop().catch(() => undefined);
+    open.held.sessions.close(address);
+  }
 
   handle<null>(CHANNEL.worktreeLand, async (_event, args) => {
     const open = projectAt(whereIn(args));
@@ -5076,6 +5926,7 @@ function register(): void {
     // this landed somebody else's branch.
     const entry = checkoutEntryFor(open, whereIn(args));
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    await putDownCopyConversation(open, entry.address);
     const landed = await landWorktree(gitRunHereFor(), open.path, entry.folder);
     // The folder is gone once it lands; a note still pointing at it would send
     // the next press somewhere that no longer exists.
@@ -5089,6 +5940,7 @@ function register(): void {
     // The same rule as landing, and it matters more here: this one deletes.
     const entry = checkoutEntryFor(open, whereIn(args));
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    await putDownCopyConversation(open, entry.address);
     const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
     if (dropped.ok) open.held.checkouts.delete(entry.address);
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
@@ -5316,7 +6168,15 @@ function register(): void {
           : undefined;
       // Checked first, when they have asked for that and nothing is already
       // waiting. Two pieces of work waiting at once is a decision nobody made.
-      if ((await preferences()).all().heldBack[open.path] === true && open.held.waiting === null) {
+      //
+      // Never a queued message: that one was asked to go behind the turn that
+      // is running, and turning it into a second piece of held work is neither
+      // what was pressed nor something the person can undo.
+      if (
+        queue === undefined &&
+        holdsBack((await preferences()).all().heldBack, open.path) &&
+        open.held.waiting === null
+      ) {
         return await checkItFirst(
           open,
           { address: conversation.path },
@@ -5429,9 +6289,12 @@ function register(): void {
 
   /* -------------------------------------------------------------- connecting */
 
-  handle<ConnectionState>(CHANNEL.connection, async () => {
+  handle<ConnectionState>(CHANNEL.connection, async (_event, args) => {
+    // `fresh` is somebody pressing refresh: read the catalogue off disk again
+    // rather than the copy this app loaded when it started.
+    const fresh = args[0] === true;
     const [providers, prefs] = await Promise.all([
-      readConnection(await defaultAgentDir()),
+      readConnection(await defaultAgentDir(), { fresh }),
       preferences(),
     ]);
     const all = prefs.all();
@@ -5542,11 +6405,26 @@ function register(): void {
     // which — was the whole of this bug. A session that will not take the model
     // keeps the one it had; the preference is still saved, so opening the
     // project again picks it up.
+    // Every conversation of this project, not only the one in front: the picker
+    // is one control for the whole window, so leaving a tab behind on the old
+    // model would make it show one thing and answer as another.
     const where = whereIn(args);
     const open = projectAt(where);
-    const session = open === null ? null : sessionAt(open, where);
-    await session?.useModel(choice);
-    session?.setThinking(level);
+    const refused: string[] = [];
+    for (const one of open?.held.sessions.open ?? []) {
+      const took = await one.held.useModel(choice);
+      if (took) one.held.setThinking(level);
+      else refused.push(one.path);
+    }
+    // Said rather than swallowed. The preference is still saved — opening the
+    // project again picks it up — but a conversation still answering as the old
+    // model while the chip names the new one is the failure this reports.
+    // Any refusal at all, not only all of them: one conversation still answering
+    // as the old model while the chip names the new one is the whole failure,
+    // and it is no less true when the tab beside it took the change.
+    if (refused.length > 0) {
+      return fail(couldNotUseModel(model?.label ?? modelId, refused.length));
+    }
     return done(saved);
   });
 

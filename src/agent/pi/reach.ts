@@ -136,9 +136,45 @@ export const REACHABLE: readonly Reach[] = [
     curated: true,
     added: false,
   },
+  {
+    // Written into the project's own list under this name, so it wants to be
+    // one nobody would have chosen for a server of their own — "code" on its
+    // own would show as already connected against somebody else's.
+    id: 'code-read',
+    name: 'A read of your code',
+    what: 'Lets me jump straight to where something is really defined, find every place it is used, rename it everywhere at once and see the errors your editor sees — instead of searching the text and hoping I caught them all.',
+    needs: 'Works on TypeScript and JavaScript projects.',
+    start: { how: 'program', command: 'npx', args: ['-y', 'ts-language-mcp'], values: {} },
+    curated: true,
+    added: false,
+  },
 ];
 
 const VOUCHED = new Map(REACHABLE.map((one) => [one.id, one]));
+
+/** One of the vouched-for tools as a line in the project's own list. The two
+ *  shapes are the same fact said twice — this is the one translation between
+ *  them, so a curated entry and a hand-typed one end up identical on disk. */
+export function asServer(reach: Reach): {
+  name: string;
+  command: string;
+  args: readonly string[];
+  address?: string;
+} {
+  if (reach.start.how === 'address') {
+    return { name: reach.id, command: '', args: [], address: reach.start.address };
+  }
+  return { name: reach.id, command: reach.start.command, args: [...reach.start.args] };
+}
+
+/** Which of the vouched-for tools this project already has, by the name they
+ *  are written down under. */
+export function alreadyReached(
+  names: readonly string[],
+): readonly Reach[] {
+  const has = new Set(names);
+  return REACHABLE.map((one) => ({ ...one, added: has.has(one.id) }));
+}
 
 /* -------------------------------------------------------------------------- */
 /* Reading what somebody typed                                                 */

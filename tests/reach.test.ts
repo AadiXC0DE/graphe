@@ -60,7 +60,7 @@ function whyNot(typed: unknown, already: readonly Reach[] = []): string {
 
 describe('the curated shelf', () => {
   it('offers the tools a designer already has open', () => {
-    expect(REACHABLE.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser']);
+    expect(REACHABLE.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'code-read']);
   });
 
   it('says what each one lets you do, in one sentence, and never what it is', () => {
@@ -404,7 +404,7 @@ describe('what is kept', () => {
       { name: 'Mine', where: 'run' },
     ]);
     const shelf = withAdded(mine);
-    expect(shelf.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'yours:mine']);
+    expect(shelf.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'code-read', 'yours:mine']);
     expect(shelf.filter((one) => one.added).map((one) => one.id)).toEqual([
       'browser',
       'yours:mine',
@@ -464,8 +464,8 @@ describe('show me how it starts', () => {
 describe('the shelf both kinds sit on', () => {
   it('offers what it can reach first, then the additions', () => {
     const shelf = everything([A_PACK]);
-    expect(shelf.map((one) => one.sort)).toEqual(['reach', 'reach', 'reach', 'addition']);
-    expect(shelf.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'pi-lens']);
+    expect(shelf.map((one) => one.sort)).toEqual(['reach', 'reach', 'reach', 'reach', 'addition']);
+    expect(shelf.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'code-read', 'pi-lens']);
   });
 
   it('narrows to what somebody typed, on the sentence as well as the name', () => {

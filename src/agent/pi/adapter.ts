@@ -35,7 +35,8 @@
  */
 
 import type { GuardFacts } from '../guard/policy';
-import { evaluate, requiresSnapshot } from '../guard/policy';
+import { changesAnything, evaluate, requiresSnapshot } from '../guard/policy';
+import { atTheEnd, beforeCall, readRules, rulesFile, type Rules, type World } from '../hooks';
 import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
@@ -43,10 +44,12 @@ import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
-import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type PutOnBoard } from './tools';
+import { PORTS_HELD as PORTS } from '../../work/ports';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard } from './tools';
+import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
-import { McpRegistry, mcpTool, readMcpConfig } from './mcp';
+import { McpRegistry, inProject, mcpTool, readMcpConfig } from './mcp';
 import { parseReview } from './review';
 import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
 import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
@@ -59,6 +62,7 @@ import {
 } from './importers';
 
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 
 import { idFor } from '../../projects/carried';
@@ -173,6 +177,15 @@ export type InterceptorOptions = {
    *  the project is refused with a sentence telling the model to propose it
    *  instead, which is the whole of planning before doing. */
   planning?: () => boolean;
+  /** The project's own rules, as they were read. They can only ever make an
+   *  answer harder, so a project that carries none changes nothing here. */
+  rules?: () => Rules;
+  /** What has actually been checked, for a rule that asks about it. A check
+   *  nobody has run holds a turn exactly as a failing one does. */
+  world?: () => World;
+  /** Told about a call before it runs, so anything already checked can be
+   *  forgotten when the files are about to move under it. */
+  filesMayHaveMoved?: (call: ToolCall) => void;
 };
 
 function whyItMatters(verdict: Verdict): string {
@@ -194,7 +207,8 @@ function whyItMatters(verdict: Verdict): string {
 export function createGuardInterceptor(
   options: InterceptorOptions,
 ): (call: ToolCall) => Promise<Interception> {
-  const { facts, relay, confirmations, timeline, planning } = options;
+  const { facts, relay, confirmations, timeline, planning, rules, world, filesMayHaveMoved } =
+    options;
 
   /* Fails closed. A host with no history wired cannot run destructive work at all:
      "every destructive action is snapshotted first" is a promise, and a promise with
@@ -211,11 +225,31 @@ export function createGuardInterceptor(
   };
 
   return async function review(call: ToolCall): Promise<Interception> {
+    filesMayHaveMoved?.(call);
     // The explicit top autonomy rung is full access for this sitting. Keep this
     // before planning too: otherwise a leftover plan-only state silently turns
     // "Get on with it" back into a restricted mode. `evaluate` mirrors this
     // rule for every other policy consumer.
     if (facts.howFar === 'doing') {
+      // The top rung is a person's decision about the Guard, not about what
+      // their project has agreed. "Never publish by hand" is the team's line
+      // and it survives somebody turning their own questions off.
+      const house = rules?.();
+      if (house !== undefined && house.rules.length > 0) {
+        const said = beforeCall(call, { kind: 'allow' }, house, world?.() ?? {});
+        if (said.verdict.kind === 'deny') {
+          relay.blocked(call, said.verdict.reason);
+          return { block: true, reason: said.verdict.reason };
+        }
+        if (said.verdict.kind === 'confirm') {
+          relay.asking(call, said.verdict);
+          const decision = await confirmations.ask(call);
+          if (decision !== 'yes') {
+            relay.blocked(call, SAID_NO);
+            return { block: true, reason: TOLD.declined };
+          }
+        }
+      }
       relay.started(call);
       return undefined;
     }
@@ -226,7 +260,13 @@ export function createGuardInterceptor(
       return { block: true, reason: PLAN_WORDS.withheld };
     }
 
-    const verdict = evaluate(call, facts);
+    // The Guard first and always. The project's rules fold on top and can only
+    // make the answer harder — there is no argument to `beforeCall` that
+    // produces something softer than what it was handed.
+    const judged = evaluate(call, facts);
+    const house = rules?.();
+    const verdict =
+      house === undefined ? judged : beforeCall(call, judged, house, world?.() ?? {}).verdict;
 
     if (verdict.kind === 'deny') {
       relay.blocked(call, verdict.reason);
@@ -244,7 +284,7 @@ export function createGuardInterceptor(
 
     // Before, not after. If this line and the next were swapped the restore
     // point would be of a project that had already been changed.
-    if (requiresSnapshot(call, facts)) {
+    if (requiresSnapshot(call, facts) || verdict.kind === 'snapshot-first') {
       const saved = await takeRestorePoint(whyItMatters(verdict));
       if (!saved) {
         relay.blocked(call, NO_RESTORE_POINT);
@@ -254,6 +294,49 @@ export function createGuardInterceptor(
 
     relay.started(call);
     return undefined;
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* What has been checked                                                       */
+/* -------------------------------------------------------------------------- */
+
+export type ChecksDesk = {
+  /** What the rules read. */
+  world: () => World;
+  /** The files have moved, so nothing checked before now describes them. */
+  forget: () => void;
+  /** Reviewers are setting off; what this hands back keeps their answers. */
+  noting: ChecksNoted;
+};
+
+/**
+ * Where the answers to this project's own checks are kept between calls.
+ *
+ * The reading of a reviewer's words happens in `whatWasChecked`, which is pure.
+ * All that is left here is one honest question: is this answer still about the
+ * project as it now stands? Reviewers take minutes, and a change landing while
+ * they read makes every one of their answers describe a version of the project
+ * that no longer exists — so the moment they set off is counted, and an answer
+ * arriving after that count has moved on is dropped rather than believed.
+ */
+export function checksDesk(): ChecksDesk {
+  let checked: World = {};
+  let moved = 0;
+
+  return {
+    world: () => checked,
+    forget: () => {
+      moved += 1;
+      checked = {};
+    },
+    noting: () => {
+      const setOff = moved;
+      return (verdicts) => {
+        if (setOff !== moved) return;
+        checked = { checks: { ...checked.checks, ...whatWasChecked(verdicts) } };
+      };
+    },
   };
 }
 
@@ -310,6 +393,10 @@ export type CreateSessionOptions = {
   /** Whether one of the extensions this folder carries has been said yes to.
    *  Left out, none of them are: a folder's own code never loads by default. */
   trusts?: (id: string) => boolean;
+  /** The folder somebody is actually looking at, when this session is running
+   *  in a copy of it. The copy gets its own preview address; the real one keeps
+   *  the ordinary one. */
+  mainFolder?: string;
   /** Somewhere to put a piece of background work. Given, the agent can break a
    *  request into pieces that run side by side; left out, it cannot — which is
    *  what keeps a run on the board from filling the board it is running on. */
@@ -342,6 +429,30 @@ export type Room = {
   part: number;
 };
 
+/** What came of asking for the line back. A line that would not come back is
+ *  not an empty line: the words are still in front of the agent, and answering
+ *  "nothing" to both takes them off the screen while it still holds them. */
+export type TakenBack =
+  | { ok: true; steering: readonly string[]; followUp: readonly string[] }
+  | { ok: false; because: string };
+
+/** The line, taken out of the agent's hands. Separated from the session so the
+ *  one decision here — a refusal is not an empty line — can be read on its
+ *  own. */
+export function takingBack(
+  clear: () => { steering: readonly string[]; followUp: readonly string[] },
+): TakenBack {
+  try {
+    const taken = clear();
+    return { ok: true, steering: [...taken.steering], followUp: [...taken.followUp] };
+  } catch (cause) {
+    return {
+      ok: false,
+      because: cause instanceof Error ? cause.message : 'The line did not come back.',
+    };
+  }
+}
+
 export type GrapheSession = {
   /** Say something to the agent. Resolves when it has finished responding.
    *  Pictures travel with the message; omitted when there are none. */
@@ -370,8 +481,25 @@ export type GrapheSession = {
    *  into the loop" move other coding agents offer; Pi calls it steering.
    *  Safe to call at any time: when nothing is running it simply joins. */
   steer(text: string, images?: readonly ImageCard[]): Promise<void>;
+  /** Whether a steer sent right now would actually be heard.
+   *
+   *  Pi's queue is drained only from inside a run that is already going. A
+   *  message pushed onto it once the run has ended sits there until the session
+   *  is disposed of and is then lost — quietly, and with nothing returned to
+   *  say so. Anything offering to pass a sentence along has to ask first. */
+  readonly listening: boolean;
+  /** Take everything waiting behind the run back out of the queue and hand it
+   *  over, so it can be put back in the box and rewritten. Nothing is left
+   *  queued afterwards — unless the answer says it did not come back, which is
+   *  its own answer and not an empty line. */
+  takeBackQueue(): TakenBack;
   /** Finish with this session. Safe to call twice. */
   dispose(): void;
+  /** The files moved underneath us by something other than a tool call — work
+   *  taken off the board, a person's own editor, going back in history. Any
+   *  check that passed did so against files that are no longer there, and a
+   *  rule reading it would be reading about the past. */
+  forgetChecks(): void;
   /** Answer a `needs-confirmation`. False if there was no such question. */
   answer(callId: string, decision: Decision): boolean;
   /** How much of what the model can hold at once this conversation is using.
@@ -484,6 +612,10 @@ export type ModelSummary = {
   available: boolean;
   rates: { input: number; output: number } | null;
   contextWindow: number | null;
+  /** Whether this model reads pictures. Null when its catalogue entry does not
+   *  say — not knowing and knowing it cannot are different claims, and only one
+   *  of them is worth stopping somebody over. */
+  takesImages: boolean | null;
   thinking: readonly ThinkingLevel[];
 };
 
@@ -533,6 +665,43 @@ export async function defaultAgentDir(): Promise<string> {
  *  opens — no restart, no handshake between the two halves. */
 const runtimes = new Map<string, Promise<PiRuntime>>();
 
+/**
+ * Forget the cached runtime, so the next ask reads the catalogue off disk again.
+ *
+ * The runtime reads `models.json` once, when it is made, and is then kept for
+ * the life of the app. Anything that adds a model afterwards — pi's own
+ * catalogue refresh, another tool writing the same file — was invisible until
+ * the app was restarted, which is not something anybody should have to work
+ * out for themselves.
+ *
+ * Nothing is disposed. Sessions already running hold their own reference and
+ * carry on with the catalogue they started on; only the next one is new.
+ */
+export function forgetRuntime(agentDir: string): void {
+  runtimes.delete(agentDir);
+}
+
+/** Ask the catalogue itself, giving up rather than hanging: this happens behind
+ *  a button somebody pressed, so it has to come back. */
+const LOOK_AGAIN_MS = 15_000;
+
+async function lookAgainFor(runtime: PiRuntime): Promise<void> {
+  const asked = runtime as unknown as {
+    refresh?: (options: { allowNetwork: boolean; force: boolean; signal?: AbortSignal }) => Promise<unknown>;
+  };
+  if (typeof asked.refresh !== 'function') return;
+  const giveUp = new AbortController();
+  const timer = setTimeout(() => giveUp.abort(), LOOK_AGAIN_MS);
+  try {
+    await asked.refresh({ allowNetwork: true, force: true, signal: giveUp.signal });
+  } catch {
+    // A catalogue that will not answer is the catalogue we already have. The
+    // list still comes back; it is just the one from disk.
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function runtimeFor(agentDir: string): Promise<PiRuntime> {
   const already = runtimes.get(agentDir);
   if (already !== undefined) return already;
@@ -540,6 +709,11 @@ function runtimeFor(agentDir: string): Promise<PiRuntime> {
     pi.ModelRuntime.create({
       authPath: join(agentDir, 'auth.json'),
       modelsPath: join(agentDir, 'models.json'),
+      // False on purpose, and it is not what "look again" depends on: the
+      // refresh below passes `allowNetwork` itself, which wins over this. So
+      // starting the app can never reach for the catalogue, and only a press
+      // can.
+      allowModelNetwork: false,
     }),
   );
   runtimes.set(agentDir, pending);
@@ -571,7 +745,19 @@ function firstUsable(runtime: PiRuntime): { providerId: string; modelId: string 
  *  one call. Nothing here throws for a provider in a bad state — each is read
  *  defensively and reported as it actually is, because a provider the runtime
  *  cannot reach is a provider the window should still see, greyed out. */
-export async function connection(agentDir: string): Promise<readonly ProviderSummary[]> {
+export async function connection(
+  agentDir: string,
+  options: { fresh?: boolean } = {},
+): Promise<readonly ProviderSummary[]> {
+  // Asked for again on purpose: forget the copy this app loaded when it
+  // started, then ask the catalogue itself — over the network, because a model
+  // added by another tool this morning is exactly what somebody is looking for
+  // when they press it. Ordinary reads never reach for the network.
+  if (options.fresh === true) {
+    forgetRuntime(agentDir);
+    const made = await runtimeFor(agentDir);
+    await lookAgainFor(made);
+  }
   const runtime = await runtimeFor(agentDir);
 
   const connected = new Set<string>();
@@ -592,6 +778,7 @@ export async function connection(agentDir: string): Promise<readonly ProviderSum
         rates: ratesOf(model),
         contextWindow: typeof model.contextWindow === 'number' ? model.contextWindow : null,
         thinking: thinkingLevelsOf(model),
+        takesImages: takesImagesOf(model),
       }));
     } catch {
       // Unreadable providers are not offered at all.
@@ -774,6 +961,23 @@ function thinkingLevelsOf(model: { reasoning?: unknown; thinkingLevelMap?: unkno
     return THINKING_LEVELS.filter((level) => values[level] !== null);
   }
   return model.reasoning === true ? ['off', 'minimal', 'low', 'medium', 'high'] : ['off'];
+}
+
+/**
+ * Whether a model reads pictures, out of the catalogue Pi already keeps.
+ *
+ * Every model definition may declare what it accepts — `['text']` or
+ * `['text', 'image']`. Nothing here has to be written down or kept up to date:
+ * the catalogue is refreshed with the agent, and this only reads it.
+ *
+ * An entry that says nothing is null rather than false. Plenty of older entries
+ * omit it, and refusing somebody's picture on the strength of a missing field
+ * would be worse than letting the provider answer for itself.
+ */
+function takesImagesOf(model: { input?: unknown }): boolean | null {
+  const input = model.input;
+  if (!Array.isArray(input)) return null;
+  return input.some((one) => one === 'image');
 }
 
 function ratesOf(model: { cost?: unknown }): { input: number; output: number } | null {
@@ -1028,17 +1232,66 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       const verdict = parseReview(tape);
       tape = '';
       if (verdict !== null) options.onEvent({ type: 'reviewed', verdict });
+      sayWhatTheRulesHeld();
     }
   };
 
+  /** How many turns have ended with the project's rules unsatisfied. Bounded on
+   *  purpose: a rule naming a check that never passes would otherwise say the
+   *  same sentence at the end of every turn for the rest of the sitting. */
+  let heldAlready = 0;
+  const MOST_HELD_SAYINGS = 3;
+
+  /**
+   * What the project's own rules make of the turn that just ended.
+   *
+   * Said, not enforced. Handing the turn straight back to the model would let a
+   * check that cannot pass loop it forever, and a loop nobody can stop is worse
+   * than a sentence somebody can act on — so the words go where both the person
+   * and the model can read them, and the next message is theirs to make.
+   */
+  function sayWhatTheRulesHeld(): void {
+    if (house.rules.length === 0) return;
+    const ending = atTheEnd(house, desk.world());
+    const said = [...ending.hold, ...ending.mention];
+    if (said.length === 0) {
+      heldAlready = 0;
+      return;
+    }
+    if (heldAlready >= MOST_HELD_SAYINGS) return;
+    heldAlready += 1;
+    options.onEvent({ type: 'message-delta', text: `\n\n${said.join('\n')}` });
+    options.onEvent({ type: 'message-end' });
+  }
+
   const relay = new EventRelay(say, { billedSoFar });
   const confirmations = new Confirmations();
+  /* What this project has agreed, read once when the sitting opens. Re-read on
+     nothing: a rules file that changed mid-turn would judge the first half of a
+     turn by one set of rules and the second half by another. */
+  const house = readRules(
+    await readFile(rulesFile(options.projectRoot), 'utf8').catch(() => null),
+  );
+  /** What has actually been checked, filled in when the project's own checks
+   *  answer. Nothing else fills it: a rule naming a check nobody wrote holds,
+   *  which is the same deny-by-default the Guard uses. */
+  const desk = checksDesk();
+
+  /** A change to the files makes every earlier check stale. Called on the way
+   *  in, before the call runs, because afterwards is a moment too late. */
+  const forgetChecks = (call: ToolCall): void => {
+    if (changesAnything(call, facts)) desk.forget();
+  };
+
   const review = createGuardInterceptor({
     facts,
     relay,
     confirmations,
     timeline: options.timeline,
     planning: () => planning,
+    rules: () => house,
+    world: desk.world,
+    filesMayHaveMoved: forgetChecks,
   });
 
   const runtime = await runtimeFor(agentDir);
@@ -1106,6 +1359,8 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     forHelpers,
     options.thinking,
     options.projectRoot,
+    options.putOnBoard,
+    desk.noting,
   );
 
   /* The anchored edit and its read: the model reads a file, the read's reply
@@ -1170,6 +1425,13 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         return { shell: config.shell, args: config.args };
       },
       writable: shellBounds(options.projectRoot, options.projectRoot).writable,
+      // A door of this copy's own. The project itself keeps the ordinary one,
+      // so the folder somebody is looking at behaves exactly as it always did;
+      // it is the copies that would otherwise collide.
+      port:
+        options.mainFolder !== undefined && options.mainFolder !== options.projectRoot
+          ? PORTS.claim(options.projectRoot)
+          : null,
       ...(options.noteServers === undefined ? {} : { noted: options.noteServers }),
       onChange: () => {
         say({ type: 'running', pieces: keptRunning.list() });
@@ -1180,8 +1442,13 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   /* The plugged-in tool servers (MCP), read from the project's own .pi/mcp.json.
      Nothing starts until the model actually calls one of them, and every call
      travels through the Guard like any other tool call. */
-  const mcpRegistry = new McpRegistry(await readMcpConfig(options.projectRoot));
-  if (mcpRegistry.config.servers.length > 0) {
+  const mcpRegistry = new McpRegistry(
+    inProject(await readMcpConfig(options.projectRoot), options.projectRoot),
+  );
+  // Registered when the list is broken as well as when it is full: a typo in
+  // the file used to mean the model had no tool at all, and so no way to say
+  // why the tools somebody connected were not there.
+  if (mcpRegistry.config.servers.length > 0 || mcpRegistry.config.trouble != null) {
     customTools.push(mcpTool(mcpRegistry));
   }
 
@@ -1511,6 +1778,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       await session.abort();
     },
 
+    get listening(): boolean {
+      if (closed) return false;
+      return session.isStreaming;
+    },
+
     async steer(text: string, images?: readonly ImageCard[]): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
       // Same envelope the prompt makes: nobody outside this file hears the
@@ -1532,6 +1804,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
           ? undefined
           : withPictures.images,
       );
+    },
+
+    forgetChecks(): void {
+      desk.forget();
     },
 
     dispose(): void {
@@ -1665,6 +1941,13 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         // Mid-reply is the ordinary case here, and it is a no, not a failure.
         return null;
       }
+    },
+
+    takeBackQueue(): TakenBack {
+      // A session that is over holds nothing, which is an empty line rather
+      // than a refusal.
+      if (closed) return { ok: true, steering: [], followUp: [] };
+      return takingBack(() => session.clearQueue());
     },
 
     mark(momentId: string, note: string): boolean {

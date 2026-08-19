@@ -42,6 +42,8 @@
   --ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);
   --ease-expo: cubic-bezier(0.19, 1, 0.22, 1);
   --ease-move: cubic-bezier(0.645, 0.045, 0.355, 1);
+  /* For the diagrams: leaves fast, lands almost without arriving. */
+  --ease-settle: cubic-bezier(0.23, 1, 0.32, 1);
 
   --wide: 1240px;
   --full: 1480px;
@@ -149,12 +151,11 @@ a {
   top: 0;
   z-index: 50;
   border-bottom: 1px solid transparent;
-  transition: background-color 240ms ease, border-color 240ms ease, backdrop-filter 240ms ease;
+  transition: background-color 240ms ease, border-color 240ms ease;
 }
 
 .nav.is-stuck {
-  background: rgba(19, 17, 16, 0.72);
-  backdrop-filter: blur(14px) saturate(140%);
+  background: rgba(19, 17, 16, 0.94);
   border-bottom-color: var(--edge);
 }
 
@@ -443,9 +444,16 @@ a {
     rgba(224, 118, 79, 0.07) 42%,
     transparent 72%
   );
-  filter: blur(12px);
   animation: breathe 22s var(--ease-move) infinite;
   pointer-events: none;
+}
+
+/* Off the compositor entirely once it cannot be seen. A decorative glow has no
+   business holding a frame budget while somebody reads the rest of the page. */
+@media (prefers-reduced-motion: reduce) {
+  .glow {
+    animation: none;
+  }
 }
 
 @keyframes breathe {
@@ -647,14 +655,15 @@ a {
   object-position: top center;
   opacity: 0;
   transform: scale(1.012);
-  filter: blur(6px);
-  transition: opacity 380ms var(--ease-out), transform 380ms var(--ease-out), filter 380ms var(--ease-out);
+  /* Fade and scale only. A blur here kept a blurred copy of all four screens
+     alive at once — three of them never visible — and re-ran the filter over a
+     full-size photograph for the whole of every switch. */
+  transition: opacity 380ms var(--ease-out), transform 380ms var(--ease-out);
 }
 
 .screen.is-on {
   opacity: 1;
   transform: scale(1);
-  filter: blur(0);
 }
 
 .stage__cap {
@@ -1094,8 +1103,8 @@ a {
   counter-reset: cell;
   max-width: var(--full);
   margin: 0 auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 1px;
   background: var(--edge);
   border: 1px solid var(--edge);
@@ -1107,6 +1116,7 @@ a {
    whatever the auto grid works out — which at this width was five slots and one
    of them empty. */
 .sheet--four {
+  display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
@@ -1124,6 +1134,10 @@ a {
 
 .cell {
   position: relative;
+  /* Wrapped rather than laid on a grid: a last row short of a full set grows to
+     fill instead of leaving empty slots showing through. */
+  flex: 1 1 268px;
+  min-width: 0;
   background: var(--night);
   padding: 30px 24px 30px;
   transition: background-color 200ms ease;
@@ -1361,6 +1375,540 @@ a {
   color: var(--coral);
 }
 
+/* ──────────────────────────────────────────── diagrams that move ── */
+
+/* Pictures of a mechanism, drawn in the page's own parts. Each one moves once,
+   when it is scrolled to, and then stops: `transform` and `opacity` only, so a
+   diagram costs a compositor and never a layout. Under reduce they are simply
+   drawn finished — the end state is the explanation, the movement only makes
+   the order of it legible. */
+
+.dia {
+  margin: 0;
+  padding: clamp(20px, 3vw, 32px);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--night-raised), var(--night));
+}
+
+.dia__cap {
+  margin-top: clamp(18px, 2.4vw, 26px);
+  padding-top: 15px;
+  border-top: 1px solid var(--edge);
+  color: var(--haze-dim);
+  font-size: 0.75rem;
+  line-height: 1.65;
+}
+
+/* ── one conversation, a different model answering it ── */
+
+.swap {
+  max-width: var(--full);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: clamp(28px, 4vw, 68px);
+  align-items: start;
+}
+
+.swap__points {
+  display: grid;
+  gap: 26px;
+}
+
+.carry__top {
+  display: flex;
+  align-items: center;
+  gap: 16px 20px;
+  flex-wrap: wrap;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--edge);
+}
+
+.carry__what {
+  color: var(--haze-dim);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.carry__swap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-inline-start: auto;
+}
+
+.pill {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 9px;
+  padding: 8px 13px;
+  border: 1px solid var(--edge-strong);
+  border-radius: var(--r-sm);
+  background: var(--night-sunken);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--haze);
+}
+
+.pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--edge-strong);
+}
+
+.pill__who {
+  grid-column: 2;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--haze-dim);
+}
+
+.pill--now {
+  border-color: rgba(224, 118, 79, 0.5);
+  background: var(--coral-soft);
+  color: var(--coral);
+  opacity: 0;
+  transform: translateX(-10px);
+  transition: opacity 240ms var(--ease-settle), transform 240ms var(--ease-settle);
+  transition-delay: 420ms;
+}
+
+.pill--now .pill__dot {
+  background: var(--coral);
+}
+
+.pill--now .pill__who {
+  color: rgba(224, 118, 79, 0.72);
+}
+
+.pill--was {
+  transition: opacity 240ms var(--ease-settle);
+  transition-delay: 420ms;
+}
+
+.carry__arrow {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--edge-strong);
+  opacity: 0;
+  transition: opacity 200ms var(--ease-settle);
+  transition-delay: 300ms;
+}
+
+.is-in .pill--now,
+.is-in .carry__arrow {
+  opacity: 1;
+  transform: none;
+}
+
+.is-in .pill--was {
+  opacity: 0.45;
+}
+
+.carry__body {
+  position: relative;
+  padding-inline-start: 20px;
+  padding-block-start: 20px;
+}
+
+/* The one coral thing in the picture: everything to the right of this line came
+   through the change untouched. */
+.carry__rail {
+  position: absolute;
+  inset-block: 24px 4px;
+  inset-inline-start: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--coral);
+  transform: scaleY(0);
+  transform-origin: top center;
+  transition: transform 620ms var(--ease-settle);
+  transition-delay: 560ms;
+}
+
+.is-in .carry__rail {
+  transform: scaleY(1);
+}
+
+.carry__held {
+  margin: 0 0 14px;
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--coral);
+}
+
+.carry__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 11px;
+}
+
+.carry__rows li {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 4px 16px;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--haze);
+  opacity: 0;
+  transform: translateY(5px);
+  transition: opacity 300ms var(--ease-settle), transform 300ms var(--ease-settle);
+  transition-delay: calc(180ms + var(--n, 0) * 40ms);
+}
+
+.is-in .carry__rows li {
+  opacity: 1;
+  transform: none;
+}
+
+.carry__rows .mono {
+  color: var(--haze-dim);
+  font-size: 0.75rem;
+  line-height: 1.75;
+}
+
+/* ── one request, four copies of the project, one branch back ── */
+
+.fan {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) clamp(28px, 5vw, 64px) minmax(0, 1fr)
+    clamp(28px, 5vw, 64px) minmax(0, 0.85fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 0;
+  row-gap: 14px;
+}
+
+.fan__label {
+  grid-row: 1;
+  align-self: end;
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--haze-dim);
+}
+
+.fan__label--one {
+  grid-column: 1;
+}
+
+.fan__label--many {
+  grid-column: 3;
+  color: var(--coral);
+}
+
+.fan__label--back {
+  grid-column: 5;
+}
+
+.fan__end {
+  grid-row: 2;
+  align-self: center;
+  display: block;
+  padding: 14px 16px;
+  border: 1px solid var(--edge-strong);
+  border-radius: var(--r-md);
+  background: var(--night-sunken);
+  font-size: 0.9375rem;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 300ms var(--ease-settle), transform 300ms var(--ease-settle);
+}
+
+.fan__end--from {
+  grid-column: 1;
+  transition-delay: 0ms;
+}
+
+.fan__end--to {
+  grid-column: 5;
+  transition-delay: 1320ms;
+}
+
+.fan__end .mono {
+  display: block;
+  margin-top: 6px;
+  color: var(--haze-dim);
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
+}
+
+.is-in .fan__end {
+  opacity: 1;
+  transform: none;
+}
+
+/* The wiring. Every line is axis-aligned, so every line is a box that grows
+   along one axis — no stroke to redraw, nothing that costs a layout. */
+.fan__wire {
+  position: relative;
+  grid-row: 2;
+}
+
+.fan__wire--out {
+  grid-column: 2;
+}
+
+.fan__wire--in {
+  grid-column: 4;
+}
+
+.fan__spine,
+.fan__arm,
+.fan__stub {
+  position: absolute;
+  background: var(--edge-strong);
+}
+
+.fan__spine {
+  inset-block: 12.5% 12.5%;
+  inset-inline-start: 50%;
+  width: 1px;
+  transform: scaleY(0);
+  transition: transform 380ms var(--ease-settle);
+}
+
+.fan__stub,
+.fan__arm {
+  height: 1px;
+  width: 50%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 260ms var(--ease-settle);
+}
+
+.fan__stub {
+  top: 50%;
+}
+
+.fan__arm {
+  top: var(--y);
+}
+
+.fan__wire--out .fan__stub {
+  inset-inline-start: 0;
+  transition-delay: 200ms;
+}
+
+.fan__wire--out .fan__spine {
+  transition-delay: 420ms;
+}
+
+.fan__wire--out .fan__arm {
+  inset-inline-start: 50%;
+  transition-delay: calc(200ms + var(--n, 0) * 40ms);
+}
+
+.fan__wire--in .fan__arm {
+  inset-inline-start: 0;
+  transition-delay: calc(280ms + var(--n, 0) * 40ms);
+}
+
+.fan__wire--in .fan__spine {
+  transition-delay: 1180ms;
+}
+
+.fan__wire--in .fan__stub {
+  inset-inline-start: 50%;
+  transition-delay: 1280ms;
+}
+
+.is-in .fan__spine {
+  transform: scaleY(1);
+}
+
+.is-in .fan__arm,
+.is-in .fan__stub {
+  transform: scaleX(1);
+}
+
+/* Zero gap on purpose: the arms above meet each lane at (n + 0.5) / 4 of this
+   column's height, which is only true while the rows are equal and touching.
+   The breathing room is inside each lane instead. */
+.fan__lanes {
+  grid-column: 3;
+  grid-row: 2;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: 0;
+}
+
+.fan__lane {
+  display: flex;
+  align-items: center;
+}
+
+.fan__lane > span {
+  flex: 1;
+  display: block;
+  margin-block: 4px;
+  padding: 9px 14px;
+  border: 1px solid var(--edge);
+  border-inline-start: 2px solid var(--coral);
+  border-radius: var(--r-sm);
+  background: var(--night-sunken);
+  font-size: 0.875rem;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: opacity 280ms var(--ease-settle), transform 280ms var(--ease-settle);
+  transition-delay: calc(220ms + var(--n, 0) * 40ms);
+}
+
+.is-in .fan__lane > span {
+  opacity: 1;
+  transform: none;
+}
+
+.fan__lane .mono {
+  display: block;
+  margin-top: 3px;
+  color: var(--haze-dim);
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
+}
+
+/* ── every tool call goes through the same two things ── */
+
+.dias {
+  max-width: var(--full);
+  margin: 0 auto;
+  display: grid;
+  gap: 20px;
+}
+
+.gate {
+  --link: clamp(14px, 2.4vw, 38px);
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) var(--link) minmax(0, 1fr) var(--link) minmax(0, 1fr) var(--link)
+    minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+}
+
+.gate__step {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 16px 18px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  background: var(--night-sunken);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 280ms var(--ease-settle), transform 280ms var(--ease-settle);
+  transition-delay: calc(var(--n, 0) * 90ms);
+}
+
+.is-in .gate__step {
+  opacity: 1;
+  transform: none;
+}
+
+.gate__step--judged {
+  border-color: rgba(224, 118, 79, 0.5);
+  background: linear-gradient(180deg, var(--coral-soft), var(--night-sunken) 70%);
+}
+
+.gate__step h4 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.gate__step--judged h4 {
+  color: var(--coral);
+}
+
+.gate__step p {
+  color: var(--haze-dim);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.gate__step .mono {
+  color: var(--haze-dim);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.gate__link {
+  align-self: center;
+  justify-self: center;
+  position: relative;
+  width: 100%;
+  height: 1px;
+  background: var(--edge-strong);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 240ms var(--ease-settle);
+  transition-delay: calc(60ms + var(--n, 0) * 90ms);
+}
+
+.is-in .gate__link {
+  transform: scaleX(1);
+}
+
+/* ── the spec sheet ── */
+
+.spec {
+  max-width: var(--full);
+  margin: clamp(40px, 5vw, 68px) auto 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--edge);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.spec li {
+  flex: 1 1 268px;
+  min-width: 0;
+  background: var(--night);
+  padding: 22px 24px;
+}
+
+.spec b {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--coral);
+}
+
+.spec span {
+  color: var(--haze-dim);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
 /* ───────────────────────────────────────────────────────── reveals ── */
 
 .reveal {
@@ -1372,14 +1920,72 @@ a {
   opacity: 1;
   transform: none;
   transition: opacity 620ms var(--ease-out), transform 620ms var(--ease-out);
-  transition-delay: calc(var(--i, 0) * 60ms);
+  transition-delay: calc(var(--i, 0) * 40ms);
 }
 
 /* ──────────────────────────────────────────────────────── narrower ── */
 
+/* The fan is a picture of three stages side by side, and the wiring between
+   them only lines up while the lanes are one tall column. Below that it is the
+   same three stages, read downwards, with the wires taken out rather than
+   redrawn wrong. */
+@media (max-width: 940px) {
+  .fan {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    row-gap: 8px;
+  }
+
+  .fan__wire {
+    display: none;
+  }
+
+  .fan__label,
+  .fan__end,
+  .fan__lanes {
+    grid-row: auto;
+    grid-column: 1;
+  }
+
+  .fan__label:not(:first-child) {
+    margin-top: 16px;
+  }
+
+  .fan__lanes {
+    grid-template-rows: none;
+    gap: 6px;
+  }
+
+  .fan__end--to {
+    transition-delay: 760ms;
+  }
+}
+
+/* Four steps side by side need room for a sentence each; below that they are
+   the same four steps read downwards. */
+@media (max-width: 1080px) {
+  .gate {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gate__link {
+    width: 1px;
+    height: var(--link);
+    justify-self: start;
+    margin-inline-start: 22px;
+    transform: scaleY(0);
+    transform-origin: top center;
+  }
+
+  .is-in .gate__link {
+    transform: scaleY(1);
+  }
+}
+
 @media (max-width: 1000px) {
   .split,
-  .away {
+  .away,
+  .swap {
     grid-template-columns: 1fr;
   }
 
@@ -1424,6 +2030,15 @@ a {
     flex-wrap: wrap;
     gap: 16px;
   }
+
+  .carry__rows li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+  }
+
+  .carry__swap {
+    margin-inline-start: 0;
+  }
 }
 
 /* ─────────────────────────────────────────────────── less movement ── */
@@ -1464,5 +2079,28 @@ a {
   *::before,
   *::after {
     transition-duration: 120ms !important;
+  }
+
+  /* The diagrams, drawn finished. The end state is the explanation; the
+     movement only ever made the order of it legible, and there is no order to
+     read when nothing moves. */
+  .pill--now,
+  .carry__arrow,
+  .carry__rail,
+  .carry__rows li,
+  .fan__end,
+  .fan__lane > span,
+  .fan__spine,
+  .fan__arm,
+  .fan__stub,
+  .gate__step,
+  .gate__link {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+
+  .pill--was {
+    opacity: 0.45 !important;
   }
 }

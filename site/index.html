@@ -6,14 +6,14 @@
     <title>Graphe — send in a team, not a prompt</title>
     <meta
       name="description"
-      content="An agentic coding platform with a real workspace. Helpers in parallel, jobs that run for hours, a plan before anything big, and a design system it reads before it writes. Built on pi."
+      content="An agentic coding platform with a real workspace. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Built on pi."
     />
     <meta name="theme-color" content="#131110" />
 
     <meta property="og:title" content="Graphe — send in a team, not a prompt" />
     <meta
       property="og:description"
-      content="An agentic coding platform with a real workspace. Helpers in parallel, jobs that run for hours, a plan before anything big, and a design system it reads before it writes. Built on pi."
+      content="An agentic coding platform with a real workspace. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Built on pi."
     />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="assets/web/app-start-dark.webp" />
@@ -60,10 +60,10 @@
 
         <nav class="nav__links" aria-label="Sections">
           <a href="#see">What it does</a>
-          <a href="#everything">Everything else</a>
+          <a href="#models">Your models</a>
           <a href="#page">The browser</a>
-          <a href="#how">How it works</a>
           <a href="#pi">Built on pi</a>
+          <a href="#engine">Under the hood</a>
           <a href="#away">Long jobs</a>
         </nav>
 
@@ -99,8 +99,9 @@
 
           <p class="hero__lead reveal" data-reveal style="--i: 2">
             A full coding agent with a workspace around it: helpers in parallel, jobs that run for
-            hours without you, and a design system it reads before it writes. Built on pi — your
-            keys, any model, the meter in plain sight.
+            hours without you, the running page beside the conversation for it to use, and a design
+            system it reads before it writes. Built on pi — every account you already pay for,
+            changed mid-conversation, the meter in plain sight.
           </p>
 
           <div class="hero__actions reveal" data-reveal style="--i: 3">
@@ -111,7 +112,7 @@
           </div>
 
           <p class="hero__fine reveal" data-reveal style="--i: 4">
-            Open source, MIT · Any provider, your own key · Nothing leaves this computer
+            Open source, MIT · Any provider, your own key · macOS
           </p>
         </div>
 
@@ -201,7 +202,7 @@
             <p class="pillar__no mono">01</p>
             <h3>It works in parallel, and it keeps working</h3>
             <p>
-              One request can become a board of pieces — each in its own copy of the project, four
+              One request can become a board of pieces — each in a git worktree of its own, four
               running at once, the rest waiting. Reviewer, researcher, and a builder that writes
               inside a copy of its own. Set a job going and close the window: it carries on, and
               you come back to a board of what finished, what's waiting, and what it cost.
@@ -256,6 +257,116 @@
         </div>
       </section>
 
+      <!-- ─────────────────────────────────── every account you have ── -->
+      <section class="band band--away" id="models">
+        <div class="head">
+          <p class="eyebrow reveal" data-reveal>Every account you already pay for</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1">
+            Change model mid-conversation.<br />Nothing gets left behind.
+          </h2>
+          <p class="head__lead reveal" data-reveal style="--i: 2">
+            Anthropic, OpenAI, Google, OpenRouter, Groq, DeepSeek, Mistral, xAI — connect them
+            once and they all answer in the same window. Which one takes the next message is a
+            chip in the composer row, and changing it starts nothing over.
+          </p>
+        </div>
+
+        <div class="swap">
+          <figure class="dia reveal" data-reveal>
+            <div class="carry">
+              <div class="carry__top">
+                <p class="carry__what mono">One conversation</p>
+                <div class="carry__swap">
+                  <span class="pill pill--was">
+                    <i class="pill__dot" aria-hidden="true"></i>
+                    <span class="pill__name">Fast and cheap</span>
+                    <span class="pill__who">openai</span>
+                  </span>
+                  <svg class="carry__arrow" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <path
+                      d="M3 10h13m-4.6-4.6L16 10l-4.6 4.6"
+                      stroke="currentColor"
+                      stroke-width="1.4"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  <span class="pill pill--now">
+                    <i class="pill__dot" aria-hidden="true"></i>
+                    <span class="pill__name">Best quality</span>
+                    <span class="pill__who">anthropic</span>
+                  </span>
+                </div>
+              </div>
+
+              <div class="carry__body">
+                <span class="carry__rail" aria-hidden="true"></span>
+                <p class="carry__held mono">Still there when the next one answers</p>
+                <ul class="carry__rows">
+                  <li style="--n: 0">
+                    <span class="mono">messages</span>
+                    <span>everything either of you has said, in order</span>
+                  </li>
+                  <li style="--n: 1">
+                    <span class="mono">tool calls</span>
+                    <span>what it ran, and everything that came back</span>
+                  </li>
+                  <li style="--n: 2">
+                    <span class="mono">files read</span>
+                    <span>every file already in the window, each with its fingerprint</span>
+                  </li>
+                  <li style="--n: 3">
+                    <span class="mono">memory</span>
+                    <span>what this project has told it, across every sitting</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <figcaption class="dia__cap">
+              The model is set on the session that is already open — not a new session seeded
+              with a transcript of the old one. Every conversation in the project moves together,
+              so no tab is left answering as something the chip no longer names.
+            </figcaption>
+          </figure>
+
+          <div class="swap__points">
+            <div class="point reveal" data-reveal>
+              <h3>Where your hand already is</h3>
+              <p>
+                The chip sits in the composer row beside Send, not in a settings screen. The cheap
+                one for the small edits and the careful one for the part that matters is a decision
+                you make one message at a time.
+              </p>
+            </div>
+            <div class="point reveal" data-reveal style="--i: 1">
+              <h3>Priced first, then grouped</h3>
+              <p>
+                Fast and cheap, balanced, best quality. The bands come from the rate the provider
+                quotes rather than a hand-kept list of model names — so a model released this
+                morning lands in the right one without anybody editing anything. One press asks
+                the catalogue again, over the network, when something new has landed since.
+              </p>
+            </div>
+            <div class="point reveal" data-reveal style="--i: 2">
+              <h3>Depth, remembered per model</h3>
+              <p>
+                How hard it should think is chosen beside the model and stored against it. Come
+                back to one you used last week and its setting comes back with it.
+              </p>
+            </div>
+            <div class="point reveal" data-reveal style="--i: 3">
+              <h3>Keys you have already pasted once</h3>
+              <p>
+                It reads what opencode and Codex have saved on this machine and offers those
+                accounts at the top. Sign in where the provider allows it, paste a key where it
+                does not — Anthropic's own terms mean its key rather than its sign-in.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ───────────────────────────────────────────── everything else ── -->
       <section class="band" id="everything">
         <div class="head">
@@ -273,7 +384,7 @@
         <div class="sheet reveal" data-reveal>
           <article class="cell">
             <h3>Memory between sittings</h3>
-            <p>Facts kept per project on your machine, ranked by meaning, loaded at the next start.</p>
+            <p>Facts kept per project on your machine, ranked by an embedding that runs here, loaded at the next start.</p>
           </article>
           <article class="cell">
             <h3>Helpers in parallel</h3>
@@ -289,19 +400,11 @@
           </article>
           <article class="cell">
             <h3>Bring your own tools</h3>
-            <p>Your MCP servers plug in through one file. Started on use, stopped with the sitting.</p>
-          </article>
-          <article class="cell">
-            <h3>Papers and PDFs</h3>
-            <p>An arxiv address comes back as words — title, authors, abstract, then page by page.</p>
-          </article>
-          <article class="cell">
-            <h3>Diagrams in the conversation</h3>
-            <p>Mermaid fences become pictures in your own palette, or stay code when they can't.</p>
+            <p>MCP servers over stdio or a listening HTTP address. A panel lists them, checks one on a press, and tells you what it offers — or exactly why it would not start.</p>
           </article>
           <article class="cell">
             <h3>Edits that cannot land blind</h3>
-            <p>A file that changed underneath is refused before a single byte is written.</p>
+            <p>A read carries a fingerprint of the file; an edit names lines and that fingerprint. One that moved underneath is refused before a byte is written.</p>
           </article>
           <article class="cell">
             <h3>Figma, both directions</h3>
@@ -312,48 +415,68 @@
             <p>Phone, tablet, desktop and wide — photographed, so you never decide from one size.</p>
           </article>
           <article class="cell">
-            <h3>Money, in your currency</h3>
-            <p>Every turn accounted for, and a split that separates your work from our own retries.</p>
-          </article>
-          <article class="cell">
-            <h3>Skills off the shelf</h3>
-            <p><span class="mono">@skill</span> brings in craft you installed; <span class="mono">/command</span> expands a prompt you wrote.</p>
+            <h3>What our mistakes cost you</h3>
+            <p>Every turn accounted for in your own currency, split so you can see what your work cost and what our own retries cost. A ceiling you set is enforced against the running total, not guessed at.</p>
           </article>
           <article class="cell">
             <h3>Second thoughts, mid-run</h3>
-            <p>Queue it behind the turn or steer it into the turn. Asked quietly, never an error.</p>
+            <p>Queue it behind the turn or steer it into the turn — asked quietly, never an error. Anything still waiting is not committed to: pull it back into the box and send it when you meant to.</p>
           </article>
           <article class="cell">
-            <h3>History as lines</h3>
-            <p>The whole timeline drawn out — short ids, parents, branches — for when you want it.</p>
+            <h3>Argue with the plan first</h3>
+            <p>Big requests come back as numbered steps. Strike one, move them into the order you want, write a note against any of them — and where the answer would change the list, it asks you two questions before writing one.</p>
           </article>
           <article class="cell">
-            <h3>The folder as a tree</h3>
-            <p>Walk it, see what changed, open anything in the editor you already use.</p>
+            <h3>Name it, mark it, copy it</h3>
+            <p>Name a conversation, mark a moment worth returning to, or take the whole record under a name of its own and try the other direction — with the one you came from still open beside it.</p>
           </article>
           <article class="cell">
-            <h3>Name it, mark it, fork it</h3>
-            <p>Name a conversation, mark a moment worth returning to, fork a direction and try both.</p>
+            <h3>Every line of work, by name</h3>
+            <p>The name in the panel is a button: every line in the project, what each one last did, how far it has run ahead of the one everybody shares — and a fresh one started from where you stand.</p>
           </article>
           <article class="cell">
             <h3>Try it two or three ways</h3>
-            <p>Goes at the same thing finish side by side, with what each cost. Keep one; the rest are thrown away.</p>
+            <p>Each go in a worktree of its own. Then hold them up file by file — who touched what, added and removed, and the part they all changed identically folded into one line. Keep one; the rest are thrown away.</p>
           </article>
           <article class="cell">
-            <h3>How far a change reaches</h3>
-            <p>It names the files a change would touch, and what it would take, before it makes it.</p>
+            <h3>Rules your project writes</h3>
+            <p>A <span class="mono">.pi/rules.json</span> in plain sentences — "ask before anything under <span class="mono">src/design</span>", "nothing goes back with the tests red". They fold into the guard and can only ever make it stricter: there is no word for letting something through.</p>
           </article>
           <article class="cell">
-            <h3>A map of the project</h3>
-            <p>Folders by size, what each reaches into, where the styles are — read before a request is broken up.</p>
+            <h3>A gate, not a gallery</h3>
+            <p>Every change is photographed at each width and counted against the last picture you agreed to — a tenth of the frame, or a third of any one band of it, and the work stops and waits. Saying yes is what moves the mark, so the same change is never questioned twice.</p>
           </article>
           <article class="cell">
             <h3>Checks a project wrote itself</h3>
             <p>One file per check in <span class="mono">.agents/checks</span> — a project says what every review must look at.</p>
           </article>
           <article class="cell">
-            <h3>Copy a conversation</h3>
-            <p>The whole record under a name of its own, opened straight away — no going back, no losing the direction.</p>
+            <h3>A copy that comes home</h3>
+            <p>A second conversation builds in a copy of the project of its own. When what it did is right, bring that work in without leaving the window; when it is not, the copy goes with it rather than being left stranded.</p>
+          </article>
+          <article class="cell">
+            <h3>A read of your code</h3>
+            <p>Go-to-definition, every reference, project-wide rename and the diagnostics your editor shows — driven off the TypeScript compiler API, by symbol name rather than line and column. One press to connect, nothing to install first.</p>
+          </article>
+          <article class="cell">
+            <h3>Say something without stopping it</h3>
+            <p>A job running in the background hears you between tool calls. Not an interrupt — nothing half-finished is thrown away to make room for the sentence.</p>
+          </article>
+          <article class="cell">
+            <h3>What is filling the window</h3>
+            <p>The context gauge opens onto the split: how much is tool output, how much is either of you talking. The total is the model's own usage up to its last reply, reckoned from there; the split is ours alone. The panel says which is which rather than dressing either up as a measurement.</p>
+          </article>
+          <article class="cell">
+            <h3>Keep some of it, not all</h3>
+            <p>A change arrives hunk by hunk. Take the three you wanted; what you left is rebuilt as a reverse patch and applied — after a restore point is written, because that is a real edit.</p>
+          </article>
+          <article class="cell">
+            <h3>A door of its own</h3>
+            <p>Every background copy gets its own dev-server port, hashed from its folder rather than handed out in order — four previews at once, and the same copy back on the same address after a restart.</p>
+          </article>
+          <article class="cell">
+            <h3>Take a stack in order</h3>
+            <p>Work that depends on other work goes in the order it needs, one press. It stops at the first piece that will not sit on what came before, says which file disagreed, and leaves the whole run one version from never having happened.</p>
           </article>
         </div>
       </section>
@@ -362,12 +485,12 @@
         <div class="head">
           <p class="eyebrow reveal" data-reveal>The page lives in the window</p>
           <h2 class="head__title reveal" data-reveal style="--i: 1">
-            A browser, beside the conversation.
+            A browser beside the conversation.<br />It can use the page too.
           </h2>
           <p class="head__lead reveal" data-reveal style="--i: 2">
             Not a screenshot of your work, and not a tab you go and find. The running project sits
-            in the window next to the agent building it — which is what makes the four things below
-            possible at all.
+            in the window next to the agent building it — close enough that it can read the page,
+            press things on it and type into it, once you have said yes to each.
           </p>
         </div>
 
@@ -400,6 +523,37 @@
             <p>
               Phone, tablet and desktop without resizing anything. One press hands the same address
               to Chrome when you want the devtools you already know.
+            </p>
+          </article>
+          <article class="cell">
+            <h3>It can use the page itself</h3>
+            <p>
+              It reads what is on screen, clicks, types and scrolls — in the page sitting beside the
+              conversation, the one you are already looking at, rather than a second browser opened
+              out of sight.
+            </p>
+          </article>
+          <article class="cell">
+            <h3>Nothing pressed without asking</h3>
+            <p>
+              Every click and every line it would type comes to you first, naming what it is about
+              to do. A private key typed into a page is refused outright rather than put to you as a
+              question.
+            </p>
+          </article>
+          <article class="cell">
+            <h3>What the page said when it broke</h3>
+            <p>
+              The messages a page printed and the requests that failed come back as words, with a
+              photograph of the moment — so the bug you can see is one it can read.
+            </p>
+          </article>
+          <article class="cell">
+            <h3>Record me using it</h3>
+            <p>
+              A press in the bar above the page starts recording what you do on it. Walk through the
+              thing that goes wrong, stop, and hand back the states you moved through rather than
+              describing them.
             </p>
           </article>
         </div>
@@ -503,7 +657,6 @@
               <li><span class="mono">Any</span> provider, any model, your own key</li>
               <li><span class="mono">MCP</span> servers and pi extensions, both</li>
               <li><span class="mono">Local</span> memory and embeddings, offline</li>
-              <li><span class="mono">MIT</span> licensed, all of it readable</li>
             </ul>
           </div>
 
@@ -515,27 +668,248 @@
                 <li>Prompt caching engineered, not hoped for</li>
                 <li>Extensions, skills and prompt templates</li>
                 <li>Sessions, branching and compaction</li>
-                <li>Read, write, edit, find, grep, bash</li>
               </ul>
             </div>
 
             <div class="from__side from__side--ours">
               <p class="from__who mono">Graphe adds</p>
               <ul class="from__list">
-                <li>Sub-agents, several at once</li>
-                <li>Plan mode, with what it will cost</li>
-                <li>A window: projects, tabs, rails, two themes</li>
+                <li>Sub-agents and parallel conversations, each in a copy of its own, whose work comes home</li>
+                <li>A plan you reorder, strike and argue with before it runs</li>
+                <li>A browser in the window it can use itself</li>
                 <li>Your design system, read as a spec</li>
-                <li>Version history, with a picture of each change</li>
-                <li>A guard that asks in plain words</li>
+                <li>Every change photographed at every width — and held when the page moved too far</li>
+                <li>A guard that asks in plain words, and rules the project writes into it</li>
                 <li>Background jobs, schedules and servers</li>
                 <li>Code review with a verdict, and the handover</li>
-                <li>Memory between sittings, kept on your machine</li>
+                <li>Memory between sittings</li>
+                <li>Go-to-definition and project-wide rename, over a language server</li>
                 <li>The money, on screen, in your own currency</li>
               </ul>
             </div>
           </div>
         </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────── under the hood ── -->
+      <section class="band" id="engine">
+        <div class="head">
+          <p class="eyebrow reveal" data-reveal>Under the hood</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1">
+            The parts you would want<br />to read the source of.
+          </h2>
+          <p class="head__lead reveal" data-reveal style="--i: 2">
+            Every agent makes claims about isolation, safety and parallelism. Here are ours with
+            the mechanism named — the sandbox profile, the worktrees, the pure policy function, the
+            anchored edits. All of it is MIT, so none of it is a claim you have to take on trust:
+            the file and the line are in the repository, and you can go and read them.
+          </p>
+        </div>
+
+        <div class="dias">
+          <figure class="dia reveal" data-reveal>
+            <div class="fan">
+              <p class="fan__label fan__label--one mono">One request</p>
+              <div class="fan__end fan__end--from">
+                Rebuild the pricing page from the Figma library
+                <span class="mono">your working copy, untouched</span>
+              </div>
+
+              <div class="fan__wire fan__wire--out" aria-hidden="true">
+                <span class="fan__stub"></span>
+                <span class="fan__spine"></span>
+                <span class="fan__arm" style="--y: 12.5%; --n: 0"></span>
+                <span class="fan__arm" style="--y: 37.5%; --n: 1"></span>
+                <span class="fan__arm" style="--y: 62.5%; --n: 2"></span>
+                <span class="fan__arm" style="--y: 87.5%; --n: 3"></span>
+              </div>
+
+              <p class="fan__label fan__label--many mono">git worktree add, four times</p>
+              <ul class="fan__lanes">
+                <li class="fan__lane" style="--n: 0">
+                  <span>The cards<span class="mono">worktree 1 · detached</span></span>
+                </li>
+                <li class="fan__lane" style="--n: 1">
+                  <span>The comparison table<span class="mono">worktree 2 · detached</span></span>
+                </li>
+                <li class="fan__lane" style="--n: 2">
+                  <span>The phone layout<span class="mono">worktree 3 · detached</span></span>
+                </li>
+                <li class="fan__lane" style="--n: 3">
+                  <span>The drifted values<span class="mono">worktree 4 · detached</span></span>
+                </li>
+              </ul>
+
+              <div class="fan__wire fan__wire--in" aria-hidden="true">
+                <span class="fan__arm" style="--y: 12.5%; --n: 0"></span>
+                <span class="fan__arm" style="--y: 37.5%; --n: 1"></span>
+                <span class="fan__arm" style="--y: 62.5%; --n: 2"></span>
+                <span class="fan__arm" style="--y: 87.5%; --n: 3"></span>
+                <span class="fan__spine"></span>
+                <span class="fan__stub"></span>
+              </div>
+
+              <p class="fan__label fan__label--back mono">Back as four decisions</p>
+              <div class="fan__end fan__end--to">
+                Four diffs, taken one at a time
+                <span class="mono">let it in, or set it aside</span>
+              </div>
+            </div>
+
+            <figcaption class="dia__cap">
+              Four at once is the real ceiling, not a figure of speech: eight pieces to a request
+              and four running, the rest waiting. Each piece is a genuine checkout of your
+              repository sharing its history, so nothing a piece does can reach the files you have
+              open — and a piece that fails is one folder to let go of.
+            </figcaption>
+          </figure>
+
+          <figure class="dia reveal" data-reveal>
+            <div class="gate">
+              <div class="gate__step" style="--n: 0">
+                <p class="mono">01 · a tool call</p>
+                <h4>What it wants to do</h4>
+                <p>
+                  One call, with its arguments. Fields the model wrote itself — approved, override,
+                  policy — are read past, not honoured.
+                </p>
+              </div>
+              <span class="gate__link" style="--n: 0" aria-hidden="true"></span>
+
+              <div class="gate__step gate__step--judged" style="--n: 1">
+                <p class="mono">02 · the guard</p>
+                <h4>Judged before it runs</h4>
+                <p>
+                  A pure function with no disk, no clock and no network: allow, ask, snapshot
+                  first, or refuse. A command it does not recognise is never quietly allowed — it
+                  stops and asks you, in a sentence.
+                </p>
+              </div>
+              <span class="gate__link" style="--n: 1" aria-hidden="true"></span>
+
+              <div class="gate__step" style="--n: 2">
+                <p class="mono">03 · the boundary</p>
+                <h4>Run inside a Seatbelt profile</h4>
+                <p>
+                  A macOS sandbox profile built for this run: writes only into the folder it was
+                  handed, the places that hold keys refused outright, nothing leaving the machine
+                  unless the work asked for it — and then only 443. The app proves the boundary by
+                  trying to escape it, and says so out loud where it will not hold.
+                </p>
+              </div>
+              <span class="gate__link" style="--n: 2" aria-hidden="true"></span>
+
+              <div class="gate__step" style="--n: 3">
+                <p class="mono">04 · your project</p>
+                <h4>With a way back</h4>
+                <p>
+                  Anything that could overwrite or delete takes a restore point first — including
+                  when you said yes to it.
+                </p>
+              </div>
+            </div>
+
+            <figcaption class="dia__cap">
+              The same call always gets the same answer, which is what makes the judgement
+              testable against adversarial input rather than merely argued about. It is tested: a
+              file in your project that tells the model to wipe your home directory, and a design
+              file imported with instructions hidden in it, are both cases in the suite.
+            </figcaption>
+          </figure>
+        </div>
+
+        <ul class="spec reveal" data-reveal>
+          <li>
+            <b>git worktree</b>
+            <span>
+              Every parallel conversation, every piece on the board and every write-capable helper
+              is a real <span class="mono">worktree add</span> of your repository. Nothing shares a
+              working copy with anything else.
+            </span>
+          </li>
+          <li>
+            <b>seatbelt</b>
+            <span>
+              Commands run under a generated macOS sandbox profile. Where the boundary cannot hold
+              — another platform, a machine without it — the app says only the guard is watching
+              rather than implying otherwise.
+            </span>
+          </li>
+          <li>
+            <b>hashline</b>
+            <span>
+              A read hands back four hex characters of a hash of the whole file, whitespace
+              canonicalised. An edit names line numbers plus that fingerprint. A file that moved
+              underneath is refused, and one stale anchor in a batch applies none of it.
+            </span>
+          </li>
+          <li>
+            <b>MCP</b>
+            <span>
+              Servers from one <span class="mono">.pi/mcp.json</span> — a command or an address —
+              started on first use and stopped with the sitting. A panel adds one, checks whether
+              it answers, and takes it away again.
+            </span>
+          </li>
+          <li>
+            <b>embeddings</b>
+            <span>
+              Memory is SQLite in wasm, one store per project, ranked by an all-MiniLM-L6-v2
+              embedding that runs on this machine. When the engine will not load, recall falls back
+              to word overlap rather than to silence.
+            </span>
+          </li>
+          <li>
+            <b>sub-agents</b>
+            <span>
+              Four roles. Reviewer, researcher and helper can only read; the builder is the one
+              that writes, and it writes in a copy of its own whose diff is read back when it is
+              done.
+            </span>
+          </li>
+          <li>
+            <b>.agents/checks</b>
+            <span>
+              One markdown file per check. Every review sends a reviewer for each of them
+              alongside the angles that ship with the app, so a project can say what its own
+              reviews must always look at.
+            </span>
+          </li>
+          <li>
+            <b>.agents/skills</b>
+            <span>
+              <span class="mono">SKILL.md</span> files, found by walking up from the project and
+              from your home directory. <span class="mono">@</span> in the composer brings one into
+              the request.
+            </span>
+          </li>
+          <li>
+            <b>OKLab</b>
+            <span>
+              Drift is a hard-coded value close to one of your own tokens without being it —
+              colours compared in OKLab, lengths proportionally, each reported as sure, likely or
+              maybe rather than as a single confident number.
+            </span>
+          </li>
+          <li>
+            <b>six page tools</b>
+            <span>
+              Read the page, click, type, scroll, read what it printed and what failed to load,
+              photograph it. All six act on the same view sitting beside the conversation rather
+              than a headless browser started out of sight. Every press and every keystroke is a
+              guard decision, and a private key in what would be typed is refused rather than
+              asked.
+            </span>
+          </li>
+          <li>
+            <b>isolated world</b>
+            <span>
+              Reads run in an isolated world, so nothing the app injects can collide with the
+              page's own scripts. The view keeps a store of its own and a preload that hands out
+              nothing, which is what keeps a page in the pane from reaching the app around it.
+            </span>
+          </li>
+        </ul>
       </section>
 
       <!-- ───────────────────────────────────────── long-horizon work ── -->
@@ -594,9 +968,9 @@
             <div class="point reveal" data-reveal>
               <h3>Every conversation gets its own copy</h3>
               <p>
-                Two, three, four jobs run at the same time without treading on each other, each in its
-                own checkout, and the work comes home when it is done. Running at once is the point,
-                not a queue.
+                Two, three, four jobs run at the same time without treading on each other, each in a
+                git worktree of its own. Running at once is the point, not a queue — and when one is
+                done you bring its work into the project or throw the copy away.
               </p>
             </div>
             <div class="point reveal" data-reveal style="--i: 1">
@@ -641,13 +1015,14 @@
       <!-- ───────────────────────────────────────────── two audiences ── -->
       <section class="band band--paper" id="both">
         <div class="head">
-          <p class="eyebrow reveal" data-reveal>Both audiences, one app</p>
+          <p class="eyebrow reveal" data-reveal>Nothing hidden</p>
           <h2 class="head__title reveal" data-reveal style="--i: 1">
-            Plain words on top.<br />The real thing underneath.
+            A readable account.<br />And the exact command.
           </h2>
           <p class="head__lead reveal" data-reveal style="--i: 2">
-            A designer never has to learn what a branch is. A developer never has to guess what just
-            happened. It is one switch, in the row where your hand already is.
+            Most agents give you one or the other: a wall of raw tool calls, or a summary that
+            quietly drops what it actually ran. You get both, on one switch in the row where your
+            hand already is — so reviewing a long unattended run does not mean reading a log.
           </p>
         </div>
 
@@ -686,15 +1061,14 @@
       <section class="band band--promises">
         <div class="promises">
           <article class="promise reveal" data-reveal>
-            <h2>Nothing leaves this computer.</h2>
+            <h2>It stays on this machine.</h2>
             <p>
-              Your code, your keys and your pictures stay on the machine. Exactly one feature in the
-              whole app sends anything anywhere, it says so before it does, and it refuses outright if
-              a private key is written into what would be sent.
+              Your code and your keys never leave. Exactly one feature in the whole app sends
+              anything anywhere, and it says so before it does.
             </p>
             <p class="promise__fine mono">
-              deny by default · tested against prompt injection · a snapshot before anything
-              destructive
+              deny by default · a macOS Seatbelt profile · tested against prompt injection · a
+              snapshot before anything destructive
             </p>
           </article>
 
@@ -723,7 +1097,7 @@
             Everything on this page works today — it is what the app does, photographed from the app.
             What beta means here is that the rough edges are mine to find and yours to report: the
             interface still moves, the first release is recent, and the fastest way to change
-            something is to say so. The whole thing is MIT, so nothing about it is a black box.
+            something is to say so.
           </p>
           <div class="where__row">
             <a class="btn btn--ghost btn--small" href="https://github.com/AadiXC0DE/graphe/issues" rel="noopener"

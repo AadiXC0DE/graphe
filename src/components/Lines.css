@@ -1,0 +1,284 @@
+/* The line of work, and the menu that changes it.
+ *
+ * One of the surfaces that says the real word, so it looks like the rest of the
+ * dev-facing panel rather than like the conversation: monospace names, quiet
+ * meta, nothing decorative. */
+
+.lines {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.lines__now {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.lines__now:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.lines__now:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lines__now:hover:not(:disabled) {
+    border-color: var(--text-faint);
+  }
+}
+
+.lines__now:focus-visible,
+.lines__box:focus-visible,
+.lines__one:focus-visible,
+.lines__new:focus-visible,
+.lines__do:focus-visible,
+.lines__quietdo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.lines__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.lines__caret {
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+}
+
+/* The gloss beside the word, for whoever did not come looking for it. */
+.lines__plainly {
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+}
+
+/* ----------------------------------------------------------------- menu -- */
+
+.lines__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 6;
+  width: max-content;
+  min-width: 15rem;
+  max-width: min(22rem, 80vw);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  /* Grows out of the control that opened it. */
+  transform-origin: 0 0;
+  animation: lines-in var(--dur-ui) var(--ease-out-quart);
+}
+
+@keyframes lines-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.lines__list {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.lines__one {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 6px var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.lines__one:disabled {
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lines__one:hover:not(:disabled) {
+    background: var(--bg-sunken);
+  }
+}
+
+.lines__tick {
+  flex: none;
+  width: 12px;
+  color: var(--accent);
+  font-size: var(--text-2xs);
+}
+
+.lines__what {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.lines__oneName {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lines__said,
+.lines__standing {
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lines__standing {
+  flex: none;
+}
+
+.lines__quiet {
+  margin: 0;
+  padding: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ---------------------------------------------------------- a new one --- */
+
+.lines__new {
+  width: 100%;
+  margin-top: var(--space-1);
+  min-height: 30px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.lines__new:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lines__new:hover {
+    color: var(--text);
+    border-color: var(--text-faint);
+  }
+}
+
+.lines__make {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.lines__box {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+}
+
+.lines__refused {
+  margin: 0;
+  color: var(--accent);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+}
+
+.lines__row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.lines__do,
+.lines__quietdo {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.lines__do {
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+.lines__quietdo {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.lines__do:active:not(:disabled),
+.lines__quietdo:active {
+  transform: scale(0.97);
+}
+
+.lines__do:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lines__menu {
+    animation: none;
+  }
+  .lines__now,
+  .lines__one,
+  .lines__new,
+  .lines__do,
+  .lines__quietdo {
+    transition: none;
+  }
+}

@@ -1767,3 +1767,144 @@ describe('a script handed straight to a shell', () => {
     expect(kindOf(bash('ruby -e "puts 1"'))).toBe('deny');
   });
 });
+
+/* ========================================================================== */
+/* Work that runs beside the conversation                                      */
+/* ========================================================================== */
+
+describe('putting work on the board', () => {
+  /* Found in an audit: both tools existed and the Guard had never heard of
+     them, so every fan-out met "Run an instruction I do not fully recognise?"
+     — a question about nothing anybody could answer. */
+  it('asks a question about the thing actually happening', () => {
+    const going = evaluate(call('set_going', { pieces: [{ doing: 'Rebuild the pricing page' }] }), ctx);
+    expect(going.kind).toBe('confirm');
+    expect(spoken(going)).toMatch(/several pieces of work/i);
+    expect(spoken(going)).not.toMatch(/do not fully recognise/i);
+
+    const ways = evaluate(call('try_ways', { doing: 'Rework the hero', ways: ['quiet', 'bold'] }), ctx);
+    expect(ways.kind).toBe('confirm');
+    expect(spoken(ways)).toMatch(/two or three different ways/i);
+  });
+
+  it('says that nothing reaches the project on its own', () => {
+    for (const name of ['set_going', 'try_ways']) {
+      expect(spoken(evaluate(call(name, {}), ctx)), name).toMatch(/your own files/i);
+    }
+  });
+
+  /* A builder writes. Telling somebody it "cannot change anything" was true of
+     the other three roles and false of this one. */
+  it('does not tell somebody a builder cannot change anything', () => {
+    const builder = evaluate(call('task', { task: 'Rebuild the footer', role: 'builder' }), ctx);
+    expect(builder.kind).toBe('confirm');
+    expect(spoken(builder)).toMatch(/its own copy/i);
+    expect(spoken(builder)).not.toMatch(/cannot change anything/i);
+
+    const reader = evaluate(call('task', { task: 'Find the bug', role: 'reviewer' }), ctx);
+    expect(spoken(reader)).toMatch(/cannot change anything/i);
+  });
+});
+
+describe('a tool somebody plugged in, judged by what it is really doing', () => {
+  /** The wrapper used to hide the inner name, so the reading half of a
+   *  connection somebody made deliberately asked permission on every call.
+   *  With a code reader connected that is a modal per go-to-definition, which
+   *  is the difference between a feature being used and being switched off. */
+  const through = (tool: string, server = 'code') => call('mcp', { server, tool });
+
+  it('asks nothing to list what is connected — that starts nothing', () => {
+    expect(kindOf(call('mcp', {}))).toBe('allow');
+    expect(kindOf(call('mcp', { list: true }))).toBe('allow');
+  });
+
+  it('reads code without asking', () => {
+    for (const tool of [
+      'get_definition',
+      'get_references',
+      'get_diagnostics',
+      'get_call_hierarchy',
+      'rename_preview',
+    ]) {
+      expect(kindOf(through(tool))).toBe('allow');
+    }
+  });
+
+  it('reads a design file without asking, which the wrapper used to prevent', () => {
+    expect(kindOf(through('get_design_context', 'figma'))).toBe('allow');
+    expect(kindOf(through('get_variable_defs', 'figma'))).toBe('allow');
+  });
+
+  /** The half that writes is not in any set, so it is unknown — and unknown
+   *  still asks. This is the line the whole relaxation depends on. */
+  it('still asks before anything that writes', () => {
+    for (const tool of ['rename_symbol', 'apply_code_fix', 'organize_imports', 'format_document']) {
+      expect(kindOf(through(tool))).toBe('confirm');
+    }
+  });
+
+  it('names the tool and the server it is really about', () => {
+    const said = evaluate(through('rename_symbol'), ctx);
+    expect(said.kind).toBe('confirm');
+    const words = JSON.stringify(said);
+    expect(words).toContain('rename_symbol');
+    expect(words).toContain('code');
+    expect(words).not.toContain('Run this through the plugged-in tool?');
+  });
+
+  /** The switch check used to run on the outer name, which for a wrapped call
+   *  is always the literal `mcp` — so a connected tool called `disable_safety`
+   *  earned a question somebody could say yes to, where the same name called
+   *  directly is refused outright. It is refused either way now. */
+  it('refuses a connected tool that reaches for the guard\u2019s own switches', () => {
+    for (const named of [
+      'disable_safety',
+      'bypass_guard',
+      'set_permission_policy',
+      'yolo',
+      'get_definition_and_disable_policy',
+    ]) {
+      expect(kindOf(through(named)), named).toBe('deny');
+    }
+    // And the same refusal the name would earn on its own.
+    expect(kindOf(call('disable_safety'))).toBe('deny');
+  });
+
+  /** A `tool` that is present but unreadable — a blank string, a list, an
+   *  object — is a call whose name nobody can check, which is the opposite of
+   *  nothing to check. It used to fall through the same door as "list what is
+   *  connected" and be allowed. */
+  it('does not treat an unnameable tool as nothing to check', () => {
+    for (const odd of ['', '   ', ['get_definition'], { name: 'get_definition' }, 7]) {
+      expect(kindOf(call('mcp', { server: 'code', tool: odd })), JSON.stringify(odd)).toBe('confirm');
+    }
+  });
+
+  /** A read still carries whatever the model put in its arguments, and a
+   *  connected tool is somebody else's program on the other end. */
+  it('will not send a key out through an allowed read', () => {
+    expect(
+      kindOf(
+        call('mcp', {
+          server: 'code',
+          tool: 'get_definition',
+          args: { note: 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+        }),
+      ),
+    ).toBe('deny');
+  });
+});
+
+describe('the app\u2019s own reading tools', () => {
+  /** Both read and report; neither writes. They were in no set, so they fell to
+   *  the unknown-command rule and every review opened by asking permission to
+   *  run a tool this app ships itself. */
+  it('does not ask permission to read the project', () => {
+    expect(kindOf(call('read_map', {}))).toBe('allow');
+    expect(kindOf(call('run_checks', { target: 'working' }))).toBe('allow');
+  });
+
+  it('still refuses anything reaching for the switches, whatever it is called', () => {
+    expect(kindOf(call('read_map_and_disable_policy', {}))).toBe('deny');
+  });
+});

@@ -223,6 +223,8 @@ const SAY = {
     "This would put a private key into a file that gets sent to everyone who opens your site, so anyone could copy it and run up charges on your account. I've stopped it. Save it as a project secret and I will read it from there.",
   sendKeyOut:
     "This would send one of your private keys out to another website. I've stopped it.",
+  keyIntoPage:
+    "This would type one of your private keys into the page you have open, and that page can keep it and pass it anywhere. I've stopped it. Save it as a project secret and I will read it from there.",
   elsewhere:
     "This would work on another copy of your project instead of the one I'm in, and I can't tell what it would change over there. I've stopped it.",
   pointedElsewhere:
@@ -247,7 +249,13 @@ const SAY = {
  *  branches ever part company. A read left out of them falls to the
  *  deny-by-default floor and starts asking permission, which is how `find`
  *  behaved until it was listed here. */
-const READ_TOOLS = new Set(['read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff']);
+/* `readmap` and `runchecks` read the project and say what they found — a map of
+   the folders, and the project's own standards read against a change. Both were
+   falling through to the unknown-command question, so every review opened with
+   "run an instruction I do not fully recognise?" about our own tool. */
+const READ_TOOLS = new Set([
+  'read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff', 'readmap', 'runchecks',
+]);
 /** Pi's `find` is `glob` under another name: it runs `fd` and returns file names
  *  without opening any of them. The shell command of the same word is a
  *  different program entirely — see `judgeFind`. */
@@ -340,6 +348,76 @@ const DESIGN_READ_TOOLS = new Set([
   'browsersnapshot',
   'browserconsolemessages',
 ]);
+
+/** The reading half of a code-reading tool, on the same terms as the design
+ *  reads above: somebody connected it deliberately, and a model asks these
+ *  dozens of times to answer one question. Nothing here writes — a rename or a
+ *  fix is not in this set, so it stays unknown, and unknown still asks. */
+const CODE_READ_TOOLS = new Set([
+  'getdefinition',
+  'gettypedefinition',
+  'getreferences',
+  'getimplementations',
+  'getcallhierarchy',
+  'gettypehierarchy',
+  'gethover',
+  'getsignature',
+  'getcompletions',
+  'getsymbols',
+  'getworkspacesymbols',
+  'getoutline',
+  'getimports',
+  'getdiagnostics',
+  'getalldiagnostics',
+  'getmoduledependencies',
+  'getcodefixes',
+  'renamepreview',
+  'analyzeposition',
+  'batchanalyze',
+  'calculatemetrics',
+  'detectduplication',
+  'findindirectionhotspots',
+  'qualityreport',
+]);
+/**
+ * Reading the page beside the conversation.
+ *
+ * Allowed, on the same terms as the design reads above and for a stronger
+ * reason: the page is already loaded, already on screen, and already the
+ * person's own. Nothing here sends a request, changes a pixel or touches a
+ * file — it looks at what is in front of both of us. A question on every
+ * reading would be a question during every glance at a page a model needs to
+ * read a dozen times to fix one row of navigation.
+ *
+ * What it does do is bring the page's own words into the conversation, and a
+ * page can say anything. That is the same footing as a fetched page or a file
+ * in the project, and it is answered the same way: nothing the model reads is
+ * an input to this file, so what a page says cannot change what is allowed.
+ */
+const PAGE_READ_TOOLS = new Set(['pageread', 'pagetrouble', 'pagepicture']);
+
+/**
+ * Scrolling that page.
+ *
+ * Not a read, and still silent. It moves what is in view and changes nothing
+ * else: no data, no request anybody asked for, nothing that outlives scrolling
+ * back. Reading a long page is many scrolls, and a question asked once per
+ * screenful is the exact shape of the fatigue that created "Accept All".
+ */
+const PAGE_MOVE_TOOLS = new Set(['pagescroll']);
+
+/**
+ * Pressing and typing on that page.
+ *
+ * These always ask. The page is somebody's live site, not a copy: a press can
+ * send an order, empty a basket or delete an account, and typing can put words
+ * in front of a stranger. None of it is a file, so none of it is anything a
+ * restore point can put back — which is exactly why the question is the whole
+ * of the protection here, and why no rung of the ladder below `doing` is
+ * allowed to skip it.
+ */
+const PAGE_ACT_TOOLS = new Set(['pageclick', 'pagetype']);
+
 /** Anything that sounds like it is reaching for the Guard's own switches. */
 const GUARD_SWITCH = /(permission|policy|guard|approval|approve|allowlist|whitelist|yolo|autorun|bypass|unsafe|disablesafety)/;
 
@@ -659,6 +737,17 @@ function collectText(input: Record<string, unknown>): string {
  *  web, `task` briefs the helper — a key hiding in either travels exactly as
  *  far as one hiding in file contents, so both are worth the same look. */
 const OUTGOING_KEYS = ['query', 'question', 'q', 'task', 'instructions', 'prompt', 'description', 'message'];
+
+/** Every string inside a value, however it is nested. Used where a tool's
+ *  payload is a free-form bag rather than a named field. */
+function asText(value: unknown): string {
+  try {
+    return typeof value === 'string' ? value : JSON.stringify(value) ?? '';
+  } catch {
+    // Circular, or something that will not serialise. Nothing readable in it.
+    return '';
+  }
+}
 
 function payloadText(input: Record<string, unknown>): string {
   const payload = readString(input, OUTGOING_KEYS);
@@ -1800,10 +1889,43 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     // The task text travels to a fresh process and, through it, maybe the web.
     const outbound = payloadText(input);
     if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
+    // A builder is the one helper that writes, and it writes only inside a copy
+    // of the project made for it. Telling somebody it "cannot change anything"
+    // was true of the other three and false of this one.
+    const builds = (readString(input, ['role']) ?? '').trim().toLowerCase() === 'builder';
+    if (builds) {
+      return ask(
+        'Send a piece of work to a helper that builds?',
+        'I start a fresh helper with its own copy of the project. It makes the change there and hands back what it changed; your own files are untouched until you take it.',
+        'It costs a little more, and nothing it does reaches your project on its own.',
+        { mutates: false },
+      );
+    }
     return ask(
       'Send a piece of work to a helper?',
       'I start a fresh helper with its own clean memory. It can read the project and search the web, and it cannot change anything.',
       'It costs a little more, and its findings come back to this conversation.',
+      { mutates: false },
+    );
+  }
+
+  /* Putting work on the board. Nothing happens to the project here — each piece
+     runs in a copy of its own and waits for somebody to take it — so this is one
+     question about starting work, not one question per file it will touch. */
+  if (name === 'setgoing') {
+    return ask(
+      'Set several pieces of work going at once?',
+      'Each one gets its own copy of your project and its own agent. They run in the background, four at a time.',
+      'Nothing reaches your own files until you take one.',
+      { mutates: false },
+    );
+  }
+
+  if (name === 'tryways') {
+    return ask(
+      'Make this two or three different ways?',
+      'Each way is made in its own copy of your project, so they can be compared side by side.',
+      'Keeping one throws the others away, and nothing reaches your own files until you keep one.',
       { mutates: false },
     );
   }
@@ -1835,6 +1957,40 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
 
   if (DESIGN_READ_TOOLS.has(name)) return allow();
 
+  /* The page beside the conversation. Reading and scrolling it are silent;
+     pressing and typing in it are the one place in this file where the thing
+     at risk is not a file at all. */
+  if (PAGE_READ_TOOLS.has(name) || PAGE_MOVE_TOOLS.has(name)) return allow();
+
+  if (PAGE_ACT_TOOLS.has(name)) {
+    // Words typed into somebody's own site go wherever that site sends them,
+    // and a page is the one place a key can leave without a request that looks
+    // like one. Checked before the question, so this is a refusal rather than
+    // something anybody can say yes to in a hurry.
+    const typing = name === 'pagetype';
+    if (typing) {
+      const words = collectText(input);
+      if (findSecret(words) !== null || findKnownSecret(words, ctx)) return deny(SAY.keyIntoPage);
+    }
+    const sending = input['submit'] === true;
+    if (!typing) {
+      return ask(
+        'Press this on the page you are looking at?',
+        'I press it on your own page, in the panel beside us, and it behaves exactly as it would under your own finger.',
+        'A press on a live page can send a form, buy something or delete something, and I cannot take that back.',
+      );
+    }
+    return ask(
+      sending ? 'Type this into your page and send it?' : 'Type this into the page you are looking at?',
+      sending
+        ? 'I put the words into the box on your own page and then send the form, in the panel beside us.'
+        : 'I put the words into the box on your own page, in the panel beside us. Nothing is sent unless I am asked to send it.',
+      sending
+        ? 'Sending it can order something, sign you up or write to somebody, and I cannot take that back.'
+        : 'The page sees every word as it goes in, and can act on it before anything is sent.',
+    );
+  }
+
   if (MEMORY_TOOLS.has(name)) {
     // Memory takes ids and words, never paths, so there is nothing to check
     // outside the project for. It stays a read of the app's own notes.
@@ -1842,12 +1998,50 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   }
 
   if (name === 'mcp') {
-    // A plugged-in tool runs with its own powers, and the call may
-    // change anything it can change. Same shape as the task question:
-    // a plain sentence, answered once per call.
+    const asked = input['tool'];
+    const inner = readString(input, ['tool']);
+    const server = readString(input, ['server']);
+
+    // Asking what is connected starts nothing and reads no file. Tested on the
+    // field being genuinely absent rather than on the name being unreadable: a
+    // `tool` that is a blank string, a list or an object is a call with a name
+    // nobody can check, and that is the opposite of nothing to check.
+    if (asked === undefined || asked === null) return allow();
+    if (inner === null) {
+      return ask(
+        'Let a connected tool do something I cannot name?',
+        'The request did not say which tool to run, so I cannot tell you what it would do.',
+        'A tool this app cannot name is one it cannot vouch for.',
+        { mutates: true },
+      );
+    }
+
+    const which = normalizeToolName(inner);
+
+    // The switch check applies to the name that will really be run. On the way
+    // in it only ever saw `mcp`, so a connected tool called `disable_safety`
+    // earned a question somebody could say yes to instead of a refusal.
+    if (GUARD_SWITCH.test(which)) return deny(SAY.guardOff);
+
+    // The wrapper was hiding the name, so the reading half of a connected tool
+    // asked on every call — the sets below were unreachable through it, and a
+    // question asked forty times is a question nobody reads by the fortieth.
+    if (DESIGN_READ_TOOLS.has(which) || CODE_READ_TOOLS.has(which)) {
+      // A read still carries whatever the model put in its arguments, and a
+      // connected tool is somebody else's program. The same check the web and
+      // the helpers get, rather than a free pass earned by the name.
+      // What a connected tool is handed lives under `args`, which none of the
+      // usual content keys name — so the ordinary sweep looked straight past it.
+      const outbound = `${payloadText(input)}\n${asText(input['args'])}`;
+      if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
+      return allow();
+    }
+
+    // Everything else keeps its question, and now says what it is really about.
+    const named = server === null ? 'the tool you connected' : server;
     return ask(
-      'Run this through the plugged-in tool?',
-      'I start the tool you connected and ask it to do this, then bring back what it answers.',
+      `Let ${named} do this?`,
+      `I ask ${named} to run “${inner}” and bring back what it answers.`,
       'The connected tool has its own powers, so this can change things on its side.',
       { mutates: true },
     );
@@ -1931,10 +2125,16 @@ function withoutQuestions(judgement: Judgement, ctx: GuardFacts): Judgement {
 }
 
 /** Reaching out or running something: the line the middle rung draws, and the
- *  one people actually feel. Changing a file is undoable; a command is not. */
+ *  one people actually feel. Changing a file is undoable; a command is not.
+ *
+ *  Pressing and typing on somebody's live page belong on this side of the line
+ *  even though no command runs. A press is how a page reaches the internet, and
+ *  what it does out there is as far past undoing as anything a shell can do. */
 function leavesTheFiles(call: ToolCall): boolean {
   const name = normalizeToolName(call.name);
-  return SHELL_TOOLS.has(name) || NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name);
+  return (
+    SHELL_TOOLS.has(name) || NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name) || PAGE_ACT_TOOLS.has(name)
+  );
 }
 
 /**
@@ -2019,4 +2219,66 @@ export function requiresSnapshot(call: ToolCall, ctx: GuardFacts): boolean {
  */
 export function changesAnything(call: ToolCall, ctx: GuardFacts): boolean {
   return judge(call, ctx).mutates;
+}
+
+/* -------------------------------------------------------------------------- */
+/* What a second opinion may do to this one                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The one ordering of verdicts in the codebase.
+ *
+ * Anything that layers its own opinion on the Guard's folds the two through
+ * here, so a layer can only ever tighten. On a tie the first argument keeps its
+ * words, and the Guard is always the first argument — a refusal it wrote is the
+ * refusal the user reads.
+ */
+export function stricter(first: Verdict, second: Verdict): Verdict {
+  return STRICTNESS[second.kind] > STRICTNESS[first.kind] ? second : first;
+}
+
+/** What a call does, in the words a project writes its own rules in. */
+export type CallDoes =
+  | 'reads'
+  | 'changes files'
+  | 'deletes something'
+  | 'runs a command'
+  | 'reaches the internet'
+  | 'something else';
+
+/** One call, reduced to the three things a project rule can match on. */
+export type CallShape = {
+  does: CallDoes;
+  /** Every location the call named, as it named it. */
+  paths: readonly string[];
+  /** The command, the query and anything being written, flattened for word matching. */
+  text: string;
+};
+
+/**
+ * Sort one call into the handful of kinds a person can hold an opinion about.
+ *
+ * Deliberately the Guard's own tool lists rather than a second set beside them:
+ * a project rule about "anything that runs a command" has to mean the same
+ * calls the Guard means by it, or the two drift and only one of them is tested.
+ */
+export function describeCall(call: ToolCall): CallShape {
+  const name = normalizeToolName(call.name);
+  const input = call.input ?? {};
+  const command = readString(input, COMMAND_KEYS);
+  const text = [command, readString(input, SQL_KEYS), readString(input, URL_KEYS), payloadText(input)]
+    .filter((part): part is string => part !== null && part !== '')
+    .join('\n');
+
+  const does = ((): CallDoes => {
+    if (SHELL_TOOLS.has(name) || SQL_TOOLS.has(name)) return 'runs a command';
+    if (NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name)) return 'reaches the internet';
+    if (DELETE_TOOLS.has(name)) return 'deletes something';
+    if (WRITE_TOOLS.has(name)) return 'changes files';
+    if (READ_TOOLS.has(name) || LIST_TOOLS.has(name) || SEARCH_TOOLS.has(name)) return 'reads';
+    if (DESIGN_READ_TOOLS.has(name) || CODE_READ_TOOLS.has(name) || PAGE_READ_TOOLS.has(name)) return 'reads';
+    return 'something else';
+  })();
+
+  return { does, paths: collectPaths(input), text };
 }

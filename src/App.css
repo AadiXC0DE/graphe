@@ -224,7 +224,12 @@
 .app__composer {
   position: sticky;
   bottom: 0;
-  z-index: 1;
+  /* Above the overview rail, which is fixed at 2. Sticky with a z-index makes
+     this a stacking context, so every menu that grows out of the composer — the
+     model list, the skills list — is trapped at whatever number sits here,
+     however high its own z-index is. At 1 the rail painted straight over the
+     model list. Below the sheets at 5: a full-screen view still covers this. */
+  z-index: 3;
   /* The bottom edge of the window, whatever the thread above is doing. The auto
      margin eats the slack of a short conversation so the box sits on the glass
      rather than half way up it; `sticky` holds it there once the thread is long

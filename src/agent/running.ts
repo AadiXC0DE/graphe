@@ -26,6 +26,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 
+import { portEnv } from '../work/ports';
 import { hold } from './sandbox';
 import type { Bounds } from './sandbox/profile';
 import type { RunningPiece } from './types';
@@ -109,6 +110,9 @@ export type StartOptions = {
   parts: { shell: string; args: readonly string[] };
   /** Where it may write. The reach is always `serving` — that is what this is. */
   writable: readonly string[];
+  /** The door this copy of the project owns. Told to the process so whatever
+   *  it runs picks it up, instead of four copies all asking for the same one. */
+  port?: number | null;
   /** How long to wait for it to say where it is. */
   settle?: number;
   /** Told whenever a piece changes, so a window can redraw without asking. */
@@ -178,7 +182,12 @@ export class Running {
 
     const child = spawn(program ?? options.parts.shell, args, {
       cwd: options.folder,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: {
+        ...process.env,
+        FORCE_COLOR: '0',
+        NO_COLOR: '1',
+        ...(options.port == null ? {} : portEnv(options.port)),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       // Its own group, so stopping it stops what it started. A dev server is

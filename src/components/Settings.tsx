@@ -3,6 +3,7 @@ import './Settings.css';
 
 export type SettingsLink =
   | 'skills'
+  | 'connected'
   | 'add-more'
   | 'usage'
   | 'show-me'
@@ -35,6 +36,12 @@ const LINKS: readonly (
     id: 'skills',
     name: 'Skills',
     note: 'Craft you can call up with @ in a message.',
+    kind: 'go',
+  },
+  {
+    id: 'connected',
+    name: 'Other tools',
+    note: 'The design files, databases and services this project can reach.',
     kind: 'go',
   },
   {

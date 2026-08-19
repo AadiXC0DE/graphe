@@ -37,6 +37,13 @@ type ConfirmVerdict = Extract<Verdict, { kind: 'confirm' }>;
 
 type Fields = Readonly<Record<string, unknown>>;
 
+/** A list of plain strings off an untrusted record, defensively. */
+function wordsIn(source: Fields, key: string): readonly string[] {
+  const value = source[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((one): one is string => typeof one === 'string');
+}
+
 function fieldsOf(value: unknown): Fields | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Fields;
@@ -113,6 +120,16 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
       return {
         type: 'tidied',
         ok: flagAt(source, 'aborted') !== true && textAt(source, 'errorMessage') === null,
+      };
+
+    /* What is waiting behind the run, as pi holds it. The window has no other
+       way to know: a queued message is handed straight to pi, and until this
+       arrived there was nothing to draw and nothing to take back. */
+    case 'queue_update':
+      return {
+        type: 'queued',
+        steering: wordsIn(source, 'steering'),
+        followUp: wordsIn(source, 'followUp'),
       };
 
     case 'agent_settled':

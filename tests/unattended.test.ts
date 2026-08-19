@@ -74,7 +74,7 @@ describe('U-01 a waiting question is never answered on its own', () => {
       { type: 'tool-progress', id: 'other', text: 'reading' },
       { type: 'tool-end', id: 'other', ok: true },
       { type: 'planning' },
-      { type: 'planned', steps: ['do it'], caveats: [] },
+      { type: 'planned', steps: ['do it'], caveats: [], questions: []  },
       { type: 'tidying' },
       { type: 'tidied', ok: true },
       { type: 'error', message: 'Something went wrong.' },

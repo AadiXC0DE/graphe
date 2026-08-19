@@ -24,6 +24,7 @@ import {
   Confirmations,
   createGuardInterceptor,
   createSession,
+  takingBack,
   type Decision,
   type Interception,
   type SnapshotSource,
@@ -523,13 +524,41 @@ describe('translating one event', () => {
       { type: 'agent_start' },
       { type: 'agent_end', messages: [] },
       { type: 'turn_start' },
-      { type: 'queue_update', steering: [], followUp: [] },
       // Pi announces a tool call before the Guard has decided about it. Ours
       // comes from the Guard instead, so this one is dropped on purpose.
       { type: 'tool_execution_start', toolCallId: 'c1', toolName: 'bash', args: {} },
     ]) {
       expect(translatePiEvent(event)).toBeNull();
     }
+  });
+
+  /* What is waiting behind the run. It used to be dropped, which is why the
+     window could not draw the line or offer to take it back — a queued message
+     was handed to the agent and then existed nowhere anybody could see. */
+  it('carries what is waiting behind the run', () => {
+    expect(
+      translatePiEvent({
+        type: 'queue_update',
+        steering: ['do the footer first'],
+        followUp: ['then the header'],
+      }),
+    ).toEqual({ type: 'queued', steering: ['do the footer first'], followUp: ['then the header'] });
+  });
+
+  it('says an empty line is an empty line, rather than nothing at all', () => {
+    // The difference matters: nothing means "the queue did not speak", and the
+    // window would keep drawing a line that is no longer there.
+    expect(translatePiEvent({ type: 'queue_update', steering: [], followUp: [] })).toEqual({
+      type: 'queued',
+      steering: [],
+      followUp: [],
+    });
+  });
+
+  it('keeps only the words, whatever else arrives in the list', () => {
+    expect(
+      translatePiEvent({ type: 'queue_update', steering: ['keep', 7, null], followUp: 'not a list' }),
+    ).toEqual({ type: 'queued', steering: ['keep'], followUp: [] });
   });
 
   it('does not fall over on a payload that changed shape underneath us', () => {
@@ -803,5 +832,49 @@ describe('the interception point', () => {
     // no path here that can refuse a call, and it only ever sees extension
     // tools — never bash, read, write or edit.
     expect(wrapper).toContain('const result = await execute(');
+  });
+});
+
+/**
+ * A queue that would not come back was reported as an empty one.
+ *
+ * The throw was swallowed and the answer was `{ steering: [], followUp: [] }` —
+ * the same answer as "nothing was queued". The window read that as done and
+ * cleared the line off the screen, while the agent still held every word of it.
+ */
+describe('taking the line back out of the agent\'s hands', () => {
+  it('hands back what was queued, in the order it was queued', () => {
+    const taken = takingBack(() => ({ steering: ['stop that'], followUp: ['then this'] }));
+    expect(taken).toEqual({ ok: true, steering: ['stop that'], followUp: ['then this'] });
+  });
+
+  it('says an empty line is empty', () => {
+    expect(takingBack(() => ({ steering: [], followUp: [] }))).toEqual({
+      ok: true,
+      steering: [],
+      followUp: [],
+    });
+  });
+
+  it('does not report a refusal as an empty line', () => {
+    // WHY: this is the whole defect. Both answers used to be the same object,
+    // so the only thing that can be asserted is that they now differ — and that
+    // the failing one carries a reason.
+    const refused = takingBack(() => {
+      throw new Error('the run is between steps');
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.because).toBe('the run is between steps');
+    expect(refused).not.toEqual(takingBack(() => ({ steering: [], followUp: [] })));
+  });
+
+  it('still has words for something thrown that was never an error', () => {
+    const refused = takingBack(() => {
+      throw 'nope';
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.because.trim()).not.toBe('');
   });
 });

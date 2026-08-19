@@ -26,6 +26,7 @@ import Away from '../components/Away';
 import Running from '../components/Running';
 import InStep from '../components/InStep';
 import Landing from '../components/Landing';
+import { gateOf, USUAL } from '../design/gate';
 import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
 import DesignView from '../components/DesignView';
@@ -584,6 +585,27 @@ const HELD: Held = {
     },
   ],
   note: null,
+  // A page that moved a little, one nobody has a picture for yet, and one that
+  // would not build — the three answers a width can come back with.
+  changes: [
+    {
+      kind: 'compared',
+      id: 'phone',
+      name: 'Phone',
+      width: 390,
+      changed: 4_800,
+      pixels: 329_160,
+      bands: [0, 0, 3_100, 1_700, 0, 0, 0, 0],
+    },
+    { kind: 'first', id: 'desktop', name: 'Desktop', width: 1440 },
+    {
+      kind: 'nopicture',
+      id: 'wide',
+      name: 'Wide',
+      width: 1920,
+      why: 'The project would not build at this width.',
+    },
+  ],
 };
 
 const LANDING: LandingState = {
@@ -648,7 +670,7 @@ const AWAY: AwayState = {
       says: 'One big line, everything else out of the way.',
       trouble: null,
       spent: inr(1900),
-      oneOf: { of: 2, at: 1 },
+      oneOf: { of: 2, at: 1, named: 'the hero' },
       question: null,
     },
     {
@@ -660,7 +682,7 @@ const AWAY: AwayState = {
       says: 'The photograph full width with the words over it.',
       trouble: null,
       spent: inr(2100),
-      oneOf: { of: 2, at: 2 },
+      oneOf: { of: 2, at: 2, named: 'the hero' },
       question: null,
     },
     {
@@ -788,6 +810,28 @@ const SPENT: SpendView = {
 /** The provider list, built with the same shapes src/agent/pi sends: two
  *  connected or connectable accounts with their real method labels, and a
  *  Google that has no account yet and no way to get one from here. */
+/** The same accounts, with a text-only model actually chosen — the state the
+ *  composer has to say something about when there is a picture in the box. */
+const READS_ONLY_WORDS: ConnectionState = {
+  chosen: { providerId: 'anthropic', modelId: 'words-only' },
+  chosenThinking: 'off',
+  providers: [
+    {
+      providerId: 'anthropic',
+      name: 'Anthropic',
+      methods: ['oauth', 'api-key'],
+      oauthLabel: 'Sign in with Claude Pro or Max',
+      apiKeyLabel: 'Anthropic API key',
+      connected: true,
+      available: true,
+      subscription: false,
+      models: [
+        { id: 'words-only', label: 'Quick 1', available: true, rates: { input: 1, output: 3 }, contextWindow: 200000, thinking: ['off'], takesImages: false },
+      ],
+    },
+  ],
+};
+
 const CONNECT_STATE: ConnectionState = {
   chosen: null,
   chosenThinking: 'off',
@@ -802,7 +846,7 @@ const CONNECT_STATE: ConnectionState = {
       available: true,
       subscription: false,
       models: [
-        { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
+        { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5', available: true, rates: { input: 3, output: 15 }, contextWindow: 1000000, thinking: ['off', 'minimal', 'low', 'medium', 'high'], takesImages: true },
         { id: 'claude-opus-4-5', label: 'Opus 4.5', available: false, rates: { input: 5, output: 25 }, contextWindow: 200000, thinking: ['off', 'minimal', 'low', 'medium', 'high'] },
       ],
     },
@@ -1463,7 +1507,26 @@ export default function Gallery() {
                 howFar={howFar}
                 onHowFar={setHowFar}
               />
+              <Composer
+                anywhere={false}
+                outLoud={false}
+                onSend={noop}
+                attachments={ATTACHED}
+                onAttachmentsChange={noop}
+                connection={READS_ONLY_WORDS}
+                onSelectModel={noop}
+                onConnect={noop}
+                howFar="asking"
+                onHowFar={noop}
+              />
             </div>
+            <p className="gallery__caption">
+              The second one is the same box with a picture in it and a model chosen that reads
+              only words. It is said at the moment the picture goes in rather than after a turn
+              has been spent on it — the provider's own refusal arrives as a wall of JSON several
+              seconds later, and by then the money is gone. The picture stays where it is, so
+              switching model and pressing again is the whole of the fix.
+            </p>
             <p className="gallery__caption">
               The chip on the left of the row says which model is answering, and opens the whole
               list of models that account can actually use. It is the one piece of the machinery
@@ -1708,11 +1771,14 @@ export default function Gallery() {
                   away: AWAY,
                   elsewhere: AWAY_ELSEWHERE,
                   project: 'paper-street',
+                  gate: gateOf(HELD.changes),
+                  howMuch: USUAL.id,
                   clock: NOW,
                 }}
                 onPutBack={noop}
                 onName={noop}
                 onKeep={noop}
+                onHowMuch={noop}
                 onDismissPutBack={noop}
                 onShowSplit={noop}
             onLimit={noop}
@@ -1848,6 +1914,9 @@ onCreateBranch={() => {}}
                 outcome={null}
                 decided={null}
                 onDecide={noop}
+                gate={gateOf(HELD.changes)}
+                howMuch={USUAL.id}
+                onHowMuch={noop}
                 onUndo={noop}
                 onHandOver={noop}
                 onShare={noop}
@@ -2017,6 +2086,7 @@ vite v6.0.5 building for production...
       {/* Mounted exactly as the app mounts it, so what is reviewed here is what
           ships: the backdrop, the panel, the found rows, the whole thing. */}
       <ConnectModal
+        onRefresh={noop}
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
         state={CONNECT_STATE}
@@ -2034,6 +2104,8 @@ vite v6.0.5 building for production...
       />
 
       <AddMore
+        onConnect={noop}
+        onDisconnect={noop}
         open={addMoreOpen}
         packs={PACKS}
         vouchedFor={VOUCHED_FOR}

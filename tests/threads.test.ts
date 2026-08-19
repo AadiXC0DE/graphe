@@ -30,7 +30,7 @@ function twoOpen(): Desks {
     ...desk,
     address: 'a',
     turns: [said('you', 'make the hero tighter')],
-    parked: { b: { turns: [said('you', 'the pricing page')], waiting: [] } },
+    parked: { b: { turns: [said('you', 'the pricing page')] } },
     order: ['a', 'b'],
   }));
 }

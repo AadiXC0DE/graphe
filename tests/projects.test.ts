@@ -30,10 +30,12 @@ import {
   changeDesk,
   closeDesk,
   currentDesk,
+  intoTheBox,
   noDesks,
   openDesk,
   receive,
   researchLog,
+  tookBack,
   folderCalled,
 } from '../src/lib/projects';
 import type { Turn } from '../src/lib/thread';
@@ -513,5 +515,41 @@ describe('naming a folder on a board of several', () => {
   it('has something to say about a path with no parts', () => {
     expect(folderCalled('/')).toBe('/');
     expect(folderCalled('')).toBe('');
+  });
+});
+
+/**
+ * Putting the line back in the box used to throw away what was in the box.
+ *
+ * The press set the composer to the queued words outright, so a sentence
+ * somebody was halfway through typing disappeared the moment they changed their
+ * mind about the line — and an empty answer cleared the line off the screen
+ * whether or not anything had actually come back.
+ */
+describe('the line, put back in the box', () => {
+  it('keeps what was already typed, and puts it first', () => {
+    // WHY: the box is a sentence in progress. The line arrives after it, never
+    // over it.
+    expect(intoTheBox('half a thought', ['and also this'])).toBe(
+      'half a thought\n\nand also this',
+    );
+  });
+
+  it('is just the line when the box was empty', () => {
+    expect(intoTheBox('', ['first', 'second'])).toBe('first\n\nsecond');
+    // Whitespace is not a sentence anybody is in the middle of.
+    expect(intoTheBox('  \n ', ['first'])).toBe('first');
+  });
+
+  it('leaves the box alone when nothing came back', () => {
+    expect(intoTheBox('half a thought', [])).toBe('half a thought');
+  });
+
+  it('reads the steering ahead of the follow-ups, and drops the blanks', () => {
+    expect(tookBack({ steering: ['stop that', '  '], followUp: ['then this', ''] })).toEqual([
+      'stop that',
+      'then this',
+    ]);
+    expect(tookBack({ steering: [], followUp: [] })).toEqual([]);
   });
 });

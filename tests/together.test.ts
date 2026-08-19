@@ -20,6 +20,7 @@
  *  scheduler's. */
 
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { Confirmations, createGuardInterceptor } from '../src/agent/pi/adapter';
@@ -29,9 +30,11 @@ import type { AgentEvent } from '../src/agent/types';
 
 /** Pi's loop, from the copy that is installed. An upgrade that moves it fails
  *  here rather than quietly stopping the measurement. */
-const LOOP = new URL(
-  '../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js',
-  import.meta.url,
+const LOOP_PATH = fileURLToPath(
+  new URL(
+    '../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js',
+    import.meta.url,
+  ),
 );
 
 type Loop = {
@@ -45,7 +48,7 @@ type Loop = {
   ) => Promise<unknown>;
 };
 
-const { runAgentLoop } = (await import(LOOP.href)) as Loop;
+const { runAgentLoop } = (await import(LOOP_PATH)) as Loop;
 
 /** Long enough to measure past the noise of starting a process, short enough
  *  that a queue of four is still a quick test. */

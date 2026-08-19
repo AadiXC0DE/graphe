@@ -17,6 +17,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -601,7 +602,7 @@ describe('the stream the app sees', () => {
 /* Pi stays in one folder                                                      */
 /* ========================================================================== */
 
-const SOURCE_ROOT = new URL('../src/', import.meta.url).pathname;
+const SOURCE_ROOT = fileURLToPath(new URL('../src/', import.meta.url));
 const ADAPTER_FOLDER = 'agent/pi';
 const PI_PACKAGE = '@earendil-works/';
 
@@ -684,7 +685,9 @@ describe('the interception point', () => {
   /** Read out of the installed SDK rather than asserted from memory. If an
    *  upgrade moves the hook, this fails here rather than silently at run time
    *  in front of a user, with the Guard wired to nothing. */
-  const sdk = new URL('../node_modules/@earendil-works/pi-coding-agent/', import.meta.url).pathname;
+  const sdk = fileURLToPath(
+    new URL('../node_modules/@earendil-works/pi-coding-agent/', import.meta.url),
+  );
 
   it('is a hook that runs before the tool does', () => {
     const session = readFileSync(join(sdk, 'dist/core/agent-session.js'), 'utf8');

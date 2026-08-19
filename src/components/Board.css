@@ -230,6 +230,10 @@
 .work__controls {
   display: flex;
   align-items: center;
+  /* In a narrow rail three decisions do not fit on one line. Wrapping the row
+     keeps each label whole; without it every button became two lines tall and
+     none of them read. */
+  flex-wrap: wrap;
   gap: var(--space-1);
   margin-top: auto;
   padding: 0 var(--space-2) var(--space-2);
@@ -238,6 +242,7 @@
 .work__keep,
 .work__drop {
   min-height: 30px;
+  white-space: nowrap;
   padding: 0 var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -282,6 +287,104 @@
 
   .work__keep:hover {
     background: color-mix(in srgb, var(--accent) 88%, var(--text));
+  }
+}
+
+/* ------------------------------------------------------- saying something --
+
+   Only ever on a card that is still going. Quiet next to the two decisions
+   beside it: this one is not a decision, it is a sentence. */
+
+.work__say {
+  min-height: 30px;
+  white-space: nowrap;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.work__say:active {
+  transform: scale(0.97);
+}
+
+.work__say:focus-visible,
+.work__box:focus-visible,
+.work__send:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .work__say:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+}
+
+.work__aside {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+.work__box {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-xs);
+}
+
+.work__send {
+  flex: none;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.work__send:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.work__send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* It is not confirmation that anything happened yet — only that it went. */
+.work__heard {
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work__say,
+  .work__send {
+    transition: none;
   }
 }
 
@@ -346,4 +449,185 @@
   font-size: var(--text-2xs);
   line-height: 1.45;
   color: var(--text-faint);
+}
+
+/* -------------------------------------------------- taking a set, in order */
+
+/* Under the band's own name, above the sheet: the press is about the several
+   of them together, so it sits where the group is named rather than on a card.
+   The order itself is behind it and shut — a sheet you can compare is the point
+   of the board, and a list of steps standing open above it is not that. */
+
+.board__set {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: calc(var(--space-1) * -1);
+}
+
+.board__set-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.board__take {
+  min-height: 30px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.board__order-toggle {
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.board__take:active,
+.board__order-toggle:active {
+  transform: scale(0.97);
+}
+
+.board__take:focus-visible,
+.board__order-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .board__take:hover {
+    background: color-mix(in srgb, var(--accent) 88%, var(--text));
+  }
+
+  .board__order-toggle:hover {
+    color: var(--text);
+  }
+}
+
+.board__set-what,
+.board__cannot {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.board__cannot {
+  max-width: 52ch;
+}
+
+/* The one thing on this sheet that moves, and only because somebody asked it
+   to. Rows rather than height, so the list is never measured twice. */
+.board__order {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-ui) var(--ease-out-quart),
+    opacity var(--dur-micro) var(--ease-hover);
+}
+
+.board__order--open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.board__order-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.board__order-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 66ch;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  list-style: none;
+  counter-reset: none;
+}
+
+.board__order-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  min-width: 0;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+/* Numbered rather than arrowed: the number is the answer to "which goes in
+   third", which is the question somebody opened this to ask. */
+.board__order-number {
+  flex: none;
+  width: 1.4em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.board__order-doing {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* Straight after the name, not pinned to the far edge: read together they are
+   a sentence, and a wide panel used to strand them at opposite ends of it. */
+.board__order-note {
+  color: var(--text-faint);
+}
+
+.board__meets {
+  max-width: 66ch;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--accent);
+}
+
+.board__meets-line {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.board__meets-what {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board__order,
+  .board__take,
+  .board__order-toggle {
+    transition: none;
+  }
 }

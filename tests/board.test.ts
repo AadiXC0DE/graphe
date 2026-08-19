@@ -12,6 +12,11 @@ import {
   AT_A_TIME,
   bandOf,
   boardWords,
+  canHearYou,
+  canKeep,
+  saysCannotKeep,
+  speaksForGroup,
+  waysNumbering,
   groupWork,
   howManyGoing,
   howManyInFlight,
@@ -338,5 +343,181 @@ describe('B-06 work that is waiting on you', () => {
     for (const banned of ['confirmation', 'permission', 'guard', 'policy', 'prompt']) {
       expect(said).not.toContain(banned);
     }
+  });
+});
+
+describe('saying something to work already going', () => {
+  /** The offer has to match what the other side can actually do. Pi delivers a
+   *  steer between tool calls; a piece with no calls left ahead of it never
+   *  reaches one, so the button would be a press that does nothing. */
+  it('is offered while something is going, and while it waits on an answer', () => {
+    expect(canHearYou('running')).toBe(true);
+    // A piece stopped on a question is a turn held open mid-step, which is
+    // where a sentence lands most reliably of all. Leaving it out hid the
+    // control exactly where it works best.
+    expect(canHearYou('needs-you')).toBe(true);
+  });
+
+  /** Nothing that has stopped can hear anything. Pi only drains the queue from
+   *  inside a run already going; a sentence handed to a finished piece sits
+   *  there until its copy is packed away and is then lost without a word. */
+  it('is not offered once there is nothing left to hear it', () => {
+    for (const state of ['waiting', 'done', 'failed'] as const) {
+      expect(canHearYou(state)).toBe(false);
+    }
+  });
+
+  it('says what it does without naming the machinery', () => {
+    const said = [boardWords.say, boardWords.sayPlaceholder, boardWords.send, boardWords.sent];
+    for (const one of said) {
+      expect(one).not.toMatch(/steer|queue|prompt|interrupt|session|token/i);
+    }
+  });
+
+  /** The sentence after sending must not claim more than happened: the message
+   *  went, and it will be heard — not that anything has changed yet. */
+  it('promises delivery, not a result', () => {
+    expect(boardWords.sent).toMatch(/hear/i);
+    expect(boardWords.sent).not.toMatch(/done|changed|fixed/i);
+  });
+
+  /** The state the board paints and the state the run is really in are not the
+   *  same thing: a card says "Going" from the moment a turn settles until its
+   *  copy has been read and put away. So the offer is a guess and the note
+   *  after it must not be — the card is told whether it was taken. */
+  it('does not treat being offered as proof it was heard', () => {
+    expect(canHearYou('running')).toBe(true);
+    expect(boardWords.sent).not.toMatch(/\bhas heard\b|\bheard it\b/i);
+  });
+});
+
+describe('who carries the comparison', () => {
+  const goes = [
+    { id: 'a', oneOf: { named: 'the hero' } },
+    { id: 'b', oneOf: { named: 'the hero' } },
+    { id: 'c', oneOf: { named: 'the footer' } },
+    { id: 'd' },
+    { id: 'e', oneOf: null },
+  ];
+
+  it('offers it once per group, not once per card', () => {
+    const speaks = speaksForGroup(goes);
+    expect([...speaks].sort()).toEqual(['a', 'c']);
+  });
+
+  /** Throwing the first go away must not take the comparison with it — the
+   *  remaining goes are exactly when somebody still needs to choose. */
+  it('moves to the next one when the first is gone', () => {
+    expect([...speaksForGroup(goes.slice(1))].sort()).toEqual(['b', 'c']);
+  });
+
+  it('offers nothing on ordinary work', () => {
+    expect(speaksForGroup([{ id: 'd' }, { id: 'e', oneOf: null }]).size).toBe(0);
+  });
+});
+
+describe('what each go is called', () => {
+  const goes = [
+    { id: 'a', ways: 'the hero' },
+    { id: 'b', ways: 'the hero' },
+    { id: 'c', ways: 'the hero' },
+    { id: 'd', ways: 'the footer' },
+    { id: 'e' },
+  ];
+
+  it('numbers every go in its group, and nothing else', () => {
+    const numbering = waysNumbering(goes);
+    expect(numbering.get('a')).toEqual({ at: 1, of: 3, named: 'the hero' });
+    expect(numbering.get('c')).toEqual({ at: 3, of: 3, named: 'the hero' });
+    expect(numbering.get('e')).toBeUndefined();
+  });
+
+  /** A group of one is not a choice: the others were thrown away, and "Way 1
+   *  of 1" would be asking somebody to decide between one thing. */
+  it('leaves a lone survivor of a group unnumbered', () => {
+    expect(waysNumbering(goes).get('d')).toBeUndefined();
+  });
+
+  /** The defect this guards: the comparison narrowed the group to the goes
+   *  that had a copy on disk and numbered what was left, so a card reading
+   *  "Way 3 of 3" sat beside a column reading "Way 2 of 2". Both sides number
+   *  the whole group, so a go carries one name wherever it is drawn. */
+  it('does not renumber the rest when one of them has not started', () => {
+    const asIfFiltered = waysNumbering(goes.filter((one) => one.id !== 'a'));
+    expect(waysNumbering(goes).get('b')).toEqual({ at: 2, of: 3, named: 'the hero' });
+    expect(asIfFiltered.get('b')).not.toEqual(waysNumbering(goes).get('b'));
+  });
+});
+
+describe('what can be taken', () => {
+  it('has a result only where something has finished', () => {
+    expect(canKeep('done')).toBe(true);
+    for (const state of ['waiting', 'running', 'needs-you', 'failed'] as const) {
+      expect(canKeep(state)).toBe(false);
+    }
+  });
+
+  /** The sentence somebody used to get for pressing "Use this one" on a go
+   *  that was still working: that it had finished without changing any files.
+   *  It had not finished, and its changes were on the screen at the time. */
+  it('never tells somebody an unfinished go finished', () => {
+    const said = saysCannotKeep('Redo the header', 'running');
+    expect(said?.because).toMatch(/still going/);
+    expect(said?.because).not.toMatch(/finished without/);
+    expect(said?.what).toMatch(/yet/);
+  });
+
+  it('tells apart one that has not started from one that did not work', () => {
+    expect(saysCannotKeep('Redo the header', 'waiting')?.because).toMatch(/not started/);
+    expect(saysCannotKeep('Redo the header', 'failed')?.because).toMatch(/didn’t work/);
+    expect(saysCannotKeep('Redo the header', 'needs-you')?.because).toMatch(/ask you/);
+  });
+
+  it('has nothing to say about one that has finished', () => {
+    expect(saysCannotKeep('Redo the header', 'done')).toBeNull();
+    expect(boardWords.notYet('done')).toBeNull();
+  });
+
+  it('says all of that without naming the machinery', () => {
+    const states = ['waiting', 'running', 'needs-you', 'failed'] as const;
+    const said = states.flatMap((state) => [
+      boardWords.notYet(state) ?? '',
+      boardWords.notYetBecause('Redo the header', state),
+    ]);
+    for (const one of said) {
+      expect(one).not.toMatch(/commit|branch|worktree|session|token|snapshot/i);
+    }
+  });
+});
+
+describe('the sentence is not lost while it is being handed over', () => {
+  /** The box used to close on the way out. A refusal then said "still in the
+   *  box" about a box that was gone — and if the piece had finished, the whole
+   *  control went with it, taking the words. */
+  it('has a word for the moment between the press and the answer', () => {
+    expect(boardWords.sending).not.toBe(boardWords.send);
+    expect(boardWords.sending).toMatch(/send/i);
+  });
+
+  it('does not say where the words are in a way that can be wrong', () => {
+    for (const said of [boardWords.send, boardWords.sending, boardWords.sent]) {
+      expect(said).not.toMatch(/still in the box/i);
+    }
+  });
+});
+
+describe('letting a piece off the wait it was given', () => {
+  /** The wait could be set when work was asked for and never changed after, so
+   *  a piece waiting on something that was abandoned waited for good. The whole
+   *  door to changing it — `putAfter` — had no caller anywhere. */
+  it('says what it does without naming the machinery', () => {
+    expect(boardWords.stopWaiting).not.toMatch(/depend|graph|queue|node|edge/i);
+  });
+
+  it('is about the wait, not about the work', () => {
+    // "Stop this one" already means something else on the same card. This must
+    // not read as a second way to say that.
+    expect(boardWords.stopWaiting).not.toBe(boardWords.stop);
+    expect(boardWords.stopWaiting).toMatch(/wait/i);
   });
 });

@@ -1,0 +1,497 @@
+/* Reviewing a change, piece by piece.
+
+   The palette has no green, so nothing here leans on red-and-green to say which
+   side a line is on. Added lines carry the accent — a tint behind them and a
+   bar down their edge; removed lines sit on the sunken tone in muted ink with a
+   plain grey bar. The sign in the gutter says it a second time, in a character,
+   for anybody the colour does not reach.
+
+   Toggling a piece is the frequent act here, so it changes colour and opacity
+   and nothing else: no width, no height, no border thickness. The list a person
+   is reading stays exactly where they left it. */
+
+.changes {
+  /* The two sides, named once. Local, so a piece can flatten its own. */
+  --line-in: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+  --line-in-edge: var(--accent);
+  --line-out: var(--bg-sunken);
+  /* The edge is what says "removed" where the tint is nearly the page, so it
+     takes the token that is meant to be seen at 3:1 rather than a decorative
+     one. */
+  --line-out-edge: var(--border-control);
+}
+
+@media (prefers-color-scheme: dark) {
+  .changes {
+    --line-in: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
+  }
+}
+
+:root[data-theme='dark'] .changes {
+  --line-in: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
+}
+
+:root[data-theme='light'] .changes {
+  --line-in: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+}
+
+/* The heading holds its width. The line under it counts what is kept, so it
+   gets shorter with every press — and a heading that shrinks drags the two
+   buttons beside it along with it, on the most frequent act on this screen. */
+.changes .sheet__titles {
+  flex: 0 1 19rem;
+  min-width: 0;
+}
+
+/* The one button whose words change as the count does. It holds a width and
+   lines its digits up, so counting down from five does not nudge Close. */
+.changes .sheet__savebtn {
+  justify-content: center;
+  min-width: 8.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.changes__count {
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------------------
+   The head's own controls
+   --------------------------------------------------------------------------- */
+
+.changes__all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.changes__all:active {
+  transform: scale(0.97);
+}
+
+.changes__all:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+}
+
+.changes__all:focus-visible,
+.changes__small:focus-visible,
+.changes__piecetop:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .changes__all:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+.changes .sheet__body:focus-visible {
+  /* The list is where the keyboard stands, not a control. Which piece it is on
+     is said by that piece's own ring, so a second ring round the whole surface
+     would only be noise. */
+  outline: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Nothing to show yet
+   --------------------------------------------------------------------------- */
+
+.changes__blank {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-5);
+  max-width: var(--thread-width);
+}
+
+.changes__blanktitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.changes__blankdetail {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   One file
+   --------------------------------------------------------------------------- */
+
+.changes__files {
+  margin: 0;
+  padding: var(--space-4) var(--space-5) var(--space-8);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 1400px;
+}
+
+.changes__file {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The file's own line stays put while its pieces scroll under it, so the path
+   is still there four hundred lines in. */
+.changes__filetop {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The badge and the path go quiet; the two buttons beside them do not. A live
+   control that has dimmed reads as one that has been switched off. */
+.changes__file--off .changes__kind,
+.changes__file--off .changes__path,
+.changes__file--off .changes__tally {
+  opacity: 0.55;
+}
+
+.changes__kind {
+  flex: none;
+  transition: opacity var(--dur-micro) var(--ease-hover);
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.changes__kind--added,
+.changes__kind--renamed {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.changes__path {
+  flex: 1 1 auto;
+  transition: opacity var(--dur-micro) var(--ease-hover);
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes__tally {
+  flex: none;
+  transition: opacity var(--dur-micro) var(--ease-hover);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.changes__fileall {
+  flex: none;
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+.changes__small {
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.changes__small--on {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+.changes__small:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .changes__small:hover:not(:disabled) {
+    color: var(--text);
+  }
+}
+
+/* A file with nothing inside to choose between. */
+.changes__whole {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   One piece
+   --------------------------------------------------------------------------- */
+
+.changes__piece {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  overflow: hidden;
+  /* Clear of the file's own sticky line when the keyboard brings it into view. */
+  scroll-margin-top: calc(var(--space-7) + var(--space-1));
+  scroll-margin-bottom: var(--space-4);
+  /* The ring is a shadow, never a thicker border: the piece under the cursor
+     must not move a pixel when it becomes the current one. */
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    box-shadow var(--dur-micro) var(--ease-hover);
+}
+
+.changes__piece--here {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.changes__piecetop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.changes__piece--here .changes__piecetop {
+  background: var(--accent-soft);
+}
+
+.changes__piecetop:disabled {
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .changes__piecetop:hover:not(:disabled) {
+    background: var(--bg-sunken);
+  }
+
+  .changes__piece--here .changes__piecetop:hover:not(:disabled) {
+    background: var(--accent-soft);
+  }
+}
+
+/* The box is always the same size and the mark inside it only fades, so the
+   row's words never shuffle sideways as pieces are turned on and off. */
+.changes__box {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--border-control);
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-text);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.changes__piece--off .changes__box {
+  background: transparent;
+  border-color: var(--border-control);
+}
+
+.changes__tick {
+  transition: opacity var(--dur-micro) var(--ease-hover);
+}
+
+.changes__piece--off .changes__tick {
+  opacity: 0;
+}
+
+.changes__keep {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--text);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    text-decoration-color var(--dur-micro) var(--ease-hover);
+  text-decoration: line-through;
+  text-decoration-color: transparent;
+}
+
+.changes__piece--off .changes__keep {
+  color: var(--text-faint);
+  text-decoration-color: currentColor;
+}
+
+.changes__where {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.changes__in {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes__piecetop .changes__tally {
+  margin-left: auto;
+}
+
+.changes__in + .changes__tally {
+  margin-left: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   The lines themselves
+   --------------------------------------------------------------------------- */
+
+.changes__lines {
+  overflow-x: auto;
+  padding: var(--space-2) 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  tab-size: 2;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  transition: opacity var(--dur-micro) var(--ease-hover);
+}
+
+/* Dimmed, not removed. The dropped piece keeps its place in the reading order
+   so the list underneath it never moves. */
+.changes__piece--off .changes__lines {
+  opacity: 0.4;
+}
+
+.changes__line {
+  display: grid;
+  grid-template-columns: 3rem 3rem 1.1rem minmax(0, 1fr);
+  align-items: baseline;
+  /* Wider than the box when a line is long, so the tint reaches the end of it. */
+  min-width: max-content;
+  border-left: 2px solid transparent;
+}
+
+.changes__no {
+  padding-right: var(--space-2);
+  text-align: right;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.changes__sign {
+  text-align: center;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.changes__code {
+  padding-right: var(--space-4);
+  font: inherit;
+  color: var(--text);
+  white-space: pre;
+}
+
+.changes__line--in {
+  background: var(--line-in);
+  border-left-color: var(--line-in-edge);
+}
+
+.changes__line--in .changes__sign {
+  color: var(--accent-ink);
+}
+
+.changes__line--out {
+  background: var(--line-out);
+  border-left-color: var(--line-out-edge);
+}
+
+.changes__line--out .changes__code,
+.changes__line--out .changes__sign {
+  color: var(--text-muted);
+}
+
+.changes__line--note .changes__code {
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .changes__all,
+  .changes__small,
+  .changes__box,
+  .changes__tick,
+  .changes__keep,
+  .changes__lines,
+  .changes__piece,
+  .changes__piecetop,
+  .changes__kind,
+  .changes__path,
+  .changes__tally {
+    transition: none;
+  }
+
+  .changes__all:active {
+    transform: none;
+  }
+}

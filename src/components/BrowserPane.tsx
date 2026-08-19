@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { walkthrough } from '../diff/flow';
 import './BrowserPane.css';
 
 /** How the window is split between the conversation and the page. */
@@ -28,6 +29,10 @@ type Props = {
   /** Hand the address to the machine's own browser. Left off, the control is
    *  not offered. */
   onElsewhere?: (address: string) => void;
+  /** True while what somebody does on the page is being recorded. */
+  recording?: boolean;
+  /** Start recording, and stop it. Left off, the control is not offered. */
+  onRecord?: (want: boolean) => void;
 };
 
 export const SAYS = {
@@ -53,6 +58,32 @@ export const SIZES: readonly { id: ScreenSize; label: string; title: string }[] 
 ];
 
 /**
+ * The one control that records the page, in whichever state it is in.
+ *
+ * The same press starts it and stops it, so both states have to be readable off
+ * the button itself — a control that looks the same while it is running is a
+ * control people leave running. Nothing being served is not a failure to
+ * report: the button says why it cannot be pressed and stays quiet.
+ */
+export function recordControl(now: { recording: boolean; address: string | null }): {
+  label: string;
+  title: string;
+  on: boolean;
+  ready: boolean;
+} {
+  if (now.recording) {
+    return { label: walkthrough.stop, title: walkthrough.working, on: true, ready: true };
+  }
+  const nothing = now.address === null;
+  return {
+    label: walkthrough.button,
+    title: nothing ? SAYS.nothing : walkthrough.button,
+    on: false,
+    ready: !nothing,
+  };
+}
+
+/**
  * The project's own page, beside the conversation.
  *
  * The chat has a floor and never goes below it — squeezing a conversation into
@@ -75,6 +106,8 @@ export default function BrowserPane({
   variations,
   variation,
   onVariation,
+  recording = false,
+  onRecord,
 }: Props) {
   const stage = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLDivElement>(null);
@@ -104,7 +137,7 @@ export default function BrowserPane({
       sized.disconnect();
       globalThis.removeEventListener('resize', tell);
     };
-  }, [room, onBounds, size, address]);
+  }, [room, onBounds, size, address, recording]);
 
   if (room === 'off') return null;
 
@@ -147,6 +180,13 @@ export default function BrowserPane({
               </button>
             ))}
           </div>
+        )}
+
+        {/* Every state a page goes through only exists while somebody is
+            using it, so the way to keep one is to record somebody using it.
+            Beside the address, because that is where the hand already is. */}
+        {onRecord === undefined ? null : (
+          <RecordButton recording={recording} address={address} onRecord={onRecord} />
         )}
 
         {/* The width to look at the page in, in the band beside the address. */}
@@ -244,5 +284,31 @@ export default function BrowserPane({
         </div>
       </div>
     </section>
+  );
+}
+
+function RecordButton({
+  recording,
+  address,
+  onRecord,
+}: {
+  recording: boolean;
+  address: string | null;
+  onRecord: (want: boolean) => void;
+}) {
+  const control = recordControl({ recording, address });
+  return (
+    <button
+      type="button"
+      className={`pane__watch ${control.on ? 'pane__watch--on' : ''}`}
+      onClick={() => onRecord(!recording)}
+      disabled={!control.ready}
+      title={control.title}
+      aria-label={control.label}
+      aria-pressed={control.on}
+    >
+      <span className="pane__dot" aria-hidden="true" />
+      <span className="pane__watchsays">{control.label}</span>
+    </button>
   );
 }

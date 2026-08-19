@@ -18,6 +18,7 @@
 }
 
 .pane__bar {
+  container-type: inline-size;
   flex: none;
   display: flex;
   align-items: center;
@@ -309,5 +310,18 @@
   .pane__watch:hover {
     color: var(--text);
     border-color: var(--border-strong);
+  }
+}
+
+/* The pane's floor is 360px wide and the words do not fit beside an address
+   there. The dot and its colour carry the state; the words stay on the button
+   for anything that reads it aloud. */
+@container (max-width: 520px) {
+  .pane__watchsays {
+    display: none;
+  }
+
+  .pane__watch {
+    padding: 0 var(--space-2);
   }
 }

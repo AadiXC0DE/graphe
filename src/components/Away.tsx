@@ -48,6 +48,15 @@ export type AwayProps = {
   onDrop: (id: string, where?: string) => void;
   /** Answer the question one of them stopped on. The only thing that can. */
   onAnswer: (id: string, callId: string, decision: Decision, where?: string) => void;
+  /** Say something to one that is still going, without stopping it. Answers
+   *  whether it was taken, so nothing claims it was. */
+  onSay?: (id: string, text: string, where?: string) => Promise<boolean>;
+  /** Hold the several goes at one job up against each other. */
+  onAgainst?: (named: string, where?: string) => void;
+  /** Let one off the wait it was given. */
+  onStopWaiting?: (id: string, where?: string) => void;
+  /** Take several finished pieces in, in the order they need. */
+  onTakeAll?: (ids: readonly string[], where?: string) => void;
   onAddRepeat: (
     doing: string,
     every: EveryKind,
@@ -98,6 +107,10 @@ export default function Away({
   onKeep,
   onDrop,
   onAnswer,
+  onSay,
+  onAgainst,
+  onStopWaiting,
+  onTakeAll,
   onAddRepeat,
   onSwitchRepeat,
   onForgetRepeat,
@@ -349,6 +362,10 @@ export default function Away({
           atOnce={away?.atOnce ?? 4}
           onKeep={onKeep}
           onDrop={onDrop}
+          onSay={onSay}
+          onAgainst={onAgainst}
+          onStopWaiting={onStopWaiting}
+          onTakeAll={onTakeAll}
         />
       )}
 

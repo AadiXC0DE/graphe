@@ -282,6 +282,18 @@
   white-space: nowrap;
 }
 
+/* What this row would give up against the one answering now. The accent
+   because it is the one thing on the row worth catching before the press —
+   and it is only ever on a row that is genuinely weaker. */
+.thinking__optionloses {
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Reserved whether or not there is a tick in it, so choosing does not shuffle
    every label sideways by ten pixels. */
 .thinking__tick {

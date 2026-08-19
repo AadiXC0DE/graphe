@@ -28,7 +28,37 @@ type Offer = {
   label: string;
   rates: { input: number; output: number } | null;
   thinking: readonly ThinkingLevel[];
+  /** Null when its catalogue entry does not say — not knowing and knowing it
+   *  cannot are different claims. */
+  takesImages: boolean | null;
 };
+
+export const SWAP_WORDS = {
+  losesPictures: 'Reads no pictures',
+  losesDepth: 'Answers straight away',
+  losesBoth: 'No pictures, and answers straight away',
+} as const;
+
+/**
+ * What this one would give up against the one answering now.
+ *
+ * Said in the list rather than after the press: switching used to flatten how
+ * hard it thinks without a word, and you found out by watching it answer
+ * differently. Only a loss is named — a row that is the same or better says
+ * nothing, or the list becomes a wall of labels nobody reads.
+ */
+export function whatItGivesUp(
+  now: { thinking: readonly ThinkingLevel[]; takesImages: boolean | null } | null,
+  offer: { thinking: readonly ThinkingLevel[]; takesImages: boolean | null },
+): string | null {
+  if (now === null) return null;
+  const pictures = now.takesImages === true && offer.takesImages === false;
+  const depth = now.thinking.length > 1 && offer.thinking.length <= 1;
+  if (pictures && depth) return SWAP_WORDS.losesBoth;
+  if (pictures) return SWAP_WORDS.losesPictures;
+  if (depth) return SWAP_WORDS.losesDepth;
+  return null;
+}
 
 /**
  * Which model is answering, said out loud and always.
@@ -62,6 +92,7 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, b
           // Absent on older shell data: a model whose capability was never
           // declared is treated as one that only answers straight away.
           thinking: model.thinking ?? ['off'],
+          takesImages: model.takesImages ?? null,
         });
       }
     }
@@ -203,6 +234,7 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, b
                           chosen !== null &&
                           chosen.providerId === one.providerId &&
                           chosen.modelId === one.modelId;
+                        const givesUp = isChosen ? null : whatItGivesUp(current, one);
                         return (
                           <button
                             key={`${one.providerId}/${one.modelId}`}
@@ -233,6 +265,9 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, b
                               <span className="thinking__optionid">
                                 {one.providerName} · {one.modelId}
                               </span>
+                              {givesUp === null ? null : (
+                                <span className="thinking__optionloses">{givesUp}</span>
+                              )}
                             </span>
                           </button>
                         );

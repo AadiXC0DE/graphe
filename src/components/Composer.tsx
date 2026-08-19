@@ -13,6 +13,7 @@ import Asking from './Asking';
 import type { HowFar } from '../agent/guard/policy';
 import HowToWork, { type Plans } from './HowToWork';
 import Room from './Room';
+import type { Turn } from '../lib/thread';
 import ThinkingWith from './ThinkingWith';
 import type { ConnectionState, ModelChoice, Room as RoomState, Skill, ThinkingLevel } from '../lib/ipc';
 import {
@@ -25,6 +26,10 @@ import {
   readDropped,
   readableSize,
   shallower,
+  modelInFront,
+  readsPictures,
+  ATTACH_WORDS,
+  PICTURE_WORDS,
 } from '../lib/attachments';
 import {
   SAYING,
@@ -85,6 +90,8 @@ type Props = {
   /** How full this conversation is, for the ring in the row. Null before the
    *  model has answered once. */
   room?: RoomState | null;
+  /** The conversation, for the split behind the ring. */
+  turns?: readonly Turn[];
   /** True while it is being shortened. */
   tidying?: boolean;
   /** Shorten it now, by hand. */
@@ -153,6 +160,7 @@ export default function Composer({
   anywhere = true,
   outLoud = true,
   room,
+  turns,
   tidying,
   onTidy,
   howFar,
@@ -173,6 +181,23 @@ export default function Composer({
    *  message, because a box with no words beside it is half a thought. */
   const [drawn, setDrawn] = useState<string | null>(null);
   const [mention, setMention] = useState<{ from: number; query: string } | null>(null);
+
+  /* A picture in the box that the model in front cannot read. Worked out here
+     rather than after a turn is spent: the provider's own refusal arrives as a
+     wall of JSON several seconds later, and by then the money is gone. Only
+     when the catalogue positively says it cannot — an entry that says nothing
+     is left to the provider to answer. */
+  const blindToPictures =
+    readsPictures(connection) === false && attachments.some((one) => one.kind === 'image');
+  /* Anything in the box that is not a picture. Only pictures travel with a
+     message — a document chip sits there looking attached and is never read,
+     which is the worst of the three possible answers. */
+  const notPictures = attachments.filter((one) => one.kind === 'document').map((one) => one.name);
+  const cannotRead = blindToPictures
+    ? PICTURE_WORDS.cannotRead(modelInFront(connection)?.label ?? 'This model')
+    : notPictures.length > 0
+      ? ATTACH_WORDS.onlyPictures(notPictures)
+      : null;
   const [mentionAt, setMentionAt] = useState(0);
 
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -284,6 +309,12 @@ export default function Composer({
   const submit = (mode?: 'steer' | 'followUp') => {
     const text = value.trim();
     if (!text) return;
+    // Said rather than sent. The picture stays in the box, so switching model
+    // and pressing again is the whole of the fix.
+    if (blindToPictures) {
+      setRefused(cannotRead);
+      return;
+    }
     ears.current?.stop();
     const said = drawn === null ? text : `${text}\n\n${drawn}`;
     // The marks travel as words as well as pixels: coordinates the model can
@@ -675,6 +706,7 @@ export default function Composer({
           room={room ?? null}
           tidying={tidying === true}
           busy={busy}
+          {...(turns === undefined ? {} : { turns })}
           {...(onTidy === undefined ? {} : { onTidy })}
         />
 
@@ -752,7 +784,7 @@ export default function Composer({
           added at the same moment as its first sentence is a live region a
           screen reader has no reason to be listening to yet. */}
       <p className="composer__refused" role="status">
-        {refused}
+        {refused ?? cannotRead}
       </p>
 
       <input

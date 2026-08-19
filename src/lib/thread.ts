@@ -104,6 +104,9 @@ export type Turn =
       text: string;
       steps: readonly string[];
       caveats: readonly string[];
+      /** What it would need to know before this list is right. Usually none —
+       *  a plan built on a guess is worse than two sharp questions. */
+      questions: readonly string[];
       /** Null while the question is still open. */
       answered: 'went-ahead' | 'changing' | null;
     }
@@ -211,7 +214,7 @@ const LOOKING = 'graphe:looking';
 /** Hold what somebody asked for while they read the plan for it. */
 export function planned(
   text: string,
-  proposal: { steps: readonly string[]; caveats: readonly string[] },
+  proposal: { steps: readonly string[]; caveats: readonly string[]; questions?: readonly string[] },
 ): Turn {
   return {
     kind: 'plan',
@@ -219,6 +222,7 @@ export function planned(
     text,
     steps: proposal.steps,
     caveats: proposal.caveats,
+    questions: proposal.questions ?? [],
     answered: null,
   };
 }
@@ -304,12 +308,37 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
         },
       ];
 
+    /* A reply that failed part way through has still ended. The shell sends
+       `error` *instead of* `message-end` when the failure arrives on the
+       assistant's own message, so closing the reply here is the only thing that
+       closes it: left open, it stayed marked as still streaming forever, which
+       read as "something is running" and put out the quiet mark for the rest of
+       the sitting. */
+    /* Held by the window beside the composer, not folded into the thread: a
+       message waiting its turn is not something that has happened yet. */
+    case 'queued':
+      return turns;
+
     case 'error':
-      return withTrouble(turns, {
-        what: STOPPED_PART_WAY,
-        because: event.message,
-        actionLabel: 'Got it',
-      });
+      return withTrouble(
+        turns.map((turn) => {
+          // Everything that was still going is over. A failure can arrive mid
+          // sentence, mid tool call or mid tidy, and each of those reads as
+          // "something is running" to the quiet mark — so closing only the
+          // sentence left the other two latched on for the rest of the sitting.
+          if (turn.kind === 'said' && turn.streaming) return { ...turn, streaming: false };
+          if (turn.kind === 'did' && turn.state === 'running') return { ...turn, state: 'failed' as const };
+          if (turn.kind === 'tidying' && turn.state === 'running') {
+            return { ...turn, state: 'failed' as const };
+          }
+          return turn;
+        }),
+        {
+          what: STOPPED_PART_WAY,
+          because: event.message,
+          actionLabel: 'Got it',
+        },
+      );
 
     // The person's own words, replayed when a saved conversation comes back
     // (BACKLOG B1.1). During a live sitting the window writes these itself and
@@ -349,6 +378,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
           text: '',
           steps: event.steps,
           caveats: event.caveats,
+          questions: event.questions,
           answered: null,
         },
       ];

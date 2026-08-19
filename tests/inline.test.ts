@@ -50,7 +50,7 @@ describe('whether the conversation is waiting on a person', () => {
       id: 'p1',
       text: 'redo the pricing page',
       steps: ['read the page', 'change the type'],
-      caveats: [],
+      caveats: [], questions: [],
       answered: null,
     };
     expect(askingYou([plan])).toBe(true);

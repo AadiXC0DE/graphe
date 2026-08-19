@@ -1,4 +1,6 @@
 import type { Room as RoomState } from '../lib/ipc';
+import type { Turn } from '../lib/thread';
+import RoomShare from './RoomShare';
 import './Room.css';
 
 type Props = {
@@ -10,6 +12,9 @@ type Props = {
   onTidy?: () => void;
   /** Nothing can be asked for mid-reply. */
   busy?: boolean;
+  /** The conversation, for the split behind the ring. Left off, the tip stays
+   *  the two numbers it has always been. */
+  turns?: readonly Turn[];
 };
 
 export const SAYS = {
@@ -43,7 +48,7 @@ function thousands(count: number): string {
  * one small ring — no number in the resting state, because a number that moves
  * every turn is a number that gets watched instead of the work.
  */
-export default function Room({ room, tidying, onTidy, busy }: Props) {
+export default function Room({ room, tidying, onTidy, busy, turns }: Props) {
   if (room === null && !tidying) return null;
 
   const part = tidying ? 0 : (room?.part ?? 0);
@@ -84,13 +89,18 @@ export default function Room({ room, tidying, onTidy, busy }: Props) {
               <span className="room__tipwhat">
                 {tidying ? SAYS.tidyingWhat : SAYS.whatFull}
               </span>
-            ) : (
+            ) : turns === undefined ? (
               <span className="room__tipcount">
                 <span className="room__tipfraction">
                   {room.used.toLocaleString()} of {room.total.toLocaleString()}
                 </span>
                 <span className="room__tippart">{Math.round(part * 100)}%</span>
               </span>
+            ) : (
+              /* The same two numbers, plus what is taking up the room. Behind
+                 the ring rather than beside it: nobody needs the split on screen
+                 every turn, and everybody has their hand on the ring already. */
+              <RoomShare turns={turns} tokens={room.used} contextWindow={room.total} />
             )}
           </span>
         </span>

@@ -11,6 +11,12 @@ import {
   extensionOf,
   figmaLink,
   readableSize,
+  modelInFront,
+  readsPictures,
+  pictureType,
+  fromConnectLine,
+  ATTACH_WORDS,
+  PICTURE_WORDS,
 } from '../src/lib/attachments';
 
 const KB = 1000;
@@ -151,5 +157,140 @@ describe('a pasted Figma link', () => {
 
   it('does not mind the whitespace a paste brings with it', () => {
     expect(figmaLink('  https://figma.com/design/8Kx2/Landing-v4\n')?.name).toBe('Landing v4');
+  });
+});
+
+/* ========================================================================== */
+/* Whether the model in front can read a picture                               */
+/* ========================================================================== */
+
+describe('a picture and a model that cannot read one', () => {
+  const connection = (takesImages: boolean | null | undefined) => ({
+    chosen: { providerId: 'acme', modelId: 'fast-1' },
+    providers: [
+      {
+        providerId: 'acme',
+        models: [
+          { id: 'fast-1', label: 'Fast 1', ...(takesImages === undefined ? {} : { takesImages }) },
+          { id: 'other', label: 'Other', takesImages: true },
+        ],
+      },
+    ],
+  });
+
+  it('knows when a model reads pictures and when it does not', () => {
+    expect(readsPictures(connection(true))).toBe(true);
+    expect(readsPictures(connection(false))).toBe(false);
+  });
+
+  /* Three answers, not two. Most older catalogue entries say nothing, and
+     refusing somebody's picture on a missing field would be worse than letting
+     the provider answer for itself. */
+  it('says it does not know rather than guessing no', () => {
+    expect(readsPictures(connection(null))).toBeNull();
+    expect(readsPictures(connection(undefined))).toBeNull();
+    expect(readsPictures(null)).toBeNull();
+    expect(readsPictures({ chosen: null, providers: [] })).toBeNull();
+  });
+
+  it('says nothing when the chosen model is not in the list any more', () => {
+    expect(
+      readsPictures({
+        chosen: { providerId: 'acme', modelId: 'gone' },
+        providers: [{ providerId: 'acme', models: [{ id: 'fast-1', takesImages: false }] }],
+      }),
+    ).toBeNull();
+    expect(
+      readsPictures({
+        chosen: { providerId: 'nobody', modelId: 'fast-1' },
+        providers: [{ providerId: 'acme', models: [{ id: 'fast-1', takesImages: false }] }],
+      }),
+    ).toBeNull();
+  });
+
+  it('names the model, and both ways out of it', () => {
+    const said = PICTURE_WORDS.cannotRead('Fast 1');
+    expect(said).toContain('Fast 1');
+    expect(said).toMatch(/take it out/i);
+    expect(said).toMatch(/pick a model/i);
+    // Nothing about the machinery underneath it.
+    expect(said).not.toMatch(/\b(vision|multimodal|modality|API|token)\b/i);
+  });
+
+  it('hands back the model in front, so its name can be used', () => {
+    expect(modelInFront(connection(false))?.label).toBe('Fast 1');
+    expect(modelInFront(null)).toBeNull();
+  });
+});
+
+/* ========================================================================== */
+/* What actually travels with a message                                        */
+/* ========================================================================== */
+
+describe('a picture whose type the browser did not say', () => {
+  /* The shell will not carry a picture whose type is blank, and it dropped
+     those in silence. A file dragged out of some folders arrives with nothing
+     said about it, so the name is the only other thing we know. */
+  it('works the type out from the name', () => {
+    expect(pictureType('hero.png', '')).toBe('image/png');
+    expect(pictureType('shot.JPG', undefined)).toBe('image/jpeg');
+    expect(pictureType('mark.svg', '')).toBe('image/svg+xml');
+    expect(pictureType('scan.tif', '')).toBe('image/tiff');
+  });
+
+  it('believes the browser when it does say', () => {
+    expect(pictureType('hero.png', 'image/webp')).toBe('image/webp');
+    expect(pictureType('odd', 'image/png')).toBe('image/png');
+  });
+
+  it('says nothing rather than inventing one', () => {
+    expect(pictureType('notes.txt', '')).toBe('');
+    expect(pictureType('noextension', undefined)).toBe('');
+  });
+});
+
+describe('what goes back into the message', () => {
+  /* Pasting a design address turns it into a chip and takes it out of the box,
+     so unless it is put back the agent is asked about a design it was never
+     given. */
+  it('names one design, and several', () => {
+    expect(ATTACH_WORDS.alsoLook(['https://figma.com/file/a'])).toContain('https://figma.com/file/a');
+    const many = ATTACH_WORDS.alsoLook(['https://figma.com/file/a', 'https://figma.com/file/b']);
+    expect(many).toContain('https://figma.com/file/a');
+    expect(many).toContain('https://figma.com/file/b');
+  });
+
+  it('says plainly that anything else in the box will not be read', () => {
+    const one = ATTACH_WORDS.onlyPictures(['Brand guidelines.pdf']);
+    expect(one).toContain('Brand guidelines.pdf');
+    expect(one).toMatch(/only pictures/i);
+    // And what to do instead, because "it will not be read" on its own is a
+    // dead end.
+    expect(one).toMatch(/project folder/i);
+    expect(ATTACH_WORDS.onlyPictures(['a.pdf', 'b.fig'])).toMatch(/^2 of these/);
+  });
+});
+
+/* An address is a tool already running, not a program to start. Typing one used
+   to be written down as a command — a command that does not exist. */
+describe('what somebody types into the connect box', () => {
+  it('is read as an address when it is one', () => {
+    for (const line of ['http://127.0.0.1:3845/mcp', 'HTTPS://example.com/mcp']) {
+      const made = fromConnectLine('figma', line);
+      expect(made?.address, line).toBe(line);
+      expect(made?.command, line).toBe('');
+    }
+  });
+
+  it('is read as a command when it is one', () => {
+    const made = fromConnectLine('browser', 'npx -y @playwright/mcp@latest');
+    expect(made?.command).toBe('npx');
+    expect(made?.args).toEqual(['-y', '@playwright/mcp@latest']);
+    expect(made?.address).toBeUndefined();
+  });
+
+  it('is nothing at all without a name or anything to reach', () => {
+    expect(fromConnectLine('', 'npx thing')).toBeNull();
+    expect(fromConnectLine('figma', '   ')).toBeNull();
   });
 });

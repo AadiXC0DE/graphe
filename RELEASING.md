@@ -110,8 +110,8 @@ conversation no longer jumps to the bottom while you are reading" does.
 
 ## 5. Update the Homebrew cask
 
-The cask lives in the tap repository, `ownpath/homebrew-tap`. `Casks/graphe.rb` in this repository
-is the template it is copied from.
+The cask lives in the tap repository, `AadiXC0DE/homebrew-tap`. `Casks/graphe.rb` in this
+repository is the template it is copied from.
 
 ```bash
 shasum -a 256 release/Graphe-<version>-arm64.zip
@@ -122,7 +122,7 @@ In the tap's `Casks/graphe.rb`, update `version` and both `sha256` values. Then,
 machine or after `brew uninstall --cask graphe`:
 
 ```bash
-brew tap ownpath/tap
+brew tap AadiXC0DE/tap
 brew install --cask graphe
 open -a Graphe
 ```

@@ -20,10 +20,10 @@
 # ## Where this file goes
 #
 # Not here. This is the template kept beside the source. At release time it is
-# copied into the tap repository — `ownpath/homebrew-tap`, as
+# copied into the tap repository — `AadiXC0DE/homebrew-tap`, as
 # `Casks/graphe.rb` — because Homebrew only reads casks from a tap. Then:
 #
-#     brew tap ownpath/tap
+#     brew tap AadiXC0DE/tap
 #     brew install --cask graphe
 #
 # Moving to homebrew-cask proper needs a stable release history and a project
@@ -55,11 +55,11 @@ cask "graphe" do
   sha256 arm:   "0000000000000000000000000000000000000000000000000000000000000000", # FILL IN
          intel: "0000000000000000000000000000000000000000000000000000000000000000"  # FILL IN
 
-  url "https://github.com/ownpath/graphe/releases/download/v#{version}/Graphe-#{version}-#{arch}.zip",
-      verified: "github.com/ownpath/graphe/"
+  url "https://github.com/AadiXC0DE/graphe/releases/download/v#{version}/Graphe-#{version}-#{arch}.zip",
+      verified: "github.com/AadiXC0DE/graphe/"
   name "Graphe"
   desc "Gentle coding agent for designers"
-  homepage "https://github.com/ownpath/graphe"
+  homepage "https://github.com/AadiXC0DE/graphe"
 
   livecheck do
     url :url
@@ -80,9 +80,9 @@ cask "graphe" do
   # ever remove them.
   zap trash: [
     "~/Library/Application Support/Graphe",
-    "~/Library/Caches/xyz.ownpath.graphe",
-    "~/Library/Preferences/xyz.ownpath.graphe.plist",
-    "~/Library/Saved Application State/xyz.ownpath.graphe.savedState",
+    "~/Library/Caches/xyz.graphe",
+    "~/Library/Preferences/xyz.graphe.plist",
+    "~/Library/Saved Application State/xyz.graphe.savedState",
   ]
 
   caveats <<~EOS

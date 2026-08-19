@@ -127,14 +127,22 @@ brew install --cask graphe
 open -a Graphe
 ```
 
-**It must open with no dialog at all.** If Gatekeeper appears, something set the quarantine
-attribute — check that the download came from Homebrew and not from a browser, and check that the
-ad-hoc signature survived:
+**A note on the dialog, because Homebrew 6 changed the ground rules.** Older Homebrew did not
+set the quarantine attribute on cask downloads, which is why this file claimed a no-dialog
+install. Homebrew 6.0 (June 2026) applies the quarantine attribute to cask installs, so an app
+that is only ad-hoc signed and not notarized will now show a Gatekeeper prompt on first launch
+regardless of how it was installed. Do not fight this from the cask — no `no_quarantine`, no
+xattr stripping in a postflight. The only real fix is notarization (the $99 route described below).
+Until then, a first-time user allows the app with "Open Anyway" (System Settings → Privacy &
+Security), or right-click → Open in Finder.
+
+**A quick check that the install is sane** — the signature must still verify (it does not matter
+that Gatekeeper prompts):
 
 ```bash
 codesign --verify --deep --strict --verbose=2 /Applications/Graphe.app
 spctl --assess --type execute /Applications/Graphe.app   # will say "rejected": expected, not notarized
-xattr -p com.apple.quarantine /Applications/Graphe.app   # should say: No such xattr
+xattr -p com.apple.quarantine /Applications/Graphe.app   # present on Homebrew 6: expected, not a bug
 ```
 
 ---

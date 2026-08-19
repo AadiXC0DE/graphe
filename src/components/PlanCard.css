@@ -50,6 +50,11 @@
   color: var(--text);
 }
 
+.plan__body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .plan__what {
   min-width: 0;
 }
@@ -75,16 +80,31 @@
     opacity var(--dur-micro) var(--ease-hover);
 }
 
-/* Quiet until wanted. Most plans are agreed whole, so this is the rare press —
-   it earns its place by being there when somebody reaches, not by advertising. */
-.plan__drop {
+/* Quiet until wanted. Most plans are agreed whole, so these are the rare press
+   — they earn their place by being there when somebody reaches, not by
+   advertising. Nothing here moves on press: moving a step three places is three
+   presses in a row, and a control that flinches under a repeated press is the
+   one thing motion must not do. */
+.plan__controls {
   flex: none;
   margin-left: auto;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-left: var(--space-2);
+}
+
+.plan__drop,
+.plan__move,
+.plan__note-open {
+  flex: none;
   border: 0;
   background: none;
-  padding: 0 0 0 var(--space-3);
+  padding: 0 var(--space-1);
   font: inherit;
   font-size: var(--text-2xs);
+  line-height: 1;
   color: var(--text-faint);
   cursor: pointer;
   /* Quiet, but never hidden: somebody who has not been told the plan can be
@@ -94,13 +114,199 @@
 }
 
 .plan__step:hover .plan__drop,
+.plan__step:hover .plan__move,
+.plan__step:hover .plan__note-open,
 .plan__drop:focus-visible,
+.plan__move:focus-visible,
+.plan__note-open:focus-visible,
 .plan__step--out .plan__drop {
   opacity: 1;
 }
 
-.plan__drop:hover {
+/* A step that is out is not going to run, so moving it and writing on it are
+   both beside the point — and "Put it back" is a wide label that would drag
+   every other row's arrows out of line if it sat beside them. */
+.plan__step--out .plan__move,
+.plan__step--out .plan__note-open {
+  display: none;
+}
+
+/* Said about, so it stays lit once the pointer leaves — the mark is the only
+   sign left that this step carries a note when the note is folded away. */
+.plan__note-open--said {
+  opacity: 1;
   color: var(--accent);
+}
+
+.plan__drop:hover,
+.plan__move:hover,
+.plan__note-open:hover {
+  color: var(--accent);
+}
+
+/* At the end of the list there is nowhere to go. Dimmed rather than disabled:
+   a disabled button loses the focus the moment it goes dead, and somebody
+   moving a step to the top would have to find the arrow again to move the next
+   one. */
+.plan__move[aria-disabled='true'] {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.plan__step:hover .plan__move[aria-disabled='true'] {
+  opacity: 0.25;
+}
+
+.plan__move[aria-disabled='true']:hover {
+  color: var(--text-faint);
+}
+
+.plan__drop:focus-visible,
+.plan__move:focus-visible,
+.plan__note-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* What somebody said about one step, without striking it. Set in from the
+   sentence it belongs to, so a note is plainly about the step above it. */
+.plan__note {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border-strong);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.plan__writing {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  animation: plan-note-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes plan-note-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.plan__notebox {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: vertical;
+  padding: var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.plan__notebox:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.plan__done {
+  flex: none;
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.plan__done:active {
+  transform: scale(0.97);
+}
+
+.plan__done:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Asked before the plan, and only when the answer would change it. Sunk rather
+   than raised: it sits inside the same card, one beat before the list, and it
+   is a place to type rather than another thing to decide. */
+.plan__asking {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+
+.plan__questions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.plan__question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.plan__asked {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.plan__answer {
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.plan__answer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.plan__hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* Said to a screen reader and to nobody else. */
+.plan__hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .plan__left {
@@ -112,8 +318,19 @@
 @media (prefers-reduced-motion: reduce) {
   .plan__what,
   .plan__number,
-  .plan__drop {
+  .plan__drop,
+  .plan__move,
+  .plan__note-open,
+  .plan__done {
     transition: none;
+  }
+
+  .plan__writing {
+    animation: none;
+  }
+
+  .plan__done:active {
+    transform: none;
   }
 }
 

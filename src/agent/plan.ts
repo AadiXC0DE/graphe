@@ -61,6 +61,19 @@ export const PLAN_WORDS = {
    *  straight back, so nobody has to be sure before they try it. */
   drop: 'Leave this out',
   undrop: 'Put it back',
+  /** Beside each step, for putting them in the order they should happen in. */
+  up: 'Move up',
+  down: 'Move down',
+  /** Said out loud after a move, because the list has shifted under somebody
+   *  who may not be able to see that it has. */
+  nowAt(at: number, of: number): string {
+    return `Now ${String(at)} of ${String(of)}.`;
+  },
+  /** Beside each step, for saying something about one without striking it. */
+  say: 'Say something about this',
+  saidLabel: 'What to know about this step',
+  sayHint: 'Anything about this step in particular',
+  sayDone: 'Done',
   /** Under the list once anything is dropped. */
   dropped(many: number): string {
     return many === 1 ? 'One step left out.' : `${String(many)} steps left out.`;
@@ -74,14 +87,35 @@ export const PLAN_WORDS = {
   /** Sent when somebody agreed to some of the plan but not all of it. The
    *  dropped ones are named as well as the kept ones: a model told only what to
    *  do will helpfully do the rest of what it proposed. */
-  doThese(kept: readonly string[], dropped: readonly string[]): string {
+  doThese(kept: readonly string[], dropped: readonly string[] = []): string {
     const list = kept.map((step, at) => `${String(at + 1)}. ${step}`).join('\n');
+    if (dropped.length === 0) return `Do these, and only these:\n\n${list}`;
     const not = dropped.map((step) => `- ${step}`).join('\n');
     return `Do these, and only these:\n\n${list}\n\nLeave these out — I do not want them:\n\n${not}`;
   },
+  /** Sent when the steps were put in a different order to the one proposed. The
+   *  numbered list already carries the order; this says the order is deliberate
+   *  rather than a list rewritten carelessly. */
+  inThisOrder: 'That order is deliberate — do them in it.',
+  /** Above what was said about particular steps. */
+  notesOn: 'About some of them:',
+  /** Above the answers to what was asked before the plan ran. */
+  answersTo: 'Answers to what you asked:',
   /** Added under the person's own words on a looking-around pass. */
   asked:
-    'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet.',
+    'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet. If — and only if — something you cannot settle from the project would change that list, finish with a line reading "Questions:" and at most three of them, one per line. Most requests need none, and a question whose answer would not change the list is not worth asking.',
+  /** Above the questions, before the list. Two sharp ones beat a plan built on
+   *  a guess; a page of them is worse than either, which is why there are never
+   *  more than three. */
+  questions(many: number): string {
+    const counted = many === 2 ? 'Two' : many === 3 ? 'Three' : String(many);
+    return many === 1
+      ? 'One thing I’d want to know first:'
+      : `${counted} things I’d want to know first:`;
+  },
+  /** Under the questions. Answering is worth the twenty seconds and skipping it
+   *  is allowed, so both have to be said. */
+  questionsHint: 'Answer what you like — anything left blank, I’ll use my best guess.',
   /** A plan longer than the list shows says so rather than ending mid-thought. */
   more(extra: number): string {
     return extra === 1
@@ -99,10 +133,36 @@ export type Proposal = {
   steps: readonly string[];
   /** Anything alongside the list worth reading before saying yes. */
   caveats: readonly string[];
+  /** What it would want to know before starting, when the answer would change
+   *  the list above. Usually empty. */
+  questions: readonly string[];
 };
 
 /** Long enough to be a plan, short enough to be read. */
 const MAX_STEPS = 12;
+
+/** Three at the very most. Past that it stops being two sharp questions and
+ *  becomes a form, and a form is worse than a plan built on a guess. */
+const MAX_QUESTIONS = 3;
+
+/** The line that hands the rest of the reply over to questions. */
+const QUESTIONS_OPEN = /^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*)?questions?(?:\*\*)?[ \t]*[:：]?[ \t]*$/im;
+
+/** The questions off the end of a proposal, and the proposal without them.
+ *
+ *  Split off before the steps are read, so a question is never counted as a
+ *  step somebody could be asked to agree to. */
+function splitQuestions(text: string): { rest: string; questions: readonly string[] } {
+  const open = QUESTIONS_OPEN.exec(text);
+  if (open?.index === undefined) return { rest: text, questions: [] };
+  const asked = text
+    .slice(open.index + open[0].length)
+    .split(/\r?\n/)
+    .map((line) => plain(line.replace(LIST_ITEM, '$1')))
+    .filter((line) => line !== '')
+    .slice(0, MAX_QUESTIONS);
+  return { rest: text.slice(0, open.index), questions: asked };
+}
 
 const LIST_ITEM = /^[ \t]*(?:[-*•]|\d+[.)])[ \t]+(.*)$/;
 const HAS_LIST = /^[ \t]*(?:[-*•]|\d+[.)])[ \t]+\S/m;
@@ -133,7 +193,8 @@ function plain(text: string): string {
  * with no list in it is one step, because a plan of one thing is still a plan.
  */
 export function parseProposal(text: string): Proposal {
-  const lines = text.split(/\r?\n/);
+  const { rest, questions } = splitQuestions(text);
+  const lines = rest.split(/\r?\n/);
   const items: string[] = [];
   const asides: string[] = [];
   let inList = false;
@@ -163,12 +224,124 @@ export function parseProposal(text: string): Proposal {
 
   if (items.length === 0) {
     const whole = plain(lines.join(' '));
-    return { steps: whole === '' ? [] : [whole], caveats: [] };
+    return { steps: whole === '' ? [] : [whole], caveats: [], questions };
   }
 
   const steps = items.slice(0, MAX_STEPS);
   const extra = items.length - steps.length;
-  return { steps, caveats: extra > 0 ? [...asides, PLAN_WORDS.more(extra)] : asides };
+  return {
+    steps,
+    caveats: extra > 0 ? [...asides, PLAN_WORDS.more(extra)] : asides,
+    questions,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Arguing with it before it runs                                              */
+/* -------------------------------------------------------------------------- */
+
+/** One step as it was left: what was proposed, and anything said about it. */
+export type PlanStep = {
+  step: string;
+  /** Said about this one step without striking it out. */
+  note?: string;
+};
+
+/** A plan as somebody left it, ready to be turned into a sentence. */
+export type PlanDecision = {
+  /** What to do, in the order decided. */
+  kept: readonly PlanStep[];
+  /** What was struck out, in the order it was proposed. */
+  dropped: readonly string[];
+  /** True when the kept steps are not in the order they were proposed in. */
+  reordered: boolean;
+  /** What was said back to the questions asked, questions left blank left out. */
+  answers: readonly { question: string; answer: string }[];
+};
+
+/**
+ * One step, one place.
+ *
+ * The order is held as where each proposed step now sits, so the steps
+ * themselves are never rewritten and a step put back where it started is
+ * identical to one never moved. At either end nothing happens and the same
+ * order comes back, which is how the caller knows not to move the focus.
+ */
+export function moved(order: readonly number[], at: number, by: -1 | 1): readonly number[] {
+  const to = at + by;
+  if (at < 0 || at >= order.length || to < 0 || to >= order.length) return order;
+  const next = [...order];
+  const one = next[at];
+  if (one === undefined) return order;
+  next.splice(at, 1);
+  next.splice(to, 0, one);
+  return next;
+}
+
+/** A note worth carrying: written by a person, not whitespace they left behind. */
+function said(text: string | undefined): string | undefined {
+  const trimmed = (text ?? '').trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
+/**
+ * Everything somebody did to a plan, as one thing to send.
+ *
+ * Kept apart from the card so the rules can be read here: the kept steps come
+ * back in the order they were left in, the struck ones in the order they were
+ * proposed in, and "reordered" is measured rather than remembered — striking
+ * the second of four is not a reorder, and nobody should have to explain a
+ * change of order they did not make.
+ */
+export function decideOn(
+  steps: readonly string[],
+  order: readonly number[],
+  dropped: ReadonlySet<number>,
+  notes: Readonly<Record<number, string>>,
+  asked: readonly string[] = [],
+  answers: Readonly<Record<number, string>> = {},
+): PlanDecision {
+  const walk = order.filter((at) => steps[at] !== undefined);
+  const keptAt = walk.filter((at) => !dropped.has(at));
+  return {
+    kept: keptAt.map((at) => {
+      const note = said(notes[at]);
+      return note === undefined ? { step: steps[at] as string } : { step: steps[at] as string, note };
+    }),
+    dropped: steps.filter((_, at) => dropped.has(at)),
+    reordered: keptAt.some((at, index) => index > 0 && at < (keptAt[index - 1] as number)),
+    answers: asked.flatMap((question, at) => {
+      const answer = said(answers[at]);
+      return answer === undefined ? [] : [{ question, answer }];
+    }),
+  };
+}
+
+/**
+ * What to send back with "Do it", or null when there is nothing to add.
+ *
+ * Null is the ordinary case: a plan agreed exactly as proposed needs no
+ * covering letter, and their own sentence already says everything. Only what
+ * they changed is worth a word — and a model told what to do without being
+ * told what to leave alone will helpfully do the rest of what it proposed.
+ */
+export function decidedMessage(decision: PlanDecision): string | null {
+  const notes = decision.kept.flatMap((one, at) =>
+    one.note === undefined ? [] : [`- ${String(at + 1)}: ${one.note}`],
+  );
+  const changed = decision.dropped.length > 0 || decision.reordered || notes.length > 0;
+  const parts: string[] = [];
+
+  if (changed) {
+    parts.push(PLAN_WORDS.doThese(decision.kept.map((one) => one.step), decision.dropped));
+    if (decision.reordered) parts.push(PLAN_WORDS.inThisOrder);
+    if (notes.length > 0) parts.push(`${PLAN_WORDS.notesOn}\n\n${notes.join('\n')}`);
+  }
+  if (decision.answers.length > 0) {
+    const lines = decision.answers.map((one) => `- ${one.question} ${one.answer}`);
+    parts.push(`${PLAN_WORDS.answersTo}\n\n${lines.join('\n')}`);
+  }
+  return parts.length === 0 ? null : parts.join('\n\n');
 }
 
 /* -------------------------------------------------------------------------- */

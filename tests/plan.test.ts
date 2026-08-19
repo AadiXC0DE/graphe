@@ -7,9 +7,19 @@
  * default, so a wrong yes lands on somebody who only wanted the header bigger.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
-import { PLAN_WORDS, parseProposal, readOnlyTools, worthPlanning } from '../src/agent/plan';
+import {
+  PLAN_WORDS,
+  decideOn,
+  decidedMessage,
+  moved,
+  parseProposal,
+  readOnlyTools,
+  worthPlanning,
+} from '../src/agent/plan';
 
 describe('readOnlyTools', () => {
   it('keeps the reads and drops everything that can change a project', () => {
@@ -125,8 +135,8 @@ describe('parseProposal', () => {
   });
 
   it('has no steps for empty text', () => {
-    expect(parseProposal('')).toEqual({ steps: [], caveats: [] });
-    expect(parseProposal('   \n\n  ')).toEqual({ steps: [], caveats: [] });
+    expect(parseProposal('')).toEqual({ steps: [], caveats: [], questions: [] });
+    expect(parseProposal('   \n\n  ')).toEqual({ steps: [], caveats: [], questions: [] });
   });
 
   it('takes the tick boxes off a checklist', () => {
@@ -308,5 +318,247 @@ describe('a plan somebody edited before agreeing to it', () => {
     ]) {
       expect(said).not.toMatch(/\b(commit|branch|token|prompt|context|API)\b/i);
     }
+  });
+});
+
+/* ========================================================================== */
+/* Putting the steps in a different order                                      */
+/* ========================================================================== */
+
+describe('moving a step before it runs', () => {
+  it('moves one step one place and leaves the rest where they were', () => {
+    expect(moved([0, 1, 2, 3], 2, -1)).toEqual([0, 2, 1, 3]);
+    expect(moved([0, 1, 2, 3], 1, 1)).toEqual([0, 2, 1, 3]);
+  });
+
+  /* The same list back, by identity — the card reads that to know nothing
+     happened, and a control that reports a move it did not make would take the
+     focus off the step somebody is trying to move. */
+  it('does nothing at either end, and says so by handing the same list back', () => {
+    const order = [0, 1, 2];
+    expect(moved(order, 0, -1)).toBe(order);
+    expect(moved(order, 2, 1)).toBe(order);
+    expect(moved(order, 9, -1)).toBe(order);
+  });
+
+  it('never loses or duplicates a step, however far one is walked', () => {
+    let order: readonly number[] = [0, 1, 2, 3, 4];
+    for (let at = 4; at > 0; at -= 1) order = moved(order, at, -1);
+    expect([...order].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+    expect(order).toEqual([4, 0, 1, 2, 3]);
+  });
+});
+
+/* ========================================================================== */
+/* What somebody left behind, as one decision                                  */
+/* ========================================================================== */
+
+const THREE = ['Move the button', 'Match the spacing', 'Rewrite the nav'];
+
+describe('a plan somebody reordered, struck and wrote on', () => {
+  it('hands the kept steps back in the order they were left in', () => {
+    const decision = decideOn(THREE, [2, 0, 1], new Set(), {});
+    expect(decision.kept.map((one) => one.step)).toEqual([
+      'Rewrite the nav',
+      'Move the button',
+      'Match the spacing',
+    ]);
+    expect(decision.reordered).toBe(true);
+  });
+
+  /* Striking the middle of three is not a reorder, and nobody should be told to
+     mind an order they never changed. */
+  it('does not call striking a step a change of order', () => {
+    const decision = decideOn(THREE, [0, 1, 2], new Set([1]), {});
+    expect(decision.reordered).toBe(false);
+    expect(decision.dropped).toEqual(['Match the spacing']);
+  });
+
+  it('carries what was said about a step without striking it', () => {
+    const decision = decideOn(THREE, [0, 1, 2], new Set(), { 1: '  8px, not 12  ', 2: '   ' });
+    expect(decision.kept[1]?.note).toBe('8px, not 12');
+    expect(decision.kept[2]?.note).toBeUndefined();
+  });
+
+  it('keeps only the questions that were actually answered', () => {
+    const decision = decideOn(THREE, [0, 1, 2], new Set(), {}, ['Which pages?', 'Dark too?'], {
+      1: 'Yes, both.',
+    });
+    expect(decision.answers).toEqual([{ question: 'Dark too?', answer: 'Yes, both.' }]);
+  });
+});
+
+describe('the sentence a decided plan sends back', () => {
+  /* The ordinary case by far. A plan agreed exactly as proposed needs no
+     covering letter — their own sentence already said it. */
+  it('says nothing at all when the plan was agreed as proposed', () => {
+    expect(decidedMessage(decideOn(THREE, [0, 1, 2], new Set(), {}))).toBeNull();
+  });
+
+  it('sends the order it was left in, and says the order is deliberate', () => {
+    const said = decidedMessage(decideOn(THREE, [2, 0, 1], new Set(), {})) ?? '';
+    expect(said).toContain('1. Rewrite the nav');
+    expect(said).toContain('2. Move the button');
+    expect(said).toContain(PLAN_WORDS.inThisOrder);
+  });
+
+  /* A note numbered against where the step used to sit points at the wrong
+     step the moment anything is moved or struck. */
+  it('numbers a note against where the step ended up, not where it started', () => {
+    const said = decidedMessage(decideOn(THREE, [2, 0, 1], new Set(), { 0: 'Keep the label' })) ?? '';
+    expect(said).toContain(PLAN_WORDS.notesOn);
+    expect(said).toContain('- 2: Keep the label');
+    expect(said).not.toContain('- 1: Keep the label');
+  });
+
+  it('sends the answers on their own when that is all that changed', () => {
+    const said =
+      decidedMessage(decideOn(THREE, [0, 1, 2], new Set(), {}, ['Which pages?'], { 0: 'All of them.' })) ?? '';
+    expect(said).toContain(PLAN_WORDS.answersTo);
+    expect(said).toContain('Which pages? All of them.');
+    expect(said).not.toContain('1. Move the button');
+  });
+
+  it('still names what to leave out, because a model finishes what it proposed', () => {
+    const said = decidedMessage(decideOn(THREE, [0, 1, 2], new Set([2]), {})) ?? '';
+    expect(said).toMatch(/Leave these out/i);
+    expect(said).toContain('Rewrite the nav');
+  });
+});
+
+/* ========================================================================== */
+/* The questions asked before the plan                                         */
+/* ========================================================================== */
+
+describe('questions before the plan', () => {
+  const PROPOSED = `1. Rebuild the header
+2. Match the spacing
+
+Questions:
+- Every page, or only the marketing ones?
+- Should the dark one change too?`;
+
+  it('reads them off the end without counting one as a step', () => {
+    const { steps, questions } = parseProposal(PROPOSED);
+    expect(steps).toEqual(['Rebuild the header', 'Match the spacing']);
+    expect(questions).toEqual([
+      'Every page, or only the marketing ones?',
+      'Should the dark one change too?',
+    ]);
+  });
+
+  /* Two sharp questions beat a plan built on a guess; a page of them is worse
+     than either. */
+  it('never asks more than three, however many were written', () => {
+    const many = parseProposal(`1. Do it\n\n## Questions\n- a?\n- b?\n- c?\n- d?\n- e?`);
+    expect(many.questions).toHaveLength(3);
+  });
+
+  it('asks none at all when the model wrote none, which is the usual reply', () => {
+    expect(parseProposal('1. Rebuild the header\n2. Match the spacing').questions).toEqual([]);
+  });
+
+  it('asks for them only when the answer would change the list', () => {
+    expect(PLAN_WORDS.asked).toMatch(/would change that list/i);
+    expect(PLAN_WORDS.asked).toMatch(/at most three/i);
+  });
+});
+
+/* ========================================================================== */
+/* The card itself                                                             */
+/* ========================================================================== */
+
+const CARD = readFileSync(new URL('../src/components/PlanCard.tsx', import.meta.url), 'utf8');
+const CARD_CSS = readFileSync(new URL('../src/components/PlanCard.css', import.meta.url), 'utf8');
+
+describe('what the plan card is allowed to do', () => {
+  /* Moving a step three places is three presses in a row, sometimes held down.
+     A control that flinches under that reads as broken, so the row's controls
+     move colour and nothing else. */
+  it('never moves anything under a press that gets repeated', () => {
+    const row = /\.plan__(?:move|drop|note-open)[^{]*\{[^}]*\}/g;
+    for (const rule of CARD_CSS.match(row) ?? []) expect(rule).not.toMatch(/transform/);
+    expect(CARD_CSS).not.toMatch(/transition:\s*all/);
+  });
+
+  it('turns every moving part off for somebody who asked for that', () => {
+    const quiet = CARD_CSS.slice(CARD_CSS.indexOf('prefers-reduced-motion'));
+    for (const name of ['plan__move', 'plan__note-open', 'plan__writing', 'plan__done']) {
+      expect(quiet).toContain(name);
+    }
+  });
+
+  /* Every colour in this app is a token, and the palette has no green in it.
+     A literal here is how one arrives. */
+  it('takes every colour from the palette rather than writing one down', () => {
+    expect(CARD_CSS).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(CARD_CSS).not.toMatch(/\b(?:green|rgb|rgba|hsl)\(/i);
+  });
+
+  /* A label written into the markup is a label nothing can check the language
+     of, and this app checks the language of all of them. */
+  it('reads every word it says out of the words object', () => {
+    for (const word of ['PLAN_WORDS.up', 'PLAN_WORDS.down', 'PLAN_WORDS.say', 'PLAN_WORDS.questions(']) {
+      expect(CARD).toContain(word);
+    }
+    for (const inline of ['Move up', 'Move down', 'Say something about this']) {
+      expect(CARD).not.toContain(`'${inline}'`);
+      expect(CARD).not.toContain(`>${inline}<`);
+    }
+  });
+
+  /* An arrow that goes `disabled` at the end of the list hands the focus back
+     to the page, and the next step somebody wants to move has to be found
+     again with the keyboard. */
+  it('dims the arrow at the end of the list rather than disabling it', () => {
+    expect(CARD).toMatch(/className="plan__move"[\s\S]{0,220}aria-disabled=/);
+    expect(CARD).not.toMatch(/className="plan__move"[\s\S]{0,220}(?<![-\w])disabled=/);
+    expect(CARD_CSS).toContain("[aria-disabled='true']");
+  });
+
+  /* "Put it back" is wide, and beside three arrows it drags that row's controls
+     out of line with every other row. A step that is out is not going to run,
+     so there is nothing to move it above or write on it about. */
+  it('leaves a struck step nothing but the way back', () => {
+    expect(CARD_CSS).toMatch(/\.plan__step--out \.plan__move[\s\S]{0,80}display: none/);
+    expect(CARD_CSS).toMatch(/\.plan__step--out \.plan__note-open[\s\S]{0,60}display: none/);
+  });
+
+  it('leaves every decision to the pure side rather than deciding here', () => {
+    expect(CARD).toContain('decideOn(');
+    expect(CARD).toContain('moved(');
+    expect(CARD).not.toMatch(/\.splice\(/);
+  });
+});
+
+describe('the words on the card', () => {
+  const said = [
+    PLAN_WORDS.up,
+    PLAN_WORDS.down,
+    PLAN_WORDS.say,
+    PLAN_WORDS.sayDone,
+    PLAN_WORDS.sayHint,
+    PLAN_WORDS.questions(2),
+    PLAN_WORDS.questionsHint,
+    PLAN_WORDS.notesOn,
+    PLAN_WORDS.answersTo,
+    PLAN_WORDS.inThisOrder,
+    PLAN_WORDS.nowAt(2, 4),
+  ];
+
+  it('uses no word a designer has no reason to know', () => {
+    const jargon =
+      /\b(commit|repo|repository|branch|token|API|prompt|agent|context|tool|subagent|session|reorder|annotate|index)\b/i;
+    for (const line of said) expect(line).not.toMatch(jargon);
+  });
+
+  it('never raises its voice', () => {
+    for (const line of said) expect(line).not.toContain('!');
+  });
+
+  it('counts the questions in words, because there are never more than three', () => {
+    expect(PLAN_WORDS.questions(1)).toContain('One');
+    expect(PLAN_WORDS.questions(2)).toContain('Two');
+    expect(PLAN_WORDS.questions(3)).toContain('Three');
   });
 });

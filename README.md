@@ -15,7 +15,24 @@ Free · open source · runs on the AI subscription you already have
 
 > **Status: early and moving quickly.** Graphe is now a capable local agent with visual review,
 > project history, cost tracking, designer-friendly controls, a file rail, reusable skills and a
-> one-button preview. More is on the way. Build it from source if you want to try it.
+> one-button preview. More is on the way.
+
+---
+
+## Install
+
+macOS — Apple silicon and Intel. Either route works:
+
+```sh
+brew tap AadiXC0DE/tap
+brew install --cask graphe
+```
+
+or download the disk image from the [latest release](https://github.com/AadiXC0DE/graphe/releases).
+
+> Graphe is ad-hoc signed but not notarized yet, so on first launch macOS may ask you to allow
+> it — “Open Anyway” in System Settings → Privacy & Security, or right-click the app in Finder
+> and choose Open. See [RELEASING](RELEASING.md) for how it is signed.
 
 ---
 

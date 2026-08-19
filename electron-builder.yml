@@ -28,7 +28,7 @@
 # and published anyway, because a direct download is what people try first — it
 # just costs them a trip through System Settings until we pay Apple.
 
-appId: xyz.ownpath.graphe
+appId: xyz.graphe
 productName: Graphe
 copyright: Copyright © 2026 Graphe contributors
 

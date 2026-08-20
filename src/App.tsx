@@ -149,6 +149,7 @@ import {
   type EstimateTurn,
   type Turn,
 } from "./lib/thread";
+import { markFor, themeFrom, type Theme } from "./lib/theme";
 import "./App.css";
 
 /** /?gallery renders every component on one page instead of the app, so the UI
@@ -729,6 +730,25 @@ function Conversation() {
   /** Whether the shelf is open. Deliberately not remembered across launches —
    *  it is a thing people flip all the time and it costs nothing to reset. */
   const [shelfOpen, setShelfOpen] = useState(true);
+
+  /** Light, dark, or whatever the computer is set to. Kept on this computer
+   *  rather than per project — it is about the person, not the work. */
+  const [theme, setTheme] = useState<Theme>(() =>
+    themeFrom(typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme')),
+  );
+
+  useEffect(() => {
+    const mark = markFor(theme);
+    // Removing it is the point of "follow this computer": the stylesheet's own
+    // prefers-color-scheme block then decides, and keeps deciding.
+    if (mark === null) document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', mark);
+    try {
+      localStorage.setItem('graphe:theme', theme);
+    } catch {
+      // A window with no storage still gets the theme, just not next time.
+    }
+  }, [theme]);
   /** The project file rail keeps its setting when folded, just like the main
    *  sidebar: showing it again is one press rather than a trip to settings. */
   const [filesOpen, setFilesOpen] = useState(true);
@@ -3749,6 +3769,8 @@ function Conversation() {
         showMe={preferences.showMe}
         showFiles={preferences.showFiles}
         holdBack={holdsBack(preferences.heldBack, desk?.path)}
+        theme={theme}
+        onTheme={setTheme}
         onToggleShowMe={() => changeShowMe(!preferences.showMe)}
         onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
         onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}

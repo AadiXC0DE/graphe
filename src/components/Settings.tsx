@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { THEMES, THEME_WORDS, type Theme } from '../lib/theme';
 import './Settings.css';
 
 export type SettingsLink =
@@ -18,6 +19,9 @@ type Props = {
   showFiles: boolean;
   /** Work in a copy and ask before anything lands in the project. */
   holdBack: boolean;
+  /** Which palette somebody has chosen, or to follow the computer. */
+  theme: Theme;
+  onTheme: (theme: Theme) => void;
   onToggleShowMe: () => void;
   onToggleShowFiles: () => void;
   onToggleHoldBack: () => void;
@@ -31,6 +35,7 @@ const LINKS: readonly (
   | { id: 'show-me'; name: string; note: string; kind: 'show-me' }
   | { id: 'files'; name: string; note: string; kind: 'files' }
   | { id: 'hold-back'; name: string; note: string; kind: 'hold-back' }
+  | { id: 'theme'; name: string; note: string; kind: 'theme' }
 )[] = [
   {
     id: 'skills',
@@ -75,6 +80,12 @@ const LINKS: readonly (
     kind: 'hold-back',
   },
   {
+    id: 'theme',
+    name: THEME_WORDS.name,
+    note: THEME_WORDS.note,
+    kind: 'theme',
+  },
+  {
     id: 'folder',
     name: 'Reveal the folder',
     note: 'Open it where this computer keeps files.',
@@ -101,6 +112,8 @@ export default function Settings({
   showMe,
   showFiles,
   holdBack,
+  theme,
+  onTheme,
   onToggleShowMe,
   onToggleShowFiles,
   onToggleHoldBack,
@@ -165,6 +178,33 @@ export default function Settings({
                     onChange={onToggleHoldBack}
                   />
                 </label>
+              </li>
+            );
+          }
+          if (one.kind === 'theme') {
+            return (
+              <li key={one.id}>
+                <div className="settings__row">
+                  <span className="settings__text">
+                    <span className="settings__name">{one.name}</span>
+                    <span className="settings__note">{one.note}</span>
+                  </span>
+                  {/* Three states rather than a switch: "follow this computer"
+                      is a real answer and a two-way toggle cannot say it. */}
+                  <span className="settings__choice" role="group" aria-label={one.name}>
+                    {THEMES.map((pick) => (
+                      <button
+                        key={pick.id}
+                        type="button"
+                        className={`settings__pick ${theme === pick.id ? 'settings__pick--on' : ''}`}
+                        aria-pressed={theme === pick.id}
+                        onClick={() => onTheme(pick.id)}
+                      >
+                        {pick.label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
               </li>
             );
           }

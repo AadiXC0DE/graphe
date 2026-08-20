@@ -340,14 +340,20 @@ export function receive(desks: Desks, notice: AgentNotice, at: number = Date.now
     // belongs to the conversation it started in. The spend is the project's
     // either way, so it is counted wherever the words land.
     const said = notice.conversation ?? '';
-    const parked = said === '' ? undefined : desk.parked[said];
-    if (parked !== undefined) {
-      return {
-        ...desk,
-        parked: { ...desk.parked, [said]: { ...parked, turns: applyEvent(parked.turns, notice.event) } },
-        spent: applySpend(desk.spent, notice.event),
-        ...measure(desk, notice, at),
-      };
+    if (said !== '' && said !== desk.address) {
+      const parked = desk.parked[said];
+      if (parked !== undefined) {
+        return {
+          ...desk,
+          parked: { ...desk.parked, [said]: { ...parked, turns: applyEvent(parked.turns, notice.event) } },
+          spent: applySpend(desk.spent, notice.event),
+          ...measure(desk, notice, at),
+        };
+      }
+      // A delayed event for a conversation this window no longer knows must
+      // never fall through into the tab in front. Its project spend remains a
+      // project fact, but its words and job state have no honest destination.
+      return { ...desk, spent: applySpend(desk.spent, notice.event) };
     }
     return {
       ...desk,

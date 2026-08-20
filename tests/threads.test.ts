@@ -93,6 +93,18 @@ describe('a project with more than one conversation open', () => {
     expect(currentDesk(desks)?.turns).toHaveLength(2);
   });
 
+  it('never puts a delayed event from an unknown conversation into the tab in front', () => {
+    const before = twoOpen();
+    const desks = receive(before, {
+      project: HERE.path,
+      conversation: 'already-closed',
+      event: { type: 'error', message: 'terminated' },
+    });
+
+    expect(currentDesk(desks)?.turns).toEqual(currentDesk(before)?.turns);
+    expect(currentDesk(desks)?.parked).toEqual(currentDesk(before)?.parked);
+  });
+
   /* Putting one down is not throwing it away — but the window does forget it,
      because reopening it reads it back from disk. */
   it('takes a put-down conversation off the row', () => {

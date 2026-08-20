@@ -46,6 +46,10 @@ export type WorkspacesOptions<T> = {
    *  whatever it held is still whole when somebody is told about it — a limit
    *  nobody is told about is a thing that disappeared. */
   evicted?: (workspace: Workspace<T>) => void;
+  /** A live workspace may be protected from LRU eviction. When every old one
+   *  is protected, the limit is temporarily exceeded rather than destroying
+   *  work that is still in flight. */
+  mayEvict?: (held: T) => boolean;
   limit?: number;
 };
 
@@ -56,11 +60,13 @@ export class Workspaces<T> {
 
   readonly #close: (held: T) => void;
   readonly #evicted: (workspace: Workspace<T>) => void;
+  readonly #mayEvict: (held: T) => boolean;
   readonly #limit: number;
 
   constructor(options: WorkspacesOptions<T>) {
     this.#close = options.close;
     this.#evicted = options.evicted ?? (() => undefined);
+    this.#mayEvict = options.mayEvict ?? (() => true);
     this.#limit = Math.max(1, options.limit ?? LIMIT);
   }
 
@@ -104,8 +110,12 @@ export class Workspaces<T> {
     while (this.#open.length > this.#limit) {
       // From the back, and never the one in front: the limit is about machines,
       // and taking away the project somebody is looking at to satisfy it would
-      // be the limit deciding what they are working on.
-      const oldest = this.#open.pop();
+      // be the limit deciding what they are working on. A running old workspace
+      // is protected too; exceeding a soft limit is safer than aborting work.
+      let index = this.#open.length - 1;
+      while (index > 0 && !this.#mayEvict(this.#open[index]!.held)) index -= 1;
+      if (index === 0) break;
+      const [oldest] = this.#open.splice(index, 1);
       if (oldest === undefined) break;
       this.#evicted(oldest);
       this.#close(oldest.held);

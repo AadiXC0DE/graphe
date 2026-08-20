@@ -234,6 +234,26 @@ describe('bringBack — Cursor-style Apply, files come home uncommitted', () => 
     }
   });
 
+  it('treats a change already applied to main as safely landed, not conflicted', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'already-applied', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'same final work\n');
+      await writeFile(path.join(repo, 'a.txt'), 'same final work\n');
+
+      const applied = await bringBack(git(), repo, made.value.folder);
+      expect(applied.ok).toBe(true);
+      if (!applied.ok) return;
+      expect(applied.value.applied).toContain('a.txt');
+      expect(applied.value.conflicted).not.toContain('a.txt');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
   it('leaves a file alone when the main checkout changed it too', async () => {
     const repo = await freshRepo();
     try {
@@ -251,6 +271,25 @@ describe('bringBack — Cursor-style Apply, files come home uncommitted', () => 
       expect(applied.value.conflicted).toContain('a.txt');
       // The main checkout keeps its own version rather than being overwritten.
       expect(readFileContent(repo, 'a.txt')).toBe('mine on main\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('does not overwrite an unrelated untracked file with the same name on main', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'untracked-both-sides', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      await writeFile(path.join(made.value.folder, 'new.txt'), 'from the tab\n');
+      await writeFile(path.join(repo, 'new.txt'), 'mine on main\n');
+      const applied = await bringBack(git(), repo, made.value.folder);
+      expect(applied.ok).toBe(true);
+      if (!applied.ok) return;
+      expect(applied.value.conflicted).toContain('new.txt');
+      expect(readFileContent(repo, 'new.txt')).toBe('mine on main\n');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

@@ -269,6 +269,37 @@ describe('P-02 open projects, in the shell', () => {
     expect(workspaces.open.map((one) => one.path)).toEqual(['/a/three', '/a/two']);
   });
 
+  it('temporarily exceeds the soft limit rather than closing protected live work', () => {
+    const closed: string[] = [];
+    const workspaces = new Workspaces<{ name: string; active: boolean }>({
+      close: (held) => closed.push(held.name),
+      mayEvict: (held) => !held.active,
+      limit: 2,
+    });
+
+    workspaces.adopt({ path: '/a/one', name: 'one', held: { name: 'one', active: true } });
+    workspaces.adopt({ path: '/a/two', name: 'two', held: { name: 'two', active: true } });
+    workspaces.adopt({ path: '/a/three', name: 'three', held: { name: 'three', active: true } });
+
+    expect(closed).toEqual([]);
+    expect(workspaces.open).toHaveLength(3);
+  });
+
+  it('skips protected old work and evicts the oldest idle workspace instead', () => {
+    const closed: string[] = [];
+    const workspaces = new Workspaces<{ name: string; active: boolean }>({
+      close: (held) => closed.push(held.name),
+      mayEvict: (held) => !held.active,
+      limit: 2,
+    });
+
+    workspaces.adopt({ path: '/a/one', name: 'one', held: { name: 'one', active: false } });
+    workspaces.adopt({ path: '/a/two', name: 'two', held: { name: 'two', active: true } });
+    workspaces.adopt({ path: '/a/three', name: 'three', held: { name: 'three', active: true } });
+
+    expect(closed).toEqual(['one']);
+  });
+
   it('counts a resume as recent, so the one you keep coming back to stays', () => {
     const closed: string[] = [];
     const workspaces = new Workspaces<{ name: string }>({

@@ -148,11 +148,14 @@ export function labelFor(command: string): string {
 /* -------------------------------------------------------------------------- */
 /* The register                                                                */
 /* -------------------------------------------------------------------------- */
-
 type Entry = {
   piece: RunningPiece;
   child: ChildProcess | null;
   said: string;
+  /** Resolves on the process's exit, not when a signal was merely sent. Stop
+   *  waits on this so its button never claims success while the port is held. */
+  ended: Promise<void>;
+  resolveEnded: () => void;
   /** How much of `said` has already been handed back, so a reader gets what is
    *  new rather than the whole thing again. */
   read: number;
@@ -175,6 +178,9 @@ export type StartOptions = {
   /** The door this copy of the project owns. Told to the process so whatever
    *  it runs picks it up, instead of four copies all asking for the same one. */
   port?: number | null;
+  /** The turn that asked for it. Stopping that turn while startup is in flight
+   *  must not let a server appear afterwards. */
+  signal?: AbortSignal;
   /** How long to wait for it to say where it is. */
   settle?: number;
   /** Told whenever a piece changes, so a window can redraw without asking. */
@@ -191,6 +197,7 @@ export type StartOptions = {
 export class Running {
   #entries = new Map<string, Entry>();
   #next = 0;
+  #closed = false;
 
   /** What is running, oldest first. Safe to hand anywhere: a copy, not the
    *  thing the register is keeping. */
@@ -218,9 +225,16 @@ export class Running {
    * is clear it is not going to say soon, which is not the same as broken.
    */
   async start(options: StartOptions): Promise<RunningPiece> {
+    const wasAborted = (): boolean => options.signal?.aborted === true;
+    if (this.#closed) throw new Error('That project is no longer open.');
+    if (wasAborted()) throw new Error('Starting that was stopped.');
     const id = `run-${String(++this.#next)}`;
     const bounds: Bounds = { writable: [...options.writable], reach: 'serving' };
     const bound = await hold(options.parts.shell, [...options.parts.args, options.command], bounds);
+    // The project may have closed while the operating-system boundary was being
+    // prepared. Never spawn after its owner has gone away.
+    if (this.#closed) throw new Error('That project is no longer open.');
+    if (wasAborted()) throw new Error('Starting that was stopped.');
 
     const piece: RunningPiece = {
       id,
@@ -232,7 +246,11 @@ export class Running {
       since: Date.now(),
       exitCode: null,
     };
-    const entry: Entry = { piece, child: null, said: '', read: 0 };
+    let resolveEnded = (): void => undefined;
+    const ended = new Promise<void>((resolve) => {
+      resolveEnded = resolve;
+    });
+    const entry: Entry = { piece, child: null, said: '', ended, resolveEnded, read: 0 };
     this.#entries.set(id, entry);
 
     const [program, ...args] = bound.held
@@ -258,6 +276,9 @@ export class Running {
     });
     entry.child = child;
     if (child.pid !== undefined) options.noted?.began(child.pid, options.command);
+    const abort = (): void => end(child, entry.ended);
+    if (wasAborted()) abort();
+    else options.signal?.addEventListener('abort', abort, { once: true });
 
     const heard = (chunk: Buffer): void => {
       entry.said = `${entry.said}${chunk.toString('utf8')}`.slice(-KEEP);
@@ -276,6 +297,9 @@ export class Running {
       entry.said = `${entry.said}${cause.message}\n`.slice(-KEEP);
       entry.piece.state = 'stopped';
       entry.piece.exitCode = null;
+      entry.child = null;
+      options.signal?.removeEventListener('abort', abort);
+      entry.resolveEnded();
       options.onChange?.();
     });
     // Both, because they are different questions. `exit` is the process going;
@@ -283,16 +307,19 @@ export class Running {
     // double-forked out of the group keeps those open for as long as it lives —
     // so waiting only for `close` left the band saying "running" forever and the
     // note of it never cleared.
-    const ended = (code: number | null): void => {
-      if (entry.piece.state === 'stopped') return;
-      entry.piece.state = 'stopped';
-      entry.piece.exitCode = code;
-      if (child.pid !== undefined) options.noted?.ended(child.pid);
-      entry.child = null;
-      options.onChange?.();
+    const markEnded = (code: number | null): void => {
+      if (entry.piece.state !== 'stopped') {
+        entry.piece.state = 'stopped';
+        entry.piece.exitCode = code;
+        if (child.pid !== undefined) options.noted?.ended(child.pid);
+        entry.child = null;
+        options.onChange?.();
+      }
+      options.signal?.removeEventListener('abort', abort);
+      entry.resolveEnded();
     };
-    child.once('exit', (code) => ended(code));
-    child.once('close', (code) => ended(code));
+    child.once('exit', (code) => markEnded(code));
+    child.once('close', (code) => markEnded(code));
 
     await settled(entry, options.settle ?? SETTLE);
 
@@ -321,21 +348,33 @@ export class Running {
     return { ...entry.piece };
   }
 
-  /** Stop one. Ends its whole group, and answers the same whether it was
-   *  already gone — stopping something twice is not an error anybody can act on. */
-  stop(id: string): boolean {
+  /** Stop one. Ends its whole group and does not answer until the process has
+   *  actually gone (or the hard-stop window has elapsed). */
+  async stop(id: string): Promise<boolean> {
     const entry = this.#entries.get(id);
     if (entry === undefined) return false;
-    end(entry.child);
-    // Not marked stopped here. Signalling a process is asking it to go, and the
-    // one that knows it went is the `close` handler above — saying so the
-    // instant we asked told people a port was free while it was still held.
+    if (entry.piece.state === 'stopped' || entry.child === null) return true;
+    end(entry.child, entry.ended);
+    await Promise.race([
+      entry.ended,
+      new Promise<void>((resolve) => setTimeout(resolve, STOP_WAIT_MS)),
+    ]);
+    // A process that never delivered an exit event is no reason to leave the UI
+    // claiming it is alive after both TERM and KILL have been sent.
+    const latest = this.#entries.get(id);
+    if (latest !== undefined && latest.piece.state !== 'stopped') {
+      latest.piece.state = 'stopped';
+      latest.piece.exitCode = null;
+      latest.child = null;
+      latest.resolveEnded();
+    }
     return true;
   }
 
   /** Stop everything and forget it. The project is closing. */
   stopAll(): void {
-    for (const id of [...this.#entries.keys()]) this.stop(id);
+    this.#closed = true;
+    for (const id of [...this.#entries.keys()]) void this.stop(id);
     this.#entries.clear();
   }
 
@@ -366,30 +405,38 @@ function settled(entry: Entry, patience: number): Promise<void> {
     look.unref?.();
   });
 }
+/** A polite server should be gone almost immediately. Half a second still gives
+ * cleanup hooks time to run, while keeping Stop perceptibly instant. */
+const FORCE_AFTER_MS = 500;
+const STOP_WAIT_MS = 1500;
 
 /** End a process group, politely and then not. Killing the shell alone leaves
- *  the server it started behind, which is how a port stays busy after a stop. */
-function end(child: ChildProcess | null): void {
+ * the server it started behind, which is how a port stays busy after a stop. */
+function end(child: ChildProcess | null, ended?: Promise<void>): void {
   if (child === null || child.pid === undefined) return;
-  if (process.platform !== 'win32') {
+  const hardStop = (): void => {
     try {
-      process.kill(-child.pid, 'SIGTERM');
-      const hard = setTimeout(() => {
-        try {
-          process.kill(-child.pid!, 'SIGKILL');
-        } catch {
-          // It went in the polite window, which is the ordinary outcome.
-        }
-      }, 3000);
-      hard.unref?.();
-      return;
+      if (process.platform !== 'win32') process.kill(-child.pid!, 'SIGKILL');
+      else child.kill('SIGKILL');
+    } catch {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // It already went, which is the result Stop wanted.
+      }
+    }
+  };
+  try {
+    if (process.platform !== 'win32') process.kill(-child.pid, 'SIGTERM');
+    else child.kill('SIGTERM');
+  } catch {
+    try {
+      child.kill('SIGTERM');
     } catch {
       // It may have gone between the check and the signal.
     }
   }
-  try {
-    child.kill('SIGTERM');
-  } catch {
-    // Already gone.
-  }
+  const hard = setTimeout(hardStop, FORCE_AFTER_MS);
+  hard.unref?.();
+  void ended?.then(() => clearTimeout(hard));
 }

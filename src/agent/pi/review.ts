@@ -115,7 +115,9 @@ export function parseReview(text: string): ReviewVerdict | null {
       if (finding !== null) findings.push(finding);
     }
   }
-  if (findings.length === 0) return null;
+  // A clean review is a real result: it is exactly what `ships` means. Other
+  // verdicts need at least one actionable reason or there is nothing to show.
+  if (findings.length === 0 && kind !== 'ships') return null;
 
   const checks = Array.isArray(body.checks)
     ? body.checks.filter((one): one is string => typeof one === 'string' && one.trim() !== '').map((one) => one.trim())

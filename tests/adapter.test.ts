@@ -625,6 +625,33 @@ describe('the stream the app sees', () => {
       { type: 'message-end' },
     ]);
   });
+
+  it('does not claim the agent stopped when Pi recovers from an API error', () => {
+    const events: AgentEvent[] = [];
+    const relay = relayInto(events);
+    relay.fromPi({ type: 'message_end', message: { role: 'assistant', errorMessage: 'terminated' } });
+    expect(events).toEqual([]);
+
+    relay.fromPi({ type: 'auto_retry_start', attempt: 1, maxAttempts: 3 });
+    relay.fromPi({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Recovered.' } });
+    relay.fromPi({ type: 'message_end', message: { role: 'assistant' } });
+    relay.fromPi({ type: 'agent_settled' });
+
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(events.map((event) => event.type)).toEqual(['message-delta', 'message-end', 'settled']);
+  });
+
+  it('reports an API error only when the agent really settles without recovering', () => {
+    const events: AgentEvent[] = [];
+    const relay = relayInto(events);
+    relay.fromPi({ type: 'message_end', message: { role: 'assistant', errorMessage: 'terminated' } });
+    relay.fromPi({ type: 'agent_settled' });
+
+    expect(events).toEqual([
+      { type: 'error', message: 'terminated' },
+      { type: 'settled' },
+    ]);
+  });
 });
 
 /* ========================================================================== */

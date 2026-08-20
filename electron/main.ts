@@ -63,6 +63,7 @@ import {
   type OurAuthInteraction,
 } from '../src/agent/pi/adapter';
 import type { AgentEvent, ImageCard, Money } from '../src/agent/types';
+import { Running } from '../src/agent/running';
 import { fleet, readCeiling } from '../src/cost/fleet';
 import { getReady } from '../src/history/newcopy';
 import { watchWhileUsed, type Watching } from '../src/diff/capture';
@@ -1409,6 +1410,10 @@ type Held = {
    *  moment between the timeline opening and the first session starting, which
    *  is the window in which that session can fail. */
   sessions: Workspaces<GrapheSession>;
+  /** Servers and watchers belong to the project, not to whichever conversation
+   *  happened to start them. A conversation can be rebuilt or evicted while a
+   *  page the project is using must stay reachable. */
+  running: Running;
   /** The finished site being looked at, if "See it" has been pressed here. */
   serving: Serving | null;
   /** Every variation in the set in front, each served on its own address. */
@@ -1453,6 +1458,7 @@ function conversationsIn(project: string): Workspaces<GrapheSession> {
 const workspaces = new Workspaces<Held>({
   close: (held) => {
     held.sessions.closeAll();
+    held.running.stopAll();
     void held.serving?.stop();
     for (const served of held.variations) void served.stop();
     // The copy goes; whatever it made stays reachable, so closing a project
@@ -2780,6 +2786,7 @@ async function startConversation(
       model: prefs.model,
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
+      running: held.running,
       noteServers,
       // Without this the agent's own way into Figma is never built, so pasting
       // a link got its text read back while the panel beside it could open the
@@ -2845,7 +2852,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
       name,
       history: front?.held.history ?? [],
       conversation: front?.held.conversation ?? null,
-      ...(front === null ? {} : { address: front.path }),
+      ...(front === null ? {} : { address: front.path, howFar: front.held.howFar }),
     });
   }
 
@@ -2860,6 +2867,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     timeline,
     spend: new SpendRecorder(),
     sessions: conversationsIn(path),
+    running: new Running(),
     serving: null,
     variations: [],
     looking: nothingSeenYet(),
@@ -2897,6 +2905,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     history: started.value.session.history,
     conversation: started.value.session.conversation,
     address: started.value.address,
+    howFar: started.value.session.howFar,
   });
 }
 
@@ -4678,14 +4687,14 @@ function register(): void {
     return Promise.resolve(done(sessionAt(open, whereIn(args))?.running ?? []));
   });
 
-  handle<readonly RunningPiece[]>(CHANNEL.stopRunning, (_event, args) => {
+  handle<readonly RunningPiece[]>(CHANNEL.stopRunning, async (_event, args) => {
     const [id] = args;
     const open = projectAt(whereIn(args));
-    if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
-    if (typeof id !== 'string') return Promise.resolve(fail(NOTHING_OPEN));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string') return fail(NOTHING_OPEN);
     const session = sessionAt(open, whereIn(args));
-    session?.stopRunning(id);
-    return Promise.resolve(done(session?.running ?? []));
+    await session?.stopRunning(id);
+    return done(session?.running ?? []);
   });
 
   handle<HowFar>(CHANNEL.goAsFarAs, (_event, args) => {
@@ -5482,6 +5491,7 @@ function register(): void {
       history: started.value.session.history,
       conversation: started.value.session.conversation,
       address: started.value.address,
+      howFar: started.value.session.howFar,
       // Only this side knows which conversations work in a copy, and without
       // being told the window cannot offer to bring that work back.
       ownCopy: checkout !== null,

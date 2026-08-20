@@ -1,4 +1,4 @@
-import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 /** One conversation, its own checkout.
@@ -264,8 +264,31 @@ async function sharedBase(run: RunGit, folder: string, repo: string): Promise<st
 
 /** Whether the main checkout changed that path since the shared base. */
 async function mainChanged(run: RunGit, repo: string, base: string, path: string): Promise<boolean> {
-  const rows = await changedAgainst(run, repo, ['diff', '--name-status', '--no-renames', base, '--', path]);
-  return rows.length > 0;
+  const [tracked, untracked] = await Promise.all([
+    changedAgainst(run, repo, ['diff', '--name-status', '--no-renames', base, '--', path]),
+    changedAgainst(run, repo, ['ls-files', '--others', '--exclude-standard', '--', path], 'paths'),
+  ]);
+  return tracked.length > 0 || untracked.length > 0;
+}
+
+/** True when both sides changed a path to the same final state. This is common
+ * after the live preview Apply has already carried a conversation's work home;
+ * treating identical bytes as a conflict makes the later explicit landing
+ * impossible even though there is nothing to choose between. */
+async function sameFileState(
+  repo: string,
+  folder: string,
+  row: { kind: 'A' | 'D' | 'M'; path: string },
+): Promise<boolean> {
+  const target = resolve(repo, row.path);
+  if (row.kind === 'D') {
+    return readFile(target).then(() => false).catch(() => true);
+  }
+  const [main, copy] = await Promise.all([
+    readFile(target).catch(() => null),
+    readFile(resolve(folder, row.path)).catch(() => null),
+  ]);
+  return main !== null && copy !== null && main.equals(copy);
 }
 
 /** Copy one file from the worktree into the main checkout, or remove it. */
@@ -304,7 +327,8 @@ export async function bringBack(
   const conflicted: string[] = [];
   for (const row of changes) {
     if (await mainChanged(run, repo, base, row.path)) {
-      conflicted.push(row.path);
+      if (await sameFileState(repo, folder, row)) applied.push(row.path);
+      else conflicted.push(row.path);
     } else {
       await carryFile(repo, folder, row);
       applied.push(row.path);

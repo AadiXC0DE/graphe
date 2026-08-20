@@ -166,8 +166,12 @@ describe('what the rules make of a turn that just ended', () => {
     const source = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
     // The call, not the declaration: matching the bare name passes on a file
     // that defines the function and never calls it, which is the whole bug.
+    // Inside the settled branch, not merely defined somewhere in the file —
+    // matching the bare name passes on a file that defines the function and
+    // never calls it, which is the whole bug this guards.
     const settled = source.slice(source.indexOf("if (event.type === 'settled')"));
-    expect(settled.slice(0, 400)).toMatch(/^\s*sayWhatTheRulesHeld\(\);/m);
+    const branch = settled.slice(0, settled.indexOf('\n    }'));
+    expect(branch).toMatch(/^\s*sayWhatTheRulesHeld\(\);/m);
     expect(source).toMatch(/atTheEnd\(house, desk\.world\(\)\)/);
   });
 

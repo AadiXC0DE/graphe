@@ -154,10 +154,12 @@ export class Confirmations {
 
   /** Stopping or closing the session answers every open question with no. An
    *  unanswered question must never resolve to yes. */
-  abandonAll(): void {
+  abandonAll(): readonly string[] {
+    const ids = [...this.waiting.keys()];
     const open = [...this.waiting.values()];
     this.waiting.clear();
     for (const resolve of open) resolve('no');
+    return ids;
   }
 }
 
@@ -1232,6 +1234,15 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       const verdict = parseReview(tape);
       tape = '';
       if (verdict !== null) options.onEvent({ type: 'reviewed', verdict });
+      // A question outlives the turn that asked it when the run ends any way
+      // other than somebody answering — a refusal, a failure, an abort. Nothing
+      // can answer it after that, and the window reads a card still waiting as
+      // "this is still working": the composer stayed a spinner and Stop had
+      // nothing left to stop, for the rest of the sitting.
+      const stranded = confirmations.abandonAll();
+      if (stranded.length > 0) {
+        options.onEvent({ type: 'questions-withdrawn', callIds: stranded });
+      }
       sayWhatTheRulesHeld();
     }
   };
@@ -1774,8 +1785,18 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     },
 
     async stop(): Promise<void> {
-      confirmations.abandonAll();
+      // Said out loud, because nothing else says it. A question is only ever
+      // closed in the window by the window's own answer, so one answered here
+      // left a card on screen whose answer could never arrive — and an
+      // unanswered card reads as "still working", which is why Stop looked
+      // dead while the run behind it had already ended.
+      const withdrawn = confirmations.abandonAll();
+      if (withdrawn.length > 0) say({ type: 'questions-withdrawn', callIds: withdrawn });
       await session.abort();
+      // The run is over whatever pi did with the abort. Saying so is what puts
+      // the composer back to Send; waiting for an event that may not come is
+      // how the button stayed a spinner.
+      say({ type: 'settled' });
     },
 
     get listening(): boolean {

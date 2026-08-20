@@ -566,6 +566,10 @@ const ALWAYS_DENY_COMMANDS = new Set([
 ]);
 
 /** Scripts we know the shape of, because we wrote the project. */
+/** Verbs that mean "go and get somebody else's code". Any runtime that grew a
+ *  package manager uses one of these words for it. */
+const FETCHES_CODE = new Set(['add', 'install', 'i', 'get', 'fetch', 'upgrade', 'update']);
+
 const KNOWN_SCRIPTS = new Set(['build', 'dev', 'start', 'test', 'lint', 'format', 'typecheck', 'check', 'preview', 'shot']);
 /** Local tools the build loop leans on constantly. Confirming these would be noise. */
 const LOCAL_DEV_BINARIES = new Set(['vitest', 'jest', 'tsc', 'eslint', 'prettier', 'vite', 'playwright', 'tsx', 'esbuild']);
@@ -1379,14 +1383,40 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
       }
       return deny(SAY.unreadable);
     }
-    return decide(
-      ask(
-        'Run a small program inside your project?',
-        'It can read and change any file in your project while it runs.',
-        `If you did not ask for this, say no. ${SAY.restorePoint}`,
-        { snapshot: true },
-      ),
-    );
+    // A script that lives in the project is the project's own code. `npm run
+    // dev` is allowed outright and runs exactly this file by another name, so
+    // asking here and not there was the same risk judged two ways — and it is
+    // the question people meet most, because every dev server is one of these.
+    // It still takes a restore point: the project's own code can still write.
+    // An interpreter that doubles as its own package manager — `bun add`,
+    // `deno install`. Fetching somebody else's code is a different question
+    // from running your own, and it is the one worth asking. Matched on the
+    // verb rather than the tool: which runtimes also install things is a list
+    // that grows, and what makes it worth asking is the fetching.
+    const doing = (meaningful[1]?.text ?? '').toLowerCase();
+    if (FETCHES_CODE.has(doing)) {
+      return decide(
+        ask(
+          'Add somebody else’s code to your project?',
+          'This downloads a package from the internet and puts it in your project.',
+          'Anything it brings with it runs the next time your project does.',
+          { snapshot: true },
+        ),
+      );
+    }
+    if (PACKAGE_MANAGERS.has(name)) return decide(judgePackageManager(meaningful));
+
+    /* A script rather than code typed into the command.
+     *
+     * Every location this names has already been walked and refused if it left
+     * the project, so what is left is the project's own code — a file it wrote,
+     * a module of the language's own, a task its own runner defines. `npm run
+     * dev` is allowed outright and is one of these under another name.
+     *
+     * A restore point rather than a question: the risk that is actually left is
+     * that it changes something, and being able to undo that is worth more than
+     * a question about a filename nobody can judge from its spelling. */
+    return decide(snapshotFirst('Running one of your project’s own programs.'));
   }
   if (name === 'rm' || name === 'rmdir') return decide(judgeRemove(meaningful));
   if (name === 'find') return decide(judgeFind(meaningful));
@@ -1456,8 +1486,26 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
   }
   if (READ_ONLY_COMMANDS.has(name)) return decide(allow());
 
-  // Deny-by-default lands here: an unrecognised command is never silent.
-  return decide(UNKNOWN_COMMAND());
+  /* An instruction we have no rule for.
+   *
+   * It used to ask, every time, and that is where most of the questions in a
+   * sitting came from: a project's own server, its task runner, a language
+   * nobody thought of. Naming more shapes only ever moves the line — tomorrow
+   * it is Rails, then Go, then something that does not exist yet.
+   *
+   * So the question is asked about what actually differs. Everything that
+   * escapes has already been judged above and is not here: elevation, a path
+   * outside the project, credentials, the history store, obfuscation, reaching
+   * the internet, deleting. `judgeSegmentPaths` has walked every location this
+   * command names and refused it if it left the folder. What is left is an
+   * unfamiliar program, confined by the same boundary as every familiar one —
+   * writes inside the project, nothing listening in from outside.
+   *
+   * It still takes a restore point, so an unfamiliar thing that changes
+   * something is one press from undone. That is the honest protection here;
+   * a question nobody can answer well is not.
+   */
+  return decide(snapshotFirst('Something I do not have a rule for, kept undoable.'));
 }
 
 /** Was somebody trying to hide a destructive verb from us? Runs over the raw

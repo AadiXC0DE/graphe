@@ -1959,6 +1959,10 @@ function Conversation() {
    */
   const deliver = useCallback(
     async (text: string, task: Task, ways?: { lookFirst?: boolean; queue?: 'followUp' }) => {
+      /* A recorded walkthrough is a brief handoff from the page. Once somebody
+         sends their next message, it has done its job; leaving its “Look” row
+         parked above the composer makes it read as still recording. */
+      setRecorded(null);
       // What is in the box at the moment of sending — never a snapshot from
       // whenever this callback was last rebuilt (see `attachmentsNow`).
       const inTheBox = attachmentsNow.current;

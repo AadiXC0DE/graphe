@@ -2452,7 +2452,7 @@ function Conversation() {
           navigation.current !== request ||
           currentDesk(desksNow.current)?.path !== project
         ) return;
-        void send(reviewPrompt(item, repository));
+        void send(reviewPrompt(item, repository, repo?.here ?? null));
       });
     },
     [repo, toChat, swapConversation, send],

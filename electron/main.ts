@@ -654,21 +654,29 @@ function applyContentPolicy(): void {
 /**
  * What the window is allowed to ask this computer for.
  *
- * Only the microphone, and only because saying a change out loud is easier than
- * writing one. Everything else — camera, location, notifications from the page,
- * anything added to the web platform after this was written — is refused
- * without being asked about, which is the reason the list in
+ * The microphone, because saying a change out loud is easier than writing one,
+ * and putting something on the clipboard, because that is what Copy is.
+ * Everything else — camera, location, reading the clipboard, notifications from
+ * the page, anything added to the web platform after this was written — is
+ * refused without being asked about, which is the reason the list in
  * electron-builder.yml was pinned in the first place: nothing acquires
  * something quietly by turning up as a dependency.
  */
 function applyPermissionPolicy(): void {
+  // Writing to the clipboard is how every Copy button in the window works, and
+  // refusing it made them all fail in silence — the button never said Copied and
+  // the clipboard kept whatever was in it, which reads as copying the wrong
+  // thing. Writing only, and sanitized: reading the clipboard is somebody's
+  // passwords, and nothing here ever needs it. This is the window's own store —
+  // a page being previewed has its own, and is granted none of it.
+  const allowed = new Set(['media', 'clipboard-sanitized-write']);
   session.defaultSession.setPermissionRequestHandler((_contents, permission, decide) => {
-    decide(permission === 'media');
+    decide(allowed.has(permission));
   });
   // Asked for by anything that checks before requesting, and answered the same
   // way — two answers that disagree is how a control ends up dead on press.
-  session.defaultSession.setPermissionCheckHandler(
-    (_contents, permission) => permission === 'media',
+  session.defaultSession.setPermissionCheckHandler((_contents, permission) =>
+    allowed.has(permission),
   );
 }
 
@@ -1739,9 +1747,13 @@ async function readBranches(cwd: string): Promise<readonly GitBranch[]> {
  *  or not logged in. `gh` reads the person's own credentials from their keyring,
  *  so no token has to be stored, refreshed or guarded here.
  */
-function ghJSON(cwd: string, args: readonly string[]): Promise<unknown | null> {
+function ghJSON(
+  cwd: string,
+  args: readonly string[],
+  fields = 'number,title,state,url,body,author,updatedAt',
+): Promise<unknown | null> {
   return new Promise((resolve) => {
-    const child = spawn('gh', [...args, '--json', 'number,title,state,url,body,author,updatedAt'], {
+    const child = spawn('gh', [...args, '--json', fields], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -1818,7 +1830,9 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
       typeof raw['body'] === 'string' && raw['body'].trim() !== '' ? raw['body'] : null,
     author: typeof author === 'string' ? author : 'unknown',
     updatedAt: typeof raw['updatedAt'] === 'string' ? raw['updatedAt'] : '',
-    baseRef: null,
+    baseRef: typeof raw['baseRefName'] === 'string' ? raw['baseRefName'] : null,
+    headRef: typeof raw['headRefName'] === 'string' ? raw['headRefName'] : null,
+    headSha: typeof raw['headRefOid'] === 'string' ? raw['headRefOid'] : null,
   };
 }
 
@@ -1826,6 +1840,19 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
  *  one call. Null when this folder is not a github repo, or gh is not ready —
  *  both are "nothing to show" rather than a failure.
  */
+/** The line of work this folder is on, and the commit it sits at. A review that
+ *  does not know this reads whatever happens to be checked out and reports it as
+ *  the pull request. */
+async function whereThisFolderIs(
+  path: string,
+): Promise<{ branch: string | null; sha: string } | null> {
+  const at = await gitRun(path, ['rev-parse', 'HEAD']);
+  if (at.code !== 0 || at.out === undefined || at.out.trim() === '') return null;
+  const named = await gitRun(path, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const branch = named.code === 0 ? (named.out ?? '').trim() : '';
+  return { branch: branch === '' || branch === 'HEAD' ? null : branch, sha: at.out.trim() };
+}
+
 async function readRepo(open: { path: string }): Promise<RepoLook> {
   try {
     const full = await githubRepo(open.path);
@@ -1836,9 +1863,11 @@ async function readRepo(open: { path: string }): Promise<RepoLook> {
     const issues = (await ghJSON(open.path, ['issue', 'list', '-R', full, '--limit', '50'])) as
       | readonly Record<string, unknown>[]
       | null;
-    const prs = (await ghJSON(open.path, ['pr', 'list', '-R', full, '--limit', '50'])) as
-      | readonly Record<string, unknown>[]
-      | null;
+    const prs = (await ghJSON(
+      open.path,
+      ['pr', 'list', '-R', full, '--limit', '50'],
+      'number,title,state,url,body,author,updatedAt,baseRefName,headRefName,headRefOid',
+    )) as readonly Record<string, unknown>[] | null;
     return {
       full,
       owner,
@@ -1846,6 +1875,7 @@ async function readRepo(open: { path: string }): Promise<RepoLook> {
       url: `https://github.com/${full}`,
       issues: (issues ?? []).map((one) => repoItem(one, 'issue')),
       prs: (prs ?? []).map((one) => repoItem(one, 'pr')),
+      here: await whereThisFolderIs(open.path),
     };
   } catch {
     return null;

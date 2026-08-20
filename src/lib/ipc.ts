@@ -1073,6 +1073,10 @@ export type RepoItem = {
   updatedAt: string;
   /** The base branch, for a pull request. */
   baseRef: string | null;
+  /** The line of work a pull request is asking to merge, and the exact commit
+   *  it is at. Null for an issue, and when github did not say. */
+  headRef: string | null;
+  headSha: string | null;
 };
 
 /** Everything the reviews screen needs about the project's github repository.
@@ -1086,6 +1090,10 @@ export type RepoLook =
       url: string;
       issues: readonly RepoItem[];
       prs: readonly RepoItem[];
+      /** What this folder is actually on. A review reads files from somewhere,
+       *  and telling it which line of work the folder is on is the difference
+       *  between reading the pull request and reading whatever was open. */
+      here: { branch: string | null; sha: string } | null;
     }
   | null;
 

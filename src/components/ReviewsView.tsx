@@ -38,8 +38,36 @@ export const SAYS = {
   changed: 'Updated',
 } as const;
 
+/**
+ * Where the review is to read this pull request's files from.
+ *
+ * The bug this exists to make impossible: the folder is a line of work like any
+ * other, and it is very often not the one the pull request is asking about. Told
+ * to "walk the checked-out code", a review reads whatever is open and reports it
+ * as the pull request — every finding true of the folder and wrong about the
+ * change. So the folder is never assumed to be the pull request; it is checked,
+ * and when it is not, the files are read from the pull request's own commit.
+ */
+export function whereToRead(item: RepoItem, here: Here): string {
+  const short = (sha: string): string => sha.slice(0, 7);
+  if (item.headSha === null) {
+    return `- this folder may be on a different line of work than the pull request. Before you read any file here, check \`git rev-parse HEAD\` against \`gh pr view ${String(item.number)} --json headRefOid\`. If they differ, read every file with \`git show <the pull request's commit>:<path>\` instead of from the folder.`;
+  }
+  if (here !== null && here.sha === item.headSha) {
+    return `- this folder is this pull request's code, at ${short(item.headSha)} — read it freely for the surrounding context.`;
+  }
+  const where =
+    here === null
+      ? 'somewhere this app could not read'
+      : `${here.branch ?? 'no line of work'}, at ${short(here.sha)}`;
+  return `- **this folder is not this pull request's code.** It is on ${where}; the pull request is ${item.headRef ?? 'its own line'} at ${short(item.headSha)}. Do not read files from the folder — every line you quoted would be from a different line of work, and every finding would be about code this pull request does not contain. Bring its files in first with \`git fetch origin pull/${String(item.number)}/head\`, then read any one of them with \`git show ${item.headSha}:<path>\`.`;
+}
+
+/** What the folder is on, as the shell reported it. */
+type Here = { branch: string | null; sha: string } | null;
+
 /** Open a pull request, whole, and review it in the conversation. */
-export function reviewPrompt(item: RepoItem, full: string): string {
+export function reviewPrompt(item: RepoItem, full: string, here: Here = null): string {
   return `Review pull request #${item.number} in ${full} and post your findings.
 
 “${item.title}”
@@ -50,7 +78,7 @@ Read what you need through your terminal, where the person’s github is already
 - \`gh pr view ${item.number} -R ${full}\` — title, description, base branch, the issue(s) it links
 - \`gh pr diff ${item.number} -R ${full}\` — every line the PR changes, held against its base branch
 - \`gh issue view <n> -R ${full}\` — for each issue the PR says it closes (find them in the PR body)
-- walk the checked-out code in this folder for the surrounding context, so a change makes sense against how the project is actually built
+${whereToRead(item, here)}
 
 Review it like a senior engineer on the team, not a checklist:
 - Does it actually solve the issue it claims to close?

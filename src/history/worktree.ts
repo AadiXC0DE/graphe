@@ -51,6 +51,9 @@ export const worktreeWords = {
    *  left mid-merge, which that sentence gives no hint of. */
   clashed:
     'This conversation and your own work changed the same lines, so I could not put them together. I have left everything exactly as it was.',
+  /** A conversation put away and then asked for again, whose work is no longer
+   *  in the project. Said rather than quietly opened on the wrong files. */
+  gone: 'The work this conversation was doing is not in this project any more, so I could not open it again.',
 } as const;
 
 /** What an Apply carried back, and where it could not. */
@@ -201,43 +204,67 @@ export async function releaseWorktree(run: RunGit, repo: string, folder: string)
   return ok();
 }
 
+/** Spread a conversation's branch back out on disk. Nothing is created: a
+ *  conversation whose branch has gone is told so rather than opened on files
+ *  that are not its own. */
+export async function reopenWorktree(
+  run: RunGit,
+  repo: string,
+  branch: string,
+  folder: string,
+): Promise<Result> {
+  if (!(await isRepo(run, repo))) return no(worktreeWords.notRepo);
+  const known = await run(['rev-parse', '--verify', `refs/heads/${branch}`], { cwd: repo });
+  if (known.code !== 0) return no(worktreeWords.gone);
+  // A folder git still has a note about, from a checkout that went away
+  // untidily, would otherwise refuse the add.
+  await run(['worktree', 'prune'], { cwd: repo });
+  const added = await run(['worktree', 'add', '--force', folder, branch], { cwd: repo });
+  if (added.code !== 0) return no(worktreeWords.gone);
+  return ok({ folder, branch });
+}
+
+/**
+ * Put a conversation's checkout away until it is next wanted.
+ *
+ * What a conversation owns is its branch. The folder is only that branch spread
+ * out on disk — kilobytes against gigabytes, and the gigabytes are what a
+ * dependency install and a build leave behind in it. So a conversation nobody
+ * is in gives the folder back and keeps the branch, and `reopenWorktree` spreads
+ * it out again if somebody returns.
+ *
+ * Refused while the working tree holds something, because that is the one thing
+ * the branch is not already holding. Say so with `put`: false is "still there",
+ * not "went wrong".
+ */
+export async function putAwayWorktree(
+  run: RunGit,
+  repo: string,
+  folder: string,
+): Promise<{ put: boolean }> {
+  if (await holdsWork(run, folder)) return { put: false };
+  const released = await releaseWorktree(run, repo, folder);
+  if (!released.ok) return { put: false };
+  await run(['worktree', 'prune'], { cwd: repo });
+  return { put: true };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Giving the idle ones back                                                   */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Whether giving this checkout back would destroy something.
- *
- * Committed work is not at risk — it is on the branch, and the branch outlives
- * the folder — so the question is only what the working tree is holding.
- * Ignored files are not work: an installed dependency or a build output is made
- * again, and those are the whole reason an idle checkout is worth reclaiming. A
- * folder git cannot read is kept, because not knowing is not knowing it is
- * empty.
- */
+/** Whether the working tree holds something the branch does not. Ignored files
+ *  do not count — an install or a build is made again, and that is the disk
+ *  worth reclaiming. A folder git cannot read is treated as holding work. */
 export async function holdsWork(run: RunGit, folder: string): Promise<boolean> {
   const { code, out } = await run(['status', '--porcelain'], { cwd: folder });
   if (code !== 0 || out === undefined) return true;
   return out.split('\n').some((line) => line.trim() !== '');
 }
 
-/**
- * Give back the checkouts left behind by conversations that are over.
- *
- * A checkout is a whole second copy of the project, so a few of them is
- * gigabytes — and nothing ever reclaimed them: the only thing that removed one
- * was somebody explicitly throwing a conversation away, which is not something
- * people do. They accumulated instead, one per parallel conversation, for as
- * long as the app had been installed.
- *
- * Two things are never taken. A checkout a conversation still owns, which the
- * caller says with `inUse` — a conversation that can be resumed goes back to
- * its own files, and taking the folder would send it at the main project
- * instead. And a working tree somebody left something in, which stays for as
- * long as it takes them to come back for it.
- *
- * Pure in the way the rest of this file is: the caller says what is on disk.
- */
+/** The backstop: checkouts left by conversations that are gone, or by a copy of
+ *  the app older than any of this. Never takes one the caller says is owned, or
+ *  one holding work. The caller says what is on disk. */
 export async function sweepCheckouts(
   run: RunGit,
   repo: string,

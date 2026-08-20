@@ -559,6 +559,24 @@ export class ProjectHistory {
     if (made.code !== 0) throw new HistoryError(historyProblems.tryFailed, detailsOf(made));
   }
 
+  /**
+   * Put this copy back to a version, discarding whatever was left in it.
+   *
+   * For a copy that is kept and used again rather than made each time. Ignored
+   * files stay: the installed pieces are the slow part of preparing a copy, and
+   * they are rebuilt from the manifest rather than recorded, so nothing about
+   * this version describes them.
+   */
+  async resetTo(versionId: string): Promise<void> {
+    await this.ensureReady();
+    const target = await this.resolve(versionId);
+    const back = await this.attempt(['reset', '--hard', target]);
+    if (back.code !== 0) throw new HistoryError(historyProblems.tryFailed, detailsOf(back));
+    // No `-x`: that would take the installed pieces with it, which is the one
+    // thing keeping the copy was for.
+    await this.attempt(['clean', '-fd']);
+  }
+
   /** Let one go, whatever state it was left in. */
   async removeWorkspace(at: string): Promise<void> {
     await this.ensureReady();

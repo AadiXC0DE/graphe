@@ -2181,6 +2181,56 @@ function workFolder(): string {
   return join(app.getPath('temp'), 'graphe-work');
 }
 
+/** Where a project's kept copy lives. Hashed, not spelled out: replacing every
+ *  awkward character with a dash gives `/work/my site` and `/work-my-site` the
+ *  same name, and two projects sharing one install is the thing that breaks. */
+function keptCopyFolder(project: string): string {
+  const key = createHash('sha256').update(resolve(project)).digest('hex');
+  return join(workFolder(), 'kept', key);
+}
+
+/** The one copy kept ready, and whose project it is.
+ *
+ * One at a time, for the reason the copy is kept at all: it holds an install,
+ * and a copy per project would put back exactly the disk this was meant to stop
+ * spending. `project` is the key the project was opened under, so it can be
+ * looked up again by exactly the string that filed it. */
+let keptCopy: { project: string; folder: string } | null = null;
+
+/** Let the kept copy go, if there is one. Safe at any time — the next piece of
+ *  work makes one again. */
+async function letKeptCopyGo(): Promise<void> {
+  const kept = keptCopy;
+  keptCopy = null;
+  if (kept === null) return;
+  await new ProjectHistory(kept.project).removeWorkspace(kept.folder).catch(() => undefined);
+  await rm(kept.folder, { recursive: true, force: true }).catch(() => undefined);
+}
+
+/** Whether a piece of work is being made in that project's copy right now.
+ *  Only while it is being made: afterwards what it made is a version, and the
+ *  folder is nothing anybody reads. */
+function stillBeingMadeIn(project: string): boolean {
+  return workspaces.find(project)?.held.waiting?.waiting.state === 'making';
+}
+
+/**
+ * Where this project's work should be done.
+ *
+ * Undefined means take an ordinary copy for this one piece of work: another
+ * project is mid-way through using the kept one, and pulling the folder out
+ * from under a turn that is running would lose it.
+ */
+async function keepCopyFor(project: string): Promise<string | undefined> {
+  if (keptCopy !== null && keptCopy.project !== project) {
+    if (stillBeingMadeIn(keptCopy.project)) return undefined;
+    await letKeptCopyGo();
+  }
+  const folder = keptCopyFolder(project);
+  keptCopy = { project, folder };
+  return folder;
+}
+
 /** Where a project's agreed pictures are kept, one per width. Images, so beside
  *  the rest of what this app keeps rather than in the settings file — and per
  *  project, because a mark is a reading of one page. */
@@ -2299,6 +2349,7 @@ async function checkItFirst(
     return fail(historyTrouble(cause));
   }
 
+  const keptIn = await keepCopyFor(open.path);
   let waiting: HeldWork;
   try {
     waiting = await HeldWork.start({
@@ -2306,6 +2357,9 @@ async function checkItFirst(
       under: workFolder(),
       id: `held-${Date.now().toString(36)}`,
       doing: text,
+      // The same copy every time. Making one is a dependency install, and it is
+      // the same install for every piece of work in this project.
+      ...(keptIn === undefined ? {} : { keepIn: keptIn }),
     });
   } catch (cause) {
     return fail(historyTrouble(cause));
@@ -4517,6 +4571,9 @@ function register(): void {
       // Ours, though, goes. Somebody who has just said "I am done with this
       // project" should not be left holding a folder of our screenshots of it.
       await forgetEverything(resolve(path));
+      if (keptCopy !== null && resolve(keptCopy.project) === resolve(path)) {
+        await letKeptCopyGo();
+      }
       // And nothing of theirs goes on happening on its own for a project they
       // have just put down.
       const desk = awayDesks.get(resolve(path));
@@ -6872,6 +6929,11 @@ if (!app.requestSingleInstanceLock()) {
     await endStrayServers().catch(() => 0);
     // And the copies of the project those conversations were working in.
     await sweepStrayCheckouts().catch(() => 0);
+    // And the copy kept ready for work checked before it lands. Warm is worth
+    // having for as long as the app is up, not for as long as it is installed.
+    await rm(join(workFolder(), 'kept'), { recursive: true, force: true }).catch(
+      () => undefined,
+    );
     // Work that was going when this last closed, back on its board.
     await pickUpWhereWeLeftOff().catch(() => undefined);
     // What somebody asked for over and over, picked up where it left off. One

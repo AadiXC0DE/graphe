@@ -340,3 +340,126 @@ describe('L-06 naming work, and where it is kept', () => {
     }
   });
 });
+
+/* ========================================================================== */
+/* L-10 the copy is kept, so the wait is not an install                        */
+/* ========================================================================== */
+
+/** What makes preparing a copy slow is putting the installed pieces back, and
+ *  that is the same install every time. These say the copy is reused, that what
+ *  the last piece of work did is never carried into the next one, and that a
+ *  copy which has gone is a slower start rather than a failure. */
+describe('L-10 a copy kept between pieces of work', () => {
+  it('works in the same copy the second time, so nothing is installed again', async () => {
+    const { history, root, under } = await aProject();
+    const keepIn = path.join(under, 'kept');
+
+    const first = await HeldWork.start({ history, under, id: 'kept-1', doing: 'one', keepIn });
+    expect(first.folder).toBe(keepIn);
+    // Stands in for node_modules: ignored by the project, so never recorded in
+    // a version, and the whole reason keeping a copy is worth anything.
+    await put(root, '.gitignore', 'node_modules/\n');
+    await history.snapshot('ignore the installed pieces');
+    await put(first.folder, 'node_modules/marker', 'installed once\n');
+    await first.settle('one');
+
+    const second = await HeldWork.start({ history, under, id: 'kept-2', doing: 'two', keepIn });
+    expect(second.folder).toBe(keepIn);
+    expect(await get(second.folder, 'node_modules/marker')).toBe('installed once\n');
+    await second.release();
+  });
+
+  it('hands on a copy holding nothing of what the last piece of work did', async () => {
+    const { history, root, under } = await aProject();
+    const keepIn = path.join(under, 'kept');
+
+    const first = await HeldWork.start({ history, under, id: 'kept-3', doing: 'one', keepIn });
+    await put(first.folder, 'hero.css', '.hero { padding: 48px; }\n');
+    await put(first.folder, 'scratch.txt', 'left behind\n');
+    await first.settle('one');
+
+    const second = await HeldWork.start({ history, under, id: 'kept-4', doing: 'two', keepIn });
+    // The project never let the first piece of work in, so the copy starts from
+    // what the project actually is.
+    expect(await get(second.folder, 'hero.css')).toBe('.hero { padding: 16px; }\n');
+    expect(await there(path.join(second.folder, 'scratch.txt'))).toBe(false);
+    await second.release();
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 16px; }\n');
+  });
+
+  it('starts the copy from where the project is now, once work has been let in', async () => {
+    const { history, root, under } = await aProject();
+    const keepIn = path.join(under, 'kept');
+
+    const first = await HeldWork.start({ history, under, id: 'kept-5', doing: 'one', keepIn });
+    await put(first.folder, 'hero.css', '.hero { padding: 48px; }\n');
+    await first.settle('one');
+    await first.approve('one');
+    expect(await get(root, 'hero.css')).toBe('.hero { padding: 48px; }\n');
+
+    const second = await HeldWork.start({ history, under, id: 'kept-6', doing: 'two', keepIn });
+    expect(await get(second.folder, 'hero.css')).toBe('.hero { padding: 48px; }\n');
+    await second.release();
+  });
+
+  it('makes a copy again when the kept one has gone', async () => {
+    const { history, under } = await aProject();
+    const keepIn = path.join(under, 'kept');
+
+    const first = await HeldWork.start({ history, under, id: 'kept-7', doing: 'one', keepIn });
+    await first.settle('one');
+    // As a restart leaves it: the folder taken away, the record of it not.
+    await rm(keepIn, { recursive: true, force: true });
+
+    const second = await HeldWork.start({ history, under, id: 'kept-8', doing: 'two', keepIn });
+    expect(second.folder).toBe(keepIn);
+    expect(await get(second.folder, 'hero.css')).toBe('.hero { padding: 16px; }\n');
+    await second.release();
+  });
+
+  it('makes a copy again when something else is sitting in the folder', async () => {
+    const { history, under } = await aProject();
+    const keepIn = path.join(under, 'kept');
+    await mkdir(keepIn, { recursive: true });
+    await put(keepIn, 'not-a-copy.txt', 'somebody else was here\n');
+
+    const work = await HeldWork.start({ history, under, id: 'kept-9', doing: 'one', keepIn });
+    expect(await get(work.folder, 'hero.css')).toBe('.hero { padding: 16px; }\n');
+    await work.release();
+  });
+
+  it('still throws the copy away when it is not one that is kept', async () => {
+    const { history, under } = await aProject();
+    const work = await HeldWork.start({ history, under, id: 'kept-10', doing: 'one' });
+    const where = work.folder;
+    expect(where).toBe(folderForHeld(under, 'kept-10'));
+    await work.settle('one');
+    expect(await there(where)).toBe(false);
+  });
+
+  it('leaves the project alone throughout, which is the whole promise', async () => {
+    const { history, root, under } = await aProject();
+    const keepIn = path.join(under, 'kept');
+    for (const round of ['one', 'two', 'three']) {
+      const work = await HeldWork.start({ history, under, id: `kept-${round}`, doing: round, keepIn });
+      await put(work.folder, 'hero.css', `.hero { padding: ${round.length}px; }\n`);
+      await work.settle(round);
+      expect(await get(root, 'hero.css')).toBe('.hero { padding: 16px; }\n');
+    }
+  });
+
+  it('cleans up after a piece of work that never finished', async () => {
+    const { history, under } = await aProject();
+    const keepIn = path.join(under, 'kept');
+
+    // As a crash leaves it: the copy written in, and nothing ever settled.
+    const first = await HeldWork.start({ history, under, id: 'kept-11', doing: 'one', keepIn });
+    await put(first.folder, 'hero.css', '.hero { padding: 99px; }\n');
+    await put(first.folder, 'half-done.txt', 'interrupted\n');
+
+    const second = await HeldWork.start({ history, under, id: 'kept-12', doing: 'two', keepIn });
+    expect(await get(second.folder, 'hero.css')).toBe('.hero { padding: 16px; }\n');
+    expect(await there(path.join(second.folder, 'half-done.txt'))).toBe(false);
+    await second.release();
+  });
+});

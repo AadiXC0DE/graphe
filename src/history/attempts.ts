@@ -290,17 +290,48 @@ export function folderForHeld(under: string, id: string): string {
   return path.join(under, safeName(id));
 }
 
+/**
+ * Put a kept copy back to a version so it can be worked in again.
+ *
+ * False when there is nothing usable there, which is the caller's cue to make
+ * one rather than an error: a copy is a cache, and a cache that has gone is
+ * only ever a slower start.
+ */
+async function putCopyBack(
+  history: ProjectHistory,
+  folder: string,
+  at: string,
+): Promise<boolean> {
+  try {
+    const known = await history.workspaces();
+    if (!known.some((one) => path.resolve(one) === path.resolve(folder))) return false;
+    await new ProjectHistory(folder).resetTo(at);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class HeldWork {
   readonly waiting: Waiting;
   readonly folder: string;
 
   private readonly history: ProjectHistory;
   private letGo = false;
+  /** True when this copy is kept between pieces of work rather than thrown
+   *  away after each one. */
+  private readonly kept: boolean;
 
-  private constructor(history: ProjectHistory, folder: string, waiting: Waiting) {
+  private constructor(
+    history: ProjectHistory,
+    folder: string,
+    waiting: Waiting,
+    kept: boolean,
+  ) {
     this.history = history;
     this.folder = folder;
     this.waiting = waiting;
+    this.kept = kept;
   }
 
   /**
@@ -317,6 +348,11 @@ export class HeldWork {
     id: string;
     doing: string;
     at?: number;
+    /** Where to keep the copy, when it is worth keeping. Given one, the same
+     *  folder is used again for the next piece of work instead of a fresh copy
+     *  being made and installed into — which is the same install every time and
+     *  the slowest thing here by far. */
+    keepIn?: string;
   }): Promise<HeldWork> {
     if (await options.history.hasUnsavedChanges()) {
       throw new HistoryError(historyProblems.unsavedFirst);
@@ -324,18 +360,32 @@ export class HeldWork {
     const from = await options.history.currentVersion();
     if (from === null) throw new HistoryError(historyProblems.tryFailed);
 
-    const folder = folderForHeld(options.under, options.id);
-    await mkdir(path.dirname(folder), { recursive: true });
-    await options.history.addWorkspace(folder, from);
+    const kept = options.keepIn !== undefined;
+    const folder = options.keepIn ?? folderForHeld(options.under, options.id);
+
+    if (!(kept && (await putCopyBack(options.history, folder, from)))) {
+      // Whatever is there is not a copy this project can use. Take it out of
+      // the record before making one in its place, or the folder is still spoken
+      // for and nothing can be put there.
+      await options.history.removeWorkspace(folder).catch(() => undefined);
+      await rm(folder, { recursive: true, force: true });
+      await mkdir(path.dirname(folder), { recursive: true });
+      await options.history.addWorkspace(folder, from);
+    }
     await carryOver(options.history.root, folder);
 
-    return new HeldWork(options.history, folder, {
-      id: options.id,
-      doing: options.doing.trim(),
-      state: 'making',
-      version: null,
-      at: options.at ?? Date.now(),
-    });
+    return new HeldWork(
+      options.history,
+      folder,
+      {
+        id: options.id,
+        doing: options.doing.trim(),
+        state: 'making',
+        version: null,
+        at: options.at ?? Date.now(),
+      },
+      kept,
+    );
   }
 
   /**
@@ -350,7 +400,7 @@ export class HeldWork {
     const inside = new ProjectHistory(this.folder);
     const version = await inside.snapshot(title);
     if (version !== null) await this.history.hold(version);
-    await this.release();
+    await this.putAway();
 
     this.waiting.version = version;
     this.waiting.state = version === null ? 'nothing' : 'waiting';
@@ -395,6 +445,20 @@ export class HeldWork {
     this.waiting.version = null;
     this.waiting.state = 'nothing';
     if (version !== null) await this.history.release(version);
+  }
+
+  /** Leave a kept copy ready for the next piece of work, holding none of what
+   *  this one did. Anything that cannot be put back is let go instead, so a copy
+   *  is never handed on in a state nobody can account for. */
+  private async putAway(): Promise<void> {
+    if (!this.kept) {
+      await this.release();
+      return;
+    }
+    const at = await this.history.currentVersion().catch(() => null);
+    if (at === null || !(await putCopyBack(this.history, this.folder, at))) {
+      await this.release();
+    }
   }
 
   /** Let the copy go, whatever state it was left in. Safe to call twice. */

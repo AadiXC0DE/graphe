@@ -125,6 +125,7 @@ import {
   parkThread,
   threadsIn,
   currentDesk,
+  helpersRunning,
   intoTheBox,
   noDesks,
   nowDoing,
@@ -3689,7 +3690,7 @@ function Conversation() {
   // reference, or a second version. Both appear once and then stay.
   const shelved = desk !== null;
   const research = researchLog(desk?.turns ?? []);
-  const helpers = nowDoing(desk?.turns ?? []).helpers;
+  const helpers = desk === null ? [] : helpersRunning(desk);
 
   /* The top row is only the conversations open in this project. Projects are
      switched in the sidebar, where the whole project list stays in one stable

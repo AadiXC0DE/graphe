@@ -323,17 +323,37 @@ void main().then(leave, () => leave(1));
  * reported a helper that had finished without saying anything.
  *
  * Setting `exitCode` and letting the loop empty is the version that cannot lose
- * the answer. The timer stays as a backstop for a pipe nobody is reading.
+ * the answer. What is left is the backstop, and it used to be a deadline: five
+ * seconds, then leave. A parent busy for six is not a parent that will never
+ * read — it is the app opening another conversation, which takes longer than
+ * that — and the answer was cut in half for it. So the backstop waits on
+ * movement instead of on the clock: as long as the pipe is emptying, however
+ * slowly, the answer is still arriving.
  */
+const NOTHING_MOVING_MS = 20_000;
+
 function leave(code: number): void {
   process.exitCode = code;
-  const give = setTimeout(() => process.exit(code), 5000);
+  if (process.stdout.writableLength === 0) return;
+
+  let left = process.stdout.writableLength;
+  const give = setInterval(() => {
+    const now = process.stdout.writableLength;
+    if (now === 0) {
+      clearInterval(give);
+      return;
+    }
+    if (now < left) {
+      // Still going out. However long it takes, it is not lost.
+      left = now;
+      return;
+    }
+    clearInterval(give);
+    process.exit(code);
+  }, NOTHING_MOVING_MS);
+  // Never the reason this stays up: a drained pipe ends the process on its own.
   give.unref();
-  if (process.stdout.writableLength === 0) {
-    clearTimeout(give);
-    return;
-  }
   process.stdout.once('drain', () => {
-    clearTimeout(give);
+    clearInterval(give);
   });
 }

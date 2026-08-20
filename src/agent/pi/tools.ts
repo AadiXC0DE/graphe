@@ -1171,11 +1171,16 @@ async function runSubagent(
         finish({
           ok: false,
           error:
-            code === 0
-              ? 'The helper finished without saying anything.'
-              : said === null
-                ? 'The helper stopped before it finished.'
-                : `The helper stopped before it finished. The last thing it said was: ${said}`,
+            code === 0 && rest !== ''
+              ? // It did say something: the answer was cut off on the way here.
+                // Saying it finished without saying anything sends the model
+                // looking for a fault in the work rather than in the pipe.
+                'The helper finished, but its answer was cut off on the way back, so none of it could be kept.'
+              : code === 0
+                ? 'The helper finished without saying anything.'
+                : said === null
+                  ? 'The helper stopped before it finished.'
+                  : `The helper stopped before it finished. The last thing it said was: ${said}`,
         });
       }
     });

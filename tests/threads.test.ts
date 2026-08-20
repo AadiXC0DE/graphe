@@ -8,7 +8,10 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { TASK_LABEL } from '../src/lib/describe';
 import {
+  helpersRunning,
+  nowDoing,
   changeDesk,
   currentDesk,
   noDesks,
@@ -182,5 +185,48 @@ describe('a project with more than one conversation open', () => {
     });
 
     expect(currentDesk(desks)?.spent?.total).toEqual({ minor: 40, currency: 'USD' });
+  });
+});
+
+describe('helpers stay on screen when another tab is opened', () => {
+  const helperTurn = (id: string, state: 'running' | 'done') => ({
+    kind: 'did' as const,
+    id,
+    callId: id,
+    label: TASK_LABEL,
+    detail: `work ${id}`,
+    state,
+    at: 10,
+  });
+
+  it('keeps a helper the conversation behind is still running', () => {
+    const desk = changeDesk(twoOpen(), HERE.path, (one) => ({
+      ...one,
+      turns: [],
+      parked: { ...one.parked, b: { ...one.parked['b']!, turns: [helperTurn('h1', 'running')] } },
+    }));
+    const front = currentDesk(desk)!;
+    // The whole of the bug: reading the front conversation alone found none,
+    // so the rail came off the screen and the helper looked stopped.
+    expect(nowDoing(front.turns).helpers).toHaveLength(0);
+    expect(helpersRunning(front).map((one) => one.id)).toEqual(['h1']);
+  });
+
+  it('leaves a finished helper behind a tab where it is', () => {
+    const desk = changeDesk(twoOpen(), HERE.path, (one) => ({
+      ...one,
+      turns: [],
+      parked: { ...one.parked, b: { ...one.parked['b']!, turns: [helperTurn('h2', 'done')] } },
+    }));
+    expect(helpersRunning(currentDesk(desk)!)).toHaveLength(0);
+  });
+
+  it('never lists one twice', () => {
+    const desk = changeDesk(twoOpen(), HERE.path, (one) => ({
+      ...one,
+      turns: [helperTurn('h3', 'running')],
+      parked: { ...one.parked, b: { ...one.parked['b']!, turns: [helperTurn('h3', 'running')] } },
+    }));
+    expect(helpersRunning(currentDesk(desk)!)).toHaveLength(1);
   });
 });

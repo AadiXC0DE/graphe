@@ -478,6 +478,23 @@ function isMechanical(label: string): boolean {
   );
 }
 
+/**
+ * Every helper still going in this project, whichever conversation asked for it.
+ *
+ * The rail used to be read off the conversation in front, so opening another tab
+ * took it off the screen — and a helper that is still working, with nothing on
+ * screen to say so, is a helper that looks stopped. Nobody watching could tell
+ * the difference, and the natural next move is to stop it and start again.
+ */
+export function helpersRunning(desk: Desk, at: number = Date.now()): NowView['helpers'] {
+  const front = nowDoing(desk.turns, at).helpers;
+  const behind = Object.values(desk.parked).flatMap((one) =>
+    nowDoing(one.turns, at).helpers.filter((helper) => helper.state === 'running'),
+  );
+  const seen = new Set(front.map((one) => one.id));
+  return [...front, ...behind.filter((one) => !seen.has(one.id))];
+}
+
 export function nowDoing(turns: readonly Turn[], at: number = Date.now()): NowView {
   let step: NowView['step'] = null;
   const helpers: NowView['helpers'][number][] = [];

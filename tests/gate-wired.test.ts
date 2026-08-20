@@ -486,14 +486,14 @@ describe('the verdict reaches the panel', () => {
 /* The default                                                                 */
 /* -------------------------------------------------------------------------- */
 
-describe('checking work first is the ordinary way to work', () => {
-  it('holds back a project nobody has said anything about', () => {
-    expect(holdsBack({}, '/project')).toBe(true);
+describe('work happens as it is asked for, unless somebody says otherwise', () => {
+  it('does not hold back a project nobody has said anything about', () => {
+    expect(holdsBack({}, '/project')).toBe(false);
+    // Turned on is turned on, and stays on across a launch.
     expect(holdsBack({ '/project': true }, '/project')).toBe(true);
-    // Turned off is turned off, and stays off across a launch.
     expect(holdsBack({ '/project': false }, '/project')).toBe(false);
     // Another project's answer is not this one's.
-    expect(holdsBack({ '/other': false }, '/project')).toBe(true);
+    expect(holdsBack({ '/other': true }, '/project')).toBe(false);
     // No folder open is nothing to hold anything back from.
     expect(holdsBack({}, null)).toBe(false);
   });

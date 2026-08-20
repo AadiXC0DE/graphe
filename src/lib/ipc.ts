@@ -432,7 +432,7 @@ export type Preferences = {
   showFiles: boolean;
   /** Whether each project holds work back to be looked at first, keyed by its
    *  path. Per project, so saying “ask me first” in one folder never changes
-   *  another. Absent is on — read it through `holdsBack`. */
+   *  another. Absent is off — read it through `holdsBack`. */
   heldBack: Readonly<Record<string, boolean>>;
   /** How much a picture has to move before work is stopped, by id, or null for
    *  the middle one. */

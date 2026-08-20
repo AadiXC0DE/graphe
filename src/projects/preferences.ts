@@ -89,8 +89,8 @@ export type Preferences = {
    * moved the page is let through without a word, so being asked means
    * something moved rather than that a turn finished.
    *
-   * Read it through `holdsBack`, never by hand — absent is on, and a `false`
-   * here is somebody having turned it off.
+   * Read it through `holdsBack`, never by hand — absent is off, and a `true`
+   * here is somebody having turned it on.
    */
   heldBack: Readonly<Record<string, boolean>>;
   /**

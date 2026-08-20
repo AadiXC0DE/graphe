@@ -112,31 +112,54 @@ async function letGoOfOldImages() {
  *  option and a worse one: it is the two builds glued together, so it is the
  *  size of both, and Homebrew can pick per machine for free.
  *
- *  One at a time, and not because it is tidier: asked for both at once,
- *  electron-builder makes the two disk images concurrently and `hdiutil` hands
- *  one of them back "resource temporarily unavailable". It fails perhaps one run
- *  in three, always on exactly one architecture, and the other one succeeds —
- *  so the folder ends up holding one new artifact and one old one. */
+ *  One at a time, so a run that does not take costs one architecture rather
+ *  than both, and can be gone again without redoing the one that worked. */
 const targets = unpackedOnly
   ? [['--dir']]
   : onlyThisMac
     ? [[args.includes('--x64') ? '--x64' : '--arm64']]
     : [['--arm64'], ['--x64']];
 
+/**
+ * Make one architecture, going again if the disk image does not take.
+ *
+ * `hdiutil` hands back "resource temporarily unavailable" while resizing the
+ * image it has just attached — often enough to lose about one run in three, and
+ * on whichever architecture it feels like. Nothing about the build is wrong when
+ * it happens: the volume is busy for a moment longer than it expected. Left
+ * alone it is the worst kind of failure, because the other architecture
+ * succeeded and the folder is left holding one new artifact and one old one that
+ * looks exactly as current.
+ */
+async function packageOne(target, name) {
+  const TRIES = 3;
+  for (let attempt = 1; attempt <= TRIES; attempt += 1) {
+    // Whatever the last attempt left attached, including our own.
+    await letGoOfOldImages();
+    try {
+      await step(
+        attempt === 1 ? name : `${name}, again (${String(attempt)} of ${String(TRIES)})`,
+        'npx',
+        ['electron-builder', '--mac', ...target, '--publish', 'never'],
+        {
+          // Belt and braces with `mac.identity: null`. Without this
+          // electron-builder goes looking through the keychain for a Developer
+          // ID, and on a machine that happens to have one it would quietly sign
+          // with it — which is a different, and unrepeatable, artifact from the
+          // one CI produces.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+        },
+      );
+      return;
+    } catch (cause) {
+      if (attempt === TRIES) throw cause;
+      await new Promise((wake) => setTimeout(wake, 4000));
+    }
+  }
+}
+
 for (const target of targets) {
-  await letGoOfOldImages();
-  await step(
-    targets.length > 1 ? `packaging ${target[0].replace('--', '')}` : 'packaging',
-    'npx',
-    ['electron-builder', '--mac', ...target, '--publish', 'never'],
-    {
-      // Belt and braces with `mac.identity: null`. Without this electron-builder
-      // goes looking through the keychain for a Developer ID, and on a machine
-      // that happens to have one it would quietly sign with it — which is a
-      // different, and unrepeatable, artifact from the one CI produces.
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false',
-    },
-  );
+  await packageOne(target, targets.length > 1 ? `packaging ${target[0].replace('--', '')}` : 'packaging');
 }
 
 if (!skipVerify && !unpackedOnly) {

@@ -1,5 +1,6 @@
 import type { Room as RoomState } from '../lib/ipc';
 import type { Turn } from '../lib/thread';
+import { ROOM_WORDS } from '../lib/roomshare';
 import RoomShare from './RoomShare';
 import './Room.css';
 
@@ -54,7 +55,7 @@ export default function Room({ room, tidying, onTidy, busy, turns }: Props) {
   const part = tidying ? 0 : (room?.part ?? 0);
   const tight = part >= TIGHT;
   const said =
-    room === null
+    room === null || room.used === null
       ? SAYS.what
       : `${thousands(room.used)} of ${thousands(room.total)} used · ${Math.round(part * 100)}%`;
 
@@ -85,9 +86,9 @@ export default function Room({ room, tidying, onTidy, busy, turns }: Props) {
             information for anyone listening. */}
         <span className="room__tip" aria-hidden="true">
           <span className="room__tipcard">
-            {tidying || room === null ? (
+            {tidying || room === null || room.used === null ? (
               <span className="room__tipwhat">
-                {tidying ? SAYS.tidyingWhat : SAYS.whatFull}
+                {tidying ? SAYS.tidyingWhat : room?.used === null ? ROOM_WORDS.notKnown : SAYS.whatFull}
               </span>
             ) : turns === undefined ? (
               <span className="room__tipcount">
@@ -111,7 +112,7 @@ export default function Room({ room, tidying, onTidy, busy, turns }: Props) {
           type="button"
           className="room__tidy"
           onClick={onTidy}
-          disabled={busy === true || tidying || room === null}
+          disabled={busy === true || tidying || room === null || room.used === null}
           title={tight ? SAYS.full : SAYS.tidyHint}
         >
           {tidying ? SAYS.tidying : SAYS.tidy}

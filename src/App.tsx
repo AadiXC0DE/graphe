@@ -122,7 +122,6 @@ import {
   changeCurrent,
   changeDesk,
   closeDesk,
-  showThread,
   parkThread,
   threadsIn,
   currentDesk,
@@ -702,6 +701,9 @@ function Conversation() {
    *  torn down and rebuilt every time somebody says something. */
   const desksNow = useRef(desks);
   desksNow.current = desks;
+  /** Last project/conversation navigation request. Only its response may change
+   *  what is in front; IPC replies can arrive out of order. */
+  const navigation = useRef(0);
 
   /** The folders open right now, in the order the tabs draw them, so ⌘1–9 lands
    *  on the tab somebody is looking at rather than on a stale list. */
@@ -796,7 +798,7 @@ function Conversation() {
   /** A run that is finished and was long enough to be worth a line, with how
    *  long it went for in seconds — kept with the project it belongs to so it
    *  is never drawn under another project's conversation. */
-  const [finishedRun, setFinishedRun] = useState<{ path: string; seconds: number } | null>(null);
+  const [finishedRun, setFinishedRun] = useState<{ owner: string; seconds: number } | null>(null);
   /* Busy is how many operations are in flight, so a turn in one tab stopping
      must not clear the busy another tab is still using. Counted, not a flag. */
   const goBusy = (): void => setBusyCount((count) => count + 1);
@@ -1036,6 +1038,33 @@ function Conversation() {
     );
   }, [refreshConnection]);
 
+  /** Put an asynchronous failure back in the conversation that made the call.
+   *  A person may have switched tabs while IPC was waiting; "current" at the
+   *  end of the await is not ownership. Unknown/closed owners are left alone. */
+  const troubleAt = useCallback((where: Where, trouble: Trouble) => {
+    if (trouble.marker === 'connect' || where.project === undefined) {
+      troubleHere(trouble);
+      return;
+    }
+    setDesks((current) =>
+      changeDesk(current, where.project!, (one) => {
+        const conversation = where.conversation;
+        if (conversation === undefined || conversation === one.address) {
+          return { ...one, turns: withTrouble(one.turns, trouble) };
+        }
+        const parked = one.parked[conversation];
+        if (parked === undefined) return one;
+        return {
+          ...one,
+          parked: {
+            ...one.parked,
+            [conversation]: { ...parked, turns: withTrouble(parked.turns, trouble) },
+          },
+        };
+      }),
+    );
+  }, [troubleHere]);
+
   const selectModel = useCallback(
     (choice: ModelChoice) => {
       void bridge.selectModel(choice).then((answer) => {
@@ -1185,9 +1214,18 @@ function Conversation() {
     });
   }, []);
 
-  const refreshRoom = useCallback(() => {
-    void bridge.room().then((answer) => {
-      if (answer.ok) setRoom(answer.value);
+  const refreshRoom = useCallback((where?: Where) => {
+    const desk = currentDesk(desksNow.current);
+    const asked: Where = where ?? {
+      ...(desk === null ? {} : { project: desk.path }),
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    };
+    void bridge.room(asked).then((answer) => {
+      if (!answer.ok) return;
+      const current = currentDesk(desksNow.current);
+      if (asked.project !== undefined && current?.path !== asked.project) return;
+      if (asked.conversation !== undefined && current?.address !== asked.conversation) return;
+      setRoom(answer.value);
     });
   }, []);
 
@@ -1293,7 +1331,9 @@ function Conversation() {
 
   const open = useCallback(
     async (path: string): Promise<void> => {
+      const request = ++navigation.current;
       const opened = await bridge.openProject(path);
+      if (request !== navigation.current) return;
       if (!opened.ok) {
         // A connect problem while opening means there is no model to think
         // with; the picker's usual "this folder is a dud" phrasing would be
@@ -1323,10 +1363,12 @@ function Conversation() {
 
       setSwitching(false);
       setPickerTrouble(null);
+      setTidying(false);
+      setRoom(null);
+      toChat();
       // A resumed session keeps its real rung; a genuinely new one reports the
       // default. Never show “asks first” while the live session has full access.
       setHowFarHere(opened.value.howFar ?? 'asking');
-      setHowFarHere('asking');
       // A file of the folder we were in is not a file of this one.
       setReading(null);
       // Which conversation this landed in. Without it nothing in the shelf is
@@ -1367,7 +1409,10 @@ function Conversation() {
       void refreshVersions(opened.value.path);
       void refreshOverview(opened.value.path);
       void refreshBuildPlan(opened.value.path);
-      refreshRoom();
+      refreshRoom({
+        project: opened.value.path,
+        ...(opened.value.address == null ? {} : { conversation: opened.value.address }),
+      });
       refreshRunning({
         project: opened.value.path,
         ...(opened.value.address == null ? {} : { conversation: opened.value.address }),
@@ -1410,16 +1455,27 @@ function Conversation() {
         return;
       }
       toChat();
+      setTidying(false);
+      setRoom(null);
       // Opening another conversation leaves an in-flight turn where it is,
       // running in the conversation it belongs to. Each conversation is its
       // own agent session, so the turn on the tab being left carries on in the
       // background and stays saved — this is how two tabs work at once. The
       // turn only stops if somebody presses Stop on it.
-      const opened = await bridge.openConversation(path);
+      const projectAtStart = desksNow.current.current;
+      const request = ++navigation.current;
+      const opened = await bridge.openConversation(
+        path,
+        projectAtStart === null ? undefined : { project: projectAtStart },
+      );
+      if (request !== navigation.current) return;
       if (!opened.ok) {
-        troubleHere(opened.trouble);
+        troubleAt(projectAtStart === null ? {} : { project: projectAtStart }, opened.trouble);
         return;
       }
+      // Another tab/project choice won the race while this conversation was
+      // opening. It is live in the shell, but must not replace the newer choice.
+      if (desksNow.current.current !== opened.value.path) return;
       const turns = opened.value.history.reduce(
         (sofar, event) => applyEvent(sofar, event),
         [] as readonly Turn[],
@@ -1453,7 +1509,10 @@ function Conversation() {
           };
         }),
       );
-      refreshRoom();
+      refreshRoom({
+        project: opened.value.path,
+        ...(opened.value.address == null ? {} : { conversation: opened.value.address }),
+      });
       refreshRunning({
         project: opened.value.path,
         ...(opened.value.address == null ? {} : { conversation: opened.value.address }),
@@ -1465,7 +1524,7 @@ function Conversation() {
         if (answer.ok && desksNow.current.current === project) setConversations(answer.value);
       });
     },
-    [inConversation, desk?.turns.length, toChat, troubleHere],
+    [inConversation, desk?.turns.length, toChat, troubleHere, troubleAt],
   );
 
   /** Throw a conversation away. If it is the one on screen, open a fresh one
@@ -1473,11 +1532,16 @@ function Conversation() {
   const deleteConversation = useCallback(
     async (path: string) => {
       const wasHere = path === inConversation;
+      const here = currentDesk(desksNow.current);
+      const where: Where = {
+        ...(here === null ? {} : { project: here.path }),
+        ...(here?.address == null ? {} : { conversation: here.address }),
+      };
       if (wasHere && busy) {
-        await bridge.stop();
+        await bridge.stop(where);
         goQuiet();
       }
-      const answer = await bridge.deleteConversation(path);
+      const answer = await bridge.deleteConversation(path, where);
       if (!answer.ok) {
         troubleHere(answer.trouble);
         return;
@@ -1613,15 +1677,20 @@ function Conversation() {
     () =>
       bridge.onEvent((notice) => {
         const key = notice.project ?? '';
+        const runKey = `${key}\u0000${notice.conversation ?? ''}`;
+        const front = currentDesk(desksNow.current);
+        const noticeIsHere =
+          notice.project === front?.path &&
+          (notice.conversation == null || notice.conversation === front.address);
         // How long the active run is going for, so a long one ends with a quiet
         // "worked for" line rather than silence. The clock starts on the first
         // real step and stops when the run settles.
         if (notice.event.type === 'tool-start') {
           didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [key]: true };
-          if (runStartedAt.current[key] === undefined) {
-            runStartedAt.current = { ...runStartedAt.current, [key]: Date.now() };
+          if (runStartedAt.current[runKey] === undefined) {
+            runStartedAt.current = { ...runStartedAt.current, [runKey]: Date.now() };
             // A new run makes the old footer's measure history.
-            setFinishedRun((was) => (was !== null && was.path === key ? null : was));
+            setFinishedRun((was) => (was !== null && was.owner === runKey ? null : was));
             // Real work has begun on a build that still has tasks: the tracker
             // picks the next one up as the one being worked on.
             const plan = buildPlanNow.current;
@@ -1653,13 +1722,13 @@ function Conversation() {
           });
           // A long run earns its quiet measure. Short runs stay silent — a
           // line under every quick change is the noise this product removes.
-          const started = runStartedAt.current[key];
+          const started = runStartedAt.current[runKey];
           const rest = { ...runStartedAt.current };
-          delete rest[key];
+          delete rest[runKey];
           runStartedAt.current = rest;
           if (started !== undefined) {
             const seconds = Math.round((Date.now() - started) / 1000);
-            if (seconds >= 60) setFinishedRun({ path: key, seconds });
+            if (seconds >= 60) setFinishedRun({ owner: runKey, seconds });
           }
         }
         if (notice.event.type === "settled" && notice.project !== null) {
@@ -1667,7 +1736,10 @@ function Conversation() {
           void refreshVersions(where);
           void refreshOverview(where);
           void refreshFiles(where);
-          refreshRoom();
+          refreshRoom({
+            project: where,
+            ...(notice.conversation == null ? {} : { conversation: notice.conversation }),
+          });
           refreshRunning({
             project: where,
             ...(notice.conversation == null ? {} : { conversation: notice.conversation }),
@@ -1729,11 +1801,22 @@ function Conversation() {
             movePane('split');
           }
         }
-        if (notice.event.type === "tidying") setTidying(true);
+        if (notice.event.type === "tidying" && noticeIsHere) setTidying(true);
         if (notice.event.type === "tidied") {
-          setTidying(false);
-          refreshRoom();
+          if (noticeIsHere) {
+            setTidying(false);
+            // Pi intentionally has no post-compaction count until the next
+            // successful model reply. Keep the meter, but never show the old
+            // pre-compaction number as if it described the shortened context.
+            setRoom((was) =>
+              was === null ? was : { used: null, total: was.total, part: null },
+            );
+          }
           if (notice.project !== null) {
+            refreshRoom({
+              project: notice.project,
+              ...(notice.conversation == null ? {} : { conversation: notice.conversation }),
+            });
             refreshRunning({
               project: notice.project,
               ...(notice.conversation == null ? {} : { conversation: notice.conversation }),
@@ -1803,22 +1886,35 @@ function Conversation() {
    *  narration is Pi's own, arriving through the ordinary event stream, so
    *  there is nothing to say here. */
   const tidyNow = useCallback(() => {
+    const desk = currentDesk(desksNow.current);
+    const where: Where = {
+      ...(desk === null ? {} : { project: desk.path }),
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    };
     void bridge
-      .tidyNow()
+      .tidyNow(where)
       .then((answer) => {
-        if (answer.ok) setRoom(answer.value);
+        const current = currentDesk(desksNow.current);
+        const stillHere =
+          (where.project === undefined || current?.path === where.project) &&
+          (where.conversation === undefined || current?.address === where.conversation);
+        if (answer.ok && stillHere) setRoom(answer.value);
         // "Not enough to shorten" and "Pi was already shortening it" are
         // ordinary, harmless outcomes. Pi's event stream has already left the
         // truthful activity line in the conversation when there was work to
         // narrate, so a large error card here would only contradict it.
-        else if (answer.trouble.what !== 'I could not tidy this conversation just now.') {
-          troubleHere(answer.trouble);
+        else if (!answer.ok && answer.trouble.what !== 'I could not tidy this conversation just now.') {
+          troubleAt(where, answer.trouble);
         }
       })
-      .finally(() => setTidying(false));
-  }, [troubleHere]);
-
-  /* ------------------------------------------------- the way out, and the words */
+      .finally(() => {
+        const current = currentDesk(desksNow.current);
+        if (
+          (where.project === undefined || current?.path === where.project) &&
+          (where.conversation === undefined || current?.address === where.conversation)
+        ) setTidying(false);
+      });
+  }, [troubleAt]);
 
   /** Sticky, so the answer comes back from the shell rather than being assumed
    *  here — if the write failed, the switch shows what was actually kept. */
@@ -1994,6 +2090,14 @@ function Conversation() {
          sends their next message, it has done its job; leaving its “Look” row
          parked above the composer makes it read as still recording. */
       setRecorded(null);
+      // Ownership is captured before reading attachments: a large image can
+      // take long enough to decode for somebody to switch tabs meanwhile.
+      const desk = currentDesk(desksNow.current);
+      const target: Where = {
+        ...(desk === null ? {} : { project: desk.path }),
+        ...(desk?.address == null ? {} : { conversation: desk.address }),
+      };
+      const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
       // What is in the box at the moment of sending — never a snapshot from
       // whenever this callback was last rebuilt (see `attachmentsNow`).
       const inTheBox = attachmentsNow.current;
@@ -2063,21 +2167,16 @@ function Conversation() {
         })),
       );
       goBusy();
-      const desk = currentDesk(desksNow.current);
-      const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
       if (owner !== null) holdSend(owner);
       try {
         const said =
           links.length === 0 ? text : `${text}\n\n${ATTACH_WORDS.alsoLook(links)}`;
-        const reply = await bridge.prompt(said, pictures, ways, {
-          ...(desk === null ? {} : { project: desk.path }),
-          ...(desk?.address == null ? {} : { conversation: desk.address }),
-        });
-        if (!reply.ok) troubleHere(reply.trouble);
+        const reply = await bridge.prompt(said, pictures, ways, target);
+        if (!reply.ok) troubleAt(target, reply.trouble);
       } catch (cause) {
         // The bridge is not supposed to throw. If it ever does, the window says
         // something calm rather than turning white.
-        troubleHere({
+        troubleAt(target, {
           what: STOPPED_PART_WAY,
           because: "Something went wrong on my side. Nothing has been changed.",
           actionLabel: "Got it",
@@ -2089,7 +2188,7 @@ function Conversation() {
         if (owner !== null) letSendGo(owner);
       }
     },
-    [troubleHere, emptyTheBox, holdSend, letSendGo, connection],
+    [troubleAt, emptyTheBox, holdSend, letSendGo, connection],
   );
 
   /**
@@ -2320,10 +2419,12 @@ function Conversation() {
       if (here.current !== project) await open(project);
       const desk = desksNow.current.byPath[project];
       if (desk === undefined || desk.address === address) return;
-      toChat();
-      setDesks((current) => showThread(current, project, address));
+      // Ask the shell to resume it as well as swapping the renderer's words.
+      // An idle session may have left the soft live-session cache; a visual-only
+      // switch would then show a tab that could no longer receive a prompt.
+      await swapConversation(address);
     },
-    [open, toChat],
+    [open, swapConversation],
   );
 
   /** Closing a tab puts the conversation down; it does not throw it away.
@@ -2350,12 +2451,12 @@ function Conversation() {
         const here = row.indexOf(address);
         const next = row[here - 1] ?? row[here + 1];
         if (next === undefined) return;
-        setDesks((current) => showThread(current, project, next));
+        await swapConversation(next);
       }
       setDesks((current) => parkThread(current, project, address));
       void bridge.closeConversation({ project, conversation: address });
     },
-    [forget],
+    [forget, swapConversation],
   );
 
   goToTabNow.current = goToTab;
@@ -2373,13 +2474,17 @@ function Conversation() {
    */
   const takeBack = useCallback(() => {
     const desk = currentDesk(desksNow.current);
+    const target: Where = {
+      ...(desk === null ? {} : { project: desk.path }),
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    };
     const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
-    void bridge.takeBackQueue().then((answer) => {
+    void bridge.takeBackQueue(target).then((answer) => {
       // The line did not come back, so it is still waiting behind the run. The
       // screen keeps showing it, and the person is told rather than left with a
       // press that appeared to work.
       if (!answer.ok) {
-        troubleHere(answer.trouble);
+        troubleAt(target, answer.trouble);
         return;
       }
       const words = tookBack(answer.value);
@@ -2389,7 +2494,7 @@ function Conversation() {
       setDraft((was) => intoTheBox(was, words));
       if (owner !== null) setQueued((was) => ({ ...was, [owner]: [] }));
     });
-  }, [troubleHere]);
+  }, [troubleAt]);
 
   /**
    * The answer to "this is a bigger job".
@@ -3951,7 +4056,8 @@ function Conversation() {
               {recorded !== null && recorded.project === desk.path ? (
                 <EvidenceReel recording={recorded.recording} />
               ) : null}
-              {finishedRun !== null && desk !== null && finishedRun.path === desk.path ? (
+              {finishedRun !== null && desk !== null &&
+              finishedRun.owner === `${desk.path}\u0000${desk.address ?? ''}` ? (
                 <p className="threadnote">
                   Worked for {durationInWords(finishedRun.seconds)}
                 </p>

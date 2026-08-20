@@ -1447,6 +1447,11 @@ type Held = {
 function conversationsIn(project: string): Workspaces<GrapheSession> {
   return new Workspaces<GrapheSession>({
     limit: CONVERSATIONS,
+    // The limit is a memory preference, not permission to abort a turn. If all
+    // older conversations are active, keep them until a later adoption finds
+    // one idle rather than making a new tab stop an old stuck-looking one.
+    mayEvict: (session) =>
+      !session.working && !session.listening && session.awaitingAnswer.length === 0,
     close: (session) => session.dispose(),
     evicted: (one) => {
       send(project, { type: 'message-delta', text: setDownWords.said }, one.path);

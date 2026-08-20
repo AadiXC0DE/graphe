@@ -727,7 +727,7 @@ let previewHowFar: HowFar = 'asking';
       send({ type: 'message-end' });
       // A conversation fills up as it goes, so the ring beside the box moves
       // the way it would in the app rather than sitting at one figure.
-      const used = Math.min(previewRoom.total, previewRoom.used + 21_000);
+      const used = Math.min(previewRoom.total, (previewRoom.used ?? 0) + 21_000);
       previewRoom = { used, total: previewRoom.total, part: used / previewRoom.total };
       send({ type: 'settled' });
       return done(null);
@@ -1861,8 +1861,8 @@ function connect(): Bridge {
     hatches: () => api.hatches(),
     openInEditor: (file) => api.openInEditor(file),
     saveVersion: (name) => api.saveVersion(name),
-    room: () => api.room(),
-    tidyNow: () => api.tidyNow(),
+    room: (where) => api.room(where),
+    tidyNow: (where) => api.tidyNow(where),
     skills: () => api.skills(),
     skillText: (id) => api.skillText(id),
     workflows: () => api.workflows(),

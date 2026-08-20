@@ -2825,9 +2825,13 @@ async function sweepStrayCheckouts(): Promise<number> {
     if (!existsSync(root)) continue;
     // The project itself is gone. Nothing here can be opened again and there is
     // no repository left to ask about it, so the folder is all there is to give
-    // back.
+    // back — unless another project answers to the same folder, in which case
+    // what is in it is still somebody's.
     if (!existsSync(project.path)) {
-      await rm(root, { recursive: true, force: true }).catch(() => undefined);
+      const alsoHere = projects.some(
+        (other) => other.path !== project.path && worktreesFolder(other.path) === root,
+      );
+      if (!alsoHere) await rm(root, { recursive: true, force: true }).catch(() => undefined);
       continue;
     }
     const found = await readdir(root, { withFileTypes: true }).catch(() => []);

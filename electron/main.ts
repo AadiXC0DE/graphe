@@ -170,6 +170,7 @@ import {
   dropWorktree,
   landWorktree,
   releaseWorktree,
+  sweepCheckouts,
   type RunGit,
 } from '../src/history/worktree';
 import {
@@ -2713,6 +2714,43 @@ async function endStrayServers(): Promise<number> {
 function worktreesFolder(project: string): string {
   const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
   return join(app.getPath('userData'), 'worktrees', key);
+}
+
+/* ------------------------------------------------ checkouts left behind -- */
+
+/**
+ * Checkouts a copy of the app that went away left on disk.
+ *
+ * The same shape as the strays above, and for the same reason: nothing above
+ * them, nothing to end them, and they spend. What they spend is disk — each one
+ * is a second copy of the project, and a working day of parallel conversations
+ * is a folder per conversation, kept for ever because the only thing that ever
+ * removed one was somebody explicitly throwing a conversation away.
+ *
+ * Runs before any conversation is open, and the app is single-instance, so
+ * nothing on disk here is in use. A checkout somebody left uncommitted work in
+ * is kept anyway.
+ */
+async function sweepStrayCheckouts(): Promise<number> {
+  const projects = await rememberedProjects().catch(() => []);
+  let given = 0;
+  for (const project of projects) {
+    const root = worktreesFolder(project.path);
+    if (!existsSync(root)) continue;
+    // The project itself is gone. Nothing here can be opened again and there is
+    // no repository left to ask about it, so the folder is all there is to give
+    // back.
+    if (!existsSync(project.path)) {
+      await rm(root, { recursive: true, force: true }).catch(() => undefined);
+      continue;
+    }
+    const found = await readdir(root, { withFileTypes: true }).catch(() => []);
+    const folders = found.filter((one) => one.isDirectory()).map((one) => join(root, one.name));
+    if (folders.length === 0) continue;
+    const released = await sweepCheckouts(gitRunHereFor(), project.path, folders).catch(() => []);
+    given += released.length;
+  }
+  return given;
 }
 
 /** Where a project's build plan lives, so it survives the window closing. */
@@ -6672,6 +6710,8 @@ if (!app.requestSingleInstanceLock()) {
     // And servers. A helper is known by its filename; a server is whatever
     // somebody asked for, so it is known only because we wrote it down.
     await endStrayServers().catch(() => 0);
+    // And the copies of the project those conversations were working in.
+    await sweepStrayCheckouts().catch(() => 0);
     // Work that was going when this last closed, back on its board.
     await pickUpWhereWeLeftOff().catch(() => undefined);
     // What somebody asked for over and over, picked up where it left off. One

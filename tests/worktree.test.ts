@@ -7,7 +7,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -19,10 +19,12 @@ import {
   checkoutFolder,
   createWorktree,
   dropWorktree,
+  holdsWork,
   landWorktree,
+  sweepCheckouts,
   type RunGit,
 } from '../src/history/worktree';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const spawn = promisify(execFile);
 
@@ -393,6 +395,141 @@ describe('shared base — a folder that commits ahead is still protected', () =>
       expect(applied.value.applied).not.toContain('a.txt');
       expect(applied.value.conflicted).toContain('a.txt');
       expect(readFileContent(repo, 'a.txt')).toBe('primary committed this\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('holdsWork — what a sweep is not allowed to destroy', () => {
+  it('says no for a checkout nobody left anything in', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'idle', null);
+      if (!made.ok || made.value === null) return;
+      expect(await holdsWork(git(), made.value.folder)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('says yes for an edit nobody committed', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'busy', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'half a thought\n');
+      expect(await holdsWork(git(), made.value.folder)).toBe(true);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('says no once the work is committed, because the branch is holding it', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'saved', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'a whole thought\n');
+      await raw(made.value.folder, 'commit', '-am', 'the tab saves');
+      expect(await holdsWork(git(), made.value.folder)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('does not count what the project ignores — that is the disk worth reclaiming', async () => {
+    const repo = await freshRepo();
+    try {
+      await writeFile(path.join(repo, '.gitignore'), 'node_modules/\nrelease/\n');
+      await raw(repo, 'add', '.');
+      await raw(repo, 'commit', '-m', 'ignore the heavy things');
+      const made = await createWorktree(git(), repo, 'built', null);
+      if (!made.ok || made.value === null) return;
+      await mkdir(path.join(made.value.folder, 'release'), { recursive: true });
+      await writeFile(path.join(made.value.folder, 'release', 'app.dmg'), 'pretend this is 240MB\n');
+      expect(await holdsWork(git(), made.value.folder)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('sweepCheckouts — the copies a finished conversation left behind', () => {
+  it('gives the folder back and keeps the branch the work is on', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'over', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'what the tab did\n');
+      await raw(made.value.folder, 'commit', '-am', 'the tab saves');
+
+      const given = await sweepCheckouts(git(), repo, [made.value.folder]);
+
+      expect(given).toEqual([made.value.folder]);
+      expect(existsSync(made.value.folder)).toBe(false);
+      // The one thing a sweep may never do: the work is still there to land.
+      expect((await raw(repo, 'show', 'graphe/over:a.txt')).trim()).toBe('what the tab did');
+      // And git is not left with a note pointing at a folder that has gone.
+      expect(await raw(repo, 'worktree', 'list')).not.toContain(made.value.folder);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a checkout somebody is still in the middle of', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'midway', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'half a thought\n');
+
+      const given = await sweepCheckouts(git(), repo, [made.value.folder]);
+
+      expect(given).toEqual([]);
+      expect(existsSync(made.value.folder)).toBe(true);
+      expect(readFileContent(made.value.folder, 'a.txt')).toBe('half a thought\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the one a conversation is open in', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'open-now', null);
+      if (!made.ok || made.value === null) return;
+
+      const given = await sweepCheckouts(git(), repo, [made.value.folder], {
+        inUse: (folder) => folder === made.value?.folder,
+      });
+
+      expect(given).toEqual([]);
+      expect(existsSync(made.value.folder)).toBe(true);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('takes back every idle one at once, which is the whole point', async () => {
+    const repo = await freshRepo();
+    try {
+      const names = ['one', 'two', 'three'];
+      const folders: string[] = [];
+      for (const name of names) {
+        const made = await createWorktree(git(), repo, name, null);
+        if (made.ok && made.value !== null) folders.push(made.value.folder);
+      }
+      expect(folders).toHaveLength(3);
+
+      const given = await sweepCheckouts(git(), repo, folders);
+
+      expect(given).toHaveLength(3);
+      for (const folder of folders) expect(existsSync(folder)).toBe(false);
+      // Every branch survives its folder.
+      for (const name of names) {
+        expect((await raw(repo, 'rev-parse', '--verify', `graphe/${name}`)).trim()).not.toBe('');
+      }
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

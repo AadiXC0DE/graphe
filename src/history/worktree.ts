@@ -201,6 +201,63 @@ export async function releaseWorktree(run: RunGit, repo: string, folder: string)
   return ok();
 }
 
+/* -------------------------------------------------------------------------- */
+/* Giving the idle ones back                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Whether giving this checkout back would destroy something.
+ *
+ * Committed work is not at risk — it is on the branch, and the branch outlives
+ * the folder — so the question is only what the working tree is holding.
+ * Ignored files are not work: an installed dependency or a build output is made
+ * again, and those are the whole reason an idle checkout is worth reclaiming. A
+ * folder git cannot read is kept, because not knowing is not knowing it is
+ * empty.
+ */
+export async function holdsWork(run: RunGit, folder: string): Promise<boolean> {
+  const { code, out } = await run(['status', '--porcelain'], { cwd: folder });
+  if (code !== 0 || out === undefined) return true;
+  return out.split('\n').some((line) => line.trim() !== '');
+}
+
+/**
+ * Give back the checkouts left behind by conversations that are over.
+ *
+ * A checkout is a whole second copy of the project, so a few of them is
+ * gigabytes — and nothing ever reclaimed them: the only thing that removed one
+ * was somebody explicitly throwing a conversation away, which is not something
+ * people do. They accumulated instead, one per parallel conversation, for as
+ * long as the app had been installed.
+ *
+ * Safe to run over everything on disk because a checkout is never picked up
+ * again: `nextCheckoutName` counts up and steps over what an earlier sitting
+ * left, so a folder from a previous run can only sit there. The one thing worth
+ * keeping is a working tree somebody left something in — that is skipped, and
+ * stays for as long as it takes them to come back for it.
+ *
+ * Pure in the way the rest of this file is: the caller says what is on disk.
+ */
+export async function sweepCheckouts(
+  run: RunGit,
+  repo: string,
+  found: readonly string[],
+  options: { inUse?: (folder: string) => boolean } = {},
+): Promise<readonly string[]> {
+  const inUse = options.inUse ?? (() => false);
+  const given: string[] = [];
+  for (const folder of found) {
+    if (inUse(folder)) continue;
+    if (await holdsWork(run, folder)) continue;
+    const released = await releaseWorktree(run, repo, folder);
+    if (released.ok) given.push(folder);
+  }
+  // Git keeps a note per checkout inside the repository. Removing the folders
+  // above leaves those notes pointing at nothing.
+  if (given.length > 0) await run(['worktree', 'prune'], { cwd: repo });
+  return given;
+}
+
 /** The names and statuses git reports, as `{ kind, path }` rows.
  *
  * Always asked for with `-z`. Git's ordinary output quotes any path that is not

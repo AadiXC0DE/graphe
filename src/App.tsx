@@ -223,20 +223,6 @@ function stableProjectOrder(
   return [...kept, ...incoming.filter((project) => !known.has(project.path))];
 }
 
-/** The one line under the project's name: where the work stands, and what has
- *  moved since. Both are already known — this only says them in one place. */
-function workingNote(desk: Desk): string {
-  const current = desk.versions.find((one) => one.current) ?? null;
-  const changed =
-    desk.overview?.git === null || desk.overview === null
-      ? 0
-      : desk.overview.git.unstaged + desk.overview.git.staged + desk.overview.git.untracked;
-  const since =
-    changed === 0 ? null : `${changed} ${changed === 1 ? 'file' : 'files'} changed since`;
-  if (current === null) return since ?? 'Nothing saved yet.';
-  return since === null ? `On screen: ${current.title}` : `${current.title} · ${since}`;
-}
-
 /** The label on the button that gets a project ready and opens it. */
 const PREVIEW = "Open preview";
 
@@ -859,6 +845,9 @@ function Conversation() {
   /** How the window is split between the conversation and the project's own
    *  page. Off until somebody opens it. */
   const [pane, setPane] = useState<PaneRoom>('off');
+  /** A native page must yield to renderer popovers; it cannot be stacked under
+     them with CSS alone. */
+  const [composerPopoverOpen, setComposerPopoverOpen] = useState(false);
   /** Read inside the event listener, which is subscribed once and so cannot
    *  close over a changing `pane`. */
   const paneNow = useRef<PaneRoom>('off');
@@ -3245,7 +3234,13 @@ function Conversation() {
   /* A native view paints above the window's own contents, so anything that
      would cover it has to take it off screen first. */
   const covered =
-    designAt !== null || graphOpen || reviewsOpen || helpersAt !== null || connectOpen || addMore;
+    designAt !== null ||
+    graphOpen ||
+    reviewsOpen ||
+    helpersAt !== null ||
+    connectOpen ||
+    addMore ||
+    composerPopoverOpen;
   useEffect(() => {
     if (pane === 'off') return;
     void bridge.pageHidden(covered);
@@ -3873,7 +3868,6 @@ function Conversation() {
                 conversation collects at the bottom by the composer. */}
             <header className="workhead">
               <h1 className="workhead__name">{desk.name}</h1>
-              <p className="workhead__note">{workingNote(desk)}</p>
             </header>
 
             <div className="thread">
@@ -4014,6 +4008,7 @@ function Conversation() {
               onTidy={tidyNow}
               howFar={howFar}
               onHowFar={setHowFar}
+              onComposerPopoverOpenChange={setComposerPopoverOpen}
               plans={plans}
               onPlans={setPlans}
               onSelectModel={selectModel}

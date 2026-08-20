@@ -15,6 +15,8 @@ type Props = {
   /** Open the full connect screen — the way to add an account, as opposed to
    *  picking between the ones already here. */
   onConnect: () => void;
+  /** Lets a native page step aside while this renderer popover is open. */
+  onOpenChange?: (open: boolean) => void;
   /** Quieter, for the strip along the top where it sits beside the project's
    *  name rather than inside the composer. */
   bare?: boolean;
@@ -69,7 +71,7 @@ export function whatItGivesUp(
  * The list holds only models that can be used right now; a menu of things that
  * will fail is not a menu.
  */
-export default function ThinkingWith({ state, onSelect, onThinking, onConnect, bare }: Props) {
+export default function ThinkingWith({ state, onSelect, onThinking, onConnect, onOpenChange, bare }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'models' | 'thinking'>('models');
@@ -136,6 +138,14 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, b
       document.removeEventListener('keydown', key);
     };
   }, [open]);
+
+  /* A WebContentsView is drawn over all renderer layers. The parent hides it
+     for the brief lifetime of this picker, so the picker remains usable next
+     to an open page rather than merely having a larger CSS z-index. */
+  useEffect(() => {
+    onOpenChange?.(open);
+    return () => onOpenChange?.(false);
+  }, [open, onOpenChange]);
 
   useEffect(() => {
     if (!open) {

@@ -67,6 +67,13 @@ export function unfinished(plan: readonly Task[]): readonly Task[] {
   return plan.filter((one) => one.status !== 'done');
 }
 
+/** Whether there is nothing left to build. A tracker that has finished has said
+ *  everything it has to say; kept, it sits above every later conversation in
+ *  the project reading 4/4. An empty plan is not finished, it is not a plan. */
+export function isFinished(plan: readonly Task[]): boolean {
+  return plan.length > 0 && plan.every((one) => one.status === 'done');
+}
+
 /** The next task to work on: the first not-yet-done, or nothing. */
 export function nextOf(plan: readonly Task[]): Task | null {
   return plan.find((one) => one.status !== 'done') ?? null;

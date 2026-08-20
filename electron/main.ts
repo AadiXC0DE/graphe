@@ -179,6 +179,7 @@ import {
 import {
   addTasks,
   finishTask,
+  isFinished,
   readPlan,
   startTask,
   type Task,
@@ -6117,10 +6118,17 @@ function register(): void {
      back — and the guards (never flatten a dirty checkout) are the same ones
      the parallel-session wiring will lean on. */
 
+  /** True while something is still being written into the project. The one
+   *  real reason not to move it: files are mid-change, and moving out from under
+   *  them loses what was being written. */
+  function stillWriting(held: Held): boolean {
+    if (held.waiting?.waiting.state === 'making') return true;
+    return held.sessions.open.some((one) => one.held.working || one.held.listening);
+  }
+
   /** Move the project onto another of its lines of work. The one rule is the
-   *  same as going back to an older version: work that is not saved yet is not
-   *  moved anywhere. Every moment is saved at the end of a turn, so a settled
-   *  project switches freely; a project caught mid-turn is told to wait. */
+   *  same as going back to an older version: work that is not saved yet is
+   *  saved first, never left behind. Only work still being written stops it. */
   handle<null>(CHANNEL.branchSwitch, async (_event, args) => {
     const [name] = args;
     const open = projectAt(whereIn(args));
@@ -6131,9 +6139,13 @@ function register(): void {
     if (git === null || git.branch === null) {
       return fail({ what: 'There is nothing to switch between yet.', because: 'This project has no saved work, so it has no lines of work.', actionLabel: 'Got it' });
     }
-    if (git.dirty) {
-      return fail({ what: 'Not yet — this moment is not saved.', because: 'Let the current turn finish (it saves everything) and switch then. A line of work is only moved when the work is safe.', actionLabel: 'Got it' });
+    if (stillWriting(open.held)) {
+      return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish and switch then. A line of work is only moved when nothing is still changing the files.', actionLabel: 'Got it' });
     }
+    // Saved, not refused. Refusing on anything unsaved made this impossible to
+    // come back from: moving to a line without a folder leaves that folder
+    // behind untouched, which counts as unsaved, which blocks the way back.
+    await open.held.timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
     const switched = await gitRun(open.path, ['checkout', name]);
     if (switched.code !== 0) {
       return fail({ what: 'I could not move onto that line of work.', because: 'git refused the switch. Check the name, and that nothing here holds the files open.', actionLabel: 'Got it' });
@@ -6152,10 +6164,10 @@ function register(): void {
     if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(clean)) {
       return fail({ what: 'That is not a usable name for a line of work.', because: 'Letters, numbers, dots, dashes and slashes — and it cannot start with a dash.', actionLabel: 'Got it' });
     }
-    const git = await readGitStatus(open.path);
-    if (git !== null && git.dirty) {
-      return fail({ what: 'Not yet — this moment is not saved.', because: 'Let the current turn finish (it saves everything), then start the new line.', actionLabel: 'Got it' });
+    if (stillWriting(open.held)) {
+      return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish, then start the new line.', actionLabel: 'Got it' });
     }
+    await open.held.timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
     const made = await gitRun(open.path, ['checkout', '-b', clean]);
     if (made.code !== 0) {
       return fail({ what: 'I could not start that line of work.', because: 'git refused the new branch — the name may already exist.', actionLabel: 'Got it' });
@@ -6247,6 +6259,9 @@ function register(): void {
       };
       if (typeof stored?.source !== 'string') return null;
       const tasks = readPlan(stored.tasks);
+      // Everything built is nothing left to say. Kept, it sits above the next
+      // conversation reading 4/4 for ever, which is what it used to do.
+      if (isFinished(tasks)) return null;
       const next = tasks.find((one) => one.status !== 'done')?.n ?? null;
       return {
         source: stored.source,
@@ -6376,6 +6391,12 @@ function register(): void {
       tasks = finishTask(stored.tasks, op.ok !== false);
     } else if (op.kind === 'add' && Array.isArray(op.titles)) {
       tasks = addTasks(stored.tasks, op.titles.filter((one) => typeof one === 'string'));
+    }
+    if (isFinished(tasks)) {
+      // Nothing left to build, so nothing left to track. Taken away here rather
+      // than only hidden, or it comes back with the next project that opens.
+      await rm(buildPlanFile(open.path), { force: true }).catch(() => undefined);
+      return done(null);
     }
     await writeBuildPlan(open.path, stored.source, tasks);
     return done(await readBuildPlan(open.path));

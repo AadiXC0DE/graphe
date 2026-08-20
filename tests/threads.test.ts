@@ -93,6 +93,53 @@ describe('a project with more than one conversation open', () => {
     expect(currentDesk(desks)?.turns).toHaveLength(2);
   });
 
+  it('measures concurrent jobs against the conversation that settled', () => {
+    const started = changeDesk(twoOpen(), HERE.path, (desk) => ({
+      ...desk,
+      doing: { task: { kind: 'blog' as const, size: 'feature' as const }, startedAt: 10 },
+      counted: 10,
+      parked: {
+        ...desk.parked,
+        b: {
+          ...desk.parked['b']!,
+          doing: { task: { kind: 'contact-form' as const, size: 'feature' as const }, startedAt: 20 },
+          counted: 20,
+        },
+      },
+    }));
+    const summary = (total: number) => ({
+      type: 'spend-summary' as const,
+      summary: {
+        currency: 'USD',
+        total: { minor: total, currency: 'USD' },
+        work: { minor: total, currency: 'USD' },
+        retry: { minor: 0, currency: 'USD' },
+        retryShare: 0,
+        entryCount: 1,
+        firstAt: 0,
+        lastAt: 1,
+        largestRetry: null,
+      },
+    });
+
+    const backgroundSettled = receive(started, {
+      project: HERE.path,
+      conversation: 'b',
+      event: summary(50),
+    }, 100);
+    const desk = currentDesk(backgroundSettled)!;
+    expect(desk.doing?.task.kind).toBe('blog');
+    expect(desk.parked['b']?.doing).toBeNull();
+    expect(desk.jobs.map((job) => job.cost.minor)).toEqual([30]);
+
+    const bothSettled = receive(backgroundSettled, {
+      project: HERE.path,
+      conversation: 'a',
+      event: summary(40),
+    }, 110);
+    expect(currentDesk(bothSettled)?.jobs.map((job) => job.cost.minor)).toEqual([30, 30]);
+  });
+
   it('never puts a delayed event from an unknown conversation into the tab in front', () => {
     const before = twoOpen();
     const desks = receive(before, {

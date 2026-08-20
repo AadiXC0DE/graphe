@@ -1365,6 +1365,8 @@ function Conversation() {
       setPickerTrouble(null);
       setTidying(false);
       setRoom(null);
+      setRepo(null);
+      setReviewsBusy(false);
       toChat();
       // A resumed session keeps its real rung; a genuinely new one reports the
       // default. Never show “asks first” while the live session has full access.
@@ -1493,13 +1495,30 @@ function Conversation() {
         changeDesk(current, opened.value.path, (one) => {
           // The one being left goes down whole, so coming back to it finds it
           // as it was rather than as something to be read off disk again.
+          const incoming =
+            opened.value.address == null ? undefined : one.parked[opened.value.address];
+          const withoutIncoming =
+            opened.value.address == null
+              ? one.parked
+              : Object.fromEntries(
+                  Object.entries(one.parked).filter(([address]) => address !== opened.value.address),
+                );
           const parked =
             one.address === null || one.address === opened.value.address
-              ? one.parked
-              : { ...one.parked, [one.address]: { turns: one.turns } };
+              ? withoutIncoming
+              : {
+                  ...withoutIncoming,
+                  [one.address]: {
+                    turns: one.turns,
+                    doing: one.doing,
+                    counted: one.counted,
+                  },
+                };
           return {
             ...one,
             turns,
+            doing: incoming?.doing ?? null,
+            counted: incoming?.counted ?? 0,
             address: opened.value.address ?? null,
             parked,
             order:
@@ -1686,7 +1705,7 @@ function Conversation() {
         // "worked for" line rather than silence. The clock starts on the first
         // real step and stops when the run settles.
         if (notice.event.type === 'tool-start') {
-          didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [key]: true };
+          didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [runKey]: true };
           if (runStartedAt.current[runKey] === undefined) {
             runStartedAt.current = { ...runStartedAt.current, [runKey]: Date.now() };
             // A new run makes the old footer's measure history.
@@ -1749,9 +1768,9 @@ function Conversation() {
           // Either way the plan on disk is the truth the next session resumes
           // from. A settle with no tool work in it is an answer to a question,
           // and an answer must not move the build.
-          const didWork = didWorkSinceSettle.current[key] === true;
+          const didWork = didWorkSinceSettle.current[runKey] === true;
           if (didWork) {
-            didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [key]: false };
+            didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [runKey]: false };
             const turns = desksNow.current.byPath[where]?.turns ?? [];
             void bridge
               .buildAdvance({ kind: 'finish', ok: settledWell(turns) }, { project: where })
@@ -2154,18 +2173,34 @@ function Conversation() {
         }
       }
 
-      setDesks((current) =>
-        changeCurrent(current, (one) => ({
-          ...one,
-          // Never over the top of a job already in flight. Queueing a second
-          // message used to replace the running one's task and start time, so
-          // what the running turn cost was filed against the queued message and
-          // timed from the moment it was queued — and every later estimate was
-          // built on that.
-          doing: one.doing ?? { task, startedAt: Date.now() },
-          references: [...one.references, ...reference],
-        })),
-      );
+      setDesks((current) => {
+        const update = (one: Desk): Desk => {
+          const started = { task, startedAt: Date.now() };
+          const conversation = target.conversation;
+          if (conversation !== undefined && conversation !== one.address) {
+            const parked = one.parked[conversation];
+            if (parked === undefined) return one;
+            return {
+              ...one,
+              references: [...one.references, ...reference],
+              parked: {
+                ...one.parked,
+                [conversation]: { ...parked, doing: parked.doing ?? started },
+              },
+            };
+          }
+          return {
+            ...one,
+            // Never over the top of a job already in flight. Queueing a second
+            // message used to replace the running one's task and start time.
+            doing: one.doing ?? started,
+            references: [...one.references, ...reference],
+          };
+        };
+        return target.project === undefined
+          ? changeCurrent(current, update)
+          : changeDesk(current, target.project, update);
+      });
       goBusy();
       if (owner !== null) holdSend(owner);
       try {
@@ -2383,6 +2418,8 @@ function Conversation() {
    *  is never kept past the moment it is fetched. */
   const refreshRepo = useCallback(() => {
     const desk = currentDesk(desksNow.current);
+    const project = desk?.path ?? null;
+    setRepo(null);
     setReviewsBusy(true);
     void bridge
       .repoLook({
@@ -2390,9 +2427,11 @@ function Conversation() {
         ...(desk?.address == null ? {} : { conversation: desk.address }),
       })
       .then((answer) => {
-        if (answer.ok) setRepo(answer.value);
+        if (answer.ok && currentDesk(desksNow.current)?.path === project) setRepo(answer.value);
       })
-      .finally(() => setReviewsBusy(false));
+      .finally(() => {
+        if (currentDesk(desksNow.current)?.path === project) setReviewsBusy(false);
+      });
   }, []);
 
   /** Open a fresh conversation and send the review of one pull request into
@@ -2401,10 +2440,20 @@ function Conversation() {
   const startReview = useCallback(
     (item: RepoItem) => {
       if (repo === null) return;
+      const project = currentDesk(desksNow.current)?.path ?? null;
+      const repository = repo.full;
+      const request = navigation.current + 1;
       toChat();
-      void swapConversation(null).then(
-        () => void send(reviewPrompt(item, repo.full)),
-      );
+      void swapConversation(null).then(() => {
+        // A newer project/tab choice may have won while the fresh review
+        // conversation was opening. Never send a repository prompt there.
+        if (
+          project === null ||
+          navigation.current !== request ||
+          currentDesk(desksNow.current)?.path !== project
+        ) return;
+        void send(reviewPrompt(item, repository));
+      });
     },
     [repo, toChat, swapConversation, send],
   );

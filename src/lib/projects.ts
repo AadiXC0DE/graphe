@@ -154,6 +154,9 @@ export type Desk = {
  */
 export type Parked = {
   turns: readonly Turn[];
+  /** Job measurement belongs to the conversation whose session will settle. */
+  doing?: { task: Task; startedAt: number } | null;
+  counted?: number;
 };
 
 /** A run of states somebody recorded on the page, and the project it was
@@ -251,9 +254,20 @@ export function showThread(desks: Desks, project: string, address: string): Desk
     return {
       ...desk,
       turns: wanted.turns,
+      doing: wanted.doing ?? null,
+      counted: wanted.counted ?? 0,
       address,
       parked:
-        desk.address === null ? rest : { ...rest, [desk.address]: { turns: desk.turns } },
+        desk.address === null
+          ? rest
+          : {
+              ...rest,
+              [desk.address]: {
+                turns: desk.turns,
+                doing: desk.doing,
+                counted: desk.counted,
+              },
+            },
     };
   });
 }
@@ -343,11 +357,29 @@ export function receive(desks: Desks, notice: AgentNotice, at: number = Date.now
     if (said !== '' && said !== desk.address) {
       const parked = desk.parked[said];
       if (parked !== undefined) {
+        const measured = measure(
+          {
+            ...desk,
+            turns: parked.turns,
+            doing: parked.doing ?? null,
+            counted: parked.counted ?? 0,
+          },
+          notice,
+          at,
+        );
         return {
           ...desk,
-          parked: { ...desk.parked, [said]: { ...parked, turns: applyEvent(parked.turns, notice.event) } },
+          jobs: measured.jobs,
+          parked: {
+            ...desk.parked,
+            [said]: {
+              ...parked,
+              turns: applyEvent(parked.turns, notice.event),
+              doing: measured.doing,
+              counted: measured.counted,
+            },
+          },
           spent: applySpend(desk.spent, notice.event),
-          ...measure(desk, notice, at),
         };
       }
       // A delayed event for a conversation this window no longer knows must

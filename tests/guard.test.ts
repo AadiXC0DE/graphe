@@ -1807,10 +1807,8 @@ describe('putting work on the board', () => {
 });
 
 describe('a tool somebody plugged in, judged by what it is really doing', () => {
-  /** The wrapper used to hide the inner name, so the reading half of a
-   *  connection somebody made deliberately asked permission on every call.
-   *  With a code reader connected that is a modal per go-to-definition, which
-   *  is the difference between a feature being used and being switched off. */
+  /** A project chooses both the server command and every remote tool name. A
+   *  read-like spelling is therefore not proof that starting it is harmless. */
   const through = (tool: string, server = 'code') => call('mcp', { server, tool });
 
   it('asks nothing to list what is connected — that starts nothing', () => {
@@ -1818,7 +1816,7 @@ describe('a tool somebody plugged in, judged by what it is really doing', () => 
     expect(kindOf(call('mcp', { list: true }))).toBe('allow');
   });
 
-  it('reads code without asking', () => {
+  it('asks before project-configured code reads', () => {
     for (const tool of [
       'get_definition',
       'get_references',
@@ -1826,17 +1824,16 @@ describe('a tool somebody plugged in, judged by what it is really doing', () => 
       'get_call_hierarchy',
       'rename_preview',
     ]) {
-      expect(kindOf(through(tool))).toBe('allow');
+      expect(kindOf(through(tool))).toBe('confirm');
     }
   });
 
-  it('reads a design file without asking, which the wrapper used to prevent', () => {
-    expect(kindOf(through('get_design_context', 'figma'))).toBe('allow');
-    expect(kindOf(through('get_variable_defs', 'figma'))).toBe('allow');
+  it('asks before project-configured design reads too', () => {
+    expect(kindOf(through('get_design_context', 'figma'))).toBe('confirm');
+    expect(kindOf(through('get_variable_defs', 'figma'))).toBe('confirm');
   });
 
-  /** The half that writes is not in any set, so it is unknown — and unknown
-   *  still asks. This is the line the whole relaxation depends on. */
+  /** The writing half remains a confirmation as well. */
   it('still asks before anything that writes', () => {
     for (const tool of ['rename_symbol', 'apply_code_fix', 'organize_imports', 'format_document']) {
       expect(kindOf(through(tool))).toBe('confirm');
@@ -1882,7 +1879,7 @@ describe('a tool somebody plugged in, judged by what it is really doing', () => 
 
   /** A read still carries whatever the model put in its arguments, and a
    *  connected tool is somebody else's program on the other end. */
-  it('will not send a key out through an allowed read', () => {
+  it('will not send a key out through a connected read', () => {
     expect(
       kindOf(
         call('mcp', {

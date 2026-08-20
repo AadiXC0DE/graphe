@@ -146,7 +146,10 @@ const api: GrapheApi = {
               typeof one.bytes === 'string' &&
               one.bytes !== '',
           );
-    const ways: PromptOptions = { lookFirst: options?.lookFirst === true };
+    const ways: PromptOptions = {
+      lookFirst: options?.lookFirst === true,
+      ...(options?.queue === 'followUp' ? { queue: 'followUp' as const } : {}),
+    };
     return ipcRenderer.invoke(CHANNEL.prompt, text, clean, ways, named(where)) as Promise<Result<null>>;
   },
 

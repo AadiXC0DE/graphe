@@ -2102,10 +2102,14 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
       // usual content keys name — so the ordinary sweep looked straight past it.
       const outbound = `${payloadText(input)}\n${asText(input['args'])}`;
       if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
-      return allow();
+      // The remote name is not proof of capability. A project can put any
+      // executable behind `get_definition`, so treating that spelling as a
+      // trusted read would let repository configuration run local code without
+      // the connected-tool confirmation.
     }
 
-    // Everything else keeps its question, and now says what it is really about.
+    // Every connected tool keeps its question, including read-like names whose
+    // server is project configuration rather than code Graphe vouches for.
     const named = server === null ? 'the tool you connected' : server;
     return ask(
       `Let ${named} do this?`,

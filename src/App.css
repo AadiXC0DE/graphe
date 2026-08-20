@@ -195,12 +195,6 @@
   color: var(--text);
 }
 
-.workhead__note {
-  margin: 0;
-  font-size: var(--text-xs);
-  color: var(--text-faint);
-}
-
 /* Generous, uneven whitespace — an exchange begins when you say something, so
    that is where the extra air goes. Inside one exchange the turns stay close
    enough to read as one answer. */

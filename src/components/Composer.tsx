@@ -99,6 +99,8 @@ type Props = {
   /** How far it may go before it stops and asks. */
   howFar?: HowFar;
   onHowFar?: (howFar: HowFar) => void;
+  /** The native preview yields while one of the composer popovers is open. */
+  onComposerPopoverOpenChange?: (open: boolean) => void;
   /** Skills the open project can use. `@` turns this quiet library into an
    * explicit per-turn choice instead of a command someone has to memorise. */
   skills?: readonly Skill[];
@@ -165,6 +167,7 @@ export default function Composer({
   onTidy,
   howFar,
   onHowFar,
+  onComposerPopoverOpenChange,
   skills = [],
 }: Props) {
   const [value, setValue] = useState('');
@@ -675,7 +678,11 @@ export default function Composer({
         )}
 
         {onHowFar === undefined ? null : (
-          <Asking howFar={howFar ?? 'asking'} onHowFar={onHowFar} />
+          <Asking
+            howFar={howFar ?? 'asking'}
+            onHowFar={onHowFar}
+            onOpenChange={onComposerPopoverOpenChange}
+          />
         )}
 
         {onSelectModel === undefined || onConnect === undefined ? null : (
@@ -684,6 +691,7 @@ export default function Composer({
             onSelect={onSelectModel}
             onConnect={onConnect}
             onThinking={onThinking}
+            onOpenChange={onComposerPopoverOpenChange}
           />
         )}
 

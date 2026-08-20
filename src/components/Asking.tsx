@@ -6,6 +6,8 @@ type Props = {
   /** How far it may go before it stops and asks. */
   howFar: HowFar;
   onHowFar: (howFar: HowFar) => void;
+  /** Lets a native page step aside while this renderer popover is open. */
+  onOpenChange?: (open: boolean) => void;
 };
 
 export const SAYS = {
@@ -67,7 +69,7 @@ function screenFor(rung: HowFar): (typeof SAYS.screens)['doing'] | null {
   return null;
 }
 
-export default function Asking({ howFar, onHowFar }: Props) {
+export default function Asking({ howFar, onHowFar, onOpenChange }: Props) {
   const [open, setOpen] = useState(false);
   /** Which rung is being asked about, or null when the menu is the menu. */
   const [warning, setWarning] = useState<HowFar | null>(null);
@@ -95,6 +97,14 @@ export default function Asking({ howFar, onHowFar }: Props) {
       document.removeEventListener('keydown', key);
     };
   }, [open]);
+
+  /* Electron's native page view is always painted above renderer content. Tell
+     the owner when this popover needs that view hidden instead of relying on a
+     CSS stacking order it cannot participate in. */
+  useEffect(() => {
+    onOpenChange?.(open);
+    return () => onOpenChange?.(false);
+  }, [open, onOpenChange]);
 
   const shut = () => {
     setOpen(false);

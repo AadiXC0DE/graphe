@@ -256,6 +256,10 @@ export type AgentEvent =
   /** The agent has finished everything it was doing, tool calls included. The
    *  moment the session split is worth working out. */
   | { type: 'settled' }
+  /** Questions nobody will answer now — the sitting was stopped, or it closed.
+   *  Without this the window keeps drawing a card whose answer can never
+   *  arrive, and reads the unanswered card as "still working". */
+  | { type: 'questions-withdrawn'; callIds: readonly string[] }
   /** A change was checked, and the verdict is in. Carries the same findings
    *  the reply showed as words, so the window can draw them as a card. */
   /** What is waiting behind the run. Both lists, because an interrupt and a

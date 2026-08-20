@@ -308,6 +308,18 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
         },
       ];
 
+    /* A question nobody can answer any more. It is marked refused rather than
+       removed: it happened, the person saw it, and a card that vanishes leaves
+       them wondering whether it went through. */
+    case 'questions-withdrawn': {
+      const gone = new Set(event.callIds);
+      return turns.map((turn) =>
+        turn.kind === 'asked' && turn.answered === null && gone.has(turn.callId)
+          ? { ...turn, answered: 'no' as const }
+          : turn,
+      );
+    }
+
     /* A reply that failed part way through has still ended. The shell sends
        `error` *instead of* `message-end` when the failure arrives on the
        assistant's own message, so closing the reply here is the only thing that
@@ -419,7 +431,22 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
     case 'spend-summary':
     case 'model-reading':
     case 'running':
-    case 'settled':
       return turns;
+
+    /* Everything has stopped, so anything still waiting on a person is waiting
+       for an answer that can no longer reach anybody. The window works out that
+       it is busy from the last turn being unanswered, so a card left open here
+       kept the composer a spinner and left Stop with nothing to stop — for the
+       rest of the sitting, and again every time the conversation was reopened,
+       because the card comes back with the history. Closed here rather than
+       only where it is abandoned: this is the window's own reckoning, and it
+       has to hold even when the shell cannot say anything. */
+    case 'settled': {
+      const stranded = turns.some((turn) => turn.kind === 'asked' && turn.answered === null);
+      if (!stranded) return turns;
+      return turns.map((turn) =>
+        turn.kind === 'asked' && turn.answered === null ? { ...turn, answered: 'no' as const } : turn,
+      );
+    }
   }
 }

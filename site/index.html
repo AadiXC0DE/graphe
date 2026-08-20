@@ -824,7 +824,9 @@
             <span>
               Every parallel conversation, every piece on the board and every write-capable helper
               is a real <span class="mono">worktree add</span> of your repository. Nothing shares a
-              working copy with anything else.
+              working copy with anything else. A copy nobody is in is given back and made again
+              from its branch when you return to it, so running four at once does not leave four
+              projects on your disk.
             </span>
           </li>
           <li>
@@ -970,7 +972,8 @@
               <p>
                 Two, three, four jobs run at the same time without treading on each other, each in a
                 git worktree of its own. Running at once is the point, not a queue — and when one is
-                done you bring its work into the project or throw the copy away.
+                done you bring its work into the project or throw the copy away. Close it instead
+                and the copy gives its space back on its own; open it again and it is there.
               </p>
             </div>
             <div class="point reveal" data-reveal style="--i: 1">

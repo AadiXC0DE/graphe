@@ -2045,6 +2045,26 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     return allow();
   }
 
+  /* Connecting another tool server is not writing a file. It is choosing a
+   * program that will later run on this computer with this computer's powers,
+   * on the strength of a name the model read somewhere. The line is quoted,
+   * because the line is the whole decision. */
+  if (name === 'connecttool') {
+    const known = readString(input, ['known']);
+    const where = readString(input, ['where']);
+    const called = readString(input, ['name']) ?? known ?? 'a tool';
+    const outbound = `${payloadText(input)}\n${where ?? ''}`;
+    if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
+    return ask(
+      `Connect “${called}” so I can use its tools?`,
+      where === null
+        ? 'I add one we vouch for to this project’s own list of connected tools. Nothing starts now.'
+        : `I write “${where}” into this project’s own list of connected tools. Nothing starts now.`,
+      'Once it is on the list, that program can be started on this computer with the powers you have, and whatever it answers comes back to me as words.',
+      { mutates: true },
+    );
+  }
+
   if (name === 'mcp') {
     const asked = input['tool'];
     const inner = readString(input, ['tool']);
@@ -2180,6 +2200,9 @@ function withoutQuestions(judgement: Judgement, ctx: GuardFacts): Judgement {
  *  what it does out there is as far past undoing as anything a shell can do. */
 function leavesTheFiles(call: ToolCall): boolean {
   const name = normalizeToolName(call.name);
+  // Writing down a program that will later run is on the far side of this line:
+  // it is not undoable the way a file edit is.
+  if (name === 'connecttool') return true;
   return (
     SHELL_TOOLS.has(name) || NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name) || PAGE_ACT_TOOLS.has(name)
   );
@@ -2319,6 +2342,10 @@ export function describeCall(call: ToolCall): CallShape {
     .join('\n');
 
   const does = ((): CallDoes => {
+    // Sorted by what it leads to, not by the mechanism. A project rule saying
+    // "ask me about anything that runs a command" ought to catch "write down a
+    // program that will run"; calling it a file change would let it past.
+    if (name === 'connecttool') return 'runs a command';
     if (SHELL_TOOLS.has(name) || SQL_TOOLS.has(name)) return 'runs a command';
     if (NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name)) return 'reaches the internet';
     if (DELETE_TOOLS.has(name)) return 'deletes something';

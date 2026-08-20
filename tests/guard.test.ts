@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ToolCall, Verdict } from '../src/agent/types';
-import { changesAnything, evaluate, requiresSnapshot, type GuardFacts } from '../src/agent/guard/policy';
+import { changesAnything, describeCall, evaluate, requiresSnapshot, type GuardFacts } from '../src/agent/guard/policy';
 import {
   containsPath,
   isCredentialPath,
@@ -1972,5 +1972,46 @@ describe('running things without an interrogation', () => {
     for (const command of ['npm install left-pad', 'bun add zod', 'deno install x', 'pip install requests']) {
       expect(kindOf(bash(command)), command).toBe('confirm');
     }
+  });
+});
+
+describe('connecting another tool server', () => {
+  const connect = (input: Record<string, unknown>) => call('connect_tool', input);
+
+  /** Not a file edit. It is choosing a program that will later run on this
+   *  computer with this computer's powers, on the strength of a name the model
+   *  read somewhere — so it is asked about, and the line is quoted, because the
+   *  line is the whole decision. */
+  it('asks, and quotes the line it would write', () => {
+    const said = evaluate(connect({ name: 'db', where: 'npx -y some-db-mcp' }), ctx);
+    expect(said.kind).toBe('confirm');
+    expect(JSON.stringify(said)).toContain('npx -y some-db-mcp');
+    expect(JSON.stringify(said)).toContain('db');
+  });
+
+  it('says plainly that nothing starts yet', () => {
+    expect(JSON.stringify(evaluate(connect({ known: 'figma' }), ctx))).toMatch(/nothing starts now/i);
+  });
+
+  /** The middle rung drops questions for anything that only touches files.
+   *  Writing down a program that will later run is on the far side of that
+   *  line — it is not undoable the way a file edit is. */
+  it('still asks when questions about file changes are off', () => {
+    const changing: GuardFacts = { ...ctx, howFar: 'changing' };
+    expect(evaluate(connect({ name: 'db', where: 'npx x' }), changing).kind).toBe('confirm');
+  });
+
+  /** A rule saying "ask me about anything that runs a command" has to catch
+   *  "write down a program that will run". */
+  it('is sorted by what it leads to, not by the mechanism', () => {
+    expect(describeCall(connect({ name: 'db', where: 'npx x' })).does).toBe('runs a command');
+  });
+
+  it('refuses to write a key into the list', () => {
+    const said = evaluate(
+      connect({ name: 'db', where: 'npx x --token sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' }),
+      ctx,
+    );
+    expect(said.kind).toBe('deny');
   });
 });

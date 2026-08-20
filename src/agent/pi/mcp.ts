@@ -23,6 +23,8 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 
+import { REACHABLE, readReach, whereOf, type Read } from './reach';
+
 export type McpServerConfig = {
   name: string;
   /** The program that starts it. Empty when the server is already running
@@ -517,4 +519,137 @@ export async function checkServer(config: McpServerConfig): Promise<McpHealth> {
   } finally {
     await registry.close();
   }
+}
+/* -------------------------------------------------------------------------- */
+/* Connecting one without being at the keyboard                                */
+/* -------------------------------------------------------------------------- */
+
+/** What the agent may say when it asks to connect another tool. Never a value
+ *  the server needs: those are read off the file and never written to it from
+ *  here. */
+export type Asked = { name?: unknown; where?: unknown; known?: unknown };
+
+export type Connecting =
+  | { ok: true; server: McpServerConfig; said: string }
+  | { ok: false; why: string };
+
+/** A name that reads the same in the file, on the panel and in the next call.
+ *  Anything else and the three stop agreeing about what is connected. */
+const PLAIN_SERVER_NAME = /^[a-z0-9][a-z0-9_-]*$/i;
+
+export const CONNECTING = {
+  cannot: (because: string): string =>
+    `I did not connect that: the list of connected tools would not read — ${because} Adding to it now would replace the whole file with what I can see, and anything else in it would go with it. Open .pi/mcp.json, put it right, and ask me again.`,
+  nothingCalled: (asked: string): string =>
+    `I do not vouch for anything called "${asked}". The ones I do: ${REACHABLE.map((one) => one.id).join(', ')}. For anything else, give me a name and the line that starts it.`,
+  oddName: 'Give it a plain name — letters, numbers, dashes and underscores — because that is the name everything else refers to it by afterwards.',
+  taken: (name: string): string =>
+    `Something is already connected under the name "${name}", and I will not quietly put something else in its place. Pick another name, or disconnect that one first under Other tools.`,
+  looksLikeAKey:
+    'There is something on that line that looks like a key. I do not write keys into this file — connect the tool without it, then put the value in .pi/mcp.json by hand.',
+  done: (name: string, line: string, file: string): string =>
+    `Connected "${name}" — ${line}. It is written down in ${file}, and it shows up under Other tools, where it can be checked or disconnected in one press. It starts only when something asks it for a tool, and I can reach it from the next conversation in this project rather than this one. Anything it needs alongside — a key, a folder — goes into that file by hand.`,
+} as const;
+
+/** Anything on a start line that we would rather not write down. Deliberately
+ *  blunt: a false alarm costs one sentence, a key in a project file does not. */
+const LOOKS_LIKE_A_KEY =
+  /\bsk-[A-Za-z0-9_-]{16,}|\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}|\bAKIA[0-9A-Z]{16}\b|\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bxox[abopsr]-[A-Za-z0-9-]{10,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/;
+
+/**
+ * One request to connect another tool, decided before anything is written.
+ *
+ * Adding one is not writing a file. It is choosing a program that will later
+ * run on this computer with this computer's powers, so the door is narrow on
+ * purpose: one of the ones we vouch for by name, or a plain name and a line
+ * with nothing in it a shell would read into. Everything a person could type
+ * into the panel goes through `readReach`, and so does this — one door, not two.
+ */
+export function connecting(asked: Asked, current: McpConfig): Connecting {
+  const trouble = current.trouble ?? null;
+  if (trouble !== null) return { ok: false, why: CONNECTING.cannot(trouble) };
+
+  const known = typeof asked.known === 'string' ? asked.known.trim() : '';
+  const read: Read = known === '' ? readReach(asked) : ours(known);
+  if (!read.ok) return { ok: false, why: read.why };
+
+  const name = read.reach.curated ? read.reach.id : String(asked.name ?? '').trim();
+  if (!PLAIN_SERVER_NAME.test(name)) return { ok: false, why: CONNECTING.oddName };
+
+  // Never a silent replacement: the name somebody already uses keeps meaning
+  // what it meant.
+  const taken = current.servers.find(
+    (one) => one.name.trim().toLowerCase() === name.toLowerCase(),
+  );
+  if (taken !== undefined) return { ok: false, why: CONNECTING.taken(taken.name) };
+
+  const line = whereOf(read.reach.start);
+  if (LOOKS_LIKE_A_KEY.test(line)) return { ok: false, why: CONNECTING.looksLikeAKey };
+
+  const server: McpServerConfig =
+    read.reach.start.how === 'address'
+      ? { name, command: '', address: read.reach.start.address }
+      : { name, command: read.reach.start.command, args: [...read.reach.start.args] };
+
+  return { ok: true, server, said: CONNECTING.done(name, line, '.pi/mcp.json') };
+}
+
+function ours(id: string): Read {
+  const found = REACHABLE.find((one) => one.id === id);
+  if (found === undefined) return { ok: false, why: CONNECTING.nothingCalled(id) };
+  return readReach({ id: found.id, name: found.name, where: whereOf(found.start) });
+}
+
+/**
+ * `connect_tool` — plug another tool server into this project.
+ *
+ * Separate from `mcp` on purpose. `mcp` is only there once a project has
+ * something connected, and the whole point of this one is the project that has
+ * nothing yet. It writes the entry and stops: nothing is started here, and the
+ * Guard asks before a single word reaches the file.
+ */
+export function connectingTool(projectRoot: string): ToolDefinition {
+  return {
+    name: 'connect_tool',
+    label: 'Connecting another tool',
+    description:
+      "Connect another tool server (MCP) to this project, so its tools become reachable through `mcp`. Give either `known` for one Graphe already vouches for, or a `name` and the `where` line that starts it. Writes the entry into the project's .pi/mcp.json and starts nothing.",
+    promptSnippet: 'connect_tool(known) or connect_tool(name, where) — plug another tool server in',
+    promptGuidelines: [
+      'Only when the person has asked for a particular tool. Never connect one on a hunch, and never as a step in some larger errand they did not ask for.',
+      `Prefer known for one we already vouch for — its start line is checked. Those are: ${REACHABLE.map((one) => one.id).join(', ')}.`,
+      'Never put a key, a token or a password on the where line. Values a server needs are added to .pi/mcp.json by hand, not by you.',
+      'It becomes reachable through mcp in the next conversation in this project, not in this one. Say so rather than trying to use it straight away.',
+    ],
+    parameters: Type.Object({
+      known: Type.Optional(
+        Type.String({
+          description: `One Graphe already vouches for: ${REACHABLE.map((one) => one.id).join(', ')}. Nothing else is needed when this is given.`,
+        }),
+      ),
+      name: Type.Optional(
+        Type.String({
+          description:
+            'What to call it — letters, numbers, dashes. This is the name to pass as `server` to the mcp tool afterwards.',
+        }),
+      ),
+      where: Type.Optional(
+        Type.String({
+          description:
+            'One line: the command that starts it, such as "npx -y @playwright/mcp@latest", or the address it already answers on, such as "http://127.0.0.1:3845/mcp".',
+        }),
+      ),
+    }),
+    executionMode: 'sequential',
+    execute: async (_callId, params: Asked): Promise<ReturnType<typeof toolResultText>> => {
+      // Read straight off the disk rather than from the session's copy: the
+      // session's has a folder written onto every entry for its own use, and
+      // saving that back would pin everybody's tools to one project.
+      const current = await readMcpConfig(projectRoot);
+      const decided = connecting(params, current);
+      if (!decided.ok) return toolResultText(decided.why);
+      await writeMcpConfig(projectRoot, [...current.servers, decided.server]);
+      return toolResultText(decided.said);
+    },
+  };
 }

@@ -1456,12 +1456,12 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   const mcpRegistry = new McpRegistry(
     inProject(await readMcpConfig(options.projectRoot), options.projectRoot),
   );
-  // Registered when the list is broken as well as when it is full: a typo in
-  // the file used to mean the model had no tool at all, and so no way to say
-  // why the tools somebody connected were not there.
-  if (mcpRegistry.config.servers.length > 0 || mcpRegistry.config.trouble != null) {
-    customTools.push(mcpTool(mcpRegistry));
-  }
+  // Always registered. It used to appear only once a project already had a
+  // server, so a tool connected during a conversation could not be used until
+  // the next one — and a typo in the file meant no tool at all and no way to
+  // say why. With nothing connected it answers that nothing is, which is a
+  // sentence the model can act on.
+  customTools.push(mcpTool(mcpRegistry));
 
   // The shell is Pi's tool, not ours, and it is the one that can change
   // anything on this disk. Pi builds it from `createBashToolDefinition`, whose

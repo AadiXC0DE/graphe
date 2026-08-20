@@ -53,6 +53,7 @@ import { ProjectHistory, type ReviewTarget } from '../../history/repo';
 import { mapFrom, saysMap, type SourceFile } from '../../files/map';
 import type { MemoryStore } from '../memory';
 import * as debug from './debug';
+import { connectingTool } from './mcp';
 import { roleSpec, type HelperRole } from './child';
 import { arxivId, arxivMeta, readPdfPages, slicePages } from './pdf';
 import { REVIEW_ANGLES, reviewRequestFor, trimDiff } from './review';
@@ -2102,6 +2103,10 @@ export const grapheTools = (
     tools.push(
       readMapTool(projectRoot),
       runChecksTool(projectRoot, agentDir, model, thinking, noted),
+      // Here rather than beside `mcp`: that one only exists once a project has
+      // something connected, and the project with nothing yet is the whole
+      // point of this one.
+      connectingTool(projectRoot),
     );
   }
   const token = (figmaToken ?? '').trim();

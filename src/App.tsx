@@ -864,6 +864,9 @@ function Conversation() {
   const paneNow = useRef<PaneRoom>('off');
   /** Where the page is pointed. Null until something is being served. */
   const [pageAt, setPageAt] = useState<string | null>(null);
+  /** The address the window opened on its own, so it does so once and does not
+   *  reopen a pane somebody deliberately closed. */
+  const openedItself = useRef<string | null>(null);
   /** Servers and watchers this conversation has kept up. Drawn from what the
    *  shell last said rather than asked for on a clock. */
   const [running, setRunning] = useState<readonly RunningPiece[]>([]);
@@ -1681,7 +1684,26 @@ function Conversation() {
           const words = [...notice.event.steering, ...notice.event.followUp];
           setQueued((was) => ({ ...was, [owner]: words }));
         }
-        if (notice.event.type === 'running') setRunning(notice.event.pieces);
+        if (notice.event.type === 'running') {
+          setRunning(notice.event.pieces);
+          // A server the agent started is the work, so it opens where the work
+          // is looked at. Once per address, and never over a page somebody is
+          // already on: the pane is theirs once it is open.
+          const up = notice.event.pieces.find(
+            (one) => one.state === 'running' && one.address !== null && one.showsAPage === true,
+          );
+          if (
+            up?.address != null &&
+            notice.project !== null &&
+            desksNow.current.current === notice.project &&
+            pageAtNow.current === null &&
+            openedItself.current !== up.address
+          ) {
+            openedItself.current = up.address;
+            setPageAt(up.address);
+            movePane('split');
+          }
+        }
         if (notice.event.type === "tidying") setTidying(true);
         if (notice.event.type === "tidied") {
           setTidying(false);

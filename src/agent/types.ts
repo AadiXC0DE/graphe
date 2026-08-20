@@ -72,6 +72,10 @@ export type RunningPiece = {
   since: number;
   /** Null while it is up; the code it ended with once it is not. */
   exitCode: number | null;
+  /** Whether what it answers with is a page. Null until it has been asked —
+   *  a worker, a watcher, and an API that answers in JSON all hold a port, and
+   *  none of them is worth putting in a frame. */
+  showsAPage?: boolean | null;
 };
 
 /** Money, in the smallest unit of the user's currency, to avoid float drift. */

@@ -308,9 +308,14 @@ describe('F7 — what gets said, and to whom', () => {
 
   /* The pause before something big is the whole point of this question. The
      price never was: a subscription is not metered per token, and a confident
-     number we cannot check is worse than none. */
+     number we cannot check is worse than none.
+
+     What changed is who decides it is big. The request used to vote by its
+     words, so "can you start the landing page?" was a page build and an
+     estimate appeared before running a server. The size now comes from the
+     agent, which has looked at the project first. */
   it('asks before a big one, in minutes and never in money', () => {
-    const priced = quote([], null, 'build me a website for my studio');
+    const priced = quote([], null, 'build me a website for my studio', 'project');
     expect(priced.warn).toBe(true);
     expect(priced.prompt?.title).toBe('This is a bigger job');
     expect(priced.prompt?.body).toMatch(/It should take/);
@@ -320,15 +325,17 @@ describe('F7 — what gets said, and to whom', () => {
 
   it('puts no price anywhere in the question, in any currency', () => {
     for (const spent of [null, money(4000, 'INR'), money(100, 'USD')]) {
-      const priced = quote([], spent, 'build me a website for my studio');
+      const priced = quote([], spent, 'build me a website for my studio', 'project');
       const words = `${priced.prompt?.body ?? ''} ${priced.prompt?.note ?? ''}`;
       expect(words).not.toMatch(/[₹$€£]|\d+(\.\d+)?\s*(cents?|dollars?|rupees?)/i);
     }
   });
 
   it('admits it is guessing until it has measured something', () => {
-    expect(quote([], null, 'build me a website').estimate.confidence).toBe('no-history');
-    expect(quote([], null, 'build me a website').prompt?.note).toMatch(/haven’t done one of these/);
+    expect(quote([], null, 'build me a website', 'project').estimate.confidence).toBe('no-history');
+    expect(quote([], null, 'build me a website', 'project').prompt?.note).toMatch(
+      /haven’t done one of these/,
+    );
   });
 
   /* The estimate still carries a currency, because the ceiling somebody set is
@@ -373,13 +380,30 @@ describe('F7 — what gets said, and to whom', () => {
 
   it('leaves the decision where estimate.ts already put it', () => {
     // Not a second threshold of our own: the same call, on the same objects.
-    const priced = quote([], null, 'build me a website for my studio');
+    const priced = quote([], null, 'build me a website for my studio', 'project');
     expect(priced.warn).toBe(
       shouldWarn(
-        estimateFrom([], priced.task, CURRENCY_BEFORE_ANY_SPEND),
+        estimateFrom([], { ...priced.task, size: 'project' }, CURRENCY_BEFORE_ANY_SPEND),
         defaultWarnThreshold(CURRENCY_BEFORE_ANY_SPEND),
       ),
     );
+  });
+
+  /** The words in a request no longer get a vote. "Can you start the landing
+   *  page?" used to match "landing page", be priced as building one, and stop
+   *  somebody with an estimate before running a server. Nothing is asked until
+   *  the agent has looked and said what the work is. */
+  it('never interrupts on the strength of the words alone', () => {
+    for (const request of [
+      'can you start the landing page?',
+      'build me a website for my studio',
+      'rebuild the whole site from scratch',
+      'make the whole thing responsive',
+    ]) {
+      const priced = quote([], null, request);
+      expect(priced.warn, request).toBe(false);
+      expect(priced.prompt, request).toBeNull();
+    }
   });
 
   it('has a sentence for “I would rather start smaller” that is not a refusal', () => {

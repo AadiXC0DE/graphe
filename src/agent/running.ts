@@ -27,6 +27,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import { portEnv } from '../work/ports';
+import { worthShowing, type Answered } from '../lib/showable';
 import { hold } from './sandbox';
 import type { Bounds } from './sandbox/profile';
 import type { RunningPiece } from './types';
@@ -49,8 +50,12 @@ export const SETTLE = 4_000;
 
 /** Every shape a server uses to say where it is. `0.0.0.0` and `[::]` mean "any
  *  address on this machine", which for somebody looking at it means localhost. */
+/** Any local host, including the LAN address Flask and Django print. The path
+ *  stops before the punctuation a banner wraps it in: python's own line ends
+ *  `(http://[::]:8000/) ...`, and taking the bracket with it produced an
+ *  address that looked right in a log and would not load. */
 const ADDRESS =
-  /https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|\[::\]):(\d{2,5})(\/[^\s"'`]*)?/gi;
+  /https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\d{1,3}(?:\.\d{1,3}){3}|\[::1?\]|\[::\]):(\d{2,5})(\/[^\s"'`)\],;]*)?/gi;
 
 const ANYWHERE = new Set(['0.0.0.0', '[::]', '[::1]']);
 
@@ -71,6 +76,63 @@ export function addressIn(output: string): string | null {
     found = `http://${where}:${port}${path === '/' ? '' : path}`;
   }
   return found;
+}
+
+/**
+ * The port a process is actually listening on, asked of the computer.
+ *
+ * Reading the address out of what a server prints is a guess about somebody
+ * else's banner, and it fails in a way nobody can see: Python buffers its one
+ * line when it is not attached to a terminal, so the address never arrives at
+ * all and the piece sits there with no way to open it. Others print a path, a
+ * proxy, or nothing.
+ *
+ * So this asks the operating system instead. It answers for anything that
+ * listens — a Rails server, a Go binary, something nobody has thought of —
+ * without knowing what any of them print.
+ *
+ * Null when nothing is listening yet, which is the ordinary answer for a
+ * worker or a watcher and not a failure.
+ */
+export async function listeningPort(pid: number): Promise<number | null> {
+  const { execFile } = await import('node:child_process');
+  return new Promise((resolve) => {
+    // The child is a shell that started the real thing, so the whole group is
+    // asked about rather than the one process we happen to hold.
+    execFile(
+      'lsof',
+      ['-nP', '-iTCP', '-sTCP:LISTEN', '-a', '-g', String(pid), '-Fn'],
+      { timeout: 4000 },
+      (_error, out) => {
+        const ports = [...String(out).matchAll(/^n.*:(\d{2,5})$/gm)].map((one) => Number(one[1]));
+        resolve(ports.length === 0 ? null : (ports[0] as number));
+      },
+    );
+  });
+}
+
+/**
+ * Ask an address what it answers with, once.
+ *
+ * A HEAD first, because a page can be large and nothing here needs the body;
+ * some servers refuse HEAD, so a GET follows. Short timeout: this decides
+ * whether to open a frame, and a slow answer is not worth holding anything up
+ * for.
+ */
+export async function whatItAnswers(address: string): Promise<Answered> {
+  const ask = async (method: 'HEAD' | 'GET'): Promise<Answered | null> => {
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), 2500);
+    try {
+      const said = await fetch(address, { method, signal: stop.signal, redirect: 'follow' });
+      return { status: said.status, type: said.headers.get('content-type') };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  return (await ask('HEAD')) ?? (await ask('GET')) ?? { status: null, type: null };
 }
 
 /** What to call this in a sentence, when nobody said. The program's own name,
@@ -233,6 +295,25 @@ export class Running {
     child.once('close', (code) => ended(code));
 
     await settled(entry, options.settle ?? SETTLE);
+
+    // Nothing printed, but something may well be listening: a banner that was
+    // buffered, or a server that never had one. Ask the computer before giving
+    // up on an address, because without one there is nothing to open and the
+    // piece reads as a job with no result.
+    if (entry.piece.address === null && entry.piece.state !== 'stopped' && child.pid !== undefined) {
+      const port = await listeningPort(child.pid);
+      if (port !== null) entry.piece.address = `http://localhost:${String(port)}`;
+    }
+
+    // Holding a port says nothing about whether there is anything to look at.
+    // An API answers in JSON, a worker answers nothing at all, and putting
+    // either in a frame shows somebody a wall of braces where their work should
+    // be. Asked once, of the address itself, so a server nobody has thought of
+    // yet is judged by what it actually answers with.
+    if (entry.piece.address !== null && entry.piece.state !== 'stopped') {
+      entry.piece.showsAPage = worthShowing(await whatItAnswers(entry.piece.address));
+    }
+
     // Still up and saying nothing about an address is ordinary: a background
     // worker, a watcher, an API that prints nothing. Running is what it is.
     if (entry.piece.state === 'starting') entry.piece.state = 'running';

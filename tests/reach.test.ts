@@ -20,10 +20,12 @@ import {
   readReach,
   readStored,
   readValues,
+  notYetConnected,
   reachShelf,
   reachesMatching,
   toKept,
   whereOf,
+  vouchedUnder,
   withAdded,
   type Kept,
   type Reach,
@@ -409,6 +411,40 @@ describe('what is kept', () => {
       'browser',
       'yours:mine',
     ]);
+  });
+});
+
+/**
+ * The two questions the Other tools screen asks of this list.
+ *
+ * That screen reads the project's own list, which is keyed by id, and draws
+ * both halves off these: what is still worth offering, and what a row already
+ * there should be called.
+ */
+describe('what a project has and has not got', () => {
+  it('offers only the ones that are not here yet, in the order we offer them', () => {
+    expect(notYetConnected([]).map((one) => one.id)).toEqual(
+      REACHABLE.map((one) => one.id),
+    );
+    expect(notYetConnected(['browser', 'figma']).map((one) => one.id)).toEqual([
+      'pencil',
+      'code-read',
+    ]);
+    expect(notYetConnected(REACHABLE.map((one) => one.id))).toEqual([]);
+  });
+
+  it('is not fooled by somebody else\u2019s tool wearing a similar name', () => {
+    // WHY: the ids are what a project writes down, so a server called
+    // "figma-dev" is not our Figma and both should still be on screen.
+    expect(notYetConnected(['figma-dev']).map((one) => one.id)).toContain('figma');
+  });
+
+  it('gives back our own name and words for a row written under one of our ids', () => {
+    const ours = REACHABLE.find((one) => one.id === 'code-read');
+    expect(vouchedUnder('code-read')).toEqual(ours);
+    expect(vouchedUnder(' code-read ')).toEqual(ours);
+    expect(vouchedUnder('my-database')).toBeUndefined();
+    expect(vouchedUnder('')).toBeUndefined();
   });
 });
 

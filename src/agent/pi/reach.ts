@@ -176,6 +176,18 @@ export function alreadyReached(
   return REACHABLE.map((one) => ({ ...one, added: has.has(one.id) }));
 }
 
+/** The ones still worth offering, in the order we offer them. */
+export function notYetConnected(names: readonly string[]): readonly Reach[] {
+  return alreadyReached(names).filter((one) => !one.added);
+}
+
+/** The one we vouch for that a project has written down under this name, if it
+ *  is one of ours. A list keyed by id would otherwise show "code-read" where
+ *  somebody chose "A read of your code". */
+export function vouchedUnder(name: string): Reach | undefined {
+  return VOUCHED.get(name.trim());
+}
+
 /* -------------------------------------------------------------------------- */
 /* Reading what somebody typed                                                 */
 /* -------------------------------------------------------------------------- */

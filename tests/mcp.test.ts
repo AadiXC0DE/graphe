@@ -11,11 +11,14 @@ import { join, resolve } from 'node:path';
 
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import type { McpServerConfig } from '../src/agent/pi/mcp';
+import type { McpConfig, McpServerConfig } from '../src/agent/pi/mcp';
 import {
+  CONNECTING,
   MCP_WORDS,
   McpRegistry,
   checkServer,
+  connecting,
+  connectingTool,
   inProject,
   keepingUnsent,
   mcpFile,
@@ -24,7 +27,8 @@ import {
   savingFrom,
   writeMcpConfig,
 } from '../src/agent/pi/mcp';
-import { REACHABLE, alreadyReached, asServer } from '../src/agent/pi/reach';
+import { REACHABLE, SAID, alreadyReached, asServer, type Reach } from '../src/agent/pi/reach';
+import { grapheTools } from '../src/agent/pi/tools';
 import type { Connected } from '../src/lib/ipc';
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -651,5 +655,164 @@ describe('saving over a list that would not read', () => {
     const back = await read(folder);
     expect(back.servers.map((one) => one.name)).toEqual(['figma', 'browser']);
     expect(back.servers[0]?.env).toEqual({ FIGMA_API_KEY: 'figd_secret' });
+  });
+});
+
+/* ========================================================================== */
+/* The agent connecting one itself                                            */
+/* ========================================================================== */
+
+/**
+ * Adding a tool server is not writing a file.
+ *
+ * It is choosing a program that will later run on this computer with this
+ * computer's powers, on the strength of a name the model read somewhere. So the
+ * door is narrow and every one of these is about a way through it that should
+ * be shut: a shell hidden in the start line, a key written into a project file,
+ * a name quietly taken from something already connected, a write over a list
+ * nobody could read.
+ */
+describe('the agent connecting another tool', () => {
+  const NONE: McpConfig = { servers: [], trouble: null, skipped: [] };
+
+  it('takes one we vouch for by name and writes the line we checked', () => {
+    const browser = REACHABLE.find((one) => one.id === 'browser');
+    expect(browser).toBeDefined();
+    const done = connecting({ known: 'browser' }, NONE);
+
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    // WHY: the whole value of `known` is that the start line comes from the
+    // list we maintain, not from whatever the model remembers.
+    expect(done.server).toEqual(asServer(browser as Reach));
+  });
+
+  it('takes a name and a line for anything else', () => {
+    const done = connecting({ name: 'my-notes', where: 'npx -y notes-mcp --stdio' }, NONE);
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    expect(done.server).toEqual({ name: 'my-notes', command: 'npx', args: ['-y', 'notes-mcp', '--stdio'] });
+  });
+
+  it('keeps an address as an address rather than a program', () => {
+    const done = connecting({ name: 'design', where: 'http://127.0.0.1:3845/mcp' }, NONE);
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    expect(done.server.command).toBe('');
+    expect(done.server.address).toBe('http://127.0.0.1:3845/mcp');
+  });
+
+  it('never quietly puts something else under a name already in use', () => {
+    const taken: McpConfig = { servers: [{ name: 'Figma', command: 'npx', args: ['old-one'] }], trouble: null, skipped: [] };
+    // WHY: the file is matched case-insensitively everywhere else, so a
+    // capital letter must not be a way past this.
+    const done = connecting({ name: 'figma', where: 'npx something-else' }, taken);
+    expect(done.ok).toBe(false);
+    if (done.ok) return;
+    expect(done.why).toContain('Figma');
+  });
+
+  it('refuses a start line with a shell hidden in it', () => {
+    const done = connecting({ name: 'sneaky', where: 'npx thing; rm -rf ~' }, NONE);
+    expect(done).toEqual({ ok: false, why: SAID.strangeSymbols });
+  });
+
+  it('refuses a name the file, the screen and the next call would not agree on', () => {
+    expect(connecting({ name: 'my tool!', where: 'npx thing' }, NONE)).toEqual({
+      ok: false,
+      why: CONNECTING.oddName,
+    });
+  });
+
+  it('refuses to write a key into a project file', () => {
+    const done = connecting(
+      { name: 'paid', where: 'npx -y some-mcp --key sk-abcdefghijklmnopqrstuvwxyz' },
+      NONE,
+    );
+    expect(done).toEqual({ ok: false, why: CONNECTING.looksLikeAKey });
+  });
+
+  it('refuses a name we do not vouch for', () => {
+    const done = connecting({ known: 'whatever-it-heard-about' }, NONE);
+    expect(done.ok).toBe(false);
+    if (done.ok) return;
+    expect(done.why).toContain('whatever-it-heard-about');
+  });
+
+  it('will not add to a list that would not read', () => {
+    const broken: McpConfig = { servers: [], trouble: 'the file is there but not valid JSON.', skipped: [] };
+    const done = connecting({ known: 'figma' }, broken);
+    expect(done.ok).toBe(false);
+    if (done.ok) return;
+    expect(done.why).toContain('the file is there but not valid JSON.');
+  });
+
+  it('says where to see it and how to take it back off', () => {
+    const done = connecting({ known: 'figma' }, NONE);
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    expect(done.said).toContain('.pi/mcp.json');
+    expect(done.said).toContain('Other tools');
+  });
+});
+
+describe('the tool the agent actually calls', () => {
+  /** What one call comes to on disk. Nothing is stubbed: the tool reads the
+   *  real file, decides, and writes the real file back. */
+  async function run(folder: string, params: Record<string, unknown>): Promise<string> {
+    const tool = connectingTool(folder);
+    const answer = (await tool.execute(
+      'test-call',
+      params as never,
+      new AbortController().signal,
+      undefined as never,
+      undefined as never,
+    )) as { content: { text: string }[] };
+    return answer.content[0]?.text ?? '';
+  }
+
+  it('appends to the list and leaves everything already in it alone', async () => {
+    const folder = await newFolder();
+    await write(folder, {
+      servers: [{ name: 'figma', command: 'npx', env: { FIGMA_API_KEY: 'figd_secret' } }],
+    });
+
+    const said = await run(folder, { known: 'browser' });
+
+    const back = await read(folder);
+    expect(back.servers.map((one) => one.name)).toEqual(['figma', 'browser']);
+    // WHY: a write that replaced the file rather than adding to it would take
+    // somebody's key with it, and the tool would still have answered happily.
+    expect(back.servers[0]?.env).toEqual({ FIGMA_API_KEY: 'figd_secret' });
+    expect(said).toContain('browser');
+  });
+
+  it('writes nothing at all when it is refused', async () => {
+    const folder = await newFolder();
+    await write(folder, { servers: [{ name: 'figma', command: 'npx', args: ['first-one'] }] });
+    const before = await fileText(folder);
+
+    const said = await run(folder, { name: 'figma', where: 'npx something-else' });
+
+    expect(await fileText(folder)).toBe(before);
+    expect(said).toContain('already connected');
+  });
+
+  it('has no way to be handed a key at all', () => {
+    const tool = connectingTool('/nowhere');
+    const fields = Object.keys(
+      (tool.parameters as { properties: Record<string, unknown> }).properties,
+    );
+    // WHY: values a server needs go in by hand. A `values` or `env` field here
+    // would be a path from anything the model has read into a project file.
+    expect(fields.sort()).toEqual(['known', 'name', 'where']);
+  });
+
+  it('is offered in a project, and nowhere there is no project', () => {
+    const named = (list: readonly { name: string }[]): string[] => list.map((one) => one.name);
+    expect(named(grapheTools('/tmp/agent', null, null, undefined, '/tmp/project'))).toContain(
+      'connect_tool',
+    );
+    expect(named(grapheTools('/tmp/agent'))).not.toContain('connect_tool');
   });
 });

@@ -23,9 +23,11 @@ import {
   type Estimate,
   type Task,
   type TaskObservation,
+  type TaskSize,
 } from '../cost/estimate';
-import { biggerJob, type Prompt } from '../cost/phrasing';
+ import { biggerJob } from '../cost/phrasing';
 import { sizeUp } from '../cost/sizing';
+import type { Prompt } from '../cost/phrasing';
 import type { Money } from '../agent/types';
 
 /**
@@ -66,6 +68,9 @@ export function quote(
   jobs: readonly TaskObservation[],
   spent: Money | null,
   request: string,
+  /** What the agent itself judged this to be, once it has looked. Absent means
+   *  nobody has judged it yet — which is every request on the way in. */
+  judged?: TaskSize,
 ): Quote {
   const currency = spent?.currency ?? CURRENCY_BEFORE_ANY_SPEND;
   const task = sizeUp(request);
@@ -73,8 +78,25 @@ export function quote(
   // otherwise have last month's numbers compared against this month's threshold.
   const comparable = jobs.filter((one) => one.cost.currency === currency);
   const estimate = estimateFrom(comparable, task, currency);
-  const warn = shouldWarn(estimate, defaultWarnThreshold(currency));
-  return { task, estimate, warn, prompt: warn ? biggerJob(estimate) : null };
+
+  /* The pause before something big is still the point. Who decides it is big
+   * is what changed.
+   *
+   * It used to be decided here, by matching words in the request: "landing
+   * page" made "can you start the landing page?" a page build, so an estimate
+   * appeared before running a server. Every fix for that is another word in
+   * another list, and the list is wrong again the moment somebody phrases it
+   * differently — which is not how anything else in this app decides anything.
+   *
+   * So the request no longer votes. The size comes from the agent, which has
+   * looked at the project and said what the work is; until it has, there is
+   * nothing to pause for and the turn simply runs. Reading the words is kept
+   * only for the shape of the estimate itself, which is a price and not a
+   * decision.
+   */
+  const warn = judged === undefined ? false : shouldWarn(estimateFrom(comparable, { ...task, size: judged }, currency), defaultWarnThreshold(currency));
+  const priced = judged === undefined ? estimate : estimateFrom(comparable, { ...task, size: judged }, currency);
+  return { task, estimate: priced, warn, prompt: warn ? biggerJob(priced) : null };
 }
 
 /** Said when somebody would rather start smaller. Not a refusal and not a

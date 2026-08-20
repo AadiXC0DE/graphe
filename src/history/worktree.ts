@@ -230,11 +230,11 @@ export async function holdsWork(run: RunGit, folder: string): Promise<boolean> {
  * people do. They accumulated instead, one per parallel conversation, for as
  * long as the app had been installed.
  *
- * Safe to run over everything on disk because a checkout is never picked up
- * again: `nextCheckoutName` counts up and steps over what an earlier sitting
- * left, so a folder from a previous run can only sit there. The one thing worth
- * keeping is a working tree somebody left something in — that is skipped, and
- * stays for as long as it takes them to come back for it.
+ * Two things are never taken. A checkout a conversation still owns, which the
+ * caller says with `inUse` — a conversation that can be resumed goes back to
+ * its own files, and taking the folder would send it at the main project
+ * instead. And a working tree somebody left something in, which stays for as
+ * long as it takes them to come back for it.
  *
  * Pure in the way the rest of this file is: the caller says what is on disk.
  */

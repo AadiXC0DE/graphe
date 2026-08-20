@@ -183,10 +183,11 @@ export type SideOfWork = {
 };
 
 export type Room = {
-  used: number;
+  /** Unknown briefly after compaction, while the window size remains known. */
+  used: number | null;
   total: number;
-  /** The two above as a fraction, 0 to 1. */
-  part: number;
+  /** The two above as a fraction, 0 to 1; unknown with `used`. */
+  part: number | null;
 };
 
 /**

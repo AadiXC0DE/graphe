@@ -40,7 +40,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -168,7 +168,6 @@ import {
   createWorktree,
   nextCheckoutName,
   dropWorktree,
-  landWorktree,
   releaseWorktree,
   sweepCheckouts,
   type RunGit,
@@ -1421,6 +1420,10 @@ type Held = {
   variations: readonly Serving[];
   /** The before-and-after (BACKLOG F2). */
   looking: Looking;
+  /** Conversations being explicitly landed or discarded. Their stop emits a
+   *  synthetic settle, but that settle must not start the ordinary asynchronous
+   *  bring-back while the checkout is being merged or removed. */
+  suppressCarry: Set<string>;
   /** What was last said to have stayed behind, so an overlap that persists —
    *  and it does persist until somebody resolves it — is mentioned once rather
    *  than at the end of every turn from then on. */
@@ -1448,6 +1451,11 @@ type Held = {
 function conversationsIn(project: string): Workspaces<GrapheSession> {
   return new Workspaces<GrapheSession>({
     limit: CONVERSATIONS,
+    // The limit is a memory preference, not permission to abort a turn. If all
+    // older conversations are active, keep them until a later adoption finds
+    // one idle rather than making a new tab stop an old stuck-looking one.
+    mayEvict: (session) =>
+      !session.working && !session.listening && session.awaitingAnswer.length === 0,
     close: (session) => session.dispose(),
     evicted: (one) => {
       send(project, { type: 'message-delta', text: setDownWords.said }, one.path);
@@ -2083,7 +2091,11 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       showTheWorkOnPage();
       const inFront = held.sessions.current?.path === from.address;
       const checkout =
-        !inFront || from.address === null ? null : held.checkouts.get(from.address) ?? null;
+        !inFront ||
+        from.address === null ||
+        held.suppressCarry.has(from.address)
+          ? null
+          : held.checkouts.get(from.address) ?? null;
       // What came back, and what did not. A file both sides changed is left as
       // this checkout has it — which is right, and used to happen in silence:
       // the person saw a finished turn and a file that had not changed.
@@ -2727,9 +2739,11 @@ function worktreesFolder(project: string): string {
  * is a folder per conversation, kept for ever because the only thing that ever
  * removed one was somebody explicitly throwing a conversation away.
  *
- * Runs before any conversation is open, and the app is single-instance, so
- * nothing on disk here is in use. A checkout somebody left uncommitted work in
- * is kept anyway.
+ * Only the ones nothing claims. A conversation that can still be resumed owns
+ * its checkout — that is what the index below is for — so this takes back the
+ * folders left by conversations that are gone, and the ones from before any of
+ * that was written down. A checkout somebody left uncommitted work in is kept
+ * either way.
  */
 async function sweepStrayCheckouts(): Promise<number> {
   const projects = await rememberedProjects().catch(() => []);
@@ -2744,13 +2758,55 @@ async function sweepStrayCheckouts(): Promise<number> {
       await rm(root, { recursive: true, force: true }).catch(() => undefined);
       continue;
     }
+    const claimed = new Set(
+      [...(await readCheckouts(project.path)).values()].map((one) => resolve(one.folder)),
+    );
     const found = await readdir(root, { withFileTypes: true }).catch(() => []);
     const folders = found.filter((one) => one.isDirectory()).map((one) => join(root, one.name));
     if (folders.length === 0) continue;
-    const released = await sweepCheckouts(gitRunHereFor(), project.path, folders).catch(() => []);
+    const released = await sweepCheckouts(gitRunHereFor(), project.path, folders, {
+      inUse: (folder) => claimed.has(resolve(folder)),
+    }).catch(() => []);
     given += released.length;
   }
   return given;
+}
+
+/** The address→checkout ownership survives an app restart. Without this, the
+ * transcript comes back but its isolated files become an anonymous folder and
+ * the resumed agent starts changing the main project instead. One file per
+ * project avoids cross-project write races. */
+function checkoutIndexFile(project: string): string {
+  const key = createHash('sha256').update(resolve(project)).digest('hex');
+  return join(app.getPath('userData'), 'conversation-checkouts', `${key}.json`);
+}
+
+async function readCheckouts(project: string): Promise<Map<string, { folder: string }>> {
+  try {
+    const parsed = JSON.parse(await readFile(checkoutIndexFile(project), 'utf8')) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return new Map();
+    const root = `${resolve(worktreesFolder(project))}${sep}`;
+    const found = new Map<string, { folder: string }>();
+    for (const [address, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value !== 'string') continue;
+      const folder = resolve(value);
+      if (!folder.startsWith(root) || !existsSync(folder)) continue;
+      found.set(address, { folder });
+    }
+    return found;
+  } catch {
+    return new Map();
+  }
+}
+
+async function saveCheckouts(
+  project: string,
+  checkouts: Map<string, { folder: string }>,
+): Promise<void> {
+  const file = checkoutIndexFile(project);
+  await mkdir(dirname(file), { recursive: true });
+  const rows = Object.fromEntries([...checkouts].map(([address, value]) => [address, value.folder]));
+  await writeFile(file, JSON.stringify(rows), 'utf8');
 }
 
 /** Where a project's build plan lives, so it survives the window closing. */
@@ -2774,15 +2830,38 @@ function openProject(folder: string): Promise<Result<OpenedProject>> {
   return attempt;
 }
 
+/** A saved transcript may be pressed twice before its first open completes.
+ * Serialize that address so two Pi sessions can never append to one file. Fresh
+ * conversations deliberately have no key: two fresh requests mean two tabs. */
+const openingConversations = new Map<
+  string,
+  Promise<Result<{ session: GrapheSession; address: string }>>
+>();
+
+async function startConversation(
+  open: { path: string; held: Held },
+  how: Opening,
+  keep?: string,
+): Promise<Result<{ session: GrapheSession; address: string }>> {
+  const asked = how.kind === 'carry-on' ? how.path : undefined;
+  if (asked === undefined) return startConversationUnlocked(open, how, keep);
+  const key = `${open.path}\u0000${asked}`;
+  const existing = openingConversations.get(key);
+  if (existing !== undefined) return existing;
+  const attempt = startConversationUnlocked(open, how, keep).finally(() => {
+    if (openingConversations.get(key) === attempt) openingConversations.delete(key);
+  });
+  openingConversations.set(key, attempt);
+  return attempt;
+}
+
 /**
  * Start a conversation in a project, and put it in front of the others.
  *
  * What `how` means is `openingFor`'s to decide; what this adds is that one
  * already live at that address is handed straight back rather than built again.
- * Two sessions writing one transcript is the race `opening` exists to prevent,
- * and it would also throw away the half-typed thought in the live one.
  */
-async function startConversation(
+async function startConversationUnlocked(
   open: { path: string; held: Held },
   how: Opening,
   keep?: string,
@@ -2803,13 +2882,21 @@ async function startConversation(
   // looking at; any further one is a parallel tab and works in its own checkout
   // rather than writing the same files the first one is writing.
   const primary = held.sessions.open.length === 0;
-  let checkout: { folder: string } | null = null;
-  if (!primary) {
+  // A put-down conversation may still own an isolated checkout with unapplied
+  // work. Reopening must resume that exact folder rather than overwrite its map
+  // entry with a fresh copy and orphan the old work.
+  let checkout: { folder: string } | null =
+    asked === undefined ? null : (held.checkouts.get(asked) ?? null);
+  let madeCheckout = false;
+  if (!primary && checkout === null) {
     const named = freshCheckout(held, open.path);
     const made = await createWorktree(gitRunHereFor(), open.path, named.name, null, {
       folder: named.folder,
     });
-    if (made.ok && made.value !== null) checkout = { folder: made.value.folder };
+    if (made.ok && made.value !== null) {
+      checkout = { folder: made.value.folder };
+      madeCheckout = true;
+    }
   }
   let session: GrapheSession;
   try {
@@ -2820,7 +2907,8 @@ async function startConversation(
       // ordinary one.
       mainFolder: open.path,
       onEvent: forwardTo(open.path, held, from),
-      timeline: held.timeline,
+      // Restore points must describe the tree this session is actually changing.
+      timeline: checkout === null ? held.timeline : await Timeline.open(checkout.folder),
       model: prefs.model,
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
@@ -2851,6 +2939,9 @@ async function startConversation(
         : { sessionDir: sessionsFolder(), ...(how.kind === 'fresh' ? { fresh: true } : {}) }),
     });
   } catch (cause) {
+    if (madeCheckout && checkout !== null) {
+      await dropWorktree(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
+    }
     // The adapter wraps whatever went wrong in a sentence of its own, so the
     // reason worth reading is down the `cause` chain rather than on top of it.
     // Search the whole chain before falling back to the likeliest explanation.
@@ -2862,7 +2953,10 @@ async function startConversation(
   // something, and a new name for the same thread would lose it.
   const address = keep ?? addressOf(session);
   from.address = address;
-  if (checkout !== null) held.checkouts.set(address, checkout);
+  if (checkout !== null) {
+    held.checkouts.set(address, checkout);
+    await saveCheckouts(open.path, held.checkouts).catch(() => undefined);
+  }
   keepConversation(held, address, session);
   return done({ session, address });
 }
@@ -2901,6 +2995,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     return fail(noSafetyNet(cause));
   }
 
+  const restoredCheckouts = await readCheckouts(path);
   const held: Held = {
     timeline,
     spend: new SpendRecorder(),
@@ -2909,9 +3004,10 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     serving: null,
     variations: [],
     looking: nothingSeenYet(),
+    suppressCarry: new Set(),
     saidHeldBack: '',
-    checkoutsMade: 0,
-    checkouts: new Map(),
+    checkoutsMade: restoredCheckouts.size,
+    checkouts: restoredCheckouts,
     waiting: null,
     pictures: null,
     sending: false,
@@ -5623,6 +5719,7 @@ function register(): void {
         if (checkout !== undefined) {
           await releaseWorktree(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
           open.held.checkouts.delete(one.path);
+          await saveCheckouts(open.path, open.held.checkouts).catch(() => undefined);
         }
         open.held.sessions.close(one.path);
       }
@@ -5962,8 +6059,13 @@ function register(): void {
   async function putDownCopyConversation(open: Workspace<Held>, address: string): Promise<void> {
     const found = open.held.sessions.open.find((one) => one.path === address);
     if (found === undefined) return;
-    await found.held.stop().catch(() => undefined);
-    open.held.sessions.close(address);
+    open.held.suppressCarry.add(address);
+    try {
+      await found.held.stop().catch(() => undefined);
+      open.held.sessions.close(address);
+    } finally {
+      open.held.suppressCarry.delete(address);
+    }
   }
 
   handle<null>(CHANNEL.worktreeLand, async (_event, args) => {
@@ -5975,11 +6077,27 @@ function register(): void {
     const entry = checkoutEntryFor(open, whereIn(args));
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
     await putDownCopyConversation(open, entry.address);
-    const landed = await landWorktree(gitRunHereFor(), open.path, entry.folder);
-    // The folder is gone once it lands; a note still pointing at it would send
-    // the next press somewhere that no longer exists.
-    if (landed.ok) open.held.checkouts.delete(entry.address);
-    return landed.ok ? done(null) : fail(worktreeTrouble(landed.because));
+    // Copy work is usually uncommitted. Apply its actual files first and await
+    // that result; merging only the branch can omit those edits, while racing
+    // the settle-time Apply can remove the folder out from underneath it.
+    const carried = await bringBack(gitRunHereFor(), open.path, entry.folder);
+    if (!carried.ok) return fail(worktreeTrouble(carried.because));
+    if (carried.value.conflicted.length > 0) {
+      return fail(worktreeTrouble(bringBackWords.heldBack(carried.value.conflicted)));
+    }
+    try {
+      await open.held.timeline.snapshot({ boundary: 'turn-ended' });
+    } catch (cause) {
+      return fail(
+        worktreeTrouble(cause instanceof Error ? cause.message : 'The project could not be saved.'),
+      );
+    }
+    const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
+    if (dropped.ok) {
+      open.held.checkouts.delete(entry.address);
+      await saveCheckouts(open.path, open.held.checkouts).catch(() => undefined);
+    }
+    return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
   });
 
   handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
@@ -5990,7 +6108,10 @@ function register(): void {
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
     await putDownCopyConversation(open, entry.address);
     const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
-    if (dropped.ok) open.held.checkouts.delete(entry.address);
+    if (dropped.ok) {
+      open.held.checkouts.delete(entry.address);
+      await saveCheckouts(open.path, open.held.checkouts).catch(() => undefined);
+    }
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
   });
 

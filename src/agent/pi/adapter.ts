@@ -427,12 +427,13 @@ export type CreateSessionOptions = {
  */
 /** How full a conversation is, in the model's own units. */
 export type Room = {
-  /** Roughly how much of the window this conversation takes. */
-  used: number;
+  /** Roughly how much of the window this conversation takes; unknown just
+   *  after compaction until the model reports its first new usage reading. */
+  used: number | null;
   /** How much the model can hold at once. */
   total: number;
-  /** The two above as a fraction, 0 to 1. */
-  part: number;
+  /** The two above as a fraction, 0 to 1; unknown with `used`. */
+  part: number | null;
 };
 
 /** What came of asking for the line back. A line that would not come back is
@@ -494,6 +495,10 @@ export type GrapheSession = {
    *  is disposed of and is then lost — quietly, and with nothing returned to
    *  say so. Anything offering to pass a sentence along has to ask first. */
   readonly listening: boolean;
+  /** True from the moment a prompt is accepted until its retries, continuations,
+   *  and post-turn tidying have all completed. Used only to prevent cache
+   *  eviction from aborting live work. */
+  readonly working: boolean;
   /** Take everything waiting behind the run back out of the queue and hand it
    *  over, so it can be put back in the box and rewritten. Nothing is left
    *  queued afterwards — unless the answer says it did not come back, which is
@@ -1609,7 +1614,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   const roomNow = (): Room | null => {
     try {
       const usage = session.getContextUsage();
-      if (usage === undefined || usage.tokens === null || usage.contextWindow <= 0) return null;
+      if (usage === undefined || usage.contextWindow <= 0) return null;
+      if (usage.tokens === null) {
+        return { used: null, total: usage.contextWindow, part: null };
+      }
       return {
         used: usage.tokens,
         total: usage.contextWindow,
@@ -1647,6 +1655,8 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     }
   };
 
+  let activePrompts = 0;
+
   const momentsNow = (): readonly Moment[] => {
     try {
       return momentsFromEntries(manager.buildContextEntries(), markOf);
@@ -1662,6 +1672,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       options?: { lookFirst?: boolean; queue?: 'followUp' },
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
+      activePrompts += 1;
       const looking = options?.lookFirst === true;
       if (looking) {
         planning = true;
@@ -1747,6 +1758,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         // turn failed the same way, and the one after that. It only acts when
         // the conversation really has grown long, and it never throws.
         await tidyIfItHasGrownLong();
+        activePrompts = Math.max(0, activePrompts - 1);
       }
     },
 
@@ -1808,6 +1820,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     get listening(): boolean {
       if (closed) return false;
       return session.isStreaming;
+    },
+
+    get working(): boolean {
+      return !closed && activePrompts > 0;
     },
 
     async steer(text: string, images?: readonly ImageCard[]): Promise<void> {

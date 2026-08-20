@@ -12,10 +12,11 @@
 
 import { readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /** Everything the window pulls in, followed from its own entry points. */
 function reachedFromTheWindow(): Set<string> {

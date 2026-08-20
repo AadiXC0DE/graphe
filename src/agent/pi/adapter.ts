@@ -365,6 +365,10 @@ export type CreateSessionOptions = {
    *  is a conversation continued, not one started again (BACKLOG B1.1). When
    *  neither this nor `sessionPath` is given, nothing is ever written. */
   sessionDir?: string;
+  /** A project-owned register for servers and watchers. Sharing this between
+   *  conversations keeps a server alive when a conversation is rebuilt or put
+   *  down. Left out, an in-memory session owns and closes its own register. */
+  running?: Running;
   /** Told about every server this session starts and stops, so a crash can be
    *  cleaned up on the way back in. A server is whatever somebody asked to be
    *  started, so the only way to recognise one afterwards is to have written it
@@ -525,8 +529,8 @@ export type GrapheSession = {
   /** What this session has kept running — servers, watchers, anything started
    *  to stay up. Empty for almost every sitting. */
   readonly running: readonly RunningPiece[];
-  /** Stop one of them by name. False when there is no such thing. */
-  stopRunning(id: string): boolean;
+  /** Stop one of them by name. Resolves only once its process has gone. */
+  stopRunning(id: string): Promise<boolean>;
   /** The extensions this folder brought with it, and which of them loaded.
    *  Empty for a project that carries none, which is almost all of them. */
   readonly carried: readonly Carried[];
@@ -1426,8 +1430,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
   /* Work that answers by staying up: servers, watchers, anything the ordinary
      shell would either wait forever for or let die with the command that
-     started it. Held for as long as this session is, and stopped with it. */
-  const keptRunning = new Running();
+     started it. Desktop sessions share the project's register; standalone
+     sessions own one and close it themselves. */
+  const ownsRunning = options.running === undefined;
+  const keptRunning = options.running ?? new Running();
   customTools.push(
     ...runningTools(keptRunning, {
       folder: options.projectRoot,
@@ -1840,9 +1846,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       void shell.close();
       void mcpRegistry.close();
       void memory?.close().catch(() => {});
-      // Nothing this session started outlives it. A port left held is a port
-      // the next sitting cannot use, and nobody would know what was holding it.
-      keptRunning.stopAll();
+      // A standalone/in-memory session owns its servers. Desktop project
+      // sessions share a project register, so rebuilding one conversation must
+      // not take down a server the project is still using.
+      if (ownsRunning) keptRunning.stopAll();
       for (const attached of debugRegistry.sessions.values()) {
         void debug.detach(attached).catch(() => {});
       }
@@ -1890,9 +1897,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       return keptRunning.list();
     },
 
-    stopRunning(id: string): boolean {
-      const stopped = keptRunning.stop(id);
-      if (stopped) say({ type: 'running', pieces: keptRunning.list() });
+    async stopRunning(id: string): Promise<boolean> {
+      const stopped = await keptRunning.stop(id);
+      if (stopped) keptRunning.forgetStopped();
+      say({ type: 'running', pieces: keptRunning.list() });
       return stopped;
     },
 

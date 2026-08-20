@@ -130,6 +130,9 @@ export type OpenedProject = {
    *  it is open, including before the first word has been written down, so a
    *  window can address a conversation it has only just started. */
   address?: string;
+  /** The autonomy rung this live conversation is actually using. A reopened
+   *  session may not be on the default rung, so the window must not guess. */
+  howFar?: HowFar;
   /** True when this conversation is working in its own copy of the project
    *  rather than in the folder itself. Only the window knows to offer bringing
    *  that work back or throwing it away, and only if it is told. */

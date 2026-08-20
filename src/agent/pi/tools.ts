@@ -1207,6 +1207,7 @@ export const taskTool = (
     'Split the work so no helper needs another helper\'s answer. Anything that has to happen in order belongs in one helper, or in a second round after the first answers.',
     'A helper reports and changes nothing — ask it for findings, not fixes. The one exception is a builder, which is given its own copy of the project, makes the change there, and hands back what it changed.',
     'A small piece of work is not worth the help: the helper reads the same files and searches the same web you would.',
+    'This helper answers inside the current tool call, so the conversation waits for its findings. If the person wants work to carry on in the background while the conversation remains free, use set_going instead.',
     "To have work checked, send it to a 'reviewer' helper and ask it to find genuine problems with file and line references. To gather facts, send a 'researcher'. A helper that needs a decision stops and says what it needs, starting with 'To continue I need to know:' — pass that question to the person, then send the work again with the answer.",
   ],
   parameters: Type.Object({
@@ -1535,7 +1536,7 @@ export function runningTools(
         label: Type.Optional(Type.String({ description: 'What to call it in a sentence — "the site", "the API".' })),
       }),
       executionMode: 'sequential',
-      execute: async (_callId, params: { command: string; label?: string }): ToolResult => {
+      execute: async (_callId, params: { command: string; label?: string }, signal: AbortSignal | undefined): ToolResult => {
         const command = params.command.trim();
         if (command === '') throw new Error('I need a command to start.');
         const piece = await running.start({
@@ -1546,6 +1547,7 @@ export function runningTools(
           writable: where.writable,
           ...(where.noted === undefined ? {} : { noted: where.noted }),
           ...(where.port == null ? {} : { port: where.port }),
+          signal,
           onChange: where.onChange,
         });
         const said = running.said(piece.id);
@@ -1599,10 +1601,12 @@ export function runningTools(
       parameters: Type.Object({
         id: Type.String({ description: 'The id keep_running returned.', minLength: 1 }),
       }),
-      execute: (_callId, params: { id: string }): ToolResult => {
-        const stopped = running.stop(params.id.trim());
+      execute: async (_callId, params: { id: string }): ToolResult => {
+        const stopped = await running.stop(params.id.trim());
+        if (stopped) running.forgetStopped();
+        where.onChange?.();
         const text = stopped ? `${params.id} is stopped.` : `Nothing here is called ${params.id}.`;
-        return Promise.resolve({ content: [{ type: 'text', text }], details: {} });
+        return { content: [{ type: 'text', text }], details: {} };
       },
     },
   ];

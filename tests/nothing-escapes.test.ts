@@ -13,10 +13,11 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-const HERE = new URL('../src/components/', import.meta.url).pathname;
+const HERE = fileURLToPath(new URL('../src/components/', import.meta.url));
 
 /** The bands that live inside the panel's own column. Sheets and modals are a
  *  different thing — they take the whole window on purpose. */

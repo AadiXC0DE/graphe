@@ -111,6 +111,7 @@ import {
   type ThinkingLevel,
   type Trouble,
   type VisualChange,
+  type Where,
 } from "./lib/ipc";
 import { modelKey } from "./lib/ipc";
 import { usePrefersReducedMotion } from "./lib/motion";
@@ -1155,17 +1156,32 @@ function Conversation() {
   }, []);
 
   const setHowFar = useCallback((rung: HowFar) => {
+    const desk = currentDesk(desksNow.current);
+    const where: Where = {
+      ...(desk === null ? {} : { project: desk.path }),
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    };
     setHowFarHere(rung);
-    void bridge.goAsFarAs(rung).then((answer) => {
+    void bridge.goAsFarAs(rung, where).then((answer) => {
       if (answer.ok) setHowFarHere(answer.value);
     });
   }, []);
 
   /** What is already up. The band is kept in step by events afterwards, but a
-   *  window that has just opened has heard none of them yet. */
-  const refreshRunning = useCallback(() => {
-    void bridge.running().then((answer) => {
-      if (answer.ok) setRunning(answer.value);
+   *  window that has just opened has heard none of them yet. The destination is
+   *  required: an old conversation settling must never clear the project that
+   *  is on screen now. */
+  const refreshRunning = useCallback((where?: Where) => {
+    const desk = currentDesk(desksNow.current);
+    const asked: Where = where ?? {
+      ...(desk === null ? {} : { project: desk.path }),
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    };
+    void bridge.running(asked).then((answer) => {
+      if (!answer.ok) return;
+      const current = currentDesk(desksNow.current);
+      if (asked.project !== undefined && current?.path !== asked.project) return;
+      setRunning(answer.value);
     });
   }, []);
 
@@ -1307,8 +1323,9 @@ function Conversation() {
 
       setSwitching(false);
       setPickerTrouble(null);
-      toChat();
-      // A new session asks again, whatever the last one had been told.
+      // A resumed session keeps its real rung; a genuinely new one reports the
+      // default. Never show “asks first” while the live session has full access.
+      setHowFarHere(opened.value.howFar ?? 'asking');
       setHowFarHere('asking');
       // A file of the folder we were in is not a file of this one.
       setReading(null);
@@ -1316,10 +1333,11 @@ function Conversation() {
       // marked, and pressing the row you are already in looks like a dead button.
       setInConversation(opened.value.conversation);
       setOwnCopyHere(opened.value.ownCopy === true);
-      // The shelf is about the project in front. Clear the old project's list
-      // while this project's list is on its way so its conversation names can
-      // never briefly appear under the wrong project.
+      // The shelf and running band are about the project in front. Clear the old
+      // project's rows while this project's readings are on their way so they
+      // can never briefly appear under the wrong project.
       setConversations([]);
+      setRunning([]);
       setDesks((current) => {
         const next = openDesk(current, opened.value);
         const desk = next.byPath[opened.value.path];
@@ -1350,7 +1368,10 @@ function Conversation() {
       void refreshOverview(opened.value.path);
       void refreshBuildPlan(opened.value.path);
       refreshRoom();
-      refreshRunning();
+      refreshRunning({
+        project: opened.value.path,
+        ...(opened.value.address == null ? {} : { conversation: opened.value.address }),
+      });
       void bridge.pages().then((answer) => {
         if (answer.ok) setPages(answer.value);
       });
@@ -1433,9 +1454,11 @@ function Conversation() {
         }),
       );
       refreshRoom();
-      refreshRunning();
-      // A new session asks again, whatever the last one had been told.
-      setHowFarHere('asking');
+      refreshRunning({
+        project: opened.value.path,
+        ...(opened.value.address == null ? {} : { conversation: opened.value.address }),
+      });
+      setHowFarHere(opened.value.howFar ?? 'asking');
       const project = desksNow.current.current;
       if (project !== null) setConversations([]);
       void bridge.conversations(project === null ? undefined : { project }).then((answer) => {
@@ -1645,7 +1668,10 @@ function Conversation() {
           void refreshOverview(where);
           void refreshFiles(where);
           refreshRoom();
-      refreshRunning();
+          refreshRunning({
+            project: where,
+            ...(notice.conversation == null ? {} : { conversation: notice.conversation }),
+          });
           // A settle with real work behind it advances the build tracker one
           // task: the turn either finished the task it was on, or it got stuck.
           // Either way the plan on disk is the truth the next session resumes
@@ -1684,7 +1710,7 @@ function Conversation() {
           setQueued((was) => ({ ...was, [owner]: words }));
         }
         if (notice.event.type === 'running') {
-          setRunning(notice.event.pieces);
+          if (notice.project === desksNow.current.current) setRunning(notice.event.pieces);
           // A server the agent started is the work, so it opens where the work
           // is looked at. Once per address, and never over a page somebody is
           // already on: the pane is theirs once it is open.
@@ -1707,7 +1733,12 @@ function Conversation() {
         if (notice.event.type === "tidied") {
           setTidying(false);
           refreshRoom();
-      refreshRunning();
+          if (notice.project !== null) {
+            refreshRunning({
+              project: notice.project,
+              ...(notice.conversation == null ? {} : { conversation: notice.conversation }),
+            });
+          }
         }
       }),
     [
@@ -2532,7 +2563,11 @@ function Conversation() {
           ),
         })),
       );
-      void bridge.answer(callId, decision);
+      const here = currentDesk(desksNow.current);
+      void bridge.answer(callId, decision, {
+        ...(here === null ? {} : { project: here.path }),
+        ...(here?.address == null ? {} : { conversation: here.address }),
+      });
     },
     [],
   );
@@ -3998,7 +4033,11 @@ function Conversation() {
                 movePane('split');
               }}
               onStop={(id) => {
-                void bridge.stopRunning(id).then((answer) => {
+                const here = currentDesk(desksNow.current);
+                void bridge.stopRunning(id, {
+                  ...(here === null ? {} : { project: here.path }),
+                  ...(here?.address == null ? {} : { conversation: here.address }),
+                }).then((answer) => {
                   if (answer.ok) setRunning(answer.value);
                 });
               }}
@@ -4047,6 +4086,7 @@ function Conversation() {
 
       {overviewed && desk !== null ? (
         <Overview
+          key={`${desk.path}\u0000${desk.address ?? ''}`}
           view={{
             now: nowDoing(desk.turns),
             git: desk.overview?.git ?? null,

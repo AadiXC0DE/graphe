@@ -102,6 +102,8 @@ const TOLD = {
     'The person you are working for was asked about this and said no. Do not try it again in another form. Ask them what they would like instead.',
   noRestorePoint:
     'I could not save a restore point before this, so I did not do it. Nothing has changed. Say what you were trying to achieve and we will find another way.',
+  /** The reason written on a restore point taken while nobody is being asked. */
+  gettingOnWithIt: 'Saved before getting on with it',
 } as const;
 
 /** What the user reads when they say no. Plain, and not an apology. */
@@ -250,6 +252,17 @@ export function createGuardInterceptor(
             relay.blocked(call, SAID_NO);
             return { block: true, reason: TOLD.declined };
           }
+        }
+      }
+      // A restore point still. Turning your own questions off says you do not
+      // want to be asked; it does not say the moment before a destructive change
+      // is not worth keeping — and this is the rung where nobody is watching, so
+      // it is the rung that needs it most.
+      if (requiresSnapshot(call, facts)) {
+        const saved = await takeRestorePoint(TOLD.gettingOnWithIt);
+        if (!saved) {
+          relay.blocked(call, NO_RESTORE_POINT);
+          return { block: true, reason: TOLD.noRestorePoint };
         }
       }
       relay.started(call);

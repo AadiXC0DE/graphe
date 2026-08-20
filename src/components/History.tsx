@@ -26,6 +26,9 @@ type Props = {
 export const SAYS = {
   heading: 'History',
   branches: 'Lines of work',
+  /** Beside the name. This is a view somebody opens to see the machinery, so
+   *  the real word belongs here rather than being kept from them. */
+  branchesPlainly: 'git calls these “branches”',
   newBranch: 'New line',
   newBranchPlaceholder: 'Name it',
   create: 'Start it',
@@ -95,7 +98,10 @@ export default function History({
 
       {git === null || branches.length === 0 ? null : (
         <section className="branches" aria-label={SAYS.branches}>
-          <h3 className="branches__heading">{SAYS.branches}</h3>
+          <h3 className="branches__heading">
+            {SAYS.branches}
+            <span className="branches__plainly">{SAYS.branchesPlainly}</span>
+          </h3>
 
           <ul className="branches__list">
             {branches.map((branch) => (

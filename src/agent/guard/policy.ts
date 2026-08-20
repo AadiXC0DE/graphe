@@ -601,7 +601,7 @@ const PUBLIC_NAME =
 /** Names that are never safe in the browser, whatever the value looks like. */
 const NEVER_PUBLIC_NAME = /(SERVICE_ROLE|SECRET|PRIVATE|PASSWORD|_PWD)/;
 
-function findSecret(text: string): string | null {
+export function findSecret(text: string): string | null {
   for (const { name, pattern } of SECRET_PATTERNS) {
     if (pattern.test(text)) return name;
   }
@@ -2094,19 +2094,20 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     // The wrapper was hiding the name, so the reading half of a connected tool
     // asked on every call — the sets below were unreachable through it, and a
     // question asked forty times is a question nobody reads by the fortieth.
-    if (DESIGN_READ_TOOLS.has(which) || CODE_READ_TOOLS.has(which)) {
-      // A read still carries whatever the model put in its arguments, and a
-      // connected tool is somebody else's program. The same check the web and
-      // the helpers get, rather than a free pass earned by the name.
-      // What a connected tool is handed lives under `args`, which none of the
-      // usual content keys name — so the ordinary sweep looked straight past it.
-      const outbound = `${payloadText(input)}\n${asText(input['args'])}`;
-      if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
-      // The remote name is not proof of capability. A project can put any
-      // executable behind `get_definition`, so treating that spelling as a
-      // trusted read would let repository configuration run local code without
-      // the connected-tool confirmation.
-    }
+    // Whatever the model put in its arguments is about to leave this computer,
+    // and a connected tool is somebody else's program. Swept for every one of
+    // them, not only the read-shaped names: a tool that changes something is the
+    // last one that should get a question where a read gets a refusal, and a
+    // question is not a refusal at all on the rung where questions are answered
+    // for you. What a connected tool is handed lives under `args`, which none of
+    // the usual content keys name.
+    const outbound = `${payloadText(input)}\n${asText(input['args'])}`;
+    if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
+
+    // A read-shaped name earns nothing further. The remote name is not proof of
+    // capability: a project can put any executable behind `get_definition`, so
+    // treating that spelling as a trusted read would let repository
+    // configuration run local code without the connected-tool confirmation.
 
     // Every connected tool keeps its question, including read-like names whose
     // server is project configuration rather than code Graphe vouches for.

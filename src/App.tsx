@@ -2484,10 +2484,18 @@ function Conversation() {
       if (project === undefined || address === undefined) return;
       const desk = desksNow.current.byPath[project];
       if (desk === undefined) return;
-      // The last one in a project takes the project off the list with it, which
-      // is what closing the only thing you had open means.
+      // Closing the last tab used to take the whole project off the list with
+      // it, which put somebody back on the list of projects for pressing the
+      // small x on a tab. Closing a tab is closing a tab: the project stays
+      // open and a fresh conversation takes the place of the one put down.
       if (desk.address === address && Object.keys(desk.parked).length === 0) {
-        await forget({ path: project });
+        // Nothing said in it yet, so there is nothing to put down and nothing
+        // a new one would be different from. The press does nothing, which is
+        // better than a flicker that ends where it started.
+        if (desk.turns.length === 0) return;
+        await swapConversation(null);
+        setDesks((current) => parkThread(current, project, address));
+        void bridge.closeConversation({ project, conversation: address });
         return;
       }
       // Closing the one you are looking at moves to its neighbour first, so
@@ -2505,7 +2513,7 @@ function Conversation() {
       setDesks((current) => parkThread(current, project, address));
       void bridge.closeConversation({ project, conversation: address });
     },
-    [forget, swapConversation],
+    [swapConversation],
   );
 
   goToTabNow.current = goToTab;

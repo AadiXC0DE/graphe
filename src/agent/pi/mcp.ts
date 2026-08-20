@@ -23,6 +23,8 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 
+import { findSecret } from '../guard/policy';
+
 import { REACHABLE, readReach, whereOf, type Read } from './reach';
 
 export type McpServerConfig = {
@@ -553,8 +555,14 @@ export const CONNECTING = {
 
 /** Anything on a start line that we would rather not write down. Deliberately
  *  blunt: a false alarm costs one sentence, a key in a project file does not. */
-const LOOKS_LIKE_A_KEY =
-  /\bsk-[A-Za-z0-9_-]{16,}|\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}|\bAKIA[0-9A-Z]{16}\b|\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bxox[abopsr]-[A-Za-z0-9-]{10,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/;
+/** The same reading the Guard does, rather than a second shorter list that
+ *  drifts behind it. Its own copy here was missing a maps key, a private key
+ *  block and the ordinary `api_key: "…"` spelling — and this is the only gate
+ *  on the rung where the Guard's own refusal is turned off, so what it missed
+ *  went into a file in plain sight. */
+function looksLikeAKey(line: string): boolean {
+  return findSecret(line) !== null;
+}
 
 /**
  * One request to connect another tool, decided before anything is written.
@@ -584,7 +592,7 @@ export function connecting(asked: Asked, current: McpConfig): Connecting {
   if (taken !== undefined) return { ok: false, why: CONNECTING.taken(taken.name) };
 
   const line = whereOf(read.reach.start);
-  if (LOOKS_LIKE_A_KEY.test(line)) return { ok: false, why: CONNECTING.looksLikeAKey };
+  if (looksLikeAKey(line)) return { ok: false, why: CONNECTING.looksLikeAKey };
 
   const server: McpServerConfig =
     read.reach.start.how === 'address'

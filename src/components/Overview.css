@@ -86,6 +86,16 @@
   background: var(--accent);
 }
 
+/** The real word beside the plain one. Lower case and unspaced against an
+ *  upper-case heading, so it reads as a gloss rather than part of the name. */
+.overview__plainly {
+  margin-left: var(--space-2);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.75;
+}
+
 .overview__title {
   margin: 0 0 var(--space-2);
   font-size: var(--text-xs);

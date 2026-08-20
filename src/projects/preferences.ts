@@ -193,6 +193,13 @@ function asHeldBack(value: unknown): Readonly<Record<string, boolean>> {
   return out;
 }
 
+/** Two ceilings are the same when they are both unset, or say the same amount
+ *  in the same currency. */
+function sameCeiling(one: Money | null, other: Money | null): boolean {
+  if (one === null || other === null) return one === other;
+  return one.minor === other.minor && one.currency === other.currency;
+}
+
 /** Two held-back maps are the same when they say the same about every project.
  *  Literally: a choice that happens to match the default is still a choice
  *  somebody made, and is written down so it survives the default changing. */
@@ -240,7 +247,11 @@ export class PreferenceFile {
       next.model?.modelId === this.#preferences.model?.modelId &&
       sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
-      sameTrusted(next.trusted, this.#preferences.trusted);
+      sameTrusted(next.trusted, this.#preferences.trusted) &&
+      // Left out, a ceiling was the one preference that never reached the file:
+      // nothing else about it had changed, so nothing was written, and it was
+      // gone by the next launch while the window still said it was set.
+      sameCeiling(next.ceiling, this.#preferences.ceiling);
     if (unchanged) return this.all();
     this.#preferences = next;
     await this.#write();

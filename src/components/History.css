@@ -33,6 +33,14 @@
   background: var(--bg-raised);
 }
 
+.branches__plainly {
+  margin-left: var(--space-2);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.75;
+}
+
 .branches__heading {
   margin: 0;
   font-size: var(--text-2xs);

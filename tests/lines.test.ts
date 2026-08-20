@@ -123,3 +123,22 @@ describe('the words', () => {
     }
   });
 });
+
+describe('the real word is actually shown, not just written down', () => {
+  it('keeps the plain name plain and the real one beside it', () => {
+    expect(LINE_WORDS.heading).toBe('Line of work');
+    expect(LINE_WORDS.plainly).toMatch(/branch/);
+  });
+
+  it('is rendered where the heading is, or it may as well not exist', async () => {
+    // It was defined and never put on screen for long enough that somebody
+    // asked what a line of work was.
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const overview = readFileSync(
+      fileURLToPath(new URL('../src/components/Overview.tsx', import.meta.url)),
+      'utf8',
+    );
+    expect(overview).toContain('LINE_WORDS.plainly');
+  });
+});

@@ -322,7 +322,10 @@ export default function Overview({
           and it was reachable before only by opening a different view. */}
       {git === null ? null : (
         <section className="overview__block">
-          <h2 className="overview__title">{LINE_WORDS.heading}</h2>
+          <h2 className="overview__title">
+            {LINE_WORDS.heading}
+            <span className="overview__plainly">{LINE_WORDS.plainly}</span>
+          </h2>
           <Lines
             branches={git.branches}
             fallback={git.branch}

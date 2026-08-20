@@ -1618,6 +1618,16 @@ function Conversation() {
         // live preview is already being served, the page turns itself on so
         // there is somewhere to see the work.
         if (notice.event.type === "settled") {
+          /* A settled session has drained every follow-up. Pi normally follows
+             this with an empty queue update, but clearing the local mirror here
+             too prevents an old or missed update from leaving “Waiting in line”
+             on screen after its message has already run. */
+          const queueOwner = `${notice.project ?? ''}\u0000${notice.conversation ?? ''}`;
+          setQueued((was) => {
+            if (!(queueOwner in was)) return was;
+            const { [queueOwner]: _drained, ...withoutDrained } = was;
+            return withoutDrained;
+          });
           // A long run earns its quiet measure. Short runs stay silent — a
           // line under every quick change is the noise this product removes.
           const started = runStartedAt.current[key];

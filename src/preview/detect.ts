@@ -58,6 +58,22 @@ export type Recipe =
   /** We could not tell. Ask, in these words. */
   | { kind: 'unsure'; question: string };
 
+/**
+ * Whether there is anything here to look at.
+ *
+ * The question a copy of the project answers: it costs a dependency install and
+ * buys two things — the folder stays untouched while the work happens, and what
+ * the work made can be shown before it lands. Where nothing can be shown only
+ * the first is left, and going back already covers that.
+ *
+ * `unsure` counts as no. It is not "probably yes": it is the answer for a folder
+ * whose shape we could not read, and a minute of installing is a poor way to
+ * treat a guess.
+ */
+export function canBeShown(recipe: Recipe): boolean {
+  return recipe.kind === 'as-is' || recipe.kind === 'make';
+}
+
 /** Where each family of project leaves what it made. Ordered: the first one that
  *  exists and has a page in it wins. */
 const WHERE_IT_LANDS: readonly { when: string; outputs: readonly string[] }[] = [

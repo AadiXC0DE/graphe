@@ -247,7 +247,8 @@ import { onlineWords } from '../src/share/online';
 import { canPutOnline, canSendItOn } from '../src/share/tools';
 
 import type { Serving } from '../src/preview/serve';
-import { makeAndServe, ShowError, showSays } from '../src/preview/show';
+import { lookAt, makeAndServe, ShowError, showSays } from '../src/preview/show';
+import { canBeShown, readTheFolder } from '../src/preview/detect';
 import { POINTER_SCRIPT, type Pointed } from '../src/preview/point';
 import {
   read as readPointed,
@@ -2212,6 +2213,23 @@ async function letKeptCopyGo(): Promise<void> {
  *  folder is nothing anybody reads. */
 function stillBeingMadeIn(project: string): boolean {
   return workspaces.find(project)?.held.waiting?.waiting.state === 'making';
+}
+
+/**
+ * Whether work here is worth doing in a copy.
+ *
+ * A copy keeps the folder untouched and lets what the work made be shown before
+ * it lands. With nothing to show, only the first is left — and a save point
+ * covers that, at no cost, which is how every other coding agent works. A folder
+ * we cannot read at all keeps its copy: the careful answer is the one that
+ * cannot lose anything.
+ */
+async function worthACopy(project: string): Promise<boolean> {
+  try {
+    return canBeShown(readTheFolder(await lookAt(project)));
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -6442,13 +6460,20 @@ function register(): void {
         holdsBack((await preferences()).all().heldBack, open.path) &&
         open.held.waiting === null
       ) {
-        return await checkItFirst(
-          open,
-          { address: conversation.path },
-          text,
-          imageCards(attachments),
-          lookFirst,
-        );
+        if (await worthACopy(open.path)) {
+          return await checkItFirst(
+            open,
+            { address: conversation.path },
+            text,
+            imageCards(attachments),
+            lookFirst,
+          );
+        }
+        // Nothing to show, so the work happens here and one press puts it back.
+        // The save point is the whole difference between that and losing it.
+        await open.held.timeline
+          .snapshot({ boundary: 'before-risky-change' })
+          .catch(() => null);
       }
       // `@name` is a deliberate, per-turn selection — stronger than hoping a
       // model notices a description in the system prompt. Keep the original

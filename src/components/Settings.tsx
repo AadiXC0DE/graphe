@@ -17,7 +17,7 @@ type Props = {
   onClose: () => void;
   showMe: boolean;
   showFiles: boolean;
-  /** Work in a copy and ask before anything lands in the project. */
+  /** Check new work before it lands, rather than as it happens. */
   holdBack: boolean;
   /** Which palette somebody has chosen, or to follow the computer. */
   theme: Theme;
@@ -75,8 +75,8 @@ const LINKS: readonly (
   },
   {
     id: 'hold-back',
-    name: 'Work in a copy first',
-    note: 'Changes are made in a copy and shown to you before anything reaches your files. Off, your files change as the work happens and every moment is one press from undone.',
+    name: 'Check new work first',
+    note: 'Where there is something to look at, changes are made in a copy and shown to you before anything reaches your files. Everywhere else a save point goes down before the work starts. Off, your files change as the work happens and every moment is one press from undone.',
     kind: 'hold-back',
   },
   {

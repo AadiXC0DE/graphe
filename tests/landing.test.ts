@@ -86,7 +86,7 @@ async function somethingWaiting(): Promise<{
 
 describe('L-01 the words', () => {
   it('names the thing after what it does for you, not how it works', () => {
-    expect(holdWords.label).toBe('Work in a copy, and ask me first');
+    expect(holdWords.label).toBe('Check new work before it lands');
     expect(holdWords.approve).toBe('Let it in');
     expect(holdWords.setAside).toBe('Set it aside');
   });

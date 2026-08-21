@@ -36,7 +36,7 @@
 
 import type { GuardFacts } from '../guard/policy';
 import { changesAnything, evaluate, requiresSnapshot } from '../guard/policy';
-import { atTheEnd, beforeCall, readRules, rulesFile, type Rules, type World } from '../hooks';
+import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, type Rules, type World } from '../hooks';
 import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
@@ -1275,30 +1275,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   let heldAlready = 0;
   const MOST_HELD_SAYINGS = 3;
 
-  /**
-   * What the project's own rules make of the turn that just ended.
-   *
-   * Said, not enforced. Handing the turn straight back to the model would let a
-   * check that cannot pass loop it forever, and a loop nobody can stop is worse
-   * than a sentence somebody can act on — so the words go where both the person
-   * and the model can read them, and the next message is theirs to make.
-   */
-  function sayWhatTheRulesHeld(): void {
-    if (house.rules.length === 0) return;
-    const ending = atTheEnd(house, desk.world());
-    const said = [...ending.hold, ...ending.mention];
-    if (said.length === 0) {
-      heldAlready = 0;
-      return;
-    }
-    if (heldAlready >= MOST_HELD_SAYINGS) return;
-    heldAlready += 1;
-    options.onEvent({ type: 'message-delta', text: `\n\n${said.join('\n')}` });
-    options.onEvent({ type: 'message-end' });
-  }
+  /** How many after-call messages have been said. Same bound as the end-of-turn
+   *  one: a rule that matches every write would otherwise narrate every tool. */
+  let afterAlready = 0;
+  const MOST_AFTER_SAYINGS = 3;
 
-  const relay = new EventRelay(say, { billedSoFar });
-  const confirmations = new Confirmations();
   /* What this project has agreed, read once when the sitting opens. Re-read on
      nothing: a rules file that changed mid-turn would judge the first half of a
      turn by one set of rules and the second half by another. */
@@ -1315,6 +1296,55 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   const forgetChecks = (call: ToolCall): void => {
     if (changesAnything(call, facts)) desk.forget();
   };
+
+  /**
+   * What the project's own rules make of the turn that just ended.
+   *
+   * Said, not enforced. Handing the turn straight back to the model would let a
+   * check that cannot pass loop it forever, and a loop nobody can stop is worse
+   * than a sentence somebody can act on — so the words go where both the person
+   * and the model can read them, and the next message is theirs to make.
+   */
+  function sayWhatTheRulesHeld(): void {
+    if (house.rules.length === 0) return;
+    const ending = atTheEnd(house, desk.world());
+    const said = [...ending.hold, ...ending.mention];
+    if (said.length === 0) {
+      heldAlready = 0;
+      afterAlready = 0;
+      return;
+    }
+    if (heldAlready >= MOST_HELD_SAYINGS) return;
+    heldAlready += 1;
+    options.onEvent({ type: 'message-delta', text: `\n\n${said.join('\n')}` });
+    options.onEvent({ type: 'message-end' });
+  }
+
+  /**
+   * What the project has to say about something that already happened.
+   *
+   * Nothing here can undo it — the moment for that was beforeCall. What it can
+   * do is name the check that now needs running, and hand the model a sentence
+   * about what it just did. Wired with the same cap atTheEnd already has: a
+   * catch-all after rule would otherwise emit on every write forever.
+   */
+  function handleAfterCall(call: ToolCall): void {
+    if (house.rules.length === 0) return;
+    const after = afterCall(call, house, desk.world());
+    if (after.sayBack.length === 0) return;
+    if (afterAlready >= MOST_AFTER_SAYINGS) return;
+    afterAlready += 1;
+    options.onEvent({ type: 'message-delta', text: `\n\n${after.sayBack.join('\n')}` });
+    options.onEvent({ type: 'message-end' });
+  }
+
+  const relay = new EventRelay(say, {
+    billedSoFar,
+    onToolEnd: ({ call }) => {
+      if (call !== undefined) handleAfterCall(call);
+    },
+  });
+  const confirmations = new Confirmations();
 
   const review = createGuardInterceptor({
     facts,

@@ -1,0 +1,122 @@
+[
+  {
+    "id": "R-01-tighten",
+    "title": "Rule can tighten but never loosen (guard floor)",
+    "check": "rules.test.ts:R-01",
+    "kind": "unit"
+  },
+  {
+    "id": "R-04-deny-default",
+    "title": "Check nobody ran is not passing (deny-by-default)",
+    "check": "rules.test.ts:R-04",
+    "kind": "unit"
+  },
+  {
+    "id": "R-06-after",
+    "title": "After-call names check to run and hands model sentence while not passing",
+    "check": "rules.test.ts:R-06",
+    "kind": "unit"
+  },
+  {
+    "id": "gate-stops",
+    "title": "Visual gate stops when moved past line",
+    "check": "gate.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "gate-wired",
+    "title": "Camera wiring: holdCamera / keepShots / gateOf",
+    "check": "gate-wired.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "guard-deny-outside",
+    "title": "Guard denies reaching outside project",
+    "check": "boundary.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "guard-snapshot",
+    "title": "Snapshot-first before destructive change",
+    "check": "guard.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "checks-fanout",
+    "title": "run_checks fans out 4 at a time, one reviewer per check",
+    "check": "checks.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "checks-passed",
+    "title": "checkPassed heuristic (quiet pass, stalled, hedged all-clear)",
+    "check": "checks.test.ts:checkPassed",
+    "kind": "unit"
+  },
+  {
+    "id": "afterCall-wired",
+    "title": "afterCall not dead: after rule surfaces once per tool",
+    "check": "rules-wired.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "repair-cap",
+    "title": "Bounded repair: at most N attempts per file, does not loop forever",
+    "check": "adapter.test.ts:repair",
+    "kind": "integration"
+  },
+  {
+    "id": "reviewer-one-file",
+    "title": "Reviewer can run one test file (allowlisted bash)",
+    "check": "child.test.ts:reviewer-bash",
+    "kind": "integration"
+  },
+  {
+    "id": "try-ways-taste",
+    "title": "try_ways for taste, not correctness; human keeps one",
+    "check": "attempts.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "auto-selection",
+    "title": "Automated selection among N where right answer exists",
+    "check": "attempts.test.ts:selection",
+    "kind": "integration"
+  },
+  {
+    "id": "eval-harness",
+    "title": "Eval harness: fixed task set reports pass@1 before and after",
+    "check": "eval.mjs",
+    "kind": "meta"
+  },
+  {
+    "id": "gate-drift",
+    "title": "Visual gate measures drift against last human-agreed picture",
+    "check": "gate.test.ts:drift",
+    "kind": "integration"
+  },
+  {
+    "id": "handling-persist",
+    "title": "Human hand-off: handing survives quit, resumed correctly",
+    "check": "handing.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "landing-atomic",
+    "title": "Landing: work is atomic until let in",
+    "check": "landing.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "history-undo",
+    "title": "History: restore to version and rescue unfinished work",
+    "check": "history.test.ts",
+    "kind": "unit"
+  },
+  {
+    "id": "cost-meter",
+    "title": "Cost: spend meter reconciles Pi rawBill after settle",
+    "check": "spend.test.ts",
+    "kind": "unit"
+  }
+]

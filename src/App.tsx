@@ -35,6 +35,7 @@ import { reviewAsMarkdown } from "./agent/pi/review";
 import { saysUseYours } from "./design/drift";
 import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
+import { drainStarted } from "./lib/queue";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
 import type { ConnectedState } from "./lib/ipc";
 import Settings, { type SettingsLink } from "./components/Settings";
@@ -1859,6 +1860,21 @@ function Conversation() {
           const owner = `${notice.project ?? ''}\u0000${notice.conversation ?? ''}`;
           const words = [...notice.event.steering, ...notice.event.followUp];
           setQueued((was) => ({ ...was, [owner]: words }));
+        }
+        // The agent has begun on one of the queued messages, so it is not
+        // waiting any more. Pi reports this drain through its own bookkeeping
+        // too, but that removal is exact-text and can silently no-op, and the
+        // whole reason the line is drawn is that one of the two promises can
+        // be kept. When the words match, the message is gone from the line;
+        // a message that starts without matching anything is the primary
+        // prompt, not one of ours.
+        if (notice.event.type === 'message-started') {
+          const owner = `${notice.project ?? ''}\u0000${notice.conversation ?? ''}`;
+          const started = notice.event.text;
+          setQueued((was) => {
+            const remaining = drainStarted(was[owner] ?? [], started);
+            return remaining === was[owner] ? was : { ...was, [owner]: remaining };
+          });
         }
         if (notice.event.type === 'running') {
           if (notice.project === desksNow.current.current) setRunning(notice.event.pieces);

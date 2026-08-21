@@ -96,6 +96,8 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
   if (source === null) return null;
 
   switch (textAt(source, 'type')) {
+    case 'message_start':
+      return fromMessageStart(source);
     case 'message_update':
       return fromMessageUpdate(source);
     case 'message_end':
@@ -140,6 +142,31 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
     default:
       return null;
   }
+}
+
+/** The person's own words, the moment the agent begins on them. Pi emits this
+ *  for every message it processes, queued or not; only a message with words is
+ *  worth telling the waiting line about — everything else is noise. */
+function fromMessageStart(source: Fields): AgentEvent | null {
+  const message = nestedAt(source, 'message');
+  if (message === null || textAt(message, 'role') !== 'user') return null;
+  const said = textBlocks(message['content']);
+  return said === '' ? null : { type: 'message-started', text: said };
+}
+
+/** The plain text of a message: every `text` block, joined, from either the
+ *  string form or the block form Pi's payloads take across versions. */
+function textBlocks(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  let all = '';
+  for (const entry of content) {
+    const item = fieldsOf(entry);
+    if (item === null || textAt(item, 'type') !== 'text') continue;
+    const text = textAt(item, 'text');
+    if (text !== null) all += all === '' ? text : `\n${text}`;
+  }
+  return all;
 }
 
 function fromMessageUpdate(source: Fields): AgentEvent | null {

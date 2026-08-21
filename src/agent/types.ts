@@ -269,6 +269,12 @@ export type AgentEvent =
   /** What is waiting behind the run. Both lists, because an interrupt and a
    *  follow-up are different promises and are shown as different things. */
   | { type: 'queued'; steering: readonly string[]; followUp: readonly string[] }
+  /** The words of a person's message the moment the agent begins on it. Pi
+   *  reports the line draining by its own bookkeeping too, but that removal is
+   *  exact-text and can silently no-op; this says directly that one of the
+   *  queued messages is no longer waiting, which is what the waiting line is
+   *  for. */
+  | { type: 'message-started'; text: string }
   | { type: 'reviewed'; verdict: ReviewVerdict }
   /** The split, from the shell's ledger. Emitted after `settled`, and only when
    *  there is something to split — no spend, no summary, no zero state. */

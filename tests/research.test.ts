@@ -4,6 +4,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+import { worthPlanning } from '../src/agent/plan';
+
 import {
   asResearch,
   implementationPlanFromResearch,
@@ -98,5 +100,29 @@ describe('what research sends', () => {
     for (const banned of ['subagent', 'token', 'api', 'prompt', 'context window', 'llm', 'model']) {
       expect(everything).not.toContain(banned);
     }
+  });
+});
+
+describe('the answer to a look-around is built, not looked at again', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  it('remembers that it just asked, rather than reading the words again', () => {
+    // "now implement the redesign" carries the same words that made it look
+    // around in the first place, so judging it by the same rule plans the plan.
+    expect(worthPlanning('now implement the redesign')).toBe(true);
+    expect(app).toContain('const justLookedFirst = useRef(false)');
+  });
+
+  it('turns the look-around off for the message that answers it', () => {
+    // Both send paths, and both ways into research.
+    expect(app.match(/const answering = justLookedFirst\.current;/g)?.length).toBe(2);
+    expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(4);
+    expect(app).toContain('!answering &&');
+  });
+
+  it('judges the message after that one fresh', () => {
+    // Cleared on read, so only the immediate answer is exempt.
+    const at = app.indexOf('const answering = justLookedFirst.current;');
+    expect(app.slice(at, at + 120)).toContain('justLookedFirst.current = false;');
   });
 });

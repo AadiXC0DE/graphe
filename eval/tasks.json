@@ -84,12 +84,6 @@
     "kind": "integration"
   },
   {
-    "id": "eval-harness",
-    "title": "Eval harness: fixed task set reports pass@1 before and after",
-    "check": "eval.mjs",
-    "kind": "meta"
-  },
-  {
     "id": "gate-drift",
     "title": "Visual gate measures drift against last human-agreed picture",
     "check": "gate.test.ts:drift",

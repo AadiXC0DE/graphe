@@ -7,8 +7,13 @@
  *
  * This thin wrapper does not invent a new harness. It runs the project's own
  * tests as the task set's oracle, because every task in eval/tasks.json maps
- * to a real test file we already maintain. The "before vs after" delta is then
- * harness-only (same model, same ids, same prompt).
+ * to a real test file we already maintain.
+ *
+ * So be clear about what the number is. There is no model here, no prompt, and
+ * no task an agent has to solve: it says whether a change broke something we
+ * already knew how to check, not whether the agent got better at anything. It
+ * is still worth running — same list every time, and it fails loudly — but a
+ * number about the agent would have to run the agent, and this does not.
  *
  * Usage:
  *   node scripts/eval.mjs                 # run and print + write results/<ISO>/summary.json
@@ -94,13 +99,10 @@ function toSummary({ json, stdout, durationMs }, tasks) {
       }
     }
   }
-  // The number is task pass@1, not the project's raw assertion count. A task
+  // The number is task files green, not the project's raw assertion count. A task
   // maps to one stable oracle file in eval/tasks.json; missing is a failure,
   // never silently clean. The full assertion totals remain beside it as detail.
   const taskResults = tasks.map((t) => {
-    if (t.id === 'eval-harness') {
-      return { id: t.id, title: t.title, check: t.check, status: 'passed', passed: 1, total: 1 };
-    }
     const named = t.check.split(':')[0];
     const fileName = named.includes('/') ? named : `tests/${named}`;
     const file = perFile.get(fileName) ?? null;
@@ -130,7 +132,7 @@ function toSummary({ json, stdout, durationMs }, tasks) {
 function printSummary(summary) {
   const pct = (summary.passAt1 * 100).toFixed(1);
   console.log(`\n# eval — ${summary.at}`);
-  console.log(`tasks (pinned): ${summary.tasksPassed}/${summary.tasks} passed   pass@1: ${pct}%   tests: ${summary.tests.passed}/${summary.tests.total}   duration: ${(summary.durationMs / 1000).toFixed(1)}s`);
+  console.log(`tasks (pinned): ${summary.tasksPassed}/${summary.tasks} passed   files green: ${pct}%   tests: ${summary.tests.passed}/${summary.tests.total}   duration: ${(summary.durationMs / 1000).toFixed(1)}s`);
   if (summary.tests.failed > 0) console.log(`failed: ${summary.tests.failed}`);
   console.log('');
 }
@@ -141,7 +143,7 @@ function compare(aPath, bPath) {
   const da = ((b.passAt1 - a.passAt1) * 100).toFixed(2);
   const sign = b.passAt1 >= a.passAt1 ? '+' : '';
   console.log(`compare ${aPath} → ${bPath}`);
-  console.log(`  pass@1: ${(a.passAt1 * 100).toFixed(1)}% → ${(b.passAt1 * 100).toFixed(1)}%   delta: ${sign}${da} pts`);
+  console.log(`  files green: ${(a.passAt1 * 100).toFixed(1)}% → ${(b.passAt1 * 100).toFixed(1)}%   delta: ${sign}${da} pts`);
   console.log(`  tests: ${a.tests.passed}/${a.tests.total} → ${b.tests.passed}/${b.tests.total}   tasks: ${a.tasks} → ${b.tasks}`);
   console.log(`  duration: ${(a.durationMs / 1000).toFixed(1)}s → ${(b.durationMs / 1000).toFixed(1)}s`);
 }
@@ -198,4 +200,6 @@ if (args.includes('--json')) {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-process.exit(0);
+// A gate that always passes is not a gate, so a failing task says so and this
+// can sit in CI beside the tests it runs.
+process.exit(summary.tasksPassed === summary.tasks ? 0 : 1);

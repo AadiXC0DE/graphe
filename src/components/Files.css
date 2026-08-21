@@ -49,6 +49,12 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  /* A long project makes this the tallest bar in the window, and the one the
+     eye keeps landing on. The inherited thumb is --border-control, which is the
+     colour reserved for controls somebody has to be able to see and act on; a
+     bar down a file list is furniture. Tokens.css says as much: everything
+     decorative stays on --border / --border-strong. */
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .files__row {

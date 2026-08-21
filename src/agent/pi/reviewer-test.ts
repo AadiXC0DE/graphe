@@ -95,6 +95,12 @@ export function reviewerTestDecision(command: string, projectRoot: string): Revi
   const parsed = tokens(command);
   const file = parsed === null ? null : fileFrom(parsed);
   if (file === null || file.trim() === '') return { ok: false, reason: REVIEWER_TEST_WORDS.onlyOne };
+  // A word beginning with a dash is an option, not a file, and the runner reads
+  // it as one. `--config=<somewhere else>/tests/a.test.ts` looks like a path
+  // inside the project to a containment check — it does not begin with a slash,
+  // so it is read as relative — while the runner loads it from wherever it
+  // actually points and runs it. One test file means one test file.
+  if (file.trimStart().startsWith('-')) return { ok: false, reason: REVIEWER_TEST_WORDS.onlyOne };
   if (!containsPath(projectRoot, file).inside) return { ok: false, reason: REVIEWER_TEST_WORDS.outside };
   if (!looksLikeTestFile(file)) return { ok: false, reason: REVIEWER_TEST_WORDS.notTest };
   return { ok: true, file };

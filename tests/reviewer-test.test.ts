@@ -33,3 +33,28 @@ describe('a reviewer may run one test file and nothing broader', () => {
     expect(reviewerTestDecision(command, ROOT).ok).toBe(false);
   });
 });
+
+describe('an option is not a file', () => {
+  const ROOT = '/Users/me/proj';
+
+  it('refuses a word that begins with a dash', () => {
+    // These pass a containment check: no leading slash, so they resolve as a
+    // relative path inside the project. The runner reads them as options and
+    // loads what they point at, which is somewhere else entirely.
+    for (const said of [
+      'npx --no-install vitest run --config=/tmp/evil/tests/a.test.ts',
+      'npx --no-install vitest run --root=/tmp/x/tests/a.test.ts',
+      'pnpm exec vitest run --config=tests/a.test.ts',
+      'yarn vitest run --config=tests/a.test.ts',
+      'node --test --experimental-loader=tests/a.test.ts',
+    ]) {
+      expect(reviewerTestDecision(said, ROOT).ok).toBe(false);
+    }
+  });
+
+  it('still takes an ordinary test file', () => {
+    const said = reviewerTestDecision('npx --no-install vitest run tests/a.test.ts', ROOT);
+    expect(said.ok).toBe(true);
+    if (said.ok) expect(said.file).toBe('tests/a.test.ts');
+  });
+});

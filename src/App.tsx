@@ -439,6 +439,15 @@ function Conversation() {
   /** What was asked for while a plan is being made, so approving it can send
    *  the same sentence rather than a reconstruction of it. */
   const asked = useRef<string>("");
+  /** True while what somebody types next is the answer to a look-around.
+   *
+   * A plan is followed by "now do it", and the words people reach for there are
+   * the same ones that made it look around to begin with — "implement the
+   * redesign", "build all of it". Judged again by the same rule, that plans the
+   * plan, and the answer never gets built. So the message after a look-around
+   * never triggers another, and the one after that is judged fresh. No word
+   * list and no guessing at intent: the only thing remembered is that we asked. */
+  const justLookedFirst = useRef(false);
   /** A project that would not open, said beside the picker rather than in a
    *  conversation that does not exist yet. */
   const [pickerTrouble, setPickerTrouble] = useState<{
@@ -2389,6 +2398,8 @@ function Conversation() {
           researchReports.current[owner] = '';
         }
         setPlans('auto');
+        // What comes back is a report to answer, not a request to look around.
+        justLookedFirst.current = true;
         // Said once a sitting, before the wait rather than after it.
         if (!saidSlower.current) {
           saidSlower.current = true;
@@ -2402,10 +2413,16 @@ function Conversation() {
       // somebody has said otherwise for this message. It is not a mode people
       // switch on: the failure designers fear most is forty files changed
       // without warning, and that is worth a round trip by default.
+      const answering = justLookedFirst.current;
+      justLookedFirst.current = false;
       const lookFirst =
+        !answering &&
         howFar !== 'doing' &&
         (plans === 'always' || (plans === 'auto' && worthPlanning(text)));
-      if (lookFirst) asked.current = text;
+      if (lookFirst) {
+        asked.current = text;
+        justLookedFirst.current = true;
+      }
       await deliver(text, priced.task, { lookFirst });
     },
     [deliver, desks, howFar, open, plans, say],
@@ -2478,12 +2495,21 @@ function Conversation() {
           researchRuns.current.add(owner);
           researchReports.current[owner] = '';
           setPlans('auto');
+          // What comes back is a report to answer, not a request to look around.
+          justLookedFirst.current = true;
           void deliver(asResearch(text), sizeUp(text), { lookFirst: false, queue: 'followUp' });
           return;
         }
+        const answering = justLookedFirst.current;
+        justLookedFirst.current = false;
         const lookFirst =
-          howFar !== 'doing' && (plans === 'always' || (plans === 'auto' && worthPlanning(text)));
-        if (lookFirst) asked.current = text;
+          !answering &&
+          howFar !== 'doing' &&
+          (plans === 'always' || (plans === 'auto' && worthPlanning(text)));
+        if (lookFirst) {
+          asked.current = text;
+          justLookedFirst.current = true;
+        }
         void deliver(text, sizeUp(text), { lookFirst, queue: 'followUp' });
         return;
       }

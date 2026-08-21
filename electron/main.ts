@@ -1899,6 +1899,21 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
  *  one call. Null when this folder is not a github repo, or gh is not ready —
  *  both are "nothing to show" rather than a failure.
  */
+/**
+ * Whether a conversation's copy is on the same line of work as the project.
+ *
+ * Unreadable either side answers no. Not knowing is not a reason to write into
+ * somebody's folder, and the work is never lost by staying where it was made.
+ */
+async function onTheSameLine(project: string, folder: string): Promise<boolean> {
+  const here = await gitRun(project, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const there = await gitRun(folder, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (here.code !== 0 || there.code !== 0) return false;
+  const a = (here.out ?? '').trim();
+  const b = (there.out ?? '').trim();
+  return a !== '' && b !== '' && a === b;
+}
+
 /** The line of work this folder is on, and the commit it sits at. A review that
  *  does not know this reads whatever happens to be checked out and reports it as
  *  the pull request. */
@@ -2208,10 +2223,17 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       // What came back, and what did not. A file both sides changed is left as
       // this checkout has it — which is right, and used to happen in silence:
       // the person saw a finished turn and a file that had not changed.
+      // Carrying home is for a copy working on the same line as the folder on
+      // screen. A conversation somebody deliberately put on its own line is the
+      // opposite of that: applying its files here would land one line of work on
+      // top of another, which is how a folder ends up holding a branch's changes
+      // it never asked for. Landing it is still one press, and says which line.
       const carried =
         checkout === null || !existsSync(checkout.folder)
           ? null
-          : bringBack(gitRunHereFor(), path, checkout.folder);
+          : onTheSameLine(path, checkout.folder).then((sameLine) =>
+              sameLine ? bringBack(gitRunHereFor(), path, checkout.folder) : null,
+            );
       void (carried ?? Promise.resolve(null))
         .then((outcome) => {
           if (outcome !== null && outcome.ok && outcome.value.conflicted.length > 0) {

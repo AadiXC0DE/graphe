@@ -6,10 +6,16 @@ type Props = {
   /** How far it may go before it stops and asks. */
   howFar: HowFar;
   onHowFar: (howFar: HowFar) => void;
+  /** Lets a native page step aside while this renderer popover is open. */
+  onOpenChange?: (open: boolean) => void;
 };
 
 export const SAYS = {
   /** The chip, one rung each, in the fewest words that are still true. */
+  /** On the one rung that hands over the whole computer. Short enough to sit
+   *  beside its name rather than under it. */
+  fullAccess: 'Full access',
+
   rungs: {
     looking: { name: 'Just looking', note: 'I read and tell you what I find. I change nothing.' },
     asking: { name: 'Asks first', note: 'I stop and check with you before anything that could cost you something.' },
@@ -63,7 +69,7 @@ function screenFor(rung: HowFar): (typeof SAYS.screens)['doing'] | null {
   return null;
 }
 
-export default function Asking({ howFar, onHowFar }: Props) {
+export default function Asking({ howFar, onHowFar, onOpenChange }: Props) {
   const [open, setOpen] = useState(false);
   /** Which rung is being asked about, or null when the menu is the menu. */
   const [warning, setWarning] = useState<HowFar | null>(null);
@@ -91,6 +97,14 @@ export default function Asking({ howFar, onHowFar }: Props) {
       document.removeEventListener('keydown', key);
     };
   }, [open]);
+
+  /* Electron's native page view is always painted above renderer content. Tell
+     the owner when this popover needs that view hidden instead of relying on a
+     CSS stacking order it cannot participate in. */
+  useEffect(() => {
+    onOpenChange?.(open);
+    return () => onOpenChange?.(false);
+  }, [open, onOpenChange]);
 
   const shut = () => {
     setOpen(false);
@@ -200,7 +214,28 @@ export default function Asking({ howFar, onHowFar }: Props) {
                 ) : null}
               </span>
               <span className="asking__text">
-                <span className="asking__name">{said.name}</span>
+                <span className="asking__name">
+                  {said.name}
+                  {/* The one rung that hands over the whole computer, marked as
+                      such. Four names in a list read alike until you have read
+                      all four descriptions, and the one worth noticing was the
+                      one you could only find by reading to the end. */}
+                  {WORTH_A_WARNING.includes(rung) ? (
+                    <span className="asking__badge">
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                        <path
+                          d="M6 1.6 11 10.4H1L6 1.6Z"
+                          stroke="currentColor"
+                          strokeWidth="1.2"
+                          strokeLinejoin="round"
+                        />
+                        <path d="M6 5v2.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                        <circle cx="6" cy="8.9" r="0.6" fill="currentColor" />
+                      </svg>
+                      {SAYS.fullAccess}
+                    </span>
+                  ) : null}
+                </span>
                 <span className="asking__note">{said.note}</span>
               </span>
             </button>

@@ -19,6 +19,14 @@ import { mkdir, rm } from 'node:fs/promises';
 import { ProjectHistory, HistoryError, historyProblems } from './repo';
 import { carryOver } from './newcopy';
 import { AT_A_TIME, nextUp, roomLeft, type WorkState } from '../work/board';
+import {
+  orderToTake,
+  takeInOrder,
+  type Meeting,
+  type Refused,
+  type Standing,
+  type Took,
+} from '../work/stack';
 
 /** The window says these too, and it has no folders — see src/share/holding.ts. */
 export { holdWords } from '../share/holding';
@@ -66,6 +74,21 @@ export function saysKept(name: string, asked: string | null): string {
     ? `Kept the ${which}`
     : `${asked.trim()} — kept the ${which}`;
 }
+
+/** What came of taking a set. The order it was worked out to go in, how far it
+ *  got, and the one version to put the project back to if none of it was
+ *  wanted — a set that landed in full is as undoable as one that stopped. */
+export type TookSet = Took & {
+  ok: true;
+  order: readonly string[];
+  meetings: readonly Meeting[];
+  /** The project's version after the last one that went in. Null when none did. */
+  version: string | null;
+  /** Where the project stood before any of them went in. */
+  undoTo: string | null;
+  /** Other goes at the same things, thrown away alongside. */
+  insteadOf: readonly string[];
+};
 
 /** What came of keeping one. A version and nothing held back is the ordinary
  *  answer; anything in `conflicted` means the project was left as it was. */
@@ -267,17 +290,48 @@ export function folderForHeld(under: string, id: string): string {
   return path.join(under, safeName(id));
 }
 
+/**
+ * Put a kept copy back to a version so it can be worked in again.
+ *
+ * False when there is nothing usable there, which is the caller's cue to make
+ * one rather than an error: a copy is a cache, and a cache that has gone is
+ * only ever a slower start.
+ */
+async function putCopyBack(
+  history: ProjectHistory,
+  folder: string,
+  at: string,
+): Promise<boolean> {
+  try {
+    const known = await history.workspaces();
+    if (!known.some((one) => path.resolve(one) === path.resolve(folder))) return false;
+    await new ProjectHistory(folder).resetTo(at);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class HeldWork {
   readonly waiting: Waiting;
   readonly folder: string;
 
   private readonly history: ProjectHistory;
   private letGo = false;
+  /** True when this copy is kept between pieces of work rather than thrown
+   *  away after each one. */
+  private readonly kept: boolean;
 
-  private constructor(history: ProjectHistory, folder: string, waiting: Waiting) {
+  private constructor(
+    history: ProjectHistory,
+    folder: string,
+    waiting: Waiting,
+    kept: boolean,
+  ) {
     this.history = history;
     this.folder = folder;
     this.waiting = waiting;
+    this.kept = kept;
   }
 
   /**
@@ -294,6 +348,11 @@ export class HeldWork {
     id: string;
     doing: string;
     at?: number;
+    /** Where to keep the copy, when it is worth keeping. Given one, the same
+     *  folder is used again for the next piece of work instead of a fresh copy
+     *  being made and installed into — which is the same install every time and
+     *  the slowest thing here by far. */
+    keepIn?: string;
   }): Promise<HeldWork> {
     if (await options.history.hasUnsavedChanges()) {
       throw new HistoryError(historyProblems.unsavedFirst);
@@ -301,18 +360,32 @@ export class HeldWork {
     const from = await options.history.currentVersion();
     if (from === null) throw new HistoryError(historyProblems.tryFailed);
 
-    const folder = folderForHeld(options.under, options.id);
-    await mkdir(path.dirname(folder), { recursive: true });
-    await options.history.addWorkspace(folder, from);
+    const kept = options.keepIn !== undefined;
+    const folder = options.keepIn ?? folderForHeld(options.under, options.id);
+
+    if (!(kept && (await putCopyBack(options.history, folder, from)))) {
+      // Whatever is there is not a copy this project can use. Take it out of
+      // the record before making one in its place, or the folder is still spoken
+      // for and nothing can be put there.
+      await options.history.removeWorkspace(folder).catch(() => undefined);
+      await rm(folder, { recursive: true, force: true });
+      await mkdir(path.dirname(folder), { recursive: true });
+      await options.history.addWorkspace(folder, from);
+    }
     await carryOver(options.history.root, folder);
 
-    return new HeldWork(options.history, folder, {
-      id: options.id,
-      doing: options.doing.trim(),
-      state: 'making',
-      version: null,
-      at: options.at ?? Date.now(),
-    });
+    return new HeldWork(
+      options.history,
+      folder,
+      {
+        id: options.id,
+        doing: options.doing.trim(),
+        state: 'making',
+        version: null,
+        at: options.at ?? Date.now(),
+      },
+      kept,
+    );
   }
 
   /**
@@ -327,7 +400,7 @@ export class HeldWork {
     const inside = new ProjectHistory(this.folder);
     const version = await inside.snapshot(title);
     if (version !== null) await this.history.hold(version);
-    await this.release();
+    await this.putAway();
 
     this.waiting.version = version;
     this.waiting.state = version === null ? 'nothing' : 'waiting';
@@ -374,6 +447,20 @@ export class HeldWork {
     if (version !== null) await this.history.release(version);
   }
 
+  /** Leave a kept copy ready for the next piece of work, holding none of what
+   *  this one did. Anything that cannot be put back is let go instead, so a copy
+   *  is never handed on in a state nobody can account for. */
+  private async putAway(): Promise<void> {
+    if (!this.kept) {
+      await this.release();
+      return;
+    }
+    const at = await this.history.currentVersion().catch(() => null);
+    if (at === null || !(await putCopyBack(this.history, this.folder, at))) {
+      await this.release();
+    }
+  }
+
   /** Let the copy go, whatever state it was left in. Safe to call twice. */
   async release(): Promise<void> {
     if (this.letGo) return;
@@ -409,6 +496,9 @@ export type PieceOfWork = {
    *  other work, and that is the whole difference. Absent on ordinary work,
    *  which is almost all of it. */
   ways?: string | null;
+  /** The files it changed, read while its copy still exists. Absent until it
+   *  has finished, and on anything rebuilt from a note that predates it. */
+  touches?: readonly string[] | null;
 };
 
 /** Where one piece of work's copy lives: its own folder inside the room, so
@@ -475,6 +565,7 @@ export class Workbench {
       picture: null,
       at: options.at ?? Date.now(),
       trouble: null,
+      touches: null,
       ...(options.ways == null ? {} : { ways: options.ways }),
     };
     this.work.push(piece);
@@ -526,6 +617,13 @@ export class Workbench {
     const piece = this.find(id);
     if (piece === undefined || piece.folder === null) return null;
     const inside = new ProjectHistory(piece.folder);
+    // Read before it is saved and while the copy is still there: once a piece
+    // is taken its folder goes, and what it changed is the one thing that says
+    // where two pieces are going to meet.
+    piece.touches = await inside
+      .unsavedChanges()
+      .then((changes) => changes.map((one) => one.path))
+      .catch(() => null);
     const version = await inside.snapshot(title);
     piece.version = version;
     piece.state = 'done';
@@ -561,19 +659,112 @@ export class Workbench {
    * A file two pieces both changed is reported rather than resolved: it is the
    * one case where somebody has to look.
    */
-  async keep(id: string, title: string): Promise<Kept | null> {
+  async keep(
+    id: string,
+    title: string,
+    options: {
+      /** Told which copies are about to go, before any of them does. Whatever
+       *  is still working in one has to be stopped first, or it carries on
+       *  writing into a folder that is not there any more. Called only once
+       *  the work has landed, so a conflict costs nobody their go. */
+      lettingGo?: (ids: readonly string[]) => Promise<void> | void;
+    } = {},
+  ): Promise<Kept | null> {
     const piece = this.find(id);
     if (piece === undefined || piece.version === null) return null;
     const carried = await this.history.carryIn(piece.version, title);
     if (!carried.ok) return { version: null, conflicted: carried.conflicted };
-    await this.drop(id);
     // The other goes at the same thing go with it. They were alternatives to
     // this one rather than other work, so leaving them on the board would be
     // offering somebody the two answers they have just decided against.
     const others =
       piece.ways == null ? [] : this.work.filter((one) => one.ways === piece.ways && one.id !== id);
+    await options.lettingGo?.([id, ...others.map((one) => one.id)]);
+    await this.drop(id);
     for (const other of others) await this.drop(other.id);
     return { version: carried.version, conflicted: [], insteadOf: others.map((one) => one.id) };
+  }
+
+  /**
+   * Take several in one act, in the order they have to go in.
+   *
+   * Every copy was made from the project as it stood, so a piece that waited
+   * for another still began without it. The order does not come from the
+   * copies; it comes from what somebody said when they asked for the work, and
+   * the caller hands it over because that is where it is kept.
+   *
+   * Each one is fitted around what is already in the project rather than
+   * replacing it, which is what makes the second one land on top of the first
+   * without anybody rebuilding it. The order decides what "already there"
+   * means for each in turn.
+   *
+   * Stops at the first that will not fit. What went in stays in and is one
+   * `undoTo` away, whole; what did not is still on the board with its copy.
+   */
+  async keepSet(
+    ids: readonly string[],
+    title: (piece: PieceOfWork) => string,
+    options: {
+      /** What each piece was asked to come after. Null for almost all of them. */
+      after?: (id: string) => string | null;
+      /** Told which copies are about to go, before any of them does — same
+       *  reason as `keep`: whatever is still working in one has to be stopped
+       *  before its folder is taken away. */
+      lettingGo?: (ids: readonly string[]) => Promise<void> | void;
+    } = {},
+  ): Promise<TookSet | Refused> {
+    const wanted = ids
+      .map((id) => this.find(id))
+      .filter((piece): piece is PieceOfWork => piece !== undefined);
+    const standing: Standing[] = wanted.map((piece) => ({
+      id: piece.id,
+      doing: piece.doing,
+      at: piece.at,
+      ready: piece.state === 'done' && piece.version !== null,
+      after: options.after?.(piece.id) ?? null,
+      touches: piece.touches ?? null,
+      ...(piece.ways == null ? {} : { ways: piece.ways }),
+    }));
+
+    const planned = orderToTake(standing);
+    if (!planned.ok) return planned;
+
+    const undoTo = await this.history.currentVersion();
+    let version: string | null = null;
+    const took = await takeInOrder(
+      planned.order.map((one) => one.id),
+      async (id) => {
+        const piece = this.find(id);
+        if (piece === undefined || piece.version === null) return { ok: false, conflicted: [] };
+        const carried = await this.history.carryIn(piece.version, title(piece));
+        if (!carried.ok) return { ok: false, conflicted: carried.conflicted };
+        version = carried.version;
+        return { ok: true };
+      },
+    );
+
+    // The other goes at anything that landed go with it, for the reason `keep`
+    // gives: they were alternatives to a decision that has now been made.
+    const instead = took.landed.flatMap((id) => {
+      const piece = this.find(id);
+      if (piece === undefined || piece.ways == null) return [];
+      return this.work
+        .filter((one) => one.ways === piece.ways && one.id !== id && !took.landed.includes(one.id))
+        .map((one) => one.id);
+    });
+    const going = [...new Set([...took.landed, ...instead])];
+    if (going.length > 0) await options.lettingGo?.(going);
+    for (const id of going) await this.drop(id);
+
+    return {
+      ok: true,
+      ...took,
+      order: planned.order.map((one) => one.id),
+      meetings: planned.meetings,
+      version,
+      undoTo,
+      insteadOf: instead,
+    };
   }
 
   /** Let one go, whatever state it was in. Safe to call twice. */

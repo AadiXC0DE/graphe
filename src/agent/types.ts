@@ -72,6 +72,10 @@ export type RunningPiece = {
   since: number;
   /** Null while it is up; the code it ended with once it is not. */
   exitCode: number | null;
+  /** Whether what it answers with is a page. Null until it has been asked —
+   *  a worker, a watcher, and an API that answers in JSON all hold a port, and
+   *  none of them is worth putting in a frame. */
+  showsAPage?: boolean | null;
 };
 
 /** Money, in the smallest unit of the user's currency, to avoid float drift. */
@@ -92,6 +96,53 @@ export type ImageCard = {
   mimeType: string;
   /** The picture, base64-encoded without the data: prefix. */
   bytes: string;
+};
+
+/** What the page beside the conversation says about itself: where it is, what
+ *  it is called, and what is on it. */
+export type PageReading = {
+  address: string;
+  title: string;
+  /** One line per thing on the page, each with a short handle to aim at. */
+  outline: string;
+};
+
+/** Something to do to that page. `target` is either the words somebody would
+ *  read on the thing, or a handle from the last reading. */
+export type PageAct =
+  | { kind: 'press'; target: string }
+  | { kind: 'write'; target: string; text: string; submit: boolean }
+  | { kind: 'move'; target: string | null; way: 'up' | 'down' | 'top' | 'bottom' };
+
+/** What came of it. A refusal is an answer rather than a failure: something
+ *  that is not on the page is a thing to read again and aim at better. */
+export type PageDone =
+  | { ok: true; did: string; now: PageReading }
+  | { ok: false; because: string };
+
+/** What the page complained about since it last loaded. */
+export type PageTrouble = {
+  /** Messages the page printed, in the order it printed them. */
+  said: readonly string[];
+  /** Requests that came back wrong or did not come back. */
+  unanswered: readonly string[];
+};
+
+/**
+ * The page beside the conversation, as the tools reach it.
+ *
+ * Implemented by the desktop shell, which is the only thing holding the view.
+ * Every answer is plain data — the tools never get the view itself, so nothing
+ * the model can say reaches past these five methods.
+ */
+export type LivePage = {
+  /** The project the page was opened for and where it has got to, or null when
+   *  no page is open at all. */
+  open: () => { project: string | null; address: string } | null;
+  read: () => Promise<PageReading | null>;
+  act: (what: PageAct) => Promise<PageDone>;
+  trouble: () => Promise<PageTrouble | null>;
+  picture: () => Promise<ImageCard | null>;
 };
 
 /** Why a spend happened. Retries caused by the agent's own failure are tracked
@@ -178,7 +229,7 @@ export type AgentEvent =
   | { type: 'user-said'; text: string }
   /** Looking around before touching anything, and what it came back with. */
   | { type: 'planning' }
-  | { type: 'planned'; steps: readonly string[]; caveats: readonly string[] }
+  | { type: 'planned'; steps: readonly string[]; caveats: readonly string[]; questions: readonly string[] }
   /**
    * Money that has just been spent, already priced.
    *
@@ -209,8 +260,15 @@ export type AgentEvent =
   /** The agent has finished everything it was doing, tool calls included. The
    *  moment the session split is worth working out. */
   | { type: 'settled' }
+  /** Questions nobody will answer now — the sitting was stopped, or it closed.
+   *  Without this the window keeps drawing a card whose answer can never
+   *  arrive, and reads the unanswered card as "still working". */
+  | { type: 'questions-withdrawn'; callIds: readonly string[] }
   /** A change was checked, and the verdict is in. Carries the same findings
    *  the reply showed as words, so the window can draw them as a card. */
+  /** What is waiting behind the run. Both lists, because an interrupt and a
+   *  follow-up are different promises and are shown as different things. */
+  | { type: 'queued'; steering: readonly string[]; followUp: readonly string[] }
   | { type: 'reviewed'; verdict: ReviewVerdict }
   /** The split, from the shell's ledger. Emitted after `settled`, and only when
    *  there is something to split — no spend, no summary, no zero state. */

@@ -37,6 +37,13 @@ type ConfirmVerdict = Extract<Verdict, { kind: 'confirm' }>;
 
 type Fields = Readonly<Record<string, unknown>>;
 
+/** A list of plain strings off an untrusted record, defensively. */
+function wordsIn(source: Fields, key: string): readonly string[] {
+  const value = source[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((one): one is string => typeof one === 'string');
+}
+
 function fieldsOf(value: unknown): Fields | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Fields;
@@ -113,6 +120,16 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
       return {
         type: 'tidied',
         ok: flagAt(source, 'aborted') !== true && textAt(source, 'errorMessage') === null,
+      };
+
+    /* What is waiting behind the run, as pi holds it. The window has no other
+       way to know: a queued message is handed straight to pi, and until this
+       arrived there was nothing to draw and nothing to take back. */
+    case 'queue_update':
+      return {
+        type: 'queued',
+        steering: wordsIn(source, 'steering'),
+        followUp: wordsIn(source, 'followUp'),
       };
 
     case 'agent_settled':
@@ -243,6 +260,10 @@ export class EventRelay {
   private readonly running = new Set<string>();
   /** Calls the Guard stopped. Pi still reports a result for these. */
   private readonly refused = new Set<string>();
+  /** An assistant failure is provisional until Pi says the whole agent has
+   *  settled. Pi may retry the same turn after an API/transport error; showing
+   *  a terminal card before that decision says it stopped while it is working. */
+  private pendingError: string | null = null;
   /** Whose fault the money was. See spend.ts. */
   private readonly spend: SpendWatch;
   private readonly billedSoFar: (() => number | null) | undefined;
@@ -257,6 +278,7 @@ export class EventRelay {
 
   /** A call that passed the Guard and is about to run. */
   started(call: ToolCall): void {
+    this.pendingError = null;
     this.refused.delete(call.id);
     this.running.add(call.id);
     this.spend.started(call);
@@ -291,12 +313,25 @@ export class EventRelay {
       // Before, not after. Whoever is keeping the ledger has to have every
       // entry in hand by the time it is asked for the split.
       this.paid(this.spend.settle(this.billedSoFar?.() ?? null));
+      if (this.pendingError !== null) {
+        this.deliver({ type: 'error', message: this.pendingError });
+        this.pendingError = null;
+      }
       this.deliver(translated);
       return;
     }
 
     this.paid(report);
     if (translated === null) return;
+
+    if (translated.type === 'error') {
+      this.pendingError = translated.message;
+      return;
+    }
+    // Any successful continuation proves the provisional failure was retried.
+    if (translated.type === 'message-delta' || translated.type === 'message-end') {
+      this.pendingError = null;
+    }
 
     if (translated.type === 'tool-end') {
       // Pi reports a blocked call as a failed one, because that is what the

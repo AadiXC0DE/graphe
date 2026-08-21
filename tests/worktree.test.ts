@@ -7,7 +7,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -19,10 +19,15 @@ import {
   checkoutFolder,
   createWorktree,
   dropWorktree,
+  holdsWork,
   landWorktree,
+  putAwayWorktree,
+  reopenWorktree,
+  sweepCheckouts,
+  worktreeWords,
   type RunGit,
 } from '../src/history/worktree';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const spawn = promisify(execFile);
 
@@ -234,6 +239,26 @@ describe('bringBack — Cursor-style Apply, files come home uncommitted', () => 
     }
   });
 
+  it('treats a change already applied to main as safely landed, not conflicted', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'already-applied', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'same final work\n');
+      await writeFile(path.join(repo, 'a.txt'), 'same final work\n');
+
+      const applied = await bringBack(git(), repo, made.value.folder);
+      expect(applied.ok).toBe(true);
+      if (!applied.ok) return;
+      expect(applied.value.applied).toContain('a.txt');
+      expect(applied.value.conflicted).not.toContain('a.txt');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
   it('leaves a file alone when the main checkout changed it too', async () => {
     const repo = await freshRepo();
     try {
@@ -251,6 +276,25 @@ describe('bringBack — Cursor-style Apply, files come home uncommitted', () => 
       expect(applied.value.conflicted).toContain('a.txt');
       // The main checkout keeps its own version rather than being overwritten.
       expect(readFileContent(repo, 'a.txt')).toBe('mine on main\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('does not overwrite an unrelated untracked file with the same name on main', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'untracked-both-sides', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      await writeFile(path.join(made.value.folder, 'new.txt'), 'from the tab\n');
+      await writeFile(path.join(repo, 'new.txt'), 'mine on main\n');
+      const applied = await bringBack(git(), repo, made.value.folder);
+      expect(applied.ok).toBe(true);
+      if (!applied.ok) return;
+      expect(applied.value.conflicted).toContain('new.txt');
+      expect(readFileContent(repo, 'new.txt')).toBe('mine on main\n');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -354,6 +398,287 @@ describe('shared base — a folder that commits ahead is still protected', () =>
       expect(applied.value.applied).not.toContain('a.txt');
       expect(applied.value.conflicted).toContain('a.txt');
       expect(readFileContent(repo, 'a.txt')).toBe('primary committed this\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('holdsWork — what a sweep is not allowed to destroy', () => {
+  it('says no for a checkout nobody left anything in', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'idle', null);
+      if (!made.ok || made.value === null) return;
+      expect(await holdsWork(git(), made.value.folder)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('says yes for an edit nobody committed', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'busy', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'half a thought\n');
+      expect(await holdsWork(git(), made.value.folder)).toBe(true);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('says no once the work is committed, because the branch is holding it', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'saved', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'a whole thought\n');
+      await raw(made.value.folder, 'commit', '-am', 'the tab saves');
+      expect(await holdsWork(git(), made.value.folder)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('does not count what the project ignores — that is the disk worth reclaiming', async () => {
+    const repo = await freshRepo();
+    try {
+      await writeFile(path.join(repo, '.gitignore'), 'node_modules/\nrelease/\n');
+      await raw(repo, 'add', '.');
+      await raw(repo, 'commit', '-m', 'ignore the heavy things');
+      const made = await createWorktree(git(), repo, 'built', null);
+      if (!made.ok || made.value === null) return;
+      await mkdir(path.join(made.value.folder, 'release'), { recursive: true });
+      await writeFile(path.join(made.value.folder, 'release', 'app.dmg'), 'pretend this is 240MB\n');
+      expect(await holdsWork(git(), made.value.folder)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('sweepCheckouts — the copies a finished conversation left behind', () => {
+  it('gives the folder back and keeps the branch the work is on', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'over', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'what the tab did\n');
+      await raw(made.value.folder, 'commit', '-am', 'the tab saves');
+
+      const given = await sweepCheckouts(git(), repo, [made.value.folder]);
+
+      expect(given).toEqual([made.value.folder]);
+      expect(existsSync(made.value.folder)).toBe(false);
+      // The one thing a sweep may never do: the work is still there to land.
+      expect((await raw(repo, 'show', 'graphe/over:a.txt')).trim()).toBe('what the tab did');
+      // And git is not left with a note pointing at a folder that has gone.
+      expect(await raw(repo, 'worktree', 'list')).not.toContain(made.value.folder);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a checkout somebody is still in the middle of', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'midway', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'half a thought\n');
+
+      const given = await sweepCheckouts(git(), repo, [made.value.folder]);
+
+      expect(given).toEqual([]);
+      expect(existsSync(made.value.folder)).toBe(true);
+      expect(readFileContent(made.value.folder, 'a.txt')).toBe('half a thought\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the one a conversation is open in', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'open-now', null);
+      if (!made.ok || made.value === null) return;
+
+      const given = await sweepCheckouts(git(), repo, [made.value.folder], {
+        inUse: (folder) => folder === made.value?.folder,
+      });
+
+      expect(given).toEqual([]);
+      expect(existsSync(made.value.folder)).toBe(true);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('takes back every idle one at once, which is the whole point', async () => {
+    const repo = await freshRepo();
+    try {
+      const names = ['one', 'two', 'three'];
+      const folders: string[] = [];
+      for (const name of names) {
+        const made = await createWorktree(git(), repo, name, null);
+        if (made.ok && made.value !== null) folders.push(made.value.folder);
+      }
+      expect(folders).toHaveLength(3);
+
+      const given = await sweepCheckouts(git(), repo, folders);
+
+      expect(given).toHaveLength(3);
+      for (const folder of folders) expect(existsSync(folder)).toBe(false);
+      // Every branch survives its folder.
+      for (const name of names) {
+        expect((await raw(repo, 'rev-parse', '--verify', `graphe/${name}`)).trim()).not.toBe('');
+      }
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('putting a conversation away and asking for it again', () => {
+  it('gives the folder back and hands it over again with the work still on it', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'later', null);
+      if (!made.ok || made.value === null) return;
+      const { folder, branch } = made.value;
+      await writeFile(path.join(folder, 'a.txt'), 'what the tab did\n');
+      await raw(folder, 'commit', '-am', 'the tab saves');
+
+      expect(await putAwayWorktree(git(), repo, folder)).toEqual({ put: true });
+      expect(existsSync(folder)).toBe(false);
+
+      const back = await reopenWorktree(git(), repo, branch, folder);
+      expect(back.ok).toBe(true);
+      // The same conversation, on the same branch, looking at its own work.
+      expect(existsSync(folder)).toBe(true);
+      expect((await raw(folder, 'rev-parse', '--abbrev-ref', 'HEAD')).trim()).toBe(branch);
+      expect(readFileContent(folder, 'a.txt')).toBe('what the tab did\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('is what takes the heavy things back, which is the whole point', async () => {
+    const repo = await freshRepo();
+    try {
+      await writeFile(path.join(repo, '.gitignore'), 'node_modules/\nrelease/\n');
+      await raw(repo, 'add', '.');
+      await raw(repo, 'commit', '-m', 'ignore the heavy things');
+      const made = await createWorktree(git(), repo, 'built', null);
+      if (!made.ok || made.value === null) return;
+      const { folder, branch } = made.value;
+      await mkdir(path.join(folder, 'node_modules'), { recursive: true });
+      await writeFile(path.join(folder, 'node_modules', 'big'), 'pretend this is 1.5GB\n');
+      await mkdir(path.join(folder, 'release'), { recursive: true });
+      await writeFile(path.join(folder, 'release', 'app.dmg'), 'pretend this is 240MB\n');
+
+      expect(await putAwayWorktree(git(), repo, folder)).toEqual({ put: true });
+      expect(existsSync(path.join(folder, 'node_modules'))).toBe(false);
+      expect(existsSync(path.join(folder, 'release'))).toBe(false);
+
+      // And what comes back is the project, not the build.
+      const back = await reopenWorktree(git(), repo, branch, folder);
+      expect(back.ok).toBe(true);
+      expect(existsSync(path.join(folder, 'a.txt'))).toBe(true);
+      expect(existsSync(path.join(folder, 'node_modules'))).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('will not put away a checkout somebody is in the middle of', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'midway', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'half a thought\n');
+
+      expect(await putAwayWorktree(git(), repo, made.value.folder)).toEqual({ put: false });
+      expect(existsSync(made.value.folder)).toBe(true);
+      expect(readFileContent(made.value.folder, 'a.txt')).toBe('half a thought\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps an untracked file nobody committed, ignored ones aside', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'notes', null);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'scratch.txt'), 'not committed anywhere\n');
+
+      expect(await putAwayWorktree(git(), repo, made.value.folder)).toEqual({ put: false });
+      expect(readFileContent(made.value.folder, 'scratch.txt')).toBe('not committed anywhere\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('says so rather than opening a conversation on somebody else\'s work', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'lost', null);
+      if (!made.ok || made.value === null) return;
+      const { folder, branch } = made.value;
+      await putAwayWorktree(git(), repo, folder);
+      // The branch is thrown away behind its back.
+      await raw(repo, 'branch', '-D', branch);
+
+      const back = await reopenWorktree(git(), repo, branch, folder);
+      expect(back.ok).toBe(false);
+      if (back.ok) return;
+      expect(back.because).toBe(worktreeWords.gone);
+      // Nothing invented to stand in for it.
+      expect(existsSync(folder)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('survives being put away and asked for over and over', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'busy-week', null);
+      if (!made.ok || made.value === null) return;
+      const { folder, branch } = made.value;
+
+      for (const round of ['one', 'two', 'three']) {
+        await writeFile(path.join(folder, 'a.txt'), `${round}\n`);
+        await raw(folder, 'commit', '-am', `round ${round}`);
+        expect(await putAwayWorktree(git(), repo, folder)).toEqual({ put: true });
+        expect(existsSync(folder)).toBe(false);
+        const back = await reopenWorktree(git(), repo, branch, folder);
+        expect(back.ok).toBe(true);
+        expect(readFileContent(folder, 'a.txt')).toBe(`${round}\n`);
+      }
+      // Three rounds of work, all of it still on the one branch.
+      expect((await raw(repo, 'log', '--oneline', branch)).trim().split('\n')).toHaveLength(4);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('a put-away conversation still lands its work in the main checkout', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'landing', null);
+      if (!made.ok || made.value === null) return;
+      const { folder, branch } = made.value;
+      await writeFile(path.join(folder, 'a.txt'), 'the tab decided this\n');
+      await raw(folder, 'commit', '-am', 'the tab saves');
+      await putAwayWorktree(git(), repo, folder);
+
+      const back = await reopenWorktree(git(), repo, branch, folder);
+      expect(back.ok).toBe(true);
+      const landed = await landWorktree(git(), repo, folder);
+      expect(landed.ok).toBe(true);
+      expect(readFileContent(repo, 'a.txt')).toBe('the tab decided this\n');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

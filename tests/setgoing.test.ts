@@ -13,6 +13,7 @@ import {
   APART_WORDS,
   MOST_APART,
   WAYS_WORDS,
+  grapheTools,
   setGoingTool,
   tryWaysTool,
   type PutOnBoard,
@@ -238,5 +239,46 @@ describe('SG-04 trying it more than one way', () => {
     expect(WAYS_WORDS.went(2)).toMatch(/Keeping one throws the others away/);
     expect(WAYS_WORDS.went(2)).toMatch(/^Two goes/);
     expect(WAYS_WORDS.went(3)).toMatch(/^3 goes/);
+  });
+});
+
+/* ========================================================================== */
+/* SG-05 the tools actually reach the model                                    */
+/* ========================================================================== */
+
+describe('SG-05 registered, not merely written', () => {
+  const board: PutOnBoard = () => Promise.resolve({ ok: true as const, id: 'work-1' });
+
+  /**
+   * The failure this exists for, found in a live audit: both tools were
+   * complete, tested and documented, and the one argument that turns them on
+   * was not passed at the only call site. Everything below them worked; nothing
+   * above them ever asked. A unit test on the tool cannot see that, so this
+   * asserts the list the model is actually handed.
+   */
+  it('are on the list when there is a board to put work on', () => {
+    const names = grapheTools('/tmp/agent', null, null, undefined, '/work/site', board).map(
+      (one) => one.name,
+    );
+    expect(names).toContain('set_going');
+    expect(names).toContain('try_ways');
+  });
+
+  /* A run on the board must not be able to fill the board it is running on. */
+  it('are absent when there is no board — which is every run on the board itself', () => {
+    const names = grapheTools('/tmp/agent', null, null, undefined, '/work/site').map(
+      (one) => one.name,
+    );
+    expect(names).not.toContain('set_going');
+    expect(names).not.toContain('try_ways');
+  });
+
+  it('never hold up the rest of a batch', () => {
+    const tools = grapheTools('/tmp/agent', null, null, undefined, '/work/site', board);
+    for (const name of ['set_going', 'try_ways']) {
+      const one = tools.find((tool) => tool.name === name);
+      expect(one, name).toBeDefined();
+      expect(one?.description.length ?? 0, name).toBeGreaterThan(0);
+    }
   });
 });

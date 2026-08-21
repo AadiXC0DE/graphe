@@ -12,6 +12,9 @@ import './ConnectModal.css';
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** Look for models added since this opened. Left off, the control is not
+   *  shown at all — the picker can be looked at on its own. */
+  onRefresh?: () => void | Promise<void>;
   /** The whole state of "who can think for me", or null while the first
    *  answer is on its way. */
   state: ConnectionState | null;
@@ -64,7 +67,10 @@ export default function ConnectModal({
   onImport,
   onSelect,
   onDisconnect,
+  onRefresh,
 }: Props) {
+  /** Whether a look-again is in flight. Only ever this screen's own state. */
+  const [refreshing, setRefreshing] = useState(false);
   // A connection that was on its way out of this screen — the last answer the
   // window got back from the shell — is a thing to mention, not to hide: the
   // sentence below the providers says whether it worked or why it stopped.
@@ -118,6 +124,24 @@ export default function ConnectModal({
               beside the box you type in.
             </p>
           </div>
+          {/* Models arrive from outside this app — pi's own catalogue refresh,
+              another tool writing the same list. Without this the app has to be
+              restarted before a new one appears, and nobody would guess that. */}
+          {onRefresh === undefined ? null : (
+            <button
+              type="button"
+              className="connectmodal__refresh"
+              onClick={() => {
+                if (refreshing) return;
+                setRefreshing(true);
+                void Promise.resolve(onRefresh()).finally(() => setRefreshing(false));
+              }}
+              disabled={refreshing}
+              title="Look again for models added since this opened"
+            >
+              {refreshing ? 'Looking…' : 'Look again'}
+            </button>
+          )}
           <button type="button" className="connectmodal__close" onClick={() => (busy ? onCancel() : onClose())} aria-label="Close">
             <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
               <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />

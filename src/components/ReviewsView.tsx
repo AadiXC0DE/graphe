@@ -26,6 +26,11 @@ export const SAYS = {
   noIssues: 'No issues have been opened.',
   noIssuesDetail:
     'When someone raises one in this project it will show up here.',
+  /** Said when github could not be asked. Never "there are none": a list that
+   *  could not be read is not an empty list, and telling somebody they have no
+   *  pull requests when they have several is worse than saying nothing. */
+  couldNotAsk: 'I could not read this from github just now.',
+  tryAgain: 'Try again',
   noRepo:
     'This folder is not a github repository, or github is not set up on your terminal.',
   noRepoDetail:
@@ -38,8 +43,36 @@ export const SAYS = {
   changed: 'Updated',
 } as const;
 
+/**
+ * Where the review is to read this pull request's files from.
+ *
+ * The bug this exists to make impossible: the folder is a line of work like any
+ * other, and it is very often not the one the pull request is asking about. Told
+ * to "walk the checked-out code", a review reads whatever is open and reports it
+ * as the pull request — every finding true of the folder and wrong about the
+ * change. So the folder is never assumed to be the pull request; it is checked,
+ * and when it is not, the files are read from the pull request's own commit.
+ */
+export function whereToRead(item: RepoItem, here: Here): string {
+  const short = (sha: string): string => sha.slice(0, 7);
+  if (item.headSha === null) {
+    return `- this folder may be on a different line of work than the pull request. Before you read any file here, check \`git rev-parse HEAD\` against \`gh pr view ${String(item.number)} --json headRefOid\`. If they differ, read every file with \`git show <the pull request's commit>:<path>\` instead of from the folder.`;
+  }
+  if (here !== null && here.sha === item.headSha) {
+    return `- this folder is this pull request's code, at ${short(item.headSha)} — read it freely for the surrounding context.`;
+  }
+  const where =
+    here === null
+      ? 'somewhere this app could not read'
+      : `${here.branch ?? 'no line of work'}, at ${short(here.sha)}`;
+  return `- **this folder is not this pull request's code.** It is on ${where}; the pull request is ${item.headRef ?? 'its own line'} at ${short(item.headSha)}. Do not read files from the folder — every line you quoted would be from a different line of work, and every finding would be about code this pull request does not contain. Bring its files in first with \`git fetch origin pull/${String(item.number)}/head\`, then read any one of them with \`git show ${item.headSha}:<path>\`.`;
+}
+
+/** What the folder is on, as the shell reported it. */
+type Here = { branch: string | null; sha: string } | null;
+
 /** Open a pull request, whole, and review it in the conversation. */
-export function reviewPrompt(item: RepoItem, full: string): string {
+export function reviewPrompt(item: RepoItem, full: string, here: Here = null): string {
   return `Review pull request #${item.number} in ${full} and post your findings.
 
 “${item.title}”
@@ -50,7 +83,7 @@ Read what you need through your terminal, where the person’s github is already
 - \`gh pr view ${item.number} -R ${full}\` — title, description, base branch, the issue(s) it links
 - \`gh pr diff ${item.number} -R ${full}\` — every line the PR changes, held against its base branch
 - \`gh issue view <n> -R ${full}\` — for each issue the PR says it closes (find them in the PR body)
-- walk the checked-out code in this folder for the surrounding context, so a change makes sense against how the project is actually built
+${whereToRead(item, here)}
 
 Review it like a senior engineer on the team, not a checklist:
 - Does it actually solve the issue it claims to close?
@@ -158,8 +191,27 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview }
           <div className="reviews reviews--empty">
             <div className="reviews__blank">
               {tab === 'prs' ? <svg viewBox="0 0 32 32" className="reviews__blankicon" width="34" height="34" fill="none" aria-hidden="true"><path d="M10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm12 0a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM10 19a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm3 0h9a5 5 0 0 0 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M13 19v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg> : <svg viewBox="0 0 32 32" className="reviews__blankicon" width="34" height="34" fill="none" aria-hidden="true"><circle cx="9" cy="16" r="3" stroke="currentColor" strokeWidth="2"/><path d="M6 16h7m0 0h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>}
-              <h2 className="reviews__blanktitle">{tab === 'prs' ? SAYS.empty : SAYS.noIssues}</h2>
-              <p className="reviews__blankdetail">{tab === 'prs' ? SAYS.emptyDetail : SAYS.noIssuesDetail}</p>
+              {repo.trouble === null ? (
+                <>
+                  <h2 className="reviews__blanktitle">{tab === 'prs' ? SAYS.empty : SAYS.noIssues}</h2>
+                  <p className="reviews__blankdetail">
+                    {tab === 'prs' ? SAYS.emptyDetail : SAYS.noIssuesDetail}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 className="reviews__blanktitle">{SAYS.couldNotAsk}</h2>
+                  <p className="reviews__blankdetail">{repo.trouble}</p>
+                  <button
+                    type="button"
+                    className="reviews__retry"
+                    onClick={onRefresh}
+                    disabled={busy}
+                  >
+                    {SAYS.tryAgain}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ) : (

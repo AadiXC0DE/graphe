@@ -3,15 +3,18 @@ import './InLine.css';
 
 type Props = {
   waiting: readonly Waiting[];
-  /** Take one back out of the line. Nothing is sent, and the words come back
-   *  to the box so a second thought can be changed rather than only cancelled. */
-  onTake: (id: string) => void;
+  /** Take the line back out. Nothing is sent, and the words come back to the
+   *  box so a second thought can be changed rather than only cancelled. All of
+   *  it at once: the queue belongs to the agent and it hands back all or none,
+   *  and taking one would silently reorder the rest. */
+  onTake: () => void;
 };
 
 export const SAYS = {
   one: 'Waiting in line',
   many: (count: number) => `${String(count)} waiting in line`,
-  take: (text: string) => `Take “${text}” back`,
+  take: 'Put it back in the box',
+  takeMany: (count: number) => `Put all ${String(count)} back in the box`,
 } as const;
 
 /**
@@ -32,24 +35,17 @@ export default function InLine({ waiting, onTake }: Props) {
         {waiting.map((one) => (
           <li key={one.id} className="inline__item">
             <span className="inline__text">{one.text}</span>
-            <button
-              type="button"
-              className="inline__take"
-              onClick={() => onTake(one.id)}
-              aria-label={SAYS.take(one.text)}
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path
-                  d="M3 3l6 6M9 3l-6 6"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
           </li>
         ))}
       </ul>
+      <button
+        type="button"
+        className="inline__take"
+        onClick={onTake}
+        aria-label={waiting.length === 1 ? SAYS.take : SAYS.takeMany(waiting.length)}
+      >
+        {waiting.length === 1 ? SAYS.take : SAYS.takeMany(waiting.length)}
+      </button>
     </div>
   );
 }

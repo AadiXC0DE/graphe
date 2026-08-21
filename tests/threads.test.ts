@@ -8,7 +8,10 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { TASK_LABEL } from '../src/lib/describe';
 import {
+  helpersRunning,
+  nowDoing,
   changeDesk,
   currentDesk,
   noDesks,
@@ -30,7 +33,7 @@ function twoOpen(): Desks {
     ...desk,
     address: 'a',
     turns: [said('you', 'make the hero tighter')],
-    parked: { b: { turns: [said('you', 'the pricing page')], waiting: [] } },
+    parked: { b: { turns: [said('you', 'the pricing page')] } },
     order: ['a', 'b'],
   }));
 }
@@ -93,6 +96,65 @@ describe('a project with more than one conversation open', () => {
     expect(currentDesk(desks)?.turns).toHaveLength(2);
   });
 
+  it('measures concurrent jobs against the conversation that settled', () => {
+    const started = changeDesk(twoOpen(), HERE.path, (desk) => ({
+      ...desk,
+      doing: { task: { kind: 'blog' as const, size: 'feature' as const }, startedAt: 10 },
+      counted: 10,
+      parked: {
+        ...desk.parked,
+        b: {
+          ...desk.parked['b']!,
+          doing: { task: { kind: 'contact-form' as const, size: 'feature' as const }, startedAt: 20 },
+          counted: 20,
+        },
+      },
+    }));
+    const summary = (total: number) => ({
+      type: 'spend-summary' as const,
+      summary: {
+        currency: 'USD',
+        total: { minor: total, currency: 'USD' },
+        work: { minor: total, currency: 'USD' },
+        retry: { minor: 0, currency: 'USD' },
+        retryShare: 0,
+        entryCount: 1,
+        firstAt: 0,
+        lastAt: 1,
+        largestRetry: null,
+      },
+    });
+
+    const backgroundSettled = receive(started, {
+      project: HERE.path,
+      conversation: 'b',
+      event: summary(50),
+    }, 100);
+    const desk = currentDesk(backgroundSettled)!;
+    expect(desk.doing?.task.kind).toBe('blog');
+    expect(desk.parked['b']?.doing).toBeNull();
+    expect(desk.jobs.map((job) => job.cost.minor)).toEqual([30]);
+
+    const bothSettled = receive(backgroundSettled, {
+      project: HERE.path,
+      conversation: 'a',
+      event: summary(40),
+    }, 110);
+    expect(currentDesk(bothSettled)?.jobs.map((job) => job.cost.minor)).toEqual([30, 30]);
+  });
+
+  it('never puts a delayed event from an unknown conversation into the tab in front', () => {
+    const before = twoOpen();
+    const desks = receive(before, {
+      project: HERE.path,
+      conversation: 'already-closed',
+      event: { type: 'error', message: 'terminated' },
+    });
+
+    expect(currentDesk(desks)?.turns).toEqual(currentDesk(before)?.turns);
+    expect(currentDesk(desks)?.parked).toEqual(currentDesk(before)?.parked);
+  });
+
   /* Putting one down is not throwing it away — but the window does forget it,
      because reopening it reads it back from disk. */
   it('takes a put-down conversation off the row', () => {
@@ -123,5 +185,48 @@ describe('a project with more than one conversation open', () => {
     });
 
     expect(currentDesk(desks)?.spent?.total).toEqual({ minor: 40, currency: 'USD' });
+  });
+});
+
+describe('helpers stay on screen when another tab is opened', () => {
+  const helperTurn = (id: string, state: 'running' | 'done') => ({
+    kind: 'did' as const,
+    id,
+    callId: id,
+    label: TASK_LABEL,
+    detail: `work ${id}`,
+    state,
+    at: 10,
+  });
+
+  it('keeps a helper the conversation behind is still running', () => {
+    const desk = changeDesk(twoOpen(), HERE.path, (one) => ({
+      ...one,
+      turns: [],
+      parked: { ...one.parked, b: { ...one.parked['b']!, turns: [helperTurn('h1', 'running')] } },
+    }));
+    const front = currentDesk(desk)!;
+    // The whole of the bug: reading the front conversation alone found none,
+    // so the rail came off the screen and the helper looked stopped.
+    expect(nowDoing(front.turns).helpers).toHaveLength(0);
+    expect(helpersRunning(front).map((one) => one.id)).toEqual(['h1']);
+  });
+
+  it('leaves a finished helper behind a tab where it is', () => {
+    const desk = changeDesk(twoOpen(), HERE.path, (one) => ({
+      ...one,
+      turns: [],
+      parked: { ...one.parked, b: { ...one.parked['b']!, turns: [helperTurn('h2', 'done')] } },
+    }));
+    expect(helpersRunning(currentDesk(desk)!)).toHaveLength(0);
+  });
+
+  it('never lists one twice', () => {
+    const desk = changeDesk(twoOpen(), HERE.path, (one) => ({
+      ...one,
+      turns: [helperTurn('h3', 'running')],
+      parked: { ...one.parked, b: { ...one.parked['b']!, turns: [helperTurn('h3', 'running')] } },
+    }));
+    expect(helpersRunning(currentDesk(desk)!)).toHaveLength(1);
   });
 });

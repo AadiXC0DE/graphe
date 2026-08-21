@@ -77,6 +77,17 @@ const KNOWN: readonly Known[] = [
     because: 'It is not something you did. Give it a minute and ask me again.',
   },
   {
+    /* Ahead of the context rule: a provider refusing a picture often says
+       "image ... not supported" alongside a size or token word, and the two
+       read nothing alike to the person who just attached one. Most of these
+       are caught before a turn is spent, from the model catalogue; this is for
+       the models whose catalogue entry says nothing about pictures. */
+    when: /(image|vision|multimodal)[^.]{0,40}(not supported|unsupported|not allowed|cannot|invalid)|(does not|doesn't) support (image|vision)|no support for image/i,
+    what: 'This model cannot read pictures.',
+    because:
+      'The picture went with your message and the model turned it away. Take it out and ask again, or pick a model that reads pictures — the model is named beside the box.',
+  },
+  {
     when: /context (length|window)|too (long|large)|token limit|maximum context/i,
     what: 'This conversation has got too long for me to hold.',
     because: 'Start a new one and tell me where we had got to, and I will pick it up from there.',

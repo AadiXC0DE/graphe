@@ -12,6 +12,17 @@ body,
   height: 100%;
 }
 
+/* The window itself never scrolls. Every part of this app that scrolls does it
+   inside its own box, so anything that reaches the document is a few pixels of
+   overflow nobody asked for — and under *Show scroll bars: Always* it arrives
+   as a grey bar down the whole right edge, over the work, most visibly in full
+   screen where there is no window frame to explain it. Said here rather than
+   left to each layout to avoid, because one of them will stop avoiding it. */
+html,
+body {
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -21,6 +32,14 @@ body {
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+
+  /* One scrollbar rule for the whole app, said once here because both
+     properties inherit: thin, with a thumb in the control-edge colour —
+     visible against a card without shouting, and clearly darker than the old
+     --border-strong bar that read as platform furniture. Anything that wants
+     none (the main window scroller) still overrides locally. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-control) transparent;
 }
 
 button {

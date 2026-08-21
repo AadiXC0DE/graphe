@@ -26,10 +26,16 @@ type Props = {
 export const SAYS = {
   heading: 'History',
   branches: 'Lines of work',
+  /** Beside the name. Says what the list is in the words somebody would say,
+   *  without a lesson about who named what. */
+  branchesPlainly: 'working branches',
   newBranch: 'New line',
   newBranchPlaceholder: 'Name it',
   create: 'Start it',
   graph: 'See it as lines',
+  /** The word the rest of the world uses, for whoever came here from a
+   *  terminal and wants to know what they are looking at. */
+  graphPlainly: 'git graph',
   graphHint: 'Every moment, what came after what, and where two goes at the same thing joined.',
 } as const;
 
@@ -89,13 +95,16 @@ export default function History({
 
   return (
     <div className="history">
-      <div className="history__top">
-        <h2 className="history__title">{SAYS.heading}</h2>
-      </div>
+      {/* No second "History" here: the tab above the panel already says where
+          this is, and a small word repeated in the corner is noise, not a
+          heading. The panel opens straight onto its content. */}
 
       {git === null || branches.length === 0 ? null : (
         <section className="branches" aria-label={SAYS.branches}>
-          <h3 className="branches__heading">{SAYS.branches}</h3>
+          <h3 className="branches__heading">
+            {SAYS.branches}
+            <span className="branches__plainly">{SAYS.branchesPlainly}</span>
+          </h3>
 
           <ul className="branches__list">
             {branches.map((branch) => (
@@ -175,7 +184,10 @@ export default function History({
 
       {versions.length === 0 ? null : (
         <button type="button" className="history__do" onClick={onOpenGraph}>
-          {SAYS.graph}
+          <span className="history__dowords">
+            {SAYS.graph}
+            <span className="history__doplain">({SAYS.graphPlainly})</span>
+          </span>
           <span className="history__doarrow" aria-hidden="true">
             →
           </span>

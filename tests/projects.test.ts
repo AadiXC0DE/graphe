@@ -30,10 +30,12 @@ import {
   changeDesk,
   closeDesk,
   currentDesk,
+  intoTheBox,
   noDesks,
   openDesk,
   receive,
   researchLog,
+  tookBack,
   folderCalled,
 } from '../src/lib/projects';
 import type { Turn } from '../src/lib/thread';
@@ -265,6 +267,37 @@ describe('P-02 open projects, in the shell', () => {
 
     expect(closed).toEqual(['one']);
     expect(workspaces.open.map((one) => one.path)).toEqual(['/a/three', '/a/two']);
+  });
+
+  it('temporarily exceeds the soft limit rather than closing protected live work', () => {
+    const closed: string[] = [];
+    const workspaces = new Workspaces<{ name: string; active: boolean }>({
+      close: (held) => closed.push(held.name),
+      mayEvict: (held) => !held.active,
+      limit: 2,
+    });
+
+    workspaces.adopt({ path: '/a/one', name: 'one', held: { name: 'one', active: true } });
+    workspaces.adopt({ path: '/a/two', name: 'two', held: { name: 'two', active: true } });
+    workspaces.adopt({ path: '/a/three', name: 'three', held: { name: 'three', active: true } });
+
+    expect(closed).toEqual([]);
+    expect(workspaces.open).toHaveLength(3);
+  });
+
+  it('skips protected old work and evicts the oldest idle workspace instead', () => {
+    const closed: string[] = [];
+    const workspaces = new Workspaces<{ name: string; active: boolean }>({
+      close: (held) => closed.push(held.name),
+      mayEvict: (held) => !held.active,
+      limit: 2,
+    });
+
+    workspaces.adopt({ path: '/a/one', name: 'one', held: { name: 'one', active: false } });
+    workspaces.adopt({ path: '/a/two', name: 'two', held: { name: 'two', active: true } });
+    workspaces.adopt({ path: '/a/three', name: 'three', held: { name: 'three', active: true } });
+
+    expect(closed).toEqual(['one']);
   });
 
   it('counts a resume as recent, so the one you keep coming back to stays', () => {
@@ -513,5 +546,41 @@ describe('naming a folder on a board of several', () => {
   it('has something to say about a path with no parts', () => {
     expect(folderCalled('/')).toBe('/');
     expect(folderCalled('')).toBe('');
+  });
+});
+
+/**
+ * Putting the line back in the box used to throw away what was in the box.
+ *
+ * The press set the composer to the queued words outright, so a sentence
+ * somebody was halfway through typing disappeared the moment they changed their
+ * mind about the line — and an empty answer cleared the line off the screen
+ * whether or not anything had actually come back.
+ */
+describe('the line, put back in the box', () => {
+  it('keeps what was already typed, and puts it first', () => {
+    // WHY: the box is a sentence in progress. The line arrives after it, never
+    // over it.
+    expect(intoTheBox('half a thought', ['and also this'])).toBe(
+      'half a thought\n\nand also this',
+    );
+  });
+
+  it('is just the line when the box was empty', () => {
+    expect(intoTheBox('', ['first', 'second'])).toBe('first\n\nsecond');
+    // Whitespace is not a sentence anybody is in the middle of.
+    expect(intoTheBox('  \n ', ['first'])).toBe('first');
+  });
+
+  it('leaves the box alone when nothing came back', () => {
+    expect(intoTheBox('half a thought', [])).toBe('half a thought');
+  });
+
+  it('reads the steering ahead of the follow-ups, and drops the blanks', () => {
+    expect(tookBack({ steering: ['stop that', '  '], followUp: ['then this', ''] })).toEqual([
+      'stop that',
+      'then this',
+    ]);
+    expect(tookBack({ steering: [], followUp: [] })).toEqual([]);
   });
 });

@@ -28,10 +28,13 @@ import {
   NOTHING_FOLLOWED,
   type Design,
 } from '../design/moved';
+import { howMuchBy } from '../design/gate';
 import { pagesIn, type Page } from '../preview/pages';
+import { holdsBack } from '../projects/heldback';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
 import { createLimit } from '../cost/limits';
+import { daysFromUsage, type TokenUsageView } from '../lib/token-days';
 import { money } from '../cost/money';
 import { nextRun, saysNext, saysRepeat, type Repeat } from '../work/schedule';
 import {
@@ -40,6 +43,9 @@ import {
   type AgentNotice,
   type Away,
   type AwayNotice,
+  type Connected,
+  type ConnectedHealth,
+  type ConnectedState,
   type AwayPiece,
   type EveryKind,
   type Repeating,
@@ -71,6 +77,7 @@ import {
   type CarriedExtension,
   type Result,
   type Room,
+  type SideOfWork,
   type Skill,
   type Workflow,
   type BuildPlan,
@@ -107,9 +114,10 @@ function done<T>(value: T): Result<T> {
   return { ok: true, value };
 }
 
-/** Whether this project is set to hold work back for a look first. */
+/** Whether this project is set to hold work back for a look first. The same
+ *  reader the shell uses, so absent means the same thing in both. */
 function heldBackOf(preferred: { heldBack: Readonly<Record<string, boolean>> }, project: string | null): boolean {
-  return project === null ? false : preferred.heldBack[project] === true;
+  return holdsBack(preferred.heldBack, project);
 }
 
 /** A browser tab cannot make a checkout; say so the way every real reading does. */
@@ -364,6 +372,7 @@ type Props = {
   blurb: string;
 };
 
+
 export default function Hero({ title, blurb }: Props) {
   return (
     <section className="hero">
@@ -515,6 +524,29 @@ function previewAway(): Away {
       trouble: null,
       question: null,
     },
+    /* Two goes at one job, so the comparison has something to open onto. */
+    {
+      id: 'away-w1',
+      doing: 'Rework the hero — one big line, everything else out of the way',
+      state: 'done',
+      at: started - 14 * MINUTE,
+      picture: null,
+      says: 'One big line, everything else out of the way.',
+      trouble: null,
+      question: null,
+      oneOf: { of: 2, at: 1, named: 'the hero' },
+    },
+    {
+      id: 'away-w2',
+      doing: 'Rework the hero — the photograph doing the work',
+      state: 'done',
+      at: started - 12 * MINUTE,
+      picture: null,
+      says: 'The photograph full width with the words over it.',
+      trouble: null,
+      question: null,
+      oneOf: { of: 2, at: 2, named: 'the hero' },
+    },
   ];
   const repeats: readonly Repeating[] = [
     {
@@ -572,6 +604,15 @@ let previewRunning: readonly RunningPiece[] = [
   },
 ];
 
+/** Lines of work the tab can actually move between, so the switcher is a
+ *  control somebody can try rather than a picture of one. */
+let previewLine = 'main';
+let previewLines: { name: string; current: boolean; upstream: string | null; ahead: number; behind: number; message: string }[] = [
+  { name: 'main', current: true, upstream: 'origin/main', ahead: 0, behind: 2, message: 'The preview line' },
+  { name: 'pricing-page', current: false, upstream: 'origin/pricing-page', ahead: 3, behind: 0, message: 'Pricing table, second pass' },
+  { name: 'hero-rework', current: false, upstream: null, ahead: 1, behind: 0, message: 'One big line for the hero' },
+];
+
 let previewHowFar: HowFar = 'asking';
   let previewCeiling: SpendLimit | null = null;
   let previewMade = 0;
@@ -602,6 +643,7 @@ let previewHowFar: HowFar = 'asking';
     kept: {},
     showFiles: true,
     heldBack: {},
+    howMuch: null,
     ceiling: null,
   };
 
@@ -686,7 +728,7 @@ let previewHowFar: HowFar = 'asking';
       send({ type: 'message-end' });
       // A conversation fills up as it goes, so the ring beside the box moves
       // the way it would in the app rather than sitting at one figure.
-      const used = Math.min(previewRoom.total, previewRoom.used + 21_000);
+      const used = Math.min(previewRoom.total, (previewRoom.used ?? 0) + 21_000);
       previewRoom = { used, total: previewRoom.total, part: used / previewRoom.total };
       send({ type: 'settled' });
       return done(null);
@@ -725,16 +767,14 @@ let previewHowFar: HowFar = 'asking';
     return Promise.resolve(
       done({
         git: {
-          branch: 'main',
+          branch: previewLine,
           dirty: true,
           unstaged: 2,
           staged: 1,
           untracked: 1,
           ahead: 0,
           behind: 2,
-          branches: [
-            { name: 'main', current: true, upstream: 'origin/main', ahead: 0, behind: 2, message: 'The preview line' },
-          ],
+          branches: previewLines.map((one) => ({ ...one, current: one.name === previewLine })),
           files: PREVIEW_CHANGED.map((path) => ({
             path,
             kind: path.startsWith('public/') ? ('new' as const) : ('changed' as const),
@@ -951,16 +991,23 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done([]));
     },
 
-    branchSwitch(): Promise<Result<null>> {
-      return Promise.resolve(previewFail<null>());
+    branchSwitch(name?: unknown): Promise<Result<null>> {
+      if (typeof name !== 'string' || !previewLines.some((one) => one.name === name)) {
+        return Promise.resolve(previewFail<null>());
+      }
+      previewLine = name;
+      return Promise.resolve(done(null));
     },
-    branchCreate(): Promise<Result<null>> {
-      return Promise.resolve(previewFail<null>());
+    branchCreate(name?: unknown): Promise<Result<null>> {
+      if (typeof name !== 'string' || name.trim() === '') return Promise.resolve(previewFail<null>());
+      const made = name.trim();
+      previewLines = [
+        ...previewLines,
+        { name: made, current: false, upstream: null, ahead: 0, behind: 0, message: '' },
+      ];
+      previewLine = made;
+      return Promise.resolve(done(null));
     },
-    worktreeStart(): Promise<Result<{ folder: string; branch: string }>> {
-      return Promise.resolve(previewFail<{ folder: string; branch: string }>());
-    },
-
     worktreeLand(): Promise<Result<null>> {
       return Promise.resolve(previewFail<null>());
     },
@@ -1154,6 +1201,10 @@ let previewHowFar: HowFar = 'asking';
           history: [],
           conversation: path,
           address: path ?? `new-${String(previewMade)}`,
+          // The first conversation of a project works in the folder itself and
+          // every one after it on a copy, so the preview shows the offer the
+          // real shell makes rather than hiding half the shelf.
+          ownCopy: previewMade > 1,
         }),
       );
     },
@@ -1287,6 +1338,21 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(split));
     },
 
+    /** A browser has no transcripts to read, so the grid is drawn from a
+     *  fortnight of plausible days — enough to show every intensity step and
+     *  the empty ones between, which is what a screenshot of this screen is
+     *  for. */
+    tokenUsage(): Promise<Result<TokenUsageView | null>> {
+      const now = Date.now();
+      const DAY = 24 * 60 * 60 * 1000;
+      const shape = [0, 41_200, 0, 128_900, 64_300, 0, 12_400, 88_100, 0, 0, 152_700, 45_600, 9_800, 0];
+      const entries = shape.flatMap((tokens, back) => {
+        const at = now - (shape.length - 1 - back) * DAY - 3 * 60 * 60 * 1000;
+        return tokens === 0 ? [] : [{ at, tokens }];
+      });
+      return Promise.resolve(done(daysFromUsage(entries)));
+    },
+
     closeConversation(): Promise<Result<null>> {
       return Promise.resolve(done(null));
     },
@@ -1365,6 +1431,11 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setHowMuch(id: string): Promise<Result<Preferences>> {
+      preferred = { ...preferred, howMuch: howMuchBy(id).id };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
     decideOnWork(letIn: boolean, _where?: Where): Promise<Result<Decided>> {
       return Promise.resolve(
         done({
@@ -1400,6 +1471,34 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(atWork));
     },
 
+    takeBackQueue(): Promise<Result<{ steering: readonly string[]; followUp: readonly string[] }>> {
+      return Promise.resolve(done({ steering: [], followUp: [] }));
+    },
+
+    changesLook(): Promise<Result<string>> {
+      return Promise.resolve(done(''));
+    },
+    changesDrop(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    connectedLook(): Promise<Result<ConnectedState>> {
+      return Promise.resolve(
+        done({
+          tools: [{ name: 'figma', command: 'npx', args: ['figma-developer-mcp', '--stdio'] }],
+          file: '/work/this-project/.pi/mcp.json',
+          trouble: null,
+          skipped: [],
+        }),
+      );
+    },
+    connectedCheck(): Promise<Result<ConnectedHealth>> {
+      return Promise.resolve(done({ state: 'working', tools: ['get_file', 'get_image'] }));
+    },
+    connectedSave(tools: readonly Connected[]): Promise<Result<ConnectedState>> {
+      return Promise.resolve(done({ tools, file: '/work/this-project/.pi/mcp.json', trouble: null, skipped: [] }));
+    },
+
     copyConversation(path: string): Promise<Result<string>> {
       return Promise.resolve(done(`${path}-copy`));
     },
@@ -1430,7 +1529,16 @@ let previewHowFar: HowFar = 'asking';
       });
     },
 
-    putAfter(_id?: unknown, _after?: unknown, _where?: Where): Promise<Result<Away>> {
+    /* Letting one off its wait: the note goes, and it is simply next. */
+    putAfter(id?: unknown, after?: unknown, _where?: Where): Promise<Result<Away>> {
+      if (typeof id === 'string') {
+        atWork = {
+          ...atWork,
+          pieces: atWork.pieces.map((one) =>
+            one.id !== id || after !== null ? one : { ...one, after: null, state: 'waiting' as const },
+          ),
+        };
+      }
       return Promise.resolve(done({ ...atWork }));
     },
 
@@ -1486,6 +1594,48 @@ let previewHowFar: HowFar = 'asking';
                     ? 'Carrying on now.'
                     : 'You said no, so I left it and carried on without it.',
               },
+        ),
+      };
+      return Promise.resolve(done(atWork));
+    },
+
+    /* Taking a set needs real folders, so the tab says so rather than pretending. */
+    keepSet(_ids: readonly string[], _where?: Where): Promise<Result<Away>> {
+      return Promise.resolve(previewFail<Away>());
+    },
+
+    /* Two goes at one job, so the view has something real to line up. */
+    compareWays(_ways: string, _where?: Where): Promise<Result<readonly SideOfWork[]>> {
+      return Promise.resolve(
+        done([
+          {
+            id: 'way-1',
+            name: 'Way 1',
+            state: 'done',
+            diff: MOCK_SIDE_A,
+            picture: null,
+            spent: null,
+            folder: null,
+          },
+          {
+            id: 'way-2',
+            name: 'Way 2',
+            state: 'done',
+            diff: MOCK_SIDE_B,
+            picture: null,
+            spent: null,
+            folder: null,
+          },
+        ]),
+      );
+    },
+
+    /* Heard between steps: the piece keeps going, it just knows one more thing. */
+    sayToAway(id: string, text: string, _where?: Where): Promise<Result<Away>> {
+      atWork = {
+        ...atWork,
+        pieces: atWork.pieces.map((one) =>
+          one.id !== id ? one : { ...one, says: `Heard you: ${text}` },
         ),
       };
       return Promise.resolve(done(atWork));
@@ -1707,7 +1857,7 @@ function connect(): Bridge {
     // the one on screen.
     stop: (where) => api.stop(where),
     steer: (text, where) => api.steer(text, where),
-    answer: (callId, decision) => api.answer(callId, decision),
+    answer: (callId, decision, where) => api.answer(callId, decision, where),
     chooseFolder: () => api.chooseFolder(),
     recentProjects: () => api.recentProjects(),
     overview: () => api.overview(),
@@ -1727,14 +1877,13 @@ function connect(): Bridge {
     hatches: () => api.hatches(),
     openInEditor: (file) => api.openInEditor(file),
     saveVersion: (name) => api.saveVersion(name),
-    room: () => api.room(),
-    tidyNow: () => api.tidyNow(),
+    room: (where) => api.room(where),
+    tidyNow: (where) => api.tidyNow(where),
     skills: () => api.skills(),
     skillText: (id) => api.skillText(id),
     workflows: () => api.workflows(),
     branchSwitch: (name, where) => api.branchSwitch(name, where),
     branchCreate: (name, where) => api.branchCreate(name, where),
-    worktreeStart: (where) => api.worktreeStart(where),
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),
     buildStart: (source, where) => api.buildStart(source, where),
@@ -1742,10 +1891,10 @@ function connect(): Bridge {
     buildAdvance: (op, where) => api.buildAdvance(op, where),
     chooseDocument: (where) => api.chooseDocument(where),
     buildSave: (tasks, where) => api.buildSave(tasks, where),
-    stopAsking: (on) => api.stopAsking(on),
-    goAsFarAs: (howFar) => api.goAsFarAs(howFar),
-    running: () => api.running(),
-    stopRunning: (id) => api.stopRunning(id),
+    stopAsking: (on, where) => api.stopAsking(on, where),
+    goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
+    running: (where) => api.running(where),
+    stopRunning: (id, where) => api.stopRunning(id, where),
     carried: () => api.carried(),
     trustCarried: (id, trust) => api.trustCarried(id, trust),
     revealFolder: () => api.revealFolder(),
@@ -1769,7 +1918,7 @@ function connect(): Bridge {
     onEvent: (listener) => api.onEvent(listener),
     visualFrames: (changeId) => api.visualFrames(changeId),
     onVisualChange: (listener) => api.onVisualChange(listener),
-    connection: () => api.connection(),
+    connection: (fresh) => api.connection(fresh),
     connect: (providerId, method) => api.connect(providerId, method),
     connectAnswer: (promptId, value) => api.connectAnswer(promptId, value),
     cancelConnect: () => api.cancelConnect(),
@@ -1784,6 +1933,7 @@ function connect(): Bridge {
     watchStart: (says) => api.watchStart(says),
     watchStop: () => api.watchStop(),
     spendSplit: () => api.spendSplit(),
+    tokenUsage: () => api.tokenUsage(),
     spendLimit: () => api.spendLimit(),
     setSpendLimit: (ceiling) => api.setSpendLimit(ceiling),
     onConnectStep: (listener) => api.onConnectStep(listener),
@@ -1792,9 +1942,16 @@ function connect(): Bridge {
     openLink: (url) => api.openLink(url),
     landing: () => api.landing(),
     setHoldBack: (on, where) => api.setHoldBack(on, where),
+    setHowMuch: (id) => api.setHowMuch(id),
     decideOnWork: (letIn) => api.decideOnWork(letIn),
     handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
     putOnline: (confirmed) => api.putOnline(confirmed),
+    connectedLook: (where) => api.connectedLook(where),
+    connectedCheck: (name, where) => api.connectedCheck(name, where),
+    connectedSave: (tools, where) => api.connectedSave(tools, where),
+    changesLook: (where) => api.changesLook(where),
+    changesDrop: (patch, where) => api.changesDrop(patch, where),
+    takeBackQueue: (where) => api.takeBackQueue(where),
     away: (where) => api.away(where),
     copyConversation: (path, where) => api.copyConversation(path, where),
     awayEverywhere: () => api.awayEverywhere(),
@@ -1802,6 +1959,9 @@ function connect(): Bridge {
     stopAway: (id, where) => api.stopAway(id, where),
     keepAway: (id, where) => api.keepAway(id, where),
     answerAway: (id, callId, decision, where) => api.answerAway(id, callId, decision, where),
+    sayToAway: (id, text, where) => api.sayToAway(id, text, where),
+    compareWays: (ways, where) => api.compareWays(ways, where),
+    keepSet: (ids, where) => api.keepSet(ids, where),
     addRepeat: (doing, every, at, on, where) => api.addRepeat(doing, every, at, on, where),
     switchRepeat: (id, on, where) => api.switchRepeat(id, on, where),
     forgetRepeat: (id, where) => api.forgetRepeat(id, where),
@@ -1825,3 +1985,44 @@ export const bridge: Bridge = connect();
 if (typeof document !== 'undefined' && bridge.desktop) {
   document.documentElement.dataset['shell'] = 'desktop';
 }
+
+/* Two goes at the same job, as real patches: one file both changed differently,
+   one file only the second touched. Enough for the comparison to be worth
+   opening in a browser tab with no app behind it. */
+const MOCK_SIDE_A = `diff --git a/src/Header.tsx b/src/Header.tsx
+index 1111111..2222222 100644
+--- a/src/Header.tsx
++++ b/src/Header.tsx
+@@ -3,5 +3,6 @@ export function Header() {
+   return (
+     <header className="header">
++      <span className="header__mark" />
+       <h1>Graphe</h1>
+     </header>
+   );
+`;
+
+const MOCK_SIDE_B = `diff --git a/src/Header.tsx b/src/Header.tsx
+index 1111111..3333333 100644
+--- a/src/Header.tsx
++++ b/src/Header.tsx
+@@ -3,5 +3,7 @@ export function Header() {
+   return (
+     <header className="header header--sticky">
+-      <h1>Graphe</h1>
++      <h1 className="header__name">Graphe</h1>
++      <p className="header__what">What you are working on</p>
+     </header>
+   );
+diff --git a/src/Header.css b/src/Header.css
+index 4444444..5555555 100644
+--- a/src/Header.css
++++ b/src/Header.css
+@@ -1,3 +1,6 @@
+ .header {
+   display: flex;
+ }
++.header--sticky {
++  position: sticky;
++}
+`;

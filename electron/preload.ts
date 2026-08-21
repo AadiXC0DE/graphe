@@ -21,6 +21,9 @@ import {
   type AgentNotice,
   type Away,
   type AwayNotice,
+  type Connected,
+  type ConnectedHealth,
+  type ConnectedState,
   type EveryKind,
   type ConnectOutcome,
   type ConnectStep,
@@ -54,6 +57,7 @@ import {
   type Result,
   type CarriedExtension,
   type Room,
+  type SideOfWork,
   type Skill,
   type Workflow,
   type BuildPlan,
@@ -70,6 +74,7 @@ import {
   type SpendLimit,
   type SpendSummary,
   type ThinkingLevel,
+  type TokenUsageView,
   type WindowState,
   type VisualFrames,
   type VisualNotice,
@@ -142,7 +147,10 @@ const api: GrapheApi = {
               typeof one.bytes === 'string' &&
               one.bytes !== '',
           );
-    const ways: PromptOptions = { lookFirst: options?.lookFirst === true };
+    const ways: PromptOptions = {
+      lookFirst: options?.lookFirst === true,
+      ...(options?.queue === 'followUp' ? { queue: 'followUp' as const } : {}),
+    };
     return ipcRenderer.invoke(CHANNEL.prompt, text, clean, ways, named(where)) as Promise<Result<null>>;
   },
 
@@ -307,12 +315,6 @@ const api: GrapheApi = {
   branchCreate(name: string, where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.branchCreate, name, named(where)) as Promise<Result<null>>;
   },
-  worktreeStart(where?: Where): Promise<Result<{ folder: string; branch: string }>> {
-    return ipcRenderer.invoke(CHANNEL.worktreeStart, named(where)) as Promise<
-      Result<{ folder: string; branch: string }>
-    >;
-  },
-
   worktreeLand(where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.worktreeLand, named(where)) as Promise<Result<null>>;
   },
@@ -559,8 +561,8 @@ const api: GrapheApi = {
     };
   },
 
-  connection(): Promise<Result<ConnectionState>> {
-    return ipcRenderer.invoke(CHANNEL.connection) as Promise<Result<ConnectionState>>;
+  connection(fresh?: boolean): Promise<Result<ConnectionState>> {
+    return ipcRenderer.invoke(CHANNEL.connection, fresh === true) as Promise<Result<ConnectionState>>;
   },
 
   connect(providerId: string, method: ProviderMethod): Promise<Result<ConnectOutcome>> {
@@ -632,6 +634,10 @@ const api: GrapheApi = {
 
   spendSplit(where?: Where): Promise<Result<SpendSummary | null>> {
     return ipcRenderer.invoke(CHANNEL.spendSplit, named(where)) as Promise<Result<SpendSummary | null>>;
+  },
+
+  tokenUsage(): Promise<Result<TokenUsageView | null>> {
+    return ipcRenderer.invoke(CHANNEL.tokenUsage) as Promise<Result<TokenUsageView | null>>;
   },
 
   pageAt(
@@ -732,6 +738,13 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.setHoldBack, on, named(where)) as Promise<Result<Preferences>>;
   },
 
+  setHowMuch(id: string): Promise<Result<Preferences>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<Preferences>('I could not tell which line that was.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setHowMuch, id) as Promise<Result<Preferences>>;
+  },
+
   decideOnWork(letIn: boolean, where?: Where): Promise<Result<Decided>> {
     if (typeof letIn !== 'boolean') {
       return Promise.resolve(refuse<Decided>('I could not tell what you decided.'));
@@ -762,6 +775,26 @@ const api: GrapheApi = {
   },
   copyConversation(path: string, where?: Where): Promise<Result<string>> {
     return ipcRenderer.invoke(CHANNEL.copyConversation, path, named(where)) as Promise<Result<string>>;
+  },
+  connectedLook(where?: Where): Promise<Result<ConnectedState>> {
+    return ipcRenderer.invoke(CHANNEL.connectedLook, named(where)) as Promise<Result<ConnectedState>>;
+  },
+  connectedCheck(name: string, where?: Where): Promise<Result<ConnectedHealth>> {
+    return ipcRenderer.invoke(CHANNEL.connectedCheck, name, named(where)) as Promise<Result<ConnectedHealth>>;
+  },
+  connectedSave(tools: readonly Connected[], where?: Where): Promise<Result<ConnectedState>> {
+    return ipcRenderer.invoke(CHANNEL.connectedSave, tools, named(where)) as Promise<Result<ConnectedState>>;
+  },
+  changesLook(where?: Where): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.changesLook, named(where)) as Promise<Result<string>>;
+  },
+  changesDrop(patch: string, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.changesDrop, patch, named(where)) as Promise<Result<null>>;
+  },
+  takeBackQueue(where?: Where): Promise<Result<{ steering: readonly string[]; followUp: readonly string[] }>> {
+    return ipcRenderer.invoke(CHANNEL.takeBackQueue, named(where)) as Promise<
+      Result<{ steering: readonly string[]; followUp: readonly string[] }>
+    >;
   },
   away(where?: Where): Promise<Result<Away>> {
     return ipcRenderer.invoke(CHANNEL.away, named(where)) as Promise<Result<Away>>;
@@ -829,6 +862,29 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<Away>('I could not tell which question that answered.'));
     }
     return ipcRenderer.invoke(CHANNEL.answerAway, id, callId, decision, named(where)) as Promise<Result<Away>>;
+  },
+
+  sayToAway(id: string, text: string, where?: Where): Promise<Result<Away>> {
+    if (typeof id !== 'string' || id.trim() === '' || typeof text !== 'string' || text.trim() === '') {
+      return Promise.resolve(refuse<Away>('There was nothing to say.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.sayToAway, id, text, named(where)) as Promise<Result<Away>>;
+  },
+
+  keepSet(ids: readonly string[], where?: Where): Promise<Result<Away>> {
+    if (!Array.isArray(ids) || ids.some((one) => typeof one !== 'string' || one.trim() === '')) {
+      return Promise.resolve(refuse<Away>('I could not tell which pieces of work those were.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.keepSet, [...ids], named(where)) as Promise<Result<Away>>;
+  },
+
+  compareWays(ways: string, where?: Where): Promise<Result<readonly SideOfWork[]>> {
+    if (typeof ways !== 'string' || ways.trim() === '') {
+      return Promise.resolve(refuse<readonly SideOfWork[]>('There was nothing to compare.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.compareWays, ways, named(where)) as Promise<
+      Result<readonly SideOfWork[]>
+    >;
   },
 
   addRepeat(

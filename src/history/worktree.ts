@@ -1,4 +1,4 @@
-import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 /** One conversation, its own checkout.
@@ -51,6 +51,9 @@ export const worktreeWords = {
    *  left mid-merge, which that sentence gives no hint of. */
   clashed:
     'This conversation and your own work changed the same lines, so I could not put them together. I have left everything exactly as it was.',
+  /** A conversation put away and then asked for again, whose work is no longer
+   *  in the project. Said rather than quietly opened on the wrong files. */
+  gone: 'The work this conversation was doing is not in this project any more, so I could not open it again.',
 } as const;
 
 /** What an Apply carried back, and where it could not. */
@@ -201,6 +204,87 @@ export async function releaseWorktree(run: RunGit, repo: string, folder: string)
   return ok();
 }
 
+/** Spread a conversation's branch back out on disk. Nothing is created: a
+ *  conversation whose branch has gone is told so rather than opened on files
+ *  that are not its own. */
+export async function reopenWorktree(
+  run: RunGit,
+  repo: string,
+  branch: string,
+  folder: string,
+): Promise<Result> {
+  if (!(await isRepo(run, repo))) return no(worktreeWords.notRepo);
+  const known = await run(['rev-parse', '--verify', `refs/heads/${branch}`], { cwd: repo });
+  if (known.code !== 0) return no(worktreeWords.gone);
+  // A folder git still has a note about, from a checkout that went away
+  // untidily, would otherwise refuse the add.
+  await run(['worktree', 'prune'], { cwd: repo });
+  const added = await run(['worktree', 'add', '--force', folder, branch], { cwd: repo });
+  if (added.code !== 0) return no(worktreeWords.gone);
+  return ok({ folder, branch });
+}
+
+/**
+ * Put a conversation's checkout away until it is next wanted.
+ *
+ * What a conversation owns is its branch. The folder is only that branch spread
+ * out on disk — kilobytes against gigabytes, and the gigabytes are what a
+ * dependency install and a build leave behind in it. So a conversation nobody
+ * is in gives the folder back and keeps the branch, and `reopenWorktree` spreads
+ * it out again if somebody returns.
+ *
+ * Refused while the working tree holds something, because that is the one thing
+ * the branch is not already holding. Say so with `put`: false is "still there",
+ * not "went wrong".
+ */
+export async function putAwayWorktree(
+  run: RunGit,
+  repo: string,
+  folder: string,
+): Promise<{ put: boolean }> {
+  if (await holdsWork(run, folder)) return { put: false };
+  const released = await releaseWorktree(run, repo, folder);
+  if (!released.ok) return { put: false };
+  await run(['worktree', 'prune'], { cwd: repo });
+  return { put: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Giving the idle ones back                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** Whether the working tree holds something the branch does not. Ignored files
+ *  do not count — an install or a build is made again, and that is the disk
+ *  worth reclaiming. A folder git cannot read is treated as holding work. */
+export async function holdsWork(run: RunGit, folder: string): Promise<boolean> {
+  const { code, out } = await run(['status', '--porcelain'], { cwd: folder });
+  if (code !== 0 || out === undefined) return true;
+  return out.split('\n').some((line) => line.trim() !== '');
+}
+
+/** The backstop: checkouts left by conversations that are gone, or by a copy of
+ *  the app older than any of this. Never takes one the caller says is owned, or
+ *  one holding work. The caller says what is on disk. */
+export async function sweepCheckouts(
+  run: RunGit,
+  repo: string,
+  found: readonly string[],
+  options: { inUse?: (folder: string) => boolean } = {},
+): Promise<readonly string[]> {
+  const inUse = options.inUse ?? (() => false);
+  const given: string[] = [];
+  for (const folder of found) {
+    if (inUse(folder)) continue;
+    if (await holdsWork(run, folder)) continue;
+    const released = await releaseWorktree(run, repo, folder);
+    if (released.ok) given.push(folder);
+  }
+  // Git keeps a note per checkout inside the repository. Removing the folders
+  // above leaves those notes pointing at nothing.
+  if (given.length > 0) await run(['worktree', 'prune'], { cwd: repo });
+  return given;
+}
+
 /** The names and statuses git reports, as `{ kind, path }` rows.
  *
  * Always asked for with `-z`. Git's ordinary output quotes any path that is not
@@ -264,8 +348,31 @@ async function sharedBase(run: RunGit, folder: string, repo: string): Promise<st
 
 /** Whether the main checkout changed that path since the shared base. */
 async function mainChanged(run: RunGit, repo: string, base: string, path: string): Promise<boolean> {
-  const rows = await changedAgainst(run, repo, ['diff', '--name-status', '--no-renames', base, '--', path]);
-  return rows.length > 0;
+  const [tracked, untracked] = await Promise.all([
+    changedAgainst(run, repo, ['diff', '--name-status', '--no-renames', base, '--', path]),
+    changedAgainst(run, repo, ['ls-files', '--others', '--exclude-standard', '--', path], 'paths'),
+  ]);
+  return tracked.length > 0 || untracked.length > 0;
+}
+
+/** True when both sides changed a path to the same final state. This is common
+ * after the live preview Apply has already carried a conversation's work home;
+ * treating identical bytes as a conflict makes the later explicit landing
+ * impossible even though there is nothing to choose between. */
+async function sameFileState(
+  repo: string,
+  folder: string,
+  row: { kind: 'A' | 'D' | 'M'; path: string },
+): Promise<boolean> {
+  const target = resolve(repo, row.path);
+  if (row.kind === 'D') {
+    return readFile(target).then(() => false).catch(() => true);
+  }
+  const [main, copy] = await Promise.all([
+    readFile(target).catch(() => null),
+    readFile(resolve(folder, row.path)).catch(() => null),
+  ]);
+  return main !== null && copy !== null && main.equals(copy);
 }
 
 /** Copy one file from the worktree into the main checkout, or remove it. */
@@ -304,7 +411,8 @@ export async function bringBack(
   const conflicted: string[] = [];
   for (const row of changes) {
     if (await mainChanged(run, repo, base, row.path)) {
-      conflicted.push(row.path);
+      if (await sameFileState(repo, folder, row)) applied.push(row.path);
+      else conflicted.push(row.path);
     } else {
       await carryFile(repo, folder, row);
       applied.push(row.path);

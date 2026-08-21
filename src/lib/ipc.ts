@@ -25,6 +25,9 @@ import type { Page } from '../preview/pages';
 import type { Reading } from '../preview/inspect';
 import type { Pointed } from '../preview/point';
 import type { WorkState } from '../work/board';
+import type { TokenUsageView } from '../lib/token-days';
+
+export type { TokenUsageView } from '../lib/token-days';
 
 export type {
   FileEntry,
@@ -130,6 +133,13 @@ export type OpenedProject = {
    *  it is open, including before the first word has been written down, so a
    *  window can address a conversation it has only just started. */
   address?: string;
+  /** The autonomy rung this live conversation is actually using. A reopened
+   *  session may not be on the default rung, so the window must not guess. */
+  howFar?: HowFar;
+  /** True when this conversation is working in its own copy of the project
+   *  rather than in the folder itself. Only the window knows to offer bringing
+   *  that work back or throwing it away, and only if it is told. */
+  ownCopy?: boolean;
 };
 
 /**
@@ -157,11 +167,30 @@ export type RecentProject = {
  * The window draws it as a ring beside the box. Everything here is the model's
  * own reckoning read back through Pi — nothing is counted on this side.
  */
+/** One go at a job, as the comparison draws it. Kept apart from the board's
+ *  own piece: this one carries the change, which nothing else needs. */
+export type SideOfWork = {
+  id: string;
+  name: string;
+  /** Where this go is up to. Only a finished one can be taken; the rest are
+   *  drawn as columns because watching one form is worth something. */
+  state: WorkState;
+  /** Everything it changed, as one patch. Empty when it changed nothing. */
+  diff: string;
+  picture: string | null;
+  /** What it came to, already in words. */
+  spent: string | null;
+  /** Its own copy of the project, so the same set can be served and looked at
+   *  rather than only read as a patch. Null once the copy has gone. */
+  folder: string | null;
+};
+
 export type Room = {
-  used: number;
+  /** Unknown briefly after compaction, while the window size remains known. */
+  used: number | null;
   total: number;
-  /** The two above as a fraction, 0 to 1. */
-  part: number;
+  /** The two above as a fraction, 0 to 1; unknown with `used`. */
+  part: number | null;
 };
 
 /**
@@ -406,8 +435,11 @@ export type Preferences = {
   showFiles: boolean;
   /** Whether each project holds work back to be looked at first, keyed by its
    *  path. Per project, so saying “ask me first” in one folder never changes
-   *  another. */
+   *  another. Absent is off — read it through `holdsBack`. */
   heldBack: Readonly<Record<string, boolean>>;
+  /** How much a picture has to move before work is stopped, by id, or null for
+   *  the middle one. */
+  howMuch: string | null;
   /** The ceiling somebody set on spending, or null when they have not set one.
    *  Remembered across launches: a ceiling that forgets itself is not one. */
   ceiling: Money | null;
@@ -540,7 +572,13 @@ export type AwayPiece = {
   spent?: Money | null;
   /** One of several goes at the same thing, and how many there are. Absent on
    *  ordinary work, which is almost all of it. */
-  oneOf?: { of: number; at: number } | null;
+  /** The files this one changed, once it has finished. Two pieces that
+   *  changed the same file are the one thing worth saying before a set goes
+   *  in. Absent on anything unfinished. */
+  touches?: readonly string[] | null;
+  oneOf?: { of: number; at: number;
+    /** What the goes share, so any one of them can open the comparison. */
+    named: string } | null;
   /** What it is waiting to be told, or null. */
   question: AwayQuestion | null;
   /** What has to finish before it starts, or null when nothing does. */
@@ -634,6 +672,9 @@ export type ModelOption = {
   rates: { input: number; output: number } | null;
   /** How much it can hold at once, in tokens. Null when unstated. */
   contextWindow: number | null;
+  /** Whether it reads pictures. Null when its catalogue entry does not say —
+   *  not knowing and knowing it cannot are different claims. */
+  takesImages?: boolean | null;
   /** The only depths this exact model accepts. Absent for older shell data. */
   thinking?: readonly ThinkingLevel[];
 };
@@ -665,6 +706,38 @@ export type ProviderAuth = {
 /** The whole state of "who can think for me", asked for by the window and
  *  rebuilt by the shell each time — credentials change on another machine's
  *  login, and a stale list is worse than none. */
+/** One other tool a project has plugged in. Four fields and no more: an entry
+ *  can also hold an API key, and the window is not a place to keep one. Those
+ *  stay in the file, and the shell carries them across a save. */
+export type Connected = {
+  name: string;
+  /** The command that starts it, and anything passed to it. Machinery, and
+   *  named as such: this is a view somebody opened on purpose. Empty when the
+   *  tool is already running and `address` says where to reach it. */
+  command: string;
+  args: readonly string[];
+  address?: string;
+};
+
+/** What one of them is doing, once somebody has asked. Never guessed — a tool
+ *  nobody has checked is not the same as one that works. */
+export type ConnectedHealth =
+  | { state: 'unknown' }
+  | { state: 'working'; tools: readonly string[] }
+  | { state: 'would-not-start'; because: string };
+
+/** Everything the panel needs: what is connected, where the list lives, and
+ *  whether the list itself could be read. */
+export type ConnectedState = {
+  tools: readonly Connected[];
+  /** The file, for the person who wants to open it themselves. */
+  file: string;
+  /** Why the list could not be read, when it could not. */
+  trouble: string | null;
+  /** Entries that were in the list and could not be used. */
+  skipped: readonly string[];
+};
+
 export type ConnectionState = {
   providers: readonly ProviderAuth[];
   /** The model chosen to work with, or null for "whatever is available". */
@@ -1003,6 +1076,10 @@ export type RepoItem = {
   updatedAt: string;
   /** The base branch, for a pull request. */
   baseRef: string | null;
+  /** The line of work a pull request is asking to merge, and the exact commit
+   *  it is at. Null for an issue, and when github did not say. */
+  headRef: string | null;
+  headSha: string | null;
 };
 
 /** Everything the reviews screen needs about the project's github repository.
@@ -1016,6 +1093,13 @@ export type RepoLook =
       url: string;
       issues: readonly RepoItem[];
       prs: readonly RepoItem[];
+      /** What this folder is actually on. A review reads files from somewhere,
+       *  and telling it which line of work the folder is on is the difference
+       *  between reading the pull request and reading whatever was open. */
+      here: { branch: string | null; sha: string } | null;
+      /** Why the lists are short, when github could not be asked. Null when it
+       *  answered — and only then does an empty list mean there are none. */
+      trouble: string | null;
     }
   | null;
 
@@ -1071,7 +1155,6 @@ export const CHANNEL = {
   workflows: 'graphe:workflows',
   branchSwitch: 'graphe:branch-switch',
   branchCreate: 'graphe:branch-create',
-  worktreeStart: 'graphe:worktree-start',
   worktreeLand: 'graphe:worktree-land',
   worktreeDrop: 'graphe:worktree-drop',
   buildStart: 'graphe:build-start',
@@ -1105,6 +1188,7 @@ export const CHANNEL = {
   selectModel: 'graphe:select-model',
   setThinking: 'graphe:set-thinking',
   spendSplit: 'graphe:spend-split',
+  tokenUsage: 'graphe:token-usage',
   spendLimit: 'graphe:spend-limit',
   setSpendLimit: 'graphe:set-spend-limit',
   connectStep: 'graphe:connect-step',
@@ -1113,9 +1197,16 @@ export const CHANNEL = {
   openLink: 'graphe:open-link',
   landing: 'graphe:landing',
   setHoldBack: 'graphe:set-hold-back',
+  setHowMuch: 'graphe:set-how-much',
   decideOnWork: 'graphe:decide-on-work',
   handToDeveloper: 'graphe:hand-to-developer',
   putOnline: 'graphe:put-online',
+  connectedLook: 'graphe:connected-look',
+  connectedCheck: 'graphe:connected-check',
+  connectedSave: 'graphe:connected-save',
+  takeBackQueue: 'graphe:take-back-queue',
+  changesLook: 'graphe:changes-look',
+  changesDrop: 'graphe:changes-drop',
   away: 'graphe:away',
   awayEverywhere: 'graphe:away-everywhere',
   keepGoing: 'graphe:keep-going',
@@ -1124,6 +1215,9 @@ export const CHANNEL = {
   stopAway: 'graphe:stop-away',
   keepAway: 'graphe:keep-away',
   answerAway: 'graphe:answer-away',
+  sayToAway: 'graphe:say-to-away',
+  compareWays: 'graphe:compare-ways',
+  keepSet: 'graphe:keep-set',
   addRepeat: 'graphe:add-repeat',
   switchRepeat: 'graphe:switch-repeat',
   forgetRepeat: 'graphe:forget-repeat',
@@ -1250,13 +1344,11 @@ export type GrapheApi = {
   buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>>;
   /** Pick a requirements document on disk and read its text, or null if closed. */
   chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>>;
-  /** Put the front conversation to work in its own git branch and checkout. */
   /** Move the project onto another of its lines of work. Refuses while the
    *  current work is not yet saved. */
   branchSwitch(name: string, where?: Where): Promise<Result<null>>;
   /** Start a new line of work and move the project onto it. */
   branchCreate(name: string, where?: Where): Promise<Result<null>>;
-  worktreeStart(where?: Where): Promise<Result<{ folder: string; branch: string }>>;
   /** Merge the front conversation's own branch back, and drop the checkout. */
   worktreeLand(where?: Where): Promise<Result<null>>;
   /** Throw the front conversation's own checkout away, branch and all. */
@@ -1365,7 +1457,9 @@ export type GrapheApi = {
   onVisualChange(listener: (notice: VisualNotice) => void): () => void;
 
   /** Everything the window knows about who can think for it. */
-  connection(): Promise<Result<ConnectionState>>;
+  /** Who can think for this computer. `fresh` re-reads the model catalogue off
+   *  disk, for the moment somebody has just added one somewhere else. */
+  connection(fresh?: boolean): Promise<Result<ConnectionState>>;
   /** Sign in to a provider, or paste its API key. Follows along while it
    *  happens via `onConnectStep`; ask for `connectAnswer` when a step asks a
    *  question. Resolves when the whole attempt is over. */
@@ -1384,6 +1478,9 @@ export type GrapheApi = {
   /** Where the money went in this project, asked for rather than waited for.
    *  Null when nothing has been spent yet. */
   spendSplit(where?: Where): Promise<Result<SpendSummary | null>>;
+  /** Tokens through the model, one day at a time, read from this computer's
+   *  own session transcripts. Null when there are none to read. */
+  tokenUsage(): Promise<Result<TokenUsageView | null>>;
   /** The ceiling somebody set on spending, or null when they have not set one. */
   spendLimit(): Promise<Result<SpendLimit | null>>;
   /** Set it, raise it, or take it away with null. Answers with what is held. */
@@ -1404,6 +1501,9 @@ export type GrapheApi = {
   landing(where?: Where): Promise<Result<Landing>>;
   /** Check new work in a copy before it reaches the files. Sticky. */
   setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>>;
+  /** Move the line a picture has to cross before the work is stopped. One of
+   *  `HOW_MUCH` in `src/design/gate.ts`. Sticky. */
+  setHowMuch(id: string): Promise<Result<Preferences>>;
   /** Let the work that is waiting in, or set it aside. Both are undoable —
    *  letting it in through `putBack`, setting it aside by deciding again. */
   decideOnWork(letIn: boolean, where?: Where): Promise<Result<Decided>>;
@@ -1420,6 +1520,22 @@ export type GrapheApi = {
   putOnline(confirmed: boolean, where?: Where): Promise<Result<WentOnline>>;
 
   /* ---------------------------------------------- while you are not looking */
+
+  /** The other tools this project has plugged in, and whether its list reads. */
+  connectedLook(where?: Where): Promise<Result<ConnectedState>>;
+  /** Start one, ask what it offers, and stop it again. Only ever on a press. */
+  connectedCheck(name: string, where?: Where): Promise<Result<ConnectedHealth>>;
+  /** Write the whole list back. */
+  connectedSave(tools: readonly Connected[], where?: Where): Promise<Result<ConnectedState>>;
+
+  /** Everything changed in the folder and not saved yet, as a diff to read. */
+  changesLook(where?: Where): Promise<Result<string>>;
+  /** Take the named parts back out. The patch is what to undo, not what to keep. */
+  changesDrop(patch: string, where?: Where): Promise<Result<null>>;
+
+  /** Take everything waiting behind the run back, so it can be rewritten. What
+   *  comes back is what was queued, in the order it was asked for. */
+  takeBackQueue(where?: Where): Promise<Result<{ steering: readonly string[]; followUp: readonly string[] }>>;
 
   /** Everything happening for this project whether or not the window is open. */
   away(where?: Where): Promise<Result<Away>>;
@@ -1454,6 +1570,29 @@ export type GrapheApi = {
    * side ever answers its own — a run with nobody watching stops and waits.
    */
   answerAway(id: string, callId: string, decision: Decision, where?: Where): Promise<Result<Away>>;
+  /**
+   * Say something to a piece of work that is already going.
+   *
+   * It hears it between one step and the next and carries on from there —
+   * nothing is stopped and nothing is lost. This is the difference between
+   * watching something go the wrong way and being able to say so.
+   */
+  sayToAway(id: string, text: string, where?: Where): Promise<Result<Away>>;
+  /**
+   * The several goes at one job, each with what it changed.
+   *
+   * Read on the press, never kept: a go that is still working has a different
+   * answer a minute later, and a stale one would be read as the real thing.
+   */
+  compareWays(ways: string, where?: Where): Promise<Result<readonly SideOfWork[]>>;
+  /**
+   * Take several finished pieces into the project, in the order they need.
+   *
+   * One press rather than N: they were meant to arrive in an order, and going
+   * in one at a time by hand is how that order gets lost. Whatever happens, the
+   * whole run is one version away from never having happened.
+   */
+  keepSet(ids: readonly string[], where?: Where): Promise<Result<Away>>;
   /** Ask for something over and over: what to do, how often, and at what time. */
   addRepeat(
     doing: string,

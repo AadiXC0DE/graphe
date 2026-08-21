@@ -134,12 +134,7 @@
   font-size: var(--text-base);
 }
 
-.settings__row input[type='checkbox'] {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
-}
+/* The drawn switch carries its own stylesheet; the row only owes it room. */
 
 .settings__row:focus-visible {
   outline: 2px solid var(--accent);
@@ -165,5 +160,57 @@
 @media (prefers-reduced-motion: reduce) {
   .settings__close:active {
     transform: none;
+  }
+}
+
+/* Three answers where a switch would only offer two: following the computer is
+   a real choice, not the absence of one. */
+.settings__choice {
+  display: inline-flex;
+  flex: none;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.settings__pick {
+  padding: 4px var(--space-2);
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+/* The one in force is stated in ink against the muted rest, the way every
+   other "this one" in this app is said. */
+.settings__pick--on {
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings__pick:not(.settings__pick--on):hover {
+    color: var(--text);
+  }
+}
+
+.settings__pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings__pick {
+    transition: none;
   }
 }

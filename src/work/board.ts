@@ -56,11 +56,124 @@ export const boardWords = {
   /** On a card that is one of several goes at the same thing. Keeping one of
    *  these is a choice between them, not a choice about it. */
   oneOf: (at: number, of: number): string => `Way ${String(at)} of ${String(of)}`,
+  /** Where "Use this one" would have been, on a go with nothing to hand over
+   *  yet. What it is up to is said just above it, so this says only why there
+   *  is no offer. Null once there is one. */
+  notYet: (state: WorkState): string | null => {
+    if (canKeep(state)) return null;
+    if (state === 'failed') return 'Nothing to take from this one.';
+    return 'Nothing to take until it finishes.';
+  },
+  /** The same fact at length, for somebody who asked for it anyway. */
+  notYetBecause: (doing: string, state: WorkState): string => {
+    if (state === 'failed') {
+      return `“${doing}” didn’t work, so there is nothing to bring into your project.`;
+    }
+    if (state === 'needs-you') {
+      return `“${doing}” stopped to ask you something. Answer it, and it will carry on.`;
+    }
+    const where = state === 'waiting' ? 'has not started yet' : 'is still going';
+    return `“${doing}” ${where}. It will be there to take when it finishes.`;
+  },
   /** Said on the card that takes the decision, so nobody presses it expecting
    *  the others to still be there. */
   insteadOfOthers: (of: number): string =>
     `Using this one throws away the other ${of === 2 ? 'way' : `${String(of - 1)} ways`}.`,
+  /** Offered only while something is going: it is heard between one step and
+   *  the next, so on a finished piece there is nothing left to hear it. */
+  /** On a card that is one of several goes: the one press that answers
+   *  "which of these do I take?" without opening three folders. */
+  against: 'Side by side',
+  /** On a piece held back until another finishes. The wait can be set when the
+   *  work is asked for; until now it could never be changed afterwards, so a
+   *  piece waiting on something abandoned waited forever. */
+  stopWaiting: 'Don’t wait for that',
+  say: 'Say something',
+  sayPlaceholder: 'Try a different approach…',
+  send: 'Send',
+  sending: 'Sending…',
+  sent: 'It will hear that between steps.',
 } as const;
+
+/**
+ * Which cards carry the one press that compares a group of goes.
+ *
+ * One per group, not one per card: the comparison is about the several goes
+ * together, and repeating it on each of them crowds the row of decisions
+ * underneath into a wrap. The first still on the board carries it, so throwing
+ * one away never takes the comparison with it.
+ */
+export function speaksForGroup(
+  pieces: readonly { id: string; oneOf?: { named: string } | null }[],
+): ReadonlySet<string> {
+  const first = new Map<string, string>();
+  for (const piece of pieces) {
+    const named = piece.oneOf?.named;
+    if (named === undefined || named === null) continue;
+    if (!first.has(named)) first.set(named, piece.id);
+  }
+  return new Set(first.values());
+}
+
+/**
+ * Which go each one is, and out of how many, wherever a go is named.
+ *
+ * One numbering for the card and the comparison alike: a go that is "Way 2 of
+ * 3" on the board has to be "Way 2 of 3" in the sheet, whatever has started.
+ * Work that is not one of several is not in the map — there is nothing to
+ * number, and a lone survivor of a group is no longer a choice.
+ */
+export function waysNumbering(
+  pieces: readonly { id: string; ways?: string | null }[],
+): ReadonlyMap<string, { at: number; of: number; named: string }> {
+  const groups = new Map<string, string[]>();
+  for (const piece of pieces) {
+    const named = piece.ways;
+    if (named === undefined || named === null) continue;
+    groups.set(named, [...(groups.get(named) ?? []), piece.id]);
+  }
+
+  const numbering = new Map<string, { at: number; of: number; named: string }>();
+  for (const [named, ids] of groups) {
+    if (ids.length < 2) continue;
+    ids.forEach((id, at) => numbering.set(id, { at: at + 1, of: ids.length, named }));
+  }
+  return numbering;
+}
+
+/** Whether one piece has a result to take. Only something finished has: the
+ *  rest have a folder somebody can watch and nothing to hand over. */
+export function canKeep(state: WorkState): boolean {
+  return state === 'done';
+}
+
+/** The whole answer when somebody asks for one that cannot be taken, and null
+ *  when it can. Said as its own thing rather than as "it changed nothing" —
+ *  that is a different fact, about a piece that has actually finished. */
+export function saysCannotKeep(
+  doing: string,
+  state: WorkState,
+): { what: string; because: string; actionLabel: string } | null {
+  if (canKeep(state)) return null;
+  return {
+    what: 'There is nothing to take from this one yet.',
+    because: boardWords.notYetBecause(doing, state),
+    actionLabel: 'Got it',
+  };
+}
+
+/**
+ * Whether a piece can still hear a sentence from a person.
+ *
+ * Something in flight can, because it is heard between one step and the next.
+ * So can one stopped on a question — that is a turn held open mid-step, and it
+ * is where a sentence lands most reliably of all, so leaving it out hid the
+ * control exactly where it works best. Anything finished has nothing left to
+ * hear it, and offering it there would be a press that quietly does nothing.
+ */
+export function canHearYou(state: WorkState): boolean {
+  return state === 'running' || state === 'needs-you';
+}
 
 /** What wants a person comes first, then what is happening, then what has not
  *  started, then what is over. */
@@ -164,7 +277,9 @@ export function nextUp<T extends OnBoard>(
 
 /* ------------------------------------------------------------------- words */
 
-function word(count: number): string {
+/** "three" up to twelve, then the number itself. Shared, so a board and a set
+ *  of work going in never count the same things in two different voices. */
+export function countWord(count: number): string {
   return NUMBERS[count] ?? String(count);
 }
 
@@ -184,11 +299,11 @@ export function saysBoard(pieces: readonly OnBoard[]): string {
   const done = many('done');
   const broke = many('failed');
 
-  if (needsYou > 0) parts.push(`${word(needsYou)} waiting on you`);
-  if (going > 0) parts.push(`${word(going)} going`);
-  if (waiting > 0) parts.push(`${word(waiting)} waiting`);
-  if (done > 0) parts.push(`${word(done)} finished`);
-  if (broke > 0) parts.push(`${word(broke)} didn’t work`);
+  if (needsYou > 0) parts.push(`${countWord(needsYou)} waiting on you`);
+  if (going > 0) parts.push(`${countWord(going)} going`);
+  if (waiting > 0) parts.push(`${countWord(waiting)} waiting`);
+  if (done > 0) parts.push(`${countWord(done)} finished`);
+  if (broke > 0) parts.push(`${countWord(broke)} didn’t work`);
 
   return `${capitalise(parts.join(', '))}.`;
 }
@@ -212,7 +327,7 @@ export function saysDrop(state: WorkState): string {
 
 /** Why something is waiting rather than going, said once under the summary. */
 export function saysFull(most: number = AT_A_TIME): string {
-  return `${capitalise(word(most))} at a time is as many as I can do properly. The rest start as soon as one finishes.`;
+  return `${capitalise(countWord(most))} at a time is as many as I can do properly. The rest start as soon as one finishes.`;
 }
 
 /** How long ago, roughly. Rounded, because "4 minutes ago" is the answer and

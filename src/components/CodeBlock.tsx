@@ -48,6 +48,7 @@ const SETTLED_MS = 120;
 export default function CodeBlock({ code, language, label, tail }: Props) {
   const [coloured, setColoured] = useState<{ code: string; html: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -87,12 +88,18 @@ export default function CodeBlock({ code, language, label, tail }: Props) {
   const copy = () => {
     void navigator.clipboard?.writeText(code).then(
       () => {
+        setCopyFailed(false);
         setCopied(true);
         if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
         copiedTimer.current = setTimeout(() => setCopied(false), 1600);
       },
       () => {
-        /* Nothing to say. The code is on screen and can be selected by hand. */
+        // Said, rather than swallowed. A Copy that quietly does nothing leaves
+        // whatever was on the clipboard before, which reads as copying the
+        // wrong thing.
+        setCopyFailed(true);
+        if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+        copiedTimer.current = setTimeout(() => setCopyFailed(false), 2600);
       },
     );
   };
@@ -121,7 +128,7 @@ export default function CodeBlock({ code, language, label, tail }: Props) {
       <div className="codeblock__bar">
         <span className="codeblock__lang">{label ?? 'Code'}</span>
         <button type="button" className="codeblock__copy" onClick={copy}>
-          {copied ? 'Copied' : 'Copy'}
+          {copyFailed ? 'Press \u2318C' : copied ? 'Copied' : 'Copy'}
         </button>
       </div>
 

@@ -1,5 +1,6 @@
 import SeeFirst from './SeeFirst';
 import { useState } from 'react';
+import type { Verdict } from '../design/gate';
 import type { HandedOver, Landing as LandingState, WentOnline } from '../lib/ipc';
 import { holdWords } from '../share/holding';
 import { handoverWords } from '../share/handover';
@@ -21,6 +22,13 @@ type Props = {
   going: 'developer' | 'online' | null;
   outcome: Outcome;
   onDecide: (letIn: boolean) => void;
+  /** How far the work has moved from the pictures that were agreed to, or null
+   *  when nothing was compared. */
+  gate: Verdict | null;
+  /** Which line is in force, by id. */
+  howMuch: string;
+  /** Move the line. */
+  onHowMuch: (id: string) => void;
   /** Undo letting work in — the same put-back as anywhere else. */
   onUndo: (versionId: string) => void;
   onHandOver: () => void;
@@ -59,6 +67,9 @@ export default function Landing({
   going,
   outcome,
   onDecide,
+  gate,
+  howMuch,
+  onHowMuch,
   onUndo,
   onHandOver,
   onShare,
@@ -82,13 +93,21 @@ export default function Landing({
     <section className="landing" aria-label={SAYS.heading}>
       <h2 className="landing__title">{SAYS.heading}</h2>
 
-      <SeeFirst
-        waiting={waiting}
-        held={held}
-        {...(looking === undefined ? {} : { looking })}
-        busy={stopped}
-        onDecide={onDecide}
-      />
+      {/* Nothing moved since the pictures that were agreed to, so there is
+          nothing to ask about and nothing to draw. The work goes in on its own
+          and the line below says so with an undo beside it. */}
+      {gate !== null && !gate.stops ? null : (
+        <SeeFirst
+          waiting={waiting}
+          held={held}
+          {...(looking === undefined ? {} : { looking })}
+          busy={stopped}
+          onDecide={onDecide}
+          gate={gate}
+          howMuch={howMuch}
+          onHowMuch={onHowMuch}
+        />
+      )}
 
       {decided === null ? null : (
         <p className="landing__done">

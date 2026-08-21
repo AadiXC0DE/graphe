@@ -30,6 +30,34 @@ const IMAGES: readonly string[] = [
   'svg',
 ];
 
+/** What each picture is, by its name. The browser usually says, but a file
+ *  dragged out of some folders arrives with nothing said about it — and the
+ *  shell drops a picture whose type is blank, which used to happen in silence.
+ *  The name is the only other thing we know, so it answers. */
+const TYPE_BY_NAME: Readonly<Record<string, string>> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  bmp: 'image/bmp',
+  tiff: 'image/tiff',
+  tif: 'image/tiff',
+  svg: 'image/svg+xml',
+};
+
+/** The type to send a picture as: what the browser said, or what its name says
+ *  when the browser said nothing. Empty when neither knows, and a picture with
+ *  no type is one the shell will not carry. */
+export function pictureType(name: string, said: string | undefined): string {
+  const given = (said ?? '').trim();
+  if (given !== '') return given;
+  return TYPE_BY_NAME[extensionOf(name)] ?? '';
+}
+
 /** The exports that come out of a design tool at the end of a day's work. */
 const DOCUMENTS: readonly string[] = ['pdf', 'fig', 'sketch', 'xd', 'ai', 'psd', 'eps'];
 
@@ -154,6 +182,86 @@ export function figmaLink(text: string): FigmaLink | null {
 
 /** How many things can arrive in one gesture. Somebody dragging a whole export
  *  folder in means "look at my work", not "read three hundred files". */
+/* -------------------------------------------------------------------------- */
+/* Whether the model in front can read a picture                               */
+/* -------------------------------------------------------------------------- */
+
+/** The shape this needs out of the connection — nothing more, so it can be
+ *  checked without one. */
+export type ModelReading = {
+  chosen: { providerId: string; modelId: string } | null;
+  providers: readonly {
+    providerId: string;
+    models: readonly { id: string; label?: string; takesImages?: boolean | null }[];
+  }[];
+};
+
+/**
+ * Whether the chosen model reads pictures.
+ *
+ * Three answers, not two. `null` is "the catalogue does not say", which is
+ * where most older entries sit, and it must not be treated as a no: refusing
+ * somebody's picture on a missing field is worse than letting the provider
+ * answer for itself.
+ */
+export function readsPictures(connection: ModelReading | null | undefined): boolean | null {
+  return modelInFront(connection)?.takesImages ?? null;
+}
+
+/** The chosen model's own entry, or null when nothing is chosen or it is not
+ *  in the list any more. */
+export function modelInFront(
+  connection: ModelReading | null | undefined,
+): { id: string; label?: string; takesImages?: boolean | null } | null {
+  const chosen = connection?.chosen;
+  if (chosen === null || chosen === undefined) return null;
+  const provider = connection?.providers.find((one) => one.providerId === chosen.providerId);
+  return provider?.models.find((one) => one.id === chosen.modelId) ?? null;
+}
+
+export const ATTACH_WORDS = {
+  /** Put back into the message, because taking the address out of the box is
+   *  what made the chip. One line, so a model reads it as an instruction and a
+   *  person reads it as a note. */
+  alsoLook: (links: readonly string[]): string =>
+    links.length === 1
+      ? `The design I am talking about is here: ${links[0] ?? ''}`
+      : `The designs I am talking about are here:\n${links.map((one) => `- ${one}`).join('\n')}`,
+  /** Said when something in the box is not a picture. Only pictures travel with
+   *  a message; a file that sits there looking attached and is never read is
+   *  the worst of the three possible answers. */
+  onlyPictures: (names: readonly string[]): string =>
+    names.length === 1
+      ? `${names[0] ?? ''} will not be read — only pictures go with a message. Put it in your project folder and ask me to open it.`
+      : `${String(names.length)} of these will not be read — only pictures go with a message. Put them in your project folder and ask me to open them.`,
+} as const;
+
+/**
+ * What somebody typed into the connect box, as a tool.
+ *
+ * Two shapes on one line, because nobody wants two boxes for one thing they
+ * already know how to write: an address is a tool already running, anything
+ * else is the program that starts it.
+ */
+export function fromConnectLine(
+  name: string,
+  line: string,
+): { name: string; command: string; args: readonly string[]; address?: string } | null {
+  const said = line.trim();
+  if (name.trim() === '' || said === '') return null;
+  if (/^https?:\/\//i.test(said)) return { name: name.trim(), command: '', args: [], address: said };
+  const parts = said.split(/\s+/).filter((one) => one !== '');
+  const [command, ...args] = parts;
+  if (command === undefined) return null;
+  return { name: name.trim(), command, args };
+}
+
+export const PICTURE_WORDS = {
+  /** Said the moment a picture is put in the box, not after a turn is spent. */
+  cannotRead: (model: string): string =>
+    `${model} cannot read pictures. Take it out, or pick a model that can — the model is named beside the box.`,
+} as const;
+
 export const MAX_AT_ONCE = 12;
 
 /** Whether a drag is worth lighting the window up for.

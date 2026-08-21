@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import type { Conversation, RecentProject } from '../lib/ipc';
 import { COPY_WORDS } from '../agent/pi/fork';
 import { ago } from '../lib/when';
 import type { Reference } from '../lib/projects';
 import { byDay, matching, needsDayLabels, needsSearch } from '../lib/shelf';
+import { keepAsking, offersOwnCopy, OWN_COPY_WORDS } from '../lib/owncopy';
 import './Sidebar.css';
 
 type Props = {
@@ -23,6 +24,12 @@ type Props = {
   onDeleteConversation?: (path: string) => void;
   /** A second copy of one, to take somewhere else. */
   onCopyConversation?: (path: string) => void;
+  /** Whether the conversation on screen is working on its own copy of the
+   *  project. Only the shell knows, and only about that one. */
+  ownCopy?: boolean;
+  /** The two ways out of a copy. Both act on the conversation on screen. */
+  onBringWorkBack?: (path: string) => void;
+  onThrowWorkAway?: (path: string) => void;
   /** Open the quieter controls — skills, spend, the rest. */
   onSettings?: () => void;
   /** Whether the shelf is expanded or reduced to its mark. ⌘B does the same
@@ -74,6 +81,9 @@ export default function Sidebar({
   onNewConversation,
   onDeleteConversation,
   onCopyConversation,
+  ownCopy = false,
+  onBringWorkBack,
+  onThrowWorkAway,
   onSettings,
   open,
   onToggle,
@@ -87,6 +97,9 @@ export default function Sidebar({
   now,
 }: Props) {
   const [term, setTerm] = useState('');
+  /** Which row has an "are you sure" standing over it, by its own path. */
+  const [asking, setAsking] = useState<string | null>(null);
+  const asked = keepAsking(asking, openConversation);
 
   const searchable = needsSearch(conversations.length);
   const found = useMemo(
@@ -203,54 +216,114 @@ export default function Sidebar({
                   {labelled ? <h3 className="shelf__daylabel">{day.label}</h3> : null}
                   <ul className="shelf__list">
                     {day.items.map((one) => (
-                      <li key={one.id} className="shelf__convo">
-                        <button
-                          type="button"
-                          className={`shelf__row ${one.path === openConversation ? 'shelf__row--here' : ''}`}
-                          onClick={() => onOpenConversation(one.path)}
-                        >
-                          <span className="shelf__rowname">{one.title}</span>
-                          <span className="shelf__rowsub">{ago(one.at)}</span>
-                        </button>
-                        {onCopyConversation === undefined ? null : (
+                      <Fragment key={one.id}>
+                        <li className="shelf__convo">
                           <button
                             type="button"
-                            className="shelf__copy"
-                            title={COPY_WORDS.hint}
-                            aria-label={`${COPY_WORDS.make} of “${one.title}”`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onCopyConversation(one.path);
+                            className={`shelf__row ${one.path === openConversation ? 'shelf__row--here' : ''}`}
+                            onClick={() => {
+                              setAsking(null);
+                              onOpenConversation(one.path);
                             }}
                           >
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                              <rect x="1.6" y="1.6" width="6" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.2" />
-                              <path d="M4.4 10.4h4a2 2 0 0 0 2-2v-4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-                            </svg>
+                            <span className="shelf__rowname">{one.title}</span>
+                            <span className="shelf__rowsub">{ago(one.at)}</span>
                           </button>
-                        )}
-                        {onDeleteConversation === undefined ? null : (
-                          <button
-                            type="button"
-                            className="shelf__forget"
-                            title="Throw this conversation away"
-                            aria-label={`Throw away “${one.title}”`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onDeleteConversation(one.path);
-                            }}
-                          >
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                              <path
-                                d="M3 3l6 6M9 3l-6 6"
-                                stroke="currentColor"
-                                strokeWidth="1.4"
-                                strokeLinecap="round"
-                              />
-                            </svg>
-                          </button>
-                        )}
-                      </li>
+                          {onCopyConversation === undefined ? null : (
+                            <button
+                              type="button"
+                              className="shelf__copy"
+                              title={COPY_WORDS.hint}
+                              aria-label={`${COPY_WORDS.make} of “${one.title}”`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onCopyConversation(one.path);
+                              }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <rect x="1.6" y="1.6" width="6" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.2" />
+                                <path d="M4.4 10.4h4a2 2 0 0 0 2-2v-4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                              </svg>
+                            </button>
+                          )}
+                          {onDeleteConversation === undefined ? null : (
+                            <button
+                              type="button"
+                              className="shelf__forget"
+                              title="Throw this conversation away"
+                              aria-label={`Throw away “${one.title}”`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onDeleteConversation(one.path);
+                              }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <path
+                                  d="M3 3l6 6M9 3l-6 6"
+                                  stroke="currentColor"
+                                  strokeWidth="1.4"
+                                  strokeLinecap="round"
+                                />
+                              </svg>
+                            </button>
+                          )}
+                        </li>
+                        {/* Under the row rather than another mark on it: a copy
+                            of your project that nothing on screen mentions is how
+                            an afternoon's work gets left behind. */}
+                        {offersOwnCopy(one.path, openConversation, ownCopy) &&
+                        onBringWorkBack !== undefined &&
+                        onThrowWorkAway !== undefined ? (
+                          <li className="shelf__owncopy">
+                            <p className="shelf__owncopysays">{OWN_COPY_WORDS.says}</p>
+                            {asked === one.path ? (
+                              <>
+                                <p className="shelf__owncopysure">{OWN_COPY_WORDS.sure}</p>
+                                <div className="shelf__owncopyrow">
+                                  {/* Keeping it first, so it is also first for
+                                      the keyboard, and it carries the weight. */}
+                                  <button
+                                    type="button"
+                                    className="shelf__owncopydo shelf__owncopydo--keep"
+                                    onClick={() => setAsking(null)}
+                                  >
+                                    {OWN_COPY_WORDS.no}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="shelf__owncopydo"
+                                    onClick={() => {
+                                      setAsking(null);
+                                      onThrowWorkAway(one.path);
+                                    }}
+                                  >
+                                    {OWN_COPY_WORDS.yes}
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="shelf__owncopyrow">
+                                <button
+                                  type="button"
+                                  className="shelf__owncopydo"
+                                  title={OWN_COPY_WORDS.bringHint}
+                                  onClick={() => onBringWorkBack(one.path)}
+                                >
+                                  {OWN_COPY_WORDS.bring}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="shelf__owncopydo"
+                                  title={OWN_COPY_WORDS.awayHint}
+                                  onClick={() => setAsking(one.path)}
+                                >
+                                  {OWN_COPY_WORDS.away}
+                                </button>
+                              </div>
+                            )}
+                          </li>
+                        ) : null}
+                      </Fragment>
                     ))}
                   </ul>
                 </div>
@@ -441,6 +514,7 @@ export default function Sidebar({
             onClick={onToggle}
             aria-label="Expand the sidebar"
             aria-expanded={open}
+            data-tip="Show the sidebar"
           >
             <span className="shelf__markdot" aria-hidden="true" />
           </button>
@@ -449,8 +523,8 @@ export default function Sidebar({
             type="button"
             className="shelf__act"
             onClick={onNewConversation}
-            title="Start a new conversation in this project"
             aria-label="Start a new conversation"
+            data-tip="New conversation"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path
@@ -466,8 +540,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onAsk}
-              title="Find anything — ⌘K"
               aria-label="Find anything"
+              data-tip="Find anything — ⌘K"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <circle
@@ -491,8 +565,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onDesign}
-              title="Colour, type and spacing — ⌘D"
               aria-label="How this project looks"
+              data-tip="Design — ⌘D"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path
@@ -505,7 +579,7 @@ export default function Sidebar({
             </button>
           )}
           {onSkills === undefined ? null : (
-            <button type="button" className="shelf__act shelf__act--skills" onClick={onSkills} title="Browse skills" aria-label="Browse skills">
+            <button type="button" className="shelf__act shelf__act--skills" onClick={onSkills} aria-label="Browse skills" data-tip="Skills">
               @
             </button>
           )}
@@ -514,8 +588,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onHistory}
-              title="Every moment, and what came after what"
               aria-label="Where this project has been"
+              data-tip="History"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <circle cx="5" cy="3.75" r="1.5" stroke="currentColor" strokeWidth="1.5" />
@@ -535,8 +609,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onReviews}
-              title="The pull requests and issues of this project"
               aria-label="Open pull requests"
+              data-tip="Pull requests"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path
@@ -554,8 +628,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onAddMore}
-              title="Give Graphe new things it can do for you"
               aria-label="Add more to Graphe"
+              data-tip="Add more to Graphe"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect
@@ -581,8 +655,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onFiles}
-              title="Open project files"
               aria-label="Open project files"
+              data-tip="Project files"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M2.5 4.5h3l1.2 1.5h6.3v5.5H2.5z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
@@ -594,8 +668,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act shelf__act--settings"
               onClick={onSettings}
-              title="Settings"
               aria-label="Open settings"
+              data-tip="Settings"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" />

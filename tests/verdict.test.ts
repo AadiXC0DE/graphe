@@ -51,11 +51,12 @@ describe('the verdict in a reply', () => {
     expect(blocking?.confidence).toBe(92);
   });
 
-  it('recognises a clean verdict too', () => {
+  it('recognises a clean verdict too, including one with nothing to report', () => {
     const verdict = parseReview(
-      'Looks good.\n```review\n{"verdict": "ships", "summary": "Nothing blocking.", "findings": [{"priority": 3, "issue": "A future idea.", "confidence": 40}]}\n```',
+      'Looks good.\n```review\n{"verdict": "ships", "summary": "Nothing blocking.", "findings": []}\n```',
     );
     expect(verdict?.kind).toBe('ships');
+    expect(verdict?.findings).toEqual([]);
   });
 
   it('ignores an ordinary reply with no review block', () => {
@@ -65,7 +66,7 @@ describe('the verdict in a reply', () => {
   it('ignores a malformed block rather than inventing a card', () => {
     expect(parseReview('```review\nnot json at all\n```')).toBeNull();
     expect(parseReview('```review\n{"verdict": "maybe"}\n```')).toBeNull();
-    expect(parseReview('```review\n{"verdict": "ships", "findings": []}\n```')).toBeNull();
+    expect(parseReview('```review\n{"verdict": "needs-work", "findings": []}\n```')).toBeNull();
   });
 
   it('clamps numbers instead of trusting them', () => {

@@ -19,6 +19,15 @@
   background: var(--bg);
   border-left: 1px solid var(--border);
   overflow-y: auto;
+  /* No bar down the window's right edge. This panel is fixed to the glass top
+     to bottom, so the thin one every scroller inherits runs the whole height of
+     the window — furniture beside the work, and hardest to explain in full
+     screen where there is no frame around it. The same reason the conversation
+     scroller has none. Hidden, not disabled: wheel, trackpad and keyboard all
+     still scroll it. */
+  scrollbar-width: none;
+  /* Inert while the bar is hidden, and kept for the day it is not: without it
+     the panel's contents jump sideways the moment one appears. */
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
 
@@ -84,6 +93,16 @@
   height: 5px;
   border-radius: 50%;
   background: var(--accent);
+}
+
+/** The real word beside the plain one. Lower case and unspaced against an
+ *  upper-case heading, so it reads as a gloss rather than part of the name. */
+.overview__plainly {
+  margin-left: var(--space-2);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.75;
 }
 
 .overview__title {

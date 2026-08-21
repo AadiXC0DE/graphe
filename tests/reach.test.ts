@@ -20,10 +20,12 @@ import {
   readReach,
   readStored,
   readValues,
+  notYetConnected,
   reachShelf,
   reachesMatching,
   toKept,
   whereOf,
+  vouchedUnder,
   withAdded,
   type Kept,
   type Reach,
@@ -60,7 +62,7 @@ function whyNot(typed: unknown, already: readonly Reach[] = []): string {
 
 describe('the curated shelf', () => {
   it('offers the tools a designer already has open', () => {
-    expect(REACHABLE.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser']);
+    expect(REACHABLE.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'code-read']);
   });
 
   it('says what each one lets you do, in one sentence, and never what it is', () => {
@@ -404,11 +406,45 @@ describe('what is kept', () => {
       { name: 'Mine', where: 'run' },
     ]);
     const shelf = withAdded(mine);
-    expect(shelf.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'yours:mine']);
+    expect(shelf.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'code-read', 'yours:mine']);
     expect(shelf.filter((one) => one.added).map((one) => one.id)).toEqual([
       'browser',
       'yours:mine',
     ]);
+  });
+});
+
+/**
+ * The two questions the Other tools screen asks of this list.
+ *
+ * That screen reads the project's own list, which is keyed by id, and draws
+ * both halves off these: what is still worth offering, and what a row already
+ * there should be called.
+ */
+describe('what a project has and has not got', () => {
+  it('offers only the ones that are not here yet, in the order we offer them', () => {
+    expect(notYetConnected([]).map((one) => one.id)).toEqual(
+      REACHABLE.map((one) => one.id),
+    );
+    expect(notYetConnected(['browser', 'figma']).map((one) => one.id)).toEqual([
+      'pencil',
+      'code-read',
+    ]);
+    expect(notYetConnected(REACHABLE.map((one) => one.id))).toEqual([]);
+  });
+
+  it('is not fooled by somebody else\u2019s tool wearing a similar name', () => {
+    // WHY: the ids are what a project writes down, so a server called
+    // "figma-dev" is not our Figma and both should still be on screen.
+    expect(notYetConnected(['figma-dev']).map((one) => one.id)).toContain('figma');
+  });
+
+  it('gives back our own name and words for a row written under one of our ids', () => {
+    const ours = REACHABLE.find((one) => one.id === 'code-read');
+    expect(vouchedUnder('code-read')).toEqual(ours);
+    expect(vouchedUnder(' code-read ')).toEqual(ours);
+    expect(vouchedUnder('my-database')).toBeUndefined();
+    expect(vouchedUnder('')).toBeUndefined();
   });
 });
 
@@ -464,8 +500,8 @@ describe('show me how it starts', () => {
 describe('the shelf both kinds sit on', () => {
   it('offers what it can reach first, then the additions', () => {
     const shelf = everything([A_PACK]);
-    expect(shelf.map((one) => one.sort)).toEqual(['reach', 'reach', 'reach', 'addition']);
-    expect(shelf.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'pi-lens']);
+    expect(shelf.map((one) => one.sort)).toEqual(['reach', 'reach', 'reach', 'reach', 'addition']);
+    expect(shelf.map((one) => one.id)).toEqual(['figma', 'pencil', 'browser', 'code-read', 'pi-lens']);
   });
 
   it('narrows to what somebody typed, on the sentence as well as the name', () => {

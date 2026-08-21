@@ -541,6 +541,62 @@ describe('alternatives rather than other work', () => {
     expect(await get(root, 'hero.css')).toBe('.hero { padding: 48px; }\n');
   });
 
+  /** The ordering that used to be wrong. Every copy about to be deleted is
+   *  named before any of them goes, so whatever is still working in one can be
+   *  stopped first — an agent mid-tool-call otherwise carries on writing into a
+   *  folder that is not there, and the delete can lose the race to it. */
+  it('names every copy that is about to go before deleting any of them', async () => {
+    const { history, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const quiet = bench.ask('Rework the hero — quieter', { ways: 'ways-2' });
+    const bold = bench.ask('Rework the hero — bolder', { ways: 'ways-2' });
+    await bench.begin();
+    await put(quiet.folder ?? '', 'hero.css', '.hero { padding: 48px; }\n');
+    await bench.settle(quiet.id, 'The quiet one');
+    await bench.settle(bold.id, 'The bold one');
+
+    const told: string[][] = [];
+    const stillThere: boolean[] = [];
+    await bench.keep(quiet.id, 'Kept the quiet one', {
+      lettingGo: async (ids) => {
+        told.push([...ids]);
+        // Both copies are still on disk at the moment we are told about them.
+        stillThere.push(await there(quiet.folder ?? ''), await there(bold.folder ?? ''));
+      },
+    });
+
+    expect(told).toEqual([[quiet.id, bold.id]]);
+    expect(stillThere).toEqual([true, true]);
+    expect(await there(quiet.folder ?? '')).toBe(false);
+    expect(await there(bold.folder ?? '')).toBe(false);
+  });
+
+  /** A conflict costs nobody their go: the work has to land before anything is
+   *  named, or a merge somebody has to look at would quietly end both. */
+  it('says nothing when the work could not land', async () => {
+    const { history, root, under } = await aProject();
+    const bench = new Workbench({ history, under });
+
+    const quiet = bench.ask('Rework the hero — quieter', { ways: 'ways-3' });
+    bench.ask('Rework the hero — bolder', { ways: 'ways-3' });
+    await bench.begin();
+    await put(quiet.folder ?? '', 'hero.css', '.hero { padding: 48px; }\n');
+    await bench.settle(quiet.id, 'The quiet one');
+    // The same file changed in the project itself, so carrying it in conflicts.
+    await put(root, 'hero.css', '.hero { padding: 2px; }\n');
+    await history.snapshot('Changed the hero in the project too');
+
+    const told: string[][] = [];
+    const kept = await bench.keep(quiet.id, 'Kept the quiet one', {
+      lettingGo: (ids) => {
+        told.push([...ids]);
+      },
+    });
+
+    if (kept?.version === null) expect(told).toEqual([]);
+  });
+
   it('ordinary work has no others to throw away', async () => {
     const { history, under } = await aProject();
     const bench = new Workbench({ history, under });

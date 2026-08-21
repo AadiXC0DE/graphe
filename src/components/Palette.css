@@ -1,0 +1,260 @@
+/* Everything this window can do.
+
+   It opens and closes on a key, dozens of times a day, so nothing here arrives:
+   no fade, no rise, no rows dealt out one after another. The panel is simply
+   there on the frame the key was pressed, which is the only version of this
+   that keeps up with somebody who already knows what they came to type.
+
+   The one thing that moves is a row answering a press. */
+
+.palette {
+  position: fixed;
+  inset: 0;
+  /* Above every other surface in the app: this is reachable from all of them. */
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(12vh, var(--space-6)) var(--space-5) var(--space-5);
+}
+
+/* The same scrim the app's other overlays use, so opening this does not read as
+   a different product than opening any of them. */
+.palette__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  background: rgb(0 0 0 / 0.36);
+  cursor: default;
+}
+
+.palette__panel {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: min(560px, calc(100vh - 20vh));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------------ the line */
+
+.palette__field {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.palette__mark {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.palette__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-base);
+  letter-spacing: -0.005em;
+}
+
+.palette__input::placeholder {
+  color: var(--text-faint);
+}
+
+/* Nothing else in the panel takes focus, so the panel's own edge is the ring;
+   a second one drawn inside it would only be noise. */
+.palette__input:focus,
+.palette__input:focus-visible {
+  outline: none;
+}
+
+/* ------------------------------------------------------------------ the rows */
+
+.palette__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  /* A row scrolled to by the arrow keys lands with air under it rather than
+     wedged against the foot. */
+  scroll-padding-block: var(--space-2);
+}
+
+.palette__band + .palette__band {
+  margin-top: var(--space-2);
+}
+
+.palette__bandhead {
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.palette__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 36px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: default;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* The tint the app already uses for the one row that is chosen, rather than the
+   sunken grey it uses for the one under the cursor. Against a raised panel the
+   grey is barely a shade, and the lit row is the only thing in here somebody is
+   actually tracking. */
+.palette__row--lit {
+  background: var(--accent-soft);
+}
+
+/* The row confirms it heard the press. Shallower than a button's 0.97 because
+   the row is the full width of the panel and the same ratio would read as a
+   lurch. */
+.palette__row:not(.palette__row--stopped):active {
+  transform: scale(0.99);
+}
+
+.palette__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.palette__chord {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.palette__row--lit .palette__chord {
+  border-color: var(--border-strong);
+  background: var(--bg-raised);
+}
+
+/* ---------------------------------------------------- the ones that cannot go
+
+   Stopped, never hidden. An action that vanishes teaches nobody where it went,
+   and the reason is the whole point of leaving it on the list. */
+
+/* Lit, but in the neutral grey: the accent tint on the row above means "Enter
+   does this", and it must not be worn by a row Enter will not touch. */
+.palette__row--lit.palette__row--stopped {
+  background: var(--bg-sunken);
+}
+
+.palette__row--stopped .palette__name {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.palette__why {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.palette__blank {
+  flex: none;
+  margin: 0;
+  padding: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------------ the foot */
+
+.palette__foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 34px;
+  padding: 0 var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.palette__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.palette__hint--last {
+  margin-left: auto;
+}
+
+.palette__key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .palette__row:not(.palette__row--lit):hover {
+    background: var(--bg-sunken);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette__row:not(.palette__row--stopped):active {
+    transform: none;
+  }
+}

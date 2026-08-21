@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { likelyOutputs, readTheFolder, helperFor } from '../src/preview/detect';
+import { canBeShown, likelyOutputs, readTheFolder, helperFor } from '../src/preview/detect';
 import { POINT_PATH, POINTER_MARK, type Pointed } from '../src/preview/point';
 import { serveFolder } from '../src/preview/serve';
 import { lookAt } from '../src/preview/show';
@@ -477,5 +477,45 @@ describe('S-04 pointing at what is on the page', () => {
     } finally {
       await serving.stop();
     }
+  });
+});
+
+/* ========================================================================== */
+/* S-09 whether a copy is worth its minute                                     */
+/* ========================================================================== */
+
+/** A copy of the project costs a dependency install and buys two things: the
+ *  folder stays untouched, and what the work made can be shown first. Only the
+ *  second is unique to it — going back covers the first — so this is the
+ *  question of whether there is anything to show. */
+describe('S-09 whether there is anything to look at', () => {
+  it('says yes to a folder that is already a site', () => {
+    const recipe = readTheFolder({ entries: ['index.html', 'styles.css'], manifest: null });
+    expect(canBeShown(recipe)).toBe(true);
+  });
+
+  it('says yes to a project that makes one', () => {
+    const recipe = readTheFolder({
+      entries: ['package.json', 'package-lock.json', 'src'],
+      manifest: { scripts: { build: 'vite build' }, devDependencies: { vite: '^6.0.0' } },
+    });
+    expect(recipe.kind).toBe('make');
+    expect(canBeShown(recipe)).toBe(true);
+  });
+
+  it('says no to a folder whose shape it could not read', () => {
+    const recipe = readTheFolder({ entries: ['notes.txt'], manifest: null });
+    expect(recipe.kind).toBe('unsure');
+    // Not "probably yes". A minute of installing is a poor way to treat a guess,
+    // and a save point covers what the copy would have.
+    expect(canBeShown(recipe)).toBe(false);
+  });
+
+  it('says no to something with no way to make a site at all', () => {
+    const recipe = readTheFolder({
+      entries: ['package.json', 'server.js'],
+      manifest: { scripts: { start: 'node server.js' }, dependencies: { express: '^4.0.0' } },
+    });
+    expect(canBeShown(recipe)).toBe(false);
   });
 });

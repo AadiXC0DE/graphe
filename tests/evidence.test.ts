@@ -27,6 +27,8 @@ import {
   type Recording,
 } from '../src/diff/flow';
 import { APART, record, type Camera } from '../src/diff/recorder';
+import { SAYS as PANE_SAYS, recordControl } from '../src/components/BrowserPane';
+import { recordedIn } from '../src/lib/projects';
 import {
   didFor,
   DRAIN_WATCHING,
@@ -513,5 +515,88 @@ describe('E-07 the headline', () => {
     ].join(' ');
 
     expect(said).not.toMatch(/\b(commit|branch|staged|DOM|screenshot|capture|API|session)\b/i);
+  });
+});
+
+/* ========================================================================== */
+/* E-08 the control that starts and stops a run                                */
+/* ========================================================================== */
+
+/** The failure guarded here is a control that reads the same whether or not it
+ *  is running. Everything a recording costs is spent while it is on, and
+ *  somebody who cannot tell leaves it on. */
+describe('E-08 the record control', () => {
+  it('offers to record the page when there is a page to record', () => {
+    const off = recordControl({ recording: false, address: 'http://localhost:3000' });
+    expect(off.label).toBe(walkthrough.button);
+    expect(off.on).toBe(false);
+    expect(off.ready).toBe(true);
+  });
+
+  it('says something different once it is running, not the same thing lit up', () => {
+    const off = recordControl({ recording: false, address: 'http://localhost:3000' });
+    const on = recordControl({ recording: true, address: 'http://localhost:3000' });
+    expect(on.label).toBe(walkthrough.stop);
+    expect(on.label).not.toBe(off.label);
+    expect(on.on).toBe(true);
+    expect(on.title).toBe(walkthrough.working);
+  });
+
+  it('cannot be pressed with nothing being served, and says why rather than failing', () => {
+    const none = recordControl({ recording: false, address: null });
+    expect(none.ready).toBe(false);
+    expect(none.title).toBe(PANE_SAYS.nothing);
+  });
+
+  /* A run you can start and cannot stop is the worst of the states this can be
+     in: the page keeps being photographed and the only way out is closing the
+     pane. Stopping is always available. */
+  it('can always be stopped, even once there is no address left', () => {
+    expect(recordControl({ recording: true, address: null }).ready).toBe(true);
+    expect(recordControl({ recording: true, address: null }).label).toBe(walkthrough.stop);
+  });
+
+  it('never uses a word the interface has retired', () => {
+    const said = [
+      recordControl({ recording: false, address: 'http://localhost:3000' }),
+      recordControl({ recording: true, address: 'http://localhost:3000' }),
+      recordControl({ recording: false, address: null }),
+    ]
+      .flatMap((one) => [one.label, one.title])
+      .join(' ');
+
+    expect(said).not.toMatch(/\b(commit|branch|staged|DOM|capture|API|session)\b/i);
+  });
+});
+
+/* ========================================================================== */
+/* E-09 what a stopped run is worth keeping                                    */
+/* ========================================================================== */
+
+/** Two failures. A run that saw nothing becoming a row in the conversation that
+ *  says nothing, and a run made against one project being left over the next
+ *  one's conversation when somebody switches folders. */
+describe('E-09 keeping a run that has stopped', () => {
+  const seen = runOf([
+    frameOf({ id: '1', doing: doing('opened', 'Basket'), after: 0, shot: 'a' }),
+    frameOf({ id: '2', doing: doing('pressed', 'Pay'), after: 900, shot: 'b' }),
+  ]);
+
+  it('keeps a run that saw something, against the project it was made in', () => {
+    const kept = recordedIn('/p/paper-street', seen);
+    expect(kept?.project).toBe('/p/paper-street');
+    expect(kept?.recording.frames).toHaveLength(2);
+  });
+
+  it('keeps nothing from a run that saw nothing', () => {
+    expect(recordedIn('/p/paper-street', runOf([]))).toBeNull();
+  });
+
+  it('keeps nothing when there is no project to hang it on', () => {
+    expect(recordedIn(null, seen)).toBeNull();
+  });
+
+  it('keeps nothing when the run itself did not come back', () => {
+    expect(recordedIn('/p/paper-street', null)).toBeNull();
   });
 });

@@ -53,15 +53,26 @@ import { ProjectHistory, type ReviewTarget } from '../../history/repo';
 import { mapFrom, saysMap, type SourceFile } from '../../files/map';
 import type { MemoryStore } from '../memory';
 import * as debug from './debug';
+import { connectingTool } from './mcp';
 import { roleSpec, type HelperRole } from './child';
 import { arxivId, arxivMeta, readPdfPages, slicePages } from './pdf';
 import { REVIEW_ANGLES, reviewRequestFor, trimDiff } from './review';
-import { checksBrief, projectChecks, usualChecks } from './checks';
+import {
+  CHECK_WORDS,
+  CHECKS_AT_A_TIME,
+  checksBrief,
+  gatheredChecks,
+  projectChecks,
+  runEachCheck,
+  usualChecks,
+  type CheckVerdict,
+  type ProjectCheck,
+} from './checks';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
 import { hold } from '../sandbox';
-import type { Money, SpendReason } from '../types';
+import type { LivePage, Money, PageAct, PageReading, SpendReason } from '../types';
 
 /** The result envelope every tool here returns: the model's answer in text.
  *  Failures are *thrown*, not tucked into the envelope — Pi marks a thrown
@@ -427,6 +438,34 @@ export const webfetchTool: ToolDefinition = {
 /** The change a review will point at, as git text. The model names the target
  *  — the work not saved yet, one saved version, or a named piece of work — and
  *  the diff comes back for the reviewer helpers to look at. */
+/** What a change to check is named by, shared by the two tools that ask for
+ *  one: the target, and the sentence to say back when it is not enough. */
+type ChangeAsked = { target: string; id?: string; name?: string };
+
+/** Named once, because two tools ask for the same change and a target that
+ *  means something different to each of them is a bug waiting. */
+const CHANGE_PARAMETERS = Type.Object({
+  target: Type.String({
+    description: "Which change: 'working' for the work not yet saved, 'version' for one saved version, 'line' for a named piece of work.",
+  }),
+  id: Type.Optional(Type.String({ description: "The saved version's id, when the target is 'version'." })),
+  name: Type.Optional(Type.String({ description: "The named piece of work, when the target is 'line'." })),
+});
+
+export function reviewTargetOf(params: ChangeAsked): ReviewTarget | string {
+  if (params.target === 'version') {
+    return params.id === undefined || params.id === ''
+      ? 'To read one saved version, tell me which one — its id from the versions list.'
+      : { kind: 'version', id: params.id };
+  }
+  if (params.target === 'line') {
+    return params.name === undefined || params.name === ''
+      ? 'To read a named piece of work, tell me its name.'
+      : { kind: 'line', name: params.name };
+  }
+  return { kind: 'working' };
+}
+
 export const readDiffTool = (cwd: string): ToolDefinition => ({
   name: 'read_diff',
   label: 'Reading a change',
@@ -435,17 +474,11 @@ export const readDiffTool = (cwd: string): ToolDefinition => ({
   promptSnippet: 'read_diff(target) — read the change being checked, as a diff',
   promptGuidelines: [
     "When asked to check a change before it ships, first read it with read_diff — 'working' unless a saved version or a named piece of work is the thing being checked.",
-    'Then send the change to reviewer helpers (task with role reviewer) in parallel — one per check listed with the change, all at once — and combine their findings into a verdict.',
+    'Where the project has written its own checks, run them with run_checks on the same target: it puts one reviewer on each of them at once and brings back what every one of them found. Where it has written none, the usual three angles listed with the change are yours to look at yourself.',
     'When somebody asks for something to be checked every time from now on, write it down as a check — one file in .agents/checks, its name and what to look for — so every later review runs it without being asked again.',
     'Finish with a short plain summary followed by a fenced review block: a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, the names of the checks you ran, and the findings — each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact, and confidence (0-100).',
   ],
-  parameters: Type.Object({
-    target: Type.String({
-      description: "Which change to read: 'working' for the work not yet saved, 'version' for one saved version, 'line' for a named piece of work.",
-    }),
-    id: Type.Optional(Type.String({ description: "The saved version's id, when the target is 'version'." })),
-    name: Type.Optional(Type.String({ description: "The named piece of work, when the target is 'line'." })),
-  }),
+  parameters: CHANGE_PARAMETERS,
   executionMode: 'sequential',
   execute: async (
     _callId: string,
@@ -457,20 +490,9 @@ export const readDiffTool = (cwd: string): ToolDefinition => ({
       details: {},
     });
 
-    let target: ReviewTarget;
-    if (params.target === 'version') {
-      if (params.id === undefined || params.id === '') {
-        return say('To read one saved version, tell me which one — its id from the versions list.');
-      }
-      target = { kind: 'version', id: params.id };
-    } else if (params.target === 'line') {
-      if (params.name === undefined || params.name === '') {
-        return say('To read a named piece of work, tell me its name.');
-      }
-      target = { kind: 'line', name: params.name };
-    } else {
-      target = { kind: 'working' };
-    }
+    const asked = reviewTargetOf(params);
+    if (typeof asked === 'string') return say(asked);
+    const target = asked;
 
     try {
       const diff = await new ProjectHistory(cwd).diffFor(target);
@@ -479,7 +501,10 @@ export const readDiffTool = (cwd: string): ToolDefinition => ({
       }
       const own = await projectChecks(cwd);
       const checks = own.length > 0 ? own : usualChecks();
-      return say(`${trimDiff(diff)}\n\n${checksBrief(checks, own.length > 0)}`);
+      // Only where there is something to run. A project that has written none
+      // reads exactly what it always did, and nothing new is spent on it.
+      const run = own.length > 0 ? `\n\n${CHECK_WORDS.runThem}` : '';
+      return say(`${trimDiff(diff)}\n\n${checksBrief(checks, own.length > 0)}${run}`);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'the change could not be read.';
       throw new Error(`I could not read the change: ${message}`);
@@ -499,6 +524,121 @@ export function reviewerBriefs(
     task: reviewRequestFor(diff, check.line),
   }));
 }
+
+/**
+ * The project's own checks, actually run.
+ *
+ * One reviewer per check, several at a time, each with the same change and one
+ * standard to hold it against. The fan-out is this app's rather than the
+ * model's: asking a model nicely to send five helpers in one reply is a queue
+ * wearing a fan-out's clothes, and the standards a team wrote down are the last
+ * thing that should depend on it remembering to.
+ *
+ * A project that has written none pays nothing here — no reviewer is sent, and
+ * the change goes back to the agent to look at as it always did.
+ */
+/**
+ * Told when a set of reviewers sets off, so their answers can be kept.
+ *
+ * Called at the moment they are dispatched and answered through what it hands
+ * back, because the two moments are minutes apart and the files can move in
+ * between. Whoever holds the answers decides whether one that arrives late
+ * still describes the project as it now stands.
+ */
+export type ChecksNoted = () => (verdicts: readonly CheckVerdict[]) => void;
+
+export const runChecksTool = (
+  cwd: string,
+  agentDir: string,
+  model: HelperModel = null,
+  thinking?: HelperPace,
+  noted?: ChecksNoted,
+): ToolDefinition => ({
+  name: 'run_checks',
+  label: 'Running this project’s checks',
+  description:
+    "Hold a change up against the checks this project has written down for itself — one reviewer on each of them, all at the same time — and bring back what every one of them found. Targets are the same as read_diff: 'working', 'version' with an id, or 'line' with a name. A project that has written no checks costs nothing here and sends nobody.",
+  promptSnippet: 'run_checks(target) — run the project’s own checks against a change, one reviewer each',
+  promptGuidelines: [
+    'After reading a change with read_diff, run the project’s own checks against the same target with run_checks. Every check gets its own reviewer and they all look at once.',
+    'What comes back is grouped under the name of the check it came from. Keep that attribution in the verdict — a finding is worth more when the standard behind it is named — and list those names in the review block’s "checks".',
+    'A check that did not finish is not a check that passed. Say so in the summary rather than counting it as clear.',
+  ],
+  parameters: CHANGE_PARAMETERS,
+  executionMode: 'parallel',
+  execute: async (
+    callId: string,
+    params: { target: string; id?: string; name?: string },
+    signal: AbortSignal | undefined,
+    onUpdate: AgentToolUpdateCallback<unknown> | undefined,
+  ): ToolResult => {
+    const say = (text: string): AgentToolResult<unknown> => ({
+      content: [{ type: 'text', text }],
+      details: {},
+    });
+
+    // Taken before the change is even read, so an edit landing anywhere between
+    // here and the last reviewer's answer is one the answers do not cover.
+    const keep = noted?.();
+
+    const asked = reviewTargetOf(params);
+    if (typeof asked === 'string') return say(asked);
+
+    let diff: string;
+    try {
+      diff = await new ProjectHistory(cwd).diffFor(asked);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'the change could not be read.';
+      throw new Error(`I could not read the change: ${message}`);
+    }
+    if (diff.trim() === '') {
+      return say('There is no change at that target to check — nothing has changed there to look at.');
+    }
+
+    const checks = await projectChecks(cwd);
+    // The common case, and it must cost nothing: no reviewer, no process, no
+    // money, and one sentence saying where a check would go if they wanted one.
+    if (checks.length === 0) return say(`${CHECK_WORDS.nothingWritten} ${CHECK_WORDS.where}`);
+
+    const briefs = new Map(reviewerBriefs(trimDiff(diff), checks).map((brief) => [brief.key, brief.task]));
+
+    const one = async (check: ProjectCheck): Promise<string> => {
+      const brief = briefs.get(check.key);
+      if (brief === undefined) throw new Error('there was nothing to hand this reviewer.');
+      // Each reviewer is its own run against the ceiling: five checks are five
+      // processes and five accounts, and a ceiling that only counted the tool
+      // call would count one.
+      const id = `${callId}:${check.key}`;
+      const admitted = fleet.begin({ id, kind: 'helper', stop: () => {} });
+      if (!admitted.ok) throw new Error(admitted.because);
+      try {
+        const { outcome } = await runSubagent(
+          { task: brief, role: 'reviewer', cwd, agentDir, model, thinking },
+          signal,
+          () => {},
+          {
+            begun: (stop) => fleet.watch(id, stop),
+            spent: (line) => fleet.spentUnseen(id, { ...line, project: cwd }),
+          },
+        );
+        if (!outcome.ok) throw new Error(outcome.error);
+        return outcome.text;
+      } finally {
+        fleet.ended(id);
+      }
+    };
+
+    const verdicts = await runEachCheck(checks, one, CHECKS_AT_A_TIME, (done, many) => {
+      onUpdate?.({ content: [{ type: 'text', text: CHECK_WORDS.soFar(done, many) }], details: {} });
+    });
+
+    keep?.(verdicts);
+
+    const gathered = gatheredChecks(verdicts);
+    onUpdate?.({ content: [{ type: 'text', text: gathered }], details: {} });
+    return say(gathered);
+  },
+});
 
 /* -------------------------------------------------------------------------- */
 /* The project's memory                                                       */
@@ -1031,11 +1171,16 @@ async function runSubagent(
         finish({
           ok: false,
           error:
-            code === 0
-              ? 'The helper finished without saying anything.'
-              : said === null
-                ? 'The helper stopped before it finished.'
-                : `The helper stopped before it finished. The last thing it said was: ${said}`,
+            code === 0 && rest !== ''
+              ? // It did say something: the answer was cut off on the way here.
+                // Saying it finished without saying anything sends the model
+                // looking for a fault in the work rather than in the pipe.
+                'The helper finished, but its answer was cut off on the way back, so none of it could be kept.'
+              : code === 0
+                ? 'The helper finished without saying anything.'
+                : said === null
+                  ? 'The helper stopped before it finished.'
+                  : `The helper stopped before it finished. The last thing it said was: ${said}`,
         });
       }
     });
@@ -1058,15 +1203,16 @@ export const taskTool = (
   label: 'Task',
   description:
     'Send a piece of work to a helper agent with its own fresh context window. Most helpers read the project and search the web and cannot change anything; a builder is handed its own copy of the project, makes one self-contained change in it, and hands back the change for you to look at and apply. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context. Call it several times in one reply to put several helpers on separate pieces of work at the same time. A helper can be asked to act as a reviewer (finding problems with file and line references) or a researcher (gathering facts), or left as a general helper.',
-  promptSnippet: 'task(task, role?) — send a piece of work to a read-only helper',
+  promptSnippet: 'task(task, role?) — send a piece of work to a helper; a builder makes the change, the rest report',
   promptGuidelines: [
     'Give the helper one whole piece of work: a question it can answer without this conversation.',
     // Without this the model sends one helper, waits for its answer, and sends
     // the next — which is a queue wearing a fan-out's clothes.
     'To send several helpers, put every task call in the same reply. They then work at once instead of queueing, and you get all the answers together.',
     'Split the work so no helper needs another helper\'s answer. Anything that has to happen in order belongs in one helper, or in a second round after the first answers.',
-    'The helper cannot make changes. Ask it for findings, not fixes.',
+    'A helper reports and changes nothing — ask it for findings, not fixes. The one exception is a builder, which is given its own copy of the project, makes the change there, and hands back what it changed.',
     'A small piece of work is not worth the help: the helper reads the same files and searches the same web you would.',
+    'This helper answers inside the current tool call, so the conversation waits for its findings. If the person wants work to carry on in the background while the conversation remains free, use set_going instead.',
     "To have work checked, send it to a 'reviewer' helper and ask it to find genuine problems with file and line references. To gather facts, send a 'researcher'. A helper that needs a decision stops and says what it needs, starting with 'To continue I need to know:' — pass that question to the person, then send the work again with the answer.",
   ],
   parameters: Type.Object({
@@ -1371,6 +1517,10 @@ export function runningTools(
     /** Told whenever something starts, finds its address or falls over, so the
      *  band above the composer is never out of date. */
     onChange?: () => void;
+    /** The door this copy owns. Four copies of one project all run the same
+     *  start command, and without this they all ask for the same port and three
+     *  of them look as though they failed for no reason. */
+    port?: number | null;
   },
 ): ToolDefinition[] {
   return [
@@ -1391,7 +1541,7 @@ export function runningTools(
         label: Type.Optional(Type.String({ description: 'What to call it in a sentence — "the site", "the API".' })),
       }),
       executionMode: 'sequential',
-      execute: async (_callId, params: { command: string; label?: string }): ToolResult => {
+      execute: async (_callId, params: { command: string; label?: string }, signal: AbortSignal | undefined): ToolResult => {
         const command = params.command.trim();
         if (command === '') throw new Error('I need a command to start.');
         const piece = await running.start({
@@ -1401,6 +1551,8 @@ export function runningTools(
           parts: where.parts(),
           writable: where.writable,
           ...(where.noted === undefined ? {} : { noted: where.noted }),
+          ...(where.port == null ? {} : { port: where.port }),
+          signal,
           onChange: where.onChange,
         });
         const said = running.said(piece.id);
@@ -1454,10 +1606,12 @@ export function runningTools(
       parameters: Type.Object({
         id: Type.String({ description: 'The id keep_running returned.', minLength: 1 }),
       }),
-      execute: (_callId, params: { id: string }): ToolResult => {
-        const stopped = running.stop(params.id.trim());
+      execute: async (_callId, params: { id: string }): ToolResult => {
+        const stopped = await running.stop(params.id.trim());
+        if (stopped) running.forgetStopped();
+        where.onChange?.();
         const text = stopped ? `${params.id} is stopped.` : `Nothing here is called ${params.id}.`;
-        return Promise.resolve({ content: [{ type: 'text', text }], details: {} });
+        return { content: [{ type: 'text', text }], details: {} };
       },
     },
   ];
@@ -1702,6 +1856,248 @@ export const tryWaysTool = (put: PutOnBoard): ToolDefinition => ({
   },
 });
 
+/* -------------------------------------------------------------------------- */
+/* The page beside the conversation                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The page somebody is actually looking at.
+ *
+ * Graphe has always had a page beside the conversation, and the agent has
+ * always worked blind of it: it could drive a browser of its own and never see
+ * the one on screen. These tools are that page — read it, press it, type in
+ * it, scroll it, see what it complained about, take its picture.
+ *
+ * ## Why this is module state and not an argument
+ *
+ * The two ends sit in different places. The shell owns the view; the session
+ * these tools are handed to is built somewhere else. Registering the page once,
+ * where it is made, is the only seam that does not thread a view through
+ * everything in between — and it gives the right answer everywhere else for
+ * free: a helper in its own process and every test have no page, so the tools
+ * are simply not on the list.
+ *
+ * ## What they deliberately cannot do
+ *
+ * Open the page, or send it somewhere else. Where the page goes is a person's
+ * press and it stays one. The pane keeps its own store and a preload that hands
+ * out nothing; none of this touches either.
+ */
+let livePage: LivePage | null = null;
+
+/** Told to the tools by the shell that holds the view. Null takes it away. */
+export function holdPage(page: LivePage | null): void {
+  livePage = page;
+}
+
+/** Long enough for a page of any size, short enough that carrying the reading
+ *  in every later turn does not cost more than the reading was worth. */
+const MOST_PAGE_LINES = 400;
+
+export const PAGE_WORDS = {
+  closed:
+    'There is no page open beside the conversation. It is opened by hand, from the panel next to the chat, and I cannot open it — so either work from the files, or say that the page needs opening first.',
+  blank:
+    'The page beside the conversation is open, but nothing is loaded in it yet. There is nothing on it to read.',
+  /** The board runs each piece of work in a copy of its own, while the page
+   *  belongs to the folder somebody is looking at. Reading it is still worth
+   *  something; acting on it is meddling with a page about other work. */
+  elsewhere: (address: string): string =>
+    `The page beside the conversation is showing ${address}, which belongs to a different copy of the project than the one I am working in. I have left it alone.`,
+  notMine: (address: string): string =>
+    `Careful: this page is ${address}, which belongs to a different copy of the project than the one I am working in, so it does not show what I have changed.`,
+} as const;
+
+/** The page as it is right now, or the plain sentence saying why there is none. */
+type PageState =
+  | { open: true; page: LivePage; elsewhere: boolean }
+  | { open: false; because: string };
+
+function pageState(cwd?: string): PageState {
+  const page = livePage;
+  const open = page?.open() ?? null;
+  if (page === null || open === null) return { open: false, because: PAGE_WORDS.closed };
+  const address = open.address.trim();
+  if (address === '' || address === 'about:blank') return { open: false, because: PAGE_WORDS.blank };
+  const mine = cwd === undefined || cwd === '' || open.project === null || open.project === cwd;
+  return { open: true, page, elsewhere: !mine };
+}
+
+function saysReading(reading: PageReading, elsewhere: boolean): string {
+  const lines = reading.outline.split('\n');
+  const kept = lines.slice(0, MOST_PAGE_LINES).join('\n');
+  const rest = lines.length - MOST_PAGE_LINES;
+  const more = rest > 0 ? `\n… ${String(rest)} more, further down the page.` : '';
+  const warn = elsewhere ? `${PAGE_WORDS.notMine(reading.address)}\n\n` : '';
+  const called = reading.title === '' ? '' : ` — ${reading.title}`;
+  return `${warn}${reading.address}${called}\n\n${kept}${more}`;
+}
+
+/** A closed pane is a fact about the world, not a call that went wrong, so
+ *  every tool here answers in words rather than throwing. A thrown execute is
+ *  what marks a step failed in the activity feed. */
+function pageSay(text: string): AgentToolResult<unknown> {
+  return { content: [{ type: 'text', text }], details: {} };
+}
+
+/**
+ * The six tools that work on the page beside the conversation.
+ *
+ * Things are named the way somebody would say them out loud — "Get started",
+ * "Email" — because that is what a reading shows and what survives the markup
+ * being rewritten underneath it. A handle from the last reading (e12) says the
+ * same thing exactly, for when two things share a name.
+ */
+export function pageTools(cwd?: string): ToolDefinition[] {
+  const acting = async (what: PageAct, state: PageState): Promise<AgentToolResult<unknown>> => {
+    if (!state.open) return pageSay(state.because);
+    if (state.elsewhere) {
+      return pageSay(PAGE_WORDS.elsewhere(state.page.open()?.address ?? 'another page'));
+    }
+    const done = await state.page.act(what);
+    if (!done.ok) return pageSay(done.because);
+    return pageSay(`${done.did}\n\n${saysReading(done.now, false)}`);
+  };
+
+  return [
+    {
+      name: 'page_read',
+      label: 'Reading the page',
+      description:
+        "Read the page open beside the conversation — the person's own site, the one they are looking at right now. It comes back as an outline: every heading, link, button, box and picture, with the words on it and a short handle to aim at. Read it before pressing or typing anything, and again afterwards to see what changed.",
+      promptSnippet: 'page_read() — what is on the page beside the conversation right now',
+      promptGuidelines: [
+        'This is the page on screen, not a browser of your own. Whatever you do to it, the person watches happen.',
+        'Aim at things by the words on them. A handle such as e12 from the last reading means exactly one thing, for when two things read the same.',
+      ],
+      parameters: Type.Object({}),
+      executionMode: 'sequential',
+      execute: async (): ToolResult => {
+        const state = pageState(cwd);
+        if (!state.open) return pageSay(state.because);
+        const reading = await state.page.read();
+        if (reading === null) return pageSay(PAGE_WORDS.blank);
+        return pageSay(saysReading(reading, state.elsewhere));
+      },
+    },
+    {
+      name: 'page_click',
+      label: 'Pressing something on the page',
+      description:
+        'Press something on the page beside the conversation: a button, a link, a tab, a checkbox. Name it the way it reads on screen. What comes back says what was pressed and what the page looks like afterwards.',
+      promptSnippet: 'page_click(target) — press something on the page beside the conversation',
+      promptGuidelines: [
+        'Read the page first, so what you name is really on it.',
+        'This is a live site. A press can send a form, buy something or delete something, and nothing here can take that back.',
+      ],
+      parameters: Type.Object({
+        target: Type.String({
+          description: 'What to press, as it reads on the page, or a handle such as e12 from the last reading.',
+          minLength: 1,
+        }),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { target: string }): ToolResult =>
+        acting({ kind: 'press', target: params.target.trim() }, pageState(cwd)),
+    },
+    {
+      name: 'page_type',
+      label: 'Typing into the page',
+      description:
+        'Type into a box on the page beside the conversation. Name the box the way its label reads on screen. The words go in the way a person would type them, so whatever the page does as somebody types happens too.',
+      promptSnippet: 'page_type(target, text, submit?) — type into a box on the page',
+      promptGuidelines: [
+        'Read the page first, so the box you name is really there.',
+        'Leave submit alone unless sending the form is the point of the call. Sending it is the part that cannot be taken back.',
+        'Never type a key, a password or anything private into a page. It goes wherever that page sends it.',
+      ],
+      parameters: Type.Object({
+        target: Type.String({
+          description: 'Which box, as its label reads on the page, or a handle such as e12 from the last reading.',
+          minLength: 1,
+        }),
+        text: Type.String({ description: 'The words to type.' }),
+        submit: Type.Optional(
+          Type.Boolean({ description: 'Send the form once the words are in. Off unless you ask for it.' }),
+        ),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { target: string; text: string; submit?: boolean }): ToolResult =>
+        acting(
+          { kind: 'write', target: params.target.trim(), text: params.text, submit: params.submit === true },
+          pageState(cwd),
+        ),
+    },
+    {
+      name: 'page_scroll',
+      label: 'Scrolling the page',
+      description:
+        'Scroll the page beside the conversation — to something named on it, or up, down, to the top or to the bottom. Use it to reach what is below the fold before reading or pressing it.',
+      promptSnippet: 'page_scroll(target?, way?) — move the page to what you want to see',
+      parameters: Type.Object({
+        target: Type.Optional(
+          Type.String({ description: 'Something on the page to bring into view, by its words or its handle.' }),
+        ),
+        way: Type.Optional(
+          Type.String({ description: "'down', 'up', 'top' or 'bottom'. Ignored when a target is given." }),
+        ),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { target?: string; way?: string }): ToolResult => {
+        const named = (params.target ?? '').trim();
+        const asked = (params.way ?? '').trim().toLowerCase();
+        // Anything unreadable means down, which is what a model asking to see
+        // more of a page nearly always wants.
+        const way = asked === 'up' || asked === 'top' || asked === 'bottom' ? asked : 'down';
+        return acting({ kind: 'move', target: named === '' ? null : named, way }, pageState(cwd));
+      },
+    },
+    {
+      name: 'page_trouble',
+      label: 'Reading what the page complained about',
+      description:
+        'What the page beside the conversation has complained about since it loaded: the messages it printed to its console, and the requests that came back wrong or never came back at all. Read it when something on the page does not work and the markup looks right.',
+      promptSnippet: 'page_trouble() — messages and failed requests from the page beside the conversation',
+      parameters: Type.Object({}),
+      executionMode: 'sequential',
+      execute: async (): ToolResult => {
+        const state = pageState(cwd);
+        if (!state.open) return pageSay(state.because);
+        const trouble = await state.page.trouble();
+        if (trouble === null) return pageSay(PAGE_WORDS.blank);
+        if (trouble.said.length === 0 && trouble.unanswered.length === 0) {
+          return pageSay('Nothing since the page loaded: it has printed no messages, and every request came back.');
+        }
+        const parts: string[] = [];
+        if (trouble.said.length > 0) parts.push(`What the page printed:\n${trouble.said.join('\n')}`);
+        if (trouble.unanswered.length > 0) {
+          parts.push(`Requests that did not come back:\n${trouble.unanswered.join('\n')}`);
+        }
+        return pageSay(parts.join('\n\n'));
+      },
+    },
+    {
+      name: 'page_picture',
+      label: 'Taking a picture of the page',
+      description:
+        'Take a picture of the page beside the conversation, exactly as it looks on screen. Use it for anything about how something looks — spacing, colour, overlap, alignment — and read the page instead for anything about what is on it.',
+      promptSnippet: 'page_picture() — a picture of the page beside the conversation',
+      parameters: Type.Object({}),
+      executionMode: 'sequential',
+      execute: async (): ToolResult => {
+        const state = pageState(cwd);
+        if (!state.open) return pageSay(state.because);
+        const shot = await state.page.picture();
+        if (shot === null) return pageSay(PAGE_WORDS.blank);
+        return {
+          content: [{ type: 'image', data: shot.bytes, mimeType: shot.mimeType }],
+          details: {},
+        };
+      },
+    },
+  ];
+}
+
 export const grapheTools = (
   agentDir: string,
   figmaToken?: string | null,
@@ -1709,13 +2105,26 @@ export const grapheTools = (
   thinking?: HelperPace,
   projectRoot?: string,
   putOnBoard?: PutOnBoard,
+  noted?: ChecksNoted,
 ): ToolDefinition[] => {
   const tools = [websearchTool, webfetchTool, taskTool(agentDir, model, thinking, projectRoot)];
-  if (projectRoot !== undefined && projectRoot !== '') tools.push(readMapTool(projectRoot));
+  if (projectRoot !== undefined && projectRoot !== '') {
+    tools.push(
+      readMapTool(projectRoot),
+      runChecksTool(projectRoot, agentDir, model, thinking, noted),
+      // Here rather than beside `mcp`: that one only exists once a project has
+      // something connected, and the project with nothing yet is the whole
+      // point of this one.
+      connectingTool(projectRoot),
+    );
+  }
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));
   // Only where there is a board to put work on. The runs on the board must not
   // hold this tool: a piece that can fill the board it is running on is a loop.
   if (putOnBoard !== undefined) tools.push(setGoingTool(putOnBoard), tryWaysTool(putOnBoard));
+  // Only where a shell has said there is a page. Anywhere else — a helper in
+  // its own process, a test — there is no page to work on and no tool for it.
+  if (livePage !== null) tools.push(...pageTools(projectRoot));
   return tools;
 };

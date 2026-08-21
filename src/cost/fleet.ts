@@ -83,7 +83,10 @@ export const ceilingWords = {
  * keeps its own four, set where the board is.
  */
 export const MOST_AT_ONCE: Readonly<Record<RunKind, number>> = {
-  helper: 6,
+  /* The same number a single request may break itself into (`MOST_APART`), so a
+     fan-out that the model was told it could ask for is never refused on the
+     way out by a ceiling nobody mentioned. */
+  helper: 8,
   // Background work is already capped per project by the board that holds it,
   // and this fleet is one for the whole app: capping it here as well would mean
   // a second project could not start anything while the first was busy.

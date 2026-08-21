@@ -239,6 +239,13 @@
   color: var(--text-muted);
   white-space: pre-wrap;
   word-break: break-word;
+  /* A description can run to paragraphs. Capped so the pane keeps its card
+     shape rather than turning into a column that outgrows the window; the rest
+     of a long one is one scroll away. */
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .reviews__do {
@@ -293,4 +300,26 @@
   .reviews__about {
     position: static;
   }
+}
+
+/** Offered where a false "there are none" used to sit. A reading that failed is
+ *  worth pressing again; an empty project is not. */
+.reviews__retry {
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.reviews__retry:hover:not(:disabled) {
+  border-color: var(--text-faint);
+}
+
+.reviews__retry:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

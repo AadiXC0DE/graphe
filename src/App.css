@@ -195,12 +195,6 @@
   color: var(--text);
 }
 
-.workhead__note {
-  margin: 0;
-  font-size: var(--text-xs);
-  color: var(--text-faint);
-}
-
 /* Generous, uneven whitespace — an exchange begins when you say something, so
    that is where the extra air goes. Inside one exchange the turns stay close
    enough to read as one answer. */
@@ -224,7 +218,12 @@
 .app__composer {
   position: sticky;
   bottom: 0;
-  z-index: 1;
+  /* Above the overview rail, which is fixed at 2. Sticky with a z-index makes
+     this a stacking context, so every menu that grows out of the composer — the
+     model list, the skills list — is trapped at whatever number sits here,
+     however high its own z-index is. At 1 the rail painted straight over the
+     model list. Below the sheets at 5: a full-screen view still covers this. */
+  z-index: 3;
   /* The bottom edge of the window, whatever the thread above is doing. The auto
      margin eats the slack of a short conversation so the box sits on the glass
      rather than half way up it; `sticky` holds it there once the thread is long
@@ -791,24 +790,13 @@
 
    With *Show scroll bars: Always* — the default whenever a mouse is connected —
    macOS has no overlay bar to fall back on: anything that genuinely overflows
-   gets a classic bar taking real width, ours or the platform's. Ours is thinner
-   (11px against 15) and its track is transparent, so an empty scroller shows
-   nothing at all.
-
-   Standard properties only. The ::-webkit-scrollbar pseudo-elements that used
-   to sit under this were measured in Electron 33 and are ignored the moment
-   scrollbar-width is set on the same element — fifty lines that rendered
-   nothing. */
-.app,
-.shelf,
-.overview,
-.connectmodal__body,
-.codeblock__code pre,
-.errorcard__pre,
-.composer__input {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
+   gets a classic bar taking real width. Every scroller in the app now wears
+   one thin bar, inherited from body (styles/global.css); nothing opts in here
+   any more. The one exception is above: this scroller hides the bar entirely,
+   because macOS apps do not put one down the side of their main content.
+   Standard properties only — ::-webkit-scrollbar pseudo-elements were measured
+   here once and are ignored whenever scrollbar-width is set, so they stayed
+   out. */
 
 /* Headings set two or three words long look broken when the last word drops to
    its own line. Prose gets `pretty`, which only guards the last line. */

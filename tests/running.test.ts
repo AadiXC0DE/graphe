@@ -129,7 +129,7 @@ describe('RU-02 something that stays up', () => {
     const first = await running.start({ command: one.command, folder: one.folder, parts: PARTS, writable: [one.folder] });
     const second = await running.start({ command: two.command, folder: two.folder, parts: PARTS, writable: [two.folder] });
 
-    expect(running.stop(first.id)).toBe(true);
+    expect(await running.stop(first.id)).toBe(true);
     await expect(fetch(`${first.address ?? ''}/`)).rejects.toThrow();
 
     const still = await fetch(`${second.address ?? ''}/`);
@@ -164,13 +164,59 @@ describe('RU-02 something that stays up', () => {
     await expect(fetch(`${piece.address ?? ''}/`)).rejects.toThrow();
   }, 30_000);
 
+  it('never starts another server after the project has closed', async () => {
+    const running = register();
+    const { folder, command } = folderWithServer();
+    running.stopAll();
+    await expect(running.start({ command, folder, parts: PARTS, writable: [folder] })).rejects.toThrow(
+      'no longer open',
+    );
+  });
+
+  it('never starts a server for a turn that was already stopped', async () => {
+    const running = register();
+    const { folder, command } = folderWithServer();
+    const stopped = new AbortController();
+    stopped.abort();
+    await expect(
+      running.start({ command, folder, parts: PARTS, writable: [folder], signal: stopped.signal }),
+    ).rejects.toThrow('was stopped');
+    expect(running.list()).toHaveLength(0);
+  });
+
   it('stopping something twice is not an error anybody can act on', async () => {
     const running = register();
     const { folder, command } = folderWithServer();
     const piece = await running.start({ command, folder, parts: PARTS, writable: [folder] });
-    expect(running.stop(piece.id)).toBe(true);
-    expect(running.stop(piece.id)).toBe(true);
-    expect(running.stop('run-nothing')).toBe(false);
+    expect(await running.stop(piece.id)).toBe(true);
+    expect(await running.stop(piece.id)).toBe(true);
+    expect(await running.stop('run-nothing')).toBe(false);
+  }, 30_000);
+
+  it('forces down a server that ignores the polite stop, without leaving the button waiting', async () => {
+    const running = register();
+    const folder = mkdtempSync(join(tmpdir(), 'graphe-running-'));
+    writeFileSync(
+      join(folder, 'stubborn.mjs'),
+      `
+import { createServer } from 'node:http';
+process.on('SIGTERM', () => {});
+const s = createServer((_q, r) => r.end('still here'));
+s.listen(0, '127.0.0.1', () => console.log('http://localhost:' + s.address().port));
+`,
+      'utf8',
+    );
+    const piece = await running.start({
+      command: `${process.execPath} stubborn.mjs`,
+      folder,
+      parts: PARTS,
+      writable: [folder],
+    });
+
+    const began = Date.now();
+    expect(await running.stop(piece.id)).toBe(true);
+    expect(Date.now() - began).toBeLessThan(2_000);
+    await expect(fetch(`${piece.address ?? ''}/`)).rejects.toThrow();
   }, 30_000);
 });
 

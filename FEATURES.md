@@ -45,7 +45,7 @@ A read carries a content fingerprint; an edit names lines plus that fingerprint 
 Your MCP servers plug in through one file: tools start on first use, stop with the session, and every call asks first.
 
 **13 · Parallel conversations**
-Every tab works in its own checkout, and the work comes home when it's done. Two conversations running at once is the point, not a queue.
+Every tab works in its own checkout, and the work comes home when it's done. Two conversations running at once is the point, not a queue. A checkout nobody is in is given back and made again from its branch when you open that conversation again, so parallel work doesn't accumulate on disk.
 
 **14 · Background work**
 Send a piece of work away, come back to a board: what finished, what didn't, what's waiting on you — each with a picture.

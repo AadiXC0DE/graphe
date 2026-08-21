@@ -27,6 +27,7 @@
  */
 
 import type { Attachment } from '../components/Attachments';
+import type { Recording } from '../diff/flow';
 import type { Task, TaskObservation } from '../cost/estimate';
 import type { AgentNotice, Overview, PutBack, SavedVersion } from './ipc';
 import { applySpend, type SpendView } from './spend';
@@ -113,14 +114,6 @@ export type Desk = {
    *  measured when it settles. Null when nothing is running. */
   doing: { task: Task; startedAt: number } | null;
   /**
-   * What was typed while something was already running, in the order it was
-   * typed. Each goes out on its own as soon as the one before it is finished.
-   *
-   * Per desk, because a second thought belongs to the project it was had in —
-   * switching away and back finds it still waiting.
-   */
-  waiting: readonly Waiting[];
-  /**
    * Which conversation is on screen, as the shell addresses it. Null before the
    * shell has said — everything still works, it just cannot be addressed.
    */
@@ -155,20 +148,61 @@ export type Desk = {
 
 /** A conversation this project has open but is not showing.
  *
- * Only the two things that belong to a conversation rather than to the project:
- * what was said in it, and anything typed into it that has not gone yet. The
- * versions, the spend and the pictures are the project's, and are shared.
+ * Only what belongs to a conversation rather than to the project: what was said
+ * in it. The versions, the spend and the pictures are the project's, and are
+ * shared.
  */
 export type Parked = {
   turns: readonly Turn[];
-  waiting: readonly Waiting[];
+  /** Job measurement belongs to the conversation whose session will settle. */
+  doing?: { task: Task; startedAt: number } | null;
+  counted?: number;
 };
+
+/** A run of states somebody recorded on the page, and the project it was
+ *  recorded in. */
+export type Recorded = {
+  recording: Recording;
+  project: string;
+};
+
+/**
+ * What is worth keeping from a run that has just stopped.
+ *
+ * Null for a run that saw nothing. Pressing record, doing nothing and pressing
+ * stop is not evidence, and a row in the conversation saying so is furniture.
+ * Null too when there is no project to hang it on, so one project's states are
+ * never left over the next one's conversation.
+ */
+export function recordedIn(project: string | null, run: Recording | null): Recorded | null {
+  if (project === null || run === null || run.frames.length === 0) return null;
+  return { recording: run, project };
+}
 
 /** One message typed while the last one was still being answered. */
 export type Waiting = {
   id: string;
   text: string;
 };
+
+/** What came back out of the line, in the order it was queued. Empty when
+ *  nothing was waiting — which is not the same as a line that would not come
+ *  back, and moves nothing either way. */
+export function tookBack(taken: {
+  steering: readonly string[];
+  followUp: readonly string[];
+}): readonly string[] {
+  return [...taken.steering, ...taken.followUp].filter((one) => one.trim() !== '');
+}
+
+/** The box with the line put back into it. Whatever was already typed there
+ *  stays, and stays first: it is a sentence somebody is in the middle of, not
+ *  an empty slot to drop the line into. */
+export function intoTheBox(draft: string, words: readonly string[]): string {
+  if (words.length === 0) return draft;
+  const back = words.join('\n\n');
+  return draft.trim() === '' ? back : `${draft}\n\n${back}`;
+}
 
 /** Every desk, and which one is in front. */
 export type Desks = {
@@ -191,7 +225,6 @@ function blankDesk(path: string, name: string): Desk {
     putBack: null,
     jobs: [],
     doing: null,
-    waiting: [],
     address: null,
     parked: {},
     order: [],
@@ -221,12 +254,20 @@ export function showThread(desks: Desks, project: string, address: string): Desk
     return {
       ...desk,
       turns: wanted.turns,
-      waiting: wanted.waiting,
+      doing: wanted.doing ?? null,
+      counted: wanted.counted ?? 0,
       address,
       parked:
         desk.address === null
           ? rest
-          : { ...rest, [desk.address]: { turns: desk.turns, waiting: desk.waiting } },
+          : {
+              ...rest,
+              [desk.address]: {
+                turns: desk.turns,
+                doing: desk.doing,
+                counted: desk.counted,
+              },
+            },
     };
   });
 }
@@ -313,14 +354,38 @@ export function receive(desks: Desks, notice: AgentNotice, at: number = Date.now
     // belongs to the conversation it started in. The spend is the project's
     // either way, so it is counted wherever the words land.
     const said = notice.conversation ?? '';
-    const parked = said === '' ? undefined : desk.parked[said];
-    if (parked !== undefined) {
-      return {
-        ...desk,
-        parked: { ...desk.parked, [said]: { ...parked, turns: applyEvent(parked.turns, notice.event) } },
-        spent: applySpend(desk.spent, notice.event),
-        ...measure(desk, notice, at),
-      };
+    if (said !== '' && said !== desk.address) {
+      const parked = desk.parked[said];
+      if (parked !== undefined) {
+        const measured = measure(
+          {
+            ...desk,
+            turns: parked.turns,
+            doing: parked.doing ?? null,
+            counted: parked.counted ?? 0,
+          },
+          notice,
+          at,
+        );
+        return {
+          ...desk,
+          jobs: measured.jobs,
+          parked: {
+            ...desk.parked,
+            [said]: {
+              ...parked,
+              turns: applyEvent(parked.turns, notice.event),
+              doing: measured.doing,
+              counted: measured.counted,
+            },
+          },
+          spent: applySpend(desk.spent, notice.event),
+        };
+      }
+      // A delayed event for a conversation this window no longer knows must
+      // never fall through into the tab in front. Its project spend remains a
+      // project fact, but its words and job state have no honest destination.
+      return { ...desk, spent: applySpend(desk.spent, notice.event) };
     }
     return {
       ...desk,
@@ -411,6 +476,23 @@ function isMechanical(label: string): boolean {
     label.startsWith('Writing ') ||
     label.startsWith('Removing ')
   );
+}
+
+/**
+ * Every helper still going in this project, whichever conversation asked for it.
+ *
+ * The rail used to be read off the conversation in front, so opening another tab
+ * took it off the screen — and a helper that is still working, with nothing on
+ * screen to say so, is a helper that looks stopped. Nobody watching could tell
+ * the difference, and the natural next move is to stop it and start again.
+ */
+export function helpersRunning(desk: Desk, at: number = Date.now()): NowView['helpers'] {
+  const front = nowDoing(desk.turns, at).helpers;
+  const behind = Object.values(desk.parked).flatMap((one) =>
+    nowDoing(one.turns, at).helpers.filter((helper) => helper.state === 'running'),
+  );
+  const seen = new Set(front.map((one) => one.id));
+  return [...front, ...behind.filter((one) => !seen.has(one.id))];
 }
 
 export function nowDoing(turns: readonly Turn[], at: number = Date.now()): NowView {

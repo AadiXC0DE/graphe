@@ -1,0 +1,453 @@
+/* Two or three results, side by side.
+
+   One grid track per go, shared by the heads and by every file row under them,
+   so a number always sits under the name it belongs to. The file names run down
+   a column of their own; the corner above them is empty, the way the corner of
+   any comparison is.
+
+   Nothing here animates on arrival. This is a screen somebody stops at to
+   decide, and columns that slide in stagger the one thing being compared. */
+
+.against__inner {
+  --against-lead: minmax(150px, 0.65fr);
+  max-width: 1400px;
+  padding: var(--space-5);
+  /* Long paths wrap rather than push the page sideways; if anything ever does
+     insist on more room, it takes it here and not from the window. */
+  overflow-x: auto;
+}
+
+/* ------------------------------------------------------------------ heads */
+
+.against__heads,
+.against__file {
+  display: grid;
+  grid-template-columns: var(--against-lead) repeat(var(--against-columns, 2), minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.against__heads {
+  align-items: end;
+  padding-bottom: var(--space-5);
+}
+
+.against__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.against__name {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* Where each go has got to, under its name. Read across the heads, this and
+   the dashed frame are the difference between "this is what it did" and "this
+   is where it has got to so far". */
+.against__state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.against__state::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+/* The same two colours the cards use, so a go looks the same in both places. */
+.against__state--running::before {
+  background: var(--accent);
+}
+
+.against__state--done::before {
+  background: var(--text-muted);
+}
+
+.against__side--going .against__frame {
+  border-style: dashed;
+}
+
+/* Where the offer would have been. Kept the height of the button it stands in
+   for, so the columns still line up along the bottom. */
+.against__notyet {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
+/* The picture, or the sentence standing in for it — same shape either way, so
+   three columns line up whether or not all three have one. */
+.against__frame {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+
+.against__picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.against__instead {
+  margin: 0;
+  height: 100%;
+  padding: var(--space-3);
+  display: flex;
+  align-items: flex-end;
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
+.against__total {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.against__spent {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
+.against__keep {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--accent-text);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.against__keep:active {
+  transform: scale(0.97);
+}
+
+.against__keep:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+}
+
+.against__keep:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .against__keep:not(:disabled):hover {
+    background: color-mix(in srgb, var(--accent) 88%, var(--text));
+  }
+}
+
+/* --------------------------------------------------------------- the rows */
+
+.against__summary {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.against__caption {
+  margin: 0 0 var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.against__files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.against__file {
+  align-items: center;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.against__about {
+  min-width: 0;
+}
+
+.against__path {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.against__who {
+  margin: 2px 0 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.against__cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The name of the go this number belongs to. The column head says it on a wide
+   window, so it is here for whoever is listening rather than looking — until
+   the columns stack, below, where it is the only thing that says whose. */
+.against__whose {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.against__tally {
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* How much of this row's biggest change this one is. Length only — the numbers
+   above it say what it means, and nothing here depends on colour. */
+.against__bar {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--accent) 55%, transparent) calc(var(--part, 0) * 100%),
+      transparent 0
+    ),
+    var(--bg-sunken);
+}
+
+/* A go that left the file alone. No bar at all, not an empty one: an empty bar
+   reads as "changed nothing", which is a different answer. */
+.against__untouched {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.against__same {
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.against__samepaths {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  overflow-wrap: anywhere;
+}
+
+.against__nothing {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------- one column, stacked
+
+   Under this width three columns are three slivers, so the comparison turns
+   into a list: the file, then what each go did to it, each one saying whose it
+   is. Nothing is dropped — it is the same reading, one thing at a time. */
+
+@media (max-width: 900px) {
+  .against__heads,
+  .against__file {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+
+  .against__lead {
+    display: none;
+  }
+
+  /* The picture lies down beside its name rather than filling the width: three
+     goes one under another is a scroll past three posters before the first
+     number. */
+  .against__side {
+    display: grid;
+    grid-template-columns: 128px minmax(0, 1fr);
+    grid-template-areas:
+      'picture name'
+      'picture state'
+      'picture total'
+      'picture keep';
+    align-content: start;
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .against__frame {
+    grid-area: picture;
+    align-self: start;
+  }
+
+  .against__name {
+    grid-area: name;
+  }
+
+  .against__state {
+    grid-area: state;
+  }
+
+  .against__total {
+    grid-area: total;
+  }
+
+  /* Beside the count rather than out at the far edge — the row is the width of
+     the window here, and a number alone over there belongs to nothing. */
+  .against__spent {
+    margin-left: 0;
+  }
+
+  .against__instead {
+    padding: var(--space-2);
+    font-size: var(--text-2xs);
+  }
+
+  .against__keep {
+    grid-area: keep;
+    justify-self: start;
+    align-self: end;
+    padding: 0 var(--space-4);
+  }
+
+  .against__notyet {
+    grid-area: keep;
+    align-self: end;
+  }
+
+  .against__file {
+    gap: var(--space-2);
+    padding: var(--space-4) 0;
+  }
+
+  .against__cell {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .against__whose {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+    flex: none;
+    min-width: 8rem;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+  }
+
+  .against__tally,
+  .against__untouched {
+    flex: none;
+  }
+
+  /* A measure beside the number, not a rule across the window. */
+  .against__bar {
+    flex: 1 1 auto;
+    min-width: 40px;
+    max-width: 220px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .against__keep:active {
+    transform: none;
+  }
+}
+
+/* Seeing them running rather than reading their patches.
+   In the sheet's own header band, beside the close: it is about the whole set,
+   not about any one column, and every column-level control sits below. */
+.against__browser {
+  flex: none;
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.against__browser:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.against__browser:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .against__browser:hover:not(:disabled) {
+    border-color: var(--text-faint);
+  }
+}
+
+.against__browser:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .against__browser {
+    transition: none;
+  }
+}

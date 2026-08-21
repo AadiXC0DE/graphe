@@ -284,6 +284,7 @@ describe('S-04 the answer is never withheld', () => {
         trouble: null,
       })),
       note: null,
+      changes: [],
     });
 
     expect(readsHeld(set(['a', 'b'])).ok).toBe(true);

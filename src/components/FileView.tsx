@@ -47,6 +47,7 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
   const [cap, setCap] = useState(CHUNK);
   const [coloured, setColoured] = useState<{ code: string; html: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const ending = endingOf(path);
@@ -99,12 +100,18 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
   const copy = () => {
     void navigator.clipboard?.writeText(path).then(
       () => {
+        setCopyFailed(false);
         setCopied(true);
         if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
         copiedTimer.current = setTimeout(() => setCopied(false), 1600);
       },
       () => {
-        /* Nothing to say. The path is on screen and can be selected by hand. */
+        // Said, rather than swallowed. A Copy that quietly does nothing leaves
+        // whatever was on the clipboard before, which reads as copying the
+        // wrong thing.
+        setCopyFailed(true);
+        if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+        copiedTimer.current = setTimeout(() => setCopyFailed(false), 2600);
       },
     );
   };
@@ -120,7 +127,7 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
         <span className="fileview__tail">
           {label === null ? null : <span className="fileview__kind">{label}</span>}
           <button type="button" className="fileview__act" onClick={copy}>
-            {copied ? 'Copied' : 'Copy path'}
+            {copyFailed ? 'Press \u2318C' : copied ? 'Copied' : 'Copy path'}
           </button>
           {onClose === undefined ? null : (
             <button type="button" className="fileview__act" onClick={onClose}>

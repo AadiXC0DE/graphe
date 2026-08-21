@@ -97,8 +97,13 @@
   --bg: #fbfbfa;
   --bg-raised: #ffffff;
   --bg-sunken: #f2f2f0;
-  --border: #e4e4e1;
-  --border-strong: #d2d2ce;
+  /* A hairline at 1.23:1 is a hairline nobody can see: the words on this theme
+     all clear AA, so what made it feel washed out was the structure — card
+     edges, row dividers, the outline of every box — sitting a hair off the
+     background. Raised until an edge reads as an edge, and kept below the
+     weight where a quiet interface starts to look like a wireframe. */
+  --border: #cdcdc7;
+  --border-strong: #a8a8a1;
   /* The edge of a control that is identified by its edge — a bare text field, a
      switch that is off. WCAG 1.4.11 asks 3:1 for those, and --border-strong
      measures 1.46:1 on this background, so it cannot be the one doing that job.
@@ -169,8 +174,8 @@
     --bg: #131312;
     --bg-raised: #1c1c1a;
     --bg-sunken: #0e0e0d;
-    --border: #2b2b28;
-    --border-strong: #3a3a36;
+    --border: #3a3a36;
+    --border-strong: #4a4a46;
     --border-control: #6e6e66;
     --text: #f2f2ef;
     --text-muted: #9a9a93;

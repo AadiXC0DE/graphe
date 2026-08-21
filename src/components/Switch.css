@@ -1,0 +1,80 @@
+/* One switch, everywhere.
+
+   The control is a bare button wearing role="switch" — see Switch.tsx for why
+   it cannot be an input, and why the classes carry the tswitch prefix. The
+   track is the state and the knob is the motion: colour changes fast (120ms,
+   hover-grade), travel takes a touch longer with a strong ease-out so the
+   knob arrives rather than slides. Nothing scales from zero — an off knob is
+   already there, waiting. */
+
+.tswitch {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  transition: scale var(--dur-micro) var(--ease-out-quart);
+}
+
+.tswitch--off-duty {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.tswitch__track {
+  position: relative;
+  display: block;
+  width: 36px;
+  height: 21px;
+  border-radius: 999px;
+  /* Off is not a grey that failed to load — it is the control-edge colour,
+     the same one a bare field is identified by, so "off" still reads as a
+     control rather than a disabled thing. Same weight as the on state, so the
+     row never shifts when the switch flips. */
+  background: var(--border-control);
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.tswitch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transform: translateX(0);
+  transition:
+    transform var(--dur-ui) cubic-bezier(0.23, 1, 0.32, 1),
+    scale var(--dur-micro) var(--ease-out-quart);
+}
+
+.tswitch--on .tswitch__track {
+  background: var(--accent);
+}
+
+.tswitch--on .tswitch__knob {
+  transform: translateX(15px);
+}
+
+/* The hand is heard at once, before the state has changed. */
+.tswitch:not(.tswitch--off-duty):active .tswitch__knob {
+  scale: 0.9;
+}
+
+.tswitch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tswitch__knob,
+  .tswitch__track {
+    /* The knob stops travelling; the track's colour change alone carries the
+       state, which reduced motion keeps. */
+    transition: none;
+  }
+}

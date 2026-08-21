@@ -39,11 +39,11 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
 import {
@@ -63,10 +63,13 @@ import {
   type OurAuthInteraction,
 } from '../src/agent/pi/adapter';
 import type { AgentEvent, ImageCard, Money } from '../src/agent/types';
+import type { TokenUsageView } from '../src/lib/token-days';
+import { Running } from '../src/agent/running';
 import { fleet, readCeiling } from '../src/cost/fleet';
 import { getReady } from '../src/history/newcopy';
 import { watchWhileUsed, type Watching } from '../src/diff/capture';
 import { createLimit } from '../src/cost/limits';
+import { readTokenUsage } from './tokens';
 import { limitReached } from '../src/cost/phrasing';
 import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline, type Version } from '../src/history/timeline';
@@ -83,7 +86,10 @@ import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
   type Away,
+  type SideOfWork,
   type AwayNotice,
+  type ConnectedHealth,
+  type ConnectedState,
   type AwayAfter,
   type AwayPiece,
   type EveryKind,
@@ -158,19 +164,24 @@ import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/pack
 import { availableSkills, selectedSkills, skillContents, skillNamed } from '../src/agent/pi/skills';
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor } from '../src/work/workflows';
+import { readCheckoutIndex, type Checkout } from '../src/history/checkouts';
 import {
   bringBack,
   bringBackWords,
   createWorktree,
   nextCheckoutName,
   dropWorktree,
-  landWorktree,
+  putAwayWorktree,
   releaseWorktree,
+  reopenWorktree,
+  sweepCheckouts,
+  worktreeWords,
   type RunGit,
 } from '../src/history/worktree';
 import {
   addTasks,
   finishTask,
+  isFinished,
   readPlan,
   startTask,
   type Task,
@@ -188,7 +199,11 @@ import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
 import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceOfWork } from '../src/history/attempts';
 import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
-import { AT_A_TIME } from '../src/work/board';
+import { checkServer, inProject, mcpFile, readMcpConfig, savingFrom, writeMcpConfig } from '../src/agent/pi/mcp';
+import { holdsBack } from '../src/projects/heldback';
+import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
+import { saysTook } from '../src/work/stack';
+import { formatMoney } from '../src/cost/money';
 import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
 import {
   addStanding,
@@ -222,13 +237,21 @@ import {
 import { StandingFile } from '../src/projects/standing';
 import { HandoverError, handToDeveloper, whatIsHere, type Change } from '../src/share/developer';
 import { handoverWords, worthTelling } from '../src/share/handover';
-import type { RunningPiece } from '../src/agent/types';
+import type {
+  LivePage,
+  PageAct,
+  PageDone,
+  PageReading,
+  RunningPiece,
+} from '../src/agent/types';
+import { holdPage } from '../src/agent/pi/tools';
 import { OnlineError, putOnline, whatIsHereForOnline } from '../src/share/publish';
 import { onlineWords } from '../src/share/online';
 import { canPutOnline, canSendItOn } from '../src/share/tools';
 
 import type { Serving } from '../src/preview/serve';
-import { makeAndServe, ShowError, showSays } from '../src/preview/show';
+import { lookAt, makeAndServe, ShowError, showSays } from '../src/preview/show';
+import { canBeShown, readTheFolder } from '../src/preview/detect';
 import { POINTER_SCRIPT, type Pointed } from '../src/preview/point';
 import {
   read as readPointed,
@@ -238,7 +261,8 @@ import {
 } from '../src/preview/inspect';
 import { readUsage } from '../src/design/usage';
 import { photographHeld, type Held as HeldPictures } from '../src/diff/holdshot';
-import { holdCamera } from '../src/diff/holdcamera';
+import { dropShots, holdCamera, keepShots } from '../src/diff/holdcamera';
+import { howMuchBy, nextAccepted } from '../src/design/gate';
 import { knownTrouble, plainMessage, plainTrouble } from './plainly';
 
 /**
@@ -258,26 +282,56 @@ patchWorkerThreads();
 
 /**
  * The PATH a Finder-launched app inherits is `/usr/bin:/bin:/usr/sbin:/sbin`,
- * which does not contain a Homebrew, nvm or mise node. Adding packages spawns
- * `npm`, so without this it fails with a spawn error on most developers'
- * machines and on nobody's terminal. Asked of the login shell once, at startup.
+ * which holds `git` and almost nothing else somebody installed — no Homebrew,
+ * no nvm, no mise. Everything spawned by name needs more than that: `npm` to
+ * add a package, `gh` to read the pull requests.
+ *
+ * Two goes at it, and the order matters. The places these things are actually
+ * installed are added first and always, because that costs nothing and cannot
+ * fail. Then the login shell is asked, which finds the ones nobody could have
+ * guessed — and that is allowed to be slow or to fail, because by then the
+ * common case already works.
+ *
+ * It used to be only the second half, on a four-second timer, at the moment the
+ * app has most to do. When the shell did not answer in time the whole thing was
+ * abandoned and PATH stayed narrow, so `gh` could not be started — and the next
+ * launch, where the timer happened to win, worked. That is the intermittency
+ * somebody reported as "restarting sometimes fixes it".
  */
 function widenPath(): void {
   if (process.platform === 'win32') return;
+  const home = homedir();
+  const known = [
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    join(home, '.local', 'bin'),
+    join(home, '.volta', 'bin'),
+    join(home, '.bun', 'bin'),
+    join(home, '.cargo', 'bin'),
+    join(home, '.npm-global', 'bin'),
+  ];
+  const add = (places: readonly string[]): void => {
+    const already = (process.env['PATH'] ?? '').split(':').filter((one) => one !== '');
+    const seen = new Set(already);
+    const more = places.filter((one) => one !== '' && one.includes('/') && !seen.has(one));
+    if (more.length > 0) process.env['PATH'] = [...already, ...more].join(':');
+  };
+
+  add(known);
+
   try {
     const shell = process.env['SHELL'] ?? '/bin/zsh';
     const asked = spawnSync(shell, ['-lic', 'printf %s "$PATH"'], {
       encoding: 'utf8',
-      timeout: 4000,
+      timeout: 10_000,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     const found = asked.stdout?.trim() ?? '';
     if (found === '' || !found.includes('/')) return;
-    const already = new Set((process.env['PATH'] ?? '').split(':'));
-    const added = found.split(':').filter((one) => one !== '' && !already.has(one));
-    if (added.length > 0) process.env['PATH'] = [...already, ...added].join(':');
+    add(found.split(':'));
   } catch {
-    // The narrow PATH still works for everything except adding packages, and
-    // that failure already says something a person can act on.
+    // The list above is the part that had to work, and it already has.
   }
 }
 
@@ -381,11 +435,67 @@ function movedOrGone(name: string): Trouble {
   };
 }
 
+/** A model the window has already switched to on screen, that the conversation
+ *  would not take. Named rather than swallowed: the alternative is a chip that
+ *  says one thing while the answers come from another. */
+function couldNotUseModel(named: string, many: number): Trouble {
+  return {
+    what:
+      many === 1
+        ? 'One conversation is still answering as the model it had.'
+        : `${String(many)} conversations are still answering as the model they had.`,
+    because: `${named} could not be brought into ${many === 1 ? 'it' : 'them'} — usually the account for it is not connected. It is saved as your choice, so a new conversation will use it.`,
+    actionLabel: 'Got it',
+  };
+}
+
 const NOTHING_OPEN: Trouble = {
   what: 'I do not have a folder to work in yet.',
   because: 'Pick the folder your project lives in and I will start there.',
   actionLabel: 'Got it',
 };
+
+/** A set that could not be put in an order at all — a round trip, or something
+ *  in it that has not finished. The sentence is stack.ts's; this only puts it
+ *  where the window draws one. */
+function couldNotTakeSet(because: string): Trouble {
+  return { what: because, because: '', actionLabel: 'Got it' };
+}
+
+/**
+ * The files moved under every conversation in this project.
+ *
+ * Not through a tool call — the interceptor already catches those. This is for
+ * the three ways the project changes with nobody's tool involved: work taken
+ * off the board, a person's own editor, and going back to an earlier moment.
+ * A check that passed did so against files that are no longer there.
+ */
+function filesMovedIn(open: Workspace<Held>): void {
+  for (const one of open.held.sessions.open) one.held.forgetChecks();
+}
+
+const NOT_GOING_ANY_MORE: Trouble = {
+  what: 'That one is not going any more.',
+  because: 'It finished, or it was stopped, so there is nothing left to hear you.',
+  actionLabel: 'Got it',
+};
+
+/** It is between turns, not mid-turn. A sentence handed over now would be put
+ *  on a queue that only a run already going ever reads, and lost when the run
+ *  is packed away — so it is refused out loud instead. */
+const DID_NOT_HEAR: Trouble = {
+  what: 'It did not hear that.',
+  because: 'It had just finished the step it was on, so there was nothing left mid-turn to take the sentence. Your words are still where you typed them.',
+  actionLabel: 'Got it',
+};
+
+function couldNotSay(cause: unknown): Trouble {
+  return {
+    what: 'I could not get that through to it.',
+    because: cause instanceof Error ? cause.message : 'It did not take the message.',
+    actionLabel: 'Got it',
+  };
+}
 
 const COULD_NOT_TIDY: Trouble = {
   what: 'I could not tidy this conversation just now.',
@@ -397,6 +507,16 @@ const COULD_NOT_TIDY: Trouble = {
  *  this does is put it where the window already knows to draw one. */
 function couldNotWait(because: string): Trouble {
   return { what: 'I did not set that up.', because, actionLabel: 'Got it' };
+}
+
+/** The line stays where it is, and says so. */
+function couldNotTakeBack(because: string): Trouble {
+  return {
+    what: 'I could not take the line back.',
+    because: 'It is still waiting behind what is running, so nothing has been lost. Try again in a moment.',
+    actionLabel: 'Got it',
+    ...(because.trim() === '' ? {} : { details: because }),
+  };
 }
 
 const PICKER_FAILED: Trouble = {
@@ -566,21 +686,29 @@ function applyContentPolicy(): void {
 /**
  * What the window is allowed to ask this computer for.
  *
- * Only the microphone, and only because saying a change out loud is easier than
- * writing one. Everything else — camera, location, notifications from the page,
- * anything added to the web platform after this was written — is refused
- * without being asked about, which is the reason the list in
+ * The microphone, because saying a change out loud is easier than writing one,
+ * and putting something on the clipboard, because that is what Copy is.
+ * Everything else — camera, location, reading the clipboard, notifications from
+ * the page, anything added to the web platform after this was written — is
+ * refused without being asked about, which is the reason the list in
  * electron-builder.yml was pinned in the first place: nothing acquires
  * something quietly by turning up as a dependency.
  */
 function applyPermissionPolicy(): void {
+  // Writing to the clipboard is how every Copy button in the window works, and
+  // refusing it made them all fail in silence — the button never said Copied and
+  // the clipboard kept whatever was in it, which reads as copying the wrong
+  // thing. Writing only, and sanitized: reading the clipboard is somebody's
+  // passwords, and nothing here ever needs it. This is the window's own store —
+  // a page being previewed has its own, and is granted none of it.
+  const allowed = new Set(['media', 'clipboard-sanitized-write']);
   session.defaultSession.setPermissionRequestHandler((_contents, permission, decide) => {
-    decide(permission === 'media');
+    decide(allowed.has(permission));
   });
   // Asked for by anything that checks before requesting, and answered the same
   // way — two answers that disagree is how a control ends up dead on press.
-  session.defaultSession.setPermissionCheckHandler(
-    (_contents, permission) => permission === 'media',
+  session.defaultSession.setPermissionCheckHandler((_contents, permission) =>
+    allowed.has(permission),
   );
 }
 
@@ -681,6 +809,18 @@ function makePageView(): WebContentsView | null {
   view.webContents.on('dom-ready', () => {
     void view.webContents.executeJavaScript(POINTER_ONCE, true).catch(() => undefined);
   });
+  // What the page complains about, kept as it happens: by the time anybody
+  // thinks to ask, the message has already been printed and gone.
+  view.webContents.on('console-message', (_event, level, message, line, source) => {
+    const where = source === '' ? '' : ` (${source}${line > 0 ? `:${String(line)}` : ''})`;
+    pageSaid = noteTrouble(pageSaid, `${LEVELS[level] ?? 'a note'}: ${message}${where}`);
+  });
+  // A new page starts with nothing against it. Only the main frame counts —
+  // an advert in a frame changing has nothing to do with the work.
+  view.webContents.on('did-navigate', () => {
+    forgetTrouble();
+  });
+  watchPageRequests(pageStore());
   mainWindow.contentView.addChildView(view);
   pageView = view;
   return view;
@@ -698,6 +838,465 @@ function dropPageView(): void {
   }
   view.webContents.close();
 }
+
+/* -------------------------------------------------------------------------- */
+/* Letting the agent work on that page                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A world of our own inside the page.
+ *
+ * The script below runs in an isolated world rather than the page's own, so it
+ * cannot be read, replaced or leaned on by anything the site loads, and the
+ * site keeps every prototype it started with. Nothing is added to the page's
+ * own world, the preload still hands out nothing, and the store stays the
+ * pane's own — this reads and drives the page from outside it. Electron keeps
+ * 0 and 999 for itself.
+ */
+const PAGE_WORLD = 1207;
+
+/**
+ * How the page is read and driven, as the page itself sees it.
+ *
+ * Written for a model rather than a person: things come back named the way a
+ * screen reader would say them — a role, the words on them, a handle — because
+ * that is what survives the markup being rewritten underneath, and because a
+ * model can aim at "Get started" and cannot aim at a pixel.
+ *
+ * Raw on purpose. A template literal would eat every backslash in here, and
+ * every regular expression with it.
+ */
+const PAGE_SCRIPT = String.raw`
+if (!window.__graphePage) { window.__graphePage = (function () {
+  var HANDLES = [];
+  var MOST_NAME = 120;
+  var MOST_LINES = 600;
+  var DEEPEST = 30;
+  var SKIP = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, HEAD: 1, META: 1, LINK: 1, TITLE: 1 };
+  var ROLE = {
+    A: 'link', BUTTON: 'button', SELECT: 'combobox', TEXTAREA: 'textbox', IMG: 'image',
+    H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading',
+    NAV: 'navigation', HEADER: 'banner', FOOTER: 'contentinfo', MAIN: 'main',
+    ASIDE: 'complementary', FORM: 'form', UL: 'list', OL: 'list', LI: 'listitem',
+    TABLE: 'table', SUMMARY: 'summary', LABEL: 'label'
+  };
+  var HOLDS = { navigation: 1, banner: 1, contentinfo: 1, main: 1, complementary: 1, form: 1, list: 1, listitem: 1, table: 1 };
+  var TAKES_A_PRESS = {
+    link: 1, button: 1, textbox: 1, checkbox: 1, radio: 1, combobox: 1,
+    tab: 1, menuitem: 1, switch: 1, option: 1, summary: 1
+  };
+
+  function attr(el, name) { try { return el.getAttribute(name) || ''; } catch (e) { return ''; } }
+  function tidy(text) { return String(text || '').replace(/\s+/g, ' ').trim(); }
+  function pad(depth) { return new Array(depth + 1).join('  '); }
+
+  function roleOf(el) {
+    var given = attr(el, 'role').trim().toLowerCase();
+    if (given) return given;
+    var tag = el.tagName;
+    if (tag === 'INPUT') {
+      var kind = (attr(el, 'type') || 'text').toLowerCase();
+      if (kind === 'checkbox') return 'checkbox';
+      if (kind === 'radio') return 'radio';
+      if (kind === 'submit' || kind === 'button' || kind === 'reset' || kind === 'image') return 'button';
+      if (kind === 'hidden') return '';
+      return 'textbox';
+    }
+    if (tag === 'A' && !attr(el, 'href')) return '';
+    return ROLE[tag] || '';
+  }
+
+  function actionable(el) {
+    if (el.disabled === true) return false;
+    if (TAKES_A_PRESS[roleOf(el)]) return true;
+    if (el.isContentEditable) return true;
+    if (el.hasAttribute && el.hasAttribute('onclick')) return true;
+    var stop = attr(el, 'tabindex');
+    return stop !== '' && stop !== '-1';
+  }
+
+  function visible(el) {
+    if (attr(el, 'aria-hidden') === 'true') return false;
+    if (el.hidden === true) return false;
+    var style = null;
+    try { style = window.getComputedStyle(el); } catch (e) { style = null; }
+    if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+    var box = null;
+    try { box = el.getBoundingClientRect(); } catch (e) { box = null; }
+    if (box && box.width === 0 && box.height === 0) return false;
+    return true;
+  }
+
+  function labelOf(el) {
+    try {
+      if (el.labels && el.labels.length) return tidy(el.labels[0].innerText || el.labels[0].textContent);
+    } catch (e) {}
+    var around = el.closest ? el.closest('label') : null;
+    return around ? tidy(around.innerText || around.textContent) : '';
+  }
+
+  /** Structural things are named only by what somebody wrote on them. Letting a
+      landmark take its name from everything inside it names the whole page. */
+  function nameOf(el, structural) {
+    var aria = tidy(attr(el, 'aria-label'));
+    if (aria) return aria.slice(0, MOST_NAME);
+    var by = attr(el, 'aria-labelledby');
+    if (by) {
+      var words = [];
+      var ids = by.split(/\s+/);
+      for (var i = 0; i < ids.length; i++) {
+        var other = document.getElementById(ids[i]);
+        if (other) words.push(tidy(other.innerText || other.textContent));
+      }
+      var joined = tidy(words.join(' '));
+      if (joined) return joined.slice(0, MOST_NAME);
+    }
+    var tag = el.tagName;
+    if (tag === 'IMG') return tidy(attr(el, 'alt')).slice(0, MOST_NAME);
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      var written = labelOf(el) || tidy(attr(el, 'placeholder')) || tidy(attr(el, 'title')) || tidy(attr(el, 'name'));
+      return written.slice(0, MOST_NAME);
+    }
+    if (structural) return '';
+    return tidy(el.innerText || el.textContent).slice(0, MOST_NAME);
+  }
+
+  function valueOf(el) {
+    var tag = el.tagName;
+    if (tag === 'INPUT') {
+      var kind = (attr(el, 'type') || 'text').toLowerCase();
+      if (kind === 'checkbox' || kind === 'radio') return el.checked ? 'ticked' : 'not ticked';
+      if (kind === 'password') return el.value ? 'something in it' : 'empty';
+      return tidy(el.value);
+    }
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return tidy(el.value);
+    return '';
+  }
+
+  function handle(el) { HANDLES.push(el); return 'e' + HANDLES.length; }
+  function quoted(text) { return text ? ' ' + JSON.stringify(text) : ''; }
+
+  function describe(el) {
+    var name = nameOf(el, false);
+    return (roleOf(el) || 'thing') + (name ? ' ' + JSON.stringify(name) : ' with nothing written on it');
+  }
+
+  function line(el, depth, role, name) {
+    var value = valueOf(el);
+    return pad(depth) + '- ' + role + quoted(name) + (value ? ' [' + value + ']' : '') + ' [ref=' + handle(el) + ']';
+  }
+
+  function walk(el, depth, lines) {
+    if (depth > DEEPEST) return;
+    var kids = el.children;
+    for (var i = 0; i < kids.length && lines.length < MOST_LINES; i++) {
+      var kid = kids[i];
+      if (SKIP[kid.tagName] || !visible(kid)) continue;
+      var role = roleOf(kid);
+      if (actionable(kid)) {
+        var named = nameOf(kid, false);
+        lines.push(line(kid, depth, role || 'button', named));
+        if (!named) walk(kid, depth + 1, lines);
+        continue;
+      }
+      if (role === 'heading' || role === 'image') {
+        lines.push(line(kid, depth, role, nameOf(kid, false)));
+        continue;
+      }
+      if (HOLDS[role]) {
+        lines.push(line(kid, depth, role, nameOf(kid, true)));
+        walk(kid, depth + 1, lines);
+        continue;
+      }
+      if (kid.children.length === 0) {
+        var words = tidy(kid.innerText || kid.textContent);
+        if (words) lines.push(pad(depth) + '- text ' + JSON.stringify(words.slice(0, MOST_NAME)));
+        continue;
+      }
+      walk(kid, depth, lines);
+    }
+  }
+
+  function read() {
+    HANDLES = [];
+    var lines = [];
+    walk(document.body || document.documentElement, 0, lines);
+    if (!lines.length) lines.push('(nothing on the page is showing)');
+    if (lines.length >= MOST_LINES) lines.push('(the page carries on past this; scroll to it and read again)');
+    return lines.join('\n');
+  }
+
+  function worthNaming() {
+    var out = [];
+    var all = document.querySelectorAll('a, button, input, select, textarea, summary, label, [role], [onclick], [tabindex], h1, h2, h3, h4, h5, h6, img, [aria-label]');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (SKIP[el.tagName] || !visible(el)) continue;
+      out.push({ el: el, name: nameOf(el, false), act: actionable(el) });
+    }
+    return out;
+  }
+
+  /** One match is the answer. Several, and the one that takes a press wins,
+      because a box and the label above it read exactly the same. */
+  function pick(list, matches) {
+    var found = [];
+    for (var i = 0; i < list.length; i++) if (matches(list[i])) found.push(list[i]);
+    if (!found.length) return null;
+    if (found.length === 1) return { one: found[0].el };
+    var doers = [];
+    for (var j = 0; j < found.length; j++) if (found[j].act) doers.push(found[j]);
+    if (doers.length === 1) return { one: doers[0].el };
+    return { many: (doers.length ? doers : found).slice(0, 8) };
+  }
+
+  function find(target) {
+    var want = String(target || '').trim();
+    if (!want) return { none: true };
+    if (/^e[0-9]+$/i.test(want)) {
+      var held = HANDLES[parseInt(want.slice(1), 10) - 1];
+      if (held && held.isConnected) return { one: held };
+      return { stale: true };
+    }
+    var low = want.toLowerCase();
+    var list = worthNaming();
+    var hit = pick(list, function (one) { return one.name.toLowerCase() === low; });
+    if (!hit) hit = pick(list, function (one) { return one.name.toLowerCase().indexOf(low) !== -1; });
+    if (hit) return hit;
+    var wider = [];
+    var all = document.body ? document.body.querySelectorAll('*') : [];
+    for (var i = 0; i < all.length && i < 4000 && wider.length < 40; i++) {
+      var el = all[i];
+      if (SKIP[el.tagName] || el.children.length || !visible(el)) continue;
+      var words = tidy(el.innerText || el.textContent);
+      if (words && words.toLowerCase().indexOf(low) !== -1) wider.push({ el: el, name: words, act: false });
+    }
+    return pick(wider, function () { return true; }) || { none: true };
+  }
+
+  function tooMany(target, many) {
+    var said = [];
+    for (var i = 0; i < many.length; i++) {
+      said.push(describe(many[i].el) + ' [ref=' + handle(many[i].el) + ']');
+    }
+    return 'Several things on the page read like ' + JSON.stringify(target) + ': ' + said.join('; ') +
+      '. Nothing was touched. Aim at one of those handles instead.';
+  }
+
+  function fire(el, name) {
+    try { el.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
+  }
+
+  function press(el) {
+    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+    try { if (el.focus) el.focus(); } catch (e) {}
+    try { el.click(); } catch (e) {
+      return { ok: false, because: 'The page would not take a press on ' + describe(el) + '.' };
+    }
+    return { ok: true, did: 'Pressed ' + describe(el) + '.' };
+  }
+
+  function write(el, text, submit) {
+    var tag = el.tagName;
+    var editable = el.isContentEditable;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !editable) {
+      return { ok: false, because: describe(el) + ' is not something words can be typed into. Read the page and name the box itself.' };
+    }
+    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+    try { el.focus(); } catch (e) {}
+    if (editable) el.textContent = text; else el.value = text;
+    fire(el, 'input');
+    fire(el, 'change');
+    var did = 'Typed ' + JSON.stringify(text) + ' into ' + describe(el) + '.';
+    if (!submit) return { ok: true, did: did + ' Nothing was sent.' };
+    var wanted = true;
+    try {
+      wanted = el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+    } catch (e) {}
+    var form = el.form || (el.closest ? el.closest('form') : null);
+    if (wanted && form) {
+      try { form.requestSubmit ? form.requestSubmit() : form.submit(); } catch (e) {}
+      return { ok: true, did: did + ' Sent the form.' };
+    }
+    return { ok: true, did: did + ' Pressed enter on it.' };
+  }
+
+  function moveTo(el) {
+    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+    return { ok: true, did: 'Scrolled to ' + describe(el) + '.' };
+  }
+
+  function moveBy(way) {
+    var tall = document.body ? document.body.scrollHeight : 0;
+    var step = Math.round(window.innerHeight * 0.85);
+    if (way === 'top') window.scrollTo(0, 0);
+    else if (way === 'bottom') window.scrollTo(0, tall);
+    else window.scrollBy(0, way === 'up' ? -step : step);
+    var down = Math.round(window.scrollY);
+    var most = Math.max(0, tall - window.innerHeight);
+    return { ok: true, did: 'Scrolled ' + way + '. The page is ' + down + ' down out of ' + most + '.' };
+  }
+
+  function act(what) {
+    if (what.kind === 'move' && !what.target) return moveBy(what.way);
+    var found = find(what.target);
+    if (found.stale) return { ok: false, because: 'That handle is gone from the page. Read the page again and aim at what is on it now.' };
+    if (found.none) return { ok: false, because: 'Nothing on the page reads like ' + JSON.stringify(what.target) + '. Nothing was touched. Read the page and use words that are really on it.' };
+    if (found.many) return { ok: false, because: tooMany(what.target, found.many) };
+    if (what.kind === 'press') return press(found.one);
+    if (what.kind === 'write') return write(found.one, what.text, what.submit === true);
+    return moveTo(found.one);
+  }
+
+  return { read: read, act: act };
+})(); }
+`;
+
+/** Kept per page, thrown away when it goes somewhere else. Capped because a
+ *  page in a loop prints thousands, and the last few are the ones worth
+ *  reading. */
+const MOST_TROUBLE = 60;
+const LEVELS = ['a note', 'a note', 'a warning', 'a problem'];
+let pageSaid: string[] = [];
+let pageUnanswered: string[] = [];
+/** The store is per partition and outlives any one view, so its listeners are
+ *  hung once rather than on every open. */
+let watchingRequests = false;
+
+function noteTrouble(kept: string[], line: string): string[] {
+  kept.push(line);
+  return kept.length > MOST_TROUBLE ? kept.slice(kept.length - MOST_TROUBLE) : kept;
+}
+
+function forgetTrouble(): void {
+  pageSaid = [];
+  pageUnanswered = [];
+}
+
+function watchPageRequests(store: Electron.Session): void {
+  if (watchingRequests) return;
+  watchingRequests = true;
+  store.webRequest.onCompleted((details) => {
+    if (details.statusCode < 400) return;
+    pageUnanswered = noteTrouble(
+      pageUnanswered,
+      `${String(details.statusCode)} — ${details.method} ${details.url}`,
+    );
+  });
+  store.webRequest.onErrorOccurred((details) => {
+    pageUnanswered = noteTrouble(pageUnanswered, `${details.method} ${details.url} — ${details.error}`);
+  });
+}
+
+/** Everything that happens in the page happens in our own world there. A page
+ *  that has gone, or one that refuses the script, answers null rather than
+ *  throwing: the tools turn that into a sentence. */
+async function inPage<T>(expression: string): Promise<T | null> {
+  const view = pageView;
+  if (view === null || view.webContents.isDestroyed()) return null;
+  try {
+    const answer: unknown = await view.webContents.executeJavaScriptInIsolatedWorld(PAGE_WORLD, [
+      { code: `${PAGE_SCRIPT}\nwindow.__graphePage.${expression}` },
+    ]);
+    return answer as T;
+  } catch {
+    return null;
+  }
+}
+
+/** An argument on its way into the page. JSON is already valid there, apart
+ *  from the two separators JSON allows raw inside a string and JavaScript does
+ *  not. */
+function asArgument(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+async function readPage(): Promise<PageReading | null> {
+  const view = pageView;
+  if (view === null || view.webContents.isDestroyed()) return null;
+  const address = view.webContents.getURL();
+  if (address === '' || address === 'about:blank') return null;
+  const outline = await inPage<string>('read()');
+  if (outline === null) return null;
+  return { address, title: view.webContents.getTitle(), outline };
+}
+
+/** A press is worth nothing until the page has answered it. Long enough for
+ *  the ordinary case, and a hard ceiling so a page that never settles cannot
+ *  hold a turn open. */
+const PAGE_SETTLES_MS = 350;
+const PAGE_WAITS_MS = 8_000;
+
+async function pageSettles(view: WebContentsView): Promise<void> {
+  await new Promise((wake) => setTimeout(wake, PAGE_SETTLES_MS));
+  if (view.webContents.isDestroyed() || !view.webContents.isLoading()) return;
+  await new Promise<void>((wake) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      view.webContents.removeListener('did-stop-loading', done);
+      wake();
+    };
+    const timer = setTimeout(done, PAGE_WAITS_MS);
+    view.webContents.on('did-stop-loading', done);
+  });
+}
+
+async function actOnPage(what: PageAct): Promise<PageDone> {
+  const view = pageView;
+  if (view === null || view.webContents.isDestroyed()) {
+    return { ok: false, because: 'The page beside the conversation has closed, so nothing was done to it.' };
+  }
+  const done = await inPage<{ ok: boolean; did?: string; because?: string }>(
+    `act(${asArgument(what)})`,
+  );
+  if (done === null) {
+    return { ok: false, because: 'The page did not answer, so nothing was done to it. It may still be loading.' };
+  }
+  if (!done.ok) return { ok: false, because: done.because ?? 'The page would not do that, and did not say why.' };
+  await pageSettles(view);
+  const now = await readPage();
+  if (now === null) {
+    return { ok: false, because: `${done.did ?? 'Done.'} The page then went blank, so there is nothing on it to read.` };
+  }
+  return { ok: true, did: done.did ?? 'Done.', now };
+}
+
+/**
+ * The page beside the conversation, handed to the agent's tools.
+ *
+ * Registered once, at start, and it looks the view up every time rather than
+ * holding one: the pane opens and closes with a press, and a held view would be
+ * a stale answer the moment somebody closed it. Five answers, all plain data —
+ * the tools never get the view, so nothing the model says reaches past here.
+ */
+holdPage({
+  open: () => {
+    const view = pageView;
+    if (view === null || view.webContents.isDestroyed()) return null;
+    return { project: pageProject, address: view.webContents.getURL() };
+  },
+  read: () => readPage(),
+  act: (what) => actOnPage(what),
+  trouble: () => {
+    const view = pageView;
+    if (view === null || view.webContents.isDestroyed()) return Promise.resolve(null);
+    return Promise.resolve({ said: [...pageSaid], unanswered: [...pageUnanswered] });
+  },
+  picture: async (): Promise<ImageCard | null> => {
+    const view = pageView;
+    if (view === null || view.webContents.isDestroyed()) return null;
+    if (view.webContents.getURL() === '') return null;
+    const shot = await view.webContents.capturePage().catch(() => null);
+    if (shot === null || shot.isEmpty()) return null;
+    // A pane picture is read once and then paid for in every later turn that
+    // carries it, so it goes back at a size worth reading and no more.
+    const sized = shot.getSize().width > 1000 ? shot.resize({ width: 1000 }) : shot;
+    return { mimeType: 'image/jpeg', bytes: sized.toJPEG(80).toString('base64') };
+  },
+} satisfies LivePage);
 
 /** A click in the page beside the conversation. It arrives from the page's own
  *  world, so it is only listened to while that view is the one that sent it. */
@@ -857,12 +1456,20 @@ type Held = {
    *  moment between the timeline opening and the first session starting, which
    *  is the window in which that session can fail. */
   sessions: Workspaces<GrapheSession>;
+  /** Servers and watchers belong to the project, not to whichever conversation
+   *  happened to start them. A conversation can be rebuilt or evicted while a
+   *  page the project is using must stay reachable. */
+  running: Running;
   /** The finished site being looked at, if "See it" has been pressed here. */
   serving: Serving | null;
   /** Every variation in the set in front, each served on its own address. */
   variations: readonly Serving[];
   /** The before-and-after (BACKLOG F2). */
   looking: Looking;
+  /** Conversations being explicitly landed or discarded. Their stop emits a
+   *  synthetic settle, but that settle must not start the ordinary asynchronous
+   *  bring-back while the checkout is being merged or removed. */
+  suppressCarry: Set<string>;
   /** What was last said to have stayed behind, so an overlap that persists —
    *  and it does persist until somebody resolves it — is mentioned once rather
    *  than at the end of every turn from then on. */
@@ -873,8 +1480,9 @@ type Held = {
   checkoutsMade: number;
   /** A conversation's own checkout, by its address. Present only for the ones
    *  running isolated in a worktree — the primary conversation works directly
-   *  on the project folder. */
-  checkouts: Map<string, { folder: string }>;
+   *  on the project folder. The branch is the durable half: the folder is put
+   *  away when nobody is in it and spread out again from the branch. */
+  checkouts: Map<string, Checkout>;
   /** Work being checked before it reaches the files, or null when none is. */
   waiting: HeldWork | null;
   /** What that work would look like, photographed in the copy while the copy
@@ -890,10 +1498,17 @@ type Held = {
 function conversationsIn(project: string): Workspaces<GrapheSession> {
   return new Workspaces<GrapheSession>({
     limit: CONVERSATIONS,
+    // The limit is a memory preference, not permission to abort a turn. If all
+    // older conversations are active, keep them until a later adoption finds
+    // one idle rather than making a new tab stop an old stuck-looking one.
+    mayEvict: (session) =>
+      !session.working && !session.listening && session.awaitingAnswer.length === 0,
     close: (session) => session.dispose(),
     evicted: (one) => {
       send(project, { type: 'message-delta', text: setDownWords.said }, one.path);
       send(project, { type: 'message-end' }, one.path);
+      const held = workspaces.find(project)?.held;
+      if (held !== undefined) void putAwayCheckoutAt(project, held, one.path);
     },
   });
 }
@@ -901,6 +1516,7 @@ function conversationsIn(project: string): Workspaces<GrapheSession> {
 const workspaces = new Workspaces<Held>({
   close: (held) => {
     held.sessions.closeAll();
+    held.running.stopAll();
     void held.serving?.stop();
     for (const served of held.variations) void served.stop();
     // The copy goes; whatever it made stays reachable, so closing a project
@@ -1163,40 +1779,71 @@ async function readBranches(cwd: string): Promise<readonly GitBranch[]> {
  *  or not logged in. `gh` reads the person's own credentials from their keyring,
  *  so no token has to be stored, refreshed or guarded here.
  */
-function ghJSON(cwd: string, args: readonly string[]): Promise<unknown | null> {
+/** Asked and answered, or asked and not answered. Never the two as one value:
+ *  a list that could not be read used to come back empty, and an empty list is
+ *  read by everything above as "there are none of these", which is a different
+ *  thing and a lie. */
+type Asked = { ok: true; value: unknown } | { ok: false; because: string };
+
+/** Long enough for a network call on a busy machine. It was eight seconds, and
+ *  this app can hold its own event loop for longer than that while it makes a
+ *  checkout — so asking github went unanswered, came back empty, and the panel
+ *  said the project had no pull requests. */
+const GH_PATIENCE_MS = 30_000;
+
+function ghJSON(
+  cwd: string,
+  args: readonly string[],
+  fields = 'number,title,state,url,body,author,updatedAt',
+): Promise<Asked> {
   return new Promise((resolve) => {
-    const child = spawn('gh', [...args, '--json', 'number,title,state,url,body,author,updatedAt'], {
+    const child = spawn('gh', [...args, '--json', fields], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
+    let noise = '';
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       out += chunk;
     });
-    child.stderr.resume();
+    // Kept, not dropped: when github refuses, what it said is the only thing
+    // that tells somebody whether to log in again or check their connection.
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      noise = `${noise}${chunk}`.slice(-400);
+    });
     const timeout = setTimeout(() => {
       child.kill('SIGKILL');
-      resolve(null);
-    }, 8000);
+      resolve({ ok: false, because: GH_WORDS.tooSlow });
+    }, GH_PATIENCE_MS);
     child.on('error', () => {
       clearTimeout(timeout);
-      resolve(null);
+      resolve({ ok: false, because: GH_WORDS.noTool });
     });
     child.on('close', (code) => {
       clearTimeout(timeout);
       if (code !== 0) {
-        resolve(null);
+        const said = noise.trim().split('\n').filter((line) => line.trim() !== '').pop();
+        resolve({ ok: false, because: said === undefined ? GH_WORDS.refused : said });
         return;
       }
       try {
-        resolve(JSON.parse(out));
+        resolve({ ok: true, value: JSON.parse(out) });
       } catch {
-        resolve(null);
+        resolve({ ok: false, because: GH_WORDS.unreadable });
       }
     });
   });
 }
+
+const GH_WORDS = {
+  tooSlow: 'github did not answer in time.',
+  noTool:
+    'I could not start the github command (`gh`). It needs to be installed and logged in — the same one your terminal uses.',
+  refused: 'github refused the request.',
+  unreadable: 'github answered with something this could not read.',
+} as const;
 
 /** Which github repository this folder answers to, or `owner/name`. Read from a
  *  remote the folder already knows about, so a project with no remote or a
@@ -1242,7 +1889,9 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
       typeof raw['body'] === 'string' && raw['body'].trim() !== '' ? raw['body'] : null,
     author: typeof author === 'string' ? author : 'unknown',
     updatedAt: typeof raw['updatedAt'] === 'string' ? raw['updatedAt'] : '',
-    baseRef: null,
+    baseRef: typeof raw['baseRefName'] === 'string' ? raw['baseRefName'] : null,
+    headRef: typeof raw['headRefName'] === 'string' ? raw['headRefName'] : null,
+    headSha: typeof raw['headRefOid'] === 'string' ? raw['headRefOid'] : null,
   };
 }
 
@@ -1250,6 +1899,19 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
  *  one call. Null when this folder is not a github repo, or gh is not ready —
  *  both are "nothing to show" rather than a failure.
  */
+/** The line of work this folder is on, and the commit it sits at. A review that
+ *  does not know this reads whatever happens to be checked out and reports it as
+ *  the pull request. */
+async function whereThisFolderIs(
+  path: string,
+): Promise<{ branch: string | null; sha: string } | null> {
+  const at = await gitRun(path, ['rev-parse', 'HEAD']);
+  if (at.code !== 0 || at.out === undefined || at.out.trim() === '') return null;
+  const named = await gitRun(path, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const branch = named.code === 0 ? (named.out ?? '').trim() : '';
+  return { branch: branch === '' || branch === 'HEAD' ? null : branch, sha: at.out.trim() };
+}
+
 async function readRepo(open: { path: string }): Promise<RepoLook> {
   try {
     const full = await githubRepo(open.path);
@@ -1257,19 +1919,28 @@ async function readRepo(open: { path: string }): Promise<RepoLook> {
     const split = full.split('/');
     const owner = split[0] ?? '';
     const name = split[1] ?? '';
-    const issues = (await ghJSON(open.path, ['issue', 'list', '-R', full, '--limit', '50'])) as
-      | readonly Record<string, unknown>[]
-      | null;
-    const prs = (await ghJSON(open.path, ['pr', 'list', '-R', full, '--limit', '50'])) as
-      | readonly Record<string, unknown>[]
-      | null;
+    const issues = await ghJSON(open.path, ['issue', 'list', '-R', full, '--limit', '50']);
+    const prs = await ghJSON(
+      open.path,
+      ['pr', 'list', '-R', full, '--limit', '50'],
+      'number,title,state,url,body,author,updatedAt,baseRefName,headRefName,headRefOid',
+    );
+    const rows = (asked: Asked): readonly Record<string, unknown>[] =>
+      asked.ok && Array.isArray(asked.value)
+        ? (asked.value as readonly Record<string, unknown>[])
+        : [];
+    // One sentence for whichever could not be read. Said out loud, because the
+    // alternative is a panel that reports nothing where there is something.
+    const trouble = !prs.ok ? prs.because : !issues.ok ? issues.because : null;
     return {
       full,
       owner,
       name,
       url: `https://github.com/${full}`,
-      issues: (issues ?? []).map((one) => repoItem(one, 'issue')),
-      prs: (prs ?? []).map((one) => repoItem(one, 'pr')),
+      issues: rows(issues).map((one) => repoItem(one, 'issue')),
+      prs: rows(prs).map((one) => repoItem(one, 'pr')),
+      here: await whereThisFolderIs(open.path),
+      trouble,
     };
   } catch {
     return null;
@@ -1524,12 +2195,18 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       showTheWorkOnPage();
       const inFront = held.sessions.current?.path === from.address;
       const checkout =
-        !inFront || from.address === null ? null : held.checkouts.get(from.address) ?? null;
+        !inFront ||
+        from.address === null ||
+        held.suppressCarry.has(from.address)
+          ? null
+          : held.checkouts.get(from.address) ?? null;
       // What came back, and what did not. A file both sides changed is left as
       // this checkout has it — which is right, and used to happen in silence:
       // the person saw a finished turn and a file that had not changed.
       const carried =
-        checkout === null ? null : bringBack(gitRunHereFor(), path, checkout.folder);
+        checkout === null || !existsSync(checkout.folder)
+          ? null
+          : bringBack(gitRunHereFor(), path, checkout.folder);
       void (carried ?? Promise.resolve(null))
         .then((outcome) => {
           if (outcome !== null && outcome.ok && outcome.value.conflicted.length > 0) {
@@ -1601,6 +2278,80 @@ function workFolder(): string {
   return join(app.getPath('temp'), 'graphe-work');
 }
 
+/** Where a project's kept copy lives. Hashed, not spelled out: replacing every
+ *  awkward character with a dash gives `/work/my site` and `/work-my-site` the
+ *  same name, and two projects sharing one install is the thing that breaks. */
+function keptCopyFolder(project: string): string {
+  const key = createHash('sha256').update(resolve(project)).digest('hex');
+  return join(workFolder(), 'kept', key);
+}
+
+/** The one copy kept ready, and whose project it is.
+ *
+ * One at a time, for the reason the copy is kept at all: it holds an install,
+ * and a copy per project would put back exactly the disk this was meant to stop
+ * spending. `project` is the key the project was opened under, so it can be
+ * looked up again by exactly the string that filed it. */
+let keptCopy: { project: string; folder: string } | null = null;
+
+/** Let the kept copy go, if there is one. Safe at any time — the next piece of
+ *  work makes one again. */
+async function letKeptCopyGo(): Promise<void> {
+  const kept = keptCopy;
+  keptCopy = null;
+  if (kept === null) return;
+  await new ProjectHistory(kept.project).removeWorkspace(kept.folder).catch(() => undefined);
+  await rm(kept.folder, { recursive: true, force: true }).catch(() => undefined);
+}
+
+/** Whether a piece of work is being made in that project's copy right now.
+ *  Only while it is being made: afterwards what it made is a version, and the
+ *  folder is nothing anybody reads. */
+function stillBeingMadeIn(project: string): boolean {
+  return workspaces.find(project)?.held.waiting?.waiting.state === 'making';
+}
+
+/**
+ * Whether work here is worth doing in a copy.
+ *
+ * A copy keeps the folder untouched and lets what the work made be shown before
+ * it lands. With nothing to show, only the first is left — and a save point
+ * covers that, at no cost, which is how every other coding agent works. A folder
+ * we cannot read at all keeps its copy: the careful answer is the one that
+ * cannot lose anything.
+ */
+async function worthACopy(project: string): Promise<boolean> {
+  try {
+    return canBeShown(readTheFolder(await lookAt(project)));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Where this project's work should be done.
+ *
+ * Undefined means take an ordinary copy for this one piece of work: another
+ * project is mid-way through using the kept one, and pulling the folder out
+ * from under a turn that is running would lose it.
+ */
+async function keepCopyFor(project: string): Promise<string | undefined> {
+  if (keptCopy !== null && keptCopy.project !== project) {
+    if (stillBeingMadeIn(keptCopy.project)) return undefined;
+    await letKeptCopyGo();
+  }
+  const folder = keptCopyFolder(project);
+  keptCopy = { project, folder };
+  return folder;
+}
+
+/** Where a project's agreed pictures are kept, one per width. Images, so beside
+ *  the rest of what this app keeps rather than in the settings file — and per
+ *  project, because a mark is a reading of one page. */
+function agreedFolder(path: string): string {
+  return join(app.getPath('userData'), 'agreed', keyFor(path));
+}
+
 /** One line for the version a held piece of work ends at. Their own words, so
  *  the timeline reads the same whether work was checked first or not. */
 function saysHeldWork(doing: string): string {
@@ -1650,7 +2401,7 @@ async function landingNow(folder: string, held: Held): Promise<Landing> {
     // Only ever beside the work it is of. Nothing is waiting, so there is
     // nothing for a picture to be a picture of.
     held: held.waiting === null ? null : held.pictures,
-    holdBack: chosen.heldBack[folder] === true,
+    holdBack: holdsBack(chosen.heldBack, folder),
     canHandOver: reach.canHandOver,
     handOverSays: reach.handOverSays,
     canPutOnline: reach.canPutOnline,
@@ -1671,7 +2422,7 @@ async function photographWaiting(project: string, work: HeldWork): Promise<HeldP
     .then(sizesFor)
     .catch(() => undefined);
   return photographHeld({
-    photographer: holdCamera(sizes),
+    photographer: holdCamera(sizes, agreedFolder(project)),
     copy: work.folder,
     project,
     id: work.waiting.id,
@@ -1712,6 +2463,7 @@ async function checkItFirst(
     return fail(historyTrouble(cause));
   }
 
+  const keptIn = await keepCopyFor(open.path);
   let waiting: HeldWork;
   try {
     waiting = await HeldWork.start({
@@ -1719,6 +2471,9 @@ async function checkItFirst(
       under: workFolder(),
       id: `held-${Date.now().toString(36)}`,
       doing: text,
+      // The same copy every time. Making one is a dependency install, and it is
+      // the same install for every piece of work in this project.
+      ...(keptIn === undefined ? {} : { keepIn: keptIn }),
     });
   } catch (cause) {
     return fail(historyTrouble(cause));
@@ -2051,7 +2806,10 @@ const NO_CHECKOUT_HERE =
  * background work in flight, that is somebody else's branch — and one of the two
  * callers deletes what it is given.
  */
-function checkoutEntryFor(open: Workspace<Held>, where: Where): { address: string; folder: string } | null {
+function checkoutEntryFor(
+  open: Workspace<Held>,
+  where: Where,
+): { address: string; folder: string; branch: string } | null {
   // Only ever the conversation actually named. Left out, `conversationAt` hands
   // back whichever is in front — and one of the two callers deletes what it is
   // given, so a call that forgot to say which would delete somebody's work.
@@ -2061,8 +2819,8 @@ function checkoutEntryFor(open: Workspace<Held>, where: Where): { address: strin
   // `found.path` is the address the checkout was filed under. Not
   // `held.conversation`: that is null until the conversation's first write and
   // a transcript path afterwards, so it matches the key exactly never.
-  const folder = open.held.checkouts.get(found.path)?.folder;
-  return folder === undefined ? null : { address: found.path, folder };
+  const one = open.held.checkouts.get(found.path);
+  return one === undefined ? null : { address: found.path, ...one };
 }
 
 
@@ -2150,6 +2908,104 @@ function worktreesFolder(project: string): string {
   return join(app.getPath('userData'), 'worktrees', key);
 }
 
+/* ------------------------------------------------ checkouts left behind -- */
+
+/** Every checkout left spread out on disk when the app last went away. What a
+ *  conversation owns is its branch, and the index keeps that, so one somebody
+ *  returns to is spread out again. A folder holding work is left alone. */
+async function sweepStrayCheckouts(): Promise<number> {
+  const projects = await rememberedProjects().catch(() => []);
+  let given = 0;
+  for (const project of projects) {
+    const root = worktreesFolder(project.path);
+    if (!existsSync(root)) continue;
+    // The project itself is gone. Nothing here can be opened again and there is
+    // no repository left to ask about it, so the folder is all there is to give
+    // back — unless another project answers to the same folder, in which case
+    // what is in it is still somebody's.
+    if (!existsSync(project.path)) {
+      const alsoHere = projects.some(
+        (other) => other.path !== project.path && worktreesFolder(other.path) === root,
+      );
+      if (!alsoHere) await rm(root, { recursive: true, force: true }).catch(() => undefined);
+      continue;
+    }
+    const found = await readdir(root, { withFileTypes: true }).catch(() => []);
+    const folders = found.filter((one) => one.isDirectory()).map((one) => join(root, one.name));
+    if (folders.length === 0) continue;
+    const released = await sweepCheckouts(gitRunHereFor(), project.path, folders).catch(() => []);
+    given += released.length;
+  }
+  return given;
+}
+
+/** The address→checkout ownership survives an app restart. Without this, the
+ * transcript comes back but its isolated files become an anonymous folder and
+ * the resumed agent starts changing the main project instead. One file per
+ * project avoids cross-project write races. */
+function checkoutIndexFile(project: string): string {
+  const key = createHash('sha256').update(resolve(project)).digest('hex');
+  return join(app.getPath('userData'), 'conversation-checkouts', `${key}.json`);
+}
+
+async function readCheckouts(project: string): Promise<Map<string, Checkout>> {
+  try {
+    const parsed = JSON.parse(await readFile(checkoutIndexFile(project), 'utf8')) as unknown;
+    const root = `${resolve(worktreesFolder(project))}${sep}`;
+    // A folder not on disk is a checkout put away, not a lost one. Dropping it
+    // here would hand the conversation a fresh branch and orphan its work.
+    return readCheckoutIndex(parsed, (folder) => resolve(folder).startsWith(root));
+  } catch {
+    return new Map();
+  }
+}
+
+async function saveCheckouts(project: string, held: Held): Promise<void> {
+  const file = checkoutIndexFile(project);
+  await mkdir(dirname(file), { recursive: true });
+  const rows = Object.fromEntries(
+    [...held.checkouts].map(([address, one]) => [checkoutKey(held, address), one]),
+  );
+  await writeFile(file, JSON.stringify(rows), 'utf8');
+}
+
+/** What a conversation is asked for by once it has been written down. An
+ *  address is `new-N` until the first write and never changes after it, so an
+ *  index filed under one is an index a resume never matches. */
+function checkoutKey(held: Held, address: string): string {
+  return held.sessions.find(address)?.held.conversation ?? address;
+}
+
+/** Put a conversation's checkout away, and remember where it went. Quiet: a
+ *  checkout still holding work simply stays. */
+async function putAwayCheckoutAt(project: string, held: Held, address: string): Promise<void> {
+  const one = held.checkouts.get(address);
+  if (one === undefined || !existsSync(one.folder)) return;
+  const filed = checkoutKey(held, address);
+  const away = await putAwayWorktree(gitRunHereFor(), project, one.folder).catch(() => ({
+    put: false,
+  }));
+  if (!away.put) return;
+  if (filed !== address) {
+    held.checkouts.delete(address);
+    held.checkouts.set(filed, one);
+  }
+  await saveCheckouts(project, held).catch(() => undefined);
+}
+
+/** Spread a checkout back out if it was put away. Null when its work is gone,
+ *  so the caller can start the conversation somewhere rather than not at all. */
+async function reopenCheckout(
+  project: string,
+  one: Checkout,
+): Promise<Checkout | null> {
+  if (existsSync(one.folder)) return one;
+  const back = await reopenWorktree(gitRunHereFor(), project, one.branch, one.folder).catch(
+    () => null,
+  );
+  return back !== null && back.ok ? one : null;
+}
+
 /** Where a project's build plan lives, so it survives the window closing. */
 function buildPlanFile(project: string): string {
   const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
@@ -2171,15 +3027,38 @@ function openProject(folder: string): Promise<Result<OpenedProject>> {
   return attempt;
 }
 
+/** A saved transcript may be pressed twice before its first open completes.
+ * Serialize that address so two Pi sessions can never append to one file. Fresh
+ * conversations deliberately have no key: two fresh requests mean two tabs. */
+const openingConversations = new Map<
+  string,
+  Promise<Result<{ session: GrapheSession; address: string }>>
+>();
+
+async function startConversation(
+  open: { path: string; held: Held },
+  how: Opening,
+  keep?: string,
+): Promise<Result<{ session: GrapheSession; address: string }>> {
+  const asked = how.kind === 'carry-on' ? how.path : undefined;
+  if (asked === undefined) return startConversationUnlocked(open, how, keep);
+  const key = `${open.path}\u0000${asked}`;
+  const existing = openingConversations.get(key);
+  if (existing !== undefined) return existing;
+  const attempt = startConversationUnlocked(open, how, keep).finally(() => {
+    if (openingConversations.get(key) === attempt) openingConversations.delete(key);
+  });
+  openingConversations.set(key, attempt);
+  return attempt;
+}
+
 /**
  * Start a conversation in a project, and put it in front of the others.
  *
  * What `how` means is `openingFor`'s to decide; what this adds is that one
  * already live at that address is handed straight back rather than built again.
- * Two sessions writing one transcript is the race `opening` exists to prevent,
- * and it would also throw away the half-typed thought in the live one.
  */
-async function startConversation(
+async function startConversationUnlocked(
   open: { path: string; held: Held },
   how: Opening,
   keep?: string,
@@ -2200,23 +3079,43 @@ async function startConversation(
   // looking at; any further one is a parallel tab and works in its own checkout
   // rather than writing the same files the first one is writing.
   const primary = held.sessions.open.length === 0;
-  let checkout: { folder: string } | null = null;
-  if (!primary) {
+  // A put-down conversation may still own an isolated checkout with unapplied
+  // work. Reopening must resume that exact folder rather than overwrite its map
+  // entry with a fresh copy and orphan the old work.
+  let checkout: Checkout | null =
+    asked === undefined ? null : (held.checkouts.get(asked) ?? null);
+  if (checkout !== null) {
+    checkout = await reopenCheckout(open.path, checkout);
+    // Its work is not in the project any more. A fresh checkout below is a
+    // better answer than refusing to open the conversation at all.
+    if (checkout === null && asked !== undefined) held.checkouts.delete(asked);
+  }
+  let madeCheckout = false;
+  if (!primary && checkout === null) {
     const named = freshCheckout(held, open.path);
     const made = await createWorktree(gitRunHereFor(), open.path, named.name, null, {
       folder: named.folder,
     });
-    if (made.ok && made.value !== null) checkout = { folder: made.value.folder };
+    if (made.ok && made.value !== null) {
+      checkout = { folder: made.value.folder, branch: made.value.branch };
+      madeCheckout = true;
+    }
   }
   let session: GrapheSession;
   try {
     session = await createSession({
       projectRoot: checkout?.folder ?? open.path,
+      // Named only when this conversation is running in a copy, so the copy
+      // takes a preview address of its own and the project on screen keeps the
+      // ordinary one.
+      mainFolder: open.path,
       onEvent: forwardTo(open.path, held, from),
-      timeline: held.timeline,
+      // Restore points must describe the tree this session is actually changing.
+      timeline: checkout === null ? held.timeline : await Timeline.open(checkout.folder),
       model: prefs.model,
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
+      running: held.running,
       noteServers,
       // Without this the agent's own way into Figma is never built, so pasting
       // a link got its text read back while the panel beside it could open the
@@ -2243,6 +3142,9 @@ async function startConversation(
         : { sessionDir: sessionsFolder(), ...(how.kind === 'fresh' ? { fresh: true } : {}) }),
     });
   } catch (cause) {
+    if (madeCheckout && checkout !== null) {
+      await dropWorktree(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
+    }
     // The adapter wraps whatever went wrong in a sentence of its own, so the
     // reason worth reading is down the `cause` chain rather than on top of it.
     // Search the whole chain before falling back to the likeliest explanation.
@@ -2254,7 +3156,10 @@ async function startConversation(
   // something, and a new name for the same thread would lose it.
   const address = keep ?? addressOf(session);
   from.address = address;
-  if (checkout !== null) held.checkouts.set(address, checkout);
+  if (checkout !== null) {
+    held.checkouts.set(address, checkout);
+    await saveCheckouts(open.path, held).catch(() => undefined);
+  }
   keepConversation(held, address, session);
   return done({ session, address });
 }
@@ -2282,7 +3187,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
       name,
       history: front?.held.history ?? [],
       conversation: front?.held.conversation ?? null,
-      ...(front === null ? {} : { address: front.path }),
+      ...(front === null ? {} : { address: front.path, howFar: front.held.howFar }),
     });
   }
 
@@ -2293,16 +3198,19 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     return fail(noSafetyNet(cause));
   }
 
+  const restoredCheckouts = await readCheckouts(path);
   const held: Held = {
     timeline,
     spend: new SpendRecorder(),
     sessions: conversationsIn(path),
+    running: new Running(),
     serving: null,
     variations: [],
     looking: nothingSeenYet(),
+    suppressCarry: new Set(),
     saidHeldBack: '',
-    checkoutsMade: 0,
-    checkouts: new Map(),
+    checkoutsMade: restoredCheckouts.size,
+    checkouts: restoredCheckouts,
     waiting: null,
     pictures: null,
     sending: false,
@@ -2334,6 +3242,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     history: started.value.session.history,
     conversation: started.value.session.conversation,
     address: started.value.address,
+    howFar: started.value.session.howFar,
   });
 }
 
@@ -2781,17 +3690,13 @@ function afterFor(desk: AwayDesk, id: string): AwayAfter | null {
 }
 
 function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
-  // Goes at the same thing, counted once so each of them can say which it is.
-  const sameThing = new Map<string, string[]>();
-  for (const piece of desk.bench.pieces) {
-    if (piece.ways == null) continue;
-    sameThing.set(piece.ways, [...(sameThing.get(piece.ways) ?? []), piece.id]);
-  }
+  // One numbering for the whole board, shared with the comparison sheet, so a
+  // go is called the same thing in both places.
+  const numbering = waysNumbering(desk.bench.pieces);
 
   const on: AwayPiece[] = desk.bench.pieces.map((piece) => {
     const run = desk.runs.get(piece.id);
     const asked = run?.held.first ?? null;
-    const group = piece.ways == null ? undefined : sameThing.get(piece.ways);
     return {
       id: piece.id,
       doing: piece.doing,
@@ -2801,6 +3706,9 @@ function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
       says: saidBriefly(lastSaidBy(desk, piece.id)),
       trouble: piece.trouble,
       spent: desk.costs.get(piece.id) ?? null,
+      // What it changed, so two pieces meeting on one file can be said before
+      // a set goes in rather than discovered part way through it.
+      touches: piece.touches ?? null,
       question:
         asked === null
           ? null
@@ -2811,10 +3719,7 @@ function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
               consequence: asked.consequence,
             },
       after: afterFor(desk, piece.id),
-      oneOf:
-        group === undefined || group.length < 2
-          ? null
-          : { of: group.length, at: group.indexOf(piece.id) + 1 },
+      oneOf: numbering.get(piece.id) ?? null,
     };
   });
   // Waiting for another is waiting, so it is drawn in the same band as anything
@@ -2851,6 +3756,21 @@ function awayRepeats(path: string, now: number): readonly Repeating[] {
 }
 
 /** Everything this project has going, as the window draws it. */
+async function connectedNow(path: string): Promise<ConnectedState> {
+  const config = await readMcpConfig(path);
+  return {
+    tools: config.servers.map((one) => ({
+      name: one.name,
+      command: one.command,
+      args: one.args === undefined ? [] : [...one.args],
+      ...(one.address === undefined ? {} : { address: one.address }),
+    })),
+    file: mcpFile(path),
+    trouble: config.trouble ?? null,
+    skipped: config.skipped === undefined ? [] : [...config.skipped],
+  };
+}
+
 function awayNow(path: string): Away {
   const repeats = awayRepeats(path, Date.now());
   const desk = awayDesks.get(path);
@@ -3016,6 +3936,9 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
   try {
     session = await createSession({
       projectRoot: folder,
+      // The folder this is a copy of, so the copy takes a preview address of
+      // its own and leaves the ordinary one to the project on screen.
+      mainFolder: desk.path,
       onEvent: hear,
       timeline: await Timeline.open(folder),
       model: (await preferences()).all().model,
@@ -3766,6 +4689,9 @@ function register(): void {
       // Ours, though, goes. Somebody who has just said "I am done with this
       // project" should not be left holding a folder of our screenshots of it.
       await forgetEverything(resolve(path));
+      if (keptCopy !== null && resolve(keptCopy.project) === resolve(path)) {
+        await letKeptCopyGo();
+      }
       // And nothing of theirs goes on happening on its own for a project they
       // have just put down.
       const desk = awayDesks.get(resolve(path));
@@ -3928,6 +4854,7 @@ function register(): void {
     if (typeof versionId !== 'string' || versionId.trim() === '') return fail(NO_SUCH_VERSION);
     try {
       const restored = await open.held.timeline.restoreTo(versionId);
+      filesMovedIn(open);
       return done({
         title: restored.wentBackTo.title,
         at: restored.wentBackTo.at,
@@ -4100,14 +5027,14 @@ function register(): void {
     return Promise.resolve(done(sessionAt(open, whereIn(args))?.running ?? []));
   });
 
-  handle<readonly RunningPiece[]>(CHANNEL.stopRunning, (_event, args) => {
+  handle<readonly RunningPiece[]>(CHANNEL.stopRunning, async (_event, args) => {
     const [id] = args;
     const open = projectAt(whereIn(args));
-    if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
-    if (typeof id !== 'string') return Promise.resolve(fail(NOTHING_OPEN));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string') return fail(NOTHING_OPEN);
     const session = sessionAt(open, whereIn(args));
-    session?.stopRunning(id);
-    return Promise.resolve(done(session?.running ?? []));
+    await session?.stopRunning(id);
+    return done(session?.running ?? []);
   });
 
   handle<HowFar>(CHANNEL.goAsFarAs, (_event, args) => {
@@ -4241,6 +5168,13 @@ function register(): void {
     return done(await landingNow(open.path, open.held));
   });
 
+  handle<Preferences>(CHANNEL.setHowMuch, async (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string') return fail(NOTHING_OPEN);
+    // Whatever arrives, what is stored is one of the three.
+    return done(await (await preferences()).change({ howMuch: howMuchBy(id).id }));
+  });
+
   handle<Preferences>(CHANNEL.setHoldBack, async (_event, args) => {
     const [on] = args;
     if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
@@ -4267,12 +5201,18 @@ function register(): void {
       return done(await asItStands(null));
     }
 
+    // The pictures go with the answer, so read them before either branch
+    // clears them.
+    const changes = open.held.pictures?.changes ?? [];
+    const agreed = agreedFolder(open.path);
+
     if (letIn !== true) {
       // Nothing moves. The work is kept reachable rather than thrown away, so
       // "bring it back" is the ordinary put-back and nothing special.
       const version = waiting.setAside();
       open.held.waiting = null;
       open.held.pictures = null;
+      await dropShots(agreed).catch(() => undefined);
       return done(await asItStands(version));
     }
 
@@ -4283,6 +5223,9 @@ function register(): void {
       const outcome = await waiting.approve(saysHeldWork(waiting.waiting.doing));
       open.held.waiting = null;
       open.held.pictures = null;
+      // The same press that takes the work moves what the next change is read
+      // against, so nobody is asked about this one twice.
+      await keepShots(agreed, nextAccepted(changes, true)).catch(() => undefined);
       return done(await asItStands(outcome?.undoTo ?? null));
     } catch (cause) {
       return fail(historyTrouble(cause));
@@ -4376,6 +5319,119 @@ function register(): void {
     const everywhere = [...awayDesks.keys()].map((path) => ({ project: path, away: awayNow(path) }));
     return done(everywhere);
   });
+
+  /* The other tools a project has plugged in. Reading the list is free; asking
+     whether one works starts a real process, so it happens once, on a press. */
+  handle<ConnectedState>(CHANNEL.connectedLook, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    return done(await connectedNow(open.path));
+  });
+
+  handle<ConnectedHealth>(CHANNEL.connectedCheck, async (_event, args) => {
+    const [name] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof name !== 'string' || name.trim() === '') return done({ state: 'unknown' });
+    const config = inProject(await readMcpConfig(open.path), open.path);
+    const server = config.servers.find((one: { name: string }) => one.name === name);
+    if (server === undefined) return done({ state: 'unknown' });
+    return done(await checkServer(server));
+  });
+
+  handle<ConnectedState>(CHANNEL.connectedSave, async (_event, args) => {
+    const [tools] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (!Array.isArray(tools)) return done(await connectedNow(open.path));
+    const wanted: { name: string; command: string; args?: readonly string[]; address?: string }[] = [];
+    for (const entry of tools) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const one = entry as Record<string, unknown>;
+      if (typeof one.name !== 'string' || one.name.trim() === '') continue;
+      const command = typeof one.command === 'string' ? one.command.trim() : '';
+      const address = typeof one.address === 'string' ? one.address.trim() : '';
+      // One or the other is enough: a tool we start, or one already listening.
+      // Insisting on a command dropped every listening tool on the floor.
+      if (command === '' && address === '') continue;
+      wanted.push({
+        name: one.name.trim(),
+        command,
+        ...(address === '' ? {} : { address }),
+        args: Array.isArray(one.args) ? (one.args as string[]).filter((x) => typeof x === 'string') : undefined,
+      });
+    }
+    try {
+      // The file as it stands, not the aimed copy: keys and folders never go out
+      // to the window, so they are carried over from here. Aiming it first would
+      // write a folder into the file that nobody put there. A file that would
+      // not read has nothing to carry across, and is refused rather than
+      // replaced — whatever any window offered.
+      const current = await readMcpConfig(open.path);
+      const saving = savingFrom(wanted, current);
+      if (!saving.ok) return fail(saving.refused);
+      await writeMcpConfig(open.path, saving.servers);
+    } catch (cause) {
+      return fail(plainTrouble(cause instanceof Error ? cause.message : 'The list could not be saved.'));
+    }
+    return done(await connectedNow(open.path));
+  });
+
+  handle<string>(CHANNEL.changesLook, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    try {
+      return done(await new ProjectHistory(open.path).diffFor({ kind: 'working' }));
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  handle<null>(CHANNEL.changesDrop, async (_event, args) => {
+    const [patch] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof patch !== 'string') return done(null);
+    try {
+      // A version first, so taking part of a change back out is one press from
+      // undone like everything else here — and if that cannot be done, neither
+      // is this. Swallowed, the sentence above became untrue in the one case it
+      // was written for, and nothing said so. The agent's own path has refused
+      // on this since it was written; this is the same rule for the press.
+      const saved = await open.held.timeline
+        .snapshot({ boundary: 'before-risky-change' })
+        .then(() => true)
+        .catch(() => false);
+      if (!saved) {
+        return fail({
+          what: 'I have left that change alone.',
+          because:
+            'I could not save the moment before taking part of it out, and doing that is only safe because it can be undone. Nothing has changed.',
+          actionLabel: 'Got it',
+        });
+      }
+      const answer = await new ProjectHistory(open.path).dropChanges(patch);
+      if (!answer.ok) return fail(plainTrouble(answer.because));
+      return done(null);
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  handle<{ steering: readonly string[]; followUp: readonly string[] }>(
+    CHANNEL.takeBackQueue,
+    (_event, args) => {
+      const where = whereIn(args);
+      const open = projectAt(where);
+      const session = open === null ? null : sessionAt(open, where);
+      if (session === null) return Promise.resolve(done({ steering: [], followUp: [] }));
+      const taken = session.takeBackQueue();
+      // A line that would not come back is still queued. Answering with an
+      // empty one took the words off the screen while the agent still had them.
+      if (!taken.ok) return Promise.resolve(fail(couldNotTakeBack(taken.because)));
+      return Promise.resolve(done({ steering: taken.steering, followUp: taken.followUp }));
+    },
+  );
 
   handle<Away>(CHANNEL.away, async (_event, args) => {
     const open = projectAt(whereIn(args));
@@ -4474,6 +5530,21 @@ function register(): void {
     return done(awayNow(open.path));
   });
 
+  /** Stop what is working in one copy, and wait for it to actually be stopped.
+   *
+   *  Its own step of the way for one reason: the copy is about to be deleted,
+   *  and an agent still mid-tool-call writes into a folder that has gone. The
+   *  board bookkeeping is deliberately left out — that happens after the work
+   *  has landed, and this has to happen before. */
+  async function stopWorkIn(desk: AwayDesk, id: string): Promise<void> {
+    const run = desk.runs.get(id);
+    if (run === undefined) return;
+    run.held.stop();
+    await run.session?.stop().catch(() => undefined);
+    run.session?.dispose();
+    desk.runs.delete(id);
+  }
+
   /** End one run and everything hanging off it. The same five things throwing
    *  a piece away does, so a piece ended any other way is not left half-ended. */
   function letGoOfRun(desk: AwayDesk, id: string, because: string): void {
@@ -4487,6 +5558,54 @@ function register(): void {
     stopWhatFollows(desk, id, because);
   }
 
+  /**
+   * Take several finished pieces in, in the order they need to be in.
+   *
+   * One press rather than several: they were meant to arrive in an order, and
+   * taking them one at a time by hand is exactly how that order gets lost.
+   * Whatever happens — the whole set in, or a stop part way — the run is one
+   * version away from never having happened, and the sentence says which.
+   */
+  handle<Away>(CHANNEL.keepSet, async (_event, args) => {
+    const [ids] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const desk = awayDesks.get(open.path);
+    if (desk === undefined || !Array.isArray(ids) || ids.length === 0) {
+      return done(awayNow(open.path));
+    }
+    const wanted = (ids as unknown[]).filter((one): one is string => typeof one === 'string');
+    try {
+      // A version first, the same way keeping one does, so the whole run has
+      // somewhere to be undone to even before the first piece goes in.
+      await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
+      const took = await desk.bench.keepSet(wanted, (piece) => saysHeldWork(piece.doing), {
+        after: (id) => desk.after.get(id) ?? null,
+        lettingGo: async (going) => {
+          for (const one of going) await stopWorkIn(desk, one);
+        },
+      });
+      if (took.ok !== true) return fail(couldNotTakeSet(took.because));
+      filesMovedIn(open);
+
+      for (const other of took.insteadOf) letGoOfRun(desk, other, afterWords.thrownAway);
+      for (const id of took.landed) {
+        desk.runs.delete(id);
+        desk.chain.take(id);
+        forgetNote(desk, id);
+      }
+      await runWhatCan(desk);
+
+      // Said whichever way it went: how many went in, and — when one stopped —
+      // which one, over which file, and that the rest are still there.
+      const said = saysTook(took, (id: string) => desk.bench.pieces.find((one) => one.id === id)?.doing ?? id);
+      if (took.stoppedAt !== null) return fail({ ...said, actionLabel: 'Got it' });
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+    return done(awayNow(open.path));
+  });
+
   handle<Away>(CHANNEL.keepAway, async (_event, args) => {
     const [id] = args;
     const open = projectAt(whereIn(args));
@@ -4495,11 +5614,20 @@ function register(): void {
     if (desk === undefined || typeof id !== 'string') return done(awayNow(open.path));
     const piece = desk.bench.pieces.find((one) => one.id === id);
     if (piece === undefined) return done(awayNow(open.path));
+    // Nothing to hand over until it has finished, and saying which of the two
+    // reasons it is matters: "it changed nothing" about work still going is a
+    // lie about work somebody was just watching.
+    const cannot = saysCannotKeep(piece.doing, piece.state);
+    if (cannot !== null) return fail(cannot);
     try {
       // Anything unfinished in the folder becomes a version first, the same way
       // going back does, so keeping this can never write over it.
       await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
-      const kept = await desk.bench.keep(id, saysHeldWork(piece.doing));
+      const kept = await desk.bench.keep(id, saysHeldWork(piece.doing), {
+        lettingGo: async (ids) => {
+          for (const one of ids) await stopWorkIn(desk, one);
+        },
+      });
       // Finished without changing a file — an answer rather than an edit. There
       // is nothing to take, and saying so is better than a press that appears
       // to do nothing while quietly losing the piece.
@@ -4507,6 +5635,7 @@ function register(): void {
       // A file two pieces both changed is the one case somebody has to look at.
       // The piece stays on the board, so the work is still there to open.
       if (kept.version === null) return fail(bothChanged(kept.conflicted));
+      filesMovedIn(open);
       // The other goes at the same thing went with the decision. Their copies
       // are already gone, so their agents have to be ended too — otherwise they
       // carry on writing into a folder that is not there, spending against the
@@ -4550,6 +5679,86 @@ function register(): void {
     if (!run.held.isWaiting && piece.state === 'needs-you') piece.state = 'running';
     noteDown(desk, id);
     return done(awayNow(open.path));
+  });
+
+  /**
+   * Say something to a piece of work without stopping it.
+   *
+   * The whole point is that it does not interrupt: the agent hears this between
+   * one step and the next, so nothing half-done is thrown away. A piece that has
+   * already finished has nothing left to hear, and says so rather than swallowing
+   * the sentence.
+   */
+  handle<Away>(CHANNEL.sayToAway, async (_event, args) => {
+    const [id, text] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || typeof text !== 'string' || text.trim() === '') {
+      return done(awayNow(open.path));
+    }
+    const desk = awayDesks.get(open.path);
+    const run = desk?.runs.get(id);
+    if (desk === undefined || run?.session == null) return fail(NOT_GOING_ANY_MORE);
+    // Asked of the session rather than the card: the board paints "Going" from
+    // the moment a turn settles until the copy has been read and put away,
+    // which is seconds in which nothing is listening.
+    if (!run.session.listening) return fail(DID_NOT_HEAR);
+    try {
+      await run.session.steer(text.trim());
+    } catch (cause) {
+      return fail(couldNotSay(cause));
+    }
+    noteDown(desk, id);
+    return done(awayNow(open.path));
+  });
+
+  /**
+   * The several goes at one job, each with what it actually changed.
+   *
+   * Read on the press rather than kept: a go still working has a different
+   * answer a minute later, and a stale patch shown beside a fresh one is worse
+   * than no comparison at all.
+   *
+   * Every go in the group comes back, whether or not it has a copy of its own
+   * yet. One that has not started has nothing to show and says so; leaving it
+   * out instead would renumber the ones that did, and somebody choosing between
+   * columns would be reading names that no card on the board agrees with.
+   */
+  handle<readonly SideOfWork[]>(CHANNEL.compareWays, async (_event, args) => {
+    const [ways] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const desk = awayDesks.get(open.path);
+    if (desk === undefined || typeof ways !== 'string') return done([]);
+
+    const numbering = waysNumbering(desk.bench.pieces);
+    const group = desk.bench.pieces.filter((one) => one.ways === ways);
+    const sides: SideOfWork[] = [];
+    for (const piece of group) {
+      const named = numbering.get(piece.id);
+      if (named === undefined) continue;
+      let diff = '';
+      if (piece.folder !== null) {
+        try {
+          diff = await new ProjectHistory(piece.folder).diffFor({ kind: 'working' });
+        } catch {
+          // A copy we cannot read is still one of the goes; it is shown as having
+          // changed nothing rather than dropped, which would silently narrow the
+          // choice somebody is about to make.
+        }
+      }
+      const spent = desk.costs.get(piece.id) ?? null;
+      sides.push({
+        id: piece.id,
+        name: boardWords.oneOf(named.at, named.of),
+        state: piece.state,
+        diff,
+        picture: piece.picture,
+        spent: spent === null ? null : formatMoney(spent),
+        folder: piece.folder,
+      });
+    }
+    return done(sides);
   });
 
   handle<Away>(CHANNEL.addRepeat, async (_event, args) => {
@@ -4636,6 +5845,10 @@ function register(): void {
       history: started.value.session.history,
       conversation: started.value.session.conversation,
       address: started.value.address,
+      howFar: started.value.session.howFar,
+      // Only this side knows which conversations work in a copy, and without
+      // being told the window cannot offer to bring that work back.
+      ownCopy: checkout !== null,
     });
   });
 
@@ -4650,8 +5863,12 @@ function register(): void {
     const open = projectAt(where);
     if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
     const found = conversationAt(open.held, where);
-    if (found !== null) open.held.sessions.close(found.path);
-    return Promise.resolve(done(null));
+    if (found === null) return Promise.resolve(done(null));
+    // Put the copy away before the session goes, while it can still be asked
+    // what it was written down as.
+    const away = putAwayCheckoutAt(open.path, open.held, found.path);
+    open.held.sessions.close(found.path);
+    return away.then(() => done(null));
   });
 
   /**
@@ -4726,6 +5943,7 @@ function register(): void {
         if (checkout !== undefined) {
           await releaseWorktree(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
           open.held.checkouts.delete(one.path);
+          await saveCheckouts(open.path, open.held).catch(() => undefined);
         }
         open.held.sessions.close(one.path);
       }
@@ -5009,10 +6227,17 @@ function register(): void {
      back — and the guards (never flatten a dirty checkout) are the same ones
      the parallel-session wiring will lean on. */
 
+  /** True while something is still being written into the project. The one
+   *  real reason not to move it: files are mid-change, and moving out from under
+   *  them loses what was being written. */
+  function stillWriting(held: Held): boolean {
+    if (held.waiting?.waiting.state === 'making') return true;
+    return held.sessions.open.some((one) => one.held.working || one.held.listening);
+  }
+
   /** Move the project onto another of its lines of work. The one rule is the
-   *  same as going back to an older version: work that is not saved yet is not
-   *  moved anywhere. Every moment is saved at the end of a turn, so a settled
-   *  project switches freely; a project caught mid-turn is told to wait. */
+   *  same as going back to an older version: work that is not saved yet is
+   *  saved first, never left behind. Only work still being written stops it. */
   handle<null>(CHANNEL.branchSwitch, async (_event, args) => {
     const [name] = args;
     const open = projectAt(whereIn(args));
@@ -5023,9 +6248,13 @@ function register(): void {
     if (git === null || git.branch === null) {
       return fail({ what: 'There is nothing to switch between yet.', because: 'This project has no saved work, so it has no lines of work.', actionLabel: 'Got it' });
     }
-    if (git.dirty) {
-      return fail({ what: 'Not yet — this moment is not saved.', because: 'Let the current turn finish (it saves everything) and switch then. A line of work is only moved when the work is safe.', actionLabel: 'Got it' });
+    if (stillWriting(open.held)) {
+      return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish and switch then. A line of work is only moved when nothing is still changing the files.', actionLabel: 'Got it' });
     }
+    // Saved, not refused. Refusing on anything unsaved made this impossible to
+    // come back from: moving to a line without a folder leaves that folder
+    // behind untouched, which counts as unsaved, which blocks the way back.
+    await open.held.timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
     const switched = await gitRun(open.path, ['checkout', name]);
     if (switched.code !== 0) {
       return fail({ what: 'I could not move onto that line of work.', because: 'git refused the switch. Check the name, and that nothing here holds the files open.', actionLabel: 'Got it' });
@@ -5044,10 +6273,10 @@ function register(): void {
     if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(clean)) {
       return fail({ what: 'That is not a usable name for a line of work.', because: 'Letters, numbers, dots, dashes and slashes — and it cannot start with a dash.', actionLabel: 'Got it' });
     }
-    const git = await readGitStatus(open.path);
-    if (git !== null && git.dirty) {
-      return fail({ what: 'Not yet — this moment is not saved.', because: 'Let the current turn finish (it saves everything), then start the new line.', actionLabel: 'Got it' });
+    if (stillWriting(open.held)) {
+      return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish, then start the new line.', actionLabel: 'Got it' });
     }
+    await open.held.timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
     const made = await gitRun(open.path, ['checkout', '-b', clean]);
     if (made.code !== 0) {
       return fail({ what: 'I could not start that line of work.', because: 'git refused the new branch — the name may already exist.', actionLabel: 'Got it' });
@@ -5055,18 +6284,24 @@ function register(): void {
     return done(null);
   });
 
-  handle<{ folder: string; branch: string }>(CHANNEL.worktreeStart, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const made = await createWorktree(
-      gitRunHereFor(),
-      open.path,
-      `conversation-${Date.now().toString(36)}`,
-      null,
-    );
-    if (!made.ok) return fail(worktreeTrouble(made.because));
-    return made.value === null ? fail(worktreeTrouble('Could not make a checkout.')) : done(made.value);
-  });
+  /**
+   * Put down the conversation that lives in a copy, before the copy goes.
+   *
+   * Its session is rooted in that folder: left open, the next thing it was
+   * asked to do would run somewhere that no longer exists. The same order the
+   * board uses when it throws a piece of work away — stop first, delete after.
+   */
+  async function putDownCopyConversation(open: Workspace<Held>, address: string): Promise<void> {
+    const found = open.held.sessions.open.find((one) => one.path === address);
+    if (found === undefined) return;
+    open.held.suppressCarry.add(address);
+    try {
+      await found.held.stop().catch(() => undefined);
+      open.held.sessions.close(address);
+    } finally {
+      open.held.suppressCarry.delete(address);
+    }
+  }
 
   handle<null>(CHANNEL.worktreeLand, async (_event, args) => {
     const open = projectAt(whereIn(args));
@@ -5076,11 +6311,31 @@ function register(): void {
     // this landed somebody else's branch.
     const entry = checkoutEntryFor(open, whereIn(args));
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
-    const landed = await landWorktree(gitRunHereFor(), open.path, entry.folder);
-    // The folder is gone once it lands; a note still pointing at it would send
-    // the next press somewhere that no longer exists.
-    if (landed.ok) open.held.checkouts.delete(entry.address);
-    return landed.ok ? done(null) : fail(worktreeTrouble(landed.because));
+    await putDownCopyConversation(open, entry.address);
+    if ((await reopenCheckout(open.path, entry)) === null) {
+      return fail(worktreeTrouble(worktreeWords.gone));
+    }
+    // Copy work is usually uncommitted. Apply its actual files first and await
+    // that result; merging only the branch can omit those edits, while racing
+    // the settle-time Apply can remove the folder out from underneath it.
+    const carried = await bringBack(gitRunHereFor(), open.path, entry.folder);
+    if (!carried.ok) return fail(worktreeTrouble(carried.because));
+    if (carried.value.conflicted.length > 0) {
+      return fail(worktreeTrouble(bringBackWords.heldBack(carried.value.conflicted)));
+    }
+    try {
+      await open.held.timeline.snapshot({ boundary: 'turn-ended' });
+    } catch (cause) {
+      return fail(
+        worktreeTrouble(cause instanceof Error ? cause.message : 'The project could not be saved.'),
+      );
+    }
+    const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
+    if (dropped.ok) {
+      open.held.checkouts.delete(entry.address);
+      await saveCheckouts(open.path, open.held).catch(() => undefined);
+    }
+    return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
   });
 
   handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
@@ -5089,8 +6344,13 @@ function register(): void {
     // The same rule as landing, and it matters more here: this one deletes.
     const entry = checkoutEntryFor(open, whereIn(args));
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    await putDownCopyConversation(open, entry.address);
+    await reopenCheckout(open.path, entry);
     const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
-    if (dropped.ok) open.held.checkouts.delete(entry.address);
+    if (dropped.ok) {
+      open.held.checkouts.delete(entry.address);
+      await saveCheckouts(open.path, open.held).catch(() => undefined);
+    }
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
   });
 
@@ -5108,6 +6368,9 @@ function register(): void {
       };
       if (typeof stored?.source !== 'string') return null;
       const tasks = readPlan(stored.tasks);
+      // Everything built is nothing left to say. Kept, it sits above the next
+      // conversation reading 4/4 for ever, which is what it used to do.
+      if (isFinished(tasks)) return null;
       const next = tasks.find((one) => one.status !== 'done')?.n ?? null;
       return {
         source: stored.source,
@@ -5138,10 +6401,36 @@ function register(): void {
     }
   }
 
+  /** One at a time, per project.
+   *
+   *  Three of these handlers read the plan, change it and write it back, and
+   *  the window fires them from two places that can be in flight together — a
+   *  step starting while another settles. Last write wins is how a finishing
+   *  step deletes a plan that had just been written, so they queue instead. */
+  const planQueue = new Map<string, Promise<unknown>>();
+  function onePlanAtATime<T>(project: string, work: () => Promise<T>): Promise<T> {
+    const after = (planQueue.get(project) ?? Promise.resolve()).then(work, work);
+    // Never left holding a rejection: the next caller waits on the turn, not on
+    // whether the last one succeeded.
+    planQueue.set(
+      project,
+      after.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return after;
+  }
+
   async function writeBuildPlan(project: string, source: string, tasks: readonly Task[]): Promise<void> {
     const file = buildPlanFile(project);
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, `${JSON.stringify({ source, tasks }, null, 2)}\n`, 'utf8');
+    // Written beside it and moved into place, because a half-written file here
+    // is unreadable json, and unreadable json is reported as having no plan at
+    // all — the tracker disappears mid-build with nothing to say why.
+    const beside = `${file}.writing`;
+    await writeFile(beside, `${JSON.stringify({ source, tasks }, null, 2)}\n`, 'utf8');
+    await rename(beside, file);
   }
 
   function toWindowTask(one: Task): import('../src/lib/ipc').BuildTask {
@@ -5181,43 +6470,60 @@ function register(): void {
     const [sourceRaw] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    if (typeof sourceRaw !== 'object' || sourceRaw === null) return fail(NOTHING_OPEN);
-    const source = sourceRaw as { name?: unknown; text?: unknown; instruction?: unknown };
-    const name = typeof source.name === 'string' ? source.name : 'A document';
-    if (typeof source.text !== 'string') return fail(NOTHING_OPEN);
-    // Start the plan empty — the planning turn that fills it runs in the
-    // conversation, where its steps show themselves before anything changes.
-    await writeBuildPlan(open.path, name, []);
-    const read = await readBuildPlan(open.path);
-    return done(read ?? { source: name, tasks: [], next: null, done: 0, total: 0 });
+    return onePlanAtATime(open.path, async () => {
+      if (typeof sourceRaw !== 'object' || sourceRaw === null) return fail(NOTHING_OPEN);
+      const source = sourceRaw as { name?: unknown; text?: unknown; instruction?: unknown };
+      const name = typeof source.name === 'string' ? source.name : 'A document';
+      if (typeof source.text !== 'string') return fail(NOTHING_OPEN);
+      // Start the plan empty — the planning turn that fills it runs in the
+      // conversation, where its steps show themselves before anything changes.
+      await writeBuildPlan(open.path, name, []);
+      const read = await readBuildPlan(open.path);
+      return done(read ?? { source: name, tasks: [], next: null, done: 0, total: 0 });
+    });
   });
 
   handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildSave, async (_event, args) => {
     const [stepsRaw] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    // A document-to-build brings its own plan; a plan approved in the
-    // conversation creates one of its own when there is none yet — a normal
-    // long task gets the same checklist above the box.
-    const prior = await readBuildPlan(open.path);
-    const source = prior?.source ?? 'The plan';
-    const steps = Array.isArray(stepsRaw)
-      ? (stepsRaw as { title?: unknown; acceptance?: unknown }[])
-      : [];
-    const tasks: Task[] = steps
-      .map((one, index) => ({
-        n: index + 1,
-        title: typeof one.title === 'string' ? one.title : 'A step',
-        acceptance:
-          typeof one.acceptance === 'string' ? one.acceptance : '',
-        test: null,
-        status: 'pending' as const,
-        note: null,
-      }))
-      .filter((one) => one.title.trim() !== '');
-    if (tasks.length === 0) return done(prior);
-    await writeBuildPlan(open.path, source, tasks);
-    return done(await readBuildPlan(open.path));
+    return onePlanAtATime(open.path, async () => {
+      // A document-to-build brings its own plan; a plan approved in the
+      // conversation creates one of its own when there is none yet — a normal
+      // long task gets the same checklist above the box.
+      const prior = await readBuildPlan(open.path);
+      const source = prior?.source ?? 'The plan';
+      const steps = Array.isArray(stepsRaw)
+        ? (stepsRaw as { title?: unknown; acceptance?: unknown }[])
+        : [];
+      /** What a step already was, when the plan is being revised rather than
+       *  made. Matched on the words, and only "done" is carried: a step that
+       *  failed is one to try again, and a title reused for different work should
+       *  not inherit a tick. */
+      const before = (title: string, acceptance: string): Task['status'] => {
+        const was = prior?.tasks.find(
+          (one) => one.title.trim() === title.trim() && one.acceptance.trim() === acceptance.trim(),
+        );
+        return was?.status === 'done' ? 'done' : 'pending';
+      };
+      const tasks: Task[] = steps
+        .map((one, index) => {
+          const title = typeof one.title === 'string' ? one.title : 'A step';
+          const acceptance = typeof one.acceptance === 'string' ? one.acceptance : '';
+          return {
+            n: index + 1,
+            title,
+            acceptance,
+            test: null,
+            status: before(title, acceptance),
+            note: null,
+          };
+        })
+        .filter((one) => one.title.trim() !== '');
+      if (tasks.length === 0) return done(prior);
+      await writeBuildPlan(open.path, source, tasks);
+      return done(await readBuildPlan(open.path));
+    });
   });
 
   /* The tracker's own step, as the run goes: close the task a settled turn
@@ -5226,20 +6532,28 @@ function register(): void {
     const [opRaw] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    const stored = await readStoredTasks(open.path);
-    if (stored === null) return fail(NOTHING_OPEN);
-    const op = opRaw as import('../src/lib/ipc').BuildAdvance | null;
-    if (op === null || typeof op !== 'object') return fail(NOTHING_OPEN);
-    let tasks: readonly Task[] = stored.tasks;
-    if (op.kind === 'start') {
-      tasks = startTask(stored.tasks);
-    } else if (op.kind === 'finish') {
-      tasks = finishTask(stored.tasks, op.ok !== false);
-    } else if (op.kind === 'add' && Array.isArray(op.titles)) {
-      tasks = addTasks(stored.tasks, op.titles.filter((one) => typeof one === 'string'));
-    }
-    await writeBuildPlan(open.path, stored.source, tasks);
-    return done(await readBuildPlan(open.path));
+    return onePlanAtATime(open.path, async () => {
+      const stored = await readStoredTasks(open.path);
+      if (stored === null) return fail(NOTHING_OPEN);
+      const op = opRaw as import('../src/lib/ipc').BuildAdvance | null;
+      if (op === null || typeof op !== 'object') return fail(NOTHING_OPEN);
+      let tasks: readonly Task[] = stored.tasks;
+      if (op.kind === 'start') {
+        tasks = startTask(stored.tasks);
+      } else if (op.kind === 'finish') {
+        tasks = finishTask(stored.tasks, op.ok !== false);
+      } else if (op.kind === 'add' && Array.isArray(op.titles)) {
+        tasks = addTasks(stored.tasks, op.titles.filter((one) => typeof one === 'string'));
+      }
+      if (isFinished(tasks)) {
+        // Nothing left to build, so nothing left to track. Taken away here rather
+        // than only hidden, or it comes back with the next project that opens.
+        await rm(buildPlanFile(open.path), { force: true }).catch(() => undefined);
+        return done(null);
+      }
+      await writeBuildPlan(open.path, stored.source, tasks);
+      return done(await readBuildPlan(open.path));
+    });
   });
 
   handle<string>(CHANNEL.skillText, async (_event, args) => {
@@ -5316,14 +6630,29 @@ function register(): void {
           : undefined;
       // Checked first, when they have asked for that and nothing is already
       // waiting. Two pieces of work waiting at once is a decision nobody made.
-      if ((await preferences()).all().heldBack[open.path] === true && open.held.waiting === null) {
-        return await checkItFirst(
-          open,
-          { address: conversation.path },
-          text,
-          imageCards(attachments),
-          lookFirst,
-        );
+      //
+      // Never a queued message: that one was asked to go behind the turn that
+      // is running, and turning it into a second piece of held work is neither
+      // what was pressed nor something the person can undo.
+      if (
+        queue === undefined &&
+        holdsBack((await preferences()).all().heldBack, open.path) &&
+        open.held.waiting === null
+      ) {
+        if (await worthACopy(open.path)) {
+          return await checkItFirst(
+            open,
+            { address: conversation.path },
+            text,
+            imageCards(attachments),
+            lookFirst,
+          );
+        }
+        // Nothing to show, so the work happens here and one press puts it back.
+        // The save point is the whole difference between that and losing it.
+        await open.held.timeline
+          .snapshot({ boundary: 'before-risky-change' })
+          .catch(() => null);
       }
       // `@name` is a deliberate, per-turn selection — stronger than hoping a
       // model notices a description in the system prompt. Keep the original
@@ -5429,9 +6758,12 @@ function register(): void {
 
   /* -------------------------------------------------------------- connecting */
 
-  handle<ConnectionState>(CHANNEL.connection, async () => {
+  handle<ConnectionState>(CHANNEL.connection, async (_event, args) => {
+    // `fresh` is somebody pressing refresh: read the catalogue off disk again
+    // rather than the copy this app loaded when it started.
+    const fresh = args[0] === true;
     const [providers, prefs] = await Promise.all([
-      readConnection(await defaultAgentDir()),
+      readConnection(await defaultAgentDir(), { fresh }),
       preferences(),
     ]);
     const all = prefs.all();
@@ -5542,11 +6874,26 @@ function register(): void {
     // which — was the whole of this bug. A session that will not take the model
     // keeps the one it had; the preference is still saved, so opening the
     // project again picks it up.
+    // Every conversation of this project, not only the one in front: the picker
+    // is one control for the whole window, so leaving a tab behind on the old
+    // model would make it show one thing and answer as another.
     const where = whereIn(args);
     const open = projectAt(where);
-    const session = open === null ? null : sessionAt(open, where);
-    await session?.useModel(choice);
-    session?.setThinking(level);
+    const refused: string[] = [];
+    for (const one of open?.held.sessions.open ?? []) {
+      const took = await one.held.useModel(choice);
+      if (took) one.held.setThinking(level);
+      else refused.push(one.path);
+    }
+    // Said rather than swallowed. The preference is still saved — opening the
+    // project again picks it up — but a conversation still answering as the old
+    // model while the chip names the new one is the failure this reports.
+    // Any refusal at all, not only all of them: one conversation still answering
+    // as the old model while the chip names the new one is the whole failure,
+    // and it is no less true when the tab beside it took the change.
+    if (refused.length > 0) {
+      return fail(couldNotUseModel(model?.label ?? modelId, refused.length));
+    }
     return done(saved);
   });
 
@@ -5585,6 +6932,14 @@ function register(): void {
     const open = projectAt(whereIn(args));
     return Promise.resolve(done(open?.held.spend.ledger?.summary() ?? null));
   });
+
+  /* Tokens by day, read when the cost screen opens rather than kept warm —
+     the transcripts are on this disk already and nobody needs them twice a
+     minute. Not per project: the question the grid answers is "how much work
+     went through my account", which is bigger than one folder. */
+  handle<TokenUsageView | null>(CHANNEL.tokenUsage, async () =>
+    done(await readTokenUsage(sessionsFolder())),
+  );
 
   /* Where the window has drawn its placeholder, in window coordinates. The
      native view is glued to it: nothing here guesses the rectangle, because a
@@ -5784,6 +7139,13 @@ if (!app.requestSingleInstanceLock()) {
     // And servers. A helper is known by its filename; a server is whatever
     // somebody asked for, so it is known only because we wrote it down.
     await endStrayServers().catch(() => 0);
+    // And the copies of the project those conversations were working in.
+    await sweepStrayCheckouts().catch(() => 0);
+    // And the copy kept ready for work checked before it lands. Warm is worth
+    // having for as long as the app is up, not for as long as it is installed.
+    await rm(join(workFolder(), 'kept'), { recursive: true, force: true }).catch(
+      () => undefined,
+    );
     // Work that was going when this last closed, back on its board.
     await pickUpWhereWeLeftOff().catch(() => undefined);
     // What somebody asked for over and over, picked up where it left off. One

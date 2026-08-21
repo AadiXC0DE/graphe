@@ -1,8 +1,11 @@
 import { useEffect } from 'react';
+import { THEMES, THEME_WORDS, type Theme } from '../lib/theme';
+import Switch from './Switch';
 import './Settings.css';
 
 export type SettingsLink =
   | 'skills'
+  | 'connected'
   | 'add-more'
   | 'usage'
   | 'show-me'
@@ -15,8 +18,11 @@ type Props = {
   onClose: () => void;
   showMe: boolean;
   showFiles: boolean;
-  /** Work in a copy and ask before anything lands in the project. */
+  /** Check new work before it lands, rather than as it happens. */
   holdBack: boolean;
+  /** Which palette somebody has chosen, or to follow the computer. */
+  theme: Theme;
+  onTheme: (theme: Theme) => void;
   onToggleShowMe: () => void;
   onToggleShowFiles: () => void;
   onToggleHoldBack: () => void;
@@ -30,11 +36,18 @@ const LINKS: readonly (
   | { id: 'show-me'; name: string; note: string; kind: 'show-me' }
   | { id: 'files'; name: string; note: string; kind: 'files' }
   | { id: 'hold-back'; name: string; note: string; kind: 'hold-back' }
+  | { id: 'theme'; name: string; note: string; kind: 'theme' }
 )[] = [
   {
     id: 'skills',
     name: 'Skills',
     note: 'Craft you can call up with @ in a message.',
+    kind: 'go',
+  },
+  {
+    id: 'connected',
+    name: 'Other tools',
+    note: 'The design files, databases and services this project can reach.',
     kind: 'go',
   },
   {
@@ -63,9 +76,15 @@ const LINKS: readonly (
   },
   {
     id: 'hold-back',
-    name: 'Work in a copy first',
-    note: 'Changes are made in a copy and shown to you before anything reaches your files. Off, your files change as the work happens and every moment is one press from undone.',
+    name: 'Check new work first',
+    note: 'Where there is something to look at, changes are made in a copy and shown to you before anything reaches your files. Everywhere else a save point goes down before the work starts. Off, your files change as the work happens and every moment is one press from undone.',
     kind: 'hold-back',
+  },
+  {
+    id: 'theme',
+    name: THEME_WORDS.name,
+    note: THEME_WORDS.note,
+    kind: 'theme',
   },
   {
     id: 'folder',
@@ -94,6 +113,8 @@ export default function Settings({
   showMe,
   showFiles,
   holdBack,
+  theme,
+  onTheme,
   onToggleShowMe,
   onToggleShowFiles,
   onToggleHoldBack,
@@ -135,11 +156,7 @@ export default function Settings({
                     <span className="settings__name">{one.name}</span>
                     <span className="settings__note">{one.note}</span>
                   </span>
-                  <input
-                    type="checkbox"
-                    checked={showMe}
-                    onChange={onToggleShowMe}
-                  />
+                  <Switch on={showMe} onChange={onToggleShowMe} label={one.name} />
                 </label>
               </li>
             );
@@ -152,12 +169,35 @@ export default function Settings({
                     <span className="settings__name">{one.name}</span>
                     <span className="settings__note">{one.note}</span>
                   </span>
-                  <input
-                    type="checkbox"
-                    checked={holdBack}
-                    onChange={onToggleHoldBack}
-                  />
+                  <Switch on={holdBack} onChange={onToggleHoldBack} label={one.name} />
                 </label>
+              </li>
+            );
+          }
+          if (one.kind === 'theme') {
+            return (
+              <li key={one.id}>
+                <div className="settings__row">
+                  <span className="settings__text">
+                    <span className="settings__name">{one.name}</span>
+                    <span className="settings__note">{one.note}</span>
+                  </span>
+                  {/* Three states rather than a switch: "follow this computer"
+                      is a real answer and a two-way toggle cannot say it. */}
+                  <span className="settings__choice" role="group" aria-label={one.name}>
+                    {THEMES.map((pick) => (
+                      <button
+                        key={pick.id}
+                        type="button"
+                        className={`settings__pick ${theme === pick.id ? 'settings__pick--on' : ''}`}
+                        aria-pressed={theme === pick.id}
+                        onClick={() => onTheme(pick.id)}
+                      >
+                        {pick.label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
               </li>
             );
           }
@@ -169,11 +209,7 @@ export default function Settings({
                     <span className="settings__name">{one.name}</span>
                     <span className="settings__note">{one.note}</span>
                   </span>
-                  <input
-                    type="checkbox"
-                    checked={showFiles}
-                    onChange={onToggleShowFiles}
-                  />
+                  <Switch on={showFiles} onChange={onToggleShowFiles} label={one.name} />
                 </label>
               </li>
             );

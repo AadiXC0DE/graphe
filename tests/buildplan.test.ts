@@ -10,6 +10,7 @@ import {
   note,
   numberFrom,
   progress,
+  isFinished,
   readPlan,
   resumeFrom,
   setStatus,
@@ -150,5 +151,36 @@ describe('buildbrief', () => {
 
   it('buildWords reads as a checklist', () => {
     expect(buildWords.heading).toMatch(/plan/i);
+  });
+});
+
+describe('isFinished — when the tracker has nothing left to say', () => {
+  const at = (status: 'pending' | 'doing' | 'done' | 'failed', n: number) => ({
+    n,
+    title: `Task ${String(n)}`,
+    acceptance: '',
+    test: null,
+    status,
+    note: null,
+  });
+
+  it('is finished once every task is built', () => {
+    expect(isFinished([at('done', 1), at('done', 2)])).toBe(true);
+  });
+
+  it('is not finished while anything is still to do', () => {
+    expect(isFinished([at('done', 1), at('pending', 2)])).toBe(false);
+    expect(isFinished([at('done', 1), at('doing', 2)])).toBe(false);
+  });
+
+  it('is not finished when something did not build', () => {
+    // Left up on purpose: a plan that did not finish is unfinished work, and
+    // taking the tracker away would be the only place it was said.
+    expect(isFinished([at('done', 1), at('failed', 2)])).toBe(false);
+  });
+
+  it('is not finished when there is no plan at all', () => {
+    // Otherwise every project with no plan reads as one that just completed.
+    expect(isFinished([])).toBe(false);
   });
 });

@@ -93,6 +93,52 @@
   color: #a2a29a;
 }
 
+/* Beside the close, quieter than it: this is a thing you reach for once in a
+   while, not the way out of the screen. */
+.connectmodal__refresh {
+  flex: none;
+  align-self: flex-start;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    transform var(--dur-micro) var(--ease-out-quart),
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .connectmodal__refresh:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--text-faint);
+  }
+}
+
+.connectmodal__refresh:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.connectmodal__refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.connectmodal__refresh:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connectmodal__refresh {
+    transition: none;
+  }
+}
+
 .connectmodal__close {
   flex: none;
   align-self: flex-start;

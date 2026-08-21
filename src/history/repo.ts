@@ -513,6 +513,34 @@ export class ProjectHistory {
     return { ok: true, version: id };
   }
 
+  /**
+   * Undo part of what is in the folder, named as a patch.
+   *
+   * The working tree already holds every change; keeping a subset means taking
+   * the rest back out. Applied in reverse for that reason, and checked first —
+   * a patch that would not apply cleanly is refused whole rather than applied
+   * halfway, which is the one outcome nobody could unpick.
+   */
+  async dropChanges(patch: string): Promise<{ ok: true } | { ok: false; because: string }> {
+    await this.ensureReady();
+    if (patch.trim() === '') return { ok: true };
+    // Through a file rather than a pipe: a patch is arbitrarily long and the
+    // runner here does not carry standard input.
+    const { mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const folder = await mkdtemp(path.join(tmpdir(), 'graphe-patch-'));
+    const file = path.join(folder, 'part.patch');
+    try {
+      await writeFile(file, patch.endsWith('\n') ? patch : `${patch}\n`, 'utf8');
+      const could = await this.attempt(['apply', '--reverse', '--check', file]);
+      if (could.code !== 0) return { ok: false, because: historyProblems.goBackFailed };
+      const done = await this.attempt(['apply', '--reverse', file]);
+      return done.code === 0 ? { ok: true } : { ok: false, because: historyProblems.goBackFailed };
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  }
+
   /* ------------------------------------------------- separate copies to try in */
 
   /**
@@ -529,6 +557,24 @@ export class ProjectHistory {
     if (!path.isAbsolute(at)) throw new TypeError(`Expected an absolute folder, got "${at}"`);
     const made = await this.attempt(['worktree', 'add', '--detach', at, from]);
     if (made.code !== 0) throw new HistoryError(historyProblems.tryFailed, detailsOf(made));
+  }
+
+  /**
+   * Put this copy back to a version, discarding whatever was left in it.
+   *
+   * For a copy that is kept and used again rather than made each time. Ignored
+   * files stay: the installed pieces are the slow part of preparing a copy, and
+   * they are rebuilt from the manifest rather than recorded, so nothing about
+   * this version describes them.
+   */
+  async resetTo(versionId: string): Promise<void> {
+    await this.ensureReady();
+    const target = await this.resolve(versionId);
+    const back = await this.attempt(['reset', '--hard', target]);
+    if (back.code !== 0) throw new HistoryError(historyProblems.tryFailed, detailsOf(back));
+    // No `-x`: that would take the installed pieces with it, which is the one
+    // thing keeping the copy was for.
+    await this.attempt(['clean', '-fd']);
   }
 
   /** Let one go, whatever state it was left in. */

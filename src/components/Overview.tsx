@@ -3,7 +3,10 @@ import Away from './Away';
 import CostMeter from './CostMeter';
 import { SAYS as DESIGN, type DesignPart } from './DesignView';
 import History from './History';
+import Lines from './Lines';
+import { LINE_WORDS } from '../lib/lines';
 import Landing, { type Outcome } from './Landing';
+import type { Verdict } from '../design/gate';
 import Swatches from './Swatches';
 import type {
   Artifact,
@@ -60,6 +63,11 @@ export type OverviewView = {
   /** What can be done with the work now it exists. Null until the shell has
    *  answered, so the band does not flash on the way in. */
   landing: LandingState | null;
+  /** How far the waiting work has moved from the pictures agreed to, or null
+   *  when nothing was compared. */
+  gate: Verdict | null;
+  /** Which line is in force, by id. */
+  howMuch: string;
   /** Which of the two things that can send anywhere is going, if either is. */
   going: 'developer' | 'online' | null;
   /** What came of the last one that went. */
@@ -104,6 +112,8 @@ type Props = {
 
   /** Let the work that is waiting in, or set it aside. */
   onDecide: (letIn: boolean) => void;
+  /** Move the line the work has to cross before it is stopped. */
+  onHowMuch: (id: string) => void;
   /** Write the work up and put it where a developer picks it up. */
   onHandOver: () => void;
   /** Open an address in the person's own browser. */
@@ -121,6 +131,14 @@ type Props = {
   onDropAway: (id: string) => void;
   /** Answer the question one of them stopped on. */
   onAnswerAway: (id: string, callId: string, decision: Decision) => void;
+  /** Say something to a piece that is still going, without stopping it. */
+  onSayToAway?: (id: string, text: string, where?: string) => Promise<boolean>;
+  /** Hold the several goes at one job up against each other. */
+  onCompareWays?: (named: string, where?: string) => void;
+  /** Let a waiting piece off its wait. */
+  onStopWaiting?: (id: string, where?: string) => void;
+  /** Take several finished pieces in, in the order they need. */
+  onTakeAll?: (ids: readonly string[], where?: string) => void;
   onAddRepeat: (
     doing: string,
     every: EveryKind,
@@ -203,6 +221,7 @@ export default function Overview({
   onShare,
 
   onDecide,
+  onHowMuch,
   onHandOver,
   onOpenLink,
   onKeepGoing,
@@ -210,6 +229,10 @@ export default function Overview({
   onKeepAway,
   onDropAway,
   onAnswerAway,
+  onSayToAway,
+  onCompareWays,
+  onStopWaiting,
+  onTakeAll,
   onAddRepeat,
   onSwitchRepeat,
   onForgetRepeat,
@@ -294,6 +317,25 @@ export default function Overview({
           can do with them — save the changed set and step it forward — so the
           band is a single commit, said the way git says it and the way people
           say it. */}
+      {/* Where the work sits, and the press that moves it. Its own band rather
+          than a label inside the save band: it is the thing people reach for,
+          and it was reachable before only by opening a different view. */}
+      {git === null ? null : (
+        <section className="overview__block">
+          <h2 className="overview__title">
+            {LINE_WORDS.heading}
+            <span className="overview__plainly">{LINE_WORDS.plainly}</span>
+          </h2>
+          <Lines
+            branches={git.branches}
+            fallback={git.branch}
+            busy={busy}
+            onSwitch={onSwitchBranch}
+            onCreate={onCreateBranch}
+          />
+        </section>
+      )}
+
       {git !== null && changedCount > 0 ? (
         <section className="overview__block">
           <h2 className="overview__title">Save / commit</h2>
@@ -301,17 +343,6 @@ export default function Overview({
             {changedCount === 1
               ? 'One change is waiting to be saved.'
               : `${changedCount} changes are waiting to be saved.`}
-          </p>
-          <p className="overview__line">
-            <span
-              className="overview__lineterm"
-              title="The line of work this project is on — git calls it a branch"
-            >
-              {git.branch === null ? 'main' : git.branch}
-            </span>
-            <span className="overview__plainsay">
-              the line of work it sits on — git calls this a “branch”
-            </span>
           </p>
           <div className="overview__actions">
             <button type="button" className="overview__do" onClick={onSave} disabled={busy}>
@@ -423,6 +454,10 @@ export default function Overview({
           onKeep={onKeepAway}
           onDrop={onDropAway}
           onAnswer={onAnswerAway}
+          onSay={onSayToAway}
+          onAgainst={onCompareWays}
+          onStopWaiting={onStopWaiting}
+          onTakeAll={onTakeAll}
           onAddRepeat={onAddRepeat}
           onSwitchRepeat={onSwitchRepeat}
           onForgetRepeat={onForgetRepeat}
@@ -501,7 +536,10 @@ export default function Overview({
           going={view.going}
           outcome={view.landed}
           decided={view.decided}
+          gate={view.gate}
+          howMuch={view.howMuch}
           onDecide={onDecide}
+          onHowMuch={onHowMuch}
           onUndo={onPutBack}
           onHandOver={onHandOver}
           onShare={onShare}

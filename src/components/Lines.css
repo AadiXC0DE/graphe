@@ -1,0 +1,261 @@
+/* The line of work, in the panel's own column.
+ *
+ * Everything here is in flow. The panel is a narrow stack of bands and there is
+ * no width in it to float a card over: one either covers the band underneath or
+ * runs past the edge of the column, and an earlier version of this did both. So
+ * it opens downward, the panel scrolls as it always did, and nothing can escape
+ * a container it was never wider than. */
+
+.lines {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.lines__now {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  /* Never wider than the column it sits in, however long a line is named. */
+  max-width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.lines__now:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.lines__now:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lines__now:hover:not(:disabled) {
+    border-color: var(--text-faint);
+  }
+}
+
+.lines__now:focus-visible,
+.lines__box:focus-visible,
+.lines__one:focus-visible,
+.lines__new:focus-visible,
+.lines__do:focus-visible,
+.lines__quietdo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.lines__dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.lines__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lines__caret {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-faint);
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.lines__caret--open {
+  transform: rotate(180deg);
+}
+
+/* --------------------------------------------------------------- opened -- */
+
+.lines__open {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.lines__list {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  /* Long enough to read, short enough that the bands under it stay reachable
+     without a scroll of their own. */
+  max-height: 13rem;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.lines__one {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  padding: 5px var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+/* The one you are on is stated, not decorated: full ink against the muted
+   rest, which is how everything else in this app says "this one". */
+.lines__one--here {
+  color: var(--text);
+  cursor: default;
+}
+
+.lines__one--here::before {
+  content: '·';
+  color: var(--accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lines__one:hover:not(:disabled) {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+.lines__oneName {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lines__standing {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.lines__quiet {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ---------------------------------------------------------- a new one --- */
+
+.lines__new {
+  justify-self: start;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lines__new:hover {
+    color: var(--text);
+  }
+}
+
+.lines__make {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.lines__box {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+}
+
+.lines__refused {
+  margin: 0;
+  color: var(--accent);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+}
+
+.lines__row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.lines__do,
+.lines__quietdo {
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.lines__do {
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+.lines__quietdo {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.lines__do:active:not(:disabled),
+.lines__quietdo:active {
+  transform: scale(0.97);
+}
+
+.lines__do:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lines__now,
+  .lines__caret,
+  .lines__one,
+  .lines__new,
+  .lines__do,
+  .lines__quietdo {
+    transition: none;
+  }
+}

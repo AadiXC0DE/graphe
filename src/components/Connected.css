@@ -1,0 +1,403 @@
+/* The other tools a project has plugged in.
+ *
+ * A settings screen somebody opens a few times a month, so nothing here
+ * animates on the way in — only the two things that respond to a press. The
+ * state of each tool is carried by a dot and a word together, never colour
+ * alone. */
+
+/* The band inside the sheet's own scrolling body, on the same measure the
+   other views use. */
+.wired {
+  max-width: 46rem;
+  padding: var(--space-5);
+}
+
+/* What this screen is for, then what one of them actually is. Two paragraphs
+   rather than one: the first is the reason to be here, the second is the
+   machinery, and somebody who only reads the first has still been told. */
+.wired__what {
+  margin: 0 0 var(--space-2);
+  max-width: 62ch;
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.wired__how {
+  margin: 0 0 var(--space-5);
+  max-width: 62ch;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+/* --------------------------------------------------------------- bands -- */
+
+.wired__band {
+  margin: 0 0 var(--space-5);
+}
+
+.wired__bandhead {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.wired__bandnote {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.wired__bandhead + .wired__list {
+  margin-top: var(--space-3);
+}
+
+/* The list itself would not read. Above everything, because until it is fixed
+   the rest of this screen is describing nothing. */
+.wired__trouble {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.wired__skipped {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.wired__skipped p {
+  margin: 0 0 var(--space-1);
+}
+.wired__skipped ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+/* ------------------------------------------------------------------ list -- */
+
+.wired__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wired__one {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+/* An offer rather than something already here: no state sits above the press,
+   so the press belongs on the middle of the row. */
+.wired__one--offer {
+  align-items: center;
+}
+
+.wired__said {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 18rem;
+}
+
+.wired__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--text);
+}
+
+/* A word and a dot together — the dot alone would put the whole state on
+   colour, which is not a thing everybody can read. */
+.wired__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.wired__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  /* The one thing on this screen that changes without a press behind it. */
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* This palette has no green and does not want one: everywhere else in the app,
+   state is carried by full ink for present, muted for spent, and the accent for
+   the one thing worth looking at. */
+.wired__state--working {
+  color: var(--text);
+}
+.wired__state--would-not-start {
+  color: var(--accent);
+}
+
+/* What it lets you do, in the same words the shelf uses. The line that makes a
+   row worth reading for somebody who does not already know the tool. */
+.wired__lets {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.wired__needs {
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.wired__command {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.wired__offers,
+.wired__because {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.wired__because {
+  color: var(--accent-ink, var(--accent));
+}
+
+/* ---------------------------------------------------------------- doing -- */
+
+.wired__does {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.wired__do,
+.wired__quietdo,
+.wired__join,
+.wired__new {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.wired__do {
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+/* The one thing on an offered row, and the only accent-filled button on the
+   screen — everything else here is a change to something already there. Sized
+   like the shelf's own Add, because it is the same offer in another place. */
+.wired__join {
+  min-height: 32px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.wired__join:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wired__quietdo,
+.wired__new {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+/* The one destructive thing on the row, quiet until the pointer is on it —
+   the same way throwing a conversation away behaves. Repeated down a list at
+   full weight it reads as the point of the screen, which it is not. */
+.wired__quietdo {
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.wired__one:hover .wired__quietdo,
+.wired__one:focus-within .wired__quietdo,
+.wired__add .wired__quietdo {
+  opacity: 1;
+}
+
+/* Touch has no hover to reveal it, so it is simply there. */
+@media (hover: none) {
+  .wired__quietdo {
+    opacity: 1;
+  }
+}
+
+/* Reads as the next row rather than a stray button under the list. */
+.wired__new {
+  width: 100%;
+  margin-top: var(--space-2);
+  border-color: var(--border);
+  border-style: dashed;
+  min-height: 40px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .wired__do:hover:not(:disabled),
+  .wired__new:hover {
+    border-color: var(--text-faint);
+  }
+  .wired__quietdo:hover {
+    color: var(--text);
+  }
+}
+
+.wired__do:active:not(:disabled),
+.wired__quietdo:active,
+.wired__join:active:not(:disabled),
+.wired__new:active {
+  transform: scale(0.97);
+}
+
+.wired__do:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.wired__do:focus-visible,
+.wired__quietdo:focus-visible,
+.wired__join:focus-visible,
+.wired__new:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --------------------------------------------------------------- adding -- */
+
+.wired__add {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.wired__field {
+  display: grid;
+  gap: 4px;
+}
+
+.wired__label {
+  font-size: var(--text-2xs);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.wired__box {
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+}
+
+.wired__box:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.wired__hint {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.wired__refused {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--accent-ink, var(--accent));
+}
+
+/* ---------------------------------------------------------------- empty -- */
+
+/* One quiet line rather than a dashed box. The band under it is four things
+   somebody can press, which is a better answer to an empty screen than a
+   rectangle saying it is empty. */
+.wired__none {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.wired__cannot {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.wired__file {
+  margin: var(--space-5) 0 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wired__do,
+  .wired__quietdo,
+  .wired__join,
+  .wired__new,
+  .wired__dot {
+    transition: none;
+  }
+
+  .wired__do:active:not(:disabled),
+  .wired__quietdo:active,
+  .wired__join:active:not(:disabled),
+  .wired__new:active {
+    transform: none;
+  }
+}

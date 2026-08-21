@@ -45,23 +45,43 @@
   white-space: nowrap;
 }
 
+/* One action under the line rather than a cross on each row: the queue is
+   handed back whole or not at all, so an affordance per row would promise
+   something that cannot be done. */
 .inline__take {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
+  align-self: flex-start;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--text-faint);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
   transition:
     color var(--dur-micro) var(--ease-hover),
-    background-color var(--dur-micro) var(--ease-hover);
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.inline__take:active {
+  transform: scale(0.97);
+}
+
+.inline__take:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inline__take {
+    transition: none;
+  }
 }
 
 @media (hover: hover) {
   .inline__take:hover {
-    background: var(--bg-sunken);
+    border-color: var(--text-faint);
     color: var(--text);
   }
 }

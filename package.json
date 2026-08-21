@@ -63,5 +63,24 @@
     "typebox": "^1.3.7",
     "unpdf": "^0.12.2",
     "use-stick-to-bottom": "^1.1.6"
-  }
+  },
+  "keywords": [
+    "ai-agent",
+    "coding-agent",
+    "ai-coding-assistant",
+    "agentic-ai",
+    "autonomous-agents",
+    "ai-pair-programming",
+    "code-generation",
+    "llm",
+    "developer-tools",
+    "electron",
+    "typescript",
+    "react",
+    "macos",
+    "desktop-app",
+    "figma",
+    "design-systems",
+    "pi"
+  ]
 }

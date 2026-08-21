@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:'Satoshi';src:url('../../site/assets/fonts/Satoshi-Variable.woff2') format('woff2');font-weight:300 900;font-style:normal}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:640px;overflow:hidden}
+body{background:#131110;font-family:'Satoshi',system-ui,sans-serif;position:relative;display:flex;align-items:center}
+.glow{position:absolute;width:950px;height:900px;left:-280px;top:-320px;border-radius:50%;
+  background:radial-gradient(circle,rgba(224,118,79,.20) 0%,rgba(224,118,79,.06) 42%,transparent 68%)}
+.left{position:relative;z-index:2;padding:0 0 0 76px;width:660px;flex:none}
+.mark{display:flex;align-items:center;gap:16px;margin-bottom:34px}
+.dot{width:15px;height:15px;border-radius:50%;background:#e0764f;box-shadow:0 0 22px rgba(224,118,79,.85)}
+.name{font-size:31px;font-weight:700;color:#fbfbfa;letter-spacing:-.015em}
+h1{font-size:75px;line-height:1.03;font-weight:800;color:#fbfbfa;letter-spacing:-.032em;margin-bottom:26px}
+h1 em{font-style:normal;color:#e0764f}
+p{font-size:26px;line-height:1.42;color:#a8a099;font-weight:400;letter-spacing:-.008em;max-width:545px}
+.foot{position:absolute;left:76px;bottom:52px;display:flex;align-items:center;gap:20px;z-index:2}
+.pill{font-size:17px;font-weight:600;color:#fbfbfa;border:1px solid #3b3330;background:#1b1817;
+  padding:9px 17px;border-radius:999px;letter-spacing:-.005em}
+.url{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:17px;color:#6e6e68}
+.shot{position:absolute;right:-268px;top:50%;transform:translateY(-50%) perspective(2200px) rotateY(-16deg) rotate(-1.4deg);
+  width:950px;border-radius:16px;border:1px solid #3b3330;box-shadow:0 46px 110px rgba(0,0,0,.8);z-index:1;
+  filter:brightness(1.28) contrast(1.07) saturate(1.05)}
+.fade{position:absolute;left:560px;top:0;width:230px;height:640px;z-index:2;pointer-events:none;
+  background:linear-gradient(to right,#131110 4%,rgba(19,17,16,.55) 55%,transparent)}
+</style></head>
+<body>
+  <div class="glow"></div>
+  <img class="shot" src="../../site/assets/web/app-start-dark.webp" alt="">
+  <div class="fade"></div>
+  <div class="left">
+    <div class="mark"><div class="dot"></div><div class="name">Graphe</div></div>
+    <h1>Send in a team,<br>not a <em>prompt</em>.</h1>
+    <p>An open-source agentic coding platform for the Mac desktop. Built on pi.</p>
+  </div>
+  <div class="foot">
+    <div class="pill">Free &amp; open source</div>
+    <div class="url">usegraphe.com</div>
+  </div>
+</body></html>

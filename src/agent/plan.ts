@@ -356,6 +356,14 @@ const BREADTH = /\b(?:every|all|each|across|whole|entire|everywhere|throughout|s
 const BIG_JOB =
   /\b(?:rebuild|rebuilding|redesign|redesigning|re-design|revamp|overhaul|restructure|rewrite|rewriting|migrate|migrating|from scratch|start over|start again)\b/i;
 
+/** A fragment that reads as a thing being complained about rather than a verb
+ *  heard. "The button is broken" is a task to someone reading a list of them,
+ *  and needs no doing word to be one. Deliberately only words nobody uses
+ *  about something that is fine — and every one still needs to sit in its own
+ *  fragment, so three complaints are needed before this counts at all. */
+const PROBLEM_FRAGMENT =
+  /\b(?:broken|broke|misaligned|overlapping|overlaps?|wrong|ugly|cramped|squished|stretched|cut off|glitchy|blurry|pixelated|missing|too small|too big|too large|too long|too short|doesn’?t work|does not work|isn’?t working|is not working|not working|nothing works|needs?|wants?|should be|should have)\b/i;
+
 /** Doing words, in the vocabulary people actually type. */
 const ACTIONS = [
   'add',
@@ -397,12 +405,54 @@ const ACTIONS = [
   'publish',
   'set up',
   'hook up',
+  // The vocabulary of everyday requests, added as they were noticed missing:
+  // "tweak the header, adjust the footer, polish the nav" is three jobs whose
+  // doing words used to be invisible.
+  'tweak',
+  'adjust',
+  'polish',
+  'improve',
+  'review',
+  'check',
+  'look',
+  'debug',
+  'refactor',
+  'optimise',
+  'optimize',
+  'ensure',
+  'verify',
+  'upgrade',
+  'simplify',
+  'shorten',
+  'extend',
+  'expand',
+  'drop',
+  'straighten',
+  'reduce',
+  'give',
+  'put',
+  'wire up',
+  'integrate',
+  'disable',
+  'enable',
+  'increase',
+  'decrease',
+  'rework',
+  'modernise',
+  'modernize',
+  'streamline',
+  'restore',
+  'revise',
 ] as const;
 
 const ENDING = '(?:s|d|es|ed|ing)?';
 const ACTION_ANYWHERE = ACTIONS.map((verb) => new RegExp(`\\b${verb}${ENDING}\\b`, 'i'));
 const ACTION_FIRST = new RegExp(`^(?:${ACTIONS.join('|')})${ENDING}\\b`, 'i');
-const POLITE = /^(?:and|then|also|please|maybe|can you|could you|would you|i(?:’|')d like you to|i want you to)\s+/i;
+/** Ways a sentence can open that are asking, not doing. Everything here strips
+ *  away so the doing word underneath can be heard; each stays a prefix, never
+ *  a whole request. */
+const POLITE =
+  /^(?:and|then|also|please|maybe|can you|could you|would you|do you think you could|i was hoping you could|i need to|i need you to|we need to|i want to|i wanted you to|i(?:’|')d like to|i(?:’|')d like you to|i would like to|i would like you to|i have to|would it be possible to|is it possible to)\s+/i;
 const JOINERS = /\band then\b|\bafter that\b|\bas well as\b|\band\b|\bthen\b|\balso\b|\bplus\b|;/gi;
 
 function distinctActions(text: string): number {
@@ -413,19 +463,34 @@ function joiners(text: string): number {
   return text.match(JOINERS)?.length ?? 0;
 }
 
-/** "Swap the hero, fix the footer, and make the nav sticky" is three jobs in one
- *  sentence. Counted by fragments that open with a doing word, so an ordinary
- *  aside between commas is not mistaken for an item. */
-function commaItems(text: string): number {
+/** "Swap the hero, fix the footer, and make the nav sticky" is three jobs in
+ *  one sentence — and so are "Swap the hero. Fix the footer. Make the nav
+ *  sticky." and three lines with no punctuation at all. Counted by fragments
+ *  that open with a doing word, whatever boundary separates them, so an
+ *  ordinary aside between commas is not mistaken for an item. */
+function verbItems(text: string): number {
   let count = 0;
-  for (const fragment of text.split(',')) {
+  for (const fragment of text.split(/[,\n;.!?]+/)) {
     let part = fragment.trim();
+    if (part === '') continue;
     for (let strip = 0; strip < 3; strip += 1) {
       const shorter = part.replace(POLITE, '');
       if (shorter === part) break;
-      part = shorter;
+      part = shorter.trim();
     }
-    if (ACTION_FIRST.test(part)) count += 1;
+    // "2. change the footer" and "do these: 3. update the nav" both hide the
+    // doing word behind a number. The first numbered token ends whatever the
+    // preamble was, so it is cut too — a sentence naturally begins after a
+    // number, and a number that does not head an item is followed by prose
+    // that still has to pass the doing-word test.
+    const numbered = /\b\d+[.):]\s+/.exec(part);
+    if (numbered !== null) part = part.slice(numbered.index + numbered[0].length);
+    for (let strip = 0; strip < 2; strip += 1) {
+      const shorter = part.replace(POLITE, '');
+      if (shorter === part) break;
+      part = shorter.trim();
+    }
+    if (part !== '' && (ACTION_FIRST.test(part) || PROBLEM_FRAGMENT.test(part))) count += 1;
   }
   return count;
 }
@@ -440,6 +505,11 @@ function listedItems(text: string): number {
  * Read only from the person's own sentence, and deliberately hard to trigger: a
  * wrong yes costs them a round trip, so one common word is never enough on its
  * own. A wrong no costs nothing — the work happens the way it always has.
+ *
+ * The things counted as items are the ways people actually write a list of
+ * jobs: a marked list, a comma run, sentences closed with a full stop, lines
+ * with no punctuation at all, and numbers dropped into prose ("1. fix the
+ * header, 2. …"). Whatever their doing word, three of them are a plan.
  */
 export function worthPlanning(text: string): boolean {
   const said = text.trim();
@@ -449,7 +519,7 @@ export function worthPlanning(text: string): boolean {
   const long = words >= 45;
   const actions = distinctActions(said);
   const clauses = joiners(said);
-  const items = Math.max(listedItems(said), commaItems(said));
+  const items = Math.max(listedItems(said), verbItems(said));
 
   if (BIG_JOB.test(said)) return true;
   if (items >= 3) return true;

@@ -239,6 +239,72 @@ describe('worthPlanning', () => {
   it('treats a list of three as a plan whatever the words are', () => {
     expect(worthPlanning('1. new logo\n2. new colours\n3. new footer')).toBe(true);
   });
+
+  /* The ways a list of jobs can hide from the old counting: nothing but full
+     stops between them, nothing but newlines, doing words outside the old
+     vocabulary, and numbers dropped into prose. All of them are how people
+     actually write "here are eight things". */
+  it('counts jobs separated by full stops as a list', () => {
+    expect(
+      worthPlanning(
+        'Fix the header. Change the footer colour. Update the nav links. Add a contact button. Rename the about page. Tighten the margins. Swap the logo. Clean up the CSS.',
+      ),
+    ).toBe(true);
+  });
+
+  it('counts jobs separated only by newlines as a list', () => {
+    expect(
+      worthPlanning(['Fix the header', 'Change the footer', 'Update the nav'].join('\n')),
+    ).toBe(true);
+  });
+
+  it('knows the doing words people type that the old list did not', () => {
+    expect(worthPlanning('tweak the header, adjust the footer spacing, polish the nav hover')).toBe(true);
+    expect(
+      worthPlanning('Tweak the header. Adjust the footer spacing. Polish the nav hover. Review the button colours.'),
+    ).toBe(true);
+  });
+
+  it('counts numbers dropped into prose as items', () => {
+    expect(
+      worthPlanning('can you do these: 1. fix the header, 2. change the footer, 3. update the nav'),
+    ).toBe(true);
+  });
+
+  it('already opens with a plan when every task is described politely', () => {
+    expect(
+      worthPlanning(
+        'I need you to fix the header. I also need the footer tightening. Could you update the nav links too?',
+      ),
+    ).toBe(true);
+  });
+
+  it('still hears one real task behind a paragraph and a half', () => {
+    expect(
+      worthPlanning(
+        'Please fix the header so it does not overlap the nav on mobile. It clips on narrow screens and looks broken.',
+      ),
+    ).toBe(false);
+  });
+
+  it('still hears one question about one thing', () => {
+    expect(worthPlanning('Can you check the header? It looks off.')).toBe(false);
+  });
+
+  it('still hears a single polite ask', () => {
+    expect(worthPlanning('I need to make the logo a bit smaller.')).toBe(false);
+    expect(worthPlanning('I wanted you to give each card a subtle shadow.')).toBe(false);
+  });
+
+  it('hears three complaints as three tasks, but one complaint plus its fix as one', () => {
+    expect(
+      worthPlanning('The button is broken, the footer needs a new colour, and the logo looks wrong.'),
+    ).toBe(true);
+    expect(
+      worthPlanning('Please fix the header so it does not overlap the nav on mobile. It clips on narrow screens.'),
+    ).toBe(false);
+    expect(worthPlanning('The header looks broken — can you fix it?')).toBe(false);
+  });
 });
 
 describe('PLAN_WORDS', () => {

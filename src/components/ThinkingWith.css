@@ -309,6 +309,9 @@
 .thinking__option--chosen {
   color: var(--text);
   font-weight: 500;
+  /* The model in front is a fact about right now, so it reads before the
+     list does — the same tinted row every other chooser in the composer uses. */
+  background: var(--accent-soft);
 }
 
 @media (hover: hover) and (pointer: fine) {

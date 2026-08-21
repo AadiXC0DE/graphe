@@ -25,6 +25,9 @@ import type { Page } from '../preview/pages';
 import type { Reading } from '../preview/inspect';
 import type { Pointed } from '../preview/point';
 import type { WorkState } from '../work/board';
+import type { TokenUsageView } from '../lib/token-days';
+
+export type { TokenUsageView } from '../lib/token-days';
 
 export type {
   FileEntry,
@@ -1185,6 +1188,7 @@ export const CHANNEL = {
   selectModel: 'graphe:select-model',
   setThinking: 'graphe:set-thinking',
   spendSplit: 'graphe:spend-split',
+  tokenUsage: 'graphe:token-usage',
   spendLimit: 'graphe:spend-limit',
   setSpendLimit: 'graphe:set-spend-limit',
   connectStep: 'graphe:connect-step',
@@ -1474,6 +1478,9 @@ export type GrapheApi = {
   /** Where the money went in this project, asked for rather than waited for.
    *  Null when nothing has been spent yet. */
   spendSplit(where?: Where): Promise<Result<SpendSummary | null>>;
+  /** Tokens through the model, one day at a time, read from this computer's
+   *  own session transcripts. Null when there are none to read. */
+  tokenUsage(): Promise<Result<TokenUsageView | null>>;
   /** The ceiling somebody set on spending, or null when they have not set one. */
   spendLimit(): Promise<Result<SpendLimit | null>>;
   /** Set it, raise it, or take it away with null. Answers with what is held. */

@@ -790,24 +790,13 @@
 
    With *Show scroll bars: Always* — the default whenever a mouse is connected —
    macOS has no overlay bar to fall back on: anything that genuinely overflows
-   gets a classic bar taking real width, ours or the platform's. Ours is thinner
-   (11px against 15) and its track is transparent, so an empty scroller shows
-   nothing at all.
-
-   Standard properties only. The ::-webkit-scrollbar pseudo-elements that used
-   to sit under this were measured in Electron 33 and are ignored the moment
-   scrollbar-width is set on the same element — fifty lines that rendered
-   nothing. */
-.app,
-.shelf,
-.overview,
-.connectmodal__body,
-.codeblock__code pre,
-.errorcard__pre,
-.composer__input {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
+   gets a classic bar taking real width. Every scroller in the app now wears
+   one thin bar, inherited from body (styles/global.css); nothing opts in here
+   any more. The one exception is above: this scroller hides the bar entirely,
+   because macOS apps do not put one down the side of their main content.
+   Standard properties only — ::-webkit-scrollbar pseudo-elements were measured
+   here once and are ignored whenever scrollbar-width is set, so they stayed
+   out. */
 
 /* Headings set two or three words long look broken when the last word drops to
    its own line. Prose gets `pretty`, which only guards the last line. */

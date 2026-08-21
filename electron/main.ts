@@ -63,11 +63,13 @@ import {
   type OurAuthInteraction,
 } from '../src/agent/pi/adapter';
 import type { AgentEvent, ImageCard, Money } from '../src/agent/types';
+import type { TokenUsageView } from '../src/lib/token-days';
 import { Running } from '../src/agent/running';
 import { fleet, readCeiling } from '../src/cost/fleet';
 import { getReady } from '../src/history/newcopy';
 import { watchWhileUsed, type Watching } from '../src/diff/capture';
 import { createLimit } from '../src/cost/limits';
+import { readTokenUsage } from './tokens';
 import { limitReached } from '../src/cost/phrasing';
 import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline, type Version } from '../src/history/timeline';
@@ -6871,6 +6873,14 @@ function register(): void {
     const open = projectAt(whereIn(args));
     return Promise.resolve(done(open?.held.spend.ledger?.summary() ?? null));
   });
+
+  /* Tokens by day, read when the cost screen opens rather than kept warm —
+     the transcripts are on this disk already and nobody needs them twice a
+     minute. Not per project: the question the grid answers is "how much work
+     went through my account", which is bigger than one folder. */
+  handle<TokenUsageView | null>(CHANNEL.tokenUsage, async () =>
+    done(await readTokenUsage(sessionsFolder())),
+  );
 
   /* Where the window has drawn its placeholder, in window coordinates. The
      native view is glued to it: nothing here guesses the rectangle, because a

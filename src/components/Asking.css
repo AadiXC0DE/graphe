@@ -153,6 +153,12 @@
   color: var(--text-faint);
 }
 
+.asking__option--chosen {
+  /* Same grammar as the planning menu beside it: the chosen row is tinted,
+     and the tick confirms rather than announces. */
+  background: var(--accent-soft);
+}
+
 .asking__option--chosen .asking__name {
   font-weight: 500;
 }

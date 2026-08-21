@@ -350,9 +350,13 @@ function Moment({
         title={kept ? 'Kept — click to let it go' : 'Keep this one at the top'}
         onClick={onKeep}
       >
+        {/* A five-point star is not vertically symmetric — its bounding box
+            centre sits above its middle point — so the path is shifted until
+            the box centres on the viewBox, and the circle around it centres
+            the drawing rather than its gaps. */}
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path
-            d="M8 1.9l1.85 3.75 4.15.6-3 2.93.71 4.12L8 11.35l-3.71 1.95.71-4.12-3-2.93 4.15-.6z"
+            d="M8 2.39l1.56 4.06 4.34.22-3.38 2.74 1.12 4.2L8 11.24l-3.64 2.37 1.12-4.2-3.38-2.74 4.34-.22z"
             fill={kept ? 'currentColor' : 'none'}
             stroke="currentColor"
             strokeWidth="1.2"

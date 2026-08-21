@@ -4013,7 +4013,14 @@ function Conversation() {
         onGo={openSettingsLink}
       />
 
-      <Usage open={usageOpen} spent={desk?.spent ?? null} onClose={() => setUsageOpen(false)} />
+      <Usage
+        open={usageOpen}
+        spent={desk?.spent ?? null}
+        onClose={() => setUsageOpen(false)}
+        onTokens={() =>
+          bridge.tokenUsage().then((answer) => (answer.ok ? answer.value : null))
+        }
+      />
 
       {filesExpanded && desk !== null ? (
         <aside className="filespanel">

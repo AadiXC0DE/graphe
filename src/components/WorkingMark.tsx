@@ -4,8 +4,9 @@ import './WorkingMark.css';
  * The quiet mark that says work is in hand.
  *
  * Shown in the silent moments of a run — the model thinking before its first
- * visible step — when there are no activity rows to carry the spinners. A
- * dither and three staggered dots, under one short sentence. The moment a step
+ * visible step — when there are no activity rows to carry the spinners. Three
+ * staggered dots and one short sentence, in line with the conversation and
+ * wearing no card of its own: a status, not a surface. The moment a step
  * appears the mark goes away and the step carries the motion, so the two never
  * speak at once.
  */

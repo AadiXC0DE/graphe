@@ -514,6 +514,7 @@ export default function Sidebar({
             onClick={onToggle}
             aria-label="Expand the sidebar"
             aria-expanded={open}
+            data-tip="Show the sidebar"
           >
             <span className="shelf__markdot" aria-hidden="true" />
           </button>
@@ -522,8 +523,8 @@ export default function Sidebar({
             type="button"
             className="shelf__act"
             onClick={onNewConversation}
-            title="Start a new conversation in this project"
             aria-label="Start a new conversation"
+            data-tip="New conversation"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path
@@ -539,8 +540,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onAsk}
-              title="Find anything — ⌘K"
               aria-label="Find anything"
+              data-tip="Find anything — ⌘K"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <circle
@@ -564,8 +565,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onDesign}
-              title="Colour, type and spacing — ⌘D"
               aria-label="How this project looks"
+              data-tip="Design — ⌘D"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path
@@ -578,7 +579,7 @@ export default function Sidebar({
             </button>
           )}
           {onSkills === undefined ? null : (
-            <button type="button" className="shelf__act shelf__act--skills" onClick={onSkills} title="Browse skills" aria-label="Browse skills">
+            <button type="button" className="shelf__act shelf__act--skills" onClick={onSkills} aria-label="Browse skills" data-tip="Skills">
               @
             </button>
           )}
@@ -587,8 +588,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onHistory}
-              title="Every moment, and what came after what"
               aria-label="Where this project has been"
+              data-tip="History"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <circle cx="5" cy="3.75" r="1.5" stroke="currentColor" strokeWidth="1.5" />
@@ -608,8 +609,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onReviews}
-              title="The pull requests and issues of this project"
               aria-label="Open pull requests"
+              data-tip="Pull requests"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path
@@ -627,8 +628,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onAddMore}
-              title="Give Graphe new things it can do for you"
               aria-label="Add more to Graphe"
+              data-tip="Add more to Graphe"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect
@@ -654,8 +655,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act"
               onClick={onFiles}
-              title="Open project files"
               aria-label="Open project files"
+              data-tip="Project files"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M2.5 4.5h3l1.2 1.5h6.3v5.5H2.5z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
@@ -667,8 +668,8 @@ export default function Sidebar({
               type="button"
               className="shelf__act shelf__act--settings"
               onClick={onSettings}
-              title="Settings"
               aria-label="Open settings"
+              data-tip="Settings"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" />

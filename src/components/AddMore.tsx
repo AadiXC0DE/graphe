@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { everything } from '../agent/pi/packages';
 import type { CarriedExtension } from '../lib/ipc';
+import Switch from './Switch';
 import {
   REACHABLE,
   describeStart,
@@ -284,10 +285,10 @@ export default function AddMore({
               <p className="addmore__carriedhint">{SAYS.carriedRestart}</p>
               {carried.map((one) => (
                 <label className="addmore__switch" key={one.id}>
-                  <input
-                    type="checkbox"
-                    checked={one.trusted}
-                    onChange={(event) => onTrustCarried?.(one.id, event.target.checked)}
+                  <Switch
+                    on={one.trusted}
+                    onChange={(next) => onTrustCarried?.(one.id, next)}
+                    label={one.name}
                   />
                   <span className="addmore__switchtext">
                     <span className="addmore__switchlabel">{one.name}</span>

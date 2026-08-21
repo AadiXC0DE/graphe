@@ -74,6 +74,7 @@ import {
   type SpendLimit,
   type SpendSummary,
   type ThinkingLevel,
+  type TokenUsageView,
   type WindowState,
   type VisualFrames,
   type VisualNotice,
@@ -633,6 +634,10 @@ const api: GrapheApi = {
 
   spendSplit(where?: Where): Promise<Result<SpendSummary | null>> {
     return ipcRenderer.invoke(CHANNEL.spendSplit, named(where)) as Promise<Result<SpendSummary | null>>;
+  },
+
+  tokenUsage(): Promise<Result<TokenUsageView | null>> {
+    return ipcRenderer.invoke(CHANNEL.tokenUsage) as Promise<Result<TokenUsageView | null>>;
   },
 
   pageAt(

@@ -60,6 +60,8 @@ export const awayWords = {
     'I carry on with this in a copy of your project, even if you close the window. Whatever it makes is waiting for you, as a picture, when you come back.',
   /** The press that starts one. */
   start: 'Start it',
+  /** The way out of the form, for whoever opened it and changed their mind. */
+  cancel: 'Cancel',
   /** Under the heading, once, so nobody has to press something to find out
    *  what it does. */
   what: 'Work that carries on in a copy of your project, whether or not this window stays open.',

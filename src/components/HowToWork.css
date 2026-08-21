@@ -111,6 +111,13 @@
   color: var(--text-faint);
 }
 
+.ways__option--chosen {
+  /* The tick alone was a 10px orange mark against grey text — true but easy
+     to miss. The whole row carries the tint too, so the answer reads at a
+     glance and the tick becomes confirmation rather than the message. */
+  background: var(--accent-soft);
+}
+
 .ways__option--chosen .ways__name {
   font-weight: 500;
 }

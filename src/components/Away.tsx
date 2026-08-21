@@ -1,5 +1,5 @@
 import { afterWords } from '../work/after';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Board from './Board';
 import type { Away as AwayState, Decision, EveryKind } from '../lib/ipc';
 import { awayWords } from '../work/unattended';
@@ -132,6 +132,35 @@ export default function Away({
   const [at, setAt] = useState('07:00');
   const [onDay, setOnDay] = useState(1);
 
+  /* Both forms fold away again without doing anything. A form that can only be
+     answered is a trap for whoever opened it to see what it was: changing your
+     mind has to cost one press, not one sentence typed into the void. */
+  const closeStart = () => {
+    setStarting(false);
+    setDoing('');
+    setUntilDone(false);
+    setWaitFor('');
+  };
+  const closeAsk = () => {
+    setAsking(false);
+    setRepeatDoing('');
+  };
+
+  /* Escape folds whichever form is open, before anything else gets to hear it.
+     The panel sits inside a full-window app where Escape means "back out";
+     letting it bubble would close things nobody asked to close. */
+  useEffect(() => {
+    if (!starting && !asking) return;
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      if (starting) closeStart();
+      if (asking) closeAsk();
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, [starting, asking]);
+
   const others = elsewhere ?? [];
   const mine = away?.pieces ?? [];
   /* Every folder's work as one list, each piece carrying the folder it belongs
@@ -250,10 +279,22 @@ export default function Away({
           <label className="away__goal">
             <input
               type="checkbox"
+              className="away__check"
               checked={untilDone}
               disabled={busy}
               onChange={(event) => setUntilDone(event.target.checked)}
             />
+            <span className="away__boxmark" aria-hidden="true">
+              <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
+                <path
+                  d="M2 6l3 3 5-5.5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
             <span>
               <span className="away__goalname">{awayWords.untilDone}</span>
               <span className="away__hint">{awayWords.untilDoneHint}</span>
@@ -286,14 +327,19 @@ export default function Away({
             </div>
           )}
 
-          <button
-            type="button"
-            className="away__do away__do--first"
-            onClick={send}
-            disabled={busy || doing.trim() === ''}
-          >
-            {untilDone ? awayWords.startUntilDone : waitFor === '' ? awayWords.start : afterWords.start}
-          </button>
+          <div className="away__row away__actions">
+            <button
+              type="button"
+              className="away__do away__do--first"
+              onClick={send}
+              disabled={busy || doing.trim() === ''}
+            >
+              {untilDone ? awayWords.startUntilDone : waitFor === '' ? awayWords.start : afterWords.start}
+            </button>
+            <button type="button" className="away__quietdo" onClick={closeStart}>
+              {awayWords.cancel}
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -461,22 +507,37 @@ export default function Away({
                   ))}
                 </select>
               ) : null}
-              <input
-                className="away__pick"
-                type="time"
-                value={at}
-                aria-label="At what time"
-                onChange={(event) => setAt(event.target.value)}
-              />
+              <span className="away__clock">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
+                  <path
+                    d="M8 4.75V8l2.25 1.5"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <input
+                  type="time"
+                  value={at}
+                  aria-label="At what time"
+                  onChange={(event) => setAt(event.target.value)}
+                />
+              </span>
             </div>
-            <button
-              type="button"
-              className="away__do away__do--first"
-              onClick={askForIt}
-              disabled={busy || repeatDoing.trim() === ''}
-            >
-              {standingWords.add}
-            </button>
+            <div className="away__row away__actions">
+              <button
+                type="button"
+                className="away__do away__do--first"
+                onClick={askForIt}
+                disabled={busy || repeatDoing.trim() === ''}
+              >
+                {standingWords.add}
+              </button>
+              <button type="button" className="away__quietdo" onClick={closeAsk}>
+                {awayWords.cancel}
+              </button>
+            </div>
           </div>
         ) : null}
       </div>

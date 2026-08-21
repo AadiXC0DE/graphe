@@ -122,10 +122,29 @@ function newId(): string {
 const answering: symbol[] = [];
 
 // Grow with content rather than scrolling a fixed box.
+//
+// Growth used to be felt, not seen: one line taller meant everything above the
+// box jumped up by exactly that much. The window is one scroller and growing
+// the box adds to its content height without touching scrollTop — so the fix
+// is to hand the delta back to the scroll position whenever the reader is
+// pinned to the bottom anyway. Scrolled away reading, nothing moves.
+const MAX_HEIGHT = 220;
+/** How close to the bottom counts as "reading the latest". A pixel of slack
+ *  absorbs rounding; more than this and somebody is genuinely scrolled up. */
+const PINNED_SLACK = 48;
+
 function resize(el: HTMLTextAreaElement | null): void {
   if (el === null) return;
+  const before = el.offsetHeight;
   el.style.height = 'auto';
-  el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  const next = Math.min(el.scrollHeight, MAX_HEIGHT);
+  const delta = next - before;
+  el.style.height = `${next}px`;
+  if (delta === 0) return;
+  const pane = el.closest('.app');
+  if (pane === null || !(pane instanceof HTMLElement)) return;
+  const fromBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight;
+  if (fromBottom <= PINNED_SLACK) pane.scrollTop += delta;
 }
 
 /**

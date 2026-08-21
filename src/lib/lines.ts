@@ -11,8 +11,11 @@ import type { GitBranch } from './ipc';
 
 export const LINE_WORDS = {
   heading: 'Line of work',
-  /** Beside the name, for anybody who has not met the word. */
-  plainly: 'git calls this a “branch”',
+  /** Beside the name, for anybody who has not met the word. Says what it is
+   *  rather than who named it: "working branch" is the plain answer to "which
+   *  one am I on?".
+   */
+  plainly: 'the working branch',
   open: 'Change line of work',
   find: 'Find a line',
   /** Said on the row the project is already on. */

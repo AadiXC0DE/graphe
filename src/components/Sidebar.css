@@ -132,6 +132,66 @@
   transform: scale(0.97);
 }
 
+/* ---------------------------------------------------------------------------
+   The folded strip's tooltips
+   Folded, the icons travel without their words, and a strip of unlabelled
+   marks is a row of guesses. The label rides beside the icon — a small dark
+   chip, entering after a beat so brushing past never flashes text, leaving at
+   once. Keyboard focus shows it with no delay, because a focused control is
+   one somebody has deliberately reached.
+   --------------------------------------------------------------------------- */
+
+.shelf--closed .shelf__act::before,
+.shelf--closed .shelf__mark::before {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 9px);
+  top: 50%;
+  translate: 0 -50%;
+  z-index: 20;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--bg);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  scale: 0.94;
+  transform-origin: left center;
+  transition:
+    opacity 125ms var(--ease-out-quart),
+    scale 125ms var(--ease-out-quart);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .shelf--closed .shelf__act:hover::before,
+  .shelf--closed .shelf__mark:hover::before {
+    opacity: 1;
+    scale: 1;
+    /* The wait is part of the entrance; the exit above runs at once. */
+    transition-delay: 350ms;
+  }
+}
+
+.shelf--closed .shelf__act:focus-visible::before,
+.shelf--closed .shelf__mark:focus-visible::before {
+  opacity: 1;
+  scale: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf--closed .shelf__act::before,
+  .shelf--closed .shelf__mark::before {
+    /* Reduced motion keeps the fade; the little jump in scale goes. */
+    scale: none;
+    transition: opacity 125ms var(--ease-hover);
+  }
+}
+
 /* The one persistent control on the folded shelf: it stays at the lower edge,
    separate from the places somebody moves between. */
 .shelf__act--settings {

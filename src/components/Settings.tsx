@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { THEMES, THEME_WORDS, type Theme } from '../lib/theme';
+import Switch from './Switch';
 import './Settings.css';
 
 export type SettingsLink =
@@ -155,11 +156,7 @@ export default function Settings({
                     <span className="settings__name">{one.name}</span>
                     <span className="settings__note">{one.note}</span>
                   </span>
-                  <input
-                    type="checkbox"
-                    checked={showMe}
-                    onChange={onToggleShowMe}
-                  />
+                  <Switch on={showMe} onChange={onToggleShowMe} label={one.name} />
                 </label>
               </li>
             );
@@ -172,11 +169,7 @@ export default function Settings({
                     <span className="settings__name">{one.name}</span>
                     <span className="settings__note">{one.note}</span>
                   </span>
-                  <input
-                    type="checkbox"
-                    checked={holdBack}
-                    onChange={onToggleHoldBack}
-                  />
+                  <Switch on={holdBack} onChange={onToggleHoldBack} label={one.name} />
                 </label>
               </li>
             );
@@ -216,11 +209,7 @@ export default function Settings({
                     <span className="settings__name">{one.name}</span>
                     <span className="settings__note">{one.note}</span>
                   </span>
-                  <input
-                    type="checkbox"
-                    checked={showFiles}
-                    onChange={onToggleShowFiles}
-                  />
+                  <Switch on={showFiles} onChange={onToggleShowFiles} label={one.name} />
                 </label>
               </li>
             );

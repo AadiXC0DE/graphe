@@ -1,45 +1,17 @@
 /* The quiet mark that says work is in hand.
    Shown in the silent moments of a run — the model thinking before its first
    visible step — when there is no activity row to carry the spinner. Three
-   dots, staggered, under a soft dither, so "something is happening" is felt
-   rather than announced. Nothing here animates on arrival; it is already
-   moving. */
+   dots, staggered, beside one short sentence, and nothing drawn around them:
+   no card, no border, no fill. A status reads as a status when it is not
+   wearing a box; the conversation around it supplies all the surface there
+   is. Nothing here animates on arrival; it is already moving. */
 
 .workingmark {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  margin: var(--space-3) 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  overflow: hidden;
-  position: relative;
-}
-
-/* The dither: a faint diagonal wash moving across the card, the way a signal
-   under load looks on a display. Pure CSS, cheap, and gone when the work is. */
-.workingmark::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    -45deg,
-    transparent 0 6px,
-    color-mix(in srgb, var(--accent) 4%, transparent) 6px 7px
-  );
-  animation: workingmark-dither 900ms linear infinite;
-  pointer-events: none;
-}
-
-@keyframes workingmark-dither {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(9px);
-  }
+  gap: var(--space-2);
+  /* Aligned with the text of the exchange rather than flush with its edge. */
+  padding: var(--space-1) var(--space-2);
 }
 
 .workingmark__dots {
@@ -49,8 +21,8 @@
 }
 
 .workingmark__dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--accent);
   animation: workingmark-pulse 1.2s ease-in-out infinite;
@@ -80,4 +52,22 @@
 .workingmark__words {
   font-size: var(--text-sm);
   color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workingmark__dot {
+    /* The dots stop travelling; the fade alone still says "in progress". */
+    animation: workingmark-fade 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes workingmark-fade {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+  }
+  30% {
+    opacity: 1;
+  }
 }

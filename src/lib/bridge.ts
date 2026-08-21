@@ -34,6 +34,7 @@ import { holdsBack } from '../projects/heldback';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
 import { createLimit } from '../cost/limits';
+import { daysFromUsage, type TokenUsageView } from '../lib/token-days';
 import { money } from '../cost/money';
 import { nextRun, saysNext, saysRepeat, type Repeat } from '../work/schedule';
 import {
@@ -1337,6 +1338,21 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(split));
     },
 
+    /** A browser has no transcripts to read, so the grid is drawn from a
+     *  fortnight of plausible days — enough to show every intensity step and
+     *  the empty ones between, which is what a screenshot of this screen is
+     *  for. */
+    tokenUsage(): Promise<Result<TokenUsageView | null>> {
+      const now = Date.now();
+      const DAY = 24 * 60 * 60 * 1000;
+      const shape = [0, 41_200, 0, 128_900, 64_300, 0, 12_400, 88_100, 0, 0, 152_700, 45_600, 9_800, 0];
+      const entries = shape.flatMap((tokens, back) => {
+        const at = now - (shape.length - 1 - back) * DAY - 3 * 60 * 60 * 1000;
+        return tokens === 0 ? [] : [{ at, tokens }];
+      });
+      return Promise.resolve(done(daysFromUsage(entries)));
+    },
+
     closeConversation(): Promise<Result<null>> {
       return Promise.resolve(done(null));
     },
@@ -1917,6 +1933,7 @@ function connect(): Bridge {
     watchStart: (says) => api.watchStart(says),
     watchStop: () => api.watchStop(),
     spendSplit: () => api.spendSplit(),
+    tokenUsage: () => api.tokenUsage(),
     spendLimit: () => api.spendLimit(),
     setSpendLimit: (ceiling) => api.setSpendLimit(ceiling),
     onConnectStep: (listener) => api.onConnectStep(listener),

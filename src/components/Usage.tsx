@@ -1,5 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { SpendView } from '../lib/spend';
+import type { TokenUsageView } from '../lib/token-days';
+import { intensityOf, saysTokens, weeksOf } from '../lib/token-days';
 import { formatMoney } from '../cost/money';
 import './Usage.css';
 
@@ -7,11 +9,25 @@ type Props = {
   open: boolean;
   spent: SpendView | null;
   onClose: () => void;
+  /** Tokens by day, read when the sheet opens. Left off, the grid is not
+   *  offered — a caller that cannot read transcripts says nothing. */
+  onTokens?: () => Promise<TokenUsageView | null>;
 };
 
+/** How many weeks the grid shows. Ten fits the sheet's measure and reaches
+ *  back far enough for a rhythm to be visible. */
+const WEEKS = 10;
+
 /** The model's own cache accounting, made legible. This is a details surface:
- * model names belong here, not beside ordinary design work. */
-export default function Usage({ open, spent, onClose }: Props) {
+ * model names belong here, not beside ordinary design work.
+ *
+ * Two answers to one question sit side by side. Money says what it cost;
+ * tokens say how much work went through the model, day by day — because a
+ * cheap model burns a pile of tokens for a small bill, and neither number
+ * alone tells somebody how much they are actually using. */
+export default function Usage({ open, spent, onClose, onTokens }: Props) {
+  const [tokens, setTokens] = useState<TokenUsageView | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const key = (event: KeyboardEvent) => {
@@ -23,10 +39,24 @@ export default function Usage({ open, spent, onClose }: Props) {
     return () => window.removeEventListener('keydown', key);
   }, [open, onClose]);
 
+  /* Read once per opening, and quietly: a slow disk delays a card, never the
+     sheet. */
+  useEffect(() => {
+    if (!open || onTokens === undefined) return;
+    let alive = true;
+    void onTokens().then((answer) => {
+      if (alive) setTokens(answer);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [open, onTokens]);
+
   if (!open) return null;
   const usage = spent?.usage ?? null;
   const split = spent?.split ?? null;
   const reused = usage?.reusedShare;
+  const weeks = tokens === null ? [] : weeksOf(tokens.days, Date.now(), WEEKS);
 
   return (
     <section className="usage" aria-label="What this cost" role="dialog" aria-modal="true">
@@ -49,6 +79,50 @@ export default function Usage({ open, spent, onClose }: Props) {
             <span>Total so far</span>
             <strong>{formatMoney(spent.total)}</strong>
           </section>
+
+          {tokens === null ? null : (
+            <section className="usage__card">
+              <h2>Tokens, week by week</h2>
+              <p className="usage__gridnote">
+                How much work went through the model, one square to a day. Alongside the money:
+                a small bill can still be a lot of work.
+              </p>
+              <div className="usage__grid" role="img" aria-label={`About ${saysTokens(tokens.total)} tokens in the last ${WEEKS} weeks`}>
+                {weeks.map((week, at) => (
+                  <span className="usage__week" key={at}>
+                    {week.map((day) => (
+                      <span
+                        key={day.at}
+                        // -1 marks days this week hasn't reached yet.
+                        className={`usage__cell ${day.tokens < 0 ? 'usage__cell--ahead' : ''} ${
+                          day.tokens > 0 ? `usage__cell--${intensityOf(day.tokens, tokens.days)}` : ''
+                        }`}
+                        title={
+                          day.tokens < 0
+                            ? undefined
+                            : `${new Date(day.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${
+                                day.tokens === 0 ? 'nothing' : `${saysTokens(day.tokens)} tokens`
+                              }`
+                        }
+                      />
+                    ))}
+                  </span>
+                ))}
+              </div>
+              <footer className="usage__gridfoot">
+                <strong>{saysTokens(tokens.total)}</strong>
+                <span>tokens in ten weeks</span>
+                <span className="usage__scale" aria-hidden="true">
+                  less
+                  <i className="usage__cell" />
+                  <i className="usage__cell usage__cell--1" />
+                  <i className="usage__cell usage__cell--2" />
+                  <i className="usage__cell usage__cell--3" />
+                  more
+                </span>
+              </footer>
+            </section>
+          )}
 
           <section className="usage__card">
             <h2>What came back from earlier</h2>

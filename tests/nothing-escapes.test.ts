@@ -58,3 +58,30 @@ describe('what the panel’s own bands may do', () => {
     expect(lines).toMatch(/min-width:\s*0/);
   });
 });
+
+/** No bar down the edge of the window.
+ *
+ * The scrollbar rule lives on `body`, and both of its properties inherit — so
+ * every scroller in the app wears a thin one unless it says otherwise. That is
+ * right for a box inside the work and wrong for the panels fixed to the glass:
+ * theirs runs the full height of the window, beside the work rather than in it,
+ * and in full screen there is no frame to explain it. Each of those opted out
+ * once; the panel on the right stopped when the rule moved and nothing noticed.
+ */
+describe('panels fixed to the edge of the window carry no scrollbar', () => {
+  const edges = ['Overview.css', 'Sidebar.css'];
+
+  for (const name of edges) {
+    it(`${name} hides its own bar`, () => {
+      const css = readFileSync(join(HERE, name), 'utf8');
+      // Only meaningful for a panel that actually scrolls.
+      expect(css).toMatch(/overflow(-y)?:\s*(auto|scroll)/);
+      expect(css).toMatch(/scrollbar-width:\s*none/);
+    });
+  }
+
+  it('the conversation scroller hides its own too', () => {
+    const app = readFileSync(join(HERE, '..', 'App.css'), 'utf8');
+    expect(app).toMatch(/scrollbar-width:\s*none/);
+  });
+});

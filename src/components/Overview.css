@@ -19,6 +19,15 @@
   background: var(--bg);
   border-left: 1px solid var(--border);
   overflow-y: auto;
+  /* No bar down the window's right edge. This panel is fixed to the glass top
+     to bottom, so the thin one every scroller inherits runs the whole height of
+     the window — furniture beside the work, and hardest to explain in full
+     screen where there is no frame around it. The same reason the conversation
+     scroller has none. Hidden, not disabled: wheel, trackpad and keyboard all
+     still scroll it. */
+  scrollbar-width: none;
+  /* Inert while the bar is hidden, and kept for the day it is not: without it
+     the panel's contents jump sideways the moment one appears. */
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
 

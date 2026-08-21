@@ -117,7 +117,10 @@ describe('the answer to a look-around is built, not looked at again', () => {
     // Both send paths, and both ways into research.
     expect(app.match(/const answering = justLookedFirst\.current;/g)?.length).toBe(2);
     expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(4);
-    expect(app).toContain('!answering &&');
+    // Only the guess steps aside. A switch somebody deliberately set to
+    // "always" is not overruled by us deciding they meant something else.
+    expect(app).toContain("plans === 'auto' && !answering && worthPlanning(text)");
+    expect(app).not.toContain("!answering &&\n        howFar");
   });
 
   it('judges the message after that one fresh', () => {

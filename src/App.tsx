@@ -2415,10 +2415,12 @@ function Conversation() {
       // without warning, and that is worth a round trip by default.
       const answering = justLookedFirst.current;
       justLookedFirst.current = false;
+      // "Always" means always: somebody who set it gets a look-around for
+      // anything they type, and answers the plan with the button. Only the
+      // guess — "auto" reading the words — steps aside for its own answer.
       const lookFirst =
-        !answering &&
         howFar !== 'doing' &&
-        (plans === 'always' || (plans === 'auto' && worthPlanning(text)));
+        (plans === 'always' || (plans === 'auto' && !answering && worthPlanning(text)));
       if (lookFirst) {
         asked.current = text;
         justLookedFirst.current = true;
@@ -2503,9 +2505,8 @@ function Conversation() {
         const answering = justLookedFirst.current;
         justLookedFirst.current = false;
         const lookFirst =
-          !answering &&
           howFar !== 'doing' &&
-          (plans === 'always' || (plans === 'auto' && worthPlanning(text)));
+          (plans === 'always' || (plans === 'auto' && !answering && worthPlanning(text)));
         if (lookFirst) {
           asked.current = text;
           justLookedFirst.current = true;

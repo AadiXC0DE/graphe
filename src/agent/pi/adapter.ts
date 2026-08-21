@@ -43,6 +43,9 @@ import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
 import { RepairCoordinator, repairPrompt } from './repair';
+import { checksAfterChange, saysFailed, sourceAmong } from './verify';
+import { notHere, runHelper } from '../../share/run';
+import { readdir } from 'node:fs/promises';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
@@ -1279,7 +1282,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   /** How many after-call messages have been said. Same bound as the end-of-turn
    *  one: a rule that matches every write would otherwise narrate every tool. */
   let afterAlready = 0;
-  const MOST_AFTER_SAYINGS = 3;
+  /** Long enough for a project's own type-check, short enough that a wedged one
+ *  is not a hang. A check that does not answer is simply not asked again. */
+const VERIFY_PATIENCE = 90_000;
+
+const MOST_AFTER_SAYINGS = 3;
 
   /* What this project has agreed, read once when the sitting opens. Re-read on
      nothing: a rules file that changed mid-turn would judge the first half of a
@@ -1341,6 +1348,61 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   }
 
   /**
+   * Run the checks a project already has, on the files that just changed.
+   *
+   * Never blocks the turn: the model keeps working while this runs, and a
+   * failure arrives as the same bounded nudge a written rule would produce.
+   * Type-checking runs whole because a file checked alone is checked without
+   * the project's settings, so it is asked at most once a turn; linting names
+   * the files and can run as often as they change.
+   */
+  let typesAskedThisTurn = false;
+  /** Whether this project type-checked the first time we looked.
+   *
+   * A folder that was already unhappy before anybody touched it will be unhappy
+   * after every edit, and nudging the model to repair something it did not
+   * break is a loop that wastes somebody's money on a problem they already knew
+   * about. So the first answer of a sitting is a reading, not a verdict: green
+   * means later failures are ours to mention, red means this project is not
+   * type-clean today and we say nothing more about it. */
+  let typesWereGreen: boolean | null = null;
+  async function verifyWhatChanged(call: ToolCall): Promise<void> {
+    const root = options.projectRoot;
+    if (root === undefined || !changesAnything(call, facts)) return;
+    if (!repairIsListening()) return;
+    const touched = sourceAmong(describeCall(call).paths);
+    if (touched.length === 0) return;
+
+    const entries = await readdir(root).catch(() => [] as string[]);
+    for (const check of checksAfterChange(entries, touched)) {
+      if (check.key === 'types') {
+        if (typesAskedThisTurn || typesWereGreen === false) continue;
+        typesAskedThisTurn = true;
+      }
+      const ran = await runHelper(check.tool, check.args, {
+        folder: root,
+        patience: VERIFY_PATIENCE,
+      }).catch(() => null);
+      // Not installed, or it could not be started: nothing to say. A check we
+      // cannot run is not a failing check, and must not read as one.
+      if (check.key === 'types' && typesWereGreen === null) {
+        // The first reading of the sitting only tells us where we started.
+        typesWereGreen = ran !== null && !notHere(ran) && ran.code === 0;
+        if (!typesWereGreen) continue;
+      }
+      if (ran === null || notHere(ran) || ran.code === 0) continue;
+      const decision = repairs.try({ check: check.key, file: touched.join(',') });
+      if (!decision.allow) continue;
+      const said = [
+        saysFailed(check.key, touched),
+        repairPrompt(check.key, touched.join(','), decision.attempt),
+      ].join('\n');
+      await steerRepair?.(said).catch(() => undefined);
+      return;
+    }
+  }
+
+  /**
    * What the project has to say about something that already happened.
    *
    * Nothing here can undo it — the moment for that was beforeCall. What it can
@@ -1349,6 +1411,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
    * catch-all after rule would otherwise emit on every write forever.
    */
   function handleAfterCall(call: ToolCall): void {
+    // What the project can check about itself, whether or not it wrote rules.
+    // A folder that type-checks and lints has said what "still fine" means; it
+    // should not also have to write a file asking us to look.
+    void verifyWhatChanged(call);
     if (house.rules.length === 0) return;
     const after = afterCall(call, house, desk.world());
     if (after.sayBack.length > 0 && afterAlready < MOST_AFTER_SAYINGS) {
@@ -1768,6 +1834,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       if (closed) throw new AdapterError('That project is no longer open.');
       sayRulesDiagnostics();
       repairs.beginTurn();
+      typesAskedThisTurn = false;
       activePrompts += 1;
       const looking = options?.lookFirst === true;
       if (looking) {

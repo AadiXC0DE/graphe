@@ -1094,6 +1094,9 @@ export type RepoLook =
        *  and telling it which line of work the folder is on is the difference
        *  between reading the pull request and reading whatever was open. */
       here: { branch: string | null; sha: string } | null;
+      /** Why the lists are short, when github could not be asked. Null when it
+       *  answered — and only then does an empty list mean there are none. */
+      trouble: string | null;
     }
   | null;
 

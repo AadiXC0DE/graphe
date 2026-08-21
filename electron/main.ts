@@ -1747,44 +1747,70 @@ async function readBranches(cwd: string): Promise<readonly GitBranch[]> {
  *  or not logged in. `gh` reads the person's own credentials from their keyring,
  *  so no token has to be stored, refreshed or guarded here.
  */
+/** Asked and answered, or asked and not answered. Never the two as one value:
+ *  a list that could not be read used to come back empty, and an empty list is
+ *  read by everything above as "there are none of these", which is a different
+ *  thing and a lie. */
+type Asked = { ok: true; value: unknown } | { ok: false; because: string };
+
+/** Long enough for a network call on a busy machine. It was eight seconds, and
+ *  this app can hold its own event loop for longer than that while it makes a
+ *  checkout — so asking github went unanswered, came back empty, and the panel
+ *  said the project had no pull requests. */
+const GH_PATIENCE_MS = 30_000;
+
 function ghJSON(
   cwd: string,
   args: readonly string[],
   fields = 'number,title,state,url,body,author,updatedAt',
-): Promise<unknown | null> {
+): Promise<Asked> {
   return new Promise((resolve) => {
     const child = spawn('gh', [...args, '--json', fields], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
+    let noise = '';
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       out += chunk;
     });
-    child.stderr.resume();
+    // Kept, not dropped: when github refuses, what it said is the only thing
+    // that tells somebody whether to log in again or check their connection.
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      noise = `${noise}${chunk}`.slice(-400);
+    });
     const timeout = setTimeout(() => {
       child.kill('SIGKILL');
-      resolve(null);
-    }, 8000);
+      resolve({ ok: false, because: GH_WORDS.tooSlow });
+    }, GH_PATIENCE_MS);
     child.on('error', () => {
       clearTimeout(timeout);
-      resolve(null);
+      resolve({ ok: false, because: GH_WORDS.noTool });
     });
     child.on('close', (code) => {
       clearTimeout(timeout);
       if (code !== 0) {
-        resolve(null);
+        const said = noise.trim().split('\n').filter((line) => line.trim() !== '').pop();
+        resolve({ ok: false, because: said === undefined ? GH_WORDS.refused : said });
         return;
       }
       try {
-        resolve(JSON.parse(out));
+        resolve({ ok: true, value: JSON.parse(out) });
       } catch {
-        resolve(null);
+        resolve({ ok: false, because: GH_WORDS.unreadable });
       }
     });
   });
 }
+
+const GH_WORDS = {
+  tooSlow: 'github did not answer in time.',
+  noTool: 'The github command could not be started.',
+  refused: 'github refused the request.',
+  unreadable: 'github answered with something this could not read.',
+} as const;
 
 /** Which github repository this folder answers to, or `owner/name`. Read from a
  *  remote the folder already knows about, so a project with no remote or a
@@ -1860,22 +1886,28 @@ async function readRepo(open: { path: string }): Promise<RepoLook> {
     const split = full.split('/');
     const owner = split[0] ?? '';
     const name = split[1] ?? '';
-    const issues = (await ghJSON(open.path, ['issue', 'list', '-R', full, '--limit', '50'])) as
-      | readonly Record<string, unknown>[]
-      | null;
-    const prs = (await ghJSON(
+    const issues = await ghJSON(open.path, ['issue', 'list', '-R', full, '--limit', '50']);
+    const prs = await ghJSON(
       open.path,
       ['pr', 'list', '-R', full, '--limit', '50'],
       'number,title,state,url,body,author,updatedAt,baseRefName,headRefName,headRefOid',
-    )) as readonly Record<string, unknown>[] | null;
+    );
+    const rows = (asked: Asked): readonly Record<string, unknown>[] =>
+      asked.ok && Array.isArray(asked.value)
+        ? (asked.value as readonly Record<string, unknown>[])
+        : [];
+    // One sentence for whichever could not be read. Said out loud, because the
+    // alternative is a panel that reports nothing where there is something.
+    const trouble = !prs.ok ? prs.because : !issues.ok ? issues.because : null;
     return {
       full,
       owner,
       name,
       url: `https://github.com/${full}`,
-      issues: (issues ?? []).map((one) => repoItem(one, 'issue')),
-      prs: (prs ?? []).map((one) => repoItem(one, 'pr')),
+      issues: rows(issues).map((one) => repoItem(one, 'issue')),
+      prs: rows(prs).map((one) => repoItem(one, 'pr')),
       here: await whereThisFolderIs(open.path),
+      trouble,
     };
   } catch {
     return null;

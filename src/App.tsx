@@ -2428,12 +2428,19 @@ function Conversation() {
         ...(desk?.address == null ? {} : { conversation: desk.address }),
       })
       .then((answer) => {
-        if (answer.ok && currentDesk(desksNow.current)?.path === project) setRepo(answer.value);
+        if (currentDesk(desksNow.current)?.path !== project) return;
+        if (answer.ok) {
+          setRepo(answer.value);
+          return;
+        }
+        // Left alone, this showed the "not a github repository" screen for a
+        // reading that failed, which is the same lie one layer up.
+        troubleAt(project === null ? {} : { project }, answer.trouble);
       })
       .finally(() => {
         if (currentDesk(desksNow.current)?.path === project) setReviewsBusy(false);
       });
-  }, []);
+  }, [troubleAt]);
 
   /** Open a fresh conversation and send the review of one pull request into
    *  it, so the agent reads the whole change on this codebase and posts its

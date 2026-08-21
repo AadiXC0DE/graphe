@@ -294,3 +294,25 @@
     position: static;
   }
 }
+
+/** Offered where a false "there are none" used to sit. A reading that failed is
+ *  worth pressing again; an empty project is not. */
+.reviews__retry {
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.reviews__retry:hover:not(:disabled) {
+  border-color: var(--text-faint);
+}
+
+.reviews__retry:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

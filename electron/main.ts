@@ -39,7 +39,7 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
@@ -5394,8 +5394,22 @@ function register(): void {
     if (typeof patch !== 'string') return done(null);
     try {
       // A version first, so taking part of a change back out is one press from
-      // undone like everything else here.
-      await open.held.timeline.snapshot({ boundary: 'before-risky-change' }).catch(() => null);
+      // undone like everything else here — and if that cannot be done, neither
+      // is this. Swallowed, the sentence above became untrue in the one case it
+      // was written for, and nothing said so. The agent's own path has refused
+      // on this since it was written; this is the same rule for the press.
+      const saved = await open.held.timeline
+        .snapshot({ boundary: 'before-risky-change' })
+        .then(() => true)
+        .catch(() => false);
+      if (!saved) {
+        return fail({
+          what: 'I have left that change alone.',
+          because:
+            'I could not save the moment before taking part of it out, and doing that is only safe because it can be undone. Nothing has changed.',
+          actionLabel: 'Got it',
+        });
+      }
       const answer = await new ProjectHistory(open.path).dropChanges(patch);
       if (!answer.ok) return fail(plainTrouble(answer.because));
       return done(null);
@@ -6387,10 +6401,36 @@ function register(): void {
     }
   }
 
+  /** One at a time, per project.
+   *
+   *  Three of these handlers read the plan, change it and write it back, and
+   *  the window fires them from two places that can be in flight together — a
+   *  step starting while another settles. Last write wins is how a finishing
+   *  step deletes a plan that had just been written, so they queue instead. */
+  const planQueue = new Map<string, Promise<unknown>>();
+  function onePlanAtATime<T>(project: string, work: () => Promise<T>): Promise<T> {
+    const after = (planQueue.get(project) ?? Promise.resolve()).then(work, work);
+    // Never left holding a rejection: the next caller waits on the turn, not on
+    // whether the last one succeeded.
+    planQueue.set(
+      project,
+      after.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return after;
+  }
+
   async function writeBuildPlan(project: string, source: string, tasks: readonly Task[]): Promise<void> {
     const file = buildPlanFile(project);
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, `${JSON.stringify({ source, tasks }, null, 2)}\n`, 'utf8');
+    // Written beside it and moved into place, because a half-written file here
+    // is unreadable json, and unreadable json is reported as having no plan at
+    // all — the tracker disappears mid-build with nothing to say why.
+    const beside = `${file}.writing`;
+    await writeFile(beside, `${JSON.stringify({ source, tasks }, null, 2)}\n`, 'utf8');
+    await rename(beside, file);
   }
 
   function toWindowTask(one: Task): import('../src/lib/ipc').BuildTask {
@@ -6430,43 +6470,60 @@ function register(): void {
     const [sourceRaw] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    if (typeof sourceRaw !== 'object' || sourceRaw === null) return fail(NOTHING_OPEN);
-    const source = sourceRaw as { name?: unknown; text?: unknown; instruction?: unknown };
-    const name = typeof source.name === 'string' ? source.name : 'A document';
-    if (typeof source.text !== 'string') return fail(NOTHING_OPEN);
-    // Start the plan empty — the planning turn that fills it runs in the
-    // conversation, where its steps show themselves before anything changes.
-    await writeBuildPlan(open.path, name, []);
-    const read = await readBuildPlan(open.path);
-    return done(read ?? { source: name, tasks: [], next: null, done: 0, total: 0 });
+    return onePlanAtATime(open.path, async () => {
+      if (typeof sourceRaw !== 'object' || sourceRaw === null) return fail(NOTHING_OPEN);
+      const source = sourceRaw as { name?: unknown; text?: unknown; instruction?: unknown };
+      const name = typeof source.name === 'string' ? source.name : 'A document';
+      if (typeof source.text !== 'string') return fail(NOTHING_OPEN);
+      // Start the plan empty — the planning turn that fills it runs in the
+      // conversation, where its steps show themselves before anything changes.
+      await writeBuildPlan(open.path, name, []);
+      const read = await readBuildPlan(open.path);
+      return done(read ?? { source: name, tasks: [], next: null, done: 0, total: 0 });
+    });
   });
 
   handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildSave, async (_event, args) => {
     const [stepsRaw] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    // A document-to-build brings its own plan; a plan approved in the
-    // conversation creates one of its own when there is none yet — a normal
-    // long task gets the same checklist above the box.
-    const prior = await readBuildPlan(open.path);
-    const source = prior?.source ?? 'The plan';
-    const steps = Array.isArray(stepsRaw)
-      ? (stepsRaw as { title?: unknown; acceptance?: unknown }[])
-      : [];
-    const tasks: Task[] = steps
-      .map((one, index) => ({
-        n: index + 1,
-        title: typeof one.title === 'string' ? one.title : 'A step',
-        acceptance:
-          typeof one.acceptance === 'string' ? one.acceptance : '',
-        test: null,
-        status: 'pending' as const,
-        note: null,
-      }))
-      .filter((one) => one.title.trim() !== '');
-    if (tasks.length === 0) return done(prior);
-    await writeBuildPlan(open.path, source, tasks);
-    return done(await readBuildPlan(open.path));
+    return onePlanAtATime(open.path, async () => {
+      // A document-to-build brings its own plan; a plan approved in the
+      // conversation creates one of its own when there is none yet — a normal
+      // long task gets the same checklist above the box.
+      const prior = await readBuildPlan(open.path);
+      const source = prior?.source ?? 'The plan';
+      const steps = Array.isArray(stepsRaw)
+        ? (stepsRaw as { title?: unknown; acceptance?: unknown }[])
+        : [];
+      /** What a step already was, when the plan is being revised rather than
+       *  made. Matched on the words, and only "done" is carried: a step that
+       *  failed is one to try again, and a title reused for different work should
+       *  not inherit a tick. */
+      const before = (title: string, acceptance: string): Task['status'] => {
+        const was = prior?.tasks.find(
+          (one) => one.title.trim() === title.trim() && one.acceptance.trim() === acceptance.trim(),
+        );
+        return was?.status === 'done' ? 'done' : 'pending';
+      };
+      const tasks: Task[] = steps
+        .map((one, index) => {
+          const title = typeof one.title === 'string' ? one.title : 'A step';
+          const acceptance = typeof one.acceptance === 'string' ? one.acceptance : '';
+          return {
+            n: index + 1,
+            title,
+            acceptance,
+            test: null,
+            status: before(title, acceptance),
+            note: null,
+          };
+        })
+        .filter((one) => one.title.trim() !== '');
+      if (tasks.length === 0) return done(prior);
+      await writeBuildPlan(open.path, source, tasks);
+      return done(await readBuildPlan(open.path));
+    });
   });
 
   /* The tracker's own step, as the run goes: close the task a settled turn
@@ -6475,26 +6532,28 @@ function register(): void {
     const [opRaw] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    const stored = await readStoredTasks(open.path);
-    if (stored === null) return fail(NOTHING_OPEN);
-    const op = opRaw as import('../src/lib/ipc').BuildAdvance | null;
-    if (op === null || typeof op !== 'object') return fail(NOTHING_OPEN);
-    let tasks: readonly Task[] = stored.tasks;
-    if (op.kind === 'start') {
-      tasks = startTask(stored.tasks);
-    } else if (op.kind === 'finish') {
-      tasks = finishTask(stored.tasks, op.ok !== false);
-    } else if (op.kind === 'add' && Array.isArray(op.titles)) {
-      tasks = addTasks(stored.tasks, op.titles.filter((one) => typeof one === 'string'));
-    }
-    if (isFinished(tasks)) {
-      // Nothing left to build, so nothing left to track. Taken away here rather
-      // than only hidden, or it comes back with the next project that opens.
-      await rm(buildPlanFile(open.path), { force: true }).catch(() => undefined);
-      return done(null);
-    }
-    await writeBuildPlan(open.path, stored.source, tasks);
-    return done(await readBuildPlan(open.path));
+    return onePlanAtATime(open.path, async () => {
+      const stored = await readStoredTasks(open.path);
+      if (stored === null) return fail(NOTHING_OPEN);
+      const op = opRaw as import('../src/lib/ipc').BuildAdvance | null;
+      if (op === null || typeof op !== 'object') return fail(NOTHING_OPEN);
+      let tasks: readonly Task[] = stored.tasks;
+      if (op.kind === 'start') {
+        tasks = startTask(stored.tasks);
+      } else if (op.kind === 'finish') {
+        tasks = finishTask(stored.tasks, op.ok !== false);
+      } else if (op.kind === 'add' && Array.isArray(op.titles)) {
+        tasks = addTasks(stored.tasks, op.titles.filter((one) => typeof one === 'string'));
+      }
+      if (isFinished(tasks)) {
+        // Nothing left to build, so nothing left to track. Taken away here rather
+        // than only hidden, or it comes back with the next project that opens.
+        await rm(buildPlanFile(open.path), { force: true }).catch(() => undefined);
+        return done(null);
+      }
+      await writeBuildPlan(open.path, stored.source, tasks);
+      return done(await readBuildPlan(open.path));
+    });
   });
 
   handle<string>(CHANNEL.skillText, async (_event, args) => {

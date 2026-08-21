@@ -1719,8 +1719,11 @@ function Conversation() {
                 .then((answer) => {
                   if (answer.ok && answer.value !== null) {
                     setBuildPlan({ path: key, plan: answer.value });
+                  } else if (!answer.ok) {
+                    void refreshBuildPlan(key);
                   }
-                });
+                })
+                .catch(() => refreshBuildPlan(key));
             }
           }
         }
@@ -1772,16 +1775,29 @@ function Conversation() {
           const didWork = didWorkSinceSettle.current[runKey] === true;
           if (didWork) {
             didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [runKey]: false };
-            const turns = desksNow.current.byPath[where]?.turns ?? [];
-            void bridge
-              .buildAdvance({ kind: 'finish', ok: settledWell(turns) }, { project: where })
-              .then((answer) => {
-                if (answer.ok) {
-                  setBuildPlan(answer.value === null ? null : { path: where, plan: answer.value });
-                } else {
-                  void refreshBuildPlan(where);
-                }
-              });
+            // The conversation that settled, not whichever is in front. A
+            // background tab's turns live in `parked`, so reading `turns` here
+            // marked its step done or failed on the evidence of a different
+            // conversation entirely.
+            const settledIn = desksNow.current.byPath[where];
+            const said =
+              notice.conversation != null && notice.conversation !== settledIn?.address
+                ? settledIn?.parked[notice.conversation]?.turns
+                : settledIn?.turns;
+            // Nothing known about it is not the same as it having gone well, so
+            // the build is left where it is rather than advanced on a guess.
+            if (said !== undefined) {
+              void bridge
+                .buildAdvance({ kind: 'finish', ok: settledWell(said) }, { project: where })
+                .then((answer) => {
+                  if (answer.ok) {
+                    setBuildPlan(answer.value === null ? null : { path: where, plan: answer.value });
+                  } else {
+                    void refreshBuildPlan(where);
+                  }
+                })
+                .catch(() => refreshBuildPlan(where));
+            }
             // Work that is finished is work to be looked at: when a live
             // preview is already being served, the page turns itself on so
             // there is somewhere to see it. Plain answers leave the pane alone.
@@ -4079,12 +4095,22 @@ function Conversation() {
               // The document is stored under the project, then the build brief
               // goes into the conversation so the agent reads it against the
               // code and plans the work in view, task by task.
+              // The brief only goes in once there is a plan behind it. Sent
+              // regardless, a start that failed left the agent building against
+              // a tracker that never appeared, and nothing said why.
               void bridge
                 .buildStart(source, desk === null ? undefined : { project: desk.path })
-                .then(() => {
+                .then((answer) => {
+                  if (!answer.ok) {
+                    troubleAt(desk === null ? {} : { project: desk.path }, answer.trouble);
+                    return;
+                  }
+                  if (desk !== null) void refreshBuildPlan(desk.path);
+                  void send(asBuildRequest(source.text, source.instruction));
+                })
+                .catch(() => {
                   if (desk !== null) void refreshBuildPlan(desk.path);
                 });
-              void send(asBuildRequest(source.text, source.instruction));
             }}
           />
         ) : (

@@ -70,6 +70,42 @@ html {
   scroll-behavior: smooth;
   scroll-padding-top: 88px;
   -webkit-text-size-adjust: 100%;
+
+  /* The bar down the side, in the page's own colours.
+     Left alone, macOS draws a light grey classic bar over a near-black page —
+     somebody else's furniture sitting on top of the work, and the one thing on
+     here the palette does not reach. Standard properties first, because they
+     win wherever they are understood; the webkit ones below are for the
+     browsers that do not understand them yet, and are ignored where they do. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--edge-strong);
+  /* Held off the edge by its own transparent border, so it reads as floating
+     down the side rather than welded to it. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #574c48;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 body {

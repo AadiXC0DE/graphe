@@ -3,21 +3,35 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Graphe — send in a team, not a prompt</title>
+    <title>Graphe — an agentic coding platform for the Mac desktop</title>
+    <link rel="canonical" href="https://usegraphe.com/" />
     <meta
       name="description"
-      content="An agentic coding platform with a real workspace. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Built on pi."
+      content="An open-source agentic coding platform for the Mac desktop. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Clone it and change it in itself. Built on pi."
     />
     <meta name="theme-color" content="#131110" />
 
     <meta property="og:title" content="Graphe — send in a team, not a prompt" />
     <meta
       property="og:description"
-      content="An agentic coding platform with a real workspace. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Built on pi."
+      content="An open-source agentic coding platform for the Mac desktop. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Clone it and change it in itself. Built on pi."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="assets/web/app-start-dark.webp" />
+    <meta property="og:site_name" content="Graphe" />
+    <meta property="og:url" content="https://usegraphe.com/" />
+    <!-- Absolute, because a relative one is never fetched: every share rendered
+         bare, and a share that renders bare is a link nobody follows. -->
+    <meta property="og:image" content="https://usegraphe.com/assets/web/app-start-dark.webp" />
+    <meta property="og:image:width" content="2880" />
+    <meta property="og:image:height" content="1800" />
+    <meta property="og:image:alt" content="The Graphe window: a conversation beside the project, with what is running, waiting and scheduled on the right." />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Graphe — an agentic coding platform for the Mac desktop" />
+    <meta
+      name="twitter:description"
+      content="Open source. Helpers in parallel, jobs that run for hours, a plan before anything big, and a browser it can use itself. Clone it and change it in itself."
+    />
+    <meta name="twitter:image" content="https://usegraphe.com/assets/web/app-start-dark.webp" />
 
     <link rel="preload" href="assets/fonts/Satoshi-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -36,6 +50,25 @@
          platform; counting page views needs nothing else, and no dependency.
          The tag is deferred so it never blocks first paint. -->
     <script defer src="/_vercel/insights/script.js"></script>
+
+    <!-- What this is, in the shape search engines read rather than guess. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Graphe",
+        "url": "https://usegraphe.com/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS",
+        "description": "An open-source agentic coding platform for the desktop. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Built on pi.",
+        "license": "https://opensource.org/licenses/MIT",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "downloadUrl": "https://github.com/AadiXC0DE/graphe/releases",
+        "codeRepository": "https://github.com/AadiXC0DE/graphe",
+        "author": { "@type": "Person", "name": "Aadi", "url": "https://github.com/AadiXC0DE" }
+      }
+    </script>
   </head>
 
   <body>
@@ -564,7 +597,7 @@
         <div class="head">
           <p class="eyebrow reveal" data-reveal>How a sitting goes</p>
           <h2 class="head__title reveal" data-reveal style="--i: 1">
-            Open a folder. Ask for something.<br />Watch it happen.
+            No config file.<br />No syntax to learn.
           </h2>
         </div>
 
@@ -1092,22 +1125,27 @@
       <!-- ────────────────────────────────────────────────── where it is ── -->
       <section class="band band--where">
         <div class="where reveal" data-reveal>
-          <p class="eyebrow">Where it is up to</p>
+          <p class="eyebrow">Open source</p>
           <h2 class="where__title">
-            In beta, in the open, and built by one person.
+            Graphe is built in Graphe.<br />So open it, and change it.
           </h2>
           <p class="where__says">
-            Everything on this page works today — it is what the app does, photographed from the app.
-            What beta means here is that the rough edges are mine to find and yours to report: the
-            interface still moves, the first release is recent, and the fastest way to change
-            something is to say so.
+            Every line is on GitHub under an MIT licence. Clone it, open that folder in Graphe, and
+            ask for the thing you wish it did — a workflow shaped like your work, a panel that suits
+            how you think, a rule your team needs. It is not a hypothetical: this app is written
+            that way, in itself, and the feature you are reading about was asked for in the window
+            it ships in.
+          </p>
+          <p class="where__says">
+            It is in beta, and the rough edges are still mine to find and yours to report. The
+            difference is that you do not have to wait for me to agree with you.
           </p>
           <div class="where__row">
+            <a class="btn btn--ghost btn--small" href="https://github.com/AadiXC0DE/graphe" rel="noopener"
+              >Clone the source</a
+            >
             <a class="btn btn--ghost btn--small" href="https://github.com/AadiXC0DE/graphe/issues" rel="noopener"
               >Tell me what broke</a
-            >
-            <a class="btn btn--ghost btn--small" href="https://github.com/AadiXC0DE/graphe" rel="noopener"
-              >Read every line</a
             >
           </div>
         </div>

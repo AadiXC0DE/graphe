@@ -25,7 +25,7 @@
   },
   {
     "id": "gate-wired",
-    "title": "Camera wiring: holdCamera / keepShots / gateOf",
+    "title": "Camera wiring: holdCamera / keepShots / gateOf (wiring is present, not that it behaves)",
     "check": "gate-wired.test.ts",
     "kind": "unit"
   },
@@ -50,12 +50,12 @@
   {
     "id": "checks-passed",
     "title": "checkPassed heuristic (quiet pass, stalled, hedged all-clear)",
-    "check": "checks.test.ts:checkPassed",
+    "check": "checks-recorded.test.ts:what counts as a check passing",
     "kind": "unit"
   },
   {
     "id": "afterCall-wired",
-    "title": "afterCall not dead: after rule surfaces once per tool",
+    "title": "afterCall not dead: after rule surfaces once per tool (wiring is present, not that it behaves)",
     "check": "rules-wired.test.ts",
     "kind": "unit"
   },

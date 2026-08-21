@@ -1741,19 +1741,24 @@ function Conversation() {
           researchReports.current = withoutThis;
           const planText = implementationPlanFromResearch(report);
           const project = notice.project;
-          if (planText !== null && project !== null) {
-            const steps = parseProposal(planText).steps;
-            if (steps.length > 0) {
-              void bridge
-                .buildSave(
-                  steps.map((title) => ({ title, acceptance: '' })),
-                  { project },
-                )
-                .then((answer) => {
-                  if (answer.ok) void refreshBuildPlan(project);
-                });
-            }
+          const steps = planText === null ? [] : parseProposal(planText).steps;
+          if (planText !== null && project !== null && steps.length > 0) {
+            void bridge
+              .buildSave(
+                steps.map((title) => ({ title, acceptance: '' })),
+                { project },
+              )
+              .then((answer) => {
+                if (answer.ok) void refreshBuildPlan(project);
+              });
           }
+          // Whether "now build it" gets a checklist depends on what came back.
+          // Research that wrote one leaves it standing, and the answer works
+          // through it. Research that wrote none leaves nothing to work
+          // through, so the answer is judged like any other message and a big
+          // one still earns its own look-around. Exempting it either way is how
+          // a large job ends up running with nothing tracking it.
+          if (steps.length === 0) justLookedFirst.current = false;
         }
         // How long the active run is going for, so a long one ends with a quiet
         // "worked for" line rather than silence. The clock starts on the first

@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { worthPlanning } from '../src/agent/plan';
+import { parseProposal, worthPlanning } from '../src/agent/plan';
 
 import {
   asResearch,
@@ -127,5 +127,40 @@ describe('the answer to a look-around is built, not looked at again', () => {
     // Cleared on read, so only the immediate answer is exempt.
     const at = app.indexOf('const answering = justLookedFirst.current;');
     expect(app.slice(at, at + 120)).toContain('justLookedFirst.current = false;');
+  });
+});
+
+describe('research, the checklist, and the answer to it', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  it('turns the plan research wrote into the checklist, when it wrote one', () => {
+    const report = [
+      'Findings: three ways to do it.',
+      '',
+      'IMPLEMENTATION PLAN',
+      '1. Move the reader',
+      '2. Wire the panel',
+      '3. Cover it with a test',
+    ].join('\n');
+    const found = implementationPlanFromResearch(report);
+    expect(found).not.toBeNull();
+    expect(parseProposal(found ?? '').steps.length).toBe(3);
+  });
+
+  it('has nothing to build from when research wrote no plan', () => {
+    expect(implementationPlanFromResearch('Findings, and no plan section at all.')).toBeNull();
+  });
+
+  it('only exempts the answer when there is a checklist to answer with', () => {
+    // Research that produced steps leaves the exemption standing, so "now build
+    // it" builds them. Research that produced none clears it, so the same words
+    // earn their own look-around and the big job is still tracked.
+    expect(app).toContain('if (steps.length === 0) justLookedFirst.current = false;');
+  });
+
+  it('creates the checklist when research settles, not on a later message', () => {
+    const at = app.indexOf('implementationPlanFromResearch(report)');
+    const near = app.slice(Math.max(0, at - 400), at);
+    expect(near).toContain("notice.event.type === 'settled'");
   });
 });

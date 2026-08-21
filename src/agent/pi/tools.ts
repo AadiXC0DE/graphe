@@ -1824,10 +1824,10 @@ export const scoreCandidatesTool: ToolDefinition = {
   label: 'Selecting the correct candidate',
   description:
     'Select the best of N completed code candidates where there is a right answer. Completed project checks decide first, then lint/type errors, then smaller diff. Unknown is not clean; an unfinished or still-failing candidate cannot win. This ranks transparently and never lands a copy. Keep using try_ways for taste, where a person must choose.',
-  promptSnippet: 'score_candidates(candidates) — objectively rank N correct-answer candidates',
+  promptSnippet: 'score_candidates(candidates) — rank N correct-answer candidates on measured evidence',
   promptGuidelines: [
     'Use only where there is a right answer. For layout, colour, wording or other taste, leave try_ways human-judged.',
-    'Run the same checks against every candidate and provide their real results. Missing evidence is not a pass.',
+    'Run the same checks against every candidate and pass their real results. This ranks what you give it and cannot measure anything itself, so a number you did not actually take makes the answer confident rather than correct. Missing evidence is not a pass.',
     'A null winner means stop: checks failed, did not finish, no objective signal exists, or the leaders tied.',
     'This selects only. Never claim it landed or kept a working copy.',
   ],

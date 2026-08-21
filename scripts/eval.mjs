@@ -83,6 +83,13 @@ function toSummary({ json, stdout, durationMs }, tasks) {
         passed: assertionResults.filter((a) => a.status === 'passed').length,
         total: assertionResults.length,
         status: file.status,
+        // Kept so a task written as `file.ts:R-01` can be answered by the tests
+        // under that heading rather than by the whole file. Three tasks sharing
+        // one file used to share one answer, which is three names for one fact.
+        cases: assertionResults.map((a) => ({
+          name: `${a.ancestorTitles?.join(' ') ?? ''} ${a.title ?? ''}`.trim(),
+          ok: a.status === 'passed',
+        })),
       });
     }
   } else {
@@ -103,17 +110,26 @@ function toSummary({ json, stdout, durationMs }, tasks) {
   // maps to one stable oracle file in eval/tasks.json; missing is a failure,
   // never silently clean. The full assertion totals remain beside it as detail.
   const taskResults = tasks.map((t) => {
-    const named = t.check.split(':')[0];
+    const [named, under] = t.check.split(':');
     const fileName = named.includes('/') ? named : `tests/${named}`;
     const file = perFile.get(fileName) ?? null;
-    const status = file !== null && file.total > 0 && file.passed === file.total ? 'passed' : 'failed';
+    // A task that names a heading is answered by the tests under it. Naming one
+    // that matches nothing is a task pointing at something that no longer
+    // exists, which is a failure and not a free pass.
+    const mine =
+      under === undefined || file === null
+        ? (file?.cases ?? [])
+        : file.cases.filter((c) => c.name.includes(under));
+    const counted = under === undefined ? (file?.total ?? 0) : mine.length;
+    const green = under === undefined ? (file?.passed ?? 0) : mine.filter((c) => c.ok).length;
+    const status = file !== null && counted > 0 && green === counted ? 'passed' : 'failed';
     return {
       id: t.id,
       title: t.title,
       check: t.check,
       status,
-      passed: file?.passed ?? 0,
-      total: file?.total ?? 0,
+      passed: green,
+      total: counted,
     };
   });
   const tasksPassed = taskResults.filter((one) => one.status === 'passed').length;

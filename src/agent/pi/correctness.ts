@@ -7,6 +7,15 @@
  * cannot win. Pure: callers can show every reason and test the ordering.
  */
 
+/* One thing this cannot do, said here so nobody reads more into it than it
+ * offers: every signal below arrives from the caller. Nothing in this file runs
+ * a check, counts a lint error, or measures a diff — it puts in order what it
+ * was handed. The ordering is deterministic and the refusals are strict, so a
+ * winner is only ever as good as the measuring that produced the numbers. A
+ * model that reports its own results well gets a real answer; one that guesses
+ * gets a confident one. Measuring these host-side is the fix, and is not done.
+ */
+
 import { checkPassed, type CheckVerdict } from './checks';
 
 export type CandidateSignals = {
@@ -101,11 +110,11 @@ export function selectCorrect(candidates: readonly CandidateSignals[]): CorrectS
   const first = ranking[0];
   if (first === undefined) return { winner: null, ranking, tie: false, reason: 'No candidates were given.' };
   if (first.disqualified) {
-    return { winner: null, ranking, tie: false, reason: 'No candidate has a completed objective correctness signal.' };
+    return { winner: null, ranking, tie: false, reason: 'No candidate reported a completed correctness signal.' };
   }
   const second = ranking[1];
   if (second !== undefined && sameSignals(first, second)) {
-    return { winner: null, ranking, tie: true, reason: 'The leading candidates tie on every objective signal.' };
+    return { winner: null, ranking, tie: true, reason: 'The leading candidates tie on every signal given.' };
   }
   const cleanChecks = first.passRate === null || first.passRate === 1;
   const cleanStatic = first.lintTypeErrors === null || first.lintTypeErrors === 0;

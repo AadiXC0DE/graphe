@@ -69,7 +69,7 @@ cask "graphe" do
   # Graphe is pre-1.0 and its window is the entire product, so an old copy is a
   # different product. Say so rather than letting people sit on the first build.
   auto_updates false
-  depends_on macos: ">= :monterey"
+  depends_on macos: :monterey
 
   app "Graphe.app"
 

@@ -74,7 +74,15 @@ export default function Lines({ branches, fallback, busy = false, onSwitch, onCr
         <span className="lines__dot" aria-hidden="true" />
         <span className="lines__name">{name}</span>
         <span className={`lines__caret ${open ? 'lines__caret--open' : ''}`} aria-hidden="true">
-          ⌄
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M4 6l4 4 4-4"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </span>
       </button>
 

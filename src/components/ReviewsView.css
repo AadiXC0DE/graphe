@@ -239,6 +239,13 @@
   color: var(--text-muted);
   white-space: pre-wrap;
   word-break: break-word;
+  /* A description can run to paragraphs. Capped so the pane keeps its card
+     shape rather than turning into a column that outgrows the window; the rest
+     of a long one is one scroll away. */
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .reviews__do {

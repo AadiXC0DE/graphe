@@ -520,6 +520,15 @@ export function worthPlanning(text: string): boolean {
   const actions = distinctActions(said);
   const clauses = joiners(said);
   const items = Math.max(listedItems(said), verbItems(said));
+  // Four or more distinct fragments is a list of jobs however it is written —
+  // even without a doing word in each (“sidebar popups hidden behind rail,
+  // star not aligned in circle …”). This is the “as much as possible” rule
+  // for the build tracker: a long task should always get its checklist.
+  const fragments = said
+    .split(/[\n]+|[.!?]+\s+|;\s*|,\s*(?=[^,]{8,})/)
+    .map((part) => part.replace(/^\s*\d+[.):]\s*/, '').trim())
+    .filter((part) => part.length >= 12);
+  if (fragments.length >= 4) return true;
 
   if (BIG_JOB.test(said)) return true;
   if (items >= 3) return true;

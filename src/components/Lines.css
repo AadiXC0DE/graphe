@@ -75,8 +75,9 @@
 
 .lines__caret {
   flex: none;
+  display: inline-flex;
+  align-items: center;
   color: var(--text-faint);
-  font-size: var(--text-2xs);
   transition: transform var(--dur-micro) var(--ease-out-quart);
 }
 

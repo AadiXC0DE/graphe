@@ -190,10 +190,12 @@
 
 /* ------------------------------------------------------- the way to the lines
 
-   One quiet pill, the width of its words — a full-width slab at the foot of
+   One quiet button, the width of its words — a full-width slab at the foot of
    the panel read as a second submit button, and nothing is being submitted.
    The word the rest of the world uses rides along in brackets, so somebody
-   coming from a terminal knows exactly what opens.
+   coming from a terminal knows exactly what opens. It sits on the content's
+   own inset with room of its own, so it reads as a button rather than a loose
+   disc stranded beside the cards.
    --------------------------------------------------------------------------- */
 
 .history__do {
@@ -201,10 +203,12 @@
   align-items: center;
   gap: var(--space-2);
   align-self: flex-start;
+  /* The panel's gap above, then room of its own down and in. */
+  margin: 0 var(--space-4) var(--space-3) var(--space-2);
   min-height: 32px;
   padding: 0 var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   font-size: var(--text-xs);
   color: var(--text-muted);

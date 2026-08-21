@@ -8,13 +8,15 @@
 
 .shelf {
   position: fixed;
+  /* Above the file rail — the folded strip's icon labels extend over it and
+     must float, not be cut by it. Nothing that overlaps the shelf sits at 4. */
+  z-index: 4;
   /* The glass, not below the strip. A mac sidebar runs the whole height of the
      window and the traffic lights sit over its top corner — the strip belongs
      to the content beside it. */
   top: 0;
   left: 0;
   bottom: 0;
-  z-index: 2;
   width: var(--shelf-width);
   display: flex;
   flex-direction: column;

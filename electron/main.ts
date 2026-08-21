@@ -43,7 +43,7 @@ import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
 import {
@@ -280,26 +280,56 @@ patchWorkerThreads();
 
 /**
  * The PATH a Finder-launched app inherits is `/usr/bin:/bin:/usr/sbin:/sbin`,
- * which does not contain a Homebrew, nvm or mise node. Adding packages spawns
- * `npm`, so without this it fails with a spawn error on most developers'
- * machines and on nobody's terminal. Asked of the login shell once, at startup.
+ * which holds `git` and almost nothing else somebody installed — no Homebrew,
+ * no nvm, no mise. Everything spawned by name needs more than that: `npm` to
+ * add a package, `gh` to read the pull requests.
+ *
+ * Two goes at it, and the order matters. The places these things are actually
+ * installed are added first and always, because that costs nothing and cannot
+ * fail. Then the login shell is asked, which finds the ones nobody could have
+ * guessed — and that is allowed to be slow or to fail, because by then the
+ * common case already works.
+ *
+ * It used to be only the second half, on a four-second timer, at the moment the
+ * app has most to do. When the shell did not answer in time the whole thing was
+ * abandoned and PATH stayed narrow, so `gh` could not be started — and the next
+ * launch, where the timer happened to win, worked. That is the intermittency
+ * somebody reported as "restarting sometimes fixes it".
  */
 function widenPath(): void {
   if (process.platform === 'win32') return;
+  const home = homedir();
+  const known = [
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    join(home, '.local', 'bin'),
+    join(home, '.volta', 'bin'),
+    join(home, '.bun', 'bin'),
+    join(home, '.cargo', 'bin'),
+    join(home, '.npm-global', 'bin'),
+  ];
+  const add = (places: readonly string[]): void => {
+    const already = (process.env['PATH'] ?? '').split(':').filter((one) => one !== '');
+    const seen = new Set(already);
+    const more = places.filter((one) => one !== '' && one.includes('/') && !seen.has(one));
+    if (more.length > 0) process.env['PATH'] = [...already, ...more].join(':');
+  };
+
+  add(known);
+
   try {
     const shell = process.env['SHELL'] ?? '/bin/zsh';
     const asked = spawnSync(shell, ['-lic', 'printf %s "$PATH"'], {
       encoding: 'utf8',
-      timeout: 4000,
+      timeout: 10_000,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     const found = asked.stdout?.trim() ?? '';
     if (found === '' || !found.includes('/')) return;
-    const already = new Set((process.env['PATH'] ?? '').split(':'));
-    const added = found.split(':').filter((one) => one !== '' && !already.has(one));
-    if (added.length > 0) process.env['PATH'] = [...already, ...added].join(':');
+    add(found.split(':'));
   } catch {
-    // The narrow PATH still works for everything except adding packages, and
-    // that failure already says something a person can act on.
+    // The list above is the part that had to work, and it already has.
   }
 }
 
@@ -1807,7 +1837,8 @@ function ghJSON(
 
 const GH_WORDS = {
   tooSlow: 'github did not answer in time.',
-  noTool: 'The github command could not be started.',
+  noTool:
+    'I could not start the github command (`gh`). It needs to be installed and logged in — the same one your terminal uses.',
   refused: 'github refused the request.',
   unreadable: 'github answered with something this could not read.',
 } as const;

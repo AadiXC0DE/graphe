@@ -76,3 +76,30 @@ describe('the panel says which it is', () => {
     expect(SAYS.couldNotAsk).not.toMatch(/not a github repository/i);
   });
 });
+
+describe('the tools an app opened from the dock has to find', () => {
+  const WIDEN = MAIN.slice(MAIN.indexOf('function widenPath('), MAIN.indexOf('widenPath();'));
+
+  it('adds where things are actually installed, without asking anything first', () => {
+    // A Finder-launched app inherits /usr/bin:/bin:/usr/sbin:/sbin, which has
+    // git and almost nothing else. gh lives in Homebrew.
+    expect(WIDEN).toContain('/opt/homebrew/bin');
+    expect(WIDEN).toContain('/usr/local/bin');
+    // Before the shell is asked, so a shell that never answers cannot take the
+    // common case down with it.
+    expect(WIDEN.indexOf('add(known)')).toBeLessThan(WIDEN.indexOf('spawnSync'));
+  });
+
+  it('does not give up on everything when the shell does not answer', () => {
+    // The old shape: one probe, and `return` on an empty answer, which left
+    // PATH narrow and gh unstartable until a launch where the timer won.
+    const afterProbe = WIDEN.slice(WIDEN.indexOf('spawnSync'));
+    expect(afterProbe).toContain('add(found.split');
+    expect(WIDEN).not.toMatch(/timeout:\s*4000/);
+  });
+
+  it('says what to do when github cannot be started', () => {
+    expect(MAIN).toMatch(/could not start the github command/);
+    expect(MAIN).toMatch(/installed and logged in/);
+  });
+});

@@ -1,9 +1,15 @@
 /** The research brief: what goes out in front of somebody's question when they
  *  ask for the question to be researched rather than answered. */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { asResearch, researchWords, RESEARCH_BRIEF } from '../src/agent/research';
+import {
+  asResearch,
+  implementationPlanFromResearch,
+  researchWords,
+  RESEARCH_BRIEF,
+} from '../src/agent/research';
 
 describe('what research sends', () => {
   it('puts the method first and the question whole', () => {
@@ -38,9 +44,51 @@ describe('what research sends', () => {
     expect(RESEARCH_BRIEF).toMatch(/change nothing until/i);
   });
 
+  it('asks the model for a structured implementation plan when one is relevant', () => {
+    expect(RESEARCH_BRIEF).toContain('IMPLEMENTATION PLAN');
+    expect(RESEARCH_BRIEF).toMatch(/when the research is about work that could be implemented/i);
+  });
+
+  it('reads the model’s explicit implementation plan without guessing intent from words', () => {
+    const report = [
+      '# Findings',
+      'The current behavior is confirmed.',
+      '',
+      'IMPLEMENTATION PLAN',
+      '1. Make the research choice apply once.',
+      '2. Build the checklist from this model-written plan.',
+    ].join('\n');
+    expect(implementationPlanFromResearch(report)).toBe(
+      '1. Make the research choice apply once.\n2. Build the checklist from this model-written plan.',
+    );
+    expect(implementationPlanFromResearch('## IMPLEMENTATION PLAN:\n1. Do the work.')).toBe(
+      '1. Do the work.',
+    );
+    expect(implementationPlanFromResearch('Research more before deciding.')).toBeNull();
+    expect(implementationPlanFromResearch('IMPLEMENTATION PLAN\n\n')).toBeNull();
+  });
+
   it('says what it will cost somebody before they wait for it', () => {
     expect(researchWords.slower).toMatch(/longer/i);
     expect(researchWords.slower).toMatch(/costs more/i);
+  });
+
+  it('is one-shot, so the next user sentence reaches the model without word matching', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    const researchBranch = app.slice(
+      app.indexOf("if (plans === 'research')"),
+      app.indexOf("if (plans === 'research')") + 1500,
+    );
+    expect(researchBranch).toContain("setPlans('auto')");
+    expect(researchBranch).toContain('deliver(asResearch(text)');
+    expect(app).not.toMatch(/classifyResearch|researchCases|PROCEED_RE/);
+  });
+
+  it('turns only the model-written implementation section into the build checklist', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    expect(app).toContain('implementationPlanFromResearch(report)');
+    expect(app).toContain('parseProposal(planText).steps');
+    expect(app).toContain('.buildSave(');
   });
 
   /* The same sweep every other word bank in the app stands: plain words on the

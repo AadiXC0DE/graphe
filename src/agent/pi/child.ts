@@ -18,6 +18,8 @@
  *    neutralised at the boundary before anything reaches the parent.
  */
 
+import { reviewerTestDecision } from './reviewer-test';
+
 export type HelperRole = 'helper' | 'reviewer' | 'researcher' | 'builder';
 
 /** The roles a person (or the model, on their behalf) can hand a job to. */
@@ -62,11 +64,11 @@ export const ROLES: Readonly<Record<HelperRole, RoleSpec>> = {
   reviewer: {
     name: 'reviewer',
     idea: 'find the real problems in the work, each with a file and line',
-    tools: [...LOCAL_TOOLS],
+    tools: [...LOCAL_TOOLS, 'bash'],
     mayChange: false,
     needsCopy: false,
     spoken:
-      'You are a reviewer. Read the work you were handed and find only genuine problems — bugs, security, correctness, missing edge cases — each with a file and line to point at. Do not invent issues: if you cannot justify a problem from what you read, do not report it. Never change anything. ' +
+      'You are a reviewer. Read the work you were handed and find only genuine problems — bugs, security, correctness, missing edge cases — each with a file and line to point at. Do not invent issues: if you cannot justify a problem from what you read, do not report it. Never change anything. You may run exactly one local test file when that would prove a finding (npx --no-install vitest run <file>, pnpm exec vitest run <file>, yarn vitest run <file>, or node --test <file>); no package script or other shell command is available. ' +
       NEEDS_A_DECISION,
   },
   researcher: {
@@ -146,9 +148,17 @@ export function mayRun(
   call: { name: string; input?: Record<string, unknown> },
   verdict: { kind: 'allow' | 'deny' | 'confirm' | 'snapshot-first'; reason?: string },
   mutates: boolean,
+  projectRoot?: string,
 ): { block: true; reason: string } | undefined {
   if (!spec.tools.includes(call.name.toLowerCase())) return { block: true, reason: declined(spec) };
   if (verdict.kind === 'deny') return { block: true, reason: verdict.reason ?? declined(spec) };
+  if (spec.name === 'reviewer' && call.name.toLowerCase() === 'bash') {
+    if (projectRoot === undefined) return { block: true, reason: declined(spec) };
+    const command = call.input?.['command'];
+    if (typeof command !== 'string') return { block: true, reason: declined(spec) };
+    const test = reviewerTestDecision(command, projectRoot);
+    return test.ok ? undefined : { block: true, reason: test.reason };
+  }
   if (!spec.mayChange) {
     return mutates ? { block: true, reason: declined(spec) } : undefined;
   }

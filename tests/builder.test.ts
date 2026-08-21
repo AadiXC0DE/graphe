@@ -43,14 +43,16 @@ async function freshRepo(): Promise<string> {
 /* ========================================================================== */
 
 describe('B-01 one role may change things, and only one', () => {
-  it('holds the making tools, and no others do', () => {
+  it('holds the making tools; the reviewer’s bash is only the one-file test exception', () => {
     expect(roleSpec('builder').tools).toEqual(
       expect.arrayContaining(['read', 'ls', 'grep', 'find', 'write', 'edit', 'bash']),
     );
     for (const role of HELPER_ROLES) {
       const spec = roleSpec(role);
       if (role === 'builder') continue;
-      for (const tool of ['write', 'edit', 'bash']) expect(spec.tools).not.toContain(tool);
+      for (const tool of ['write', 'edit']) expect(spec.tools).not.toContain(tool);
+      if (role === 'reviewer') expect(spec.tools).toContain('bash');
+      else expect(spec.tools).not.toContain('bash');
       expect(spec.mayChange).toBe(false);
     }
   });

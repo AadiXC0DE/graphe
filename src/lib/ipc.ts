@@ -1505,8 +1505,11 @@ export type GrapheApi = {
    *  `HOW_MUCH` in `src/design/gate.ts`. Sticky. */
   setHowMuch(id: string): Promise<Result<Preferences>>;
   /** Let the work that is waiting in, or set it aside. Both are undoable —
-   *  letting it in through `putBack`, setting it aside by deciding again. */
-  decideOnWork(letIn: boolean, where?: Where): Promise<Result<Decided>>;
+   *  letting it in through `putBack`, setting it aside by deciding again.
+   *  `observed` is true only for a person's explicit press. Auto-clear may let
+   *  work in, but it must not move the picture the next change is measured
+   *  against: only a picture somebody actually saw can become agreed. */
+  decideOnWork(letIn: boolean, observed: boolean, where?: Where): Promise<Result<Decided>>;
 
   /**
    * Write up what changed and put the work where a developer picks it up.

@@ -62,13 +62,13 @@
   {
     "id": "repair-cap",
     "title": "Bounded repair: at most N attempts per file, does not loop forever",
-    "check": "adapter.test.ts:repair",
+    "check": "repair.test.ts",
     "kind": "integration"
   },
   {
     "id": "reviewer-one-file",
     "title": "Reviewer can run one test file (allowlisted bash)",
-    "check": "child.test.ts:reviewer-bash",
+    "check": "reviewer-test.test.ts",
     "kind": "integration"
   },
   {
@@ -80,7 +80,7 @@
   {
     "id": "auto-selection",
     "title": "Automated selection among N where right answer exists",
-    "check": "attempts.test.ts:selection",
+    "check": "correctness.test.ts",
     "kind": "integration"
   },
   {
@@ -116,7 +116,7 @@
   {
     "id": "cost-meter",
     "title": "Cost: spend meter reconciles Pi rawBill after settle",
-    "check": "spend.test.ts",
+    "check": "cost.test.ts",
     "kind": "unit"
   }
 ]

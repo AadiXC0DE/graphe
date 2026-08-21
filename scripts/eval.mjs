@@ -21,8 +21,8 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -52,7 +52,6 @@ function runTests() {
   try {
     // vitest --reporter=json writes a single JSON blob to stdout
     const trimmed = stdout.trim();
-    const last = trimmed.lastIndexOf('\n');
     // Sometimes vite prints banner before JSON — find the JSON start
     const jsonStart = trimmed.indexOf('{');
     if (jsonStart !== -1) json = JSON.parse(trimmed.slice(jsonStart));
@@ -69,14 +68,17 @@ function toSummary({ json, stdout, durationMs }, tasks) {
   const perFile = new Map();
   if (json && Array.isArray(json.testResults)) {
     for (const file of json.testResults) {
-      const name = file.name ?? file.assertionResults?.[0]?.title ?? 'unknown';
       const assertionResults = file.assertionResults ?? [];
       for (const t of assertionResults) {
         total += 1;
         if (t.status === 'passed') passed += 1;
         else failed += 1;
       }
-      perFile.set(file.name, { passed: assertionResults.filter((a) => a.status === 'passed').length, total: assertionResults.length });
+      perFile.set(relative(root, file.name).replaceAll('\\', '/'), {
+        passed: assertionResults.filter((a) => a.status === 'passed').length,
+        total: assertionResults.length,
+        status: file.status,
+      });
     }
   } else {
     // Fallback: parse "Tests  X passed | Y failed"
@@ -92,18 +94,32 @@ function toSummary({ json, stdout, durationMs }, tasks) {
       }
     }
   }
-  const passAt1 = total === 0 ? 0 : passed / total;
-  // Also map tasks to perFile for display
+  // The number is task pass@1, not the project's raw assertion count. A task
+  // maps to one stable oracle file in eval/tasks.json; missing is a failure,
+  // never silently clean. The full assertion totals remain beside it as detail.
   const taskResults = tasks.map((t) => {
-    const file = perFile.get(join(root, t.check.split(':')[0])) ?? null;
-    // For tasks that are synthetic (eval.mjs), treat as meta pass if overall passed>0
-    if (t.id === 'eval-harness') return { id: t.id, title: t.title, status: 'passed', note: 'runner itself' };
-    // Unknown mapping — mark as unmapped
-    return { id: t.id, title: t.title, check: t.check, mapped: file !== null };
+    if (t.id === 'eval-harness') {
+      return { id: t.id, title: t.title, check: t.check, status: 'passed', passed: 1, total: 1 };
+    }
+    const named = t.check.split(':')[0];
+    const fileName = named.includes('/') ? named : `tests/${named}`;
+    const file = perFile.get(fileName) ?? null;
+    const status = file !== null && file.total > 0 && file.passed === file.total ? 'passed' : 'failed';
+    return {
+      id: t.id,
+      title: t.title,
+      check: t.check,
+      status,
+      passed: file?.passed ?? 0,
+      total: file?.total ?? 0,
+    };
   });
+  const tasksPassed = taskResults.filter((one) => one.status === 'passed').length;
+  const passAt1 = tasks.length === 0 ? 0 : tasksPassed / tasks.length;
   return {
     at: new Date().toISOString(),
     tasks: tasks.length,
+    tasksPassed,
     tests: { total, passed, failed },
     passAt1,
     durationMs,
@@ -114,7 +130,7 @@ function toSummary({ json, stdout, durationMs }, tasks) {
 function printSummary(summary) {
   const pct = (summary.passAt1 * 100).toFixed(1);
   console.log(`\n# eval — ${summary.at}`);
-  console.log(`tasks (pinned): ${summary.tasks}   tests: ${summary.tests.passed}/${summary.tests.total} passed   pass@1: ${pct}%   duration: ${(summary.durationMs / 1000).toFixed(1)}s`);
+  console.log(`tasks (pinned): ${summary.tasksPassed}/${summary.tasks} passed   pass@1: ${pct}%   tests: ${summary.tests.passed}/${summary.tests.total}   duration: ${(summary.durationMs / 1000).toFixed(1)}s`);
   if (summary.tests.failed > 0) console.log(`failed: ${summary.tests.failed}`);
   console.log('');
 }

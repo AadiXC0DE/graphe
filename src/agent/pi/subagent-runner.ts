@@ -185,7 +185,7 @@ async function work(
    * folder, a key on its way out — is still a deny.
    */
   const review = async (call: { id: string; name: string; input: Record<string, unknown> }) =>
-    mayRun(spec, call, evaluate(call, facts), changesAnything(call, facts));
+    mayRun(spec, call, evaluate(call, facts), changesAnything(call, facts), facts.projectRoot);
 
   // The helper's Guard is a resource-layer hook rather than a session option:
   // extension factories plug into the resource loader, exactly as the main

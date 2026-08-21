@@ -35,13 +35,14 @@
  */
 
 import type { GuardFacts } from '../guard/policy';
-import { changesAnything, evaluate, requiresSnapshot } from '../guard/policy';
-import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, type Rules, type World } from '../hooks';
+import { changesAnything, describeCall, evaluate, requiresSnapshot } from '../guard/policy';
+import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
 import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
+import { RepairCoordinator, repairPrompt } from './repair';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
@@ -1286,10 +1287,29 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   const house = readRules(
     await readFile(rulesFile(options.projectRoot), 'utf8').catch(() => null),
   );
+  let rulesDiagnosticsSaid = false;
+  const sayRulesDiagnostics = (): void => {
+    if (rulesDiagnosticsSaid) return;
+    rulesDiagnosticsSaid = true;
+    const diagnostics = [
+      ...(house.trouble === null ? [] : [RULE_WORDS.fileTrouble(house.trouble)]),
+      ...house.skipped,
+    ];
+    if (diagnostics.length === 0) return;
+    options.onEvent({ type: 'message-delta', text: `\n\n${diagnostics.join('\n')}` });
+    options.onEvent({ type: 'message-end' });
+  };
   /** What has actually been checked, filled in when the project's own checks
    *  answer. Nothing else fills it: a rule naming a check nobody wrote holds,
    *  which is the same deny-by-default the Guard uses. */
   const desk = checksDesk();
+  /** Host-owned repair budget. The model cannot raise these limits: at most two
+   *  after-call verification nudges for one check/file, two in one turn, and
+   *  six in the whole sitting. */
+  const repairs = new RepairCoordinator();
+  /** Filled after Pi creates the session. Tool-end cannot arrive before then. */
+  let repairIsListening = (): boolean => false;
+  let steerRepair: ((text: string) => Promise<void>) | null = null;
 
   /** A change to the files makes every earlier check stale. Called on the way
    *  in, before the call runs, because afterwards is a moment too late. */
@@ -1331,17 +1351,39 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   function handleAfterCall(call: ToolCall): void {
     if (house.rules.length === 0) return;
     const after = afterCall(call, house, desk.world());
-    if (after.sayBack.length === 0) return;
-    if (afterAlready >= MOST_AFTER_SAYINGS) return;
-    afterAlready += 1;
-    options.onEvent({ type: 'message-delta', text: `\n\n${after.sayBack.join('\n')}` });
-    options.onEvent({ type: 'message-end' });
+    if (after.sayBack.length > 0 && afterAlready < MOST_AFTER_SAYINGS) {
+      afterAlready += 1;
+      // The person sees why verification is happening. Do not emit message-end
+      // in the middle of a live tool loop; Pi owns the real message boundary.
+      options.onEvent({ type: 'message-delta', text: `\n\n${after.sayBack.join('\n')}` });
+    }
+
+    if (!repairIsListening()) return;
+    const files = [...describeCall(call).paths].map((one) => one.trim()).filter((one) => one !== '').sort();
+    // One incident names the whole touched set. Unknown command paths share the
+    // stricter check-wide bucket rather than inventing a file from output text.
+    const file = files.length === 0 ? undefined : files.join(',');
+    for (const check of after.run) {
+      const decision = repairs.try({ check, ...(file === undefined ? {} : { file }) });
+      if (!decision.allow) continue;
+      const instruction = [
+        ...after.sayBack,
+        repairPrompt(check, file, decision.attempt),
+      ].join('\n');
+      // tool-end arrives while Pi's loop is still streaming, which is the safe
+      // steering window. If that changes in a future Pi version the nudge is
+      // simply not sent; the visible rule sentence and atTheEnd fallback remain.
+      void steerRepair?.(instruction).catch(() => undefined);
+      break;
+    }
   }
 
   const relay = new EventRelay(say, {
     billedSoFar,
-    onToolEnd: ({ call }) => {
-      if (call !== undefined) handleAfterCall(call);
+    onToolEnd: ({ call, ok }) => {
+      // Post-action rules describe something that actually happened. A failed
+      // tool result changed nothing and must not start a verification cycle.
+      if (ok && call !== undefined) handleAfterCall(call);
     },
   });
   const confirmations = new Confirmations();
@@ -1614,6 +1656,15 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   }
 
   running = session;
+  repairIsListening = () => session.isStreaming;
+  steerRepair = async (text: string): Promise<void> => {
+    // Pi drains steering only from a run already in flight. Never turn a late
+    // after-call result into a fresh prompt: that is the unbounded loop this
+    // host-owned budget exists to prevent. The budget is consumed only after
+    // repairIsListening passed immediately above.
+    if (!session.isStreaming) return;
+    await session.steer(text);
+  };
   alreadyBilled = rawBill() ?? 0;
 
   const unsubscribe = session.subscribe((event) => {
@@ -1715,6 +1766,8 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       options?: { lookFirst?: boolean; queue?: 'followUp' },
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
+      sayRulesDiagnostics();
+      repairs.beginTurn();
       activePrompts += 1;
       const looking = options?.lookFirst === true;
       if (looking) {

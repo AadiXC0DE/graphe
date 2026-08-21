@@ -41,6 +41,8 @@ export const RESEARCH_BRIEF = [
   '4. Where two answers disagree, or where one rests on a single source, send another helper to settle it rather than picking the one you saw first.',
   '5. Report what you found, how sure you are of each part, and what you could not confirm. Name your sources.',
   '',
+  'When the research is about work that could be implemented, finish with a concrete numbered implementation plan under the exact heading "IMPLEMENTATION PLAN". Omit that heading when implementation is not relevant.',
+  '',
   'Change nothing until I have read it and said so.',
 ].join('\n');
 
@@ -51,4 +53,22 @@ export function asResearch(asked: string): string {
   const said = asked.trim();
   if (said === '') return said;
   return `${RESEARCH_BRIEF}\n\nThe question:\n\n${said}`;
+}
+
+/**
+ * The implementation-plan section the model chose to include in its research.
+ *
+ * There is deliberately no intent word list here. "Digs deep" applies to one
+ * message and then returns to Auto, so the person's next words reach the model
+ * unchanged. The model decides whether those words mean implement, research
+ * more, challenge a premise, or something else. This only reads the explicit
+ * structured section the research brief asked the model to produce, so a large
+ * implementation gets a real build checklist without guessing from keywords.
+ */
+export function implementationPlanFromResearch(report: string): string | null {
+  const marker = /^(?:#{1,6}\s*)?IMPLEMENTATION PLAN:?\s*$/im;
+  const found = marker.exec(report);
+  if (found === null) return null;
+  const after = report.slice(found.index + found[0].length).trim();
+  return after === '' ? null : after;
 }

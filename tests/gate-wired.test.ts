@@ -466,19 +466,26 @@ describe('the verdict reaches the panel', () => {
     expect(read).toBeLessThan(main.indexOf('open.held.pictures = null'));
   });
 
-  /** Keyed to the gate's own `stops`, not to `clear`. A project that cannot be
-   *  served as a page has every width unchecked — nothing to compare, nothing
-   *  moved — and reading that as "not clear" made every turn of every such
-   *  project end waiting for a press, which is the interruption this exists to
-   *  end. `unchecked` asks; only `stopped` holds. */
-  it('draws no panel unless something actually moved', () => {
+  /** Only a picture somebody actually saw becomes agreed. Clear work still
+   *  goes in automatically, but leaves the old baseline in place so five small
+   *  unseen changes accumulate. First/unchecked/stopped all ask. */
+  it('auto-clears only clear work and distinguishes that from a human press', () => {
     const landing = source('src/components/Landing.tsx');
-    expect(landing).toContain('gate !== null && !gate.stops ? null : (');
-    expect(landing).not.toContain("gate?.standing === 'clear'");
+    expect(landing).toContain('gate !== null && !gate.asks ? null : (');
 
     const app = source('src/App.tsx');
-    expect(app).toContain('if (gate === null || gate.stops) return;');
-    expect(app).toContain('decideOnWork(true);');
+    expect(app).toContain("gate.standing !== 'clear'");
+    expect(app).toContain('decideOnWork(true, false);');
+    expect(app).toContain('.decideOnWork(letIn, observed, {');
+
+    const main = source('electron/main.ts');
+    expect(main).toContain("if (typeof observed !== 'boolean')");
+    expect(main).toContain('if (observed)');
+    expect(main).toContain('await keepShots(agreed, nextAccepted(changes, true))');
+    expect(main).toContain('await dropShots(agreed)');
+
+    const seeFirst = source('src/components/SeeFirst.tsx');
+    expect(seeFirst).toContain('onDecide(letIn, true)');
   });
 });
 

@@ -283,4 +283,23 @@ describe('G-08 nonsense in', () => {
     expect(verdict.open).toBeNull();
     expect(verdict.readings).toEqual([]);
   });
+
+  it('eventually stops cumulative sub-threshold drift against one human baseline', () => {
+    const pixels = SIZES['desktop']?.pixels ?? 1;
+    const standings = [0.02, 0.04, 0.06, 0.08, 0.11].map((share) =>
+      gateOf([
+        {
+          kind: 'compared' as const,
+          id: 'desktop',
+          name: 'Desktop',
+          width: 1440,
+          changed: pixels * share,
+          pixels,
+        },
+      ]).standing,
+    );
+    // Auto-clear does not rebase, so each comparison remains against the same
+    // person-approved picture and the fifth small move crosses the 10% line.
+    expect(standings).toEqual(['clear', 'clear', 'clear', 'clear', 'stopped']);
+  });
 });

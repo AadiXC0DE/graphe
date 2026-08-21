@@ -64,8 +64,8 @@ import {
   sessionSummary,
 } from "./cost/phrasing";
 import { sizeUp } from "./cost/sizing";
-import { worthPlanning } from "./agent/plan";
-import { asResearch, researchWords } from "./agent/research";
+import { parseProposal, worthPlanning } from "./agent/plan";
+import { asResearch, implementationPlanFromResearch, researchWords } from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
@@ -430,6 +430,11 @@ function Conversation() {
   /** Whether the sentence about how long research takes has been said. Once per
    *  sitting: a warning repeated every time is a warning nobody reads. */
   const saidSlower = useRef(false);
+  /** Research is a one-message choice. While that one run is live, its model
+   *  output is kept by conversation so an explicit IMPLEMENTATION PLAN section
+   *  can become the build checklist. No word matching decides the next action. */
+  const researchRuns = useRef(new Set<string>());
+  const researchReports = useRef<Record<string, string>>({});
   /** What was asked for while a plan is being made, so approving it can send
    *  the same sentence rather than a reconstruction of it. */
   const asked = useRef<string>("");
@@ -1239,8 +1244,14 @@ function Conversation() {
   /** Ask for the git state of the project in front, for the overview. Applied
    *  only if it is still the one in front by the time the answer comes back —
    *  the same guard `refreshVersions` stands on, for the same reason. */
-  const refreshOverview = useCallback(async (path: string) => {
-    const answer = await bridge.overview();
+  const refreshOverview = useCallback(async (path: string, conversation?: string | null) => {
+    const here = desksNow.current.byPath[path];
+    const address = conversation === undefined ? here?.address : conversation;
+    const where: Where = {
+      project: path,
+      ...(address == null ? {} : { conversation: address }),
+    };
+    const answer = await bridge.overview(where);
     if (!answer.ok) return;
     setDesks((current) =>
       current.current === path
@@ -1410,7 +1421,7 @@ function Conversation() {
       });
 
       void refreshVersions(opened.value.path);
-      void refreshOverview(opened.value.path);
+      void refreshOverview(opened.value.path, opened.value.address);
       void refreshBuildPlan(opened.value.path);
       refreshRoom({
         project: opened.value.path,
@@ -1702,6 +1713,38 @@ function Conversation() {
         const noticeIsHere =
           notice.project === front?.path &&
           (notice.conversation == null || notice.conversation === front.address);
+
+        // "Digs deep" is one message, not a sticky interpretation of everything
+        // said afterwards. Keep that one report long enough to turn the model's
+        // explicit IMPLEMENTATION PLAN section into the build checklist. The
+        // person's next message is never classified here; it reaches the model
+        // unchanged after the switch has returned to Auto.
+        if (researchRuns.current.has(runKey) && notice.event.type === 'message-delta') {
+          researchReports.current[runKey] =
+            (researchReports.current[runKey] ?? '') + notice.event.text;
+        }
+        if (researchRuns.current.has(runKey) && notice.event.type === 'settled') {
+          researchRuns.current.delete(runKey);
+          const report = researchReports.current[runKey] ?? '';
+          const withoutThis = { ...researchReports.current };
+          delete withoutThis[runKey];
+          researchReports.current = withoutThis;
+          const planText = implementationPlanFromResearch(report);
+          const project = notice.project;
+          if (planText !== null && project !== null) {
+            const steps = parseProposal(planText).steps;
+            if (steps.length > 0) {
+              void bridge
+                .buildSave(
+                  steps.map((title) => ({ title, acceptance: '' })),
+                  { project },
+                )
+                .then((answer) => {
+                  if (answer.ok) void refreshBuildPlan(project);
+                });
+            }
+          }
+        }
         // How long the active run is going for, so a long one ends with a quiet
         // "worked for" line rather than silence. The clock starts on the first
         // real step and stops when the run settles.
@@ -1757,7 +1800,7 @@ function Conversation() {
         if (notice.event.type === "settled" && notice.project !== null) {
           const where = notice.project;
           void refreshVersions(where);
-          void refreshOverview(where);
+          void refreshOverview(where, notice.conversation);
           void refreshFiles(where);
           refreshRoom({
             project: where,
@@ -2318,7 +2361,18 @@ function Conversation() {
 
       // Research goes out with its method in front of it and no looking-around
       // pass: the brief already says to look, and at more than this turn.
+      // It is deliberately one-shot. Once this message has been handed over the
+      // switch returns to Auto, so whatever the person says next — implement,
+      // research more, challenge this, or anything else — reaches the LLM whole
+      // and unclassified. The model, not a word list, decides what they mean.
       if (plans === 'research') {
+        const researching = currentDesk(desksNow.current);
+        if (researching !== null) {
+          const owner = `${researching.path}\u0000${researching.address ?? ''}`;
+          researchRuns.current.add(owner);
+          researchReports.current[owner] = '';
+        }
+        setPlans('auto');
         // Said once a sitting, before the wait rather than after it.
         if (!saidSlower.current) {
           saidSlower.current = true;
@@ -2404,6 +2458,10 @@ function Conversation() {
         // behind a run on purpose, and a money question that then sits
         // unanswered while that run finishes is not what the button said.
         if (plans === 'research') {
+          const owner = `${desk.path}\u0000${desk.address ?? ''}`;
+          researchRuns.current.add(owner);
+          researchReports.current[owner] = '';
+          setPlans('auto');
           void deliver(asResearch(text), sizeUp(text), { lookFirst: false, queue: 'followUp' });
           return;
         }
@@ -2916,12 +2974,16 @@ function Conversation() {
   );
 
   const decideOnWork = useCallback(
-    (letIn: boolean) => {
-      const path = desks.current;
-      if (path === null) return;
+    (letIn: boolean, observed = true) => {
+      const here = currentDesk(desksNow.current);
+      if (here === null) return;
+      const path = here.path;
       goBusy();
       void bridge
-        .decideOnWork(letIn)
+        .decideOnWork(letIn, observed, {
+          project: here.path,
+          ...(here.address == null ? {} : { conversation: here.address }),
+        })
         .then((answer) => {
           if (!answer.ok) {
             troubleHere(answer.trouble);
@@ -2958,24 +3020,22 @@ function Conversation() {
     });
   }, []);
 
-  /* Nothing has moved since the pictures somebody last agreed to, so nobody is
-     asked: the work goes in and the undo sits where the question would have
-     been. This is the whole of what makes checking first bearable by default.
+  /* Nothing has moved far enough since the picture somebody last agreed to, so
+     nobody is asked: the work goes in and the undo sits where the question
+     would have been. Auto-clear deliberately does not move that picture. Small
+     changes therefore accumulate until somebody actually looks and agrees.
 
-     Once per piece of work, whatever comes back — a refusal must not become a
-     loop of the window trying again forever. */
+     A first or unchecked picture still asks: there is no honest baseline until
+     a person has seen one. Once per piece of work, whatever comes back — a
+     refusal must not become a loop of the window trying again forever. */
   const letThrough = useRef<string | null>(null);
   useEffect(() => {
     const waiting = landing?.waiting ?? null;
     if (waiting === null || waiting.state !== 'waiting') return;
-    // `stops` is the gate's own contract: only a real difference holds work.
-    // Keying this to `clear` instead meant a project that cannot be served as a
-    // page — every width unchecked, nothing to compare — ended every single turn
-    // waiting for a press, which is the interruption the gate exists to end.
-    if (gate === null || gate.stops) return;
+    if (gate === null || gate.standing !== 'clear') return;
     if (letThrough.current === waiting.id) return;
     letThrough.current = waiting.id;
-    decideOnWork(true);
+    decideOnWork(true, false);
   }, [landing?.waiting, gate?.standing, decideOnWork]);
 
   /** The two that can send something off this computer. Both are only ever
@@ -3003,37 +3063,42 @@ function Conversation() {
    *  new one. Both change what the project on screen is, so after either one
    *  the readings that describe it are asked for again — the versions, the
    *  overview, and the band that answers "what now?". */
-  /* `desks.current` belongs in the list. Without it this closed over the value
-     from the first render — no folder open, so every move returned before it
-     did anything, and the control looked dead rather than broken. */
+  /* Read the current desk at the press, not the value from the first render.
+     A parallel conversation may live in its own checkout: its branch control
+     must address that conversation rather than silently moving the project’s
+     primary checkout. */
   const branchMove = useCallback(
-    (move: (path: string) => Promise<Result<null>>) => {
-      const path = desks.current;
-      if (path === null) return;
-      void move(path).then((answer) => {
+    (move: (where: Where) => Promise<Result<null>>) => {
+      const here = currentDesk(desksNow.current);
+      if (here === null) return;
+      const where: Where = {
+        project: here.path,
+        ...(here.address == null ? {} : { conversation: here.address }),
+      };
+      void move(where).then((answer) => {
         if (!answer.ok) {
           troubleHere(answer.trouble);
           return;
         }
-        void refreshVersions(path);
-        void refreshOverview(path);
-        refreshLanding(path);
+        void refreshVersions(here.path);
+        void refreshOverview(here.path, here.address);
+        refreshLanding(here.path);
       });
     },
-    [desks.current, refreshVersions, refreshOverview, refreshLanding, troubleHere],
+    [refreshVersions, refreshOverview, refreshLanding, troubleHere],
   );
 
-  // One place reads which folder is in front, and it is the one above.
+  // One place reads which folder/conversation is in front, and it is the one above.
   const switchBranch = useCallback(
     (name: string) => {
-      branchMove((where) => bridge.branchSwitch(name, { project: where }));
+      branchMove((where) => bridge.branchSwitch(name, where));
     },
     [branchMove],
   );
 
   const createBranch = useCallback(
     (name: string) => {
-      branchMove((where) => bridge.branchCreate(name, { project: where }));
+      branchMove((where) => bridge.branchCreate(name, where));
     },
     [branchMove],
   );

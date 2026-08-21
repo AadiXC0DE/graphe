@@ -1791,6 +1791,7 @@ onCreateBranch={() => {}}
                 onDecide={noop}
                 onHandOver={noop}
                 onOpenLink={noop}
+                onOpenFile={noop}
                 onKeepGoing={noop}
                 onStartAfter={noop}
                 onKeepAway={noop}

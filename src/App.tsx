@@ -4425,6 +4425,7 @@ function Conversation() {
           onHowMuch={changeHowMuch}
           onHandOver={handToDeveloper}
           onOpenLink={(address) => void bridge.openLink(address)}
+          onOpenFile={(file) => void bridge.openInEditor(file)}
           onKeepGoing={keepGoing}
           onStartAfter={startAfter}
           onKeepAway={keepAway}

@@ -295,6 +295,15 @@ a {
   background: var(--coral);
 }
 
+.chip__mark {
+  flex: none;
+  opacity: 0.85;
+}
+
+.chip--repo:hover .chip__mark {
+  opacity: 1;
+}
+
 /* ───────────────────────────────────────────────────────────── buttons ── */
 
 .btn {
@@ -2050,6 +2059,18 @@ a {
   }
 
   .chip {
+    display: none;
+  }
+
+  /* Where the source is, is not decoration, so it stays when the rest of the
+     strip goes — as the mark on its own, which is all a narrow header has room
+     for. */
+  .chip--repo {
+    display: inline-flex;
+    padding: 0 10px;
+  }
+
+  .chip--repo .chip__label {
     display: none;
   }
 

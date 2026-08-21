@@ -13,7 +13,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { WORDS, countsOf, diffOf, parseDiff } from '../src/diff/hunks';
+import {
+  undoOf, WORDS, countsOf, diffOf, parseDiff } from '../src/diff/hunks';
 import type { Hunk } from '../src/diff/hunks';
 
 const diff = (...lines: readonly string[]): string => `${lines.join('\n')}\n`;
@@ -408,5 +409,42 @@ describe('HK-05 saying it in one line', () => {
     for (const jargon of ['hunk', 'diff', 'patch', 'staged', 'commit', 'binary', 'blob']) {
       expect(said.toLowerCase()).not.toContain(jargon);
     }
+  });
+});
+
+/** The patch that takes pieces back out is applied in reverse, against a file
+ *  that still holds every piece. So its anchors are the ones that arrived. */
+describe('undoOf — anchors for a patch applied in reverse', () => {
+  const pieces = () => parseDiff(THREE_PIECES)[0]?.hunks ?? [];
+
+  it('leaves every new-side number exactly where it came in', () => {
+    const first = pieces()[0]?.id;
+    // diffOf, built for a forward apply onto the old file, moves the ones
+    // below the dropped piece up by what it would have added.
+    expect(headersIn(diffOf(parseDiff(THREE_PIECES), (p: Hunk) => p.id !== first))).toEqual([
+      '@@ -10,5 +10,6 @@',
+      '@@ -20,5 +21,6 @@',
+    ]);
+    // Reverse-applied, the file still holds the first piece, so the ones below
+    // have not moved — and must not be told they have.
+    expect(headersIn(undoOf(parseDiff(THREE_PIECES), (p: Hunk) => p.id !== first))).toEqual([
+      '@@ -10,5 +11,6 @@',
+      '@@ -20,5 +22,6 @@',
+    ]);
+  });
+
+  it('is unchanged from the input when everything is taken', () => {
+    expect(undoOf(parseDiff(THREE_PIECES), () => true)).toBe(THREE_PIECES);
+  });
+
+  it('leaves a file out whole when nothing of it is taken', () => {
+    expect(undoOf(parseDiff(THREE_PIECES), () => false)).toBe('');
+  });
+
+  it('holds the piece\u2019s own lines, not a rebuilt version of them', () => {
+    const last = pieces()[2]?.id;
+    const only = undoOf(parseDiff(THREE_PIECES), (p: Hunk) => p.id === last);
+    expect(only).toContain('twenty-one and a half');
+    expect(headersIn(only)).toEqual(['@@ -20,5 +22,6 @@']);
   });
 });

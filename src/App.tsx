@@ -42,7 +42,7 @@ import Connected from "./components/Connected";
 import Palette from "./components/Palette";
 import Changes from "./components/Changes";
 import Against from "./components/Against";
-import { diffOf, parseDiff } from "./diff/hunks";
+import { parseDiff, undoOf } from "./diff/hunks";
 import { REACHABLE, alreadyReached, asServer } from "./agent/pi/reach";
 import Usage from "./components/Usage";
 import Sidebar from "./components/Sidebar";
@@ -3971,8 +3971,10 @@ function Conversation() {
           const whole = changeText ?? '';
           const keeping = new Set(parseDiff(kept).flatMap((one) => one.hunks).map((one) => one.id));
           // What was NOT kept is what to undo. Built from the whole change so
-          // the line numbers on the way out are the ones on the way in.
-          const dropping = diffOf(parseDiff(whole), (hunk) => !keeping.has(hunk.id));
+          // the line numbers on the way out are the ones on the way in — and
+          // left where they are, because this is applied in reverse against a
+          // file that still holds every piece.
+          const dropping = undoOf(parseDiff(whole), (hunk) => !keeping.has(hunk.id));
           setChangesOpen(false);
           if (dropping.trim() === '') return;
           void bridge.changesDrop(dropping).then((answer) => {

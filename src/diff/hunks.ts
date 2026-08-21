@@ -256,6 +256,31 @@ export function diffOf(files: readonly FileChange[], keep: (hunk: Hunk) => boole
   return out.join('');
 }
 
+/**
+ * A patch holding the pieces to take back out, ready to be applied in reverse.
+ *
+ * The other direction from `diffOf`, and it needs the opposite treatment.
+ * Reverse-applied, the new side is the file as it stands — and it still holds
+ * every piece, including the ones being kept, because nothing has been taken
+ * out yet. So the anchors are the new-side numbers exactly as they arrived.
+ *
+ * Shifting them, which is right for a patch applied forwards onto the old file,
+ * put every piece below the first dropped one a line or two out. `git apply`
+ * hunts for its context and usually finds it anyway, so this looked fine — but
+ * in a file that repeats itself, generated css or a lock file, it can find the
+ * wrong one and take out lines nobody chose.
+ */
+export function undoOf(files: readonly FileChange[], take: (hunk: Hunk) => boolean): string {
+  const out: string[] = [];
+  for (const file of files) {
+    // Exactly as they arrived: nothing to rebuild, so nothing to get wrong.
+    const taking = file.hunks.filter(take).map((hunk) => hunk.text);
+    if (taking.length === 0) continue;
+    out.push(file.header, ...taking);
+  }
+  return out.join('');
+}
+
 export function countsOf(files: readonly FileChange[]): Counts {
   let hunks = 0;
   let added = 0;

@@ -1,9 +1,17 @@
 /** The research brief: what goes out in front of somebody's question when they
  *  ask for the question to be researched rather than answered. */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { asResearch, researchWords, RESEARCH_BRIEF } from '../src/agent/research';
+import { parseProposal, worthPlanning } from '../src/agent/plan';
+
+import {
+  asResearch,
+  implementationPlanFromResearch,
+  researchWords,
+  RESEARCH_BRIEF,
+} from '../src/agent/research';
 
 describe('what research sends', () => {
   it('puts the method first and the question whole', () => {
@@ -38,9 +46,51 @@ describe('what research sends', () => {
     expect(RESEARCH_BRIEF).toMatch(/change nothing until/i);
   });
 
+  it('asks the model for a structured implementation plan when one is relevant', () => {
+    expect(RESEARCH_BRIEF).toContain('IMPLEMENTATION PLAN');
+    expect(RESEARCH_BRIEF).toMatch(/when the research is about work that could be implemented/i);
+  });
+
+  it('reads the model’s explicit implementation plan without guessing intent from words', () => {
+    const report = [
+      '# Findings',
+      'The current behavior is confirmed.',
+      '',
+      'IMPLEMENTATION PLAN',
+      '1. Make the research choice apply once.',
+      '2. Build the checklist from this model-written plan.',
+    ].join('\n');
+    expect(implementationPlanFromResearch(report)).toBe(
+      '1. Make the research choice apply once.\n2. Build the checklist from this model-written plan.',
+    );
+    expect(implementationPlanFromResearch('## IMPLEMENTATION PLAN:\n1. Do the work.')).toBe(
+      '1. Do the work.',
+    );
+    expect(implementationPlanFromResearch('Research more before deciding.')).toBeNull();
+    expect(implementationPlanFromResearch('IMPLEMENTATION PLAN\n\n')).toBeNull();
+  });
+
   it('says what it will cost somebody before they wait for it', () => {
     expect(researchWords.slower).toMatch(/longer/i);
     expect(researchWords.slower).toMatch(/costs more/i);
+  });
+
+  it('is one-shot, so the next user sentence reaches the model without word matching', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    const researchBranch = app.slice(
+      app.indexOf("if (plans === 'research')"),
+      app.indexOf("if (plans === 'research')") + 1500,
+    );
+    expect(researchBranch).toContain("setPlans('auto')");
+    expect(researchBranch).toContain('deliver(asResearch(text)');
+    expect(app).not.toMatch(/classifyResearch|researchCases|PROCEED_RE/);
+  });
+
+  it('turns only the model-written implementation section into the build checklist', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    expect(app).toContain('implementationPlanFromResearch(report)');
+    expect(app).toContain('parseProposal(planText).steps');
+    expect(app).toContain('.buildSave(');
   });
 
   /* The same sweep every other word bank in the app stands: plain words on the
@@ -50,5 +100,67 @@ describe('what research sends', () => {
     for (const banned of ['subagent', 'token', 'api', 'prompt', 'context window', 'llm', 'model']) {
       expect(everything).not.toContain(banned);
     }
+  });
+});
+
+describe('the answer to a look-around is built, not looked at again', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  it('remembers that it just asked, rather than reading the words again', () => {
+    // "now implement the redesign" carries the same words that made it look
+    // around in the first place, so judging it by the same rule plans the plan.
+    expect(worthPlanning('now implement the redesign')).toBe(true);
+    expect(app).toContain('const justLookedFirst = useRef(false)');
+  });
+
+  it('turns the look-around off for the message that answers it', () => {
+    // Both send paths, and both ways into research.
+    expect(app.match(/const answering = justLookedFirst\.current;/g)?.length).toBe(2);
+    expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(4);
+    // Only the guess steps aside. A switch somebody deliberately set to
+    // "always" is not overruled by us deciding they meant something else.
+    expect(app).toContain("plans === 'auto' && !answering && worthPlanning(text)");
+    expect(app).not.toContain("!answering &&\n        howFar");
+  });
+
+  it('judges the message after that one fresh', () => {
+    // Cleared on read, so only the immediate answer is exempt.
+    const at = app.indexOf('const answering = justLookedFirst.current;');
+    expect(app.slice(at, at + 120)).toContain('justLookedFirst.current = false;');
+  });
+});
+
+describe('research, the checklist, and the answer to it', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  it('turns the plan research wrote into the checklist, when it wrote one', () => {
+    const report = [
+      'Findings: three ways to do it.',
+      '',
+      'IMPLEMENTATION PLAN',
+      '1. Move the reader',
+      '2. Wire the panel',
+      '3. Cover it with a test',
+    ].join('\n');
+    const found = implementationPlanFromResearch(report);
+    expect(found).not.toBeNull();
+    expect(parseProposal(found ?? '').steps.length).toBe(3);
+  });
+
+  it('has nothing to build from when research wrote no plan', () => {
+    expect(implementationPlanFromResearch('Findings, and no plan section at all.')).toBeNull();
+  });
+
+  it('only exempts the answer when there is a checklist to answer with', () => {
+    // Research that produced steps leaves the exemption standing, so "now build
+    // it" builds them. Research that produced none clears it, so the same words
+    // earn their own look-around and the big job is still tracked.
+    expect(app).toContain('if (steps.length === 0) justLookedFirst.current = false;');
+  });
+
+  it('creates the checklist when research settles, not on a later message', () => {
+    const at = app.indexOf('implementationPlanFromResearch(report)');
+    const near = app.slice(Math.max(0, at - 400), at);
+    expect(near).toContain("notice.event.type === 'settled'");
   });
 });

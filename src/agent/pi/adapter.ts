@@ -35,13 +35,17 @@
  */
 
 import type { GuardFacts } from '../guard/policy';
-import { changesAnything, evaluate, requiresSnapshot } from '../guard/policy';
-import { atTheEnd, beforeCall, readRules, rulesFile, type Rules, type World } from '../hooks';
+import { changesAnything, describeCall, evaluate, requiresSnapshot } from '../guard/policy';
+import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
 import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
+import { RepairCoordinator, repairPrompt } from './repair';
+import { checksAfterChange, saysFailed, sourceAmong } from './verify';
+import { notHere, runHelper } from '../../share/run';
+import { readdir } from 'node:fs/promises';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
@@ -1275,6 +1279,51 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   let heldAlready = 0;
   const MOST_HELD_SAYINGS = 3;
 
+  /** How many after-call messages have been said. Same bound as the end-of-turn
+   *  one: a rule that matches every write would otherwise narrate every tool. */
+  let afterAlready = 0;
+  /** Long enough for a project's own type-check, short enough that a wedged one
+ *  is not a hang. A check that does not answer is simply not asked again. */
+const VERIFY_PATIENCE = 90_000;
+
+const MOST_AFTER_SAYINGS = 3;
+
+  /* What this project has agreed, read once when the sitting opens. Re-read on
+     nothing: a rules file that changed mid-turn would judge the first half of a
+     turn by one set of rules and the second half by another. */
+  const house = readRules(
+    await readFile(rulesFile(options.projectRoot), 'utf8').catch(() => null),
+  );
+  let rulesDiagnosticsSaid = false;
+  const sayRulesDiagnostics = (): void => {
+    if (rulesDiagnosticsSaid) return;
+    rulesDiagnosticsSaid = true;
+    const diagnostics = [
+      ...(house.trouble === null ? [] : [RULE_WORDS.fileTrouble(house.trouble)]),
+      ...house.skipped,
+    ];
+    if (diagnostics.length === 0) return;
+    options.onEvent({ type: 'message-delta', text: `\n\n${diagnostics.join('\n')}` });
+    options.onEvent({ type: 'message-end' });
+  };
+  /** What has actually been checked, filled in when the project's own checks
+   *  answer. Nothing else fills it: a rule naming a check nobody wrote holds,
+   *  which is the same deny-by-default the Guard uses. */
+  const desk = checksDesk();
+  /** Host-owned repair budget. The model cannot raise these limits: at most two
+   *  after-call verification nudges for one check/file, two in one turn, and
+   *  six in the whole sitting. */
+  const repairs = new RepairCoordinator();
+  /** Filled after Pi creates the session. Tool-end cannot arrive before then. */
+  let repairIsListening = (): boolean => false;
+  let steerRepair: ((text: string) => Promise<void>) | null = null;
+
+  /** A change to the files makes every earlier check stale. Called on the way
+   *  in, before the call runs, because afterwards is a moment too late. */
+  const forgetChecks = (call: ToolCall): void => {
+    if (changesAnything(call, facts)) desk.forget();
+  };
+
   /**
    * What the project's own rules make of the turn that just ended.
    *
@@ -1289,6 +1338,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     const said = [...ending.hold, ...ending.mention];
     if (said.length === 0) {
       heldAlready = 0;
+      afterAlready = 0;
       return;
     }
     if (heldAlready >= MOST_HELD_SAYINGS) return;
@@ -1297,24 +1347,112 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     options.onEvent({ type: 'message-end' });
   }
 
-  const relay = new EventRelay(say, { billedSoFar });
-  const confirmations = new Confirmations();
-  /* What this project has agreed, read once when the sitting opens. Re-read on
-     nothing: a rules file that changed mid-turn would judge the first half of a
-     turn by one set of rules and the second half by another. */
-  const house = readRules(
-    await readFile(rulesFile(options.projectRoot), 'utf8').catch(() => null),
-  );
-  /** What has actually been checked, filled in when the project's own checks
-   *  answer. Nothing else fills it: a rule naming a check nobody wrote holds,
-   *  which is the same deny-by-default the Guard uses. */
-  const desk = checksDesk();
+  /**
+   * Run the checks a project already has, on the files that just changed.
+   *
+   * Never blocks the turn: the model keeps working while this runs, and a
+   * failure arrives as the same bounded nudge a written rule would produce.
+   * Type-checking runs whole because a file checked alone is checked without
+   * the project's settings, so it is asked at most once a turn; linting names
+   * the files and can run as often as they change.
+   */
+  let typesAskedThisTurn = false;
+  /** Whether this project type-checked the first time we looked.
+   *
+   * A folder that was already unhappy before anybody touched it will be unhappy
+   * after every edit, and nudging the model to repair something it did not
+   * break is a loop that wastes somebody's money on a problem they already knew
+   * about. So the first answer of a sitting is a reading, not a verdict: green
+   * means later failures are ours to mention, red means this project is not
+   * type-clean today and we say nothing more about it. */
+  let typesWereGreen: boolean | null = null;
+  async function verifyWhatChanged(call: ToolCall): Promise<void> {
+    const root = options.projectRoot;
+    if (root === undefined || !changesAnything(call, facts)) return;
+    if (!repairIsListening()) return;
+    const touched = sourceAmong(describeCall(call).paths);
+    if (touched.length === 0) return;
 
-  /** A change to the files makes every earlier check stale. Called on the way
-   *  in, before the call runs, because afterwards is a moment too late. */
-  const forgetChecks = (call: ToolCall): void => {
-    if (changesAnything(call, facts)) desk.forget();
-  };
+    const entries = await readdir(root).catch(() => [] as string[]);
+    for (const check of checksAfterChange(entries, touched)) {
+      if (check.key === 'types') {
+        if (typesAskedThisTurn || typesWereGreen === false) continue;
+        typesAskedThisTurn = true;
+      }
+      const ran = await runHelper(check.tool, check.args, {
+        folder: root,
+        patience: VERIFY_PATIENCE,
+      }).catch(() => null);
+      // Not installed, or it could not be started: nothing to say. A check we
+      // cannot run is not a failing check, and must not read as one.
+      if (check.key === 'types' && typesWereGreen === null) {
+        // The first reading of the sitting only tells us where we started.
+        typesWereGreen = ran !== null && !notHere(ran) && ran.code === 0;
+        if (!typesWereGreen) continue;
+      }
+      if (ran === null || notHere(ran) || ran.code === 0) continue;
+      const decision = repairs.try({ check: check.key, file: touched.join(',') });
+      if (!decision.allow) continue;
+      const said = [
+        saysFailed(check.key, touched),
+        repairPrompt(check.key, touched.join(','), decision.attempt),
+      ].join('\n');
+      await steerRepair?.(said).catch(() => undefined);
+      return;
+    }
+  }
+
+  /**
+   * What the project has to say about something that already happened.
+   *
+   * Nothing here can undo it — the moment for that was beforeCall. What it can
+   * do is name the check that now needs running, and hand the model a sentence
+   * about what it just did. Wired with the same cap atTheEnd already has: a
+   * catch-all after rule would otherwise emit on every write forever.
+   */
+  function handleAfterCall(call: ToolCall): void {
+    // What the project can check about itself, whether or not it wrote rules.
+    // A folder that type-checks and lints has said what "still fine" means; it
+    // should not also have to write a file asking us to look.
+    void verifyWhatChanged(call);
+    if (house.rules.length === 0) return;
+    const after = afterCall(call, house, desk.world());
+    if (after.sayBack.length > 0 && afterAlready < MOST_AFTER_SAYINGS) {
+      afterAlready += 1;
+      // The person sees why verification is happening. Do not emit message-end
+      // in the middle of a live tool loop; Pi owns the real message boundary.
+      options.onEvent({ type: 'message-delta', text: `\n\n${after.sayBack.join('\n')}` });
+    }
+
+    if (!repairIsListening()) return;
+    const files = [...describeCall(call).paths].map((one) => one.trim()).filter((one) => one !== '').sort();
+    // One incident names the whole touched set. Unknown command paths share the
+    // stricter check-wide bucket rather than inventing a file from output text.
+    const file = files.length === 0 ? undefined : files.join(',');
+    for (const check of after.run) {
+      const decision = repairs.try({ check, ...(file === undefined ? {} : { file }) });
+      if (!decision.allow) continue;
+      const instruction = [
+        ...after.sayBack,
+        repairPrompt(check, file, decision.attempt),
+      ].join('\n');
+      // tool-end arrives while Pi's loop is still streaming, which is the safe
+      // steering window. If that changes in a future Pi version the nudge is
+      // simply not sent; the visible rule sentence and atTheEnd fallback remain.
+      void steerRepair?.(instruction).catch(() => undefined);
+      break;
+    }
+  }
+
+  const relay = new EventRelay(say, {
+    billedSoFar,
+    onToolEnd: ({ call, ok }) => {
+      // Post-action rules describe something that actually happened. A failed
+      // tool result changed nothing and must not start a verification cycle.
+      if (ok && call !== undefined) handleAfterCall(call);
+    },
+  });
+  const confirmations = new Confirmations();
 
   const review = createGuardInterceptor({
     facts,
@@ -1584,6 +1722,15 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   }
 
   running = session;
+  repairIsListening = () => session.isStreaming;
+  steerRepair = async (text: string): Promise<void> => {
+    // Pi drains steering only from a run already in flight. Never turn a late
+    // after-call result into a fresh prompt: that is the unbounded loop this
+    // host-owned budget exists to prevent. The budget is consumed only after
+    // repairIsListening passed immediately above.
+    if (!session.isStreaming) return;
+    await session.steer(text);
+  };
   alreadyBilled = rawBill() ?? 0;
 
   const unsubscribe = session.subscribe((event) => {
@@ -1685,6 +1832,9 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       options?: { lookFirst?: boolean; queue?: 'followUp' },
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
+      sayRulesDiagnostics();
+      repairs.beginTurn();
+      typesAskedThisTurn = false;
       activePrompts += 1;
       const looking = options?.lookFirst === true;
       if (looking) {

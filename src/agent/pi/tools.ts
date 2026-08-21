@@ -68,6 +68,7 @@ import {
   type CheckVerdict,
   type ProjectCheck,
 } from './checks';
+import { selectCorrect, type CandidateSignals } from './correctness';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
@@ -1806,6 +1807,91 @@ export const setGoingTool = (put: PutOnBoard): ToolDefinition => ({
   },
 });
 
+/* -------------------------------------------------------------------------- */
+/* Correctness selection                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Select among completed candidates with objective signals.
+ *
+ * This is deliberately separate from `try_ways`: layouts and wording stay a
+ * human choice; code with a right answer can be ranked by completed checks,
+ * lint/type errors and diff size. It selects but never lands a copy, and it
+ * refuses to name a winner while the best objective signal is still failing.
+ */
+export const scoreCandidatesTool: ToolDefinition = {
+  name: 'score_candidates',
+  label: 'Selecting the correct candidate',
+  description:
+    'Select the best of N completed code candidates where there is a right answer. Completed project checks decide first, then lint/type errors, then smaller diff. Unknown is not clean; an unfinished or still-failing candidate cannot win. This ranks transparently and never lands a copy. Keep using try_ways for taste, where a person must choose.',
+  promptSnippet: 'score_candidates(candidates) — rank N correct-answer candidates on measured evidence',
+  promptGuidelines: [
+    'Use only where there is a right answer. For layout, colour, wording or other taste, leave try_ways human-judged.',
+    'Run the same checks against every candidate and pass their real results. This ranks what you give it and cannot measure anything itself, so a number you did not actually take makes the answer confident rather than correct. Missing evidence is not a pass.',
+    'A null winner means stop: checks failed, did not finish, no objective signal exists, or the leaders tied.',
+    'This selects only. Never claim it landed or kept a working copy.',
+  ],
+  parameters: Type.Object({
+    candidates: Type.Array(
+      Type.Object({
+        id: Type.String({ minLength: 1 }),
+        ready: Type.Optional(Type.Boolean()),
+        checks: Type.Array(
+          Type.Object({
+            key: Type.String(),
+            name: Type.Optional(Type.String()),
+            ok: Type.Boolean(),
+            said: Type.String(),
+          }),
+        ),
+        lintErrors: Type.Optional(Type.Number({ minimum: 0 })),
+        typeErrors: Type.Optional(Type.Number({ minimum: 0 })),
+        diffLines: Type.Optional(Type.Number({ minimum: 0 })),
+      }),
+    ),
+  }),
+  executionMode: 'parallel',
+  execute: async (_callId, params: {
+    candidates: readonly {
+      id: string;
+      ready?: boolean;
+      checks: readonly { key: string; name?: string; ok: boolean; said: string }[];
+      lintErrors?: number;
+      typeErrors?: number;
+      diffLines?: number;
+    }[];
+  }): ToolResult => {
+    const candidates: CandidateSignals[] = params.candidates.map((one) => ({
+      id: one.id,
+      ...(one.ready === undefined ? {} : { ready: one.ready }),
+      checks: one.checks.map((check) => ({
+        check: { key: check.key, name: check.name ?? check.key, line: '' },
+        ok: check.ok,
+        said: check.said,
+      })),
+      ...(one.lintErrors === undefined ? {} : { lintErrors: one.lintErrors }),
+      ...(one.typeErrors === undefined ? {} : { typeErrors: one.typeErrors }),
+      ...(one.diffLines === undefined ? {} : { diffLines: one.diffLines }),
+    }));
+    const selection = selectCorrect(candidates);
+    const lines = [
+      selection.winner === null
+        ? `No winner: ${selection.reason}`
+        : `Winner: ${selection.winner}. ${selection.reason}`,
+      '',
+      'Ranking:',
+      ...selection.ranking.map(
+        (one) =>
+          `- ${one.id}${one.disqualified ? ' (disqualified)' : ''}: ${one.reasons.join('; ')}`,
+      ),
+    ];
+    return {
+      content: [{ type: 'text', text: lines.join('\n') }],
+      details: { selection },
+    };
+  },
+};
+
 /**
  * Two or three goes at one thing, to be compared and chosen between.
  *
@@ -1821,7 +1907,7 @@ export const tryWaysTool = (put: PutOnBoard): ToolDefinition => ({
     'Make the same thing two or three different ways at once, so they can be compared side by side and one of them kept. Use it when the request has taste in it and there is no single right answer — a layout, a colour, a piece of writing, the shape of a page — rather than when there is a correct result to arrive at. Each way runs in its own copy of the project; keeping one throws the others away.',
   promptSnippet: 'try_ways(doing, ways) — make the same thing two or three ways, and compare them',
   promptGuidelines: [
-    'Use it where taste decides and there is no single right answer. Where there is one correct result, do the work instead.',
+    'Use it where taste decides and there is no single right answer. Where there is one correct result, generate candidates separately and use score_candidates on the same objective checks.',
     'Make the ways genuinely different from each other — three versions of one idea is one idea, and the comparison is worthless.',
     'Say what each way is in a sentence the person can tell apart from the others at a glance, because that is what they will read under the pictures.',
   ],
@@ -2107,7 +2193,12 @@ export const grapheTools = (
   putOnBoard?: PutOnBoard,
   noted?: ChecksNoted,
 ): ToolDefinition[] => {
-  const tools = [websearchTool, webfetchTool, taskTool(agentDir, model, thinking, projectRoot)];
+  const tools: ToolDefinition[] = [
+    websearchTool,
+    webfetchTool,
+    taskTool(agentDir, model, thinking, projectRoot),
+    scoreCandidatesTool,
+  ];
   if (projectRoot !== undefined && projectRoot !== '') {
     tools.push(
       readMapTool(projectRoot),

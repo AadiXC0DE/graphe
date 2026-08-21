@@ -308,6 +308,35 @@
   min-width: 0;
 }
 
+/* A thing the last turn made is itself a press: open the file to look at it.
+   The row keeps the ref look, so the panel does not read as buttons every-
+   where; the hover is the only thing that says it is one. */
+.overview__made {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.overview__made:hover .overview__reficon,
+.overview__made:focus-visible .overview__reficon {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.overview__made:hover .overview__refname,
+.overview__made:focus-visible .overview__refname {
+  color: var(--accent);
+}
+
 .overview__thumb {
   flex: none;
   width: 26px;

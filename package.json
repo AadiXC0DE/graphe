@@ -26,6 +26,8 @@
     "package": "node scripts/package-app.mjs",
     "package:quick": "node scripts/package-app.mjs --arm64",
     "verify:package": "node scripts/verify-package.mjs",
+    "eval": "node scripts/eval.mjs",
+    "eval:json": "node scripts/eval.mjs --json",
     "lint": "eslint .",
     "check": "npm run typecheck && npm test"
   },

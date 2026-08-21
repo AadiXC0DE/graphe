@@ -17,9 +17,10 @@ import {
 describe('roles', () => {
   it('gives the reviewer a local-only tool set and a find-problems remit', () => {
     const reviewer = ROLES.reviewer;
-    expect(reviewer.tools).toEqual(['read', 'ls', 'grep', 'find']);
+    expect(reviewer.tools).toEqual(['read', 'ls', 'grep', 'find', 'bash']);
     expect(reviewer.spoken).toContain('find only genuine problems');
     expect(reviewer.spoken).toContain('Never change anything');
+    expect(reviewer.spoken).toContain('exactly one local test file');
   });
 
   it('gives the researcher the web as well, and an every-fact-named remit', () => {

@@ -1436,7 +1436,7 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done({ ...preferred }));
     },
 
-    decideOnWork(letIn: boolean, _where?: Where): Promise<Result<Decided>> {
+    decideOnWork(letIn: boolean, _observed: boolean, _where?: Where): Promise<Result<Decided>> {
       return Promise.resolve(
         done({
           landing: {
@@ -1860,7 +1860,7 @@ function connect(): Bridge {
     answer: (callId, decision, where) => api.answer(callId, decision, where),
     chooseFolder: () => api.chooseFolder(),
     recentProjects: () => api.recentProjects(),
-    overview: () => api.overview(),
+    overview: (where) => api.overview(where),
     forgetProject: (path) => api.forgetProject(path),
     versions: () => api.versions(),
     repoLook: (where) => api.repoLook(where),
@@ -1943,7 +1943,7 @@ function connect(): Bridge {
     landing: () => api.landing(),
     setHoldBack: (on, where) => api.setHoldBack(on, where),
     setHowMuch: (id) => api.setHowMuch(id),
-    decideOnWork: (letIn) => api.decideOnWork(letIn),
+    decideOnWork: (letIn, observed, where) => api.decideOnWork(letIn, observed, where),
     handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
     putOnline: (confirmed) => api.putOnline(confirmed),
     connectedLook: (where) => api.connectedLook(where),

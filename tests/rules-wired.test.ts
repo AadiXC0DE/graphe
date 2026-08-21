@@ -183,6 +183,31 @@ describe('what the rules make of a turn that just ended', () => {
   });
 });
 
+describe('after rules are wired into the live tool loop', () => {
+  const ADAPTER = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
+  const EVENTS = readFileSync(new URL('../src/agent/pi/events.ts', import.meta.url), 'utf8');
+
+  it('keeps the original call until tool-end and calls afterCall only on success', () => {
+    expect(EVENTS).toContain('private readonly running = new Map<string, ToolCall>()');
+    expect(EVENTS).toContain('this.onToolEnd?.({');
+    expect(ADAPTER).toContain('if (ok && call !== undefined) handleAfterCall(call)');
+    expect(ADAPTER).toContain('const after = afterCall(call, house, desk.world())');
+  });
+
+  it('has a host-owned repair cap and steers only while Pi is still streaming', () => {
+    expect(ADAPTER).toContain('const repairs = new RepairCoordinator()');
+    expect(ADAPTER).toContain('repairs.try({ check');
+    expect(ADAPTER).toContain('if (!session.isStreaming) return');
+    expect(ADAPTER).toContain('await session.steer(text)');
+  });
+
+  it('surfaces broken and skipped rules instead of silently dropping them', () => {
+    expect(ADAPTER).toContain('RULE_WORDS.fileTrouble(house.trouble)');
+    expect(ADAPTER).toContain('...house.skipped');
+    expect(ADAPTER).toContain('sayRulesDiagnostics()');
+  });
+});
+
 /** Checks going stale when nothing asked the Guard.
  *
  * `forgetChecks` on the interceptor covers every call the model makes. It does

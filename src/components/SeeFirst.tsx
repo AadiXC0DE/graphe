@@ -43,7 +43,7 @@ export type SeeFirstProps = {
   looking?: boolean;
   /** Something else is going on; both answers wait for it. */
   busy?: boolean;
-  onDecide: (letIn: boolean) => void;
+  onDecide: (letIn: boolean, observed?: boolean) => void;
   /** What the pictures were compared to, or null when nothing was compared. */
   gate?: Verdict | null;
   /** Which line is in force, by id. */
@@ -190,7 +190,7 @@ export default function SeeFirst({
                 key={String(letIn)}
                 type="button"
                 className={order === 0 ? 'seefirst__do seefirst__do--first' : 'seefirst__quietdo'}
-                onClick={() => onDecide(letIn)}
+                onClick={() => onDecide(letIn, true)}
                 disabled={busy}
               >
                 {letIn ? proceeds(gate, doubt) : holdWords.setAside}

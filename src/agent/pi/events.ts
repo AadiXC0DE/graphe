@@ -96,6 +96,8 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
   if (source === null) return null;
 
   switch (textAt(source, 'type')) {
+    case 'message_start':
+      return fromMessageStart(source);
     case 'message_update':
       return fromMessageUpdate(source);
     case 'message_end':
@@ -140,6 +142,31 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
     default:
       return null;
   }
+}
+
+/** The person's own words, the moment the agent begins on them. Pi emits this
+ *  for every message it processes, queued or not; only a message with words is
+ *  worth telling the waiting line about — everything else is noise. */
+function fromMessageStart(source: Fields): AgentEvent | null {
+  const message = nestedAt(source, 'message');
+  if (message === null || textAt(message, 'role') !== 'user') return null;
+  const said = textBlocks(message['content']);
+  return said === '' ? null : { type: 'message-started', text: said };
+}
+
+/** The plain text of a message: every `text` block, joined, from either the
+ *  string form or the block form Pi's payloads take across versions. */
+function textBlocks(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  let all = '';
+  for (const entry of content) {
+    const item = fieldsOf(entry);
+    if (item === null || textAt(item, 'type') !== 'text') continue;
+    const text = textAt(item, 'text');
+    if (text !== null) all += all === '' ? text : `\n${text}`;
+  }
+  return all;
 }
 
 function fromMessageUpdate(source: Fields): AgentEvent | null {
@@ -253,11 +280,13 @@ export type RelayOptions = {
   billedSoFar?: () => number | null;
   /** Overridable for a test. There is one per session otherwise. */
   spend?: SpendWatch;
+  /** Called after a tool finishes, with the original call when known. */
+  onToolEnd?: (event: { id: string; ok: boolean; detail?: string; call?: ToolCall }) => void;
 };
 
 export class EventRelay {
   /** Calls the Guard let through and Pi has not finished yet. */
-  private readonly running = new Set<string>();
+  private readonly running = new Map<string, ToolCall>();
   /** Calls the Guard stopped. Pi still reports a result for these. */
   private readonly refused = new Set<string>();
   /** An assistant failure is provisional until Pi says the whole agent has
@@ -274,13 +303,16 @@ export class EventRelay {
   ) {
     this.spend = options.spend ?? new SpendWatch();
     this.billedSoFar = options.billedSoFar;
+    this.onToolEnd = options.onToolEnd;
   }
+
+  private readonly onToolEnd?: RelayOptions['onToolEnd'];
 
   /** A call that passed the Guard and is about to run. */
   started(call: ToolCall): void {
     this.pendingError = null;
     this.refused.delete(call.id);
-    this.running.add(call.id);
+    this.running.set(call.id, call);
     this.spend.started(call);
     this.deliver({ type: 'tool-start', call });
   }
@@ -291,6 +323,11 @@ export class EventRelay {
     this.refused.add(call.id);
     this.spend.refused(call.id);
     this.deliver({ type: 'blocked', call, reason });
+  }
+
+  /** Expose the call for a tool id, when it is still running. */
+  callFor(id: string): ToolCall | undefined {
+    return this.running.get(id);
   }
 
   /** A question for the person. Emitted before anything waits on the answer. */
@@ -338,8 +375,18 @@ export class EventRelay {
       // model is told. The user has already read why it was stopped; a second
       // line saying it failed is noise, and worse, it reads like our fault.
       if (this.refused.delete(translated.id)) return;
+      const call = this.running.get(translated.id);
       // A result for something we never announced. Nothing to close off.
-      if (!this.running.delete(translated.id)) return;
+      if (call === undefined && !this.running.has(translated.id)) return;
+      this.running.delete(translated.id);
+      // Let the adapter's afterCall handler see the result while we still know
+      // which call it was. Failures are delivered before this, so ordering is
+      // tool-end handling then afterCall post-processing.
+      try {
+        this.onToolEnd?.({ id: translated.id, ok: translated.ok, detail: translated.detail, call });
+      } catch {
+        // After-call is advisory; it must never break the event stream.
+      }
     }
 
     this.deliver(translated);

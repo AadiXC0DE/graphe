@@ -561,6 +561,37 @@ describe('translating one event', () => {
     ).toEqual({ type: 'queued', steering: ['keep'], followUp: [] });
   });
 
+  /* The agent has begun on one of the queued messages. Pi's own bookkeeping
+     removal is exact-text and can silently no-op, so the waiting line is drawn
+     from this instead: the message that starts is the message that is no
+     longer waiting. */
+  it('says when the agent begins on a message, by its words', () => {
+    expect(
+      translatePiEvent({
+        type: 'message_start',
+        message: { role: 'user', content: [{ type: 'text', text: 'then the header' }] },
+      }),
+    ).toEqual({ type: 'message-started', text: 'then the header' });
+    // A string-typed content, as an earlier version of Pi carried it.
+    expect(
+      translatePiEvent({ type: 'message_start', message: { role: 'user', content: 'do it' } }),
+    ).toEqual({ type: 'message-started', text: 'do it' });
+  });
+
+  it('does not call the line for anything that is not the person speaking', () => {
+    for (const message of [
+      // The agent's reply, and tool results: neither is a queued message.
+      { role: 'assistant', content: [{ type: 'text', text: 'on it' }] },
+      { role: 'toolResult', content: [{ type: 'text', text: 'ok' }] },
+      // A message with nothing to say: the waiting line has no use for it.
+      { role: 'user', content: [{ type: 'image', data: 'aaa' }] },
+      { role: 'user', content: [] },
+    ]) {
+      expect(translatePiEvent({ type: 'message_start', message })).toBeNull();
+    }
+    expect(translatePiEvent({ type: 'message_start' })).toBeNull();
+  });
+
   it('does not fall over on a payload that changed shape underneath us', () => {
     for (const event of [null, undefined, 42, 'message_end', [], {}, { type: 7 }]) {
       expect(translatePiEvent(event)).toBeNull();

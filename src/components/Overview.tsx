@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { type ReactElement, useMemo, useState } from 'react';
 import Away from './Away';
 import CostMeter from './CostMeter';
 import { SAYS as DESIGN, type DesignPart } from './DesignView';
@@ -118,6 +118,8 @@ type Props = {
   onHandOver: () => void;
   /** Open an address in the person's own browser. */
   onOpenLink: (address: string) => void;
+  /** Open one of the files the last turn made, in the person's editor. */
+  onOpenFile: (file: string) => void;
 
   /* ---------------------------------------------- while you are not looking */
 
@@ -147,6 +149,45 @@ type Props = {
   ) => void;
   onSwitchRepeat: (id: string, on: boolean) => void;
   onForgetRepeat: (id: string) => void;
+};
+
+/** What each thing the turn made is, as a small drawing. The icon is the only
+ *  thing that tells a palette from a page of copy before reading the name. */
+const MADE_ICONS: Readonly<Record<Artifact['kind'], ReactElement>> = {
+  image: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+      <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="5.5" cy="6.5" r="1.1" fill="currentColor" />
+      <path d="M2 11.5l3.5-3 2.5 2 3-2.5 3 2.7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  vector: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+      <path d="M4 12L12 4m0 0l.5-2.5L14 2l-2 .5L12 4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M6.5 13.5c2 .5 4 .5 6 .5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
+  palette: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+      <circle cx="5" cy="5" r="1.2" fill="currentColor" />
+      <circle cx="11" cy="5" r="1.2" fill="currentColor" />
+      <circle cx="8" cy="11.5" r="1.2" fill="currentColor" />
+      <path d="M8 2.5A5.5 5.5 0 1 0 13.5 8c0-1.5-1-2.5-2.5-2.5H10c-.5 0-1-.5-1-1V4c0-1-.5-1.5-1-1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  ),
+  words: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+      <path d="M4 2.5h5L12 5.5v8H4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M8.5 2.5V6H12" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M6 9h5M6 11h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
+  data: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M2.5 6.5h11M6.5 6.5v6.5" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  ),
 };
 
 /** How many rows a band holds before it says "and more". The panel is a summary
@@ -224,6 +265,7 @@ export default function Overview({
   onHowMuch,
   onHandOver,
   onOpenLink,
+  onOpenFile,
   onKeepGoing,
   onStartAfter,
   onKeepAway,
@@ -427,14 +469,29 @@ export default function Overview({
       {artifacts.length === 0 ? null : (
         <section className="overview__block">
           <h2 className="overview__title">Made</h2>
+          <p className="overview__summary">
+            {artifacts.length === 1
+              ? 'One thing the last turn made. Press it to open the file.'
+              : `${artifacts.length} things the last turn made. Press one to open the file.`}
+          </p>
           <ul className="overview__refs">
             {artifacts.map((one) => (
               <li key={one.path} className="overview__ref">
-                <span className="overview__reficon" aria-hidden="true" />
-                <span className="overview__reftext">
-                  <span className="overview__refname">{one.name}</span>
-                  <span className="overview__refnote">{one.note}</span>
-                </span>
+                <button
+                  type="button"
+                  className="overview__made"
+                  onClick={() => onOpenFile(one.path)}
+                  title={one.path}
+                  aria-label={`Open ${one.name} in your editor`}
+                >
+                  <span className="overview__reficon" aria-hidden="true">
+                    {MADE_ICONS[one.kind]}
+                  </span>
+                  <span className="overview__reftext">
+                    <span className="overview__refname">{one.name}</span>
+                    <span className="overview__refnote">{one.note}</span>
+                  </span>
+                </button>
               </li>
             ))}
           </ul>

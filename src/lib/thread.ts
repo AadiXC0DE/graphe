@@ -331,6 +331,12 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
     case 'queued':
       return turns;
 
+    /* The agent has begun on one of the queued messages. The waiting line
+       beside the composer hears this directly — it must not depend on Pi's
+       own bookkeeping removal, which is exact-text and can silently no-op. */
+    case 'message-started':
+      return turns;
+
     case 'error':
       return withTrouble(
         turns.map((turn) => {

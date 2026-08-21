@@ -745,11 +745,11 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.setHowMuch, id) as Promise<Result<Preferences>>;
   },
 
-  decideOnWork(letIn: boolean, where?: Where): Promise<Result<Decided>> {
-    if (typeof letIn !== 'boolean') {
+  decideOnWork(letIn: boolean, observed: boolean, where?: Where): Promise<Result<Decided>> {
+    if (typeof letIn !== 'boolean' || typeof observed !== 'boolean') {
       return Promise.resolve(refuse<Decided>('I could not tell what you decided.'));
     }
-    return ipcRenderer.invoke(CHANNEL.decideOnWork, letIn, named(where)) as Promise<Result<Decided>>;
+    return ipcRenderer.invoke(CHANNEL.decideOnWork, letIn, observed, named(where)) as Promise<Result<Decided>>;
   },
 
   /* The two that can send something off this computer. Both refuse anything but

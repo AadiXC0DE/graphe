@@ -87,6 +87,18 @@ describe('a project with more than one conversation open', () => {
     expect(desk.turns).toHaveLength(1);
   });
 
+  /* The agent beginning on a queued message is news for the waiting line
+     beside the composer, not a new turn for the thread — the message is
+     already there, written by the window the moment it was asked for. */
+  it('does not fold a message that has begun into the thread again', () => {
+    const desks = receive(twoOpen(), {
+      project: HERE.path,
+      conversation: 'a',
+      event: { type: 'message-started', text: 'make the hero tighter' },
+    });
+    expect(currentDesk(desks)?.turns).toHaveLength(1);
+  });
+
   it('still files one that names no conversation into the one in front', () => {
     const desks = receive(twoOpen(), {
       project: HERE.path,

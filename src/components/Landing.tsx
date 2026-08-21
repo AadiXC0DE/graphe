@@ -21,7 +21,7 @@ type Props = {
   /** Which of the two is going, if either is. */
   going: 'developer' | 'online' | null;
   outcome: Outcome;
-  onDecide: (letIn: boolean) => void;
+  onDecide: (letIn: boolean, observed?: boolean) => void;
   /** How far the work has moved from the pictures that were agreed to, or null
    *  when nothing was compared. */
   gate: Verdict | null;
@@ -93,10 +93,10 @@ export default function Landing({
     <section className="landing" aria-label={SAYS.heading}>
       <h2 className="landing__title">{SAYS.heading}</h2>
 
-      {/* Nothing moved since the pictures that were agreed to, so there is
-          nothing to ask about and nothing to draw. The work goes in on its own
-          and the line below says so with an undo beside it. */}
-      {gate !== null && !gate.stops ? null : (
+      {/* Clear work goes in silently without moving the agreed picture. First,
+          unchecked and stopped work all need a human answer: only a picture
+          somebody actually saw is allowed to become the next baseline. */}
+      {gate !== null && !gate.asks ? null : (
         <SeeFirst
           waiting={waiting}
           held={held}

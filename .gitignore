@@ -7,6 +7,8 @@ dist-electron/
 .env
 .env.local
 coverage/
+.eval/
+results/
 .screenshots/*.png
 !.screenshots/.gitkeep
 .agents/

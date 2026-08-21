@@ -283,4 +283,60 @@ describe('G-08 nonsense in', () => {
     expect(verdict.open).toBeNull();
     expect(verdict.readings).toEqual([]);
   });
+
+  it('eventually stops cumulative sub-threshold drift against one human baseline', () => {
+    const pixels = SIZES['desktop']?.pixels ?? 1;
+    const standings = [0.02, 0.04, 0.06, 0.08, 0.11].map((share) =>
+      gateOf([
+        {
+          kind: 'compared' as const,
+          id: 'desktop',
+          name: 'Desktop',
+          width: 1440,
+          changed: pixels * share,
+          pixels,
+        },
+      ]).standing,
+    );
+    // Auto-clear does not rebase, so each comparison remains against the same
+    // person-approved picture and the fifth small move crosses the 10% line.
+    expect(standings).toEqual(['clear', 'clear', 'clear', 'clear', 'stopped']);
+  });
+
+  /* The one above compares five separately-made readings and would pass whether
+     or not anything rebases — it is arithmetic on the threshold, not a test of
+     the thing that broke. This is the behaviour: drift is measured from the
+     picture somebody agreed to, and a turn nobody looked at must not move it. */
+  it('measures each turn against the agreed picture, not the last one seen', () => {
+    const pixels = SIZES['desktop']?.pixels ?? 1;
+    /** How far this turn's picture sits from whatever it is compared against. */
+    const readingAgainst = (baseline: number, now: number) =>
+      gateOf([
+        {
+          kind: 'compared' as const,
+          id: 'desktop',
+          name: 'Desktop',
+          width: 1440,
+          changed: pixels * Math.abs(now - baseline),
+          pixels,
+        },
+      ]).standing;
+
+    // Four turns of 3%, none of them looked at. The agreed picture stays at 0.
+    const agreed = 0;
+    let where = 0;
+    const seen: string[] = [];
+    for (const step of [0.03, 0.03, 0.03, 0.03]) {
+      where += step;
+      seen.push(readingAgainst(agreed, where));
+    }
+    // 3, 6, 9 are under the line; 12 is not. Held against the agreed picture,
+    // the fourth quiet turn is the one that stops.
+    expect(seen).toEqual(['clear', 'clear', 'clear', 'stopped']);
+
+    // The bug this replaces: rebasing on every auto-clear compares each turn
+    // with the one before it, so 3% never adds up and nothing ever stops.
+    const rebasing = [0.03, 0.03, 0.03, 0.03].map(() => readingAgainst(0, 0.03));
+    expect(rebasing).toEqual(['clear', 'clear', 'clear', 'clear']);
+  });
 });

@@ -1899,6 +1899,21 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
  *  one call. Null when this folder is not a github repo, or gh is not ready —
  *  both are "nothing to show" rather than a failure.
  */
+/**
+ * Whether a conversation's copy is on the same line of work as the project.
+ *
+ * Unreadable either side answers no. Not knowing is not a reason to write into
+ * somebody's folder, and the work is never lost by staying where it was made.
+ */
+async function onTheSameLine(project: string, folder: string): Promise<boolean> {
+  const here = await gitRun(project, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const there = await gitRun(folder, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (here.code !== 0 || there.code !== 0) return false;
+  const a = (here.out ?? '').trim();
+  const b = (there.out ?? '').trim();
+  return a !== '' && b !== '' && a === b;
+}
+
 /** The line of work this folder is on, and the commit it sits at. A review that
  *  does not know this reads whatever happens to be checked out and reports it as
  *  the pull request. */
@@ -2190,6 +2205,11 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // running in the background is NOT brought back — that is what keeps two
     // parallel tabs from silently overwriting each other's files.
     if (said.type === 'settled') {
+      // An agent may have switched branch through its shell. Keep the durable
+      // checkout row in step before this folder is ever put away; otherwise a
+      // reopened conversation recreates the old branch while the panel claims
+      // the switch worked.
+      if (from.address !== null) void syncCheckoutBranch(path, held, from.address);
       sayIfCeilingIsBlind(path, from.address ?? undefined);
       clearNotesOnPage();
       showTheWorkOnPage();
@@ -2203,10 +2223,17 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       // What came back, and what did not. A file both sides changed is left as
       // this checkout has it — which is right, and used to happen in silence:
       // the person saw a finished turn and a file that had not changed.
+      // Carrying home is for a copy working on the same line as the folder on
+      // screen. A conversation somebody deliberately put on its own line is the
+      // opposite of that: applying its files here would land one line of work on
+      // top of another, which is how a folder ends up holding a branch's changes
+      // it never asked for. Landing it is still one press, and says which line.
       const carried =
         checkout === null || !existsSync(checkout.folder)
           ? null
-          : bringBack(gitRunHereFor(), path, checkout.folder);
+          : onTheSameLine(path, checkout.folder).then((sameLine) =>
+              sameLine ? bringBack(gitRunHereFor(), path, checkout.folder) : null,
+            );
       void (carried ?? Promise.resolve(null))
         .then((outcome) => {
           if (outcome !== null && outcome.ok && outcome.value.conflicted.length > 0) {
@@ -3004,6 +3031,23 @@ async function reopenCheckout(
     () => null,
   );
   return back !== null && back.ok ? one : null;
+}
+
+/**
+ * Keep the durable checkout row on the branch the agent actually selected.
+ *
+ * Branches can be changed by the panel or by `git switch` in the agent's shell.
+ * The row is what recreates a put-away checkout, so stale metadata is not merely
+ * stale UI: it would reopen the conversation on the wrong work.
+ */
+async function syncCheckoutBranch(project: string, held: Held, address: string): Promise<void> {
+  const one = held.checkouts.get(address);
+  if (one === undefined || !existsSync(one.folder)) return;
+  const found = await gitRun(one.folder, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => null);
+  const branch = found?.code === 0 ? (found.out ?? '').trim() : '';
+  if (branch === '' || branch === 'HEAD' || branch === one.branch) return;
+  one.branch = branch;
+  await saveCheckouts(project, held).catch(() => undefined);
 }
 
 /** Where a project's build plan lives, so it survives the window closing. */
@@ -4749,7 +4793,8 @@ function register(): void {
   });
 
   handle<Overview>(CHANNEL.overview, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) {
       return done({ git: null, preview: null, artifacts: [], swatches: [], styles: null });
     }
@@ -4761,12 +4806,17 @@ function register(): void {
       palette === null
         ? []
         : paletteFrom(await readFile(join(open.path, palette.path), 'utf8').catch(() => ''));
-    const git = await readGitStatus(open.path);
+    // A parallel conversation works in its own checkout. The right panel must
+    // describe the folder its agent is actually changing, not always the
+    // project's primary checkout — otherwise a successful `git switch` looks
+    // like it never happened.
+    const cwd = checkoutEntryFor(open, where)?.folder ?? open.path;
+    const git = await readGitStatus(cwd);
     return done({
       git:
         git === null
           ? null
-          : { ...git, branches: await readBranches(open.path) },
+          : { ...git, branches: await readBranches(cwd) },
       preview: open.held.serving?.address ?? null,
       artifacts: made,
       swatches,
@@ -5185,7 +5235,8 @@ function register(): void {
   });
 
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
-    const [letIn] = args;
+    const [letIn, observed] = args;
+    if (typeof observed !== 'boolean') return fail(NOTHING_OPEN);
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     const waiting = open.held.waiting;
@@ -5223,9 +5274,15 @@ function register(): void {
       const outcome = await waiting.approve(saysHeldWork(waiting.waiting.doing));
       open.held.waiting = null;
       open.held.pictures = null;
-      // The same press that takes the work moves what the next change is read
-      // against, so nobody is asked about this one twice.
-      await keepShots(agreed, nextAccepted(changes, true)).catch(() => undefined);
+      // Work may pass automatically when the movement is under the line, but
+      // the comparison baseline moves only after a person actually looked and
+      // pressed. Otherwise five small unseen changes become five new baselines
+      // and the accumulated drift the gate exists to catch stays at zero.
+      if (observed) {
+        await keepShots(agreed, nextAccepted(changes, true)).catch(() => undefined);
+      } else {
+        await dropShots(agreed).catch(() => undefined);
+      }
       return done(await asItStands(outcome?.undoTo ?? null));
     } catch (cause) {
       return fail(historyTrouble(cause));
@@ -6240,11 +6297,14 @@ function register(): void {
    *  saved first, never left behind. Only work still being written stops it. */
   handle<null>(CHANNEL.branchSwitch, async (_event, args) => {
     const [name] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null || typeof name !== 'string' || name.trim() === '') {
       return fail(NOTHING_OPEN);
     }
-    const git = await readGitStatus(open.path);
+    const entry = checkoutEntryFor(open, where);
+    const cwd = entry?.folder ?? open.path;
+    const git = await readGitStatus(cwd);
     if (git === null || git.branch === null) {
       return fail({ what: 'There is nothing to switch between yet.', because: 'This project has no saved work, so it has no lines of work.', actionLabel: 'Got it' });
     }
@@ -6254,10 +6314,18 @@ function register(): void {
     // Saved, not refused. Refusing on anything unsaved made this impossible to
     // come back from: moving to a line without a folder leaves that folder
     // behind untouched, which counts as unsaved, which blocks the way back.
-    await open.held.timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
-    const switched = await gitRun(open.path, ['checkout', name]);
+    const timeline = entry === null ? open.held.timeline : await Timeline.open(cwd);
+    await timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
+    const switched = await gitRun(cwd, ['checkout', name]);
     if (switched.code !== 0) {
       return fail({ what: 'I could not move onto that line of work.', because: 'git refused the switch. Check the name, and that nothing here holds the files open.', actionLabel: 'Got it' });
+    }
+    if (entry !== null) {
+      const remembered = open.held.checkouts.get(entry.address);
+      if (remembered !== undefined) {
+        remembered.branch = name;
+        await saveCheckouts(open.path, open.held).catch(() => undefined);
+      }
     }
     return done(null);
   });
@@ -6267,7 +6335,8 @@ function register(): void {
    *  name mean something other than what it says. */
   handle<null>(CHANNEL.branchCreate, async (_event, args) => {
     const [name] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null || typeof name !== 'string') return fail(NOTHING_OPEN);
     const clean = name.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(clean)) {
@@ -6276,10 +6345,20 @@ function register(): void {
     if (stillWriting(open.held)) {
       return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish, then start the new line.', actionLabel: 'Got it' });
     }
-    await open.held.timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
-    const made = await gitRun(open.path, ['checkout', '-b', clean]);
+    const entry = checkoutEntryFor(open, where);
+    const cwd = entry?.folder ?? open.path;
+    const timeline = entry === null ? open.held.timeline : await Timeline.open(cwd);
+    await timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
+    const made = await gitRun(cwd, ['checkout', '-b', clean]);
     if (made.code !== 0) {
       return fail({ what: 'I could not start that line of work.', because: 'git refused the new branch — the name may already exist.', actionLabel: 'Got it' });
+    }
+    if (entry !== null) {
+      const remembered = open.held.checkouts.get(entry.address);
+      if (remembered !== undefined) {
+        remembered.branch = clean;
+        await saveCheckouts(open.path, open.held).catch(() => undefined);
+      }
     }
     return done(null);
   });

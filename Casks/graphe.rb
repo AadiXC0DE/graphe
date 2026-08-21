@@ -58,7 +58,7 @@ cask "graphe" do
   url "https://github.com/AadiXC0DE/graphe/releases/download/v#{version}/Graphe-#{version}-#{arch}.zip",
       verified: "github.com/AadiXC0DE/graphe/"
   name "Graphe"
-  desc "Gentle coding agent for designers"
+  desc "Agentic coding platform for the desktop"
   homepage "https://github.com/AadiXC0DE/graphe"
 
   livecheck do

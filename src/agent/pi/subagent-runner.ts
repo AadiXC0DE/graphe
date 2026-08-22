@@ -124,8 +124,20 @@ const NO_MODEL =
   'The helper had nothing to think with — no account reached it. Nothing was looked at.';
 
 /** A helper that ran and said nothing is not a helper that found nothing. */
-const SAID_NOTHING =
+export const SAID_NOTHING =
   'The helper finished without saying anything. Nothing was found, and nothing was changed.';
+
+/**
+ * The same, for a helper that went quiet after being refused something.
+ *
+ * Five reviewers were once sent to read a branch, refused every `git` they
+ * tried, and each reported the plain sentence above — which reads as "looked
+ * and found nothing" when what happened was "never got to look". The refusal is
+ * the whole answer, so it travels back with it.
+ */
+export function saidNothingAfterRefusal(refused: string): string {
+  return `The helper could not do what it was asked and so said nothing. What stopped it: ${refused} Give it a job it can do with what it has, or do this piece yourself.`;
+}
 
 /** The only tools this process may run at all — a second lock on the `tools:`
  *  list below, so anything a resource or a Pi upgrade registers is blocked by
@@ -192,6 +204,10 @@ async function work(
   const review = async (call: { id: string; name: string; input: Record<string, unknown> }) =>
     mayRun(spec, call, evaluate(call, facts), changesAnything(call, facts), facts.projectRoot);
 
+  /** The last thing this helper was refused, if it was refused anything.
+   *  Declared here because the hook below closes over it. */
+  let lastRefusal: string | null = null;
+
   // The helper's Guard is a resource-layer hook rather than a session option:
   // extension factories plug into the resource loader, exactly as the main
   // session wires them.
@@ -246,9 +262,17 @@ async function work(
       {
         name: 'graphe-subagent-guard',
         factory: (api) => {
-          api.on('tool_call', async (event) =>
-            review({ id: event.toolCallId, name: event.toolName, input: { ...event.input } }),
-          );
+          api.on('tool_call', async (event) => {
+            const held = await review({
+              id: event.toolCallId,
+              name: event.toolName,
+              input: { ...event.input },
+            });
+            // Kept so a helper that goes quiet can say what stopped it rather
+            // than reporting the silence as an answer.
+            if (held !== undefined) lastRefusal = held.reason;
+            return held;
+          });
         },
       },
     ],
@@ -258,6 +282,10 @@ async function work(
   let session: { dispose: () => void } | null = null;
   let finished = false;
   let spoken = '';
+
+  /** What to report when it produced no words at all. */
+  const nothingSaid = (): string =>
+    lastRefusal === null ? SAID_NOTHING : saidNothingAfterRefusal(lastRefusal);
 
   /** One answer, however the run ends: the settled event, a failure, or the
    *  prompt resolving without either. The guard means the first one wins. */
@@ -294,7 +322,7 @@ async function work(
     }
     if (event.type === 'settled') {
       const said = safeChildWords(spoken.trim());
-      finish(said === '' ? { ok: false, error: SAID_NOTHING } : { ok: true, text: said });
+      finish(said === '' ? { ok: false, error: nothingSaid() } : { ok: true, text: said });
     }
   });
 
@@ -349,7 +377,7 @@ async function work(
     await new Promise((wake) => setTimeout(wake, 250));
     if (!finished) {
       const said = safeChildWords(spoken.trim());
-      finish(said === '' ? { ok: false, error: SAID_NOTHING } : { ok: true, text: said });
+      finish(said === '' ? { ok: false, error: nothingSaid() } : { ok: true, text: said });
     }
     unsubscribe();
   } catch (cause) {

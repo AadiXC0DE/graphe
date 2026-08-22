@@ -2089,12 +2089,34 @@ function Conversation() {
      conversation down · ⌘1–9 goes to one of the things open · ⌘⇧[ and ⌘⇧] move
      along the row · ⌘⇧N goes to whatever has stopped to ask you. */
   useEffect(() => {
+    /* Escape means "back out of what is in front of me". Only when nothing is
+       in front of you does it mean "stop the run", and one press must never do
+       both — this listener sits on the window and was registered before any
+       panel's, so it ran first: opening Settings, looking, and pressing Escape
+       to leave stopped the turn and killed every helper with it, in the same
+       frame as the panel closing. */
+    const overlayUp = (): boolean =>
+      settingsOpen ||
+      usageOpen ||
+      skillsOpen ||
+      connectedOpen ||
+      addMore ||
+      paletteOpen ||
+      graphOpen ||
+      reviewsOpen ||
+      helpersAt !== null ||
+      designAt !== null;
+
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        // Something nearer the key already answered it — the composer's own
+        // menu, or anything else below the window.
+        if (event.defaultPrevented) return;
         if (connectOpen) {
           if (connectBusy) cancelConnect();
           else closeConnect();
         } else if (switching) setSwitching(false);
+        else if (overlayUp()) return;
         else if (busy) halt();
         return;
       }
@@ -2200,6 +2222,18 @@ function Conversation() {
     cancelConnect,
     closeConnect,
     togglePane,
+    // What is in front of the conversation. Escape belongs to whichever of
+    // these is up, and only reaches the run when none of them is.
+    settingsOpen,
+    usageOpen,
+    skillsOpen,
+    connectedOpen,
+    addMore,
+    paletteOpen,
+    graphOpen,
+    reviewsOpen,
+    helpersAt,
+    designAt,
   ]);
 
   /* ----------------------------------------------------------------- saying */

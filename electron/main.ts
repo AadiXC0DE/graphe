@@ -1526,6 +1526,20 @@ function conversationsIn(project: string): Workspaces<GrapheSession> {
 }
 
 const workspaces = new Workspaces<Held>({
+  /**
+   * A project with work going is never the one dropped off the end.
+   *
+   * The same rule conversations have had, missing one level up: closing a
+   * project closes every conversation in it, and closing a conversation kills
+   * the helpers it sent. So opening a fifth project used to end whatever the
+   * oldest one was doing, silently and with nothing said. If every project is
+   * busy, `adopt` keeps them all rather than picking one to end.
+   */
+  mayEvict: (held) =>
+    held.sessions.open.every(
+      (one) =>
+        !one.held.working && !one.held.listening && one.held.awaitingAnswer.length === 0,
+    ),
   close: (held) => {
     held.sessions.closeAll();
     held.running.stopAll();
@@ -5191,6 +5205,13 @@ function register(): void {
 
     const held = open.held;
     const was = conversationAt(held, whereIn(args));
+    // Rebuilding the conversation ends it, and ending it kills whatever it has
+    // working. The switch is remembered above either way, so it takes effect
+    // the moment this conversation is next started rather than by stopping it
+    // mid-sentence.
+    if (was !== null && (was.held.working || was.held.listening)) {
+      return done(was.held.carried);
+    }
     const carryOn = was?.held.conversation ?? null;
     if (was !== null) held.sessions.close(was.path);
     const started = await startConversation(open, openingFor(carryOn), was?.path);

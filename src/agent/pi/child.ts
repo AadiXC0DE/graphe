@@ -69,7 +69,7 @@ export const ROLES: Readonly<Record<HelperRole, RoleSpec>> = {
     mayChange: false,
     needsCopy: false,
     spoken:
-      'You are a reviewer. Read the work you were handed and find only genuine problems — bugs, security, correctness, missing edge cases — each with a file and line to point at. Do not invent issues: if you cannot justify a problem from what you read, do not report it. Never change anything. You may run exactly one local test file when that would prove a finding (npx --no-install vitest run <file>, pnpm exec vitest run <file>, yarn vitest run <file>, or node --test <file>); no package script or other shell command is available. ' +
+      'You are a reviewer. Read the work you were handed and find only genuine problems — bugs, security, correctness, missing edge cases — each with a file and line to point at. Do not invent issues: if you cannot justify a problem from what you read, do not report it. Never change anything. You may read the history to see what actually changed — git diff, log, show, status, branch, blame, grep and the like, including `git diff <base>...HEAD` and `git log -p` — but nothing that writes, fetches or checks anything out. You may also run one local test file when that would prove a finding (npx --no-install vitest run <file>, pnpm exec vitest run <file>, yarn vitest run <file>, or node --test <file>). No package script or other shell command is available, so do not reach for one — say what you could not check instead of going quiet. ' +
       NEEDS_A_DECISION,
   },
   researcher: {

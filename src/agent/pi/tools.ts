@@ -551,8 +551,8 @@ export type ChecksNoted = () => (verdicts: readonly CheckVerdict[]) => void;
 export const runChecksTool = (
   cwd: string,
   agentDir: string,
-  model: HelperModel = null,
-  thinking?: HelperPace,
+  model: HelperModel | (() => HelperModel) = null,
+  thinking?: HelperPace | (() => HelperPace | undefined),
   noted?: ChecksNoted,
 ): ToolDefinition => ({
   name: 'run_checks',
@@ -613,8 +613,10 @@ export const runChecksTool = (
       const admitted = fleet.begin({ id, kind: 'helper', stop: () => {} });
       if (!admitted.ok) throw new Error(admitted.because);
       try {
+        const currentModel = typeof model === 'function' ? model() : model;
+        const currentThinking = typeof thinking === 'function' ? thinking() : thinking;
         const { outcome } = await runSubagent(
-          { task: brief, role: 'reviewer', cwd, agentDir, model, thinking },
+          { task: brief, role: 'reviewer', cwd, agentDir, model: currentModel, thinking: currentThinking },
           signal,
           () => {},
           {
@@ -1196,8 +1198,8 @@ async function runSubagent(
 
 export const taskTool = (
   agentDir: string,
-  model: HelperModel = null,
-  thinking?: HelperPace,
+  model: HelperModel | (() => HelperModel) = null,
+  thinking?: HelperPace | (() => HelperPace | undefined),
   projectRoot?: string,
 ): ToolDefinition => ({
   name: 'task',
@@ -1271,12 +1273,14 @@ export const taskTool = (
     let built = '';
     let ran: Ran;
     try {
+      const currentModel = typeof model === 'function' ? model() : model;
+      const currentThinking = typeof thinking === 'function' ? thinking() : thinking;
       ran = await runSubagent(
         // `project` is the session's real folder. `params.cwd` is model input
         // and must never decide where a helper starts: previously it was used
         // for accounting but accidentally dropped here, so helpers fell back
         // to Graphe's application directory and could not resolve the project.
-        { ...params, role: spec.name, cwd: where, agentDir, model, thinking },
+        { ...params, role: spec.name, cwd: where, agentDir, model: currentModel, thinking: currentThinking },
         signal,
         (text) => {
           progress += text;
@@ -2187,8 +2191,8 @@ export function pageTools(cwd?: string): ToolDefinition[] {
 export const grapheTools = (
   agentDir: string,
   figmaToken?: string | null,
-  model: HelperModel = null,
-  thinking?: HelperPace,
+  model: HelperModel | (() => HelperModel) = null,
+  thinking: HelperPace | (() => HelperPace | undefined) | undefined = undefined,
   projectRoot?: string,
   putOnBoard?: PutOnBoard,
   noted?: ChecksNoted,

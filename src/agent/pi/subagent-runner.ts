@@ -64,6 +64,24 @@ function paceOf(value: unknown): HelperPace | undefined {
   return PACES.find((level) => level === value);
 }
 
+function isTransientStreamError(cause: unknown): boolean {
+  const msg = cause instanceof Error ? cause.message : String(cause ?? '');
+  return (
+    /stream ended before a terminal response/i.test(msg) ||
+    /stream ended without producing/i.test(msg) ||
+    /Responses stream ended/i.test(msg) ||
+    /rate limit/i.test(msg) ||
+    /429/.test(msg) ||
+    /503/.test(msg) ||
+    /ETIMEDOUT|ECONNRESET/.test(msg) ||
+    /timeout/i.test(msg)
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** The one channel out. Only JSON lines ever leave, so a parent that reads by
  *  line never has to guess which parts are report and which are noise. The
  *  shapes are the `SubagentLine` contract in tools.ts. */
@@ -201,10 +219,22 @@ async function work(
 
   const pace = paceOf(job.thinking);
   const chosen = job.model ?? null;
-  const model =
-    chosen === null
-      ? runtime.getAvailableSnapshot()[0]
-      : (runtime.getModel(chosen.providerId, chosen.modelId) ?? runtime.getAvailableSnapshot()[0]);
+  let model: ReturnType<typeof runtime.getAvailableSnapshot>[number] | undefined;
+  if (chosen === null) {
+    model = runtime.getAvailableSnapshot()[0];
+  } else {
+    model = runtime.getModel(chosen.providerId, chosen.modelId);
+    if (model === undefined) {
+      report({
+        type: 'done',
+        outcome: {
+          ok: false,
+          error: `The model you selected (${chosen.providerId}/${chosen.modelId}) is not available for this helper — it may have been removed or renamed. Select a model that is available and try again.`,
+        },
+      });
+      return 1;
+    }
+  }
 
   // Said rather than survived. A helper with nothing to think with used to
   // finish quietly with an empty answer, which read as "it worked and found
@@ -290,7 +320,20 @@ async function work(
     session = created.session;
     const unsubscribe = created.session.subscribe((event) => relay.fromPi(event));
 
-    await created.session.prompt(`${spec.spoken}\n\n${job.task.trim()}`);
+    // Retry transient stream errors like helpers do for main session
+    const delays = [2_000, 10_000, 60_000];
+    for (let attempt = 0; attempt <= delays.length; attempt++) {
+      try {
+        await created.session.prompt(`${spec.spoken}\n\n${job.task.trim()}`);
+        break;
+      } catch (cause) {
+        if (isTransientStreamError(cause) && attempt < delays.length) {
+          await sleep(delays[attempt]!);
+          continue;
+        }
+        throw cause;
+      }
+    }
 
     // A run that was refused outright can resolve with no `settled` to follow.
     // Give the event a beat to land, then answer with whatever did.

@@ -16,10 +16,6 @@ export const researchWords = {
   chip: 'Digs deep',
   name: 'Research it properly',
   note: 'Sends several helpers out at once, weighs what they disagree about, and reports before touching anything.',
-  /** Said in the conversation the first time somebody uses it, so nobody is
-   *  surprised by a turn that takes minutes and spends more than usual. */
-  slower:
-    'This one goes wide: several helpers at once, each on its own part of the question. It takes longer than an ordinary answer and costs more, and nothing gets changed until you have read what came back.',
 } as const;
 
 /**

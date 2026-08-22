@@ -70,9 +70,11 @@ describe('what research sends', () => {
     expect(implementationPlanFromResearch('IMPLEMENTATION PLAN\n\n')).toBeNull();
   });
 
-  it('says what it will cost somebody before they wait for it', () => {
-    expect(researchWords.slower).toMatch(/longer/i);
-    expect(researchWords.slower).toMatch(/costs more/i);
+  it('does not emit a pre-research cost warning', () => {
+    expect((researchWords as Record<string, unknown>).slower).toBeUndefined();
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    expect(app).not.toContain('saidSlower');
+    expect(app).not.toContain('researchWords.slower');
   });
 
   it('is one-shot, so the next user sentence reaches the model without word matching', () => {

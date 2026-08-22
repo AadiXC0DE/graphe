@@ -49,7 +49,7 @@ import { readdir } from 'node:fs/promises';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
-import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type HelperModel, type HelperPace } from './tools';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
@@ -1155,6 +1155,30 @@ function plainly(cause: unknown): string {
   return 'Something went wrong on my side, and I have stopped where I was.';
 }
 
+/** Transient errors that should be retried automatically (like other agents do).
+ *  Covers the "OpenAI Responses stream ended before a terminal response event"
+ *  that actually comes from pi's OpenAI-compatible path and affects opencode/
+ *  codex providers, plus network and rate-limit errors. */
+function isTransientStreamError(cause: unknown): boolean {
+  const msg = cause instanceof Error ? cause.message : String(cause ?? '');
+  return (
+    /stream ended before a terminal response/i.test(msg) ||
+    /stream ended without producing/i.test(msg) ||
+    /Responses stream ended/i.test(msg) ||
+    /rate limit/i.test(msg) ||
+    /429/.test(msg) ||
+    /503/.test(msg) ||
+    /ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN/.test(msg) ||
+    /timeout/i.test(msg) ||
+    /network error/i.test(msg) ||
+    /fetch failed/i.test(msg)
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Pi refuses a second prompt while a turn is still running unless it is told
  *  how to queue it. Recognised by its own sentence, so an upgrade that renames
  *  the error cannot take the queue with it. */
@@ -1517,18 +1541,29 @@ const MOST_AFTER_SAYINGS = 3;
       ? undefined
       : runtime.getModel(chosen.providerId, chosen.modelId) ?? undefined;
 
+  // Our own ids rather than Pi's `Model`, so no Pi shape leaves this file.
+  // Keep what user selected even if stale — helpers will surface an error
+  // rather than silently switching to a different model (the model 1 vs 2 bug).
+  let inUse: { providerId: string; modelId: string } | null =
+    chosen === null || chosen === undefined ? null : { providerId: chosen.providerId, modelId: chosen.modelId };
+  let currentThinking: HelperPace | undefined = options.thinking as HelperPace | undefined;
+
   // A helper thinks with whatever this session thinks with. Resolved here and
   // handed over, because the child has no settings of its own to fall back on.
-  const forHelpers =
-    model === undefined
-      ? firstUsable(runtime)
-      : { providerId: model.provider, modelId: model.id };
+  // These are getters so a later useModel()/setThinking() updates helpers immediately.
+  const getHelperModel = (): HelperModel => {
+    if (inUse !== null) return { providerId: inUse.providerId, modelId: inUse.modelId };
+    // No explicit choice — use whatever the session model would be or first available
+    if (model !== undefined) return { providerId: model.provider, modelId: model.id };
+    return firstUsable(runtime);
+  };
+  const getHelperThinking = (): HelperPace | undefined => currentThinking;
 
   const customTools = grapheTools(
     agentDir,
     options.figmaToken,
-    forHelpers,
-    options.thinking,
+    getHelperModel,
+    getHelperThinking,
     options.projectRoot,
     options.putOnBoard,
     desk.noting,
@@ -1675,9 +1710,7 @@ const MOST_AFTER_SAYINGS = 3;
     ...(settings.prefix === undefined ? {} : { commandPrefix: settings.prefix }),
   });
 
-  /* Our own ids rather than Pi's `Model`, so no Pi shape leaves this file. */
-  let inUse: { providerId: string; modelId: string } | null =
-    model === undefined || chosen === null || chosen === undefined ? null : chosen;
+  // inUse already defined above (keeps chosen even if stale for helpers)
 
   // The manager stays in our hands after the session is built, because the read
   // side of a resumed conversation needs the same manager that will keep
@@ -1875,6 +1908,38 @@ const MOST_AFTER_SAYINGS = 3;
             }
           }
         }
+        // Helper to retry transient stream errors (like "OpenAI Responses stream
+        // ended before a terminal response event" which affects opencode/codex
+        // providers via the OpenAI-compatible path) — other agents retry in
+        // ~1 min, so we do too rather than leaving a long task to fail.
+        const delays = [2_000, 10_000, 60_000];
+        const doPromptWithRetry = async (promptText: string, opts: unknown): Promise<void> => {
+          for (let attempt = 0; attempt <= delays.length; attempt++) {
+            try {
+              await (session.prompt as (text: string, opts?: unknown) => Promise<void>)(promptText, opts as never);
+              return;
+            } catch (cause) {
+              if (isTransientStreamError(cause) && attempt < delays.length) {
+                const waitMs = delays[attempt]!;
+                const waitSec = Math.round(waitMs / 1000);
+                // Tell the window we're retrying so a long task doesn't look dead
+                try {
+                  say({
+                    type: 'message-delta',
+                    text: `\n\nStream interrupted — retrying in ${waitSec}s (attempt ${attempt + 1}/${delays.length})…`,
+                  });
+                  say({ type: 'message-end' });
+                } catch {
+                  // Window not listening — retry still happens
+                }
+                await sleep(waitMs);
+                continue;
+              }
+              throw cause;
+            }
+          }
+        };
+
         // The window chose to queue this message behind the run in flight
         // (the composer's "queue it" option). Pi delivers a prompt marked
         // followUp after the current turn finishes, without interrupting it.
@@ -1883,10 +1948,10 @@ const MOST_AFTER_SAYINGS = 3;
             withPictures === undefined
               ? { streamingBehavior: 'followUp' as const }
               : { ...withPictures, streamingBehavior: 'followUp' as const };
-          await session.prompt(said, queued);
+          await doPromptWithRetry(said, queued);
         } else {
           try {
-            await session.prompt(said, withPictures);
+            await doPromptWithRetry(said, withPictures);
           } catch (cause) {
             // Pi refuses a second prompt while a turn is still running unless
             // it is told how to queue it. The window can ask while the agent
@@ -1899,7 +1964,7 @@ const MOST_AFTER_SAYINGS = 3;
               withPictures === undefined
                 ? { streamingBehavior: 'followUp' as const }
                 : { ...withPictures, streamingBehavior: 'followUp' as const };
-            await session.prompt(said, queued);
+            await doPromptWithRetry(said, queued);
           }
         }
       } catch (cause) {
@@ -1962,6 +2027,7 @@ const MOST_AFTER_SAYINGS = 3;
     setThinking(level: ThinkingLevel): ThinkingLevel {
       if (closed) return session.thinkingLevel as ThinkingLevel;
       session.setThinkingLevel(level);
+      currentThinking = session.thinkingLevel as HelperPace;
       return session.thinkingLevel as ThinkingLevel;
     },
 

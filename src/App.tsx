@@ -66,7 +66,7 @@ import {
 } from "./cost/phrasing";
 import { sizeUp } from "./cost/sizing";
 import { parseProposal, worthPlanning } from "./agent/plan";
-import { asResearch, implementationPlanFromResearch, researchWords } from "./agent/research";
+import { asResearch, implementationPlanFromResearch } from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
@@ -428,9 +428,6 @@ function Conversation() {
    *  `auto` decides from the sentence, which is what almost everybody wants;
    *  the other two are for somebody who has an opinion about this one. */
   const [plans, setPlans] = useState<'auto' | 'always' | 'never' | 'research'>('auto');
-  /** Whether the sentence about how long research takes has been said. Once per
-   *  sitting: a warning repeated every time is a warning nobody reads. */
-  const saidSlower = useRef(false);
   /** Research is a one-message choice. While that one run is live, its model
    *  output is kept by conversation so an explicit IMPLEMENTATION PLAN section
    *  can become the build checklist. No word matching decides the next action. */
@@ -2405,11 +2402,6 @@ function Conversation() {
         setPlans('auto');
         // What comes back is a report to answer, not a request to look around.
         justLookedFirst.current = true;
-        // Said once a sitting, before the wait rather than after it.
-        if (!saidSlower.current) {
-          saidSlower.current = true;
-          say(researchWords.slower);
-        }
         await deliver(asResearch(text), priced.task, { lookFirst: false });
         return;
       }

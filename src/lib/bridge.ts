@@ -747,6 +747,13 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(true));
     },
 
+    answerAsked(
+      _id: string,
+      _answers: Readonly<Record<string, readonly string[]>> | null,
+    ): Promise<Result<boolean>> {
+      return Promise.resolve(done(true));
+    },
+
     /** The third project, as though somebody had gone and found it. A browser
      *  tab has no folder picker to open, and answering "you closed it" would
      *  leave the one control on the empty picker doing nothing at all. */
@@ -1686,6 +1693,10 @@ let previewHowFar: HowFar = 'asking';
 
     /* Nothing lands on its own behind a browser tab, so nothing is ever pushed
        at the window here. It asks, and it is answered. */
+    onBuildPlan(): () => void {
+      return () => undefined;
+    },
+
     onAway(): () => void {
       return () => {};
     },
@@ -1858,6 +1869,7 @@ function connect(): Bridge {
     stop: (where) => api.stop(where),
     steer: (text, where) => api.steer(text, where),
     answer: (callId, decision, where) => api.answer(callId, decision, where),
+    answerAsked: (id, answers, where) => api.answerAsked(id, answers, where),
     chooseFolder: () => api.chooseFolder(),
     recentProjects: () => api.recentProjects(),
     overview: (where) => api.overview(where),
@@ -1966,6 +1978,7 @@ function connect(): Bridge {
     switchRepeat: (id, on, where) => api.switchRepeat(id, on, where),
     forgetRepeat: (id, where) => api.forgetRepeat(id, where),
     onAway: (listener) => api.onAway(listener),
+    onBuildPlan: (listener) => api.onBuildPlan(listener),
     inStep: () => api.inStep(),
     followDesign: (address) => api.followDesign(address),
     lookAgain: () => api.lookAgain(),

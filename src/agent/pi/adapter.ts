@@ -49,12 +49,26 @@ import { readdir } from 'node:fs/promises';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
-import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type HelperModel, type HelperPace } from './tools';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
 import { McpRegistry, inProject, mcpTool, readMcpConfig } from './mcp';
 import { parseReview } from './review';
+import { askWords, cannotAsk, saysAnswers, tidyQuestions, type Answers } from '../asking';
+import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
+
+/**
+ * The last thing said in a sitting, and nobody is reading the answer.
+ *
+ * Named things rather than impressions: a note saying the work went well helps
+ * nobody next time, and a memory full of them is worse than an empty one.
+ */
+const WORTH_KEEPING = `This sitting is over and nobody is reading this reply, so keep it to the notes.
+
+Look back over what we just did. If you learned anything about this project that would save time next time — how it is built, how it is run, what it expects, a decision and why it went that way, something that caught you out — write each one down with retain, one fact per note, in a sentence that will still make sense months from now.
+
+Write nothing about how this sitting went, nothing you already have a note for, and nothing that reading the code would tell you just as fast. Most sittings are worth one or two notes and many are worth none, which is a fine answer. Say nothing else.`;
 import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
 import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
 import { Running, type RunningPiece } from '../running';
@@ -165,6 +179,49 @@ export class Confirmations {
     const open = [...this.waiting.values()];
     this.waiting.clear();
     for (const resolve of open) resolve('no');
+    return ids;
+  }
+}
+
+/**
+ * The one set of questions a turn is allowed to stop for, and who has answered.
+ *
+ * The same parking as `Confirmations` and for the same reason: the promise
+ * handed back to the tool has not resolved, so the model is genuinely waiting
+ * rather than being told to wait. What differs is the answer — a set of picks
+ * rather than a yes — and that an unanswered one resolves to "decide it
+ * yourself" instead of "no". A question nobody answers must never stop work.
+ */
+export class Asking {
+  private readonly waiting = new Map<string, (answers: Answers | null) => void>();
+
+  get pending(): readonly string[] {
+    return [...this.waiting.keys()];
+  }
+
+  ask(id: string): Promise<Answers | null> {
+    return new Promise<Answers | null>((resolve) => {
+      this.waiting.get(id)?.(null);
+      this.waiting.set(id, resolve);
+    });
+  }
+
+  /** Null is a real answer: it is somebody saying "just decide for me". */
+  answer(id: string, answers: Answers | null): boolean {
+    const resolve = this.waiting.get(id);
+    if (resolve === undefined) return false;
+    this.waiting.delete(id);
+    resolve(answers);
+    return true;
+  }
+
+  /** Stopping or closing lets every open question go. Never left hanging: the
+   *  turn is over, and a promise nobody will resolve holds the loop forever. */
+  abandonAll(): readonly string[] {
+    const ids = [...this.waiting.keys()];
+    const open = [...this.waiting.values()];
+    this.waiting.clear();
+    for (const resolve of open) resolve(null);
     return ids;
   }
 }
@@ -406,6 +463,9 @@ export type CreateSessionOptions = {
    *  `~/.pi/agent`, which is where signing in puts them. Worth overriding in a
    *  test: Pi creates the folder on sight. */
   agentDir?: string;
+  /** True for work nobody is sitting in front of. Such a run answers its own
+   *  questions, so it is never given the tool that asks one. */
+  unattended?: boolean;
   /** The model chosen to work with, or null for "whatever is available". The
    *  id is Pi's own — resolved inside this file, where the model objects
    *  live, and never heard of outside it. */
@@ -424,6 +484,8 @@ export type CreateSessionOptions = {
    *  request into pieces that run side by side; left out, it cannot — which is
    *  what keeps a run on the board from filling the board it is running on. */
   putOnBoard?: PutOnBoard;
+  /** Tick one thing off the checklist the person can see. */
+  stepDone?: StepDone;
 };
 
 /**
@@ -451,6 +513,10 @@ export type Room = {
   total: number;
   /** The two above as a fraction, 0 to 1; unknown with `used`. */
   part: number | null;
+  /** How many times this conversation has been shortened to make room. Zero
+   *  for almost every sitting; the number is what explains a conversation that
+   *  remembers less than somebody expects. */
+  shortened: number;
 };
 
 /** What came of asking for the line back. A line that would not come back is
@@ -530,6 +596,10 @@ export type GrapheSession = {
   forgetChecks(): void;
   /** Answer a `needs-confirmation`. False if there was no such question. */
   answer(callId: string, decision: Decision): boolean;
+  /** Answer the questions asked before the work started. Null is a real
+   *  answer — it is somebody saying to decide for them. False when that card
+   *  has already been answered or the turn it belonged to has ended. */
+  answerAsked(id: string, answers: Answers | null): boolean;
   /** How much of what the model can hold at once this conversation is using.
    *  Null before the model has answered once, and for a moment after a tidy —
    *  the count comes from the model's own reckoning, not ours. */
@@ -537,6 +607,10 @@ export type GrapheSession = {
   /** Shorten the conversation now, rather than waiting for it to fill up. False
    *  when there is nothing to shorten or one is already going. */
   tidyNow(): Promise<boolean>;
+  /** The sitting is over: write down anything about this project worth having
+   *  next time. Silent, at most once, and only after a sitting that did
+   *  something. False when there was nothing to do. */
+  settleUp(): Promise<boolean>;
   /** Stop asking before things the Guard would otherwise check, for as long as
    *  this session lives. Restore points and outright refusals are unaffected —
    *  see `stopAsking` in the Guard's own facts. */
@@ -1155,6 +1229,10 @@ function plainly(cause: unknown): string {
   return 'Something went wrong on my side, and I have stopped where I was.';
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Pi refuses a second prompt while a turn is still running unless it is told
  *  how to queue it. Recognised by its own sentence, so an upgrade that renames
  *  the error cannot take the queue with it. */
@@ -1244,6 +1322,13 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
   /** True only for the length of a looking-around pass. */
   let planning = false;
+  /** Nothing reaches the window while this is on, except what was spent. Used
+   *  for the one turn nobody asked for — see `settleUp`. */
+  let unwatched = false;
+  /** Whether this sitting did anything worth having notes about. */
+  let didSomething = false;
+  /** Once a sitting, at most. */
+  let settledUp = false;
   /** Whether this sitting has had its first question yet — the moment the most
    *  relevant notes are handed over, so memory works without being asked. */
   let firstTurn = true;
@@ -1252,9 +1337,33 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   /** Everything said since the last settled moment, so a review verdict can be
    *  read out of the final reply and shown as its own card. */
   let tape = '';
+  /**
+   * A failure caught on its way to the window, while there are still waits
+   * left to spend on it.
+   *
+   * The engine does not throw when a provider fails: the turn settles with the
+   * failure on it and `prompt()` returns as though all was well, which is why
+   * the retry that used to live around that call could never once have run.
+   * The failure arrives here instead. Held rather than shown, because a
+   * "stopped part way" card followed by the work carrying on underneath it is
+   * two contradictory things on one screen.
+   */
+  let heldBackTrouble: string | null = null;
+  let waitsLeft = 0;
   const say = (event: AgentEvent): void => {
+    if (event.type === 'tool-start') didSomething = true;
+    if (event.type === 'tidied' && event.ok) shortened += 1;
+    if (unwatched) {
+      // What it costs is never hidden, whoever asked for the turn.
+      if (event.type === 'spend') options.onEvent(event);
+      return;
+    }
     if (planning && event.type === 'message-delta') proposed += event.text;
     if (event.type === 'message-delta') tape += event.text;
+    if (event.type === 'error' && waitsLeft > 0 && isTransientStreamError(event.message)) {
+      heldBackTrouble = event.message;
+      return;
+    }
     options.onEvent(event);
     if (event.type === 'settled') {
       const verdict = parseReview(tape);
@@ -1269,6 +1378,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       if (stranded.length > 0) {
         options.onEvent({ type: 'questions-withdrawn', callIds: stranded });
       }
+      // The same for a card asked before the work: the turn is over, so
+      // nothing it says can reach anything. Left open it would be a form that
+      // reads as "still working" for the rest of the sitting.
+      const dropped = asking.abandonAll();
+      if (dropped.length > 0) options.onEvent({ type: 'asking-withdrawn', ids: dropped });
       sayWhatTheRulesHeld();
     }
   };
@@ -1321,7 +1435,12 @@ const MOST_AFTER_SAYINGS = 3;
   /** A change to the files makes every earlier check stale. Called on the way
    *  in, before the call runs, because afterwards is a moment too late. */
   const forgetChecks = (call: ToolCall): void => {
-    if (changesAnything(call, facts)) desk.forget();
+    if (!changesAnything(call, facts)) return;
+    desk.forget();
+    // The same moment closes the asking. Reading around first is fine and does
+    // not count as starting; changing something is what a person cannot be
+    // waiting behind.
+    if (asksLeft === 'open') asksLeft = 'started';
   };
 
   /**
@@ -1453,6 +1572,11 @@ const MOST_AFTER_SAYINGS = 3;
     },
   });
   const confirmations = new Confirmations();
+  /** The one set of questions a turn may stop for, and the count that names
+   *  them. Ids are per session, so a card answered in one conversation can
+   *  never resolve a question in another. */
+  const asking = new Asking();
+  let askedSoFar = 0;
 
   const review = createGuardInterceptor({
     facts,
@@ -1517,21 +1641,70 @@ const MOST_AFTER_SAYINGS = 3;
       ? undefined
       : runtime.getModel(chosen.providerId, chosen.modelId) ?? undefined;
 
+  // Our own ids rather than Pi's `Model`, so no Pi shape leaves this file.
+  // Keep what user selected even if stale — helpers will surface an error
+  // rather than silently switching to a different model (the model 1 vs 2 bug).
+  let inUse: { providerId: string; modelId: string } | null =
+    chosen === null || chosen === undefined ? null : { providerId: chosen.providerId, modelId: chosen.modelId };
+  let currentThinking: HelperPace | undefined = options.thinking as HelperPace | undefined;
+
   // A helper thinks with whatever this session thinks with. Resolved here and
   // handed over, because the child has no settings of its own to fall back on.
-  const forHelpers =
-    model === undefined
-      ? firstUsable(runtime)
-      : { providerId: model.provider, modelId: model.id };
+  // These are getters so a later useModel()/setThinking() updates helpers immediately.
+  const getHelperModel = (): HelperModel => {
+    if (inUse !== null) return { providerId: inUse.providerId, modelId: inUse.modelId };
+    // No explicit choice — use whatever the session model would be or first available
+    if (model !== undefined) return { providerId: model.provider, modelId: model.id };
+    return firstUsable(runtime);
+  };
+  const getHelperThinking = (): HelperPace | undefined => currentThinking;
+
+  /**
+   * Whether a question may still stop this turn.
+   *
+   * `open` only at the very top. It closes the moment anything is changed, and
+   * it closes for good once one set of questions has been asked — one stop per
+   * turn, at the start, or none. This is the whole safety property: a person
+   * told what is about to happen can walk away, and a person who walked away
+   * never comes back to find an hour was spent waiting on a form.
+   *
+   * It also never opens where nobody is watching. Background work answers its
+   * own questions by design, so the tool is not built for it at all.
+   */
+  let asksLeft: 'open' | 'started' | 'asked' = 'open';
+
+  const askFirst = async (raw: unknown): Promise<string> => {
+    if (asksLeft === 'started') return cannotAsk.started;
+    if (asksLeft === 'asked') return cannotAsk.already;
+    const questions = tidyQuestions(raw);
+    // Nothing survived: every "question" had one real answer, so there was
+    // never a decision for anybody to make.
+    if (questions.length === 0) return cannotAsk.nothingWorthAsking;
+
+    asksLeft = 'asked';
+    const id = `ask-${String(++askedSoFar)}`;
+    say({ type: 'asked-first', id, questions });
+    const answers = await asking.ask(id);
+    // Nobody answered, or somebody said to get on with it. Both are the same
+    // instruction to the model, and neither is a reason to stop.
+    if (answers === null) {
+      say({ type: 'asking-withdrawn', ids: [id] });
+      return askWords.skipped;
+    }
+    return saysAnswers(questions, answers);
+  };
 
   const customTools = grapheTools(
     agentDir,
     options.figmaToken,
-    forHelpers,
-    options.thinking,
+    getHelperModel,
+    getHelperThinking,
     options.projectRoot,
     options.putOnBoard,
     desk.noting,
+    // Nobody to answer means no tool, rather than a tool that always says so.
+    options.unattended === true ? null : askFirst,
+    options.stepDone,
   );
 
   /* The anchored edit and its read: the model reads a file, the read's reply
@@ -1675,9 +1848,7 @@ const MOST_AFTER_SAYINGS = 3;
     ...(settings.prefix === undefined ? {} : { commandPrefix: settings.prefix }),
   });
 
-  /* Our own ids rather than Pi's `Model`, so no Pi shape leaves this file. */
-  let inUse: { providerId: string; modelId: string } | null =
-    model === undefined || chosen === null || chosen === undefined ? null : chosen;
+  // inUse already defined above (keeps chosen even if stale for helpers)
 
   // The manager stays in our hands after the session is built, because the read
   // side of a resumed conversation needs the same manager that will keep
@@ -1771,17 +1942,21 @@ const MOST_AFTER_SAYINGS = 3;
 
   /** Read through the same small hole the automatic tidy reads through: a Pi
    *  upgrade that moves this costs a meter, not a session. */
+  /** How many times this conversation has been shortened. */
+  let shortened = 0;
+
   const roomNow = (): Room | null => {
     try {
       const usage = session.getContextUsage();
       if (usage === undefined || usage.contextWindow <= 0) return null;
       if (usage.tokens === null) {
-        return { used: null, total: usage.contextWindow, part: null };
+        return { used: null, total: usage.contextWindow, part: null, shortened };
       }
       return {
         used: usage.tokens,
         total: usage.contextWindow,
         part: Math.min(1, Math.max(0, usage.tokens / usage.contextWindow)),
+        shortened,
       };
     } catch {
       return null;
@@ -1835,6 +2010,10 @@ const MOST_AFTER_SAYINGS = 3;
       sayRulesDiagnostics();
       repairs.beginTurn();
       typesAskedThisTurn = false;
+      // A new request may ask again; a follow-up landing mid-run may not. The
+      // second is somebody adding to work already going, and stopping that to
+      // put a form up is exactly what this must never do.
+      if (activePrompts === 0) asksLeft = 'open';
       activePrompts += 1;
       const looking = options?.lookFirst === true;
       if (looking) {
@@ -1875,6 +2054,66 @@ const MOST_AFTER_SAYINGS = 3;
             }
           }
         }
+        /**
+         * Ask, and keep asking while the answer is only that the service is
+         * busy.
+         *
+         * Both endings are read the same way. A turn can fail by throwing
+         * before it starts, or — far more often — by settling with the failure
+         * on it, which `prompt()` reports as an ordinary return. The second is
+         * the one that ends long jobs, and it is the one nothing here used to
+         * see.
+         *
+         * The engine has already tried three times over fourteen seconds by the
+         * time this is reached. That covers a blip. This covers a rate limit
+         * measured in minutes and an outage measured in an afternoon, so
+         * somebody can start a long list and walk away from it.
+         */
+        const askUntilItAnswers = async (promptText: string, opts: unknown): Promise<void> => {
+          let words = promptText;
+          let how = opts;
+          for (let attempt = 0; ; attempt += 1) {
+            heldBackTrouble = null;
+            // Only ever one loop holding a failure back. A second prompt in
+            // flight — the composer's queued follow-up — would otherwise
+            // swallow this one's failure and let the turn end as though it had
+            // worked.
+            waitsLeft = activePrompts > 1 ? 0 : WAITS_MS.length - attempt;
+            try {
+              await (session.prompt as (text: string, opts?: unknown) => Promise<void>)(
+                words,
+                how as never,
+              );
+            } catch (cause) {
+              if (!isTransientStreamError(cause)) throw cause;
+              heldBackTrouble = plainly(cause);
+            } finally {
+              waitsLeft = 0;
+            }
+
+            const trouble = heldBackTrouble;
+            heldBackTrouble = null;
+            if (trouble === null) return;
+            if (attempt >= WAITS_MS.length) {
+              // Out of waits. The window has been told nothing about this yet,
+              // so it is told now, in the ordinary way.
+              // `waitsLeft` is back to zero, so this one is not held back.
+              say({ type: 'held', ok: false });
+              say({ type: 'error', message: trouble });
+              return;
+            }
+
+            const wait = WAITS_MS[attempt] ?? 0;
+            say({ type: 'holding', seconds: Math.round(wait / 1000) });
+            await sleep(wait);
+            say({ type: 'held', ok: true });
+            // Never the original request again: everything already done is
+            // still in the conversation, and asking twice does it twice.
+            words = CARRY_ON;
+            how = undefined;
+          }
+        };
+
         // The window chose to queue this message behind the run in flight
         // (the composer's "queue it" option). Pi delivers a prompt marked
         // followUp after the current turn finishes, without interrupting it.
@@ -1883,10 +2122,10 @@ const MOST_AFTER_SAYINGS = 3;
             withPictures === undefined
               ? { streamingBehavior: 'followUp' as const }
               : { ...withPictures, streamingBehavior: 'followUp' as const };
-          await session.prompt(said, queued);
+          await askUntilItAnswers(said, queued);
         } else {
           try {
-            await session.prompt(said, withPictures);
+            await askUntilItAnswers(said, withPictures);
           } catch (cause) {
             // Pi refuses a second prompt while a turn is still running unless
             // it is told how to queue it. The window can ask while the agent
@@ -1899,7 +2138,7 @@ const MOST_AFTER_SAYINGS = 3;
               withPictures === undefined
                 ? { streamingBehavior: 'followUp' as const }
                 : { ...withPictures, streamingBehavior: 'followUp' as const };
-            await session.prompt(said, queued);
+            await askUntilItAnswers(said, queued);
           }
         }
       } catch (cause) {
@@ -1962,6 +2201,7 @@ const MOST_AFTER_SAYINGS = 3;
     setThinking(level: ThinkingLevel): ThinkingLevel {
       if (closed) return session.thinkingLevel as ThinkingLevel;
       session.setThinkingLevel(level);
+      currentThinking = session.thinkingLevel as HelperPace;
       return session.thinkingLevel as ThinkingLevel;
     },
 
@@ -1973,6 +2213,8 @@ const MOST_AFTER_SAYINGS = 3;
       // dead while the run behind it had already ended.
       const withdrawn = confirmations.abandonAll();
       if (withdrawn.length > 0) say({ type: 'questions-withdrawn', callIds: withdrawn });
+      const letGo = asking.abandonAll();
+      if (letGo.length > 0) say({ type: 'asking-withdrawn', ids: letGo });
       await session.abort();
       // The run is over whatever pi did with the abort. Saying so is what puts
       // the composer back to Send; waiting for an event that may not come is
@@ -2020,6 +2262,7 @@ const MOST_AFTER_SAYINGS = 3;
       if (closed) return;
       closed = true;
       confirmations.abandonAll();
+      asking.abandonAll();
       unsubscribe();
       session.dispose();
       void shell.close();
@@ -2038,8 +2281,14 @@ const MOST_AFTER_SAYINGS = 3;
       return confirmations.answer(callId, decision);
     },
 
+    answerAsked(id: string, answers: Answers | null): boolean {
+      return asking.answer(id, answers);
+    },
+
     get awaitingAnswer(): readonly string[] {
-      return confirmations.pending;
+      // Both kinds. A conversation parked on either is one somebody is in the
+      // middle of, and evicting it would answer for them.
+      return [...confirmations.pending, ...asking.pending];
     },
 
     get room(): Room | null {
@@ -2095,6 +2344,36 @@ const MOST_AFTER_SAYINGS = 3;
         return true;
       } catch {
         return false;
+      }
+    },
+
+    /**
+     * The sitting is over. Write down anything worth keeping.
+     *
+     * A sitting already begins by carrying its notes in; this is the other
+     * half, and without it the memory only ever holds what somebody thought to
+     * ask for. The conversation is still loaded, so this is the cheapest moment
+     * there will ever be to ask — and the last.
+     *
+     * Nothing of it reaches the window. Whoever closed the conversation has
+     * moved on, and a reply arriving after they left is not something they can
+     * do anything with. What it spends is still reported, because money is
+     * never hidden.
+     *
+     * Quiet about its own failures too: a sitting that could not write its
+     * notes down is not a sitting that went wrong.
+     */
+    async settleUp(): Promise<boolean> {
+      if (closed || settledUp || memory === null || !didSomething) return false;
+      settledUp = true;
+      unwatched = true;
+      try {
+        await session.prompt(WORTH_KEEPING);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        unwatched = false;
       }
     },
 

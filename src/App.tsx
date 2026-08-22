@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
+import AskFirst from "./components/AskFirst";
 import type { Attachment } from "./components/Attachments";
 import BuildProgress from "./components/BuildProgress";
 import Composer from "./components/Composer";
@@ -30,6 +31,7 @@ import EvidenceReel from "./components/EvidenceReel";
 import Running from "./components/Running";
 import { asksAbout } from "./preview/point";
 import { ATTACH_WORDS, pictureType, readsPictures } from "./lib/attachments";
+import type { Answers } from "./agent/asking";
 import { PLAN_WORDS, decidedMessage, type PlanDecision } from "./agent/plan";
 import { reviewAsMarkdown } from "./agent/pi/review";
 import { saysUseYours } from "./design/drift";
@@ -58,6 +60,7 @@ import AskAnything from "./components/AskAnything";
 import type { Found, Things } from "./lib/anything";
 import type { Task } from "./cost/estimate";
 import {
+  busyService,
   longConversation,
   meter,
   nothingSpentYet,
@@ -65,8 +68,15 @@ import {
   sessionSummary,
 } from "./cost/phrasing";
 import { sizeUp } from "./cost/sizing";
-import { parseProposal, worthPlanning } from "./agent/plan";
-import { asResearch, implementationPlanFromResearch, researchWords } from "./agent/research";
+import { parseProposal, shouldLookFirst } from "./agent/plan";
+import {
+  asLinesOfEnquiry,
+  asResearch,
+  chosenDepth,
+  implementationPlanFromResearch,
+  lookingInto,
+  stepsNotOnTheList,
+} from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
@@ -428,9 +438,6 @@ function Conversation() {
    *  `auto` decides from the sentence, which is what almost everybody wants;
    *  the other two are for somebody who has an opinion about this one. */
   const [plans, setPlans] = useState<'auto' | 'always' | 'never' | 'research'>('auto');
-  /** Whether the sentence about how long research takes has been said. Once per
-   *  sitting: a warning repeated every time is a warning nobody reads. */
-  const saidSlower = useRef(false);
   /** Research is a one-message choice. While that one run is live, its model
    *  output is kept by conversation so an explicit IMPLEMENTATION PLAN section
    *  can become the build checklist. No word matching decides the next action. */
@@ -1741,7 +1748,8 @@ function Conversation() {
           researchReports.current = withoutThis;
           const planText = implementationPlanFromResearch(report);
           const project = notice.project;
-          const steps = planText === null ? [] : parseProposal(planText).steps;
+          const proposal = planText === null ? null : parseProposal(planText);
+          const steps = proposal?.steps ?? [];
           if (planText !== null && project !== null && steps.length > 0) {
             void bridge
               .buildSave(
@@ -1749,7 +1757,18 @@ function Conversation() {
                 { project },
               )
               .then((answer) => {
-                if (answer.ok) void refreshBuildPlan(project);
+                if (!answer.ok) return;
+                void refreshBuildPlan(project);
+                // A list that stops short and says nothing reads as the whole
+                // plan, which is the one thing it is not.
+                const missed = stepsNotOnTheList(proposal?.caveats ?? []);
+                if (missed === null) return;
+                setDesks((current) =>
+                  changeDesk(current, project, (one) => ({
+                    ...one,
+                    turns: [...one.turns, said('graphe', missed)],
+                  })),
+                );
               });
           }
           // Whether "now build it" gets a checklist depends on what came back.
@@ -2070,12 +2089,36 @@ function Conversation() {
      conversation down · ⌘1–9 goes to one of the things open · ⌘⇧[ and ⌘⇧] move
      along the row · ⌘⇧N goes to whatever has stopped to ask you. */
   useEffect(() => {
+    /* Escape means "back out of what is in front of me". Only when nothing is
+       in front of you does it mean "stop the run", and one press must never do
+       both — this listener sits on the window and was registered before any
+       panel's, so it ran first: opening Settings, looking, and pressing Escape
+       to leave stopped the turn and killed every helper with it, in the same
+       frame as the panel closing. */
+    const overlayUp = (): boolean =>
+      settingsOpen ||
+      usageOpen ||
+      skillsOpen ||
+      connectedOpen ||
+      addMore ||
+      paletteOpen ||
+      graphOpen ||
+      reviewsOpen ||
+      changesOpen ||
+      asking ||
+      helpersAt !== null ||
+      designAt !== null;
+
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        // Something nearer the key already answered it — the composer's own
+        // menu, or anything else below the window.
+        if (event.defaultPrevented) return;
         if (connectOpen) {
           if (connectBusy) cancelConnect();
           else closeConnect();
         } else if (switching) setSwitching(false);
+        else if (overlayUp()) return;
         else if (busy) halt();
         return;
       }
@@ -2181,6 +2224,20 @@ function Conversation() {
     cancelConnect,
     closeConnect,
     togglePane,
+    // What is in front of the conversation. Escape belongs to whichever of
+    // these is up, and only reaches the run when none of them is.
+    settingsOpen,
+    usageOpen,
+    skillsOpen,
+    connectedOpen,
+    addMore,
+    paletteOpen,
+    graphOpen,
+    reviewsOpen,
+    changesOpen,
+    asking,
+    helpersAt,
+    designAt,
   ]);
 
   /* ----------------------------------------------------------------- saying */
@@ -2405,12 +2462,7 @@ function Conversation() {
         setPlans('auto');
         // What comes back is a report to answer, not a request to look around.
         justLookedFirst.current = true;
-        // Said once a sitting, before the wait rather than after it.
-        if (!saidSlower.current) {
-          saidSlower.current = true;
-          say(researchWords.slower);
-        }
-        await deliver(asResearch(text), priced.task, { lookFirst: false });
+        await deliver(asResearch(text, chosenDepth()), priced.task, { lookFirst: false });
         return;
       }
 
@@ -2423,9 +2475,10 @@ function Conversation() {
       // "Always" means always: somebody who set it gets a look-around for
       // anything they type, and answers the plan with the button. Only the
       // guess — "auto" reading the words — steps aside for its own answer.
-      const lookFirst =
-        howFar !== 'doing' &&
-        (plans === 'always' || (plans === 'auto' && !answering && worthPlanning(text)));
+      // Full access means do not stop and ask. It never meant work without a
+      // list — the biggest jobs are the ones that most need one, and the plan
+      // approves itself the moment it lands.
+      const lookFirst = shouldLookFirst({ plans, answering, text });
       if (lookFirst) {
         asked.current = text;
         justLookedFirst.current = true;
@@ -2504,14 +2557,12 @@ function Conversation() {
           setPlans('auto');
           // What comes back is a report to answer, not a request to look around.
           justLookedFirst.current = true;
-          void deliver(asResearch(text), sizeUp(text), { lookFirst: false, queue: 'followUp' });
+          void deliver(asResearch(text, chosenDepth()), sizeUp(text), { lookFirst: false, queue: 'followUp' });
           return;
         }
         const answering = justLookedFirst.current;
         justLookedFirst.current = false;
-        const lookFirst =
-          howFar !== 'doing' &&
-          (plans === 'always' || (plans === 'auto' && !answering && worthPlanning(text)));
+        const lookFirst = shouldLookFirst({ plans, answering, text });
         if (lookFirst) {
           asked.current = text;
           justLookedFirst.current = true;
@@ -2753,6 +2804,10 @@ function Conversation() {
       );
       if (text === "") return;
       asked.current = "";
+      // The look-around has been answered here. Without this the next thing
+      // somebody typed counted as the answer to it and skipped its own list,
+      // so every message straight after an accepted plan got none.
+      justLookedFirst.current = false;
       if (go) {
         // A build plan keeps the real task list the agent proposed, so a
         // resumed session knows each step and where it got to.
@@ -2780,7 +2835,9 @@ function Conversation() {
               ? null
               : PLAN_WORDS.doThese(agreed, dropped)
             : decidedMessage(chosen.decision);
-        const say = extra === null ? text : `${text}\n\n${extra}`;
+        const withExtra = extra === null ? text : `${text}\n\n${extra}`;
+        // A list nobody told the model about is a list nobody ticks.
+        const say = agreed.length > 0 ? `${withExtra}\n\n${PLAN_WORDS.ticking}` : withExtra;
         void deliver(say, sizeUp(say), { lookFirst: false });
       } else setDraft(text);
     },
@@ -2834,14 +2891,16 @@ function Conversation() {
      so a big document can be kicked off and left alone.*/
   useEffect(() => {
     if (desk === null) return;
-    if (holdsBack(preferences.heldBack, desk.path)) return;
+    // "Until it's done" is itself the answer, whatever the project's hold-back
+    // says: somebody who picked it has already said not to stop and ask.
+    if (howFar !== 'doing' && holdsBack(preferences.heldBack, desk.path)) return;
     const waiting = desk.turns.find((one) => one.kind === 'plan' && one.answered === null);
     if (waiting === undefined || waiting.kind !== 'plan') return;
     // A plan that asked something must never answer itself. Asking two
     // questions and then answering them yourself is worse than never asking.
     if (waiting.questions.length > 0) return;
     answerPlan(waiting.id, true);
-  }, [desk, preferences.heldBack, answerPlan]);
+  }, [desk, preferences.heldBack, answerPlan, howFar]);
 
   const respond = useCallback(
     (turnId: string, callId: string, decision: Decision) => {
@@ -2863,6 +2922,39 @@ function Conversation() {
     },
     [],
   );
+
+  /**
+   * The answer to the questions asked before the work started.
+   *
+   * Null is a real answer — "just decide for me" — and the shell reads it as
+   * one. The turn is closed here rather than waited on: the agent withdraws
+   * every ask it answers, and a card still open when that arrives would be
+   * marked as never answered at all.
+   */
+  const answerAsked = useCallback((turnId: string, answers: Answers | null) => {
+    setDesks((current) =>
+      changeCurrent(current, (one) => ({
+        ...one,
+        turns: one.turns.map((turn) =>
+          turn.kind === "asked-first" && turn.id === turnId
+            ? {
+                ...turn,
+                answers: answers ?? {},
+                answered:
+                  answers === null
+                    ? ("waved-through" as const)
+                    : ("answered" as const),
+              }
+            : turn,
+        ),
+      })),
+    );
+    const here = currentDesk(desksNow.current);
+    void bridge.answerAsked(turnId, answers, {
+      ...(here === null ? {} : { project: here.path }),
+      ...(here?.address == null ? {} : { conversation: here.address }),
+    });
+  }, []);
 
   const dismiss = useCallback((turnId: string) => {
     setDesks((current) =>
@@ -3250,14 +3342,21 @@ function Conversation() {
 
   /* Pushed at the window whenever something lands, including the first moment
      after it has been away and come back. Subscribed once. */
-  useEffect(
-    () =>
-      bridge.onAway((notice) => {
-        setAway((current) => ({ ...current, [notice.project]: notice.away }));
-        setNow(Date.now());
-      }),
-    [],
-  );
+  useEffect(() => {
+    const stopAway = bridge.onAway((notice) => {
+      setAway((current) => ({ ...current, [notice.project]: notice.away }));
+      setNow(Date.now());
+    });
+    // The checklist, while the reply is still going. The model ticks its own
+    // items off now, so this is the only thing that shows it moving.
+    const stopPlan = bridge.onBuildPlan((notice) => {
+      setBuildPlan(notice.plan === null ? null : { path: notice.project, plan: notice.plan });
+    });
+    return () => {
+      stopAway();
+      stopPlan();
+    };
+  }, []);
 
   /* Every folder's board, once, on the way in. Notices arrive as things happen;
      without this first read, work already running in a project nobody has
@@ -3827,6 +3926,15 @@ function Conversation() {
   const shelved = desk !== null;
   const research = researchLog(desk?.turns ?? []);
   const helpers = desk === null ? [] : helpersRunning(desk);
+  // On the rail, each helper wears the one question it is answering: a run
+  // working four angles at once should read as four angles, not as a spinner.
+  // The board behind it keeps the whole of what each was asked.
+  const angles = asLinesOfEnquiry(helpers);
+  const intoIt = lookingInto(helpers);
+  const doingNow = nowDoing(desk?.turns ?? []);
+  // What it is looking into takes the band while any of it is still out: that
+  // is the thing worth reading, and the step underneath it will come back.
+  const nowThere = intoIt === null ? doingNow : { ...doingNow, step: intoIt };
 
   /* The top row is only the conversations open in this project. Projects are
      switched in the sidebar, where the whole project list stays in one stable
@@ -4246,6 +4354,7 @@ function Conversation() {
                   <Turnstile
                     turn={row.turn}
                     onRespond={respond}
+                    onAnswerAsked={answerAsked}
                     onDismiss={dismiss}
                     onAnswerEstimate={answerEstimate}
                     onAnswerPlan={answerPlan}
@@ -4335,7 +4444,7 @@ function Conversation() {
                 the right: that panel is a reading of what has happened, and
                 these two are what is happening. */}
             <HelperRail
-              helpers={helpers}
+              helpers={angles}
               onOpen={(at) => {
                 goToScreen("helpers");
                 setHelpersAt({ at });
@@ -4407,7 +4516,7 @@ function Conversation() {
         <Overview
           key={`${desk.path}\u0000${desk.address ?? ''}`}
           view={{
-            now: nowDoing(desk.turns),
+            now: nowThere,
             git: desk.overview?.git ?? null,
             research,
             references: desk.references,
@@ -4764,6 +4873,7 @@ function Picture({ change }: { change: VisualChange }) {
 function Turnstile({
   turn,
   onRespond,
+  onAnswerAsked,
   onDismiss,
   onAnswerEstimate,
   onAnswerPlan,
@@ -4773,6 +4883,7 @@ function Turnstile({
 }: {
   turn: Turn;
   onRespond: (turnId: string, callId: string, decision: Decision) => void;
+  onAnswerAsked: (turnId: string, answers: Answers | null) => void;
   onDismiss: (turnId: string) => void;
   onAnswerEstimate: (turn: EstimateTurn, go: boolean) => void;
   onAnswerPlan: (
@@ -4839,6 +4950,19 @@ function Turnstile({
         />
       );
 
+    // Asked before a single file is touched, so that everything after it can
+    // happen with nobody watching. The card holds the picking; the turn only
+    // hears the answer.
+    case "asked-first":
+      return (
+        <AskFirst
+          questions={turn.questions}
+          answers={turn.answers}
+          answered={turn.answered}
+          onAnswer={(answers) => onAnswerAsked(turn.id, answers)}
+        />
+      );
+
     case "plan":
       return (
         <PlanCard
@@ -4902,6 +5026,22 @@ function Turnstile({
           state={turn.state}
           label={turn.state === 'failed' ? longConversation.stayedAsIs : longConversation.tidying}
           real={showMe ? behind.tidying : undefined}
+        />
+      );
+
+    case "holding":
+      // A service that could not answer, and the wait before asking again.
+      // Nothing to look at for up to half an hour, so the line says how long.
+      return (
+        <ActivityLine
+          state={turn.state}
+          label={
+            turn.state === 'failed'
+              ? busyService.gaveUp
+              : turn.state === 'done'
+                ? busyService.carriedOn
+                : busyService.waiting(turn.seconds)
+          }
         />
       );
 

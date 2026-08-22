@@ -34,13 +34,36 @@ environment variables, percent-encoding, and Windows separators are all resolved
 globally pre-approved. There is deliberately no "accept everything" mode, because that switch is the
 first thing users flip and the last thing they should.
 
-## What is not yet true
+## What the boundary actually is
 
-Being straight about this, because a security document that overstates its position is worse than none.
-
-- **Process isolation is not implemented yet.** The policy layer is built and tested; the container
-  boundary beneath it is not. Until it lands, the guard is a strong filter rather than a hard
-  boundary, and Graphe should be treated as pre-release software.
+- **Policy layer + OS boundary, layered.** Every tool call is judged by a pure, synchronous, deny-by-default
+  policy engine (`src/agent/guard/policy.ts`) that never reads model prose. Beneath that, commands run inside
+  an OS boundary when the machine offers one: macOS `sandbox-exec` (Seatbelt) and Linux `bubblewrap`. The boundary
+  is *proved* at startup by attempting a real escape write and checking it was refused (`src/agent/sandbox`).
+  Helpers are additionally wrapped and self-probe from inside; a missing boundary is reported alongside the
+  helper's answer, never silently. Helpers that write (builder role) do so only inside a private git worktree.
+- **Reads are allow-listed on macOS.** Everything is denied and the places a command genuinely needs are
+  named: system libraries and frameworks, certificate stores, the runtime it executes, per-user tool
+  installs, and the project itself. File *names and dates* stay readable everywhere — directory traversal
+  and `pwd` are impossible without that — but contents outside the list are not, so a Guard bypass no longer
+  reaches `~/.ssh` or another tool's saved login. On Linux the boundary is still read-open except for private
+  places, because bubblewrap has no read denial and the equivalent is a much larger change.
+- **Egress is checked by address on macOS, for the agent's own shell.** It goes through a loopback
+  doorway that accepts `CONNECT` only for known hosts; the profile then opens nothing else, so going
+  around the doorway fails in the kernel rather than being asked not to. Extra addresses come from
+  `GRAPHE_EGRESS_HOSTS`. If the doorway cannot open, the run says so rather than quietly reverting to
+  reaching anything. **Helpers are not behind it** — they run in a runtime that reads no proxy setting,
+  so a helper pointed at the doorway walks past it into a profile that permits the doorway and nothing
+  else, which leaves it with no way out at all. Until the child installs a proxy-aware dispatcher and
+  the sign-in addresses it refreshes tokens against are on the list, a helper reaches secure addresses
+  directly and the Guard is what stands between it and where it goes.
+- **Known gaps, stated plainly.** Egress on Linux is port-only: with the network namespace shared there is
+  nothing to filter with, and with it unshared the doorway is unreachable, so a proxy setting there would be
+  a request the child could ignore. A server started by `keep_running` is not put behind the doorway — a dev
+  server legitimately reaches many addresses, and breaking that is worse than the narrow case it would close;
+  the command itself is still judged by the Guard first. **Windows has no kernel boundary at all** (Guard
+  only). `sandbox-exec` is deprecated by Apple since 10.10. The single kill switch is `GRAPHE_SANDBOX=off`.
+  See `src/agent/sandbox/index.ts` notes for the full list.
 - **Prompt injection cannot be fully prevented.** Text inside a repository can influence the model. The
   guard is designed on the assumption that it sometimes will, which is why enforcement sits below the
   model rather than inside the prompt.

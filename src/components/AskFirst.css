@@ -1,0 +1,435 @@
+/* The questions asked before anything is touched.
+
+   Same grammar as the plan and the confirmation: raised ground in the thread,
+   no dimmed backdrop, one accent doing one job. Being asked something is an
+   ordinary moment — but it is the one moment in a run where somebody is meant
+   to stop and read, so the heading carries more weight than the plan's does. */
+
+.askfirst {
+  --askfirst-mark: 16px;
+  /* A row is wide, so it presses less far than a button would. */
+  --askfirst-press: 0.99;
+
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+  animation: askfirst-arrives var(--dur-large) var(--ease-out-quart) both;
+}
+
+@keyframes askfirst-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.askfirst__heading {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.askfirst__why {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* -------------------------------------------------------------- questions */
+
+.askfirst__questions {
+  list-style: none;
+  margin: var(--space-5) 0 0;
+  padding: 0;
+}
+
+/* A rule between them rather than a box around each: four questions in four
+   boxes reads as a form, and this is meant to read as being asked. */
+.askfirst__question + .askfirst__question {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+/* Two or three words naming what is being decided, so a card with four
+   questions can be scanned as four decisions. */
+.askfirst__header {
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+.askfirst__asked {
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: var(--text-base);
+  font-weight: 550;
+  line-height: 1.45;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.askfirst__choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ---------------------------------------------------------------- a choice */
+
+.askfirst__choice {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  /* Generous on all four sides rather than a min-height: a one-line choice and
+     a three-line one then sit the same distance off their own edges. */
+  padding: var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.askfirst__choice:active {
+  transform: scale(var(--askfirst-press));
+}
+
+/* Picked. The mark carries it, so nothing here depends on colour alone. */
+.askfirst__choice[data-on='true'] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* The ring belongs on the row, not on the 1px box the input has been reduced
+   to. Nothing else in the app needs this, so it is said here. */
+.askfirst__choice:has(.askfirst__input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .askfirst__choice:hover {
+    background: var(--bg-sunken);
+  }
+
+  .askfirst__choice[data-on='true']:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+}
+
+/* Out of sight and still the control: the row is its label, so every click and
+   every keystroke lands on the real input. */
+.askfirst__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.askfirst__input:focus-visible {
+  outline: none;
+}
+
+.askfirst__mark {
+  position: relative;
+  flex: none;
+  width: var(--askfirst-mark);
+  height: var(--askfirst-mark);
+  /* Centred on the first line of the label rather than on the whole block, so
+     a two-line choice does not leave the mark floating. */
+  margin-top: calc((1.5em - var(--askfirst-mark)) / 2);
+  border: 1.5px solid var(--border-control);
+  border-radius: 50%;
+  background: var(--bg-raised);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+/* Several can be picked, so the mark is a box rather than a circle — and at
+   16px the smallest radius we have still reads round, so it is halved. */
+.askfirst__choice--many .askfirst__mark {
+  border-radius: calc(var(--radius-sm) / 2);
+}
+
+.askfirst__mark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  transform: scale(0.4);
+  transition:
+    opacity var(--dur-micro) var(--ease-out-quart),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* One of these: a dot. */
+.askfirst__choice:not(.askfirst__choice--many) .askfirst__mark::after {
+  width: 50%;
+  height: 50%;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Any of these: a tick. Rotated about its own centre it reads low, so it is
+   lifted back onto the middle of the box. */
+.askfirst__choice--many .askfirst__mark::after {
+  width: 30%;
+  height: 56%;
+  border: solid var(--accent-text);
+  border-width: 0 2px 2px 0;
+  transform: translateY(-12%) rotate(45deg) scale(0.4);
+}
+
+.askfirst__choice[data-on='true'] .askfirst__mark {
+  border-color: var(--accent);
+}
+
+.askfirst__choice--many[data-on='true'] .askfirst__mark {
+  background: var(--accent);
+}
+
+.askfirst__choice[data-on='true'] .askfirst__mark::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.askfirst__choice--many[data-on='true'] .askfirst__mark::after {
+  transform: translateY(-12%) rotate(45deg) scale(1);
+}
+
+.askfirst__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.askfirst__label {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* The difference somebody is actually choosing between. */
+.askfirst__note {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* -------------------------------------------------------- their own words */
+
+.askfirst__own {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Opens by growing its own row rather than by appearing, so nothing below it
+   jumps. Closing runs faster than opening: the box going is the system keeping
+   up, the box arriving is somebody about to write in it. */
+.askfirst__reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-exit) var(--ease-in-out-cubic),
+    opacity var(--dur-exit) var(--ease-hover);
+}
+
+.askfirst__reveal[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows var(--dur-ui) var(--ease-out-quart),
+    opacity var(--dur-ui) var(--ease-out-quart);
+}
+
+/* Set in to the label above it, so it reads as that choice continuing. */
+.askfirst__revealed {
+  min-height: 0;
+  overflow: hidden;
+  padding: var(--space-1) var(--space-3) var(--space-1)
+    calc(var(--space-3) + var(--askfirst-mark) + var(--space-3));
+}
+
+.askfirst__words {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--text-sm);
+}
+
+.askfirst__words::placeholder {
+  color: var(--text-faint);
+}
+
+.askfirst__words:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------- the ask */
+
+.askfirst__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.askfirst__button {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    opacity var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.askfirst__button:active {
+  transform: scale(0.97);
+}
+
+.askfirst__button--skip {
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.askfirst__button--go {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+/* Dimmed rather than gone: its label says what would make it live, and it has
+   to stay reachable for that label to be read at all. */
+.askfirst__button[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.askfirst__button[aria-disabled='true']:active {
+  transform: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .askfirst__button--skip:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+
+  .askfirst__button--go:hover {
+    background: var(--accent-ink);
+    border-color: var(--accent-ink);
+  }
+
+  .askfirst__button[aria-disabled='true']:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+}
+
+/* ------------------------------------------------------------- answered */
+
+/* Answered, it stops being a control and becomes the record of what was
+   settled — flat ground, no buttons, nothing left to press. */
+.askfirst--settled {
+  background: none;
+  box-shadow: none;
+  padding: var(--space-3) var(--space-4);
+}
+
+.askfirst__record {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.askfirst__was {
+  display: block;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+.askfirst__picked {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* How it closed. Ruled off, or on a card where nothing was picked it reads as
+   one more unanswered question. */
+.askfirst__said {
+  margin: var(--space-3) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* Colour and opacity still carry the state; nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .askfirst {
+    animation: none;
+  }
+
+  .askfirst__choice:active,
+  .askfirst__button:active {
+    transform: none;
+  }
+
+  .askfirst__mark::after {
+    transform: none;
+  }
+
+  .askfirst__choice--many .askfirst__mark::after,
+  .askfirst__choice--many[data-on='true'] .askfirst__mark::after {
+    transform: rotate(45deg);
+  }
+}

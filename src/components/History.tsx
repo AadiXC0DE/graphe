@@ -150,6 +150,9 @@ export default function History({
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') create();
                   if (event.key === 'Escape') {
+                    // Closes this and only this — the press must not reach the
+                    // run going on behind it.
+                    event.preventDefault();
                     setNaming(false);
                     setDraft('');
                   }

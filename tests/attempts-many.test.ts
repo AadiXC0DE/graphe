@@ -87,6 +87,25 @@ describe('M-01 several at once', () => {
     await bench.clear();
   });
 
+  /** A machine already short of memory takes them one at a time. The rest stay
+   *  waiting rather than failing, and start when a slot frees up. */
+  it('starts only as many as this round allows, and leaves the rest waiting', async () => {
+    const { history, under } = await aProject();
+    const bench = new Workbench({ history, under });
+    for (const doing of ['Calm the hero', 'Tighten the nav', 'Warm the palette']) bench.ask(doing);
+
+    expect(await bench.begin(1)).toHaveLength(1);
+    expect(states(bench)).toEqual(['running', 'waiting', 'waiting']);
+
+    expect(await bench.begin(0)).toHaveLength(0);
+    expect(states(bench)).toEqual(['running', 'waiting', 'waiting']);
+
+    expect(await bench.begin()).toHaveLength(2);
+    expect(states(bench)).toEqual(['running', 'running', 'running']);
+
+    await bench.clear();
+  });
+
   /** The history deliberately does not keep a project's keys, so a copy made
    *  from it arrives without them and every piece of work fails on whatever it
    *  talks to. They are carried across instead. */

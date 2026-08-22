@@ -4,6 +4,8 @@
  * Pi shipped three breaking SDK changes in six weeks, so the blast radius of an
  * upgrade has to stay inside one module. These types are ours, not Pi's. */
 
+import type { Question } from './asking';
+
 /** A tool the model wants to run, normalised away from Pi's own event shape. */
 export type ToolCall = {
   id: string;
@@ -257,9 +259,31 @@ export type AgentEvent =
   /** Finished. `ok` is false when it could not be done, which changes nothing
    *  about the conversation — it simply stays long. */
   | { type: 'tidied'; ok: boolean }
+  /**
+   * The service could not answer, and this is the wait before asking again.
+   *
+   * The same shape as tidying, and for the same reason: something is happening
+   * that takes real time and produces nothing to look at. A long job that hit a
+   * busy provider used to leave the window empty for half an hour, which reads
+   * as stopped rather than waiting.
+   */
+  | { type: 'holding'; seconds: number }
+  /** Done waiting. `ok` is false when asking again did not help either. */
+  | { type: 'held'; ok: boolean }
   /** The agent has finished everything it was doing, tool calls included. The
    *  moment the session split is worth working out. */
   | { type: 'settled' }
+  /**
+   * A handful of things it would rather not guess, asked before it starts.
+   *
+   * Only ever before the first change: somebody who has been asked knows work
+   * is about to begin and can walk away, and somebody who walked away must
+   * never come back to find nothing happened because a question was waiting.
+   */
+  | { type: 'asked-first'; id: string; questions: readonly Question[] }
+  /** That card can no longer be answered — the turn was stopped, or it closed.
+   *  Without this the window keeps drawing a form whose answer goes nowhere. */
+  | { type: 'asking-withdrawn'; ids: readonly string[] }
   /** Questions nobody will answer now — the sitting was stopped, or it closed.
    *  Without this the window keeps drawing a card whose answer can never
    *  arrive, and reads the unanswered card as "still working". */

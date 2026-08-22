@@ -20,7 +20,13 @@ describe('roles', () => {
     expect(reviewer.tools).toEqual(['read', 'ls', 'grep', 'find', 'bash']);
     expect(reviewer.spoken).toContain('find only genuine problems');
     expect(reviewer.spoken).toContain('Never change anything');
-    expect(reviewer.spoken).toContain('exactly one local test file');
+    expect(reviewer.spoken).toContain('one local test file');
+    // A review of a change is a review of a diff, so it can read the history —
+    // and is told plainly that a refusal is something to report, not a reason
+    // to go quiet, which is what five of them did.
+    expect(reviewer.spoken).toContain('read the history');
+    expect(reviewer.spoken).toContain('nothing that writes, fetches or checks anything out');
+    expect(reviewer.spoken).toContain('say what you could not check instead of going quiet');
   });
 
   it('gives the researcher the web as well, and an every-fact-named remit', () => {

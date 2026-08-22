@@ -71,19 +71,31 @@ function meta(text: string): { description?: string; hint?: string } {
 }
 
 /**
- * `$@` (everything) and `$1`, `$2` … (the Nth typed word) in a prompt body.
+ * `$@` / `$ARGUMENTS` (everything) and `$1`, `$2` … (the Nth typed word) in a prompt body.
+ * Also supports `${N:-default}` (use default when N missing) — the minimal
+ * subset of pi's `substituteArgs` that covers common workflows. `$ARGUMENTS`
+ * is pi's long form for `$@`.
  *
  * A `$1` whose word was not given has nothing to be replaced by — rather than
  * guess, the placeholder is left in place so the agent can see exactly what was
  * missing instead of puzzling over a half-filled sentence.
  */
 export function expand(body: string, args: string): string {
-  const words = args.trim() === '' ? [] : args.trim().split(/\s+/);
-  return body.replace(
-    /\$@|\$([1-9][0-9]*)/g,
-    (token, index: string) =>
-      token === '$@' ? args.trim() : (words[Number(index) - 1] ?? token),
-  );
+  const trimmed = args.trim();
+  const words = trimmed === '' ? [] : trimmed.split(/\s+/);
+  let out = body;
+  // Long form first, then $@
+  out = out.replace(/\$ARGUMENTS/g, trimmed);
+  out = out.replace(/\$@/g, trimmed);
+  // ${N:-default} — N is 1-indexed, default may be empty
+  out = out.replace(/\$\{(\d+):-([^}]*)\}/g, (_m, n: string, def: string) => {
+    const idx = Number(n) - 1;
+    const val = words[idx];
+    return val !== undefined && val !== '' ? val : def;
+  });
+  // $1, $2 ... leave token if missing (so agent sees gap)
+  out = out.replace(/\$([1-9][0-9]*)/g, (token, index: string) => words[Number(index) - 1] ?? token);
+  return out;
 }
 
 /** Turn one prompt file into a workflow. */

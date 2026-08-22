@@ -85,7 +85,8 @@ export const ceilingWords = {
 export const MOST_AT_ONCE: Readonly<Record<RunKind, number>> = {
   /* The same number a single request may break itself into (`MOST_APART`), so a
      fan-out that the model was told it could ask for is never refused on the
-     way out by a ceiling nobody mentioned. */
+     way out by a ceiling nobody mentioned. Research splits a question fewer
+     ways than this on purpose, leaving room for whatever is already working. */
   helper: 8,
   // Background work is already capped per project by the board that holds it,
   // and this fleet is one for the whole app: capping it here as well would mean

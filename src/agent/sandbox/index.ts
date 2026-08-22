@@ -181,6 +181,19 @@ function runOnce(spawnable: { command: string; args: string[] }): Promise<{ ok: 
   });
 }
 
+/** The real paths behind a list of folders, with the ones that are not there
+ *  dropped rather than guessed at. */
+async function resolved(folders: readonly string[]): Promise<string[]> {
+  const real: string[] = [];
+  for (const folder of folders) {
+    const usable = usableFolder(folder);
+    if (usable === null) continue;
+    const found = await realpath(usable).catch(() => null);
+    if (found !== null && !real.includes(found)) real.push(found);
+  }
+  return real;
+}
+
 function messageOf(cause: unknown): string {
   return cause instanceof Error && cause.message !== '' ? cause.message : 'the boundary could not be tried';
 }
@@ -225,18 +238,15 @@ async function decide(command: string, args: readonly string[], bounds: Bounds):
   // The kernel matches on the real path, so a folder reached through a shortcut
   // — /tmp on macOS is one — has to be resolved before it is named, or every
   // write into it is refused and nothing says why.
-  const writable: string[] = [];
-  for (const folder of bounds.writable) {
-    const usable = usableFolder(folder);
-    if (usable === null) continue;
-    const real = await realpath(usable).catch(() => null);
-    if (real !== null) writable.push(real);
-  }
+  const writable = await resolved(bounds.writable);
   if (writable.length === 0) {
     return unheld('nowhere-to-bind', `none of ${bounds.writable.join(', ')} could be resolved`);
   }
+  // The temp folder is reached through one of those shortcuts on macOS, and
+  // some of the developer tools keep a lookup cache in there.
+  const readable = await resolved([...(bounds.readable ?? []), tmpdir()]);
 
-  const wrapped = wrap(look.kind, look.tool, { ...bounds, writable }, command, args);
+  const wrapped = wrap(look.kind, look.tool, { ...bounds, writable, readable }, command, args);
   return {
     held: true,
     command: wrapped.command,
@@ -253,14 +263,18 @@ async function decide(command: string, args: readonly string[], bounds: Bounds):
  * Written down because half of this is packaging, and packaging is not solved
  * here.
  *
- *  - **Reads are open.** Only the private places and key-shaped filenames are
- *    refused. Anything else on the disk can be read by anything we wrap. A read
- *    allowlist is the stronger shape and is not built.
- *  - **Egress is a port, not an address.** `secure` means outbound 443. Which
- *    host that is cannot be filtered without a proxy in the middle, which is the
- *    part `@anthropic-ai/sandbox-runtime` has and this does not. On Linux there
- *    is not even a port filter: bubblewrap can only remove the network entirely,
- *    so `secure` there is the whole network.
+ *  - **Reads are a list on macOS and not on Linux.** The Seatbelt profile shuts
+ *    the disk and opens the folder, the runtimes and the system back up again.
+ *    bubblewrap has no read denial, so on Linux the whole disk is still readable
+ *    except the private places, which are covered over with empty folders.
+ *    Names and dates stay readable everywhere; it is contents that are refused.
+ *  - **Addresses are checked only where the kernel can insist.** The main
+ *    agent's shell goes out through one door on this machine that reads the
+ *    address by name (`egress.ts`), and the macOS profile allows nothing else.
+ *    On Linux there is no port filter at all — bubblewrap can only remove the
+ *    network entirely — so the door is not used there and `secure` is the whole
+ *    network. The helper the `task` tool spawns, and anything `keep_running`
+ *    starts, still reach any address on 443.
  *  - **Nothing can listen.** A bound command reaches out and cannot be reached,
  *    so a development server started from the shell never comes up. Graphe
  *    serves its own preview from outside all of this, which is why that has not

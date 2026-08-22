@@ -12,6 +12,7 @@
 import type { ActivityState } from '../components/ActivityLine';
 import type { MessageAuthor } from '../components/Message';
 import type { AgentEvent, ReviewVerdict } from '../agent/types';
+import type { Answers, Question } from '../agent/asking';
 import type { Prompt } from '../cost/phrasing';
 import { PLAN_WORDS } from '../agent/plan';
 import { describeCall } from './describe';
@@ -111,6 +112,23 @@ export type Turn =
       answered: 'went-ahead' | 'changing' | null;
     }
   | { kind: 'tidying'; id: string; state: ActivityState }
+  /**
+   * A handful of things it would rather not guess, put before the work starts.
+   *
+   * `answers` is empty until somebody picks. `answered` is what closes the
+   * card: it can be closed by being answered, by being waved through, or by
+   * the turn ending under it, and the card has to be able to say which.
+   */
+  | {
+      kind: 'asked-first';
+      id: string;
+      questions: readonly Question[];
+      answers: Answers;
+      answered: 'answered' | 'waved-through' | 'withdrawn' | null;
+    }
+  /** Waiting out a service that could not answer. `seconds` is how long this
+   *  wait is, so the line can say it rather than spin. */
+  | { kind: 'holding'; id: string; state: ActivityState; seconds: number }
   | { kind: 'trouble'; id: string; trouble: Trouble }
   /** "I checked the change: here is the verdict." Draws the review card. */
   | {
@@ -153,6 +171,11 @@ export function askingYou(turns: readonly Turn[]): boolean {
     case 'asked':
     case 'estimate':
     case 'plan':
+      return last.answered === null;
+    // The turn really is parked on this one: the agent asked before starting
+    // and is waiting. Without it here, a message typed underneath goes out as
+    // though nothing were pending.
+    case 'asked-first':
       return last.answered === null;
     default:
       return false;
@@ -349,6 +372,12 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
           if (turn.kind === 'tidying' && turn.state === 'running') {
             return { ...turn, state: 'failed' as const };
           }
+          if (turn.kind === 'holding' && turn.state === 'running') {
+            return { ...turn, state: 'failed' as const };
+          }
+          if (turn.kind === 'asked-first' && turn.answered === null) {
+            return { ...turn, answered: 'withdrawn' as const };
+          }
           return turn;
         }),
         {
@@ -410,6 +439,42 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       return already ? turns : [...turns, { kind: 'tidying', id: newId(), state: 'running' }];
     }
 
+    case 'asked-first': {
+      return [
+        ...turns,
+        { kind: 'asked-first', id: event.id, questions: event.questions, answers: {}, answered: null },
+      ];
+    }
+
+    case 'asking-withdrawn': {
+      const gone = new Set(event.ids);
+      return turns.map((turn) =>
+        turn.kind === 'asked-first' && turn.answered === null && gone.has(turn.id)
+          ? { ...turn, answered: 'withdrawn' as const }
+          : turn,
+      );
+    }
+
+    case 'holding': {
+      // Once per wait, and never stacked: four waits in a row are four lines,
+      // but a second announcement of the same one is an app fretting.
+      const already = turns.some((turn) => turn.kind === 'holding' && turn.state === 'running');
+      if (already) return turns;
+      return [...turns, { kind: 'holding', id: newId(), state: 'running', seconds: event.seconds }];
+    }
+
+    case 'held': {
+      const index = turns.findLastIndex(
+        (turn) => turn.kind === 'holding' && turn.state === 'running',
+      );
+      if (index === -1) return turns;
+      const next = [...turns];
+      const was = turns[index];
+      if (was?.kind !== 'holding') return turns;
+      next[index] = { ...was, state: event.ok ? 'done' : 'failed' };
+      return next;
+    }
+
     case 'reviewed': {
       return [...turns, { kind: 'review', id: newId(), verdict: event.verdict, asked: false }];
     }
@@ -448,11 +513,23 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
        only where it is abandoned: this is the window's own reckoning, and it
        has to hold even when the shell cannot say anything. */
     case 'settled': {
-      const stranded = turns.some((turn) => turn.kind === 'asked' && turn.answered === null);
-      if (!stranded) return turns;
-      return turns.map((turn) =>
-        turn.kind === 'asked' && turn.answered === null ? { ...turn, answered: 'no' as const } : turn,
+      const stranded = turns.some(
+        (turn) =>
+          (turn.kind === 'asked' || turn.kind === 'asked-first') && turn.answered === null,
       );
+      if (!stranded) return turns;
+      // Whatever was being asked, the turn it belonged to is over and nothing
+      // it says can reach anything. A form still drawn reads as answerable and
+      // comes back with the history.
+      return turns.map((turn) => {
+        if (turn.kind === 'asked' && turn.answered === null) {
+          return { ...turn, answered: 'no' as const };
+        }
+        if (turn.kind === 'asked-first' && turn.answered === null) {
+          return { ...turn, answered: 'withdrawn' as const };
+        }
+        return turn;
+      });
     }
   }
 }

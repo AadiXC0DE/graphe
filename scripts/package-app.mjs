@@ -1,7 +1,7 @@
 // Builds a shippable Graphe: a .dmg and a .zip, for both Mac architectures.
 //
 //   node scripts/package-app.mjs            everything
-//   node scripts/package-app.mjs --arm64    just this machine's, for a quick look
+//   node scripts/package-app.mjs --arm64    just this machine's disk image, for a quick look
 //   node scripts/package-app.mjs --dir      unpacked .app only, no disk image
 //
 // The order below is the point of the file. electron-builder packages whatever
@@ -114,10 +114,16 @@ async function letGoOfOldImages() {
  *
  *  One at a time, so a run that does not take costs one architecture rather
  *  than both, and can be gone again without redoing the one that worked. */
+/* A quick look wants a disk image and nothing else. The zip exists so Homebrew
+   can unpack it without setting the quarantine attribute, which matters when a
+   release is published and never when somebody is checking their own build —
+   and compressing eight hundred megabytes is a real part of the wait. */
+const forThisMacOnly = ['-c.mac.target=dmg'];
+
 const targets = unpackedOnly
   ? [['--dir']]
   : onlyThisMac
-    ? [[args.includes('--x64') ? '--x64' : '--arm64']]
+    ? [[args.includes('--x64') ? '--x64' : '--arm64', ...forThisMacOnly]]
     : [['--arm64'], ['--x64']];
 
 /**

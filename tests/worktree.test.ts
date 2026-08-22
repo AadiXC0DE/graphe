@@ -25,6 +25,7 @@ import {
   reopenWorktree,
   sweepCheckouts,
   worktreeWords,
+  writingLeftBehind,
   type RunGit,
 } from '../src/history/worktree';
 import { existsSync, readFileSync } from 'node:fs';
@@ -398,6 +399,99 @@ describe('shared base — a folder that commits ahead is still protected', () =>
       expect(applied.value.applied).not.toContain('a.txt');
       expect(applied.value.conflicted).toContain('a.txt');
       expect(readFileContent(repo, 'a.txt')).toBe('primary committed this\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('writing nothing else would keep — the report a restart deleted', () => {
+  /** A project that ignores a notes folder, and a conversation that wrote in it. */
+  async function repoWithNotes(): Promise<{ repo: string; folder: string }> {
+    const repo = await freshRepo();
+    await writeFile(path.join(repo, '.gitignore'), 'node_modules/\nnotes/\n');
+    await raw(repo, 'add', '.');
+    await raw(repo, 'commit', '-m', 'ignore the notes');
+    const made = await createWorktree(git(), repo, 'wrote-a-report', null);
+    if (!made.ok || made.value === null) throw new Error('no checkout');
+    return { repo, folder: made.value.folder };
+  }
+
+  it('finds a page somebody wrote that no save would ever pick up', async () => {
+    const { repo, folder } = await repoWithNotes();
+    try {
+      await mkdir(path.join(folder, 'notes'), { recursive: true });
+      await writeFile(path.join(folder, 'notes', 'audit.md'), '# fifty kilobytes of research\n');
+      // The sweep still sees nothing, which is exactly how it was lost.
+      expect(await holdsWork(git(), folder)).toBe(false);
+      expect(await writingLeftBehind(git(), folder)).toEqual(['notes/audit.md']);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the install behind — that is still the disk worth reclaiming', async () => {
+    const { repo, folder } = await repoWithNotes();
+    try {
+      const heavy = path.join(folder, 'node_modules', 'thing');
+      await mkdir(heavy, { recursive: true });
+      for (let at = 0; at < 401; at += 1) {
+        await writeFile(path.join(heavy, `part-${String(at)}.js`), 'made again\n');
+      }
+      expect(await writingLeftBehind(git(), folder)).toEqual([]);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the notes and drops the install when a copy holds both', async () => {
+    const { repo, folder } = await repoWithNotes();
+    try {
+      await mkdir(path.join(folder, 'notes'), { recursive: true });
+      await writeFile(path.join(folder, 'notes', 'audit.md'), 'kept\n');
+      const heavy = path.join(folder, 'node_modules', 'thing');
+      await mkdir(heavy, { recursive: true });
+      for (let at = 0; at < 401; at += 1) {
+        await writeFile(path.join(heavy, `part-${String(at)}.js`), 'made again\n');
+      }
+      expect(await writingLeftBehind(git(), folder)).toEqual(['notes/audit.md']);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('carries it out before putting the checkout away', async () => {
+    const { repo, folder } = await repoWithNotes();
+    try {
+      await mkdir(path.join(folder, 'notes'), { recursive: true });
+      await writeFile(path.join(folder, 'notes', 'audit.md'), 'the only copy\n');
+      const saved: string[] = [];
+      const away = await putAwayWorktree(git(), repo, folder, {
+        rescue: async (_where, files) => {
+          saved.push(...files);
+        },
+      });
+      expect(away.put).toBe(true);
+      expect(saved).toEqual(['notes/audit.md']);
+      expect(existsSync(folder)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('carries it out before the startup sweep takes the folder', async () => {
+    const { repo, folder } = await repoWithNotes();
+    try {
+      await mkdir(path.join(folder, 'notes'), { recursive: true });
+      await writeFile(path.join(folder, 'notes', 'audit.md'), 'the only copy\n');
+      const saved: string[] = [];
+      const given = await sweepCheckouts(git(), repo, [folder], {
+        rescue: async (_where, files) => {
+          saved.push(...files);
+        },
+      });
+      expect(given).toEqual([folder]);
+      expect(saved).toEqual(['notes/audit.md']);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

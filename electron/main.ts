@@ -39,7 +39,7 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
@@ -177,6 +177,7 @@ import {
   sweepCheckouts,
   worktreeWords,
   type RunGit,
+  type Rescue,
 } from '../src/history/worktree';
 import {
   addTasks,
@@ -201,10 +202,11 @@ import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceO
 import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
 import { checkServer, inProject, mcpFile, readMcpConfig, savingFrom, writeMcpConfig } from '../src/agent/pi/mcp';
 import { holdsBack } from '../src/projects/heldback';
-import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
+import { AT_A_TIME, boardWords, howManyGoing, saysCannotKeep, waysNumbering } from '../src/work/board';
 import { saysTook } from '../src/work/stack';
 import { formatMoney } from '../src/cost/money';
 import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
+import { pressureNow, roomHere } from '../src/work/machine';
 import {
   addStanding,
   dueNow,
@@ -2935,6 +2937,25 @@ function worktreesFolder(project: string): string {
   return join(app.getPath('userData'), 'worktrees', key);
 }
 
+/** Where writing carried out of a copy is kept. Somewhere ordinary and findable
+ *  — whoever wrote it is going to come looking. */
+function keptAsideFolder(project: string): string {
+  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+  return join(app.getPath('userData'), 'kept-aside', key);
+}
+
+/** Copy a conversation's own writing out before its copy is given back. Those
+ *  files are in no save and no version, so this is the only copy of them. */
+function keepAside(project: string, whose: string): Rescue {
+  return async (folder, files) => {
+    for (const one of files) {
+      const to = join(keptAsideFolder(project), whose, one);
+      await mkdir(dirname(to), { recursive: true }).catch(() => undefined);
+      await copyFile(join(folder, one), to).catch(() => undefined);
+    }
+  };
+}
+
 /* ------------------------------------------------ checkouts left behind -- */
 
 /** Every checkout left spread out on disk when the app last went away. What a
@@ -2960,7 +2981,9 @@ async function sweepStrayCheckouts(): Promise<number> {
     const found = await readdir(root, { withFileTypes: true }).catch(() => []);
     const folders = found.filter((one) => one.isDirectory()).map((one) => join(root, one.name));
     if (folders.length === 0) continue;
-    const released = await sweepCheckouts(gitRunHereFor(), project.path, folders).catch(() => []);
+    const released = await sweepCheckouts(gitRunHereFor(), project.path, folders, {
+      rescue: (folder, files) => keepAside(project.path, basename(folder))(folder, files),
+    }).catch(() => []);
     given += released.length;
   }
   return given;
@@ -3009,9 +3032,9 @@ async function putAwayCheckoutAt(project: string, held: Held, address: string): 
   const one = held.checkouts.get(address);
   if (one === undefined || !existsSync(one.folder)) return;
   const filed = checkoutKey(held, address);
-  const away = await putAwayWorktree(gitRunHereFor(), project, one.folder).catch(() => ({
-    put: false,
-  }));
+  const away = await putAwayWorktree(gitRunHereFor(), project, one.folder, {
+    rescue: keepAside(project, basename(one.folder)),
+  }).catch(() => ({ put: false }));
   if (!away.put) return;
   if (filed !== address) {
     held.checkouts.delete(address);
@@ -3583,7 +3606,10 @@ function deskFor(path: string, name: string): AwayDesk {
   const already = awayDesks.get(path);
   if (already !== undefined) return already;
   const history = new ProjectHistory(path);
-  const bench = new Workbench({ history, under: awayFolder(path), atOnce: AT_A_TIME });
+  // How many this computer can carry, not how many fill a sheet. A machine with
+  // less memory than the board assumes runs fewer, rather than running four and
+  // stalling.
+  const bench = new Workbench({ history, under: awayFolder(path), atOnce: roomHere(AT_A_TIME) });
   const desk: AwayDesk = {
     path,
     name,
@@ -4091,6 +4117,15 @@ function stopWhatFollows(desk: AwayDesk, id: string, because: string): void {
   for (const one of desk.chain.stopFollowing(id, because)) noteDown(desk, one);
 }
 
+/** Whether any project has background work going. The memory a run holds is the
+ *  machine's, not the project's, so what may start next is asked of all of it. */
+function anythingGoing(): boolean {
+  for (const desk of awayDesks.values()) {
+    if (howManyGoing(desk.bench.pieces) > 0) return true;
+  }
+  return false;
+}
+
 /** Start as many as there is room for. Called when one is asked for and again
  *  whenever one finishes. */
 async function runWhatCan(desk: AwayDesk): Promise<void> {
@@ -4110,7 +4145,14 @@ async function runWhatCan(desk: AwayDesk): Promise<void> {
     if (await desk.history.hasUnsavedChanges()) {
       await desk.history.snapshot('Saved before working on its own');
     }
-    began = await desk.bench.begin();
+    // On a machine already short of memory, nothing new starts until something
+    // frees up — counted across every project, because two of them filling the
+    // laptop is the case a per-project cap cannot see. Never a full stop: with
+    // nothing going anywhere there is nothing left to start the next one, and
+    // work that silently never begins is worse than work that takes longer.
+    const easy = (await pressureNow()) === 'fine';
+    const room = easy || !anythingGoing() ? undefined : 0;
+    began = await desk.bench.begin(room);
   } catch (cause) {
     const why = cause instanceof Error ? cause.message : String(cause);
     const stopped: string[] = [];

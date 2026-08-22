@@ -30,6 +30,7 @@ import path from 'node:path';
 
 import { helperFor } from '../preview/detect';
 import { runHelper } from '../share/run';
+import { oneAtATime } from '../work/machine';
 
 /** Where a project says which private files its copies need. */
 export const CARRY_LIST = '.carryover';
@@ -204,6 +205,10 @@ export async function piecesCommand(folder: string): Promise<readonly string[] |
   return entries.includes('package-lock.json') ? ['npm', 'ci'] : ['npm', 'install'];
 }
 
+/** Every install in the app queues here. Module-level on purpose: the point is
+ *  that two copies in two projects still take their turn. */
+const inTurn = oneAtATime();
+
 /** Whether the pieces are already in place. Copies are made fresh, so this is
  *  normally false — but a copy reused after a stop should not pay for it twice. */
 async function piecesAreIn(folder: string): Promise<boolean> {
@@ -231,6 +236,11 @@ const PIECES_MISSING =
  *
  * The install is the slow half, so this is worth starting the moment a copy
  * exists rather than when somebody first asks it for something.
+ *
+ * One at a time across the whole app, whatever else is going. Four copies each
+ * putting a gigabyte and a half of pieces back at once is what took a laptop
+ * down hard enough to need the power button; run one after another they take
+ * the same total time and the machine stays usable throughout.
  */
 export async function getReady(
   from: string,
@@ -247,7 +257,7 @@ export async function getReady(
 
   const [tool = 'npm', ...args] = command;
   const how = options.patience === undefined ? { folder: to } : { folder: to, patience: options.patience };
-  const ran = await runHelper(tool, args, how);
+  const ran = await inTurn(() => runHelper(tool, args, how));
   if (ran.code === 0) return { carried, installed: command, ready: true, trouble: null };
   return { carried, installed: command, ready: false, trouble: PIECES_MISSING };
 }

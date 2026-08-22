@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 /** One conversation, its own checkout.
@@ -236,13 +236,17 @@ export async function reopenWorktree(
  * Refused while the working tree holds something, because that is the one thing
  * the branch is not already holding. Say so with `put`: false is "still there",
  * not "went wrong".
+ *
+ * Anything the project ignores is carried out first — see `writingLeftBehind`.
  */
 export async function putAwayWorktree(
   run: RunGit,
   repo: string,
   folder: string,
+  options: { rescue?: Rescue } = {},
 ): Promise<{ put: boolean }> {
   if (await holdsWork(run, folder)) return { put: false };
+  await carryOutWriting(run, folder, options.rescue);
   const released = await releaseWorktree(run, repo, folder);
   if (!released.ok) return { put: false };
   await run(['worktree', 'prune'], { cwd: repo });
@@ -262,6 +266,78 @@ export async function holdsWork(run: RunGit, folder: string): Promise<boolean> {
   return out.split('\n').some((line) => line.trim() !== '');
 }
 
+/* ---------------------------------------------- what nothing else would keep */
+
+/**
+ * Writing a person could have done that no save would ever pick up.
+ *
+ * `holdsWork` steps over what the project ignores, and it is right to: an
+ * install or a build is the disk worth reclaiming. But a project that ignores a
+ * notes folder writes real things into that folder, and nothing saves them, or
+ * carries them home, or counts them as work — so the folder going is the only
+ * copy going. A fifty-kilobyte research report was lost exactly this way, on a
+ * restart, with nothing said.
+ *
+ * Small and few, because that is the whole difference between a page somebody
+ * wrote and a folder a command made. Anything over the budget is left to be
+ * reclaimed as before.
+ */
+export async function writingLeftBehind(run: RunGit, folder: string): Promise<readonly string[]> {
+  const { code, out } = await run(['status', '--porcelain', '-z', '--ignored'], { cwd: folder });
+  if (code !== 0 || out === undefined) return [];
+  const keep: string[] = [];
+  for (const row of out.split('\0')) {
+    if (!row.startsWith('!! ')) continue;
+    // Entry by entry: a copy holding an install and a page of notes should lose
+    // the install and keep the notes.
+    const under = await smallFilesUnder(folder, row.slice(3));
+    if (under !== null) keep.push(...under);
+  }
+  return keep;
+}
+
+/** Past these an ignored entry is something a command made, not something
+ *  somebody wrote. */
+const RESCUE_FILES = 400;
+const RESCUE_BYTES = 8 * 1024 * 1024;
+
+/** Everything under one ignored entry, or null once it is plainly a build. */
+async function smallFilesUnder(folder: string, entry: string): Promise<string[] | null> {
+  const where = entry.replace(/\/+$/, '');
+  if (where === '') return null;
+  const found: string[] = [];
+  let bytes = 0;
+
+  const walk = async (at: string): Promise<boolean> => {
+    const about = await stat(resolve(folder, at)).catch(() => null);
+    if (about === null) return true;
+    if (about.isFile()) {
+      found.push(at);
+      bytes += about.size;
+      return found.length <= RESCUE_FILES && bytes <= RESCUE_BYTES;
+    }
+    if (!about.isDirectory()) return true;
+    for (const name of await readdir(resolve(folder, at)).catch(() => [])) {
+      if (!(await walk(`${at}/${name}`))) return false;
+    }
+    return true;
+  };
+
+  return (await walk(where)) ? found : null;
+}
+
+/** Told where a copy is and what it holds, before the copy goes. The copying
+ *  itself is the caller's, the same way the git runner is. */
+export type Rescue = (folder: string, files: readonly string[]) => Promise<void>;
+
+/** Carry that writing out, if anybody said where to put it. Never throws: a
+ *  rescue that failed must not leave a checkout wedged on disk forever. */
+async function carryOutWriting(run: RunGit, folder: string, rescue?: Rescue): Promise<void> {
+  if (rescue === undefined) return;
+  const writing = await writingLeftBehind(run, folder).catch(() => []);
+  if (writing.length > 0) await rescue(folder, writing).catch(() => undefined);
+}
+
 /** The backstop: checkouts left by conversations that are gone, or by a copy of
  *  the app older than any of this. Never takes one the caller says is owned, or
  *  one holding work. The caller says what is on disk. */
@@ -269,13 +345,14 @@ export async function sweepCheckouts(
   run: RunGit,
   repo: string,
   found: readonly string[],
-  options: { inUse?: (folder: string) => boolean } = {},
+  options: { inUse?: (folder: string) => boolean; rescue?: Rescue } = {},
 ): Promise<readonly string[]> {
   const inUse = options.inUse ?? (() => false);
   const given: string[] = [];
   for (const folder of found) {
     if (inUse(folder)) continue;
     if (await holdsWork(run, folder)) continue;
+    await carryOutWriting(run, folder, options.rescue);
     const released = await releaseWorktree(run, repo, folder);
     if (released.ok) given.push(folder);
   }

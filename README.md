@@ -16,6 +16,13 @@ your keys, any model, the meter in plain sight.
   <img src="https://img.shields.io/badge/built%20on-pi-1a1410" alt="Built on pi">
 </p>
 
+<p align="center">
+  <a href="https://usegraphe.com"><b>usegraphe.com</b></a> &nbsp;·&nbsp;
+  <a href="https://usegraphe.com#see">See it work</a> &nbsp;·&nbsp;
+  <a href="https://github.com/AadiXC0DE/graphe/releases">Releases</a> &nbsp;·&nbsp;
+  <a href="https://github.com/AadiXC0DE/graphe/discussions">Discussions</a>
+</p>
+
 <br>
 
 <img src="site/assets/web/app-start-dark.webp" width="100%" alt="The Graphe window: the project's files on the left, things to start from in the middle, and a rail on the right holding what is waiting to be saved, what is running in the background, what is on a schedule, and the handover.">

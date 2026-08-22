@@ -72,7 +72,8 @@ import { selectCorrect, type CandidateSignals } from './correctness';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet, MOST_AT_ONCE } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
-import { hold } from '../sandbox';
+import { boundaryHere, hold } from '../sandbox';
+import { doorwayEnvironment, openDoorway, type Doorway } from '../sandbox/egress';
 import type { LivePage, Money, PageAct, PageReading, SpendReason } from '../types';
 
 /** The result envelope every tool here returns: the model's answer in text.
@@ -991,8 +992,38 @@ export function boundaryNote(facts: BoundaryFacts): string | null {
 /** What a helper may write to: the folder it works in, and the app's own folder
  *  — the account it thinks with is kept there, along with the small records Pi
  *  keeps for itself, and a helper that cannot write them will not start. */
-function helperBounds(cwd: string, agentDir: string): { writable: string[]; reach: 'secure' } {
-  return { writable: agentDir === '' ? [cwd] : [cwd, agentDir], reach: 'secure' };
+function helperBounds(
+  cwd: string,
+  agentDir: string,
+  through?: number,
+): { writable: string[]; reach: 'secure'; through?: number } {
+  const writable = agentDir === '' ? [cwd] : [cwd, agentDir];
+  return through === undefined
+    ? { writable, reach: 'secure' }
+    : { writable, reach: 'secure', through };
+}
+
+/**
+ * The door helpers reach the internet through.
+ *
+ * One for all of them rather than one each: a helper is a whole process and a
+ * fan-out sends several at once, so a door apiece would be several servers for
+ * one job. Opened the first time a helper needs it and left up — closing it
+ * between helpers would only mean opening it again a second later.
+ *
+ * Only where the boundary can insist work goes through it. Anywhere else,
+ * pointing a helper at a door it is free to walk past is a request dressed up
+ * as a rule, and saying nothing about that is worse than not having one.
+ */
+let helperDoor: Promise<Doorway | null> | null = null;
+
+async function doorForHelpers(): Promise<Doorway | null> {
+  helperDoor ??= (async () => {
+    const look = await boundaryHere();
+    if (!look.ok || look.kind !== 'seatbelt') return null;
+    return openDoorway();
+  })();
+  return helperDoor;
 }
 
 /** Who the helper thinks with. The child has no window, no settings of its own
@@ -1071,7 +1102,17 @@ async function runSubagent(
   const boundary: BoundaryFacts = { asked: false, observed: null, because: null };
   if (missing !== null) return { outcome: { ok: false, error: missing }, boundary };
 
-  const bound = await hold(process.execPath, [SUBAGENT_RUNNER], helperBounds(cwd, job.agentDir));
+  // Which addresses this helper may reach, before the boundary is built: the
+  // profile has to name the door, or the door is something the child may
+  // simply not use.
+  const gate = await doorForHelpers().catch(() => null);
+  const through = gate !== null && gate.open ? gate.port : undefined;
+
+  const bound = await hold(
+    process.execPath,
+    [SUBAGENT_RUNNER],
+    helperBounds(cwd, job.agentDir, through),
+  );
   boundary.asked = bound.held;
   if (!bound.held) boundary.because = bound.sentence;
 
@@ -1081,7 +1122,11 @@ async function runSubagent(
       bound.held ? [...bound.args] : [SUBAGENT_RUNNER],
       {
         cwd,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          ...(through === undefined ? {} : doorwayEnvironment(through)),
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     );

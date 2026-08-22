@@ -246,7 +246,7 @@ export async function putAwayWorktree(
   options: { rescue?: Rescue } = {},
 ): Promise<{ put: boolean }> {
   if (await holdsWork(run, folder)) return { put: false };
-  await carryOutWriting(run, folder, options.rescue);
+  if (!(await carryOutWriting(run, folder, options.rescue))) return { put: false };
   const released = await releaseWorktree(run, repo, folder);
   if (!released.ok) return { put: false };
   await run(['worktree', 'prune'], { cwd: repo });
@@ -278,28 +278,65 @@ export async function holdsWork(run: RunGit, folder: string): Promise<boolean> {
  * copy going. A fifty-kilobyte research report was lost exactly this way, on a
  * restart, with nothing said.
  *
- * Small and few, because that is the whole difference between a page somebody
- * wrote and a folder a command made. Anything over the budget is left to be
- * reclaimed as before.
+ * Named things a command makes are dropped without being read. Everything else
+ * ignored is carried out — and if it is too big to carry, the copy is kept
+ * instead of being given back, because "too big" must never quietly mean
+ * "deleted". That was the whole bug.
  */
-export async function writingLeftBehind(run: RunGit, folder: string): Promise<readonly string[]> {
+export async function writingLeftBehind(
+  run: RunGit,
+  folder: string,
+): Promise<{ files: readonly string[]; tooBig: boolean }> {
   const { code, out } = await run(['status', '--porcelain', '-z', '--ignored'], { cwd: folder });
-  if (code !== 0 || out === undefined) return [];
+  if (code !== 0 || out === undefined) return { files: [], tooBig: false };
   const keep: string[] = [];
+  let tooBig = false;
   for (const row of out.split('\0')) {
     if (!row.startsWith('!! ')) continue;
+    const entry = row.slice(3).replace(/\/+$/, '');
+    // Made again by one command, whatever is in it. These are the disk worth
+    // reclaiming and the reason the sweep exists.
+    if (MADE_AGAIN.has(entry.split('/')[0] ?? entry)) continue;
     // Entry by entry: a copy holding an install and a page of notes should lose
     // the install and keep the notes.
-    const under = await smallFilesUnder(folder, row.slice(3));
-    if (under !== null) keep.push(...under);
+    const under = await smallFilesUnder(folder, entry);
+    if (under === null) tooBig = true;
+    else keep.push(...under);
   }
-  return keep;
+  return { files: keep, tooBig };
 }
 
-/** Past these an ignored entry is something a command made, not something
- *  somebody wrote. */
-const RESCUE_FILES = 400;
-const RESCUE_BYTES = 8 * 1024 * 1024;
+/** Folders whose whole contents one command puts back. Anything ignored that is
+ *  not one of these is treated as somebody's, however big it turns out to be. */
+const MADE_AGAIN = new Set([
+  'node_modules',
+  '.venv',
+  'venv',
+  '__pycache__',
+  'dist',
+  'build',
+  'out',
+  'target',
+  'vendor',
+  '.next',
+  '.nuxt',
+  '.svelte-kit',
+  '.astro',
+  '.turbo',
+  '.cache',
+  '.parcel-cache',
+  'coverage',
+  '.gradle',
+  '.venv-tools',
+  'release',
+  '.vite',
+  '.eval',
+]);
+
+/** Past these, carrying an entry out is no longer a small kindness. Generous,
+ *  because the cost of being wrong the other way is somebody's writing. */
+const RESCUE_FILES = 2_000;
+const RESCUE_BYTES = 64 * 1024 * 1024;
 
 /** Everything under one ignored entry, or null once it is plainly a build. */
 async function smallFilesUnder(folder: string, entry: string): Promise<string[] | null> {
@@ -330,12 +367,24 @@ async function smallFilesUnder(folder: string, entry: string): Promise<string[] 
  *  itself is the caller's, the same way the git runner is. */
 export type Rescue = (folder: string, files: readonly string[]) => Promise<void>;
 
-/** Carry that writing out, if anybody said where to put it. Never throws: a
- *  rescue that failed must not leave a checkout wedged on disk forever. */
-async function carryOutWriting(run: RunGit, folder: string, rescue?: Rescue): Promise<void> {
-  if (rescue === undefined) return;
-  const writing = await writingLeftBehind(run, folder).catch(() => []);
-  if (writing.length > 0) await rescue(folder, writing).catch(() => undefined);
+/**
+ * Carry that writing out before the copy goes, and say whether it may go.
+ *
+ * False means keep it. Only ever because there is more here than can be
+ * carried — and a folder that is too big to rescue is the last one to delete
+ * on the grounds that it was probably nothing.
+ */
+async function carryOutWriting(run: RunGit, folder: string, rescue?: Rescue): Promise<boolean> {
+  const found = await writingLeftBehind(run, folder).catch(() => ({
+    files: [] as readonly string[],
+    tooBig: false,
+  }));
+  if (found.tooBig) return false;
+  // Nowhere to put it is not a reason to keep the folder: the caller that did
+  // not ask for a rescue is the one that never had anything to lose.
+  if (rescue === undefined) return true;
+  if (found.files.length > 0) await rescue(folder, found.files).catch(() => undefined);
+  return true;
 }
 
 /** The backstop: checkouts left by conversations that are gone, or by a copy of
@@ -352,7 +401,7 @@ export async function sweepCheckouts(
   for (const folder of found) {
     if (inUse(folder)) continue;
     if (await holdsWork(run, folder)) continue;
-    await carryOutWriting(run, folder, options.rescue);
+    if (!(await carryOutWriting(run, folder, options.rescue))) continue;
     const released = await releaseWorktree(run, repo, folder);
     if (released.ok) given.push(folder);
   }

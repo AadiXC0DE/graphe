@@ -513,9 +513,13 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
        only where it is abandoned: this is the window's own reckoning, and it
        has to hold even when the shell cannot say anything. */
     case 'settled': {
+      /* A plan or an estimate left open is not stranded — it is waiting on
+         somebody, which is what it is for. These two are: a question nothing
+         can answer now, and a wait that cannot outlive the turn it was in. */
       const stranded = turns.some(
         (turn) =>
-          (turn.kind === 'asked' || turn.kind === 'asked-first') && turn.answered === null,
+          ((turn.kind === 'asked' || turn.kind === 'asked-first') && turn.answered === null) ||
+          (turn.kind === 'holding' && turn.state === 'running'),
       );
       if (!stranded) return turns;
       // Whatever was being asked, the turn it belonged to is over and nothing
@@ -527,6 +531,9 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
         }
         if (turn.kind === 'asked-first' && turn.answered === null) {
           return { ...turn, answered: 'withdrawn' as const };
+        }
+        if (turn.kind === 'holding' && turn.state === 'running') {
+          return { ...turn, state: 'done' as const };
         }
         return turn;
       });

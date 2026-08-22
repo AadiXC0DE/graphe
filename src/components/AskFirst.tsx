@@ -16,6 +16,13 @@ type Picked = {
 
 const NOTHING: Picked = { labels: [], own: false, words: '' };
 
+/** What is picked against one question, and never what the language would hand
+ *  back for a name like `__proto__` — which is an object, not a set of picks,
+ *  and reading `.words` off it takes the card down. */
+function pickedIn(all: Readonly<Record<string, Picked>>, question: string): Picked {
+  return Object.prototype.hasOwnProperty.call(all, question) ? (all[question] ?? NOTHING) : NOTHING;
+}
+
 type Props = {
   questions: readonly Question[];
   /** What was picked, once it has been. Empty while it is still a question. */
@@ -43,11 +50,19 @@ export default function AskFirst({ questions, answers, answered, onAnswer }: Pro
   /** Which box in a several-answer question the keyboard comes back to. */
   const [roving, setRoving] = useState<Readonly<Record<string, number>>>({});
   const wordBoxes = useRef(new Map<string, HTMLInputElement | null>());
+  /** True for the moment between a deliberate keypress and the click it
+   *  becomes, so choosing by keyboard lands in the box the way clicking does. */
+  const chose = useRef(false);
 
   const chosen = useMemo<Answers>(() => {
-    const out: Record<string, readonly string[]> = {};
+    // Nothing inherited, either way round: a question named for something every
+    // object already has would otherwise be answered by the language.
+    const out: Record<string, readonly string[]> = Object.create(null) as Record<
+      string,
+      readonly string[]
+    >;
     for (const one of questions) {
-      const pick = picks[one.question] ?? NOTHING;
+      const pick = pickedIn(picks, one.question);
       const words = pick.words.trim();
       // "Something else" is not itself an answer — what they typed is.
       const said = [...pick.labels, ...(pick.own && words !== '' ? [words] : [])];
@@ -59,7 +74,7 @@ export default function AskFirst({ questions, answers, answered, onAnswer }: Pro
   const ready = allAnswered(questions, chosen);
 
   const change = useCallback((question: string, to: (was: Picked) => Picked) => {
-    setPicks((current) => ({ ...current, [question]: to(current[question] ?? NOTHING) }));
+    setPicks((current) => ({ ...current, [question]: to(pickedIn(current, question)) }));
   }, []);
 
   /** One of the model's own choices. Single picking replaces; several toggles. */
@@ -129,6 +144,15 @@ export default function AskFirst({ questions, answers, answered, onAnswer }: Pro
   /* Enter sends, from anywhere in the card including the free-text box. Buttons
      keep their own Enter, or the primary would fire twice. */
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    // The card is what the turn is waiting on, so Escape belongs to it. Left to
+    // travel on it reaches the window and stops the run — which answers the
+    // question by ending the work it was asked about.
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onAnswer(null);
+      return;
+    }
     if (event.key !== 'Enter') return;
     if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.target instanceof HTMLButtonElement) return;
@@ -178,7 +202,9 @@ export default function AskFirst({ questions, answers, answered, onAnswer }: Pro
           const pickedHere = picks[one.question] ?? NOTHING;
           const askedId = `${base}-q${String(at)}`;
           const ownId = `${askedId}-own`;
-          const lands = roving[one.question] ?? 0;
+          const lands = Object.prototype.hasOwnProperty.call(roving, one.question)
+            ? (roving[one.question] ?? 0)
+            : 0;
           const kind = one.many ? 'askfirst__choice askfirst__choice--many' : 'askfirst__choice';
 
           return (
@@ -256,10 +282,20 @@ export default function AskFirst({ questions, answers, answered, onAnswer }: Pro
                       checked={pickedHere.own}
                       aria-labelledby={`${ownId}-label`}
                       onChange={() => pickOwn(one)}
+                      onKeyDown={(event) => {
+                        // Space and Enter are somebody choosing this on purpose,
+                        // and arrive as a click with no pointer behind it —
+                        // indistinguishable from arrowing past unless the key
+                        // itself is remembered.
+                        if (event.key === ' ' || event.key === 'Enter') chose.current = true;
+                      }}
                       onClick={(event) => {
-                        // Only a real click. Arrowing onto it must leave the
-                        // focus on the group, or there is no arrowing off it.
-                        if (event.detail === 0) return;
+                        // A real click, or a deliberate keypress. Arrowing onto
+                        // it must leave the focus on the group, or there is no
+                        // arrowing off it again.
+                        const meant = event.detail > 0 || chose.current;
+                        chose.current = false;
+                        if (!meant) return;
                         requestAnimationFrame(() => wordBoxes.current.get(one.question)?.focus());
                       }}
                     />

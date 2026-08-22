@@ -424,7 +424,7 @@ describe('writing nothing else would keep — the report a restart deleted', () 
       await writeFile(path.join(folder, 'notes', 'audit.md'), '# fifty kilobytes of research\n');
       // The sweep still sees nothing, which is exactly how it was lost.
       expect(await holdsWork(git(), folder)).toBe(false);
-      expect(await writingLeftBehind(git(), folder)).toEqual(['notes/audit.md']);
+      expect(await writingLeftBehind(git(), folder)).toEqual({ files: ['notes/audit.md'], tooBig: false });
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -438,7 +438,7 @@ describe('writing nothing else would keep — the report a restart deleted', () 
       for (let at = 0; at < 401; at += 1) {
         await writeFile(path.join(heavy, `part-${String(at)}.js`), 'made again\n');
       }
-      expect(await writingLeftBehind(git(), folder)).toEqual([]);
+      expect(await writingLeftBehind(git(), folder)).toEqual({ files: [], tooBig: false });
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -454,7 +454,46 @@ describe('writing nothing else would keep — the report a restart deleted', () 
       for (let at = 0; at < 401; at += 1) {
         await writeFile(path.join(heavy, `part-${String(at)}.js`), 'made again\n');
       }
-      expect(await writingLeftBehind(git(), folder)).toEqual(['notes/audit.md']);
+      expect(await writingLeftBehind(git(), folder)).toEqual({ files: ['notes/audit.md'], tooBig: false });
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  /* The budget used to be a silent delete: an ignored folder over it was
+     classed as a build and the copy given back with it. That is the very bug
+     the rescue was added for, wearing a size limit. */
+  it('keeps the copy rather than deleting writing it cannot carry', { timeout: 30_000 }, async () => {
+    const { repo, folder } = await repoWithNotes();
+    try {
+      await mkdir(path.join(folder, 'notes'), { recursive: true });
+      // Over the size budget, and nothing a command would put back.
+      await writeFile(path.join(folder, 'notes', 'big.bin'), Buffer.alloc(65 * 1024 * 1024));
+      const found = await writingLeftBehind(git(), folder);
+      expect(found.tooBig).toBe(true);
+
+      const away = await putAwayWorktree(git(), repo, folder, { rescue: async () => undefined });
+      expect(away.put).toBe(false);
+      expect(existsSync(folder)).toBe(true);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('still gives back a copy whose bulk is only what a command makes', { timeout: 30_000 }, async () => {
+    const { repo, folder } = await repoWithNotes();
+    try {
+      // Huge, ignored, and rebuilt by one command — the disk worth reclaiming.
+      await mkdir(path.join(folder, 'node_modules', 'thing'), { recursive: true });
+      await writeFile(
+        path.join(folder, 'node_modules', 'thing', 'big.bin'),
+        Buffer.alloc(65 * 1024 * 1024),
+      );
+      const found = await writingLeftBehind(git(), folder);
+      expect(found).toEqual({ files: [], tooBig: false });
+
+      const away = await putAwayWorktree(git(), repo, folder, { rescue: async () => undefined });
+      expect(away.put).toBe(true);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

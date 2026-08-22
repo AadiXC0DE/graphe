@@ -2271,9 +2271,12 @@ const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
       Type.String({ description: 'One line on what came of it. Left out is fine.' }),
     ),
   }),
-  /* Sequential: two ticks racing would tick the same item twice and skip the
-     one between them. */
-  executionMode: 'sequential',
+  /* Parallel, and it has to be: one sequential tool in a batch makes the whole
+     batch run one after another, so a tick sent alongside a fan-out would turn
+     six helpers working at once into six waiting their turn. Two ticks racing
+     is safe on its own account — the list is only ever touched one at a time
+     where it is written. */
+  executionMode: 'parallel',
   execute: async (_callId, params: { note?: string }): ToolResult => {
     const said = await stepDone(typeof params.note === 'string' ? params.note : null);
     return { content: [{ type: 'text', text: said }], details: {} };

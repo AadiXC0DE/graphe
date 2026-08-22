@@ -48,7 +48,18 @@ export const CARRIED_BY_DEFAULT: readonly string[] = [
 
 /** Never carried, whatever a list says. The first two are rebuilt or shared;
  *  the last is the record that makes this a copy at all. */
-const NEVER_CARRY = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.cache']);
+const NEVER_CARRY = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '.next',
+  '.cache',
+  // Made again by one command, and big enough to matter when it is not.
+  '.venv',
+  'venv',
+  '__pycache__',
+]);
 
 /** A private file is a few kilobytes. Anything of size is something else. */
 const BIGGEST = 4 * 1024 * 1024;
@@ -257,7 +268,16 @@ export async function getReady(
 
   const [tool = 'npm', ...args] = command;
   const how = options.patience === undefined ? { folder: to } : { folder: to, patience: options.patience };
-  const ran = await inTurn(() => runHelper(tool, args, how));
+  const ran = await inTurn(async () => {
+    // Asked again inside the queue. One copy is kept and shared between
+    // conversations, so two can both look, both find nothing, and both join
+    // the queue — and the second would install on top of what the first had
+    // just finished putting there, at the one moment the machine can least
+    // afford it.
+    if (await piecesAreIn(to)) return null;
+    return runHelper(tool, args, how);
+  });
+  if (ran === null) return { carried, installed: null, ready: true, trouble: null };
   if (ran.code === 0) return { carried, installed: command, ready: true, trouble: null };
   return { carried, installed: command, ready: false, trouble: PIECES_MISSING };
 }

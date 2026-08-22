@@ -203,19 +203,29 @@ describe('asking is not itself a change', () => {
 /* ========================================================================== */
 
 describe('the gate closes the moment work begins', () => {
-  it('is closed by the same call that makes every earlier check stale', () => {
-    // Three lines, and all three matter: only a changing call closes it, it
-    // happens on the way in rather than after, and the interceptor is the
-    // thing that calls it.
-    expect(adapter).toContain('const forgetChecks = (call: ToolCall): void => {');
-    expect(adapter).toContain('if (!changesAnything(call, facts)) return;');
-    expect(adapter).toContain("if (asksLeft === 'open') asksLeft = 'started';");
-    expect(adapter).toContain('filesMayHaveMoved: forgetChecks,');
+  it('is closed by a call that actually runs, not by one that was refused', () => {
+    // Only a changing call closes it, and only once that call has passed
+    // everything. A refused call changes nothing, so it must not spend the one
+    // question a turn is allowed — which is what it used to do, leaving the
+    // model told it was too late to ask before anything had happened.
+    expect(adapter).toContain('const workBegan = (call: ToolCall): void => {');
+    expect(adapter).toContain(
+      "if (asksLeft === 'open' && changesAnything(call, facts)) asksLeft = 'started';",
+    );
+    expect(adapter).toContain('workBegan,');
+    // And it is no longer the check-staleness hook's business.
+    const forget = adapter.slice(adapter.indexOf('const forgetChecks = (call: ToolCall)'));
+    expect(forget.slice(0, forget.indexOf('};'))).not.toContain('asksLeft');
+  });
 
-    // Before the verdict, not after: a call that is about to run has already
-    // started as far as somebody who walked away is concerned.
+  it('is closed on every road a call takes to actually running', () => {
+    // Two: the ordinary one, and the full-access rung that skips the questions.
     const body = adapter.slice(adapter.indexOf('return async function review(call: ToolCall)'));
-    expect(body.indexOf('filesMayHaveMoved?.(call);')).toBeLessThan(body.indexOf('relay.started(call)'));
+    expect(body.match(/workBegan\?\.\(call\);/g)?.length).toBe(2);
+    // Immediately before the call is announced as started, both times.
+    for (const at of [...body.matchAll(/workBegan\?\.\(call\);/g)]) {
+      expect(body.slice(at.index, at.index + 90)).toContain('relay.started(call);');
+    }
   });
 
   it('reads a call the way the gate needs it read', () => {

@@ -432,4 +432,5 @@
   .askfirst__choice--many[data-on='true'] .askfirst__mark::after {
     transform: rotate(45deg);
   }
+
 }

@@ -84,6 +84,9 @@ export const cannotAsk = {
     'That question has only one real answer, so it is not worth stopping for. Carry on and say what you settled on.',
 } as const;
 
+/** Names that mean something to every object in the language. */
+const RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
+
 function trim(text: unknown, most: number): string {
   return typeof text === 'string' ? text.replace(/\s+/g, ' ').trim().slice(0, most) : '';
 }
@@ -117,6 +120,10 @@ export function tidyQuestions(raw: unknown): readonly Question[] {
 
     const question = trim(source['question'], 300);
     if (question === '') continue;
+    // Answers are filed against the question's own words, so a "question"
+    // whose words name a property every object already has is not one — it
+    // reads back as something nobody picked.
+    if (RESERVED.has(question)) continue;
     // The same question twice is a model repeating itself, not two questions.
     const already = question.toLowerCase();
     if (seen.has(already)) continue;

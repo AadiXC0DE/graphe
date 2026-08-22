@@ -377,8 +377,6 @@ describe('the session wiring the two ends to one desk', () => {
   });
 
   it('empties it whenever a call is about to change the files', () => {
-    // The same moment now also closes the asking, so the two live together in
-    // one guard rather than on one line.
-    expect(SOURCE).toMatch(/if \(!changesAnything\(call, facts\)\) return;\s*desk\.forget\(\)/);
+    expect(SOURCE).toMatch(/changesAnything\(call, facts\)\)\s*desk\.forget\(\)/);
   });
 });

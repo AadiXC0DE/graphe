@@ -251,6 +251,10 @@ export type InterceptorOptions = {
   /** Told about a call before it runs, so anything already checked can be
    *  forgotten when the files are about to move under it. */
   filesMayHaveMoved?: (call: ToolCall) => void;
+  /** This call has passed everything and is about to run. Not the same moment
+   *  as being asked for: a call the Guard refuses never happens, and must not
+   *  count as work having started. */
+  workBegan?: (call: ToolCall) => void;
 };
 
 function whyItMatters(verdict: Verdict): string {
@@ -272,7 +276,7 @@ function whyItMatters(verdict: Verdict): string {
 export function createGuardInterceptor(
   options: InterceptorOptions,
 ): (call: ToolCall) => Promise<Interception> {
-  const { facts, relay, confirmations, timeline, planning, rules, world, filesMayHaveMoved } =
+  const { facts, relay, confirmations, timeline, planning, rules, world, filesMayHaveMoved, workBegan } =
     options;
 
   /* Fails closed. A host with no history wired cannot run destructive work at all:
@@ -326,6 +330,7 @@ export function createGuardInterceptor(
           return { block: true, reason: TOLD.noRestorePoint };
         }
       }
+      workBegan?.(call);
       relay.started(call);
       return undefined;
     }
@@ -368,6 +373,7 @@ export function createGuardInterceptor(
       }
     }
 
+    workBegan?.(call);
     relay.started(call);
     return undefined;
   };
@@ -1435,12 +1441,20 @@ const MOST_AFTER_SAYINGS = 3;
   /** A change to the files makes every earlier check stale. Called on the way
    *  in, before the call runs, because afterwards is a moment too late. */
   const forgetChecks = (call: ToolCall): void => {
-    if (!changesAnything(call, facts)) return;
-    desk.forget();
-    // The same moment closes the asking. Reading around first is fine and does
-    // not count as starting; changing something is what a person cannot be
-    // waiting behind.
-    if (asksLeft === 'open') asksLeft = 'started';
+    if (changesAnything(call, facts)) desk.forget();
+  };
+
+  /**
+   * Work has actually begun, so the asking is over.
+   *
+   * Only for a call that passed everything and is about to run. Reading around
+   * first is fine and does not count as starting; changing something is what a
+   * person cannot be left waiting behind. A call the Guard refused changed
+   * nothing at all, and used to spend the one question a turn is allowed —
+   * so the model was told it was too late to ask before anything had happened.
+   */
+  const workBegan = (call: ToolCall): void => {
+    if (asksLeft === 'open' && changesAnything(call, facts)) asksLeft = 'started';
   };
 
   /**
@@ -1587,6 +1601,7 @@ const MOST_AFTER_SAYINGS = 3;
     rules: () => house,
     world: desk.world,
     filesMayHaveMoved: forgetChecks,
+    workBegan,
   });
 
   const runtime = await runtimeFor(agentDir);

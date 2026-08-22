@@ -153,6 +153,12 @@ export class HistoryError extends Error {
  *  exclude the secrets file is what puts keys in public. */
 const NEVER_SAVE = [
   'node_modules/',
+  // A project-local Python environment. Hundreds of megabytes, rebuilt with one
+  // command, and the deck skill tells the agent to make one — so without this
+  // the first deck somebody asks for lands in every version from then on.
+  '.venv/',
+  'venv/',
+  '__pycache__/',
   '.next/',
   '.nuxt/',
   '.svelte-kit/',

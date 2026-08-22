@@ -34,13 +34,19 @@ environment variables, percent-encoding, and Windows separators are all resolved
 globally pre-approved. There is deliberately no "accept everything" mode, because that switch is the
 first thing users flip and the last thing they should.
 
-## What is not yet true
+## What the boundary actually is
 
-Being straight about this, because a security document that overstates its position is worse than none.
-
-- **Process isolation is not implemented yet.** The policy layer is built and tested; the container
-  boundary beneath it is not. Until it lands, the guard is a strong filter rather than a hard
-  boundary, and Graphe should be treated as pre-release software.
+- **Policy layer + OS boundary, layered.** Every tool call is judged by a pure, synchronous, deny-by-default
+  policy engine (`src/agent/guard/policy.ts`) that never reads model prose. Beneath that, commands run inside
+  an OS boundary when the machine offers one: macOS `sandbox-exec` (Seatbelt) and Linux `bubblewrap`. The boundary
+  is *proved* at startup by attempting a real escape write and checking it was refused (`src/agent/sandbox`).
+  Helpers are additionally wrapped and self-probe from inside; a missing boundary is reported alongside the
+  helper's answer, never silently. Helpers that write (builder role) do so only inside a private git worktree.
+- **Known gaps, stated plainly.** Reads are open inside the boundary except for private places and key-shaped
+  filenames — the Guard refuses reads outside the project, but the kernel boundary does not. Egress is port-only
+  (`*:443` on macOS, whole network on Linux) with no host allowlist or proxy. **Windows has no kernel boundary
+  at all** (Guard only). `sandbox-exec` is deprecated by Apple since 10.10. The single kill switch is
+  `GRAPHE_SANDBOX=off`. See `src/agent/sandbox/index.ts` notes for the full list.
 - **Prompt injection cannot be fully prevented.** Text inside a repository can influence the model. The
   guard is designed on the assumption that it sometimes will, which is why enforcement sits below the
   model rather than inside the prompt.

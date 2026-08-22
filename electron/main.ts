@@ -163,7 +163,7 @@ import { pagesIn, type Page } from '../src/preview/pages';
 import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
 import { availableSkills, selectedSkills, skillContents, skillNamed } from '../src/agent/pi/skills';
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
-import { promptFor } from '../src/work/workflows';
+import { promptFor, workflowWords } from '../src/work/workflows';
 import { readCheckoutIndex, type Checkout } from '../src/history/checkouts';
 import {
   bringBack,
@@ -6672,13 +6672,10 @@ function register(): void {
     // that is not a known `/word` is left as the plain message it looks like.
     const leadingSlash = /^\/([a-z][a-z0-9-]*)(?:\s|$)/i.exec(text);
     if (leadingSlash !== null) {
-      const workflow = await workflowNamed(
-        open.path,
-        await defaultAgentDir(),
-        leadingSlash[1] ?? '',
-      );
+      const wanted = leadingSlash[1] ?? '';
+      const workflow = await workflowNamed(open.path, await defaultAgentDir(), wanted);
       if (workflow !== null) {
-        const rest = text.slice((leadingSlash[1]?.length ?? 0) + 1).trim();
+        const rest = text.slice(wanted.length + 1).trim();
         if (workflow.hint !== null && rest === '') {
           return fail({
             what: `Say what you want ${workflow.command} to do.`,
@@ -6687,6 +6684,14 @@ function register(): void {
           });
         }
         text = promptFor(workflow, rest);
+      } else {
+        // Unknown /word is not a chat message — surface as a workflow miss
+        // rather than sending literal "/unknown" to the model.
+        return fail({
+          what: workflowWords.noPage,
+          because: `There is no workflow named /${wanted}.`,
+          actionLabel: 'Got it',
+        });
       }
     }
     // A new turn is a new thing started, which is the one thing the ceiling

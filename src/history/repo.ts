@@ -773,32 +773,38 @@ export class ProjectHistory {
   ): Promise<Attempt> {
     const settings = FORCED_SETTINGS.flatMap((setting) => ['-c', setting]);
     const full = ['-C', this.root, ...settings, ...args];
-    try {
-      const { stdout, stderr } = await run(this.tool, full, {
-        cwd: this.root,
-        env: this.environment(options.theirSettings === true),
-        maxBuffer: 64 * 1024 * 1024,
-        windowsHide: true,
-      });
-      return { code: 0, stdout, stderr };
-    } catch (error) {
-      const failure = error as NodeJS.ErrnoException & {
-        stdout?: string;
-        stderr?: string;
-        code?: number | string;
-      };
-      if (typeof failure.code === 'string') {
-        // ENOENT and friends: the tool itself isn't there, which is not
-        // something the user did and not something they can be told about in
-        // these words.
-        throw new HistoryError(historyProblems.toolMissing, failure.message);
+    for (let retry = 0; retry < 3; retry++) {
+      try {
+        const { stdout, stderr } = await run(this.tool, full, {
+          cwd: this.root,
+          env: this.environment(options.theirSettings === true),
+          maxBuffer: 64 * 1024 * 1024,
+          windowsHide: true,
+        });
+        return { code: 0, stdout, stderr };
+      } catch (error) {
+        const failure = error as NodeJS.ErrnoException & {
+          stdout?: string;
+          stderr?: string;
+          code?: number | string;
+        };
+        if (typeof failure.code === 'string') {
+          throw new HistoryError(historyProblems.toolMissing, failure.message);
+        }
+        const stderr = failure.stderr ?? '';
+        const isLock = /index\.lock/.test(stderr);
+        if (isLock && retry < 2) {
+          await new Promise((r) => setTimeout(r, 100 * (retry + 1)));
+          continue;
+        }
+        return {
+          code: typeof failure.code === 'number' ? failure.code : 1,
+          stdout: failure.stdout ?? '',
+          stderr,
+        };
       }
-      return {
-        code: typeof failure.code === 'number' ? failure.code : 1,
-        stdout: failure.stdout ?? '',
-        stderr: failure.stderr ?? '',
-      };
     }
+    return { code: 1, stdout: '', stderr: 'index.lock retry exhausted' };
   }
 
   /** `theirSettings` is only ever true for sending work somewhere shared, where

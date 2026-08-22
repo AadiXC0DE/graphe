@@ -257,6 +257,17 @@ export type AgentEvent =
   /** Finished. `ok` is false when it could not be done, which changes nothing
    *  about the conversation — it simply stays long. */
   | { type: 'tidied'; ok: boolean }
+  /**
+   * The service could not answer, and this is the wait before asking again.
+   *
+   * The same shape as tidying, and for the same reason: something is happening
+   * that takes real time and produces nothing to look at. A long job that hit a
+   * busy provider used to leave the window empty for half an hour, which reads
+   * as stopped rather than waiting.
+   */
+  | { type: 'holding'; seconds: number }
+  /** Done waiting. `ok` is false when asking again did not help either. */
+  | { type: 'held'; ok: boolean }
   /** The agent has finished everything it was doing, tool calls included. The
    *  moment the session split is worth working out. */
   | { type: 'settled' }

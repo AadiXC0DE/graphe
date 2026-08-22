@@ -55,6 +55,7 @@ import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
 import { McpRegistry, inProject, mcpTool, readMcpConfig } from './mcp';
 import { parseReview } from './review';
+import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
 import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
 import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
 import { Running, type RunningPiece } from '../running';
@@ -1155,26 +1156,6 @@ function plainly(cause: unknown): string {
   return 'Something went wrong on my side, and I have stopped where I was.';
 }
 
-/** Transient errors that should be retried automatically (like other agents do).
- *  Covers the "OpenAI Responses stream ended before a terminal response event"
- *  that actually comes from pi's OpenAI-compatible path and affects opencode/
- *  codex providers, plus network and rate-limit errors. */
-function isTransientStreamError(cause: unknown): boolean {
-  const msg = cause instanceof Error ? cause.message : String(cause ?? '');
-  return (
-    /stream ended before a terminal response/i.test(msg) ||
-    /stream ended without producing/i.test(msg) ||
-    /Responses stream ended/i.test(msg) ||
-    /rate limit/i.test(msg) ||
-    /429/.test(msg) ||
-    /503/.test(msg) ||
-    /ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN/.test(msg) ||
-    /timeout/i.test(msg) ||
-    /network error/i.test(msg) ||
-    /fetch failed/i.test(msg)
-  );
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1276,9 +1257,26 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   /** Everything said since the last settled moment, so a review verdict can be
    *  read out of the final reply and shown as its own card. */
   let tape = '';
+  /**
+   * A failure caught on its way to the window, while there are still waits
+   * left to spend on it.
+   *
+   * The engine does not throw when a provider fails: the turn settles with the
+   * failure on it and `prompt()` returns as though all was well, which is why
+   * the retry that used to live around that call could never once have run.
+   * The failure arrives here instead. Held rather than shown, because a
+   * "stopped part way" card followed by the work carrying on underneath it is
+   * two contradictory things on one screen.
+   */
+  let heldBackTrouble: string | null = null;
+  let waitsLeft = 0;
   const say = (event: AgentEvent): void => {
     if (planning && event.type === 'message-delta') proposed += event.text;
     if (event.type === 'message-delta') tape += event.text;
+    if (event.type === 'error' && waitsLeft > 0 && isTransientStreamError(event.message)) {
+      heldBackTrouble = event.message;
+      return;
+    }
     options.onEvent(event);
     if (event.type === 'settled') {
       const verdict = parseReview(tape);
@@ -1908,36 +1906,63 @@ const MOST_AFTER_SAYINGS = 3;
             }
           }
         }
-        // Helper to retry transient stream errors (like "OpenAI Responses stream
-        // ended before a terminal response event" which affects opencode/codex
-        // providers via the OpenAI-compatible path) — other agents retry in
-        // ~1 min, so we do too rather than leaving a long task to fail.
-        // Must not stop before finishing all todo tasks — retry 1m, 5m, 10m, 30m (4-5 times) so user can leave and come back
-        const delays = [60_000, 5 * 60_000, 10 * 60_000, 30 * 60_000];
-        const doPromptWithRetry = async (promptText: string, opts: unknown): Promise<void> => {
-          for (let attempt = 0; attempt <= delays.length; attempt++) {
+        /**
+         * Ask, and keep asking while the answer is only that the service is
+         * busy.
+         *
+         * Both endings are read the same way. A turn can fail by throwing
+         * before it starts, or — far more often — by settling with the failure
+         * on it, which `prompt()` reports as an ordinary return. The second is
+         * the one that ends long jobs, and it is the one nothing here used to
+         * see.
+         *
+         * The engine has already tried three times over fourteen seconds by the
+         * time this is reached. That covers a blip. This covers a rate limit
+         * measured in minutes and an outage measured in an afternoon, so
+         * somebody can start a long list and walk away from it.
+         */
+        const askUntilItAnswers = async (promptText: string, opts: unknown): Promise<void> => {
+          let words = promptText;
+          let how = opts;
+          for (let attempt = 0; ; attempt += 1) {
+            heldBackTrouble = null;
+            // Only ever one loop holding a failure back. A second prompt in
+            // flight — the composer's queued follow-up — would otherwise
+            // swallow this one's failure and let the turn end as though it had
+            // worked.
+            waitsLeft = activePrompts > 1 ? 0 : WAITS_MS.length - attempt;
             try {
-              await (session.prompt as (text: string, opts?: unknown) => Promise<void>)(promptText, opts as never);
-              return;
+              await (session.prompt as (text: string, opts?: unknown) => Promise<void>)(
+                words,
+                how as never,
+              );
             } catch (cause) {
-              if (isTransientStreamError(cause) && attempt < delays.length) {
-                const waitMs = delays[attempt]!;
-                const waitSec = Math.round(waitMs / 1000);
-                // Tell the window we're retrying so a long task doesn't look dead
-                try {
-                  say({
-                    type: 'message-delta',
-                    text: `\n\nStream interrupted — retrying in ${waitSec}s (attempt ${attempt + 1}/${delays.length})…`,
-                  });
-                  say({ type: 'message-end' });
-                } catch {
-                  // Window not listening — retry still happens
-                }
-                await sleep(waitMs);
-                continue;
-              }
-              throw cause;
+              if (!isTransientStreamError(cause)) throw cause;
+              heldBackTrouble = plainly(cause);
+            } finally {
+              waitsLeft = 0;
             }
+
+            const trouble = heldBackTrouble;
+            heldBackTrouble = null;
+            if (trouble === null) return;
+            if (attempt >= WAITS_MS.length) {
+              // Out of waits. The window has been told nothing about this yet,
+              // so it is told now, in the ordinary way.
+              // `waitsLeft` is back to zero, so this one is not held back.
+              say({ type: 'held', ok: false });
+              say({ type: 'error', message: trouble });
+              return;
+            }
+
+            const wait = WAITS_MS[attempt] ?? 0;
+            say({ type: 'holding', seconds: Math.round(wait / 1000) });
+            await sleep(wait);
+            say({ type: 'held', ok: true });
+            // Never the original request again: everything already done is
+            // still in the conversation, and asking twice does it twice.
+            words = CARRY_ON;
+            how = undefined;
           }
         };
 
@@ -1949,10 +1974,10 @@ const MOST_AFTER_SAYINGS = 3;
             withPictures === undefined
               ? { streamingBehavior: 'followUp' as const }
               : { ...withPictures, streamingBehavior: 'followUp' as const };
-          await doPromptWithRetry(said, queued);
+          await askUntilItAnswers(said, queued);
         } else {
           try {
-            await doPromptWithRetry(said, withPictures);
+            await askUntilItAnswers(said, withPictures);
           } catch (cause) {
             // Pi refuses a second prompt while a turn is still running unless
             // it is told how to queue it. The window can ask while the agent
@@ -1965,7 +1990,7 @@ const MOST_AFTER_SAYINGS = 3;
               withPictures === undefined
                 ? { streamingBehavior: 'followUp' as const }
                 : { ...withPictures, streamingBehavior: 'followUp' as const };
-            await doPromptWithRetry(said, queued);
+            await askUntilItAnswers(said, queued);
           }
         }
       } catch (cause) {

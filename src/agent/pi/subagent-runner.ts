@@ -30,6 +30,7 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { mayRun, roleSpec, safeChildWords, type HelperRole } from './child';
+import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
 import { patchWorkerThreads } from './node-shim';
 import type { HelperPace } from './tools';
 import type { GuardFacts } from '../guard/policy';
@@ -62,20 +63,6 @@ const PACES: readonly HelperPace[] = ['off', 'minimal', 'low', 'medium', 'high',
 
 function paceOf(value: unknown): HelperPace | undefined {
   return PACES.find((level) => level === value);
-}
-
-function isTransientStreamError(cause: unknown): boolean {
-  const msg = cause instanceof Error ? cause.message : String(cause ?? '');
-  return (
-    /stream ended before a terminal response/i.test(msg) ||
-    /stream ended without producing/i.test(msg) ||
-    /Responses stream ended/i.test(msg) ||
-    /rate limit/i.test(msg) ||
-    /429/.test(msg) ||
-    /503/.test(msg) ||
-    /ETIMEDOUT|ECONNRESET/.test(msg) ||
-    /timeout/i.test(msg)
-  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -281,6 +268,9 @@ async function work(
     session?.dispose();
   };
 
+  /** A failure caught on its way out while there are still waits left. */
+  let heldBackTrouble: string | null = null;
+  let waitsLeft = 0;
   const relay = new EventRelay((event) => {
     if (event.type === 'message-delta') {
       spoken += event.text;
@@ -292,7 +282,16 @@ async function work(
     if (event.type === 'spend') {
       report({ type: 'spend', amount: event.amount, label: event.label, reason: event.reason });
     }
-    if (event.type === 'error') finish({ ok: false, error: event.message });
+    if (event.type === 'error') {
+      // The engine reports a provider failure by settling the turn with it, not
+      // by throwing, so this is where a helper actually dies. Held while there
+      // are waits left to spend, or a fan-out of six loses one to a busy minute.
+      if (waitsLeft > 0 && isTransientStreamError(event.message)) {
+        heldBackTrouble = event.message;
+        return;
+      }
+      finish({ ok: false, error: event.message });
+    }
     if (event.type === 'settled') {
       const said = safeChildWords(spoken.trim());
       finish(said === '' ? { ok: false, error: SAID_NOTHING } : { ok: true, text: said });
@@ -320,19 +319,29 @@ async function work(
     session = created.session;
     const unsubscribe = created.session.subscribe((event) => relay.fromPi(event));
 
-    // Retry transient stream errors — 1m, 5m, 10m, 30m so long todo lists survive
-    const delays = [60_000, 5 * 60_000, 10 * 60_000, 30 * 60_000];
-    for (let attempt = 0; attempt <= delays.length; attempt++) {
+    // A busy provider settles the turn with the failure on it rather than
+    // throwing, so both endings are read the same way and waited the same way.
+    let words = `${spec.spoken}\n\n${job.task.trim()}`;
+    for (let attempt = 0; ; attempt += 1) {
+      heldBackTrouble = null;
+      waitsLeft = WAITS_MS.length - attempt;
       try {
-        await created.session.prompt(`${spec.spoken}\n\n${job.task.trim()}`);
-        break;
+        await created.session.prompt(words);
       } catch (cause) {
-        if (isTransientStreamError(cause) && attempt < delays.length) {
-          await sleep(delays[attempt]!);
-          continue;
-        }
-        throw cause;
+        if (!isTransientStreamError(cause)) throw cause;
+        heldBackTrouble = cause instanceof Error ? cause.message : String(cause);
+      } finally {
+        waitsLeft = 0;
       }
+      const trouble = heldBackTrouble;
+      heldBackTrouble = null;
+      if (trouble === null) break;
+      if (attempt >= WAITS_MS.length) {
+        finish({ ok: false, error: trouble });
+        break;
+      }
+      await sleep(WAITS_MS[attempt] ?? 0);
+      words = CARRY_ON;
     }
 
     // A run that was refused outright can resolve with no `settled` to follow.

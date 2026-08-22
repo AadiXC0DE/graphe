@@ -511,6 +511,27 @@ function listedItems(text: string): number {
  * with no punctuation at all, and numbers dropped into prose ("1. fix the
  * header, 2. …"). Whatever their doing word, three of them are a plan.
  */
+/**
+ * Whether to look around and say what we would do before doing any of it.
+ *
+ * Kept here rather than inline in the window because it is a rule, and a rule
+ * nobody can test is a rule that quietly stops holding. It deliberately does
+ * not take how far the run may go: full access says do not stop and ask, which
+ * is about the pause, not about the list. The biggest jobs are the ones that
+ * most need a list, and they were the ones getting none.
+ */
+export function shouldLookFirst(options: {
+  plans: 'auto' | 'always' | 'never' | 'research';
+  /** This message is the answer to a look-around we just did. */
+  answering: boolean;
+  text: string;
+}): boolean {
+  const { plans, answering, text } = options;
+  if (plans === 'never' || plans === 'research') return false;
+  if (plans === 'always') return true;
+  return !answering && worthPlanning(text);
+}
+
 export function worthPlanning(text: string): boolean {
   const said = text.trim();
   if (said === '') return false;
@@ -529,6 +550,11 @@ export function worthPlanning(text: string): boolean {
     .map((part) => part.replace(/^\s*\d+[.):]\s*/, '').trim())
     .filter((part) => part.length >= 12);
   if (fragments.length >= 4) return true;
+  // Three is the commonest shape of a list of jobs — "the popups are behind the
+  // rail, the star is off centre, the header jumps". What separates it from a
+  // polite sentence with an aside in it is length: an aside is a few words, a
+  // job described in its own words is not.
+  if (fragments.filter((part) => part.length >= 24).length >= 3) return true;
   // Very huge/medium tasks with two jobs and a long description should also plan —
   // user reported even huge tasks not creating a todo. Keep threshold high so single polite asks stay non-planning.
   if (words >= 60 && actions >= 2 && items >= 2) return true;

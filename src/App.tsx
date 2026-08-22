@@ -58,6 +58,7 @@ import AskAnything from "./components/AskAnything";
 import type { Found, Things } from "./lib/anything";
 import type { Task } from "./cost/estimate";
 import {
+  busyService,
   longConversation,
   meter,
   nothingSpentYet,
@@ -65,7 +66,7 @@ import {
   sessionSummary,
 } from "./cost/phrasing";
 import { sizeUp } from "./cost/sizing";
-import { parseProposal, worthPlanning } from "./agent/plan";
+import { parseProposal, shouldLookFirst } from "./agent/plan";
 import { asResearch, implementationPlanFromResearch } from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
 import { readDesign } from "./design/reading";
@@ -2415,9 +2416,10 @@ function Conversation() {
       // "Always" means always: somebody who set it gets a look-around for
       // anything they type, and answers the plan with the button. Only the
       // guess — "auto" reading the words — steps aside for its own answer.
-      const lookFirst =
-        howFar !== 'doing' &&
-        (plans === 'always' || (plans === 'auto' && !answering && worthPlanning(text)));
+      // Full access means do not stop and ask. It never meant work without a
+      // list — the biggest jobs are the ones that most need one, and the plan
+      // approves itself the moment it lands.
+      const lookFirst = shouldLookFirst({ plans, answering, text });
       if (lookFirst) {
         asked.current = text;
         justLookedFirst.current = true;
@@ -2501,9 +2503,7 @@ function Conversation() {
         }
         const answering = justLookedFirst.current;
         justLookedFirst.current = false;
-        const lookFirst =
-          howFar !== 'doing' &&
-          (plans === 'always' || (plans === 'auto' && !answering && worthPlanning(text)));
+        const lookFirst = shouldLookFirst({ plans, answering, text });
         if (lookFirst) {
           asked.current = text;
           justLookedFirst.current = true;
@@ -2745,6 +2745,10 @@ function Conversation() {
       );
       if (text === "") return;
       asked.current = "";
+      // The look-around has been answered here. Without this the next thing
+      // somebody typed counted as the answer to it and skipped its own list,
+      // so every message straight after an accepted plan got none.
+      justLookedFirst.current = false;
       if (go) {
         // A build plan keeps the real task list the agent proposed, so a
         // resumed session knows each step and where it got to.
@@ -2826,14 +2830,16 @@ function Conversation() {
      so a big document can be kicked off and left alone.*/
   useEffect(() => {
     if (desk === null) return;
-    if (holdsBack(preferences.heldBack, desk.path)) return;
+    // "Until it's done" is itself the answer, whatever the project's hold-back
+    // says: somebody who picked it has already said not to stop and ask.
+    if (howFar !== 'doing' && holdsBack(preferences.heldBack, desk.path)) return;
     const waiting = desk.turns.find((one) => one.kind === 'plan' && one.answered === null);
     if (waiting === undefined || waiting.kind !== 'plan') return;
     // A plan that asked something must never answer itself. Asking two
     // questions and then answering them yourself is worse than never asking.
     if (waiting.questions.length > 0) return;
     answerPlan(waiting.id, true);
-  }, [desk, preferences.heldBack, answerPlan]);
+  }, [desk, preferences.heldBack, answerPlan, howFar]);
 
   const respond = useCallback(
     (turnId: string, callId: string, decision: Decision) => {
@@ -4894,6 +4900,22 @@ function Turnstile({
           state={turn.state}
           label={turn.state === 'failed' ? longConversation.stayedAsIs : longConversation.tidying}
           real={showMe ? behind.tidying : undefined}
+        />
+      );
+
+    case "holding":
+      // A service that could not answer, and the wait before asking again.
+      // Nothing to look at for up to half an hour, so the line says how long.
+      return (
+        <ActivityLine
+          state={turn.state}
+          label={
+            turn.state === 'failed'
+              ? busyService.gaveUp
+              : turn.state === 'done'
+                ? busyService.carriedOn
+                : busyService.waiting(turn.seconds)
+          }
         />
       );
 

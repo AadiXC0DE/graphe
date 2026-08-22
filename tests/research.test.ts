@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { parseProposal, worthPlanning } from '../src/agent/plan';
+import { parseProposal, shouldLookFirst, worthPlanning } from '../src/agent/plan';
 
 import {
   asResearch,
@@ -119,10 +119,28 @@ describe('the answer to a look-around is built, not looked at again', () => {
     // Both send paths, and both ways into research.
     expect(app.match(/const answering = justLookedFirst\.current;/g)?.length).toBe(2);
     expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(4);
-    // Only the guess steps aside. A switch somebody deliberately set to
-    // "always" is not overruled by us deciding they meant something else.
-    expect(app).toContain("plans === 'auto' && !answering && worthPlanning(text)");
-    expect(app).not.toContain("!answering &&\n        howFar");
+    // The rule itself lives where it can be tested, and both paths call it.
+    expect(app.match(/shouldLookFirst\(\{ plans, answering, text \}\)/g)?.length).toBe(2);
+  });
+
+  /* The rule the window used to hold inline. Its own tests, because a rule
+     nobody can run is a rule that quietly stops holding — which is what
+     happened: full access turned the whole thing off. */
+  it('only the guess steps aside for the message that answers it', () => {
+    const text = 'now implement the redesign';
+    expect(shouldLookFirst({ plans: 'auto', answering: true, text })).toBe(false);
+    // A switch somebody deliberately set to "always" is not overruled by us
+    // deciding they meant something else.
+    expect(shouldLookFirst({ plans: 'always', answering: true, text })).toBe(true);
+    expect(shouldLookFirst({ plans: 'never', answering: false, text })).toBe(false);
+    expect(shouldLookFirst({ plans: 'research', answering: false, text })).toBe(false);
+  });
+
+  it('does not ask how far the run may go — that was the bug', () => {
+    // "Until it's done" is about not stopping to ask. It never meant working
+    // without a list, and the biggest jobs are the ones that most need one.
+    expect(app).not.toContain("howFar !== 'doing' &&\n        (plans ===");
+    expect(app).not.toContain("howFar !== 'doing' &&\n          (plans ===");
   });
 
   it('judges the message after that one fresh', () => {

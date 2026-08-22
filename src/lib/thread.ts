@@ -111,6 +111,9 @@ export type Turn =
       answered: 'went-ahead' | 'changing' | null;
     }
   | { kind: 'tidying'; id: string; state: ActivityState }
+  /** Waiting out a service that could not answer. `seconds` is how long this
+   *  wait is, so the line can say it rather than spin. */
+  | { kind: 'holding'; id: string; state: ActivityState; seconds: number }
   | { kind: 'trouble'; id: string; trouble: Trouble }
   /** "I checked the change: here is the verdict." Draws the review card. */
   | {
@@ -349,6 +352,9 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
           if (turn.kind === 'tidying' && turn.state === 'running') {
             return { ...turn, state: 'failed' as const };
           }
+          if (turn.kind === 'holding' && turn.state === 'running') {
+            return { ...turn, state: 'failed' as const };
+          }
           return turn;
         }),
         {
@@ -408,6 +414,26 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       // fretting rather than an app tidying.
       const already = turns.some((turn) => turn.kind === 'tidying' && turn.state === 'running');
       return already ? turns : [...turns, { kind: 'tidying', id: newId(), state: 'running' }];
+    }
+
+    case 'holding': {
+      // Once per wait, and never stacked: four waits in a row are four lines,
+      // but a second announcement of the same one is an app fretting.
+      const already = turns.some((turn) => turn.kind === 'holding' && turn.state === 'running');
+      if (already) return turns;
+      return [...turns, { kind: 'holding', id: newId(), state: 'running', seconds: event.seconds }];
+    }
+
+    case 'held': {
+      const index = turns.findLastIndex(
+        (turn) => turn.kind === 'holding' && turn.state === 'running',
+      );
+      if (index === -1) return turns;
+      const next = [...turns];
+      const was = turns[index];
+      if (was?.kind !== 'holding') return turns;
+      next[index] = { ...was, state: event.ok ? 'done' : 'failed' };
+      return next;
     }
 
     case 'reviewed': {

@@ -89,11 +89,38 @@ async function projectRoots(project: string): Promise<string[]> {
   return roots;
 }
 
+async function packageSkillRoots(agentDir: string): Promise<string[]> {
+  const out: string[] = [];
+  const npmRoot = join(agentDir, 'npm', 'node_modules');
+  const pkgs = await readdir(npmRoot, { withFileTypes: true }).catch(() => [] as import('node:fs').Dirent[]);
+  for (const entry of pkgs) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    const pkgPath = join(npmRoot, entry.name);
+    if (entry.name.startsWith('@')) {
+      const scoped = await readdir(pkgPath, { withFileTypes: true }).catch(() => [] as import('node:fs').Dirent[]);
+      for (const sub of scoped) {
+        if (!sub.isDirectory()) continue;
+        const subPath = join(pkgPath, sub.name);
+        out.push(join(subPath, 'skills'));
+        out.push(subPath);
+      }
+    } else {
+      out.push(join(pkgPath, 'skills'));
+      out.push(pkgPath);
+    }
+  }
+  return out;
+}
+
 export async function availableSkills(project: string | null, agentDir: string): Promise<readonly AvailableSkill[]> {
   const roots: { path: string; source: Found['source'] }[] = [
     { path: join(agentDir, 'skills'), source: 'global' },
     { path: join(homedir(), '.agents', 'skills'), source: 'global' },
   ];
+  // Package-installed skills (e.g. via Add More → pi-subagents) live under agentDir/npm
+  if (agentDir !== '') {
+    for (const p of await packageSkillRoots(agentDir)) roots.push({ path: p, source: 'global' });
+  }
   if (project !== null) {
     for (const path of await projectRoots(project)) roots.push({ path, source: 'project' });
   }

@@ -320,8 +320,8 @@ async function work(
     session = created.session;
     const unsubscribe = created.session.subscribe((event) => relay.fromPi(event));
 
-    // Retry transient stream errors like helpers do for main session
-    const delays = [2_000, 10_000, 60_000];
+    // Retry transient stream errors — 1m, 5m, 10m, 30m so long todo lists survive
+    const delays = [60_000, 5 * 60_000, 10 * 60_000, 30 * 60_000];
     for (let attempt = 0; attempt <= delays.length; attempt++) {
       try {
         await created.session.prompt(`${spec.spoken}\n\n${job.task.trim()}`);

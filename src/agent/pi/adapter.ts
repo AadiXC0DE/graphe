@@ -1912,7 +1912,8 @@ const MOST_AFTER_SAYINGS = 3;
         // ended before a terminal response event" which affects opencode/codex
         // providers via the OpenAI-compatible path) — other agents retry in
         // ~1 min, so we do too rather than leaving a long task to fail.
-        const delays = [2_000, 10_000, 60_000];
+        // Must not stop before finishing all todo tasks — retry 1m, 5m, 10m, 30m (4-5 times) so user can leave and come back
+        const delays = [60_000, 5 * 60_000, 10 * 60_000, 30 * 60_000];
         const doPromptWithRetry = async (promptText: string, opts: unknown): Promise<void> => {
           for (let attempt = 0; attempt <= delays.length; attempt++) {
             try {

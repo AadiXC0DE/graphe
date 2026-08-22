@@ -64,7 +64,7 @@ export function asResearch(asked: string): string {
 export function implementationPlanFromResearch(report: string): string | null {
   // Robust to bold (**PLAN**), heading levels, trailing colon, and case.
   // Previously only matched exact uppercase without markers, so **IMPLEMENTATION PLAN** was missed.
-  const marker = /^\s*(?:#{1,6}\s*)?(?:\*\*|__|[\*_])?\s*IMPLEMENTATION PLAN\s*(?:\*\*|__|[\*_])?\s*:?\s*$/im;
+  const marker = /^\s*(?:#{1,6}\s*)?(?:\*\*|__|[*_])?\s*IMPLEMENTATION PLAN\s*(?:\*\*|__|[*_])?\s*:?\s*$/im;
   const found = marker.exec(report);
   if (found === null) return null;
   const after = report.slice(found.index + found[0].length).trim();

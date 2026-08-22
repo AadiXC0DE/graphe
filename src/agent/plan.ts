@@ -529,6 +529,9 @@ export function worthPlanning(text: string): boolean {
     .map((part) => part.replace(/^\s*\d+[.):]\s*/, '').trim())
     .filter((part) => part.length >= 12);
   if (fragments.length >= 4) return true;
+  // Very huge/medium tasks with two jobs and a long description should also plan —
+  // user reported even huge tasks not creating a todo. Keep threshold high so single polite asks stay non-planning.
+  if (words >= 60 && actions >= 2 && items >= 2) return true;
 
   if (BIG_JOB.test(said)) return true;
   if (items >= 3) return true;

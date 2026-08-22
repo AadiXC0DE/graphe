@@ -72,8 +72,8 @@ import { selectCorrect, type CandidateSignals } from './correctness';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet, MOST_AT_ONCE } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
-import { boundaryHere, hold } from '../sandbox';
-import { doorwayEnvironment, openDoorway, type Doorway } from '../sandbox/egress';
+import { hold } from '../sandbox';
+import { doorwayEnvironment, type Doorway } from '../sandbox/egress';
 import type { LivePage, Money, PageAct, PageReading, SpendReason } from '../types';
 
 /** The result envelope every tool here returns: the model's answer in text.
@@ -115,6 +115,10 @@ export type SubagentLine =
    *  helper is a separate process with its own account calls — so a fan-out to
    *  six helpers is money nobody counted until it travels this line. */
   | { type: 'spend'; amount: Money; label: string; reason: SpendReason }
+  /** Still here, waiting out a service that could not answer. Nothing is drawn
+   *  from it — it exists so that a helper sitting out a wobble is not mistaken
+   *  for one that has stopped saying anything and killed for it. */
+  | { type: 'waiting' }
   | { type: 'done'; outcome: SubagentOutcome };
 
 /* -------------------------------------------------------------------------- */
@@ -1004,26 +1008,23 @@ function helperBounds(
 }
 
 /**
- * The door helpers reach the internet through.
+ * The door helpers would reach the internet through, if they could use one.
  *
- * One for all of them rather than one each: a helper is a whole process and a
- * fan-out sends several at once, so a door apiece would be several servers for
- * one job. Opened the first time a helper needs it and left up — closing it
- * between helpers would only mean opening it again a second later.
+ * They cannot, and this is why it is off. A helper runs in Electron's own Node,
+ * whose `fetch` reads no proxy setting — so a helper pointed at a door walks
+ * straight past it, while the boundary built around that door permits the door
+ * and nothing else. The result is a helper with no way out at all: every model
+ * call refused by the kernel, every helper in a fan-out failing at the same
+ * instant, and none of them able to say why.
  *
- * Only where the boundary can insist work goes through it. Anywhere else,
- * pointing a helper at a door it is free to walk past is a request dressed up
- * as a rule, and saying nothing about that is worse than not having one.
+ * So helpers reach secure addresses directly, as they did before, and the
+ * Guard is what stands between them and where they go. Turning this on again
+ * means installing a proxy-aware dispatcher inside the child first, and adding
+ * the sign-in addresses the runtime refreshes tokens against — without both,
+ * it is a boundary that only looks like one.
  */
-let helperDoor: Promise<Doorway | null> | null = null;
-
 async function doorForHelpers(): Promise<Doorway | null> {
-  helperDoor ??= (async () => {
-    const look = await boundaryHere();
-    if (!look.ok || look.kind !== 'seatbelt') return null;
-    return openDoorway();
-  })();
-  return helperDoor;
+  return null;
 }
 
 /** Who the helper thinks with. The child has no window, no settings of its own
@@ -2246,6 +2247,39 @@ export function pageTools(cwd?: string): ToolDefinition[] {
  */
 export type AskFirst = (questions: unknown) => Promise<string>;
 
+/**
+ * Tick one thing off the list on screen.
+ *
+ * The list used to move on its own, one step per reply. That works for a list
+ * of jobs done a reply at a time and for nothing else — a list of six things
+ * the model meant to do inside one reply could never get past the first, so
+ * somebody watched real work happen beside a checklist reading nought.
+ *
+ * Whoever is doing the work says when a thing is done. Answers with how far
+ * along it now is, so the model can see its own list rather than guess.
+ */
+export type StepDone = (note: string | null) => Promise<string>;
+
+const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
+  name: 'step_done',
+  label: 'Ticking one off the list',
+  description:
+    "Tick the thing you have just finished off the checklist the person can see. Call it once for each item, the moment that item is genuinely done — not at the end, and never for something you have only started. If there is no checklist it says so and costs nothing.",
+  promptSnippet: 'step_done(note) — tick the thing you just finished off the checklist',
+  parameters: Type.Object({
+    note: Type.Optional(
+      Type.String({ description: 'One line on what came of it. Left out is fine.' }),
+    ),
+  }),
+  /* Sequential: two ticks racing would tick the same item twice and skip the
+     one between them. */
+  executionMode: 'sequential',
+  execute: async (_callId, params: { note?: string }): ToolResult => {
+    const said = await stepDone(typeof params.note === 'string' ? params.note : null);
+    return { content: [{ type: 'text', text: said }], details: {} };
+  },
+});
+
 const askFirstTool = (askFirst: AskFirst): ToolDefinition => ({
   name: 'ask_first',
   label: 'Asking before starting',
@@ -2288,6 +2322,7 @@ export const grapheTools = (
   putOnBoard?: PutOnBoard,
   noted?: ChecksNoted,
   askFirst?: AskFirst | null,
+  stepDone?: StepDone | null,
 ): ToolDefinition[] => {
   const tools: ToolDefinition[] = [
     websearchTool,
@@ -2299,6 +2334,8 @@ export const grapheTools = (
   // run nobody is watching both get no tool at all, rather than a tool that
   // always answers "there is nobody here".
   if (askFirst !== undefined && askFirst !== null) tools.push(askFirstTool(askFirst));
+  // Only where there is a list to tick. A helper has no checklist of its own.
+  if (stepDone !== undefined && stepDone !== null) tools.push(stepDoneTool(stepDone));
   if (projectRoot !== undefined && projectRoot !== '') {
     tools.push(
       readMapTool(projectRoot),

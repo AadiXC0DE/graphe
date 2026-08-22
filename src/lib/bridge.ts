@@ -1693,6 +1693,10 @@ let previewHowFar: HowFar = 'asking';
 
     /* Nothing lands on its own behind a browser tab, so nothing is ever pushed
        at the window here. It asks, and it is answered. */
+    onBuildPlan(): () => void {
+      return () => undefined;
+    },
+
     onAway(): () => void {
       return () => {};
     },
@@ -1974,6 +1978,7 @@ function connect(): Bridge {
     switchRepeat: (id, on, where) => api.switchRepeat(id, on, where),
     forgetRepeat: (id, where) => api.forgetRepeat(id, where),
     onAway: (listener) => api.onAway(listener),
+    onBuildPlan: (listener) => api.onBuildPlan(listener),
     inStep: () => api.inStep(),
     followDesign: (address) => api.followDesign(address),
     lookAgain: () => api.lookAgain(),

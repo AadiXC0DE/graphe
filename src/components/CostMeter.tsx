@@ -212,7 +212,11 @@ function Ceiling({
           onChange={(event) => setTyped(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') save();
-            if (event.key === 'Escape') setOpen(false);
+            if (event.key === 'Escape') {
+              // Closes this and only this — the press must not reach the run.
+              event.preventDefault();
+              setOpen(false);
+            }
           }}
         />
       </label>

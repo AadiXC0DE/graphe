@@ -30,7 +30,7 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { mayRun, roleSpec, safeChildWords, type HelperRole } from './child';
-import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
+import { CARRY_ON, HELPER_WAITS_MS, isTransientStreamError } from './transient';
 import { patchWorkerThreads } from './node-shim';
 import type { HelperPace } from './tools';
 import type { GuardFacts } from '../guard/policy';
@@ -72,6 +72,21 @@ function sleep(ms: number): Promise<void> {
 /** The one channel out. Only JSON lines ever leave, so a parent that reads by
  *  line never has to guess which parts are report and which are noise. The
  *  shapes are the `SubagentLine` contract in tools.ts. */
+/**
+ * Wait, saying so as it goes.
+ *
+ * The one above kills a helper that has written nothing for five minutes, and
+ * any byte resets that clock. A helper sitting out a provider wobble writes
+ * nothing at all, so it was being killed for waiting exactly as it was told to.
+ */
+async function waitOut(ms: number): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    await sleep(Math.min(20_000, until - Date.now()));
+    report({ type: 'waiting' });
+  }
+}
+
 function report(payload: unknown): void {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
@@ -321,6 +336,12 @@ async function work(
       finish({ ok: false, error: event.message });
     }
     if (event.type === 'settled') {
+      // A turn that settled on a failure we are about to wait out has not
+      // ended — the loop below owns that one. The engine reports the failure
+      // and then settles immediately, so without this every wobble ended the
+      // helper here, one callback before the waiting could start, and reported
+      // it as having finished with nothing to say.
+      if (heldBackTrouble !== null) return;
       const said = safeChildWords(spoken.trim());
       finish(said === '' ? { ok: false, error: nothingSaid() } : { ok: true, text: said });
     }
@@ -352,7 +373,7 @@ async function work(
     let words = `${spec.spoken}\n\n${job.task.trim()}`;
     for (let attempt = 0; ; attempt += 1) {
       heldBackTrouble = null;
-      waitsLeft = WAITS_MS.length - attempt;
+      waitsLeft = HELPER_WAITS_MS.length - attempt;
       try {
         await created.session.prompt(words);
       } catch (cause) {
@@ -364,11 +385,11 @@ async function work(
       const trouble = heldBackTrouble;
       heldBackTrouble = null;
       if (trouble === null) break;
-      if (attempt >= WAITS_MS.length) {
+      if (attempt >= HELPER_WAITS_MS.length) {
         finish({ ok: false, error: trouble });
         break;
       }
-      await sleep(WAITS_MS[attempt] ?? 0);
+      await waitOut(HELPER_WAITS_MS[attempt] ?? 0);
       words = CARRY_ON;
     }
 

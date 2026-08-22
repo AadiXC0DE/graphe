@@ -53,6 +53,17 @@ export function isTransientStreamError(cause: unknown): boolean {
  */
 export const WAITS_MS: readonly number[] = [60_000, 5 * 60_000, 10 * 60_000, 30 * 60_000];
 
+/**
+ * The same idea at the size of a helper.
+ *
+ * A helper runs inside a turn somebody is sitting through, and the one above it
+ * gives up on a helper that has said nothing for five minutes. A ladder that
+ * starts at a minute and reaches thirty is longer than the patience it is being
+ * measured against, so the later rungs could never be reached — the helper was
+ * killed mid-wait instead. This is the part of a wait that fits inside a turn.
+ */
+export const HELPER_WAITS_MS: readonly number[] = [15_000, 45_000, 90_000];
+
 /** Said to the model when a turn is picked up after a wait. Never the original
  *  request again: everything finished so far is still in the conversation, and
  *  asking for the whole thing twice is how a list gets done twice. */

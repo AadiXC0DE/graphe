@@ -182,8 +182,13 @@ import {
 import {
   addTasks,
   finishTask,
+  inHand,
   isFinished,
+  nextOf,
+  note as noteOn,
+  progress,
   readPlan,
+  setStatus,
   startTask,
   type Task,
 } from '../src/work/buildplan';
@@ -3220,6 +3225,9 @@ async function startConversationUnlocked(
       // must not be able to fill the board they are running on.
       putOnBoard: (doing, after, ways) =>
         keepGoing(open.path, basename(open.path), doing, after, false, ways ?? null),
+      // Whoever is doing the work says when a thing is done, rather than the
+      // window guessing from where one reply ends and the next begins.
+      stepDone: (note) => tickOneOff(open.path, note),
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -3627,6 +3635,25 @@ type AwayDesk = {
    *  wall-clock ceiling so a stuck loop cannot burn a night. */
   goals: Set<string>;
 };
+
+/**
+ * Ticking one thing off the checklist, from inside a tool call.
+ *
+ * The plan helpers live inside `register`, and the session that needs them is
+ * built elsewhere, so the two meet here. Answers plainly before `register` has
+ * run: a conversation with no checklist is the ordinary case, not a failure.
+ */
+let tickOneOff: (project: string, note: string | null) => Promise<string> = () =>
+  Promise.resolve(NO_LIST_TO_TICK);
+
+const NO_LIST_TO_TICK =
+  'There is no checklist on screen for this project, so there was nothing to tick. Carry on.';
+
+/** Projects whose checklist the model has moved itself this turn. The window
+ *  advances one step per reply for a plan worked a reply at a time; when the
+ *  model has said where it is, its word is the better one and the reply-boundary
+ *  guess must not move it a second time. */
+const tickedThisTurn = new Set<string>();
 
 const awayDesks = new Map<string, AwayDesk>();
 
@@ -6590,6 +6617,47 @@ function register(): void {
     return after;
   }
 
+  /**
+   * Tick the thing in hand off, and say how far along that leaves it.
+   *
+   * The one place the model can move its own list. Everything it needs to know
+   * comes back in the sentence — how many are done, and what is next — because
+   * a tool that answers "ok" teaches the model nothing about the list it is
+   * working through.
+   */
+  tickOneOff = async (project: string, note: string | null): Promise<string> =>
+    onePlanAtATime(project, async () => {
+      const stored = await readStoredTasks(project);
+      if (stored === null) return NO_LIST_TO_TICK;
+      const was = inHand(stored.tasks);
+      if (was === null) return NO_LIST_TO_TICK;
+
+      let tasks = setStatus(stored.tasks, was.n, 'done');
+      if (note !== null && note.trim() !== '') tasks = noteOn(tasks, was.n, note.trim());
+      // Its word, not the reply boundary's guess.
+      tickedThisTurn.add(project);
+
+      const how = progress(tasks);
+      if (isFinished(tasks)) {
+        await rm(buildPlanFile(project), { force: true }).catch(() => undefined);
+        pushBuildPlan(project, null);
+        return `“${was.title}” is ticked off. That was the last of ${String(how.total)} — the list is done and is gone from the screen.`;
+      }
+      await writeBuildPlan(project, stored.source, tasks);
+      pushBuildPlan(project, await readBuildPlan(project));
+      const next = nextOf(tasks);
+      return `“${was.title}” is ticked off — ${String(how.done)} of ${String(how.total)} done.${
+        next === null ? '' : ` Next on the list: “${next.title}”.`
+      }`;
+    });
+
+  /** Say the checklist moved, so it moves on screen while the reply is still
+   *  going rather than catching up once nobody is watching. */
+  function pushBuildPlan(project: string, plan: import('../src/lib/ipc').BuildPlan | null): void {
+    if (mainWindow === null || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send(CHANNEL.buildPlanChanged, { project, plan });
+  }
+
   async function writeBuildPlan(project: string, source: string, tasks: readonly Task[]): Promise<void> {
     const file = buildPlanFile(project);
     await mkdir(dirname(file), { recursive: true });
@@ -6707,8 +6775,18 @@ function register(): void {
       if (op === null || typeof op !== 'object') return fail(NOTHING_OPEN);
       let tasks: readonly Task[] = stored.tasks;
       if (op.kind === 'start') {
+        // A new reply, so whatever the model said last time is spent.
+        tickedThisTurn.delete(open.path);
         tasks = startTask(stored.tasks);
       } else if (op.kind === 'finish') {
+        // The window moves the list on one step per reply, which is right for a
+        // plan worked a reply at a time. When the model has ticked its own
+        // items off, its word is the better one and this must not move it
+        // again — six items done inside one reply is six, not seven.
+        if (tickedThisTurn.has(open.path)) {
+          tickedThisTurn.delete(open.path);
+          return done(await readBuildPlan(open.path));
+        }
         tasks = finishTask(stored.tasks, op.ok !== false);
       } else if (op.kind === 'add' && Array.isArray(op.titles)) {
         tasks = addTasks(stored.tasks, op.titles.filter((one) => typeof one === 'string'));

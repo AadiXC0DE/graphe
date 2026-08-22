@@ -48,11 +48,15 @@ first thing users flip and the last thing they should.
   and `pwd` are impossible without that — but contents outside the list are not, so a Guard bypass no longer
   reaches `~/.ssh` or another tool's saved login. On Linux the boundary is still read-open except for private
   places, because bubblewrap has no read denial and the equivalent is a much larger change.
-- **Egress is checked by address on macOS, for the agent's shell and its helpers.** Both go through a
-  loopback doorway that accepts `CONNECT` only for known hosts; the profile then opens nothing else, so
-  going around the doorway fails in the kernel rather than being asked not to. Extra addresses come from
+- **Egress is checked by address on macOS, for the agent's own shell.** It goes through a loopback
+  doorway that accepts `CONNECT` only for known hosts; the profile then opens nothing else, so going
+  around the doorway fails in the kernel rather than being asked not to. Extra addresses come from
   `GRAPHE_EGRESS_HOSTS`. If the doorway cannot open, the run says so rather than quietly reverting to
-  reaching anything.
+  reaching anything. **Helpers are not behind it** — they run in a runtime that reads no proxy setting,
+  so a helper pointed at the doorway walks past it into a profile that permits the doorway and nothing
+  else, which leaves it with no way out at all. Until the child installs a proxy-aware dispatcher and
+  the sign-in addresses it refreshes tokens against are on the list, a helper reaches secure addresses
+  directly and the Guard is what stands between it and where it goes.
 - **Known gaps, stated plainly.** Egress on Linux is port-only: with the network namespace shared there is
   nothing to filter with, and with it unshared the doorway is unreachable, so a proxy setting there would be
   a request the child could ignore. A server started by `keep_running` is not put behind the doorway — a dev

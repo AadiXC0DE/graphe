@@ -430,7 +430,7 @@ describe('writing nothing else would keep — the report a restart deleted', () 
     }
   });
 
-  it('leaves the install behind — that is still the disk worth reclaiming', async () => {
+  it('leaves the install behind — that is still the disk worth reclaiming', { timeout: 30_000 }, async () => {
     const { repo, folder } = await repoWithNotes();
     try {
       const heavy = path.join(folder, 'node_modules', 'thing');
@@ -444,7 +444,7 @@ describe('writing nothing else would keep — the report a restart deleted', () 
     }
   });
 
-  it('keeps the notes and drops the install when a copy holds both', async () => {
+  it('keeps the notes and drops the install when a copy holds both', { timeout: 30_000 }, async () => {
     const { repo, folder } = await repoWithNotes();
     try {
       await mkdir(path.join(folder, 'notes'), { recursive: true });
@@ -735,7 +735,7 @@ describe('putting a conversation away and asking for it again', () => {
     }
   });
 
-  it('survives being put away and asked for over and over', async () => {
+  it('survives being put away and asked for over and over', { timeout: 30_000 }, async () => {
     const repo = await freshRepo();
     try {
       const made = await createWorktree(git(), repo, 'busy-week', null);

@@ -947,6 +947,21 @@ const api: GrapheApi = {
     };
   },
 
+  onBuildPlan(
+    listener: (notice: { project: string; plan: BuildPlan | null }) => void,
+  ): () => void {
+    const forward = (
+      _source: IpcRendererEvent,
+      notice: { project: string; plan: BuildPlan | null },
+    ): void => {
+      listener(notice);
+    };
+    ipcRenderer.on(CHANNEL.buildPlanChanged, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.buildPlanChanged, forward);
+    };
+  },
+
   inStep(where?: Where): Promise<Result<InStep>> {
     return ipcRenderer.invoke(CHANNEL.inStep, named(where)) as Promise<Result<InStep>>;
   },

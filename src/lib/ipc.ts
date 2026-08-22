@@ -1226,6 +1226,7 @@ export const CHANNEL = {
   switchRepeat: 'graphe:switch-repeat',
   forgetRepeat: 'graphe:forget-repeat',
   awayChanged: 'graphe:away-changed',
+  buildPlanChanged: 'graphe:build-plan-changed',
   inStep: 'graphe:in-step',
   followDesign: 'graphe:follow-design',
   lookAgain: 'graphe:look-again',
@@ -1622,6 +1623,10 @@ export type GrapheApi = {
   /** Follow along while any of that changes, including while the window was
    *  away and has just come back. Returns the function that stops listening. */
   onAway(listener: (notice: AwayNotice) => void): () => void;
+  /** The checklist moved while a reply was still going — the model ticked
+   *  something off. Without this the list only catches up when the reply ends,
+   *  which is exactly when nobody is still watching it. */
+  onBuildPlan(listener: (notice: { project: string; plan: BuildPlan | null }) => void): () => void;
 
   /* ----------------------------------------------- staying in step with Figma */
 

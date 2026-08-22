@@ -2104,6 +2104,8 @@ function Conversation() {
       paletteOpen ||
       graphOpen ||
       reviewsOpen ||
+      changesOpen ||
+      asking ||
       helpersAt !== null ||
       designAt !== null;
 
@@ -2232,6 +2234,8 @@ function Conversation() {
     paletteOpen,
     graphOpen,
     reviewsOpen,
+    changesOpen,
+    asking,
     helpersAt,
     designAt,
   ]);
@@ -2831,7 +2835,9 @@ function Conversation() {
               ? null
               : PLAN_WORDS.doThese(agreed, dropped)
             : decidedMessage(chosen.decision);
-        const say = extra === null ? text : `${text}\n\n${extra}`;
+        const withExtra = extra === null ? text : `${text}\n\n${extra}`;
+        // A list nobody told the model about is a list nobody ticks.
+        const say = agreed.length > 0 ? `${withExtra}\n\n${PLAN_WORDS.ticking}` : withExtra;
         void deliver(say, sizeUp(say), { lookFirst: false });
       } else setDraft(text);
     },
@@ -3336,14 +3342,21 @@ function Conversation() {
 
   /* Pushed at the window whenever something lands, including the first moment
      after it has been away and come back. Subscribed once. */
-  useEffect(
-    () =>
-      bridge.onAway((notice) => {
-        setAway((current) => ({ ...current, [notice.project]: notice.away }));
-        setNow(Date.now());
-      }),
-    [],
-  );
+  useEffect(() => {
+    const stopAway = bridge.onAway((notice) => {
+      setAway((current) => ({ ...current, [notice.project]: notice.away }));
+      setNow(Date.now());
+    });
+    // The checklist, while the reply is still going. The model ticks its own
+    // items off now, so this is the only thing that shows it moving.
+    const stopPlan = bridge.onBuildPlan((notice) => {
+      setBuildPlan(notice.plan === null ? null : { path: notice.project, plan: notice.plan });
+    });
+    return () => {
+      stopAway();
+      stopPlan();
+    };
+  }, []);
 
   /* Every folder's board, once, on the way in. Notices arrive as things happen;
      without this first read, work already running in a project nobody has

@@ -49,7 +49,7 @@ import { readdir } from 'node:fs/promises';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
-import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type HelperModel, type HelperPace } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type HelperModel, type HelperPace } from './tools';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
@@ -484,6 +484,8 @@ export type CreateSessionOptions = {
    *  request into pieces that run side by side; left out, it cannot — which is
    *  what keeps a run on the board from filling the board it is running on. */
   putOnBoard?: PutOnBoard;
+  /** Tick one thing off the checklist the person can see. */
+  stepDone?: StepDone;
 };
 
 /**
@@ -1702,6 +1704,7 @@ const MOST_AFTER_SAYINGS = 3;
     desk.noting,
     // Nobody to answer means no tool, rather than a tool that always says so.
     options.unattended === true ? null : askFirst,
+    options.stepDone,
   );
 
   /* The anchored edit and its read: the model reads a file, the read's reply

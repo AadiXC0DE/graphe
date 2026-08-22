@@ -101,6 +101,16 @@ export const PLAN_WORDS = {
   notesOn: 'About some of them:',
   /** Above the answers to what was asked before the plan ran. */
   answersTo: 'Answers to what you asked:',
+  /**
+   * Said once, when a list has just gone on screen in front of somebody.
+   *
+   * The list used to move on its own, one step per reply, so a plan the model
+   * worked through inside a single reply sat at nought while all of it got
+   * done. It moves when the model says it has moved, which only works if the
+   * model is told the list is there.
+   */
+  ticking:
+    'Those steps are now a checklist the person can see. Call step_done the moment each one is genuinely finished — one call per step, as you go, not all at the end. It is the only thing that moves the list, and they are watching it to know where you are.',
   /** Added under the person's own words on a looking-around pass. */
   asked:
     'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet. If — and only if — something you cannot settle from the project would change that list, ask about it. Where the answer is a choice between a few sensible options, use ask_first, once, before the list — they pick and you carry on. Only where the answer could be anything, finish with a line reading "Questions:" and at most three of them, one per line. Never both. Most requests need none, and a question whose answer would not change the list is not worth asking.',

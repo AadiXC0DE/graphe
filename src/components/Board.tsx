@@ -255,7 +255,11 @@ function Card({
             onChange={(event) => setWords(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') say();
-              if (event.key === 'Escape') setSaying(false);
+              if (event.key === 'Escape') {
+                // Closes this and only this — the press must not reach the run.
+                event.preventDefault();
+                setSaying(false);
+              }
             }}
           />
           <button

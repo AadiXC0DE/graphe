@@ -71,7 +71,12 @@ export default function HowToWork({ plans, onPlans }: Props) {
       if (root.current !== null && !root.current.contains(event.target as Node)) setOpen(false);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key !== 'Escape') return;
+      // Closes this and only this. Left to travel on, the same press reaches
+      // the window and stops the run behind it.
+      event.stopPropagation();
+      event.preventDefault();
+      setOpen(false);
     };
     document.addEventListener('mousedown', away);
     document.addEventListener('keydown', key);

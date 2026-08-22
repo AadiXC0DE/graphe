@@ -56,6 +56,18 @@ import * as debug from './debug';
 import { McpRegistry, inProject, mcpTool, readMcpConfig } from './mcp';
 import { parseReview } from './review';
 import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
+
+/**
+ * The last thing said in a sitting, and nobody is reading the answer.
+ *
+ * Named things rather than impressions: a note saying the work went well helps
+ * nobody next time, and a memory full of them is worse than an empty one.
+ */
+const WORTH_KEEPING = `This sitting is over and nobody is reading this reply, so keep it to the notes.
+
+Look back over what we just did. If you learned anything about this project that would save time next time — how it is built, how it is run, what it expects, a decision and why it went that way, something that caught you out — write each one down with retain, one fact per note, in a sentence that will still make sense months from now.
+
+Write nothing about how this sitting went, nothing you already have a note for, and nothing that reading the code would tell you just as fast. Most sittings are worth one or two notes and many are worth none, which is a fine answer. Say nothing else.`;
 import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
 import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
 import { Running, type RunningPiece } from '../running';
@@ -452,6 +464,10 @@ export type Room = {
   total: number;
   /** The two above as a fraction, 0 to 1; unknown with `used`. */
   part: number | null;
+  /** How many times this conversation has been shortened to make room. Zero
+   *  for almost every sitting; the number is what explains a conversation that
+   *  remembers less than somebody expects. */
+  shortened: number;
 };
 
 /** What came of asking for the line back. A line that would not come back is
@@ -538,6 +554,10 @@ export type GrapheSession = {
   /** Shorten the conversation now, rather than waiting for it to fill up. False
    *  when there is nothing to shorten or one is already going. */
   tidyNow(): Promise<boolean>;
+  /** The sitting is over: write down anything about this project worth having
+   *  next time. Silent, at most once, and only after a sitting that did
+   *  something. False when there was nothing to do. */
+  settleUp(): Promise<boolean>;
   /** Stop asking before things the Guard would otherwise check, for as long as
    *  this session lives. Restore points and outright refusals are unaffected —
    *  see `stopAsking` in the Guard's own facts. */
@@ -1249,6 +1269,13 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
   /** True only for the length of a looking-around pass. */
   let planning = false;
+  /** Nothing reaches the window while this is on, except what was spent. Used
+   *  for the one turn nobody asked for — see `settleUp`. */
+  let unwatched = false;
+  /** Whether this sitting did anything worth having notes about. */
+  let didSomething = false;
+  /** Once a sitting, at most. */
+  let settledUp = false;
   /** Whether this sitting has had its first question yet — the moment the most
    *  relevant notes are handed over, so memory works without being asked. */
   let firstTurn = true;
@@ -1271,6 +1298,13 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   let heldBackTrouble: string | null = null;
   let waitsLeft = 0;
   const say = (event: AgentEvent): void => {
+    if (event.type === 'tool-start') didSomething = true;
+    if (event.type === 'tidied' && event.ok) shortened += 1;
+    if (unwatched) {
+      // What it costs is never hidden, whoever asked for the turn.
+      if (event.type === 'spend') options.onEvent(event);
+      return;
+    }
     if (planning && event.type === 'message-delta') proposed += event.text;
     if (event.type === 'message-delta') tape += event.text;
     if (event.type === 'error' && waitsLeft > 0 && isTransientStreamError(event.message)) {
@@ -1802,17 +1836,21 @@ const MOST_AFTER_SAYINGS = 3;
 
   /** Read through the same small hole the automatic tidy reads through: a Pi
    *  upgrade that moves this costs a meter, not a session. */
+  /** How many times this conversation has been shortened. */
+  let shortened = 0;
+
   const roomNow = (): Room | null => {
     try {
       const usage = session.getContextUsage();
       if (usage === undefined || usage.contextWindow <= 0) return null;
       if (usage.tokens === null) {
-        return { used: null, total: usage.contextWindow, part: null };
+        return { used: null, total: usage.contextWindow, part: null, shortened };
       }
       return {
         used: usage.tokens,
         total: usage.contextWindow,
         part: Math.min(1, Math.max(0, usage.tokens / usage.contextWindow)),
+        shortened,
       };
     } catch {
       return null;
@@ -2187,6 +2225,36 @@ const MOST_AFTER_SAYINGS = 3;
         return true;
       } catch {
         return false;
+      }
+    },
+
+    /**
+     * The sitting is over. Write down anything worth keeping.
+     *
+     * A sitting already begins by carrying its notes in; this is the other
+     * half, and without it the memory only ever holds what somebody thought to
+     * ask for. The conversation is still loaded, so this is the cheapest moment
+     * there will ever be to ask — and the last.
+     *
+     * Nothing of it reaches the window. Whoever closed the conversation has
+     * moved on, and a reply arriving after they left is not something they can
+     * do anything with. What it spends is still reported, because money is
+     * never hidden.
+     *
+     * Quiet about its own failures too: a sitting that could not write its
+     * notes down is not a sitting that went wrong.
+     */
+    async settleUp(): Promise<boolean> {
+      if (closed || settledUp || memory === null || !didSomething) return false;
+      settledUp = true;
+      unwatched = true;
+      try {
+        await session.prompt(WORTH_KEEPING);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        unwatched = false;
       }
     },
 

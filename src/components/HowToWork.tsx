@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { researchWords } from '../agent/research';
+import {
+  chooseDepth,
+  chosenDepth,
+  DEFAULT_DEPTH,
+  DEPTHS,
+  howDeep,
+  researchWords,
+  type Depth,
+} from '../agent/research';
 import './HowToWork.css';
 
 export type Plans = 'auto' | 'always' | 'never' | 'research';
@@ -46,8 +54,15 @@ const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[
 
 export default function HowToWork({ plans, onPlans }: Props) {
   const [open, setOpen] = useState(false);
+  /* The way of working is one message; how far to go is a preference. It is
+     kept where the send can read it, and mirrored here to draw the tick. */
+  const [howFar, setHowFar] = useState<Depth>(chosenDepth);
   const root = useRef<HTMLDivElement>(null);
   const chosen = CHOICES.find((one) => one.id === plans) ?? CHOICES[0]!;
+  /* The chip keeps its own words at the setting nobody had to choose, and wears
+     the setting itself once somebody has. */
+  const label =
+    plans === 'research' && howFar !== DEFAULT_DEPTH ? howDeep(howFar).name : chosen.chip;
 
   /* Click away and escape both close it — people reach for both. */
   useEffect(() => {
@@ -84,7 +99,7 @@ export default function HowToWork({ plans, onPlans }: Props) {
             strokeLinecap="round"
           />
         </svg>
-        <span className="ways__label">{chosen.chip}</span>
+        <span className="ways__label">{label}</span>
       </button>
 
       {open ? (
@@ -120,6 +135,53 @@ export default function HowToWork({ plans, onPlans }: Props) {
               </span>
             </button>
           ))}
+
+          {/* Behind the choice it belongs to, so it is found by the hand that
+              is already here and is out of the way of everybody else. */}
+          {plans === 'research' ? (
+            <div role="group" aria-label={researchWords.howFar}>
+              <div
+                className="ways__note"
+                style={{ padding: 'var(--space-2) var(--space-2) 0 var(--space-5)' }}
+                aria-hidden="true"
+              >
+                {researchWords.howFar}
+              </div>
+              {DEPTHS.map((one) => (
+                <button
+                  key={one.id}
+                  type="button"
+                  role="option"
+                  aria-selected={one.id === howFar}
+                  className={`ways__option ${one.id === howFar ? 'ways__option--chosen' : ''}`}
+                  style={{ paddingLeft: 'var(--space-5)' }}
+                  onClick={() => {
+                    chooseDepth(one.id);
+                    setHowFar(one.id);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="ways__tick" aria-hidden="true">
+                    {one.id === howFar ? (
+                      <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
+                        <path
+                          d="M2 6l3 3 5-5.5"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    ) : null}
+                  </span>
+                  <span className="ways__text">
+                    <span className="ways__name">{one.name}</span>
+                    <span className="ways__note">{one.note}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

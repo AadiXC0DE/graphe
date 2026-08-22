@@ -70,7 +70,7 @@ import {
 } from './checks';
 import { selectCorrect, type CandidateSignals } from './correctness';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
-import { ceilingWords, fleet } from '../../cost/fleet';
+import { ceilingWords, fleet, MOST_AT_ONCE } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
 import { hold } from '../sandbox';
 import type { LivePage, Money, PageAct, PageReading, SpendReason } from '../types';
@@ -1212,6 +1212,9 @@ export const taskTool = (
     // Without this the model sends one helper, waits for its answer, and sends
     // the next — which is a queue wearing a fan-out's clothes.
     'To send several helpers, put every task call in the same reply. They then work at once instead of queueing, and you get all the answers together.',
+    // Said out loud so a split is sized to what will actually start. A fan-out
+    // refused on the way out costs the turn and answers nothing.
+    `At most ${String(MOST_AT_ONCE.helper)} helpers work at once. Ask for more than that in one reply and the rest are turned away, so send the ones the answer depends on first.`,
     'Split the work so no helper needs another helper\'s answer. Anything that has to happen in order belongs in one helper, or in a second round after the first answers.',
     'A helper reports and changes nothing — ask it for findings, not fixes. The one exception is a builder, which is given its own copy of the project, makes the change there, and hands back what it changed.',
     'A small piece of work is not worth the help: the helper reads the same files and searches the same web you would.',

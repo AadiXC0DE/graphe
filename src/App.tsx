@@ -67,7 +67,14 @@ import {
 } from "./cost/phrasing";
 import { sizeUp } from "./cost/sizing";
 import { parseProposal, shouldLookFirst } from "./agent/plan";
-import { asResearch, implementationPlanFromResearch } from "./agent/research";
+import {
+  asLinesOfEnquiry,
+  asResearch,
+  chosenDepth,
+  implementationPlanFromResearch,
+  lookingInto,
+  stepsNotOnTheList,
+} from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
@@ -1739,7 +1746,8 @@ function Conversation() {
           researchReports.current = withoutThis;
           const planText = implementationPlanFromResearch(report);
           const project = notice.project;
-          const steps = planText === null ? [] : parseProposal(planText).steps;
+          const proposal = planText === null ? null : parseProposal(planText);
+          const steps = proposal?.steps ?? [];
           if (planText !== null && project !== null && steps.length > 0) {
             void bridge
               .buildSave(
@@ -1747,7 +1755,18 @@ function Conversation() {
                 { project },
               )
               .then((answer) => {
-                if (answer.ok) void refreshBuildPlan(project);
+                if (!answer.ok) return;
+                void refreshBuildPlan(project);
+                // A list that stops short and says nothing reads as the whole
+                // plan, which is the one thing it is not.
+                const missed = stepsNotOnTheList(proposal?.caveats ?? []);
+                if (missed === null) return;
+                setDesks((current) =>
+                  changeDesk(current, project, (one) => ({
+                    ...one,
+                    turns: [...one.turns, said('graphe', missed)],
+                  })),
+                );
               });
           }
           // Whether "now build it" gets a checklist depends on what came back.
@@ -2403,7 +2422,7 @@ function Conversation() {
         setPlans('auto');
         // What comes back is a report to answer, not a request to look around.
         justLookedFirst.current = true;
-        await deliver(asResearch(text), priced.task, { lookFirst: false });
+        await deliver(asResearch(text, chosenDepth()), priced.task, { lookFirst: false });
         return;
       }
 
@@ -2498,7 +2517,7 @@ function Conversation() {
           setPlans('auto');
           // What comes back is a report to answer, not a request to look around.
           justLookedFirst.current = true;
-          void deliver(asResearch(text), sizeUp(text), { lookFirst: false, queue: 'followUp' });
+          void deliver(asResearch(text, chosenDepth()), sizeUp(text), { lookFirst: false, queue: 'followUp' });
           return;
         }
         const answering = justLookedFirst.current;
@@ -3825,6 +3844,15 @@ function Conversation() {
   const shelved = desk !== null;
   const research = researchLog(desk?.turns ?? []);
   const helpers = desk === null ? [] : helpersRunning(desk);
+  // On the rail, each helper wears the one question it is answering: a run
+  // working four angles at once should read as four angles, not as a spinner.
+  // The board behind it keeps the whole of what each was asked.
+  const angles = asLinesOfEnquiry(helpers);
+  const intoIt = lookingInto(helpers);
+  const doingNow = nowDoing(desk?.turns ?? []);
+  // What it is looking into takes the band while any of it is still out: that
+  // is the thing worth reading, and the step underneath it will come back.
+  const nowThere = intoIt === null ? doingNow : { ...doingNow, step: intoIt };
 
   /* The top row is only the conversations open in this project. Projects are
      switched in the sidebar, where the whole project list stays in one stable
@@ -4333,7 +4361,7 @@ function Conversation() {
                 the right: that panel is a reading of what has happened, and
                 these two are what is happening. */}
             <HelperRail
-              helpers={helpers}
+              helpers={angles}
               onOpen={(at) => {
                 goToScreen("helpers");
                 setHelpersAt({ at });
@@ -4405,7 +4433,7 @@ function Conversation() {
         <Overview
           key={`${desk.path}\u0000${desk.address ?? ''}`}
           view={{
-            now: nowDoing(desk.turns),
+            now: nowThere,
             git: desk.overview?.git ?? null,
             research,
             references: desk.references,

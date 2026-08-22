@@ -53,6 +53,9 @@ export default function Room({ room, tidying, onTidy, busy, turns }: Props) {
   if (room === null && !tidying) return null;
 
   const part = tidying ? 0 : (room?.part ?? 0);
+  // Why a conversation remembers less than expected. Null until it has
+  // happened, which for almost every sitting is always.
+  const shortened = ROOM_WORDS.shortened(room?.shortened ?? 0);
   const tight = part >= TIGHT;
   const said =
     room === null || room.used === null
@@ -68,7 +71,9 @@ export default function Room({ room, tidying, onTidy, busy, turns }: Props) {
       <span
         className={`room__ring ${tidying ? 'room__ring--going' : ''}`}
         role="img"
-        aria-label={tidying ? SAYS.tidying : `${said}. ${SAYS.whatFull}`}
+        aria-label={
+          tidying ? SAYS.tidying : `${said}. ${SAYS.whatFull}${shortened === null ? '' : ` ${shortened}`}`
+        }
         tabIndex={0}
       >
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -103,6 +108,7 @@ export default function Room({ room, tidying, onTidy, busy, turns }: Props) {
                  every turn, and everybody has their hand on the ring already. */
               <RoomShare turns={turns} tokens={room.used} contextWindow={room.total} />
             )}
+            {shortened === null ? null : <span className="room__tipshortened">{shortened}</span>}
           </span>
         </span>
       </span>

@@ -112,11 +112,26 @@ async function packageSkillRoots(agentDir: string): Promise<string[]> {
   return out;
 }
 
+/**
+ * Where the skills that come with the app live.
+ *
+ * Set once, by the shell, because only the shell knows whether this is a
+ * checkout or a packaged app. Empty until it is, so nothing here has to guess.
+ */
+let shippedWith = '';
+
+export function skillsShippedWith(folder: string): void {
+  shippedWith = folder;
+}
+
 export async function availableSkills(project: string | null, agentDir: string): Promise<readonly AvailableSkill[]> {
   const roots: { path: string; source: Found['source'] }[] = [
     { path: join(agentDir, 'skills'), source: 'global' },
     { path: join(homedir(), '.agents', 'skills'), source: 'global' },
   ];
+  // What the app brought with it. Last of the global roots, so anything
+  // somebody installed themselves under the same name wins.
+  if (shippedWith !== '') roots.push({ path: shippedWith, source: 'global' });
   // Package-installed skills (e.g. via Add More → pi-subagents) live under agentDir/npm
   if (agentDir !== '') {
     for (const p of await packageSkillRoots(agentDir)) roots.push({ path: p, source: 'global' });

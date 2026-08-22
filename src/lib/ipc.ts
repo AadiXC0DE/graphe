@@ -191,6 +191,9 @@ export type Room = {
   total: number;
   /** The two above as a fraction, 0 to 1; unknown with `used`. */
   part: number | null;
+  /** How many times this conversation has been shortened to make room. Absent
+   *  from a reading that predates the count, and from the mock bridge. */
+  shortened?: number;
 };
 
 /**

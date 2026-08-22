@@ -1970,6 +1970,27 @@ describe('running things without an interrogation', () => {
       expect(kindOf(bash(command)), command).toBe('confirm');
     }
   });
+
+  /** The same installer reached through the runtime instead of by its own name.
+   *  It read as running one of the project's own programs, so the question that
+   *  guards every other install was skipped by spelling it differently. */
+  it('asks the same question when the installer is reached through the runtime', () => {
+    for (const command of [
+      'python3 -m pip install requests',
+      'python -m pip install --upgrade pip',
+      'python3 -m ensurepip',
+    ]) {
+      expect(kindOf(bash(command)), command).toBe('confirm');
+    }
+  });
+
+  /** And leaves the rest of `-m` alone: a runtime's own modules are not
+   *  installers, and treating them as ones would ask about a local server. */
+  it('does not ask about the runtime’s own modules', () => {
+    for (const command of ['python3 -m venv .venv', 'python3 -m http.server', 'python3 -m json.tool']) {
+      expect(kindOf(bash(command)), command).toBe('snapshot-first');
+    }
+  });
 });
 
 describe('connecting another tool server', () => {

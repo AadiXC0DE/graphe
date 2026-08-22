@@ -60,6 +60,9 @@ extraResources:
   - LICENSE
   - THIRD-PARTY-NOTICES.md
   - THIRD-PARTY-LICENSES.md
+  # The skills the app comes with. Read from disk at runtime, so they travel
+  # unpacked rather than inside the archive.
+  - skills
 
 # Nothing in the tree compiles. The .node files that are in there are prebuilt
 # binaries belonging to Pi's terminal interface, which this app never loads, and

@@ -161,7 +161,7 @@ import { addressed, Workspaces, type Workspace } from '../src/projects/workspace
 import { findEditor, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
 import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
-import { availableSkills, selectedSkills, skillContents, skillNamed } from '../src/agent/pi/skills';
+import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShippedWith } from '../src/agent/pi/skills';
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor, workflowWords } from '../src/work/workflows';
 import { readCheckoutIndex, type Checkout } from '../src/history/checkouts';
@@ -4055,6 +4055,9 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
     // Whatever happened, nothing is left parked on a question nobody can reach.
     // Turned down, never up: the run ending is not a person saying yes.
     held.stop();
+    // A sitting nobody watched is the one whose notes would otherwise be lost
+    // entirely. Awaited: the copy it learned from goes away right after this.
+    if (session !== null) await session.settleUp().catch(() => false);
     session?.dispose();
     run.session = null;
     // Kept past the run itself, so the sentence beside the picture is still
@@ -5966,7 +5969,12 @@ function register(): void {
     // Put the copy away before the session goes, while it can still be asked
     // what it was written down as.
     const away = putAwayCheckoutAt(open.path, open.held, found.path);
-    open.held.sessions.close(found.path);
+    // Somebody closing a conversation themselves is the end of that sitting.
+    // Not awaited — they have moved on, and nothing here is theirs to wait for.
+    const noted = found.held.settleUp().catch(() => false);
+    void noted.finally(() => {
+      open.held.sessions.close(found.path);
+    });
     return away.then(() => done(null));
   });
 
@@ -7250,6 +7258,11 @@ if (!app.requestSingleInstanceLock()) {
   app.on('web-contents-created', (_event, contents) => guardNavigation(contents));
 
   void app.whenReady().then(async () => {
+    // The skills the app brought with it. A checkout has them beside the source;
+    // a packaged app has them beside the licences.
+    skillsShippedWith(
+      app.isPackaged ? join(process.resourcesPath, 'skills') : join(app.getAppPath(), 'skills'),
+    );
     applyContentPolicy();
     applyPermissionPolicy();
     watchTheCeiling();

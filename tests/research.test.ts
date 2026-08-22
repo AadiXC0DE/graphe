@@ -8,7 +8,9 @@ import { parseProposal, shouldLookFirst, worthPlanning } from '../src/agent/plan
 
 import {
   asResearch,
+  DEPTHS,
   implementationPlanFromResearch,
+  researchBrief,
   researchWords,
   RESEARCH_BRIEF,
 } from '../src/agent/research';
@@ -84,21 +86,29 @@ describe('what research sends', () => {
       app.indexOf("if (plans === 'research')") + 1500,
     );
     expect(researchBranch).toContain("setPlans('auto')");
-    expect(researchBranch).toContain('deliver(asResearch(text)');
+    expect(researchBranch).toContain('deliver(asResearch(text, chosenDepth())');
     expect(app).not.toMatch(/classifyResearch|researchCases|PROCEED_RE/);
   });
 
   it('turns only the model-written implementation section into the build checklist', () => {
     const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
     expect(app).toContain('implementationPlanFromResearch(report)');
-    expect(app).toContain('parseProposal(planText).steps');
+    expect(app).toContain('parseProposal(planText)');
+    expect(app).toContain('const steps = proposal?.steps ?? []');
     expect(app).toContain('.buildSave(');
   });
 
   /* The same sweep every other word bank in the app stands: plain words on the
      surface, and none of the machinery underneath. */
   it('never names the machinery', () => {
-    const everything = [...Object.values(researchWords), RESEARCH_BRIEF].join(' ').toLowerCase();
+    const everything = [
+      ...Object.values(researchWords),
+      ...DEPTHS.flatMap((one) => [one.name, one.note]),
+      ...DEPTHS.map((one) => researchBrief(one.id)),
+      RESEARCH_BRIEF,
+    ]
+      .join(' ')
+      .toLowerCase();
     for (const banned of ['subagent', 'token', 'api', 'prompt', 'context window', 'llm', 'model']) {
       expect(everything).not.toContain(banned);
     }

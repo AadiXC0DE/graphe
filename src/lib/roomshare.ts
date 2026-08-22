@@ -70,6 +70,19 @@ export const ROOM_WORDS = {
    *  reply is sized by us until it replies again, so calling the whole figure
    *  counted would be a claim the number cannot carry. */
   counted: 'counted to its last reply, reckoned since',
+  /**
+   * How often this conversation has been shortened, when it has been.
+   *
+   * The one fact that explains a conversation remembering less than somebody
+   * expects, and until now nothing said it. Absent at zero: a count of none is
+   * furniture, and almost every sitting is none.
+   */
+  shortened(times: number): string | null {
+    if (times < 1) return null;
+    return times === 1
+      ? 'Shortened once already — the earliest part is a summary now.'
+      : `Shortened ${String(times)} times already — the earliest parts are summaries now.`;
+  },
 } as const;
 
 const LABELS: Record<Share['kind'], string> = {

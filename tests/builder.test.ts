@@ -15,7 +15,15 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
-import { HELPER_DECLINED, HELPER_ROLES, ROLES, mayRun, roleSpec } from '../src/agent/pi/child';
+import {
+  BUILDER_SCRIPT_WORDS,
+  HELPER_DECLINED,
+  HELPER_ROLES,
+  ROLES,
+  builderScriptDecision,
+  mayRun,
+  roleSpec,
+} from '../src/agent/pi/child';
 import { builderFolder, makeBuilderCopy } from '../src/agent/pi/tools';
 import { changesAnything, evaluate } from '../src/agent/guard/policy';
 
@@ -276,5 +284,142 @@ describe('B-04 what a helper is allowed to run', () => {
   it('never tells a builder it cannot change anything, because it can', () => {
     expect(HELPER_DECLINED.building).not.toMatch(/cannot .*change anything/i);
     expect(HELPER_DECLINED.reading).toMatch(/change anything/i);
+  });
+});
+
+/* ========================================================================== */
+/* B-05 a program of the copy's own                                            */
+/* ========================================================================== */
+
+describe('B-05 running the copy’s own programs', () => {
+  const copy = '/work/.graphe-builders/site-call-1';
+  const builder = roleSpec('builder');
+  const kept = { kind: 'snapshot-first', reason: 'Running one of your project’s own programs.' } as const;
+  const asks = { kind: 'confirm' } as const;
+  const run = (command: string) =>
+    mayRun(builder, { name: 'bash', input: { command } }, kept, true, copy);
+
+  it('runs a script that lives in the copy, whichever runtime it needs', () => {
+    for (const command of [
+      'python3 make_deck.py',
+      'python3 ./scripts/make_deck.py',
+      '.venv/bin/python scripts/check_deck.py',
+      'node build.mjs',
+      'ruby tasks/seed.rb',
+      'python3 make_deck.py --out out/deck.pptx --title "Half Year"',
+    ]) {
+      expect(run(command), command).toBeUndefined();
+      expect(builderScriptDecision(command, copy).ok, command).toBe(true);
+    }
+  });
+
+  /* The refusals are the point. Each of these is a way out of the copy. */
+  it('refuses a script that is not in the copy', () => {
+    for (const command of [
+      'python3 ../evil.py',
+      'python3 ../../site/make_deck.py',
+      'python3 /tmp/evil.py',
+      'python3 /work/site/scripts/make_deck.py',
+      'python3 %2e%2e/evil.py',
+      'python3 %252e%252e/evil.py',
+    ]) {
+      expect(run(command)?.reason, command).toBe(BUILDER_SCRIPT_WORDS.outside);
+    }
+  });
+
+  it('refuses a runtime borrowed from outside the copy', () => {
+    expect(run('/usr/bin/python3 make_deck.py')?.reason).toBe(BUILDER_SCRIPT_WORDS.outside);
+    expect(run('../.venv/bin/python make_deck.py')?.reason).toBe(BUILDER_SCRIPT_WORDS.outside);
+  });
+
+  it('refuses a home folder or a shortcut the shell would fill in', () => {
+    for (const command of [
+      'python3 ~/evil.py',
+      'python3 $HOME/evil.py',
+      'python3 ${HOME}/evil.py',
+      'python3 `ls`.py',
+      'python3 $(ls).py',
+      'python3 ..\\evil.py',
+    ]) {
+      expect(run(command)?.reason, command).toBe(BUILDER_SCRIPT_WORDS.onlyItsOwn);
+    }
+  });
+
+  it('refuses anything joined on to the one command', () => {
+    for (const command of [
+      'python3 make_deck.py && rm -rf /',
+      'python3 make_deck.py; cat /etc/passwd',
+      'python3 make_deck.py | sh',
+      'python3 make_deck.py > /etc/hosts',
+      'rm -rf src && python3 make_deck.py',
+      '(python3 make_deck.py)',
+    ]) {
+      expect(run(command)?.reason, command).toBe(BUILDER_SCRIPT_WORDS.onlyItsOwn);
+    }
+  });
+
+  it('refuses code handed straight to a runtime, and a module from somewhere else', () => {
+    for (const command of [
+      'python3 -c "import shutil; shutil.rmtree(\'/\')"',
+      'node -e "require(\'fs\').rmSync(\'/\')"',
+      'python3 -m http.server 4321',
+      'python3 -m pip install requests',
+    ]) {
+      expect(run(command)?.reason, command).toBe(BUILDER_SCRIPT_WORDS.onlyItsOwn);
+    }
+  });
+
+  /* A shell script's first job is to run other commands, and none of them can
+     be read from here. */
+  it('refuses a shell, which is not a runtime that runs one file', () => {
+    for (const command of ['bash deploy.sh', 'sh ./make.sh', 'zsh scripts/go.zsh']) {
+      expect(run(command)?.reason, command).toBe(BUILDER_SCRIPT_WORDS.onlyItsOwn);
+    }
+  });
+
+  it('refuses a later word that leaves the copy', () => {
+    for (const command of [
+      'python3 make_deck.py --out /etc/deck.pptx',
+      'python3 make_deck.py --out=../out/deck.pptx',
+      'python3 make_deck.py ../../site/content.md',
+    ]) {
+      expect(run(command)?.reason, command).toBe(BUILDER_SCRIPT_WORDS.outside);
+    }
+  });
+
+  it('is not a way round anything else the Guard stopped', () => {
+    expect(mayRun(builder, { name: 'bash', input: { command: 'python3 make_deck.py' } },
+      { kind: 'deny', reason: 'That is outside your project.' }, true, copy)?.reason)
+      .toBe('That is outside your project.');
+    // A question is still a question, and there is still nobody to ask it.
+    expect(mayRun(builder, { name: 'bash', input: { command: 'python3 make_deck.py' } }, asks, true, copy)?.reason)
+      .toBe(HELPER_DECLINED.building);
+    // And a script named alongside git is still git.
+    expect(run('python3 make_deck.py && git push')?.reason).toBe(HELPER_DECLINED.noGit);
+  });
+
+  it('opens nothing for a helper that changes nothing', () => {
+    for (const role of ['helper', 'researcher', 'reviewer'] as const) {
+      const spec = roleSpec(role);
+      const blocked = mayRun(spec, { name: 'bash', input: { command: 'python3 make_deck.py' } }, kept, true, copy);
+      expect(blocked?.block, role).toBe(true);
+    }
+  });
+
+  it('needs to know which copy before it allows anything', () => {
+    expect(mayRun(builder, { name: 'bash', input: { command: 'python3 make_deck.py' } }, kept, true)?.reason)
+      .toBe(HELPER_DECLINED.building);
+    expect(mayRun(builder, { name: 'bash', input: {} }, kept, true, copy)?.reason)
+      .toBe(HELPER_DECLINED.building);
+  });
+
+  /* The wall this was written for: the Guard never says an outright yes to a
+     project's own program, so a builder could not run one at all. */
+  it('lets a builder run the deck it just wrote, end to end', () => {
+    const facts = { projectRoot: copy };
+    const command = '.venv/bin/python scripts/build_deck.py';
+    const verdict = evaluate({ id: 'c', name: 'bash', input: { command } }, facts);
+    expect(verdict.kind).toBe('snapshot-first');
+    expect(mayRun(builder, { name: 'bash', input: { command } }, verdict, true, copy)).toBeUndefined();
   });
 });

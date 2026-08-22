@@ -103,7 +103,7 @@ export const PLAN_WORDS = {
   answersTo: 'Answers to what you asked:',
   /** Added under the person's own words on a looking-around pass. */
   asked:
-    'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet. If — and only if — something you cannot settle from the project would change that list, finish with a line reading "Questions:" and at most three of them, one per line. Most requests need none, and a question whose answer would not change the list is not worth asking.',
+    'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet. If — and only if — something you cannot settle from the project would change that list, ask about it. Where the answer is a choice between a few sensible options, use ask_first, once, before the list — they pick and you carry on. Only where the answer could be anything, finish with a line reading "Questions:" and at most three of them, one per line. Never both. Most requests need none, and a question whose answer would not change the list is not worth asking.',
   /** Above the questions, before the list. Two sharp ones beat a plan built on
    *  a guess; a page of them is worse than either, which is why there are never
    *  more than three. */

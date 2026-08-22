@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
+import AskFirst from "./components/AskFirst";
 import type { Attachment } from "./components/Attachments";
 import BuildProgress from "./components/BuildProgress";
 import Composer from "./components/Composer";
@@ -30,6 +31,7 @@ import EvidenceReel from "./components/EvidenceReel";
 import Running from "./components/Running";
 import { asksAbout } from "./preview/point";
 import { ATTACH_WORDS, pictureType, readsPictures } from "./lib/attachments";
+import type { Answers } from "./agent/asking";
 import { PLAN_WORDS, decidedMessage, type PlanDecision } from "./agent/plan";
 import { reviewAsMarkdown } from "./agent/pi/review";
 import { saysUseYours } from "./design/drift";
@@ -2881,6 +2883,39 @@ function Conversation() {
     [],
   );
 
+  /**
+   * The answer to the questions asked before the work started.
+   *
+   * Null is a real answer — "just decide for me" — and the shell reads it as
+   * one. The turn is closed here rather than waited on: the agent withdraws
+   * every ask it answers, and a card still open when that arrives would be
+   * marked as never answered at all.
+   */
+  const answerAsked = useCallback((turnId: string, answers: Answers | null) => {
+    setDesks((current) =>
+      changeCurrent(current, (one) => ({
+        ...one,
+        turns: one.turns.map((turn) =>
+          turn.kind === "asked-first" && turn.id === turnId
+            ? {
+                ...turn,
+                answers: answers ?? {},
+                answered:
+                  answers === null
+                    ? ("waved-through" as const)
+                    : ("answered" as const),
+              }
+            : turn,
+        ),
+      })),
+    );
+    const here = currentDesk(desksNow.current);
+    void bridge.answerAsked(turnId, answers, {
+      ...(here === null ? {} : { project: here.path }),
+      ...(here?.address == null ? {} : { conversation: here.address }),
+    });
+  }, []);
+
   const dismiss = useCallback((turnId: string) => {
     setDesks((current) =>
       changeCurrent(current, (one) => ({
@@ -4272,6 +4307,7 @@ function Conversation() {
                   <Turnstile
                     turn={row.turn}
                     onRespond={respond}
+                    onAnswerAsked={answerAsked}
                     onDismiss={dismiss}
                     onAnswerEstimate={answerEstimate}
                     onAnswerPlan={answerPlan}
@@ -4790,6 +4826,7 @@ function Picture({ change }: { change: VisualChange }) {
 function Turnstile({
   turn,
   onRespond,
+  onAnswerAsked,
   onDismiss,
   onAnswerEstimate,
   onAnswerPlan,
@@ -4799,6 +4836,7 @@ function Turnstile({
 }: {
   turn: Turn;
   onRespond: (turnId: string, callId: string, decision: Decision) => void;
+  onAnswerAsked: (turnId: string, answers: Answers | null) => void;
   onDismiss: (turnId: string) => void;
   onAnswerEstimate: (turn: EstimateTurn, go: boolean) => void;
   onAnswerPlan: (
@@ -4862,6 +4900,19 @@ function Turnstile({
               : "You said no, so I left it alone."
           }
           real={showMe ? turn.real : undefined}
+        />
+      );
+
+    // Asked before a single file is touched, so that everything after it can
+    // happen with nobody watching. The card holds the picking; the turn only
+    // hears the answer.
+    case "asked-first":
+      return (
+        <AskFirst
+          questions={turn.questions}
+          answers={turn.answers}
+          answered={turn.answered}
+          onAnswer={(answers) => onAnswerAsked(turn.id, answers)}
         />
       );
 

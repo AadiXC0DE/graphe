@@ -747,6 +747,13 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(true));
     },
 
+    answerAsked(
+      _id: string,
+      _answers: Readonly<Record<string, readonly string[]>> | null,
+    ): Promise<Result<boolean>> {
+      return Promise.resolve(done(true));
+    },
+
     /** The third project, as though somebody had gone and found it. A browser
      *  tab has no folder picker to open, and answering "you closed it" would
      *  leave the one control on the empty picker doing nothing at all. */
@@ -1858,6 +1865,7 @@ function connect(): Bridge {
     stop: (where) => api.stop(where),
     steer: (text, where) => api.steer(text, where),
     answer: (callId, decision, where) => api.answer(callId, decision, where),
+    answerAsked: (id, answers, where) => api.answerAsked(id, answers, where),
     chooseFolder: () => api.chooseFolder(),
     recentProjects: () => api.recentProjects(),
     overview: (where) => api.overview(where),

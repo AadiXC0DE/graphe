@@ -1114,6 +1114,7 @@ export const CHANNEL = {
   stop: 'graphe:stop',
   steer: 'graphe:steer',
   answer: 'graphe:answer',
+  answerAsked: 'graphe:answer-asked',
   chooseFolder: 'graphe:choose-folder',
   event: 'graphe:event',
   overview: 'graphe:overview',
@@ -1265,6 +1266,13 @@ export type GrapheApi = {
   steer(text: string, where?: Where): Promise<Result<null>>;
   /** Answer a question the Guard asked. False when there was no such question. */
   answer(callId: string, decision: Decision, where?: Where): Promise<Result<boolean>>;
+  /** Answer the questions put before the work started. Null answers is a real
+   *  answer — somebody saying to decide for them. */
+  answerAsked(
+    id: string,
+    answers: Readonly<Record<string, readonly string[]>> | null,
+    where?: Where,
+  ): Promise<Result<boolean>>;
   /** Ask the person to pick a folder. Null when they closed the picker. */
   chooseFolder(): Promise<Result<string | null>>;
 

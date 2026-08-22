@@ -2236,6 +2236,49 @@ export function pageTools(cwd?: string): ToolDefinition[] {
   ];
 }
 
+/**
+ * Put a few things to the person before starting, and wait for the answer.
+ *
+ * The session decides whether this may be used at all: `askFirst` is null
+ * everywhere there is nobody to answer, and returns a sentence rather than
+ * answers when the moment has passed. The tool never decides that for itself,
+ * because the tool cannot see whether work has begun.
+ */
+export type AskFirst = (questions: unknown) => Promise<string>;
+
+const askFirstTool = (askFirst: AskFirst): ToolDefinition => ({
+  name: 'ask_first',
+  label: 'Asking before starting',
+  description:
+    "Ask the person up to four multiple-choice questions before you start, when the job genuinely has more than one sensible shape and picking wrong would waste real work — which framework, which of two designs, how far to take it, what to leave alone. Use it ONCE, at the very beginning, before you change anything. Do not use it for things you can find out by looking at the project, for permission (you are asked for that separately), or for anything you could reasonably decide yourself. If you are already working, decide and say what you assumed instead.",
+  promptSnippet:
+    'ask_first(questions) — put a few either/or questions to the person before starting, once, at the top',
+  parameters: Type.Object({
+    questions: Type.Array(
+      Type.Object({
+        question: Type.String({ description: 'The whole question, in plain words.' }),
+        header: Type.Optional(Type.String({ description: 'Two or three words over the choices.' })),
+        choices: Type.Array(
+          Type.Object({
+            label: Type.String({ description: 'The choice, in a few words.' }),
+            note: Type.String({ description: 'What picking this one means, in one line.' }),
+          }),
+          { description: 'Two to four real alternatives.' },
+        ),
+        many: Type.Optional(Type.Boolean({ description: 'True when more than one may be picked.' })),
+      }),
+      { description: 'One to four questions. Fewer is better.' },
+    ),
+  }),
+  /* Sequential: this stops the turn on a person, and a batch running beside it
+     would carry on working against an answer that has not arrived. */
+  executionMode: 'sequential',
+  execute: async (_callId, params: { questions: unknown }): ToolResult => {
+    const said = await askFirst(params.questions);
+    return { content: [{ type: 'text', text: said }], details: {} };
+  },
+});
+
 export const grapheTools = (
   agentDir: string,
   figmaToken?: string | null,
@@ -2244,6 +2287,7 @@ export const grapheTools = (
   projectRoot?: string,
   putOnBoard?: PutOnBoard,
   noted?: ChecksNoted,
+  askFirst?: AskFirst | null,
 ): ToolDefinition[] => {
   const tools: ToolDefinition[] = [
     websearchTool,
@@ -2251,6 +2295,10 @@ export const grapheTools = (
     taskTool(agentDir, model, thinking, projectRoot),
     scoreCandidatesTool,
   ];
+  // Only where somebody is there to answer. A helper in its own process and a
+  // run nobody is watching both get no tool at all, rather than a tool that
+  // always answers "there is nobody here".
+  if (askFirst !== undefined && askFirst !== null) tools.push(askFirstTool(askFirst));
   if (projectRoot !== undefined && projectRoot !== '') {
     tools.push(
       readMapTool(projectRoot),

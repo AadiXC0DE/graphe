@@ -175,6 +175,19 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.answer, callId, decision, named(where)) as Promise<Result<boolean>>;
   },
 
+  answerAsked(
+    id: string,
+    answers: Readonly<Record<string, readonly string[]>> | null,
+    where?: Where,
+  ): Promise<Result<boolean>> {
+    if (typeof id !== 'string' || id === '') {
+      return Promise.resolve(refuse<boolean>('I could not tell which question that answered.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.answerAsked, id, answers, named(where)) as Promise<
+      Result<boolean>
+    >;
+  },
+
   chooseFolder(): Promise<Result<string | null>> {
     return ipcRenderer.invoke(CHANNEL.chooseFolder) as Promise<Result<string | null>>;
   },

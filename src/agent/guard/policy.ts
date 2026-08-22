@@ -253,6 +253,9 @@ const SAY = {
    the folders, and the project's own standards read against a change. Both were
    falling through to the unknown-command question, so every review opened with
    "run an instruction I do not fully recognise?" about our own tool. */
+/** The tool that stops to ask a person something before the work starts. */
+const ASKING_TOOLS = new Set(['askfirst']);
+
 const READ_TOOLS = new Set([
   'read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff', 'readmap', 'runchecks',
 ]);
@@ -2061,6 +2064,12 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
 
   if (DESIGN_READ_TOOLS.has(name)) return allow();
 
+  /* Putting a few questions on the screen and waiting for the answer. It reads
+     nothing, writes nothing and reaches nowhere — and it has to be classed as
+     changing nothing, or the look-around withholds it and the one moment worth
+     asking at is the one moment it cannot. */
+  if (ASKING_TOOLS.has(name)) return allow();
+
   /* The page beside the conversation. Reading and scrolling it are silent;
      pressing and typing in it are the one place in this file where the thing
      at risk is not a file at all. */
@@ -2411,6 +2420,7 @@ export function describeCall(call: ToolCall): CallShape {
     if (NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name)) return 'reaches the internet';
     if (DELETE_TOOLS.has(name)) return 'deletes something';
     if (WRITE_TOOLS.has(name)) return 'changes files';
+    if (ASKING_TOOLS.has(name)) return 'reads';
     if (READ_TOOLS.has(name) || LIST_TOOLS.has(name) || SEARCH_TOOLS.has(name)) return 'reads';
     if (DESIGN_READ_TOOLS.has(name) || CODE_READ_TOOLS.has(name) || PAGE_READ_TOOLS.has(name)) return 'reads';
     return 'something else';

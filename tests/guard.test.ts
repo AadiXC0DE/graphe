@@ -14,6 +14,7 @@ import {
   normalizePosixPath,
   shipsToBrowser,
 } from '../src/agent/guard/paths';
+import { readOnlyTools } from '../src/agent/plan';
 
 const ROOT = '/Users/mira/Projects/portfolio';
 const ctx: GuardFacts = { projectRoot: ROOT };
@@ -1969,6 +1970,16 @@ describe('running things without an interrogation', () => {
     for (const command of ['npm install left-pad', 'bun add zod', 'deno install x', 'pip install requests']) {
       expect(kindOf(bash(command)), command).toBe('confirm');
     }
+  });
+
+  /** Putting a few questions on the screen and waiting is the one tool that
+   *  does nothing at all. It has to be classed that way, or the look-around
+   *  withholds it and the one moment worth asking at is the one moment it
+   *  cannot — which is exactly how it behaved before it was listed. */
+  it('lets it ask before starting, and counts that as changing nothing', () => {
+    expect(kindOf(call('ask_first', { questions: [] }))).toBe('allow');
+    expect(changesAnything(call('ask_first', { questions: [] }), ctx)).toBe(false);
+    expect(readOnlyTools(['ask_first'])).toEqual(['ask_first']);
   });
 
   /** The same installer reached through the runtime instead of by its own name.

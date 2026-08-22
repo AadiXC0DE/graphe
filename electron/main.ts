@@ -1487,6 +1487,16 @@ type Held = {
   checkouts: Map<string, Checkout>;
   /** Work being checked before it reaches the files, or null when none is. */
   waiting: HeldWork | null;
+  /**
+   * The session running that check, while it runs.
+   *
+   * It works in a copy and is nobody's conversation, so nothing in the map of
+   * conversations can reach it — and it draws its cards into the person's own
+   * thread all the same. Without a way back to it, a question it asked was
+   * answered into a session that had never heard of it and the run waited
+   * forever, with Stop reaching the wrong session too.
+   */
+  checking: GrapheSession | null;
   /** What that work would look like, photographed in the copy while the copy
    *  still existed. Null until it has been, or when nothing came out. */
   pictures: HeldPictures | null;
@@ -2530,14 +2540,17 @@ async function checkItFirst(
       thinking: thinkingFor((await preferences()).all()),
       sessionDir: sessionsFolder(),
     });
+    held.checking = inside;
     await inside.prompt(text, cards, { lookFirst });
   } catch (cause) {
+    held.checking = null;
     inside?.dispose();
     await waiting.release().catch(() => undefined);
     held.waiting = null;
     const raw = cause instanceof Error ? cause.message : String(cause);
     return fail(plainTrouble(raw, detailsOf(cause)));
   }
+  held.checking = null;
   inside.dispose();
 
   // Before settling, because settling deletes the copy and the copy is the only
@@ -3279,6 +3292,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     checkoutsMade: restoredCheckouts.size,
     checkouts: restoredCheckouts,
     waiting: null,
+    checking: null,
     pictures: null,
     sending: false,
   };
@@ -4006,6 +4020,10 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
   try {
     session = await createSession({
       projectRoot: folder,
+      // Nobody is sitting in front of this, so it is never given the tool that
+      // stops to ask. A run that waited for an answer nobody is there to give
+      // would be a night spent on a question.
+      unattended: true,
       // The folder this is a copy of, so the copy takes a preview address of
       // its own and leaves the ordinary one to the project on screen.
       mainFolder: desk.path,
@@ -6840,8 +6858,55 @@ function register(): void {
   handle<null>(CHANNEL.stop, async (_event, args) => {
     const where = whereIn(args);
     const open = projectAt(where);
-    if (open !== null) await sessionAt(open, where)?.stop();
+    if (open === null) return done(null);
+    // A check running in a copy is nobody's conversation, so Stop used to reach
+    // past it to the conversation behind and leave the thing actually running.
+    await open.held.checking?.stop();
+    await sessionAt(open, where)?.stop();
     return done(null);
+  });
+
+  /**
+   * Answers as they arrive from the window, or null.
+   *
+   * Nothing from a renderer is taken on trust, and this one is handed straight
+   * to the model — so anything that is not a question with words against it is
+   * dropped rather than passed on. An empty result is null, which is the same
+   * as saying "decide for me" and is a real answer rather than a failure.
+   */
+  const asAnswers = (raw: unknown): Record<string, readonly string[]> | null => {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+    // No inherited keys: the answers are read back by name, and a question
+    // called `__proto__` would otherwise assign through the prototype setter
+    // and leave the model reading `length` and `map` off an array.
+    const out = Object.create(null) as Record<string, string[]>;
+    for (const [question, picked] of Object.entries(raw as Record<string, unknown>)) {
+      if (question.trim() === '' || question === '__proto__' || !Array.isArray(picked)) continue;
+      const words = picked
+        .filter((one): one is string => typeof one === 'string')
+        .map((one) => one.replace(/\s+/g, ' ').trim().slice(0, 400))
+        .filter((one) => one !== '')
+        .slice(0, 8);
+      if (words.length > 0) out[question.slice(0, 400)] = words;
+    }
+    return Object.keys(out).length === 0 ? null : out;
+  };
+
+  /** The answers to the questions asked before the work started. Null is a
+   *  real answer: it is somebody saying to decide for them, and the run is
+   *  told so rather than being left waiting. */
+  handle<boolean>(CHANNEL.answerAsked, async (_event, args) => {
+    const [id, answers] = args;
+    if (typeof id !== 'string' || id === '') return done(false);
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done(false);
+    const picked = asAnswers(answers);
+    // Whichever session asked. A check running in a copy draws its card into
+    // the same thread, and answering it into the conversation behind would have
+    // returned quietly false and left the run waiting forever.
+    if (open.held.checking?.answerAsked(id, picked) === true) return done(true);
+    return done(sessionAt(open, where)?.answerAsked(id, picked) ?? false);
   });
 
   handle<boolean>(CHANNEL.answer, async (_event, args) => {
@@ -6849,8 +6914,11 @@ function register(): void {
     if (typeof callId !== 'string' || (decision !== 'yes' && decision !== 'no')) return done(false);
     const where = whereIn(args);
     const open = projectAt(where);
-    const agent = open === null ? null : sessionAt(open, where);
-    return done(agent?.answer(callId, decision as Decision) ?? false);
+    if (open === null) return done(false);
+    // Same again for the Guard's own questions: the check in a copy asks them
+    // too, and it is the one that has to hear the answer.
+    if (open.held.checking?.answer(callId, decision as Decision) === true) return done(true);
+    return done(sessionAt(open, where)?.answer(callId, decision as Decision) ?? false);
   });
 
   /**

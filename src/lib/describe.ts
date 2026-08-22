@@ -149,6 +149,12 @@ export function describeCall(call: ToolCall): Described {
         detail: oneLine(textField(input, ['task', 'instructions'])),
       };
 
+    /* Not "working on your project": it is the opposite of working, and the
+       line sits directly above the card holding the questions. */
+    case 'ask_first':
+    case 'askfirst':
+      return { label: ASKING_LABEL };
+
     default:
       return { label: 'Working on your project' };
   }
@@ -161,3 +167,6 @@ export const WEB_SEARCH_LABEL = 'Searching the web';
 
 /** The words a delegated piece of work wears in the thread. */
 export const TASK_LABEL = 'Sending a piece of work to a helper';
+
+/** Above the card that holds the questions. */
+export const ASKING_LABEL = 'Asking you first';

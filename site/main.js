@@ -53,6 +53,22 @@ for (const tab of tabs) {
   tab.addEventListener('click', () => show(tab.dataset.view));
 }
 
+/* ── long catalogues stay short until a reader asks for the rest ─────── */
+
+for (const button of document.querySelectorAll('[data-sheet-more]')) {
+  const sheet = button.previousElementSibling;
+  const label = button.querySelector('[data-sheet-more-label]');
+  const initialLabel = label?.textContent ?? '';
+  const closeLabel = button.dataset.sheetMoreClose ?? 'Show fewer capabilities';
+
+  button.addEventListener('click', () => {
+    if (!sheet?.classList.contains('sheet--mobile-more')) return;
+    const expanded = sheet.classList.toggle('is-expanded');
+    button.setAttribute('aria-expanded', String(expanded));
+    if (label) label.textContent = expanded ? closeLabel : initialLabel;
+  });
+}
+
 // Left and right walk the tabs, which is what a tab list is expected to do.
 document.querySelector('.stage__tabs')?.addEventListener('keydown', (event) => {
   const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;

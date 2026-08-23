@@ -2287,7 +2287,7 @@ const askFirstTool = (askFirst: AskFirst): ToolDefinition => ({
   name: 'ask_first',
   label: 'Asking before starting',
   description:
-    "Ask the person up to four multiple-choice questions before you start, when the job genuinely has more than one sensible shape and picking wrong would waste real work — which framework, which of two designs, how far to take it, what to leave alone. Use it ONCE, at the very beginning, before you change anything. Do not use it for things you can find out by looking at the project, for permission (you are asked for that separately), or for anything you could reasonably decide yourself. If you are already working, decide and say what you assumed instead.",
+    "Ask the person up to four multiple-choice questions before you start, when the job genuinely has more than one sensible shape and picking wrong would waste real work — which framework, which of two designs, how far to take it, what to leave alone. Use it ONCE, at the very beginning, before you change anything. If they ask you to check with them first, or to ask before starting, use it: that request is exactly what this is for and is reason enough on its own. Otherwise do not use it for things you can find out by looking at the project, for permission (you are asked for that separately), or for anything you could reasonably decide yourself. If you are already working, decide and say what you assumed instead.",
   promptSnippet:
     'ask_first(questions) — put a few either/or questions to the person before starting, once, at the top',
   parameters: Type.Object({

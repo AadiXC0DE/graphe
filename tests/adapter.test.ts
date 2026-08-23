@@ -14,7 +14,7 @@
  *  away and both need a model. The interception point is asserted from Pi's own
  *  source instead — see "the interception point" below. */
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -129,6 +129,44 @@ describe('a call the Guard denies', () => {
     const { order, runThroughPi } = harness();
     await runThroughPi(call('write', { path: '../../../etc/hosts', content: 'x' }));
     expect(order).toEqual(['blocked']);
+  });
+});
+
+describe('a symlink that leaves the project', () => {
+  it('blocks a write through the link before the tool can execute', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'graphe-adapter-workspace-'));
+    const outside = mkdtempSync(join(tmpdir(), 'graphe-adapter-outside-'));
+    try {
+      symlinkSync(outside, join(workspace, 'escape'), 'dir');
+      const { order, events, runThroughPi } = harness({
+        guardFacts: { projectRoot: workspace, howFar: 'changing' },
+      });
+      const outcome = await runThroughPi(call('write', { path: 'escape/created.txt', content: 'x' }));
+
+      expect(outcome?.block).toBe(true);
+      expect(outcome?.reason).toMatch(/through a link/i);
+      expect(order).toEqual(['blocked']);
+      expect(events.some((event) => event.type === 'tool-start')).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('also blocks a read through the link', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'graphe-adapter-workspace-'));
+    const outside = mkdtempSync(join(tmpdir(), 'graphe-adapter-outside-'));
+    try {
+      symlinkSync(outside, join(workspace, 'escape'), 'dir');
+      const { order, runThroughPi } = harness({ guardFacts: { projectRoot: workspace } });
+      const outcome = await runThroughPi(call('read', { path: 'escape/canary.txt' }));
+
+      expect(outcome?.block).toBe(true);
+      expect(order).toEqual(['blocked']);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 

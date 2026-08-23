@@ -422,6 +422,466 @@ a {
   border-top: 1px solid var(--edge);
 }
 
+/* ─────────────────────────────────────────────── measured proof ── */
+
+/* This is deliberately an instrument, not a dashboard: two findings, their
+   actual comparison rows, then the method. The barely-there scan lines make it
+   feel like a recorded result without inventing another decorative object. */
+.band--evidence {
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, rgba(224, 118, 79, 0.045) 1px, transparent 1px) 0 0 / 44px 44px,
+    linear-gradient(rgba(224, 118, 79, 0.035) 1px, transparent 1px) 0 0 / 44px 44px,
+    radial-gradient(70% 90% at 100% 0%, rgba(224, 118, 79, 0.12), transparent 64%),
+    var(--night-sunken);
+}
+
+.evidence__head {
+  margin-bottom: clamp(36px, 5vw, 62px);
+}
+
+.evidence__head .head__lead {
+  max-width: 61ch;
+}
+
+.evidence-board {
+  max-width: var(--full);
+  margin: 0 auto;
+  border: 1px solid var(--edge-strong);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: rgba(27, 24, 23, 0.92);
+  box-shadow: 0 40px 100px -55px #000;
+}
+
+.evidence-board__bar {
+  min-height: 52px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--edge);
+  background: rgba(13, 11, 11, 0.72);
+  color: var(--haze-dim);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+}
+
+.evidence-board__stamp {
+  color: var(--coral);
+  text-align: right;
+}
+
+.evidence-board__cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--edge);
+}
+
+.proof-card {
+  min-width: 0;
+  padding: clamp(26px, 3vw, 42px);
+  min-height: 416px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background: var(--night-raised);
+}
+
+.proof-card + .proof-card {
+  border-top: 0;
+}
+
+.proof-card--safety {
+  background: linear-gradient(135deg, rgba(224, 118, 79, 0.08), transparent 58%), var(--night-raised);
+}
+
+.proof-card--quality {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 56%), var(--night-raised);
+}
+
+.proof-card--boundary {
+  background: linear-gradient(225deg, rgba(224, 118, 79, 0.06), transparent 54%), var(--night-raised);
+}
+
+.proof-card__kicker {
+  margin-bottom: 16px;
+  color: var(--coral);
+  font-size: 0.6875rem;
+  letter-spacing: 0.15em;
+}
+
+.proof-card h3 {
+  max-width: 13ch;
+  font-size: clamp(1.625rem, 1.3rem + 1.3vw, 2.5rem);
+  line-height: 0.98;
+}
+
+.proof-card__intro > p:not(.proof-card__kicker):not(.proof-card__result) {
+  max-width: 35ch;
+  margin-top: 16px;
+  color: var(--haze);
+  font-size: 0.975rem;
+  line-height: 1.55;
+}
+
+.proof-card__result {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  margin-top: auto;
+  padding-top: 26px;
+}
+
+.proof-card__result strong {
+  color: var(--coral);
+  font-size: clamp(3.25rem, 2.25rem + 4vw, 5.25rem);
+  font-weight: 850;
+  letter-spacing: -0.075em;
+  line-height: 0.75;
+}
+
+.proof-card__result span {
+  color: var(--haze-dim);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.proof-card--quality .proof-card__result strong,
+.proof-card--boundary .proof-card__result strong {
+  font-size: clamp(2.75rem, 1.9rem + 3vw, 4.25rem);
+}
+
+.proof-card__direction {
+  margin: 16px 0 13px;
+  color: var(--haze-dim);
+  font-size: 0.625rem;
+  letter-spacing: 0.09em;
+}
+
+.proof-chart,
+.safety-chart {
+  display: grid;
+  gap: 15px;
+  width: 100%;
+}
+
+.proof-chart__row {
+  display: grid;
+  grid-template-columns: minmax(106px, auto) minmax(80px, 1fr) 40px;
+  align-items: center;
+  gap: 12px;
+  color: var(--haze);
+  font-size: 0.875rem;
+}
+
+.proof-chart__row small {
+  display: block;
+  margin-top: 2px;
+  color: var(--haze-dim);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+}
+
+.proof-chart__row b,
+.safety-chart__row b {
+  color: var(--haze);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.proof-chart__row--graphe {
+  color: #f7eae4;
+  font-weight: 700;
+}
+
+.proof-chart__row--graphe b {
+  color: var(--coral);
+}
+
+.proof-chart__track {
+  position: relative;
+  height: 9px;
+  overflow: hidden;
+  background: var(--edge);
+  border-radius: 2px;
+}
+
+.proof-chart__track i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--haze-dim);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 740ms var(--ease-settle);
+  transition-delay: 160ms;
+}
+
+.proof-chart__row--graphe .proof-chart__track i {
+  background: linear-gradient(90deg, var(--brick), var(--coral));
+}
+
+.evidence-board.is-in .proof-chart__track i {
+  transform: scaleX(var(--fill));
+}
+
+.safety-chart__key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  color: var(--haze-dim);
+  font-size: 0.625rem;
+  letter-spacing: 0.03em;
+}
+
+.safety-chart__key span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.safety-chart__key i {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+}
+
+.key--protected { background: var(--coral); }
+.key--escaped { background: #5e5551; }
+.key--quiet { background: var(--edge-strong); }
+
+.safety-chart__row {
+  display: grid;
+  grid-template-columns: 75px minmax(120px, 1fr) 72px;
+  align-items: center;
+  gap: 12px;
+  color: var(--haze);
+  font-size: 0.875rem;
+}
+
+.safety-chart__row--graphe {
+  color: #f7eae4;
+  font-weight: 700;
+}
+
+.safety-chart__rail {
+  display: grid;
+  grid-template-columns: repeat(18, minmax(0, 1fr));
+  gap: 2px;
+  height: 9px;
+  background: var(--edge);
+}
+
+.safety-chart__rail--eight {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.safety-chart__rail i {
+  grid-column: span var(--n);
+  opacity: 0;
+  transform: scaleX(0.7);
+  transform-origin: left center;
+  transition: opacity 360ms var(--ease-out), transform 520ms var(--ease-settle);
+  transition-delay: 260ms;
+}
+
+.safety-chart__rail .protected { background: var(--coral); }
+.safety-chart__rail .escaped { background: #5e5551; }
+.safety-chart__rail .quiet { background: var(--edge-strong); }
+
+.evidence-board.is-in .safety-chart__rail i {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.evidence__floor {
+  max-width: var(--full);
+  margin: 18px auto 0;
+  color: var(--haze);
+  font-size: 0.9375rem;
+}
+
+.evidence__floor span {
+  margin-right: 9px;
+  color: var(--coral);
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+}
+
+.evidence__floor b {
+  color: #f0ece9;
+}
+
+/* The method is part of the argument, but it should not compete with the two
+   results above. It begins as a compact protocol and expands in the same place,
+   so there is no detour between the chart and its qualification. */
+.method__top,
+.method__rules,
+.method__details {
+  max-width: var(--full);
+  margin-inline: auto;
+}
+
+.method__top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr);
+  align-items: end;
+  gap: clamp(28px, 8vw, 160px);
+  margin-bottom: clamp(36px, 5vw, 58px);
+}
+
+.method__top .head {
+  margin: 0;
+}
+
+.method__lede {
+  max-width: 41ch;
+  color: var(--ink-muted);
+  font-size: clamp(1rem, 0.96rem + 0.2vw, 1.125rem);
+}
+
+.method__rules {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--paper-edge);
+  border-bottom: 1px solid var(--paper-edge);
+}
+
+.method__rules p {
+  min-height: 150px;
+  margin: 0;
+  padding: 24px clamp(16px, 2.2vw, 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.method__rules p + p {
+  border-left: 1px solid var(--paper-edge);
+}
+
+.method__rules span {
+  color: var(--brick);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+}
+
+.method__rules b {
+  font-size: 1.0625rem;
+  letter-spacing: -0.02em;
+}
+
+.method__rules em {
+  color: var(--ink-muted);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-style: normal;
+  line-height: 1.55;
+}
+
+.method__details {
+  margin-top: 22px;
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+
+.method__details summary {
+  min-height: 62px;
+  padding: 17px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+  list-style: none;
+}
+
+.method__details summary::-webkit-details-marker {
+  display: none;
+}
+
+.method__plus {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--paper-edge);
+  border-radius: 50%;
+  color: var(--brick);
+  font-family: var(--mono);
+  font-size: 1.125rem;
+  font-weight: 400;
+  line-height: 1;
+  transition: transform 200ms var(--ease-out), background-color 180ms ease, color 180ms ease;
+}
+
+.method__details[open] .method__plus {
+  transform: rotate(45deg);
+  background: var(--brick);
+  color: #fff;
+}
+
+.method__inside {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--paper-edge);
+}
+
+.method__inside article {
+  padding: 26px clamp(18px, 2.2vw, 32px) 30px;
+}
+
+.method__inside article + article {
+  border-left: 1px solid var(--paper-edge);
+}
+
+.method__inside article:nth-child(odd) {
+  border-left: 0;
+}
+
+.method__inside article:nth-child(n + 3) {
+  border-top: 1px solid var(--paper-edge);
+}
+
+.method__inside .mono {
+  color: var(--brick);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+}
+
+.method__inside h3 {
+  margin-top: 13px;
+  font-size: 1.25rem;
+}
+
+.method__inside article > p:last-child,
+.method__disclaimer {
+  margin-top: 10px;
+  color: var(--ink-muted);
+  font-size: 0.9375rem;
+  line-height: 1.58;
+}
+
+.method__disclaimer {
+  margin: 0;
+  padding: 16px 20px;
+  border-top: 1px solid var(--paper-edge);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+}
+
 .eyebrow {
   font-family: var(--mono);
   font-size: 0.75rem;
@@ -2034,6 +2494,11 @@ a {
     grid-template-columns: 1fr;
   }
 
+  .method__top {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
   .nav__links {
     display: none;
   }
@@ -2044,6 +2509,71 @@ a {
 }
 
 @media (max-width: 640px) {
+  .evidence-board__bar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .evidence-board__stamp {
+    text-align: left;
+  }
+
+  .proof-card {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    padding: 28px 20px;
+    min-height: 0;
+  }
+
+  .evidence-board__cards {
+    grid-template-columns: 1fr;
+  }
+
+  .proof-card h3 {
+    max-width: 17ch;
+  }
+
+  .proof-chart__row {
+    grid-template-columns: minmax(92px, auto) minmax(50px, 1fr) 34px;
+    gap: 9px;
+    font-size: 0.8125rem;
+  }
+
+  .safety-chart__row {
+    grid-template-columns: 68px minmax(72px, 1fr) 66px;
+    gap: 8px;
+    font-size: 0.8125rem;
+  }
+
+  .safety-chart__row b {
+    font-size: 0.625rem;
+  }
+
+  .evidence__floor {
+    font-size: 0.875rem;
+  }
+
+  .method__rules,
+  .method__inside {
+    grid-template-columns: 1fr;
+  }
+
+  .method__rules p {
+    min-height: 0;
+    padding: 19px 0;
+  }
+
+  .method__rules p + p,
+  .method__inside article + article {
+    border-top: 1px solid var(--paper-edge);
+    border-left: 0;
+  }
+
+  .method__inside article {
+    padding-inline: 20px;
+  }
+
   .step {
     gap: 18px;
   }
@@ -2117,6 +2647,17 @@ a {
   /* No growing. It is simply at four of nine, which is all it ever said. */
   .bar__fill {
     transform: none;
+    transition: none;
+  }
+
+  .proof-chart__track i {
+    transform: scaleX(var(--fill));
+    transition: none;
+  }
+
+  .safety-chart__rail i {
+    opacity: 1;
+    transform: scaleX(1);
     transition: none;
   }
 

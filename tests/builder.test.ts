@@ -423,3 +423,60 @@ describe('B-05 running the copy’s own programs', () => {
     expect(mayRun(builder, { name: 'bash', input: { command } }, verdict, true, copy)).toBeUndefined();
   });
 });
+
+/* -------------------------------------------------------------------------- */
+
+/** Every way of naming the same program.
+ *
+ * A builder works in a throwaway copy, but a copy shares its history with the
+ * real project — refs, stashes, the lot — so git is the one thing it may never
+ * reach. The block matched the bare word only, which left the two spellings
+ * anybody would try when the bare word failed. */
+describe('B-06 the ways round a blocked program', () => {
+  const bash = (command: string) => ({ name: 'bash', input: { command } });
+  const held = (command: string) =>
+    mayRun(ROLES.builder, bash(command), { kind: 'snapshot-first' }, false, '/copy') !== undefined;
+
+  it('is not walked round by a path, a quote, or a capital', () => {
+    for (const command of [
+      'git status',
+      '/usr/bin/git push',
+      '/opt/homebrew/bin/git stash',
+      'GIT status',
+      'Git log',
+      '"git" stash',
+      "'git' worktree add /tmp/x",
+      'echo hi && git push',
+      'cd src; git reset --hard',
+    ]) {
+      expect(held(command), command).toBe(true);
+    }
+  });
+
+  it('still lets the copy run its own programs', () => {
+    // The third is the one that proves the word is matched and not merely
+    // found: "digit" carries a git nobody meant.
+    for (const command of ['python3 build.py', 'node scripts/make.mjs', 'python3 digital.py']) {
+      expect(held(command), command).toBe(false);
+    }
+  });
+});
+
+/** The same anchored reading of a web address the rest of the codebase uses. A
+ *  word with `://` in the middle is an ordinary relative path, and skipping it
+ *  meant a path that leaves the copy was never checked at all. */
+describe('B-07 a location with :// in the middle of it', () => {
+  it('is still checked against the copy', () => {
+    for (const command of [
+      'python3 ../../out://x.py',
+      'python3 build.py --out ../../evil://y',
+      'python3 build.py ~/secrets://z',
+    ]) {
+      expect(builderScriptDecision(command, '/copy').ok, command).toBe(false);
+    }
+  });
+
+  it('leaves a real address alone, which is not a path at all', () => {
+    expect(builderScriptDecision('python3 build.py https://example.com/x', '/copy').ok).toBe(true);
+  });
+});

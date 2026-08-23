@@ -356,8 +356,15 @@ export function bubblewrapArgs(
   }
 
   // An empty folder over each private one: bubblewrap has no read denial, so
-  // the only way to refuse a read is to put nothing where the keys were.
-  for (const folder of bounds.private ?? privatePlaces()) {
+  // the only way to refuse a read is to put nothing where the keys were. Keys
+  // kept inside the project count here exactly as they do on the other
+  // boundary — covering them on one and not the other is a fix that only holds
+  // on the machine it was written on.
+  const covered = [
+    ...(bounds.private ?? privatePlaces()),
+    ...bounds.writable.flatMap((where) => credentialFoldersIn(where)),
+  ];
+  for (const folder of covered) {
     const usable = usableFolder(folder);
     if (usable === null) continue;
     args.push('--tmpfs', usable);

@@ -472,7 +472,7 @@ describe('writing nothing else would keep — the report a restart deleted', () 
       const found = await writingLeftBehind(git(), folder);
       expect(found.tooBig).toBe(true);
 
-      const away = await putAwayWorktree(git(), repo, folder, { rescue: async () => undefined });
+      const away = await putAwayWorktree(git(), repo, folder, { rescue: async () => true });
       expect(away.put).toBe(false);
       expect(existsSync(folder)).toBe(true);
     } finally {
@@ -492,8 +492,26 @@ describe('writing nothing else would keep — the report a restart deleted', () 
       const found = await writingLeftBehind(git(), folder);
       expect(found).toEqual({ files: [], tooBig: false });
 
-      const away = await putAwayWorktree(git(), repo, folder, { rescue: async () => undefined });
+      const away = await putAwayWorktree(git(), repo, folder, { rescue: async () => true });
       expect(away.put).toBe(true);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  /* Saying it was carried out and then deleting the only copy is the whole
+     failure this was written to prevent — a full disk must not become a lost
+     report. */
+  it('keeps the copy when the writing could not be carried out', async () => {
+    const { repo, folder } = await repoWithNotes();
+    try {
+      await mkdir(path.join(folder, 'notes'), { recursive: true });
+      await writeFile(path.join(folder, 'notes', 'audit.md'), 'the only copy\n');
+      const away = await putAwayWorktree(git(), repo, folder, {
+        rescue: async () => false,
+      });
+      expect(away.put).toBe(false);
+      expect(existsSync(folder)).toBe(true);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -508,6 +526,7 @@ describe('writing nothing else would keep — the report a restart deleted', () 
       const away = await putAwayWorktree(git(), repo, folder, {
         rescue: async (_where, files) => {
           saved.push(...files);
+          return true;
         },
       });
       expect(away.put).toBe(true);
@@ -527,6 +546,7 @@ describe('writing nothing else would keep — the report a restart deleted', () 
       const given = await sweepCheckouts(git(), repo, [folder], {
         rescue: async (_where, files) => {
           saved.push(...files);
+          return true;
         },
       });
       expect(given).toEqual([folder]);

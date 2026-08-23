@@ -142,7 +142,10 @@ function declined(spec: RoleSpec): string {
  * A builder edits files. Saving, branching and history are this app's to do,
  * and it does them. So git is simply not a builder's to run.
  */
-const REACHES_THE_REAL_ONE = /(?:^|[\s;&|(`])git(?:[\s;&|)`]|$)/;
+/* Any way of naming git: on its own, by a path, in quotes, and whatever case
+   a case-insensitive disk will answer to. The word alone missed `/usr/bin/git`
+   and `"git"` outright, which is the whole of the block walked around. */
+const REACHES_THE_REAL_ONE = /(?:^|[\s;&|(`"'/\\])git(?:[\s;&|)`"']|$)/i;
 
 /* -------------------------------------------------------------------------- */
 /* A program of the copy's own                                                 */
@@ -206,7 +209,10 @@ function locationIn(word: string): string | null {
     if (equals === -1) return null;
     text = text.slice(equals + 1);
   }
-  if (text === '' || text.includes('://')) return null;
+  // Only a real web address is not a location. Anchored, because a shell reads
+  // `../../out://x` as an ordinary relative path — the same word that walked
+  // out of the project everywhere else it was tested for.
+  if (text === '' || /^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return null;
   return text.includes('/') || text.startsWith('.') ? text : null;
 }
 

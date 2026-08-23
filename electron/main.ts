@@ -1541,6 +1541,12 @@ const workspaces = new Workspaces<Held>({
    * busy, `adopt` keeps them all rather than picking one to end.
    */
   mayEvict: (held) =>
+    // Everything a project can have going, not only its conversations. A check
+    // running in a copy is nobody's conversation and work waiting to be looked
+    // at is nobody's either — and closing a project ends all of it.
+    held.checking === null &&
+    held.waiting === null &&
+    held.running.list().length === 0 &&
     held.sessions.open.every(
       (one) =>
         !one.held.working && !one.held.listening && one.held.awaitingAnswer.length === 0,
@@ -2982,9 +2988,17 @@ function keepAside(project: string, whose: string): Rescue {
   return async (folder, files) => {
     for (const one of files) {
       const to = join(keptAsideFolder(project), whose, one);
-      await mkdir(dirname(to), { recursive: true }).catch(() => undefined);
-      await copyFile(join(folder, one), to).catch(() => undefined);
+      try {
+        await mkdir(dirname(to), { recursive: true });
+        await copyFile(join(folder, one), to);
+      } catch {
+        // One that could not be carried is enough to keep the copy. Saying it
+        // went and then deleting the only copy is the whole failure this was
+        // written to prevent.
+        return false;
+      }
     }
+    return true;
   };
 }
 

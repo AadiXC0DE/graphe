@@ -363,9 +363,15 @@ async function smallFilesUnder(folder: string, entry: string): Promise<string[] 
   return (await walk(where)) ? found : null;
 }
 
-/** Told where a copy is and what it holds, before the copy goes. The copying
- *  itself is the caller's, the same way the git runner is. */
-export type Rescue = (folder: string, files: readonly string[]) => Promise<void>;
+/**
+ * Told where a copy is and what it holds, before the copy goes.
+ *
+ * The copying itself is the caller's, the same way the git runner is — and so
+ * is saying whether it worked. False keeps the copy: a rescue that could not
+ * write, because the disk was full or the folder refused it, must not be
+ * followed by deleting the only copy of what it was rescuing.
+ */
+export type Rescue = (folder: string, files: readonly string[]) => Promise<boolean>;
 
 /**
  * Carry that writing out before the copy goes, and say whether it may go.
@@ -383,8 +389,8 @@ async function carryOutWriting(run: RunGit, folder: string, rescue?: Rescue): Pr
   // Nowhere to put it is not a reason to keep the folder: the caller that did
   // not ask for a rescue is the one that never had anything to lose.
   if (rescue === undefined) return true;
-  if (found.files.length > 0) await rescue(folder, found.files).catch(() => undefined);
-  return true;
+  if (found.files.length === 0) return true;
+  return rescue(folder, found.files).catch(() => false);
 }
 
 /** The backstop: checkouts left by conversations that are gone, or by a copy of

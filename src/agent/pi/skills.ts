@@ -7,6 +7,7 @@
 import { homedir } from 'node:os';
 import { realpath, readdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
+import { containsPath } from '../guard/paths';
 
 export type AvailableSkill = {
   id: string;
@@ -63,8 +64,13 @@ async function inRoots(roots: readonly { path: string; source: Found['source'] }
   const seen = new Set<string>();
   const found: Found[] = [];
   for (const root of roots) {
+    const home = await realpath(root.path).catch(() => root.path);
     for (const path of await skillFiles(root.path)) {
       const actual = await realpath(path).catch(() => path);
+      // A skill's words are read straight into the instructions, so a link
+      // pointing out of the folder is a way to have any file on the machine
+      // read aloud to the model. Where it really is has to be where it looks.
+      if (!containsPath(home, actual).inside) continue;
       if (seen.has(actual)) continue;
       seen.add(actual);
       const text = await readFile(path, 'utf8').catch(() => '');

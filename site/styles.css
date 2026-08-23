@@ -2648,6 +2648,10 @@ a {
     display: none;
   }
 
+  #page .sheet--mobile-more:not(.is-expanded) .cell:nth-child(n + 4) {
+    display: none;
+  }
+
   .sheet__more {
     width: 100%;
     display: inline-flex;
@@ -2666,15 +2670,9 @@ a {
   }
 
   .sheet__more-mark {
-    display: grid;
-    width: 22px;
-    height: 22px;
     flex: 0 0 auto;
-    place-items: center;
-    border: 1px solid var(--edge-strong);
-    border-radius: 50%;
     color: var(--coral);
-    font-size: 1rem;
+    font-size: 1.25rem;
     line-height: 1;
   }
 
@@ -2714,6 +2712,42 @@ a {
 
 @media (max-width: 360px) {
   .mark__beta {
+    margin-inline-start: 0;
+    padding: 2px 5px;
+    font-size: 0.5625rem;
+  }
+
+  .nav__inner {
+    padding-inline: 8px;
+    gap: 6px;
+  }
+
+  .mark {
+    gap: 6px;
+    font-size: 1rem;
+  }
+
+  .mark__glyph {
+    width: 24px;
+    height: 24px;
+  }
+
+  .nav__end {
+    gap: 6px;
+  }
+
+  .chip--repo {
+    padding-inline: 8px;
+    height: 34px;
+  }
+
+  .btn--small {
+    height: 34px;
+    padding-inline: 10px;
+    font-size: 0.8125rem;
+  }
+
+  .btn--small .btn__apple {
     display: none;
   }
 

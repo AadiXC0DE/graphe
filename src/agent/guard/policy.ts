@@ -253,6 +253,9 @@ const SAY = {
    the folders, and the project's own standards read against a change. Both were
    falling through to the unknown-command question, so every review opened with
    "run an instruction I do not fully recognise?" about our own tool. */
+/** The tool that stops to ask a person something before the work starts. */
+const ASKING_TOOLS = new Set(['askfirst']);
+
 const READ_TOOLS = new Set([
   'read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff', 'readmap', 'runchecks',
 ]);
@@ -972,12 +975,19 @@ function isRedirect(text: string): boolean {
   return text === '>' || text === '>>' || text === '<';
 }
 
+/** A real web address, which is not a location on this computer. Anchored: a
+ *  shell reads `../../out://x` as an ordinary relative path. */
+const WEB_ADDRESS = /^[a-z][a-z0-9+.-]*:\/\//i;
+
 /** Devices that swallow output harmlessly. Everything else under /dev is storage. */
 const SAFE_DEVICES = new Set(['/dev/null', '/dev/stdout', '/dev/stderr', '/dev/tty', '/dev/zero']);
 
 function looksLikeLocation(text: string): boolean {
   if (text === '') return false;
-  if (text.includes('://')) return false;
+  // A web address is not a location on this computer. Anchored, because a
+  // shell reads `../../out://x` as an ordinary relative path and only the
+  // start of a word can be a scheme.
+  if (WEB_ADDRESS.test(text)) return false;
   if (text.startsWith('-')) return false;
   return (
     text.includes('/') ||
@@ -1026,29 +1036,50 @@ function judgeSegmentPaths(tokens: Token[], ctx: GuardFacts, reading = false): J
     const isWriteTarget = previous !== undefined && (previous.text === '>' || previous.text === '>>');
     if (isRedirect(token.text)) continue;
 
-    let text = token.text;
-    if (text.startsWith('-')) {
-      const equals = text.indexOf('=');
-      if (equals === -1) continue;
-      text = text.slice(equals + 1);
-    }
-    if (text.includes('://')) continue;
-    if (SAFE_DEVICES.has(text)) continue;
-    if (text.startsWith('/dev/')) return deny(SAY.wipeDisk);
-    if (!looksLikeLocation(text) && !isCredentialPath(text)) continue;
+    // Every way one word can carry a location. A word was checked only as
+    // itself, so two ordinary spellings walked straight out of the project:
+    // `sort -o../../out.txt`, where the option and its value are one word, and
+    // anything holding `://`, which was taken for a web address when a shell
+    // reads it as a folder called `x:`.
+    for (const text of locationsIn(token.text)) {
+      if (SAFE_DEVICES.has(text)) continue;
+      if (text.startsWith('/dev/')) return deny(SAY.wipeDisk);
+      if (!looksLikeLocation(text) && !isCredentialPath(text)) continue;
 
-    const check = containsPath(ctx.projectRoot, text);
-    if (!check.inside) {
-      if (reading && !isWriteTarget && readsOwnFolder(check.resolved, ctx)) continue;
-      return refuseOutside(check, ctx);
-    }
-    if (check.resolved !== null && isCredentialPath(check.resolved)) return deny(SAY.credentials);
-    if (isHistoryStore(text)) return deny(SAY.historyStore);
-    if (isWriteTarget) {
-      judgement = strictest(judgement, snapshotFirst('Writing over a file in your project.'));
+      const check = containsPath(ctx.projectRoot, text);
+      if (!check.inside) {
+        if (reading && !isWriteTarget && readsOwnFolder(check.resolved, ctx)) continue;
+        return refuseOutside(check, ctx);
+      }
+      if (check.resolved !== null && isCredentialPath(check.resolved)) return deny(SAY.credentials);
+      if (isHistoryStore(text)) return deny(SAY.historyStore);
+      if (isWriteTarget) {
+        judgement = strictest(judgement, snapshotFirst('Writing over a file in your project.'));
+      }
     }
   }
   return judgement;
+}
+
+/**
+ * Every location one word could be.
+ *
+ * Usually itself. An option carrying its value in the same word is the case
+ * that matters — `-o../../out.txt`, `--exclude=../secrets` — because the value
+ * is a location and the word is not, so checking the word alone found nothing
+ * to refuse.
+ */
+function locationsIn(word: string): string[] {
+  if (WEB_ADDRESS.test(word)) return [];
+  if (!word.startsWith('-')) return [word];
+
+  const found: string[] = [];
+  const equals = word.indexOf('=');
+  if (equals !== -1) found.push(word.slice(equals + 1));
+  // `-o../../out.txt`: the dashes, then the option's letters, then the value.
+  const attached = /^-{1,2}[A-Za-z]*(.+)$/.exec(word);
+  if (attached?.[1] !== undefined) found.push(attached[1]);
+  return found.filter((one) => one !== '' && !WEB_ADDRESS.test(one));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1394,6 +1425,15 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
     // verb rather than the tool: which runtimes also install things is a list
     // that grows, and what makes it worth asking is the fetching.
     const doing = (meaningful[1]?.text ?? '').toLowerCase();
+    /* An installer reached through the runtime rather than by its own name —
+       `python3 -m pip install requests`. The same fetching, the same question,
+       and without this it read as running one of the project's own programs. */
+    if (doing === '-m') {
+      const module = (meaningful[2]?.text ?? '').toLowerCase();
+      if (PACKAGE_MANAGERS.has(module) || module === 'ensurepip') {
+        return decide(judgePackageManager(meaningful.slice(2)));
+      }
+    }
     if (FETCHES_CODE.has(doing)) {
       return decide(
         ask(
@@ -1511,11 +1551,30 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
 /** Was somebody trying to hide a destructive verb from us? Runs over the raw
  *  text, before any parsing, so it catches shapes the reader would choke on. */
 function looksObfuscated(command: string): boolean {
+  /* These read the raw command, so their length is whatever somebody typed,
+     and two of them used to cost the square of it: fifty thousand characters
+     of `echo aaa…` took four and a half seconds of the one thread the window
+     draws on. A long word is not a strange thing for an instruction to carry.
+     The name in front of `()` was never needed to spot the shape, and the
+     braces are walked rather than backtracked over. */
   // A function that calls itself forever, the classic one-line way to freeze a machine.
-  if (/[\w:]*\(\)\s*\{[^}]*[|&]/.test(command)) return true;
+  if (/\(\)\s*\{[^}]*[|&]/.test(command)) return true;
   // Text being reassembled character by character to dodge a word match.
   if (/\\x[0-9a-f]{2}\\x[0-9a-f]{2}/i.test(command)) return true;
-  if (/\$\{[^}]*[:#%/][^}]*\}/.test(command)) return true;
+  if (hasTrickyExpansion(command)) return true;
+  return false;
+}
+
+/** A `${…}` doing something to its value on the way out — the shape used to
+ *  spell a word out of pieces. Walked rather than matched: the pattern for it
+ *  had two open-ended runs before a closing brace, and an instruction with no
+ *  closing brace at all cost seconds. */
+function hasTrickyExpansion(command: string): boolean {
+  for (let at = command.indexOf('${'); at !== -1; at = command.indexOf('${', at + 2)) {
+    const end = command.indexOf('}', at + 2);
+    if (end === -1) return false;
+    if (/[:#%/]/.test(command.slice(at + 2, end))) return true;
+  }
   return false;
 }
 
@@ -2005,6 +2064,12 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
 
   if (DESIGN_READ_TOOLS.has(name)) return allow();
 
+  /* Putting a few questions on the screen and waiting for the answer. It reads
+     nothing, writes nothing and reaches nowhere — and it has to be classed as
+     changing nothing, or the look-around withholds it and the one moment worth
+     asking at is the one moment it cannot. */
+  if (ASKING_TOOLS.has(name)) return allow();
+
   /* The page beside the conversation. Reading and scrolling it are silent;
      pressing and typing in it are the one place in this file where the thing
      at risk is not a file at all. */
@@ -2355,6 +2420,7 @@ export function describeCall(call: ToolCall): CallShape {
     if (NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name)) return 'reaches the internet';
     if (DELETE_TOOLS.has(name)) return 'deletes something';
     if (WRITE_TOOLS.has(name)) return 'changes files';
+    if (ASKING_TOOLS.has(name)) return 'reads';
     if (READ_TOOLS.has(name) || LIST_TOOLS.has(name) || SEARCH_TOOLS.has(name)) return 'reads';
     if (DESIGN_READ_TOOLS.has(name) || CODE_READ_TOOLS.has(name) || PAGE_READ_TOOLS.has(name)) return 'reads';
     return 'something else';

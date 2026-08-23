@@ -18,6 +18,7 @@
  *    neutralised at the boundary before anything reaches the parent.
  */
 
+import { containsPath, toPosix } from '../guard/paths';
 import { reviewerTestDecision } from './reviewer-test';
 
 export type HelperRole = 'helper' | 'reviewer' | 'researcher' | 'builder';
@@ -68,7 +69,7 @@ export const ROLES: Readonly<Record<HelperRole, RoleSpec>> = {
     mayChange: false,
     needsCopy: false,
     spoken:
-      'You are a reviewer. Read the work you were handed and find only genuine problems — bugs, security, correctness, missing edge cases — each with a file and line to point at. Do not invent issues: if you cannot justify a problem from what you read, do not report it. Never change anything. You may run exactly one local test file when that would prove a finding (npx --no-install vitest run <file>, pnpm exec vitest run <file>, yarn vitest run <file>, or node --test <file>); no package script or other shell command is available. ' +
+      'You are a reviewer. Read the work you were handed and find only genuine problems — bugs, security, correctness, missing edge cases — each with a file and line to point at. Do not invent issues: if you cannot justify a problem from what you read, do not report it. Never change anything. You may read the history to see what actually changed — git diff, log, show, status, branch, blame, grep and the like, including `git diff <base>...HEAD` and `git log -p` — but nothing that writes, fetches or checks anything out. You may also run one local test file when that would prove a finding (npx --no-install vitest run <file>, pnpm exec vitest run <file>, yarn vitest run <file>, or node --test <file>). No package script or other shell command is available, so do not reach for one — say what you could not check instead of going quiet. ' +
       NEEDS_A_DECISION,
   },
   researcher: {
@@ -86,7 +87,7 @@ export const ROLES: Readonly<Record<HelperRole, RoleSpec>> = {
     mayChange: true,
     needsCopy: true,
     spoken:
-      'You are a builder. You have your own copy of the project and you are the only one working in it, so make the change you were asked for rather than describing it. Stay inside the piece you were handed: a copy that also changes three other things cannot be read, and will not be taken. When you are done, say in a sentence or two what you changed and where, so somebody deciding whether to take it does not have to read it all. ' +
+      'You are a builder. You have your own copy of the project and you are the only one working in it, so make the change you were asked for rather than describing it. You may run the copy’s own programs to check your work — one script file at a time, with nothing joined on to it. Stay inside the piece you were handed: a copy that also changes three other things cannot be read, and will not be taken. When you are done, say in a sentence or two what you changed and where, so somebody deciding whether to take it does not have to read it all. ' +
       NEEDS_A_DECISION,
   },
 };
@@ -141,7 +142,126 @@ function declined(spec: RoleSpec): string {
  * A builder edits files. Saving, branching and history are this app's to do,
  * and it does them. So git is simply not a builder's to run.
  */
-const REACHES_THE_REAL_ONE = /(?:^|[\s;&|(`])git(?:[\s;&|)`]|$)/;
+/* Any way of naming git: on its own, by a path, in quotes, and whatever case
+   a case-insensitive disk will answer to. The word alone missed `/usr/bin/git`
+   and `"git"` outright, which is the whole of the block walked around. */
+const REACHES_THE_REAL_ONE = /(?:^|[\s;&|(`"'/\\])git(?:[\s;&|)`"']|$)/i;
+
+/* -------------------------------------------------------------------------- */
+/* A program of the copy's own                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Runtimes that take one file and run what is in it, with the endings each one
+ *  is handed. A shell is not one: its first job is to run other commands, and
+ *  none of those can be read from here. */
+const SCRIPT_RUNNERS: Readonly<Record<string, readonly string[]>> = {
+  node: ['.js', '.mjs', '.cjs'],
+  python: ['.py'],
+  python3: ['.py'],
+  ruby: ['.rb'],
+  perl: ['.pl'],
+  php: ['.php'],
+};
+
+export const BUILDER_SCRIPT_WORDS = {
+  onlyItsOwn:
+    'A builder may run one of its copy’s own programs: a runtime and one script file inside the copy, on its own, with nothing joined on to it.',
+  outside: 'That is not inside the copy you were given.',
+} as const;
+
+export type BuilderScriptDecision = { ok: true; script: string } | { ok: false; reason: string };
+
+/** Anything a shell would run, join, redirect or swap out before the program is
+ *  reached. One plain command or none. */
+const SHELL_LANGUAGE = /[;&|`$<>(){}[\]*?~!\n\r\\]/;
+
+/** The words of a single command, or null when it is more than one. */
+function words(command: string): string[] | null {
+  if (SHELL_LANGUAGE.test(command)) return null;
+  const out: string[] = [];
+  let word = '';
+  let quote: '"' | "'" | null = null;
+  for (const char of command.trim()) {
+    if (char === '"' || char === "'") {
+      if (quote === char) quote = null;
+      else if (quote === null) quote = char;
+      else word += char;
+      continue;
+    }
+    if (/\s/.test(char) && quote === null) {
+      if (word !== '') out.push(word);
+      word = '';
+      continue;
+    }
+    word += char;
+  }
+  if (quote !== null) return null;
+  if (word !== '') out.push(word);
+  return out;
+}
+
+/** A word that names a place rather than a plain value, with an option's own
+ *  `--name=` taken off first — the same shape the Guard reads. */
+function locationIn(word: string): string | null {
+  let text = word;
+  if (text.startsWith('-')) {
+    const equals = text.indexOf('=');
+    if (equals === -1) return null;
+    text = text.slice(equals + 1);
+  }
+  // Only a real web address is not a location. Anchored, because a shell reads
+  // `../../out://x` as an ordinary relative path — the same word that walked
+  // out of the project everywhere else it was tested for.
+  if (text === '' || /^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return null;
+  return text.includes('/') || text.startsWith('.') ? text : null;
+}
+
+/**
+ * Whether a builder may run this, because everything it names is its own.
+ *
+ * The copy is the whole world: a builder was handed a throwaway clone and is
+ * the only thing in it, so a script sitting in that clone is no more than the
+ * builder's own work read back. Every location the command names is measured
+ * from the copy with the Guard's own containment, so `..`, an absolute path and
+ * a runtime borrowed from somewhere else all land outside and stop here.
+ *
+ * Pure and lexical, like the containment it leans on. What the script then does
+ * is held by the boundary around the process, not by this.
+ */
+export function builderScriptDecision(command: string, copyFolder: string): BuilderScriptDecision {
+  const parts = words(command);
+  if (parts === null || parts.length < 2) {
+    return { ok: false, reason: BUILDER_SCRIPT_WORDS.onlyItsOwn };
+  }
+  const runner = parts[0] ?? '';
+  const endings = SCRIPT_RUNNERS[(toPosix(runner).split('/').pop() ?? '').toLowerCase()];
+  if (endings === undefined) return { ok: false, reason: BUILDER_SCRIPT_WORDS.onlyItsOwn };
+  // A runtime named by path — a project-local one — has to be the copy's too.
+  if (runner.includes('/') && !containsPath(copyFolder, runner).inside) {
+    return { ok: false, reason: BUILDER_SCRIPT_WORDS.outside };
+  }
+
+  const script = parts[1] ?? '';
+  // A word beginning with a dash is an option, not a file: `-c` and `-m` hand
+  // the runtime code and modules from elsewhere, neither of which is a script
+  // in the copy.
+  if (script.startsWith('-')) return { ok: false, reason: BUILDER_SCRIPT_WORDS.onlyItsOwn };
+  const lower = script.toLowerCase();
+  if (!endings.some((ending) => lower.endsWith(ending))) {
+    return { ok: false, reason: BUILDER_SCRIPT_WORDS.onlyItsOwn };
+  }
+  if (!containsPath(copyFolder, script).inside) {
+    return { ok: false, reason: BUILDER_SCRIPT_WORDS.outside };
+  }
+
+  for (const word of parts.slice(2)) {
+    const location = locationIn(word);
+    if (location !== null && !containsPath(copyFolder, location).inside) {
+      return { ok: false, reason: BUILDER_SCRIPT_WORDS.outside };
+    }
+  }
+  return { ok: true, script };
+}
 
 export function mayRun(
   spec: RoleSpec,
@@ -162,10 +282,23 @@ export function mayRun(
   if (!spec.mayChange) {
     return mutates ? { block: true, reason: declined(spec) } : undefined;
   }
-  if (verdict.kind !== 'allow') return { block: true, reason: declined(spec) };
   const command = call.input?.['command'];
   if (typeof command === 'string' && REACHES_THE_REAL_ONE.test(command)) {
     return { block: true, reason: HELPER_DECLINED.noGit };
+  }
+  if (verdict.kind !== 'allow') {
+    // The Guard never says an outright yes to a program of the project's own —
+    // it keeps one undoable instead, and there is nobody here to take a restore
+    // point. Inside a throwaway copy there is nothing to restore, so a script
+    // of the copy's own runs.
+    if (verdict.kind !== 'snapshot-first' || call.name.toLowerCase() !== 'bash') {
+      return { block: true, reason: declined(spec) };
+    }
+    if (projectRoot === undefined || typeof command !== 'string') {
+      return { block: true, reason: declined(spec) };
+    }
+    const own = builderScriptDecision(command, projectRoot);
+    if (!own.ok) return { block: true, reason: own.reason };
   }
   return undefined;
 }

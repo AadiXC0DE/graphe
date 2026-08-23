@@ -30,6 +30,7 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { mayRun, roleSpec, safeChildWords, type HelperRole } from './child';
+import { CARRY_ON, HELPER_WAITS_MS, isTransientStreamError } from './transient';
 import { patchWorkerThreads } from './node-shim';
 import type { HelperPace } from './tools';
 import type { GuardFacts } from '../guard/policy';
@@ -64,9 +65,28 @@ function paceOf(value: unknown): HelperPace | undefined {
   return PACES.find((level) => level === value);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** The one channel out. Only JSON lines ever leave, so a parent that reads by
  *  line never has to guess which parts are report and which are noise. The
  *  shapes are the `SubagentLine` contract in tools.ts. */
+/**
+ * Wait, saying so as it goes.
+ *
+ * The one above kills a helper that has written nothing for five minutes, and
+ * any byte resets that clock. A helper sitting out a provider wobble writes
+ * nothing at all, so it was being killed for waiting exactly as it was told to.
+ */
+async function waitOut(ms: number): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    await sleep(Math.min(20_000, until - Date.now()));
+    report({ type: 'waiting' });
+  }
+}
+
 function report(payload: unknown): void {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
@@ -119,8 +139,20 @@ const NO_MODEL =
   'The helper had nothing to think with — no account reached it. Nothing was looked at.';
 
 /** A helper that ran and said nothing is not a helper that found nothing. */
-const SAID_NOTHING =
+export const SAID_NOTHING =
   'The helper finished without saying anything. Nothing was found, and nothing was changed.';
+
+/**
+ * The same, for a helper that went quiet after being refused something.
+ *
+ * Five reviewers were once sent to read a branch, refused every `git` they
+ * tried, and each reported the plain sentence above — which reads as "looked
+ * and found nothing" when what happened was "never got to look". The refusal is
+ * the whole answer, so it travels back with it.
+ */
+export function saidNothingAfterRefusal(refused: string): string {
+  return `The helper could not do what it was asked and so said nothing. What stopped it: ${refused} Give it a job it can do with what it has, or do this piece yourself.`;
+}
 
 /** The only tools this process may run at all — a second lock on the `tools:`
  *  list below, so anything a resource or a Pi upgrade registers is blocked by
@@ -187,6 +219,10 @@ async function work(
   const review = async (call: { id: string; name: string; input: Record<string, unknown> }) =>
     mayRun(spec, call, evaluate(call, facts), changesAnything(call, facts), facts.projectRoot);
 
+  /** The last thing this helper was refused, if it was refused anything.
+   *  Declared here because the hook below closes over it. */
+  let lastRefusal: string | null = null;
+
   // The helper's Guard is a resource-layer hook rather than a session option:
   // extension factories plug into the resource loader, exactly as the main
   // session wires them.
@@ -201,10 +237,22 @@ async function work(
 
   const pace = paceOf(job.thinking);
   const chosen = job.model ?? null;
-  const model =
-    chosen === null
-      ? runtime.getAvailableSnapshot()[0]
-      : (runtime.getModel(chosen.providerId, chosen.modelId) ?? runtime.getAvailableSnapshot()[0]);
+  let model: ReturnType<typeof runtime.getAvailableSnapshot>[number] | undefined;
+  if (chosen === null) {
+    model = runtime.getAvailableSnapshot()[0];
+  } else {
+    model = runtime.getModel(chosen.providerId, chosen.modelId);
+    if (model === undefined) {
+      report({
+        type: 'done',
+        outcome: {
+          ok: false,
+          error: `The model you selected (${chosen.providerId}/${chosen.modelId}) is not available for this helper — it may have been removed or renamed. Select a model that is available and try again.`,
+        },
+      });
+      return 1;
+    }
+  }
 
   // Said rather than survived. A helper with nothing to think with used to
   // finish quietly with an empty answer, which read as "it worked and found
@@ -229,9 +277,17 @@ async function work(
       {
         name: 'graphe-subagent-guard',
         factory: (api) => {
-          api.on('tool_call', async (event) =>
-            review({ id: event.toolCallId, name: event.toolName, input: { ...event.input } }),
-          );
+          api.on('tool_call', async (event) => {
+            const held = await review({
+              id: event.toolCallId,
+              name: event.toolName,
+              input: { ...event.input },
+            });
+            // Kept so a helper that goes quiet can say what stopped it rather
+            // than reporting the silence as an answer.
+            if (held !== undefined) lastRefusal = held.reason;
+            return held;
+          });
         },
       },
     ],
@@ -242,6 +298,10 @@ async function work(
   let finished = false;
   let spoken = '';
 
+  /** What to report when it produced no words at all. */
+  const nothingSaid = (): string =>
+    lastRefusal === null ? SAID_NOTHING : saidNothingAfterRefusal(lastRefusal);
+
   /** One answer, however the run ends: the settled event, a failure, or the
    *  prompt resolving without either. The guard means the first one wins. */
   const finish = (outcome: { ok: true; text: string } | { ok: false; error: string }): void => {
@@ -251,6 +311,9 @@ async function work(
     session?.dispose();
   };
 
+  /** A failure caught on its way out while there are still waits left. */
+  let heldBackTrouble: string | null = null;
+  let waitsLeft = 0;
   const relay = new EventRelay((event) => {
     if (event.type === 'message-delta') {
       spoken += event.text;
@@ -262,10 +325,25 @@ async function work(
     if (event.type === 'spend') {
       report({ type: 'spend', amount: event.amount, label: event.label, reason: event.reason });
     }
-    if (event.type === 'error') finish({ ok: false, error: event.message });
+    if (event.type === 'error') {
+      // The engine reports a provider failure by settling the turn with it, not
+      // by throwing, so this is where a helper actually dies. Held while there
+      // are waits left to spend, or a fan-out of six loses one to a busy minute.
+      if (waitsLeft > 0 && isTransientStreamError(event.message)) {
+        heldBackTrouble = event.message;
+        return;
+      }
+      finish({ ok: false, error: event.message });
+    }
     if (event.type === 'settled') {
+      // A turn that settled on a failure we are about to wait out has not
+      // ended — the loop below owns that one. The engine reports the failure
+      // and then settles immediately, so without this every wobble ended the
+      // helper here, one callback before the waiting could start, and reported
+      // it as having finished with nothing to say.
+      if (heldBackTrouble !== null) return;
       const said = safeChildWords(spoken.trim());
-      finish(said === '' ? { ok: false, error: SAID_NOTHING } : { ok: true, text: said });
+      finish(said === '' ? { ok: false, error: nothingSaid() } : { ok: true, text: said });
     }
   });
 
@@ -290,14 +368,37 @@ async function work(
     session = created.session;
     const unsubscribe = created.session.subscribe((event) => relay.fromPi(event));
 
-    await created.session.prompt(`${spec.spoken}\n\n${job.task.trim()}`);
+    // A busy provider settles the turn with the failure on it rather than
+    // throwing, so both endings are read the same way and waited the same way.
+    let words = `${spec.spoken}\n\n${job.task.trim()}`;
+    for (let attempt = 0; ; attempt += 1) {
+      heldBackTrouble = null;
+      waitsLeft = HELPER_WAITS_MS.length - attempt;
+      try {
+        await created.session.prompt(words);
+      } catch (cause) {
+        if (!isTransientStreamError(cause)) throw cause;
+        heldBackTrouble = cause instanceof Error ? cause.message : String(cause);
+      } finally {
+        waitsLeft = 0;
+      }
+      const trouble = heldBackTrouble;
+      heldBackTrouble = null;
+      if (trouble === null) break;
+      if (attempt >= HELPER_WAITS_MS.length) {
+        finish({ ok: false, error: trouble });
+        break;
+      }
+      await waitOut(HELPER_WAITS_MS[attempt] ?? 0);
+      words = CARRY_ON;
+    }
 
     // A run that was refused outright can resolve with no `settled` to follow.
     // Give the event a beat to land, then answer with whatever did.
     await new Promise((wake) => setTimeout(wake, 250));
     if (!finished) {
       const said = safeChildWords(spoken.trim());
-      finish(said === '' ? { ok: false, error: SAID_NOTHING } : { ok: true, text: said });
+      finish(said === '' ? { ok: false, error: nothingSaid() } : { ok: true, text: said });
     }
     unsubscribe();
   } catch (cause) {

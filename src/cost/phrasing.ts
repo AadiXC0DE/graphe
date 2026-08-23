@@ -317,6 +317,29 @@ export const longConversation = {
   },
 };
 
+/**
+ * A service that could not answer, and the wait before asking again.
+ *
+ * Said because the alternative is a window that looks stopped for half an hour.
+ * Whose service and why it could not answer are not this sentence's business —
+ * there is nothing anybody can do about either, and naming them only makes the
+ * wait feel like somebody's fault.
+ */
+export const busyService = {
+  waiting(seconds: number): string {
+    return `The service is busy, so I'll wait ${howLongToWait(seconds)} and carry on where I left off. You can leave this running.`;
+  },
+  carriedOn: 'Back again, carrying on from where it stopped.',
+  gaveUp: 'The service stayed busy, so I stopped rather than keep waiting.',
+};
+
+/** A wait, in the roundest words that are still true. */
+function howLongToWait(seconds: number): string {
+  if (seconds < 90) return 'a minute';
+  const minutes = Math.round(seconds / 60);
+  return `${String(minutes)} minutes`;
+}
+
 /* ------------------------------------------------- runaway protection */
 
 /** Same failure three times, then stop. Never a fourth attempt, and never a
@@ -451,6 +474,10 @@ export function auditableStrings(voice: Voice = {}): string[] {
   push(limitSetup);
   push(workingStyle);
   push(longConversation);
+  push(busyService.waiting(60));
+  push(busyService.waiting(1800));
+  push(busyService.carriedOn);
+  push(busyService.gaveUp);
   push(connectBilling);
   push(choseStyle('quick'));
   push(choseStyle('careful'));

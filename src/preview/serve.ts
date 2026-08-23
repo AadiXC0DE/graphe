@@ -88,6 +88,11 @@ const TYPES: Readonly<Record<string, string>> = {
   '.mp3': 'audio/mpeg',
   '.pdf': 'application/pdf',
   '.wasm': 'application/wasm',
+  // Named so a made deck, document or sheet arrives as itself and opens in
+  // whatever the person already uses, rather than as bytes nobody can place.
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
 
 /** Said to whoever asks for something that is not there. It is their own site,

@@ -101,9 +101,19 @@ export const PLAN_WORDS = {
   notesOn: 'About some of them:',
   /** Above the answers to what was asked before the plan ran. */
   answersTo: 'Answers to what you asked:',
+  /**
+   * Said once, when a list has just gone on screen in front of somebody.
+   *
+   * The list used to move on its own, one step per reply, so a plan the model
+   * worked through inside a single reply sat at nought while all of it got
+   * done. It moves when the model says it has moved, which only works if the
+   * model is told the list is there.
+   */
+  ticking:
+    'Those steps are now a checklist the person can see. Call step_done the moment each one is genuinely finished — one call per step, as you go, not all at the end. It is the only thing that moves the list, and they are watching it to know where you are.',
   /** Added under the person's own words on a looking-around pass. */
   asked:
-    'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet. If — and only if — something you cannot settle from the project would change that list, finish with a line reading "Questions:" and at most three of them, one per line. Most requests need none, and a question whose answer would not change the list is not worth asking.',
+    'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet. If — and only if — something you cannot settle from the project would change that list, ask about it. Where the answer is a choice between a few sensible options, use ask_first, once, before the list — they pick and you carry on. Only where the answer could be anything, finish with a line reading "Questions:" and at most three of them, one per line. Never both. Most requests need none, and a question whose answer would not change the list is not worth asking.',
   /** Above the questions, before the list. Two sharp ones beat a plan built on
    *  a guess; a page of them is worse than either, which is why there are never
    *  more than three. */
@@ -511,6 +521,27 @@ function listedItems(text: string): number {
  * with no punctuation at all, and numbers dropped into prose ("1. fix the
  * header, 2. …"). Whatever their doing word, three of them are a plan.
  */
+/**
+ * Whether to look around and say what we would do before doing any of it.
+ *
+ * Kept here rather than inline in the window because it is a rule, and a rule
+ * nobody can test is a rule that quietly stops holding. It deliberately does
+ * not take how far the run may go: full access says do not stop and ask, which
+ * is about the pause, not about the list. The biggest jobs are the ones that
+ * most need a list, and they were the ones getting none.
+ */
+export function shouldLookFirst(options: {
+  plans: 'auto' | 'always' | 'never' | 'research';
+  /** This message is the answer to a look-around we just did. */
+  answering: boolean;
+  text: string;
+}): boolean {
+  const { plans, answering, text } = options;
+  if (plans === 'never' || plans === 'research') return false;
+  if (plans === 'always') return true;
+  return !answering && worthPlanning(text);
+}
+
 export function worthPlanning(text: string): boolean {
   const said = text.trim();
   if (said === '') return false;
@@ -529,6 +560,14 @@ export function worthPlanning(text: string): boolean {
     .map((part) => part.replace(/^\s*\d+[.):]\s*/, '').trim())
     .filter((part) => part.length >= 12);
   if (fragments.length >= 4) return true;
+  // Three is the commonest shape of a list of jobs — "the popups are behind the
+  // rail, the star is off centre, the header jumps". What separates it from a
+  // polite sentence with an aside in it is length: an aside is a few words, a
+  // job described in its own words is not.
+  if (fragments.filter((part) => part.length >= 24).length >= 3) return true;
+  // Very huge/medium tasks with two jobs and a long description should also plan —
+  // user reported even huge tasks not creating a todo. Keep threshold high so single polite asks stay non-planning.
+  if (words >= 60 && actions >= 2 && items >= 2) return true;
 
   if (BIG_JOB.test(said)) return true;
   if (items >= 3) return true;

@@ -70,9 +70,10 @@ import {
 } from './checks';
 import { selectCorrect, type CandidateSignals } from './correctness';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
-import { ceilingWords, fleet } from '../../cost/fleet';
+import { ceilingWords, fleet, MOST_AT_ONCE } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
 import { hold } from '../sandbox';
+import { doorwayEnvironment, type Doorway } from '../sandbox/egress';
 import type { LivePage, Money, PageAct, PageReading, SpendReason } from '../types';
 
 /** The result envelope every tool here returns: the model's answer in text.
@@ -114,6 +115,10 @@ export type SubagentLine =
    *  helper is a separate process with its own account calls — so a fan-out to
    *  six helpers is money nobody counted until it travels this line. */
   | { type: 'spend'; amount: Money; label: string; reason: SpendReason }
+  /** Still here, waiting out a service that could not answer. Nothing is drawn
+   *  from it — it exists so that a helper sitting out a wobble is not mistaken
+   *  for one that has stopped saying anything and killed for it. */
+  | { type: 'waiting' }
   | { type: 'done'; outcome: SubagentOutcome };
 
 /* -------------------------------------------------------------------------- */
@@ -551,8 +556,8 @@ export type ChecksNoted = () => (verdicts: readonly CheckVerdict[]) => void;
 export const runChecksTool = (
   cwd: string,
   agentDir: string,
-  model: HelperModel = null,
-  thinking?: HelperPace,
+  model: HelperModel | (() => HelperModel) = null,
+  thinking?: HelperPace | (() => HelperPace | undefined),
   noted?: ChecksNoted,
 ): ToolDefinition => ({
   name: 'run_checks',
@@ -613,8 +618,10 @@ export const runChecksTool = (
       const admitted = fleet.begin({ id, kind: 'helper', stop: () => {} });
       if (!admitted.ok) throw new Error(admitted.because);
       try {
+        const currentModel = typeof model === 'function' ? model() : model;
+        const currentThinking = typeof thinking === 'function' ? thinking() : thinking;
         const { outcome } = await runSubagent(
-          { task: brief, role: 'reviewer', cwd, agentDir, model, thinking },
+          { task: brief, role: 'reviewer', cwd, agentDir, model: currentModel, thinking: currentThinking },
           signal,
           () => {},
           {
@@ -989,8 +996,35 @@ export function boundaryNote(facts: BoundaryFacts): string | null {
 /** What a helper may write to: the folder it works in, and the app's own folder
  *  — the account it thinks with is kept there, along with the small records Pi
  *  keeps for itself, and a helper that cannot write them will not start. */
-function helperBounds(cwd: string, agentDir: string): { writable: string[]; reach: 'secure' } {
-  return { writable: agentDir === '' ? [cwd] : [cwd, agentDir], reach: 'secure' };
+function helperBounds(
+  cwd: string,
+  agentDir: string,
+  through?: number,
+): { writable: string[]; reach: 'secure'; through?: number } {
+  const writable = agentDir === '' ? [cwd] : [cwd, agentDir];
+  return through === undefined
+    ? { writable, reach: 'secure' }
+    : { writable, reach: 'secure', through };
+}
+
+/**
+ * The door helpers would reach the internet through, if they could use one.
+ *
+ * They cannot, and this is why it is off. A helper runs in Electron's own Node,
+ * whose `fetch` reads no proxy setting — so a helper pointed at a door walks
+ * straight past it, while the boundary built around that door permits the door
+ * and nothing else. The result is a helper with no way out at all: every model
+ * call refused by the kernel, every helper in a fan-out failing at the same
+ * instant, and none of them able to say why.
+ *
+ * So helpers reach secure addresses directly, as they did before, and the
+ * Guard is what stands between them and where they go. Turning this on again
+ * means installing a proxy-aware dispatcher inside the child first, and adding
+ * the sign-in addresses the runtime refreshes tokens against — without both,
+ * it is a boundary that only looks like one.
+ */
+async function doorForHelpers(): Promise<Doorway | null> {
+  return null;
 }
 
 /** Who the helper thinks with. The child has no window, no settings of its own
@@ -1069,7 +1103,17 @@ async function runSubagent(
   const boundary: BoundaryFacts = { asked: false, observed: null, because: null };
   if (missing !== null) return { outcome: { ok: false, error: missing }, boundary };
 
-  const bound = await hold(process.execPath, [SUBAGENT_RUNNER], helperBounds(cwd, job.agentDir));
+  // Which addresses this helper may reach, before the boundary is built: the
+  // profile has to name the door, or the door is something the child may
+  // simply not use.
+  const gate = await doorForHelpers().catch(() => null);
+  const through = gate !== null && gate.open ? gate.port : undefined;
+
+  const bound = await hold(
+    process.execPath,
+    [SUBAGENT_RUNNER],
+    helperBounds(cwd, job.agentDir, through),
+  );
   boundary.asked = bound.held;
   if (!bound.held) boundary.because = bound.sentence;
 
@@ -1079,7 +1123,11 @@ async function runSubagent(
       bound.held ? [...bound.args] : [SUBAGENT_RUNNER],
       {
         cwd,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          ...(through === undefined ? {} : doorwayEnvironment(through)),
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     );
@@ -1196,8 +1244,8 @@ async function runSubagent(
 
 export const taskTool = (
   agentDir: string,
-  model: HelperModel = null,
-  thinking?: HelperPace,
+  model: HelperModel | (() => HelperModel) = null,
+  thinking?: HelperPace | (() => HelperPace | undefined),
   projectRoot?: string,
 ): ToolDefinition => ({
   name: 'task',
@@ -1210,6 +1258,9 @@ export const taskTool = (
     // Without this the model sends one helper, waits for its answer, and sends
     // the next — which is a queue wearing a fan-out's clothes.
     'To send several helpers, put every task call in the same reply. They then work at once instead of queueing, and you get all the answers together.',
+    // Said out loud so a split is sized to what will actually start. A fan-out
+    // refused on the way out costs the turn and answers nothing.
+    `At most ${String(MOST_AT_ONCE.helper)} helpers work at once. Ask for more than that in one reply and the rest are turned away, so send the ones the answer depends on first.`,
     'Split the work so no helper needs another helper\'s answer. Anything that has to happen in order belongs in one helper, or in a second round after the first answers.',
     'A helper reports and changes nothing — ask it for findings, not fixes. The one exception is a builder, which is given its own copy of the project, makes the change there, and hands back what it changed.',
     'A small piece of work is not worth the help: the helper reads the same files and searches the same web you would.',
@@ -1271,12 +1322,14 @@ export const taskTool = (
     let built = '';
     let ran: Ran;
     try {
+      const currentModel = typeof model === 'function' ? model() : model;
+      const currentThinking = typeof thinking === 'function' ? thinking() : thinking;
       ran = await runSubagent(
         // `project` is the session's real folder. `params.cwd` is model input
         // and must never decide where a helper starts: previously it was used
         // for accounting but accidentally dropped here, so helpers fell back
         // to Graphe's application directory and could not resolve the project.
-        { ...params, role: spec.name, cwd: where, agentDir, model, thinking },
+        { ...params, role: spec.name, cwd: where, agentDir, model: currentModel, thinking: currentThinking },
         signal,
         (text) => {
           progress += text;
@@ -2184,14 +2237,95 @@ export function pageTools(cwd?: string): ToolDefinition[] {
   ];
 }
 
+/**
+ * Put a few things to the person before starting, and wait for the answer.
+ *
+ * The session decides whether this may be used at all: `askFirst` is null
+ * everywhere there is nobody to answer, and returns a sentence rather than
+ * answers when the moment has passed. The tool never decides that for itself,
+ * because the tool cannot see whether work has begun.
+ */
+export type AskFirst = (questions: unknown) => Promise<string>;
+
+/**
+ * Tick one thing off the list on screen.
+ *
+ * The list used to move on its own, one step per reply. That works for a list
+ * of jobs done a reply at a time and for nothing else — a list of six things
+ * the model meant to do inside one reply could never get past the first, so
+ * somebody watched real work happen beside a checklist reading nought.
+ *
+ * Whoever is doing the work says when a thing is done. Answers with how far
+ * along it now is, so the model can see its own list rather than guess.
+ */
+export type StepDone = (note: string | null) => Promise<string>;
+
+const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
+  name: 'step_done',
+  label: 'Ticking one off the list',
+  description:
+    "Tick the thing you have just finished off the checklist the person can see. Call it once for each item, the moment that item is genuinely done — not at the end, and never for something you have only started. If there is no checklist it says so and costs nothing.",
+  promptSnippet: 'step_done(note) — tick the thing you just finished off the checklist',
+  parameters: Type.Object({
+    note: Type.Optional(
+      Type.String({ description: 'One line on what came of it. Left out is fine.' }),
+    ),
+  }),
+  /* Parallel, and it has to be: one sequential tool in a batch makes the whole
+     batch run one after another, so a tick sent alongside a fan-out would turn
+     six helpers working at once into six waiting their turn. Two ticks racing
+     is safe on its own account — the list is only ever touched one at a time
+     where it is written. */
+  executionMode: 'parallel',
+  execute: async (_callId, params: { note?: string }): ToolResult => {
+    const said = await stepDone(typeof params.note === 'string' ? params.note : null);
+    return { content: [{ type: 'text', text: said }], details: {} };
+  },
+});
+
+const askFirstTool = (askFirst: AskFirst): ToolDefinition => ({
+  name: 'ask_first',
+  label: 'Asking before starting',
+  description:
+    "Ask the person up to four multiple-choice questions before you start, when the job genuinely has more than one sensible shape and picking wrong would waste real work — which framework, which of two designs, how far to take it, what to leave alone. Use it ONCE, at the very beginning, before you change anything. If they ask you to check with them first, or to ask before starting, use it: that request is exactly what this is for and is reason enough on its own. Otherwise do not use it for things you can find out by looking at the project, for permission (you are asked for that separately), or for anything you could reasonably decide yourself. If you are already working, decide and say what you assumed instead.",
+  promptSnippet:
+    'ask_first(questions) — put a few either/or questions to the person before starting, once, at the top',
+  parameters: Type.Object({
+    questions: Type.Array(
+      Type.Object({
+        question: Type.String({ description: 'The whole question, in plain words.' }),
+        header: Type.Optional(Type.String({ description: 'Two or three words over the choices.' })),
+        choices: Type.Array(
+          Type.Object({
+            label: Type.String({ description: 'The choice, in a few words.' }),
+            note: Type.String({ description: 'What picking this one means, in one line.' }),
+          }),
+          { description: 'Two to four real alternatives.' },
+        ),
+        many: Type.Optional(Type.Boolean({ description: 'True when more than one may be picked.' })),
+      }),
+      { description: 'One to four questions. Fewer is better.' },
+    ),
+  }),
+  /* Sequential: this stops the turn on a person, and a batch running beside it
+     would carry on working against an answer that has not arrived. */
+  executionMode: 'sequential',
+  execute: async (_callId, params: { questions: unknown }): ToolResult => {
+    const said = await askFirst(params.questions);
+    return { content: [{ type: 'text', text: said }], details: {} };
+  },
+});
+
 export const grapheTools = (
   agentDir: string,
   figmaToken?: string | null,
-  model: HelperModel = null,
-  thinking?: HelperPace,
+  model: HelperModel | (() => HelperModel) = null,
+  thinking: HelperPace | (() => HelperPace | undefined) | undefined = undefined,
   projectRoot?: string,
   putOnBoard?: PutOnBoard,
   noted?: ChecksNoted,
+  askFirst?: AskFirst | null,
+  stepDone?: StepDone | null,
 ): ToolDefinition[] => {
   const tools: ToolDefinition[] = [
     websearchTool,
@@ -2199,6 +2333,12 @@ export const grapheTools = (
     taskTool(agentDir, model, thinking, projectRoot),
     scoreCandidatesTool,
   ];
+  // Only where somebody is there to answer. A helper in its own process and a
+  // run nobody is watching both get no tool at all, rather than a tool that
+  // always answers "there is nobody here".
+  if (askFirst !== undefined && askFirst !== null) tools.push(askFirstTool(askFirst));
+  // Only where there is a list to tick. A helper has no checklist of its own.
+  if (stepDone !== undefined && stepDone !== null) tools.push(stepDoneTool(stepDone));
   if (projectRoot !== undefined && projectRoot !== '') {
     tools.push(
       readMapTool(projectRoot),

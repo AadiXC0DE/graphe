@@ -24,6 +24,8 @@
  *    being wrong.
  *  - **The folders programs keep their downloads in.** Installing a package
  *    fails outright without them, and nothing kept there is irreplaceable.
+ *  - **One way out**, opened here and closed with the shell, so which addresses
+ *    the work reaches is decided by name rather than by port. See `egress.ts`.
  *
  * Failing stays loud: `hold` hands back no runnable command when it could not
  * bind, so the fall through to running with only the Guard is written down here,
@@ -37,7 +39,8 @@ import { join } from 'node:path';
 import { developmentServerCommand } from './servers';
 export { developmentServerCommand } from './servers';
 
-import { hold } from './index';
+import { boundaryHere, hold } from './index';
+import { doorwayEnvironment, openDoorway, type Doorway } from './egress';
 import type { Bounds } from './profile';
 
 /** Everything a command run needs to say for itself while it goes. Shaped to
@@ -91,6 +94,8 @@ export type HeldShellOptions = {
   unrestricted?: () => boolean;
   /** Home, for the folders below. Tests pass their own. */
   home?: string;
+  /** Addresses this project may reach, on top of the ones every project gets. */
+  hosts?: readonly string[];
 };
 
 /**
@@ -206,6 +211,73 @@ export function isForegroundDevelopmentServer(command: string): boolean {
  * Graphe serves its own preview from outside the boundary, so the thing being
  * asked for is already here. This is where that gets said.
  */
+/**
+ * What a refusal from the boundary looks like on the way back.
+ *
+ * The kernel answers a refused read, write or connection with `EPERM`, which
+ * every command in the world prints in its own words, and the wrapper itself
+ * fails with its own name in front. None of that reads as a rule — it reads as
+ * a broken machine, which is why the model's next four attempts were the same
+ * command in a different hat.
+ */
+const WRAPPER_FAILED = [/sandbox-exec:/i, /\bbwrap:/i, /bubblewrap/i, /sandbox_apply/i];
+
+/** The kernel's own answer to something it would not do. */
+const REFUSED_A_PLACE = [/operation not permitted/i, /\bEPERM\b/, /file system sandbox blocked/i];
+
+/** The one door out saying an address was not on the list. */
+const REFUSED_AN_ADDRESS = [
+  /not on the list of addresses/i,
+  /CONNECT tunnel failed/i,
+  /proxy CONNECT aborted/i,
+  /tunneling socket could not be established/i,
+];
+
+/** Failures that say `not permitted` and mean it about the command, not about
+ *  the boundary — a login somebody has to do, a service saying no. */
+const NOT_THE_BOUNDARY = [
+  /permission denied/i,
+  /\bEACCES\b/,
+  /authentication|unauthorized|not logged in/i,
+];
+
+/** Which kind of refusal, if it was one at all. */
+export type Refusal = 'place' | 'address';
+
+/**
+ * Did the boundary turn this down, rather than the command failing on its own?
+ *
+ * Only asked of commands that were actually wrapped, and only of ones that
+ * failed: the developer tools print a `not permitted` grumble about a cache file
+ * and then work perfectly, and calling that a refusal would be worse than saying
+ * nothing.
+ */
+export function refusedByBoundary(
+  output: string,
+  exitCode: number | null,
+  held: boolean,
+): Refusal | null {
+  if (!held || exitCode === 0 || exitCode === null) return null;
+  if (REFUSED_AN_ADDRESS.some((mark) => mark.test(output))) return 'address';
+  // The wrapper naming itself is the boundary whatever excuse it gives.
+  if (WRAPPER_FAILED.some((mark) => mark.test(output))) return 'place';
+  if (!REFUSED_A_PLACE.some((mark) => mark.test(output))) return null;
+  return NOT_THE_BOUNDARY.some((mark) => mark.test(output)) ? null : 'place';
+}
+
+/** Said in the command's own output, where the model reads it, because the
+ *  alternative is the same command tried again five times and charged for. */
+export const REFUSED: Record<Refusal, string> = {
+  place:
+    'That was not the command failing — it was refused by the boundary around it. What runs here reaches this project’s folder and the tools it needs, and nothing else on the computer; a path outside the folder is turned down however the command is written. Try it again inside the folder, or find another way to what you need. Running the same thing again will get the same answer.',
+  address:
+    'That was not the command failing — the boundary around it would not open that address. Work here reaches the places it ordinarily needs and nothing else, so this one is not on the list. Carry on without it, or tell the person which address you need and why. Running the same thing again will get the same answer.',
+};
+
+/** Enough of the end of the output to recognise a refusal in, without holding a
+ *  whole build in memory. */
+const TAIL = 8_000;
+
 export const CANNOT_LISTEN =
   'I did not run that here. A command run this way is waited on until it finishes, and this kind never does — and what I run has no port of its own to be reached on. Start it with the keep_running tool instead: it stays up after this turn, several can run at once, and it comes back with the address it is reachable at. Ask it about them again with running(), and end one with stop_running(id).';
 
@@ -316,12 +388,26 @@ const NO_SCRATCH =
 export function heldShell(options: HeldShellOptions): HeldShell {
   let scratch: Promise<string | null> | null = null;
   let told = false;
+  let toldAboutAddresses = false;
+  let door: Promise<Doorway | null> | null = null;
 
   const scratchFolder = async (): Promise<string | null> => {
     scratch ??= mkdtemp(join(tmpdir(), 'graphe-shell-'))
       .then((made) => realpath(made))
       .catch(() => null);
     return scratch;
+  };
+
+  /** Opened once, and only where the boundary can insist commands go through
+   *  it. Anywhere else, pointing work at a door it is free to walk past would
+   *  be a request dressed up as a rule. */
+  const doorway = async (): Promise<Doorway | null> => {
+    door ??= (async () => {
+      const look = await boundaryHere();
+      if (!look.ok || look.kind !== 'seatbelt') return null;
+      return openDoorway({ hosts: options.hosts });
+    })();
+    return door;
   };
 
   const unheld = async (
@@ -374,18 +460,42 @@ export function heldShell(options: HeldShellOptions): HeldShell {
         return unheld(command, cwd, run, null);
       }
 
-      const bounds = shellBounds(options.folder, folder, options.home);
+      const gate = await doorway();
+      if (gate !== null && !gate.open && !toldAboutAddresses) {
+        toldAboutAddresses = true;
+        run.onData(Buffer.from(`${gate.sentence}\n`));
+      }
+      const through = gate !== null && gate.open ? gate.port : undefined;
+
+      const bounds = { ...shellBounds(options.folder, folder, options.home), through };
       const bound = await hold(parts.shell, [...parts.args, command], bounds);
       if (!bound.held) return unheld(command, cwd, run, bound.sentence);
 
-      return options.plain(heldLine(bound), cwd, {
+      let tail = '';
+      const result = await options.plain(heldLine(bound), cwd, {
         ...run,
+        onData: (data) => {
+          tail = `${tail}${data.toString('utf8')}`.slice(-TAIL);
+          run.onData(data);
+        },
         // Temporary files land in the folder that is bound rather than the one
         // that is not.
-        env: { ...run.env, TMPDIR: folder, TMP: folder, TEMP: folder },
+        env: {
+          ...run.env,
+          TMPDIR: folder,
+          TMP: folder,
+          TEMP: folder,
+          ...(through === undefined ? {} : doorwayEnvironment(through)),
+        },
       });
+      const refusal = refusedByBoundary(tail, result.exitCode, true);
+      if (refusal !== null) run.onData(Buffer.from(`${REFUSED[refusal]}\n`));
+      return result;
     },
     close: async () => {
+      const gate = door === null ? null : await door;
+      door = null;
+      if (gate !== null && gate.open) await gate.close();
       const folder = await scratchFolder();
       scratch = null;
       if (folder !== null) await rm(folder, { recursive: true, force: true }).catch(() => {});

@@ -153,6 +153,12 @@ export class HistoryError extends Error {
  *  exclude the secrets file is what puts keys in public. */
 const NEVER_SAVE = [
   'node_modules/',
+  // A project-local Python environment. Hundreds of megabytes, rebuilt with one
+  // command, and the deck skill tells the agent to make one — so without this
+  // the first deck somebody asks for lands in every version from then on.
+  '.venv/',
+  'venv/',
+  '__pycache__/',
   '.next/',
   '.nuxt/',
   '.svelte-kit/',
@@ -773,32 +779,38 @@ export class ProjectHistory {
   ): Promise<Attempt> {
     const settings = FORCED_SETTINGS.flatMap((setting) => ['-c', setting]);
     const full = ['-C', this.root, ...settings, ...args];
-    try {
-      const { stdout, stderr } = await run(this.tool, full, {
-        cwd: this.root,
-        env: this.environment(options.theirSettings === true),
-        maxBuffer: 64 * 1024 * 1024,
-        windowsHide: true,
-      });
-      return { code: 0, stdout, stderr };
-    } catch (error) {
-      const failure = error as NodeJS.ErrnoException & {
-        stdout?: string;
-        stderr?: string;
-        code?: number | string;
-      };
-      if (typeof failure.code === 'string') {
-        // ENOENT and friends: the tool itself isn't there, which is not
-        // something the user did and not something they can be told about in
-        // these words.
-        throw new HistoryError(historyProblems.toolMissing, failure.message);
+    for (let retry = 0; retry < 3; retry++) {
+      try {
+        const { stdout, stderr } = await run(this.tool, full, {
+          cwd: this.root,
+          env: this.environment(options.theirSettings === true),
+          maxBuffer: 64 * 1024 * 1024,
+          windowsHide: true,
+        });
+        return { code: 0, stdout, stderr };
+      } catch (error) {
+        const failure = error as NodeJS.ErrnoException & {
+          stdout?: string;
+          stderr?: string;
+          code?: number | string;
+        };
+        if (typeof failure.code === 'string') {
+          throw new HistoryError(historyProblems.toolMissing, failure.message);
+        }
+        const stderr = failure.stderr ?? '';
+        const isLock = /index\.lock/.test(stderr);
+        if (isLock && retry < 2) {
+          await new Promise((r) => setTimeout(r, 100 * (retry + 1)));
+          continue;
+        }
+        return {
+          code: typeof failure.code === 'number' ? failure.code : 1,
+          stdout: failure.stdout ?? '',
+          stderr,
+        };
       }
-      return {
-        code: typeof failure.code === 'number' ? failure.code : 1,
-        stdout: failure.stdout ?? '',
-        stderr: failure.stderr ?? '',
-      };
     }
+    return { code: 1, stdout: '', stderr: 'index.lock retry exhausted' };
   }
 
   /** `theirSettings` is only ever true for sending work somewhere shared, where

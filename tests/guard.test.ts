@@ -14,6 +14,7 @@ import {
   normalizePosixPath,
   shipsToBrowser,
 } from '../src/agent/guard/paths';
+import { readOnlyTools } from '../src/agent/plan';
 
 const ROOT = '/Users/mira/Projects/portfolio';
 const ctx: GuardFacts = { projectRoot: ROOT };
@@ -1968,6 +1969,37 @@ describe('running things without an interrogation', () => {
   it('still asks before adding somebody else’s code', () => {
     for (const command of ['npm install left-pad', 'bun add zod', 'deno install x', 'pip install requests']) {
       expect(kindOf(bash(command)), command).toBe('confirm');
+    }
+  });
+
+  /** Putting a few questions on the screen and waiting is the one tool that
+   *  does nothing at all. It has to be classed that way, or the look-around
+   *  withholds it and the one moment worth asking at is the one moment it
+   *  cannot — which is exactly how it behaved before it was listed. */
+  it('lets it ask before starting, and counts that as changing nothing', () => {
+    expect(kindOf(call('ask_first', { questions: [] }))).toBe('allow');
+    expect(changesAnything(call('ask_first', { questions: [] }), ctx)).toBe(false);
+    expect(readOnlyTools(['ask_first'])).toEqual(['ask_first']);
+  });
+
+  /** The same installer reached through the runtime instead of by its own name.
+   *  It read as running one of the project's own programs, so the question that
+   *  guards every other install was skipped by spelling it differently. */
+  it('asks the same question when the installer is reached through the runtime', () => {
+    for (const command of [
+      'python3 -m pip install requests',
+      'python -m pip install --upgrade pip',
+      'python3 -m ensurepip',
+    ]) {
+      expect(kindOf(bash(command)), command).toBe('confirm');
+    }
+  });
+
+  /** And leaves the rest of `-m` alone: a runtime's own modules are not
+   *  installers, and treating them as ones would ask about a local server. */
+  it('does not ask about the runtime’s own modules', () => {
+    for (const command of ['python3 -m venv .venv', 'python3 -m http.server', 'python3 -m json.tool']) {
+      expect(kindOf(bash(command)), command).toBe('snapshot-first');
     }
   });
 });

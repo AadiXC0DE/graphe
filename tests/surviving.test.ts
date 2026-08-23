@@ -291,6 +291,34 @@ describe('helpers whose app is not there any more', () => {
     expect(whichAreStray(table, () => false)).toEqual([]);
   });
 
+  /* The window and the graphics are the app's own processes, and when the one
+     that owns them goes abruptly they are not always taken with it. One was
+     found alone having spent eleven hours at two cores, drawing a window for an
+     app that no longer existed. */
+  it('ends the app\u2019s own processes when the app itself has gone', () => {
+    const helper =
+      '/Volumes/Graphe 0.3.0-arm64/Graphe.app/Contents/Frameworks/Graphe Helper (Renderer).app/Contents/MacOS/Graphe Helper (Renderer)';
+    expect(whichAreStray([running({ pid: 8784, ppid: 1, command: helper })], () => true)).toEqual([
+      8784,
+    ]);
+  });
+
+  it('leaves a working copy\u2019s own processes alone', () => {
+    // A live app's helpers have a live parent, which is the whole test.
+    const helper = '/Applications/Graphe.app/Contents/Frameworks/Graphe Helper (GPU).app/x';
+    const table = [running({ pid: 8784, ppid: 8279, command: helper })];
+    expect(whichAreStray(table, (pid) => pid === 8279)).toEqual([]);
+  });
+
+  it('leaves every other app\u2019s helpers alone, orphaned or not', () => {
+    const table = [
+      running({ pid: 900, ppid: 1, command: '/Applications/Visual Studio Code.app/…/Code Helper' }),
+      running({ pid: 901, ppid: 1, command: '/Applications/Slack.app/…/Slack Helper (Renderer)' }),
+      running({ pid: 902, ppid: 1, command: '/Applications/Notion.app/…/Notion Helper' }),
+    ];
+    expect(whichAreStray(table, () => false)).toEqual([]);
+  });
+
   it('reads what the machine says it is running', () => {
     const table = readRunning(
       [

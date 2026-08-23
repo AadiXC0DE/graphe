@@ -576,12 +576,17 @@ export class Workbench {
    * Start as many waiting pieces as there is room for, and hand back the ones
    * that just began. Called again whenever a slot frees up.
    *
+   * `atMost` is how many may start *this* round, under the board's own cap. A
+   * machine already short of memory takes them one at a time rather than all
+   * at once; the rest stay waiting and start when the next one finishes.
+   *
    * The project must have nothing unsaved, for the same reason a set of tries
    * does: a piece of work starts from a version, and starting from a
    * half-finished state would make keeping one mean losing that work.
    */
-  async begin(): Promise<readonly PieceOfWork[]> {
-    const wanted = nextUp(this.work, this.most);
+  async begin(atMost?: number): Promise<readonly PieceOfWork[]> {
+    const ready = nextUp(this.work, this.most);
+    const wanted = atMost === undefined ? ready : ready.slice(0, Math.max(0, atMost));
     if (wanted.length === 0) return [];
 
     if (await this.history.hasUnsavedChanges()) {

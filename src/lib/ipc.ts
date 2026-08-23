@@ -191,6 +191,9 @@ export type Room = {
   total: number;
   /** The two above as a fraction, 0 to 1; unknown with `used`. */
   part: number | null;
+  /** How many times this conversation has been shortened to make room. Absent
+   *  from a reading that predates the count, and from the mock bridge. */
+  shortened?: number;
 };
 
 /**
@@ -1111,6 +1114,7 @@ export const CHANNEL = {
   stop: 'graphe:stop',
   steer: 'graphe:steer',
   answer: 'graphe:answer',
+  answerAsked: 'graphe:answer-asked',
   chooseFolder: 'graphe:choose-folder',
   event: 'graphe:event',
   overview: 'graphe:overview',
@@ -1222,6 +1226,7 @@ export const CHANNEL = {
   switchRepeat: 'graphe:switch-repeat',
   forgetRepeat: 'graphe:forget-repeat',
   awayChanged: 'graphe:away-changed',
+  buildPlanChanged: 'graphe:build-plan-changed',
   inStep: 'graphe:in-step',
   followDesign: 'graphe:follow-design',
   lookAgain: 'graphe:look-again',
@@ -1262,6 +1267,13 @@ export type GrapheApi = {
   steer(text: string, where?: Where): Promise<Result<null>>;
   /** Answer a question the Guard asked. False when there was no such question. */
   answer(callId: string, decision: Decision, where?: Where): Promise<Result<boolean>>;
+  /** Answer the questions put before the work started. Null answers is a real
+   *  answer — somebody saying to decide for them. */
+  answerAsked(
+    id: string,
+    answers: Readonly<Record<string, readonly string[]>> | null,
+    where?: Where,
+  ): Promise<Result<boolean>>;
   /** Ask the person to pick a folder. Null when they closed the picker. */
   chooseFolder(): Promise<Result<string | null>>;
 
@@ -1611,6 +1623,10 @@ export type GrapheApi = {
   /** Follow along while any of that changes, including while the window was
    *  away and has just come back. Returns the function that stops listening. */
   onAway(listener: (notice: AwayNotice) => void): () => void;
+  /** The checklist moved while a reply was still going — the model ticked
+   *  something off. Without this the list only catches up when the reply ends,
+   *  which is exactly when nobody is still watching it. */
+  onBuildPlan(listener: (notice: { project: string; plan: BuildPlan | null }) => void): () => void;
 
   /* ----------------------------------------------- staying in step with Figma */
 

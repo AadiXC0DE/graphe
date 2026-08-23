@@ -141,7 +141,12 @@ describe('the total, and how far its grounding actually reaches', () => {
 });
 
 describe('nothing here presents an estimate as a measurement', () => {
-  const words = Object.values(ROOM_WORDS);
+  /* The sentences, without the one that takes a number: how often a
+     conversation has been shortened is a count, and counts are what the rule
+     below is about. It is checked on its own further down. */
+  const words: string[] = Object.values(ROOM_WORDS).flatMap((one) =>
+    typeof one === 'string' ? [one] : [],
+  );
   const source = readFileSync(new URL('../src/components/RoomShare.tsx', import.meta.url), 'utf8');
 
   /** Every sentence the panel can say, whichever branch it takes. */
@@ -152,6 +157,23 @@ describe('nothing here presents an estimate as a measurement', () => {
      allowed a number. */
   it('keeps every figure out of the words around the bar', () => {
     for (const word of words) expect(word, word).not.toMatch(/\d/);
+  });
+
+  /* The one sentence allowed a number, because the number is the whole point:
+     a conversation that has been shortened remembers less, and nothing else
+     says so. */
+  it('says how often the conversation has been shortened, and only once it has', () => {
+    expect(ROOM_WORDS.shortened(0)).toBeNull();
+    expect(ROOM_WORDS.shortened(1)).toMatch(/once/i);
+    expect(ROOM_WORDS.shortened(3)).toMatch(/3 times/);
+    for (const times of [1, 2, 5]) {
+      const said = ROOM_WORDS.shortened(times);
+      expect(said).not.toBeNull();
+      // Plain words: what it means for them, not what the machine did.
+      for (const banned of ['compact', 'token', 'context', 'window']) {
+        expect(said?.toLowerCase()).not.toContain(banned);
+      }
+    }
   });
 
   it('says in plain words that the split is a reading and not a count', () => {

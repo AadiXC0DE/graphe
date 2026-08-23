@@ -11,12 +11,18 @@
  *  - **Writes are allow-only.** Nothing on the disk is writable except the
  *    folders named in `Bounds.writable` — which is the folder the agent was
  *    given, and that may be a copy rather than the project on screen.
- *  - **Reads are open except the private places.** An agent reads the system it
- *    runs on, so a read allowlist would be a list of everything; instead the
- *    places that hold keys are denied outright, matching the Guard's own list.
- *    This is the honest gap against a full read allowlist.
+ *  - **Reads are allow-only too, on macOS.** The disk is refused, and then the
+ *    places anything at all needs to run are opened again: the loader and the
+ *    system libraries, the developer tools, the language runtimes, the folder
+ *    the work is in. The rest of the person's home — their other projects,
+ *    their mail, another app's saved logins — is not readable, so a command
+ *    that has been talked into copying something out has nothing to copy.
+ *    Names and dates stay visible everywhere, because a folder cannot be walked
+ *    without them.
  *  - **Nothing leaves by default.** `reach: 'secure'` opens outbound 443 and
- *    nothing else — no other port, no listening socket.
+ *    nothing else — no other port, no listening socket. `Bounds.through` points
+ *    it at a single address on this machine instead, which is how the reachable
+ *    hosts get filtered by name rather than by port.
  *
  * Folders travel as `-D` parameters rather than inside the profile text, so a
  * project folder whose name contains a quote or a parenthesis cannot rewrite the
@@ -24,6 +30,7 @@
  */
 
 import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 
 /**
  * What may leave the machine, and what may arrive.
@@ -41,6 +48,11 @@ export type Bounds = {
   reach: Reach;
   /** Places holding keys that nothing may read. Defaults to the usual ones. */
   private?: readonly string[];
+  /** Folders this run may read on top of the ones every run gets. */
+  readable?: readonly string[];
+  /** A port on this machine every outbound connection has to go through, so the
+   *  addresses it may reach are checked by name. Without one, reach is a port. */
+  through?: number;
 };
 
 /** A profile and the folder values it refers to by name. */
@@ -62,7 +74,91 @@ export function privatePlaces(home = homedir()): string[] {
     '.config/gcloud',
     '.password-store',
     'Library/Keychains',
+    // Where the other coding tools on this machine keep their saved logins.
+    '.codex',
+    '.config/opencode',
+    '.local/share/opencode',
   ].map((place) => `${home}/${place}`);
+}
+
+/**
+ * Key-shaped folders anywhere, named relative to a root.
+ *
+ * Deliberately not `.env`: a project's own code reads it to run, so covering it
+ * over would stop the thing being built rather than protect it. The Guard
+ * refuses `.env` on the way in, which is the right layer for a file that has to
+ * stay readable by the project itself.
+ */
+export function credentialFoldersIn(root: string): string[] {
+  return ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.config/gcloud', '.password-store'].map(
+    (place) => `${root}/${place}`,
+  );
+}
+
+/** The parts of the machine that have to be readable for anything to run at
+ *  all: the loader, the system libraries, the shells, the developer tools and
+ *  the usual places a package manager installs into. All public. */
+const SYSTEM_READS = [
+  // The loader looks at the root itself before it looks anywhere else.
+  '(literal "/")',
+  '(subpath "/usr/lib")',
+  '(subpath "/usr/libexec")',
+  '(subpath "/usr/share")',
+  '(subpath "/usr/bin")',
+  '(subpath "/usr/sbin")',
+  '(subpath "/bin")',
+  '(subpath "/sbin")',
+  '(subpath "/System")',
+  '(subpath "/Library/Frameworks")',
+  '(subpath "/Library/Apple")',
+  '(subpath "/Library/Preferences")',
+  '(subpath "/private/var/db/dyld")',
+  '(subpath "/private/var/db/timezone")',
+  '(subpath "/private/var/select")',
+  '(subpath "/private/etc")',
+  '(subpath "/dev")',
+  // Compilers, linkers, and the stub commands that go looking for them.
+  '(subpath "/Library/Developer")',
+  String.raw`(regex #"^/Applications/Xcode[^/]*\.app/")`,
+  '(subpath "/opt/homebrew")',
+  '(subpath "/opt/local")',
+  '(subpath "/usr/local")',
+];
+
+/** Where a personal machine keeps language runtimes and the settings the tools
+ *  read on the way past. Everything else in the home folder stays shut. */
+export function readablePlaces(home = homedir()): string[] {
+  return [
+    '.nvm',
+    '.volta',
+    '.asdf',
+    '.bun',
+    '.deno',
+    '.cargo',
+    '.rustup',
+    '.pyenv',
+    '.rbenv',
+    '.gradle',
+    '.m2',
+    '.sdkman',
+    'go',
+    '.local/bin',
+    '.local/lib',
+    '.local/share/mise',
+    '.local/share/pnpm',
+    '.gitconfig',
+    '.config/git',
+    '.gitignore_global',
+  ].map((place) => `${home}/${place}`);
+}
+
+/** The folder the running program lives in, so a bound command can start the
+ *  same runtime this one is using. Never the root, however it was installed. */
+export function programFolder(binary = process.execPath): string | null {
+  const near = usableFolder(dirname(binary));
+  if (near === null || near === '/') return null;
+  const above = usableFolder(dirname(near));
+  return above === null || above === '/' ? near : above;
 }
 
 /** A folder we are willing to name in a profile: absolute, and nothing in it
@@ -99,6 +195,19 @@ const PUBLIC_CERTIFICATES = [
 /** Character devices a program expects to exist and cannot hurt anyone with. */
 const HARMLESS_DEVICES = ['/dev/null', '/dev/zero', '/dev/random', '/dev/urandom', '/dev/dtracehelper', '/dev/tty'];
 
+/** macOS reaches a few folders through a shortcut, and the kernel matches the
+ *  real path. Both spellings are named, so a caller that has not resolved the
+ *  one it was handed still gets the folder it asked for. */
+function behindTheShortcut(folder: string): string[] {
+  return /^\/(var|tmp|etc)(\/|$)/.test(folder) ? [folder, `/private${folder}`] : [folder];
+}
+
+/** A port number we are willing to write into a rule, or nothing. */
+function doorway(port: number | undefined): number | null {
+  if (port === undefined || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return port;
+}
+
 function literals(paths: readonly string[]): string {
   return paths.map((path) => `(literal "${path}")`).join(' ');
 }
@@ -121,11 +230,30 @@ export function seatbeltProfile(bounds: Bounds): Profile {
   }
 
   const kept: string[] = [];
-  for (const folder of bounds.private ?? privatePlaces()) {
+  // Keys kept inside the project itself, as well as the ones in a home folder.
+  // The Guard already refuses to read either; this is the floor under it, and a
+  // repository with an `.aws` in it is exactly where a bypass would look.
+  const alsoPrivate = bounds.writable.flatMap((where) => credentialFoldersIn(where));
+  for (const folder of [...(bounds.private ?? privatePlaces()), ...alsoPrivate]) {
     const usable = usableFolder(folder);
     if (usable === null || kept.includes(usable)) continue;
     const name = `PRIVATE${String(kept.length)}`;
     kept.push(usable);
+    params.push([name, usable]);
+  }
+
+  const readable: string[] = [];
+  const wanted = [
+    ...bounds.writable,
+    ...(bounds.readable ?? []),
+    ...readablePlaces(),
+    programFolder() ?? '',
+  ];
+  for (const folder of wanted.flatMap(behindTheShortcut)) {
+    const usable = usableFolder(folder);
+    if (usable === null || usable === '/' || readable.includes(usable)) continue;
+    const name = `READ${String(readable.length)}`;
+    readable.push(usable);
     params.push([name, usable]);
   }
 
@@ -137,8 +265,22 @@ export function seatbeltProfile(bounds: Bounds): Profile {
     '(allow sysctl-read)',
     '(allow mach-lookup)',
     '(allow signal (target self))',
-    '(allow file-read*)',
+    // Shut the disk, then open the parts that have to be open. What is left out
+    // is the part worth taking: the person's other work, and anybody's saved
+    // logins.
+    '(deny file-read* (subpath "/"))',
+    // A folder cannot be walked into without this, and `pwd` cannot answer.
+    // Names and dates only — nothing that is in a file.
+    '(allow file-read-metadata)',
+    `(allow file-read* ${SYSTEM_READS.join(' ')})`,
   ];
+
+  // Both shapes, because some of these are a single settings file rather than
+  // a folder and `subpath` does not answer for one.
+  const reads = readable
+    .map((_, index) => `(subpath (param "READ${String(index)}")) (literal (param "READ${String(index)}"))`)
+    .join(' ');
+  if (reads !== '') lines.push(`(allow file-read* ${reads})`);
 
   for (const pattern of PRIVATE_BY_NAME) {
     lines.push(`(deny file-read* (regex #"${pattern}"))`);
@@ -154,10 +296,18 @@ export function seatbeltProfile(bounds: Bounds): Profile {
   lines.push('(allow file-write-data (literal "/dev/stdout") (literal "/dev/stderr"))');
 
   if (bounds.reach === 'secure' || bounds.reach === 'serving') {
-    // Secure addresses and the name lookup they need, and nothing else. Port
-    // rather than address is as far as this goes without a proxy in the middle.
-    lines.push('(allow network-outbound (remote tcp "*:443") (remote unix-socket))');
-    lines.push('(allow system-socket)');
+    const door = doorway(bounds.through);
+    if (door === null) {
+      // Secure addresses and the name lookup they need, and nothing else. Port
+      // rather than address is as far as this gets on its own.
+      lines.push('(allow network-outbound (remote tcp "*:443") (remote unix-socket))');
+      lines.push('(allow system-socket)');
+    } else {
+      // One door, on this machine, which checks the address by name before it
+      // opens. Nothing else is reachable — including the name service, because
+      // the door is what does the looking up.
+      lines.push(`(allow network-outbound (remote ip "localhost:${String(door)}") (remote unix-socket))`);
+    }
   }
 
   if (bounds.reach === 'serving') {
@@ -206,8 +356,15 @@ export function bubblewrapArgs(
   }
 
   // An empty folder over each private one: bubblewrap has no read denial, so
-  // the only way to refuse a read is to put nothing where the keys were.
-  for (const folder of bounds.private ?? privatePlaces()) {
+  // the only way to refuse a read is to put nothing where the keys were. Keys
+  // kept inside the project count here exactly as they do on the other
+  // boundary — covering them on one and not the other is a fix that only holds
+  // on the machine it was written on.
+  const covered = [
+    ...(bounds.private ?? privatePlaces()),
+    ...bounds.writable.flatMap((where) => credentialFoldersIn(where)),
+  ];
+  for (const folder of covered) {
     const usable = usableFolder(folder);
     if (usable === null) continue;
     args.push('--tmpfs', usable);

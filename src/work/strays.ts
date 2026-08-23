@@ -15,9 +15,20 @@ import { execFile } from 'node:child_process';
 /** One program the machine says is running. */
 export type Alive = { pid: number; ppid: number; command: string };
 
-/** The helper program's own file. Anything else with a parent that has gone is
- *  somebody else's business. */
-const HELPER = 'subagent-runner.mjs';
+/**
+ * What counts as ours, by the name it runs under.
+ *
+ * Two kinds, and the second was learned the hard way. A helper doing the
+ * thinking is its own program and is recognised by its filename. But the app
+ * itself is several processes — the window, the graphics — and when the one
+ * that owns them goes away abruptly they are not always taken with it. One was
+ * found alone on a machine having spent eleven hours at two cores, drawing a
+ * window for an app that no longer existed.
+ *
+ * Named exactly, because anything else with a parent that has gone is somebody
+ * else's business — every other app on the machine has helpers too.
+ */
+const OURS = ['subagent-runner.mjs', 'Graphe Helper'];
 
 /** One server this app started, written down while it runs.
  *
@@ -56,7 +67,9 @@ export function whichAreStray(
   stillThere: (pid: number) => boolean,
 ): readonly number[] {
   return running
-    .filter((one) => one.command.includes(HELPER))
+    .filter((one) => OURS.some((name) => one.command.includes(name)))
+    // Only the ones whose owner has gone. A live app's own processes have a
+    // live parent, so this never reaches another copy that is working.
     .filter((one) => one.ppid <= 1 || !stillThere(one.ppid))
     .map((one) => one.pid);
 }

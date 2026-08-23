@@ -60,6 +60,9 @@ extraResources:
   - LICENSE
   - THIRD-PARTY-NOTICES.md
   - THIRD-PARTY-LICENSES.md
+  # The skills the app comes with. Read from disk at runtime, so they travel
+  # unpacked rather than inside the archive.
+  - skills
 
 # Nothing in the tree compiles. The .node files that are in there are prebuilt
 # binaries belonging to Pi's terminal interface, which this app never loads, and
@@ -91,17 +94,17 @@ mac:
   # on makes electron-builder go looking for a keychain we do not have.
   hardenedRuntime: false
   gatekeeperAssess: false
+  # No `arch` here on purpose. Pinning both against each target makes the
+  # architecture the config's decision, so `--arm64` on the command line was
+  # ignored and a quick look built the whole x64 side as well — twice the work
+  # for a bundle that machine cannot run. `scripts/package-app.mjs` names the
+  # architecture on every call and goes through both for a release, so a build
+  # still produces exactly what it did before.
   target:
     - target: dmg
-      arch:
-        - arm64
-        - x64
     # The cask installs from the zip: Homebrew unpacks it without ever setting
     # the quarantine attribute, which is the whole reason the free route works.
     - target: zip
-      arch:
-        - arm64
-        - x64
   extendInfo:
     # The microphone is offered because saying a change out loud is easier than
     # writing one, and only ever after a press. Nothing is recorded and nothing

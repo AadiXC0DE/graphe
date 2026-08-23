@@ -4,11 +4,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { parseProposal, worthPlanning } from '../src/agent/plan';
+import { parseProposal, shouldLookFirst, worthPlanning } from '../src/agent/plan';
 
 import {
   asResearch,
+  DEPTHS,
   implementationPlanFromResearch,
+  researchBrief,
   researchWords,
   RESEARCH_BRIEF,
 } from '../src/agent/research';
@@ -70,9 +72,11 @@ describe('what research sends', () => {
     expect(implementationPlanFromResearch('IMPLEMENTATION PLAN\n\n')).toBeNull();
   });
 
-  it('says what it will cost somebody before they wait for it', () => {
-    expect(researchWords.slower).toMatch(/longer/i);
-    expect(researchWords.slower).toMatch(/costs more/i);
+  it('does not emit a pre-research cost warning', () => {
+    expect((researchWords as Record<string, unknown>).slower).toBeUndefined();
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    expect(app).not.toContain('saidSlower');
+    expect(app).not.toContain('researchWords.slower');
   });
 
   it('is one-shot, so the next user sentence reaches the model without word matching', () => {
@@ -82,21 +86,29 @@ describe('what research sends', () => {
       app.indexOf("if (plans === 'research')") + 1500,
     );
     expect(researchBranch).toContain("setPlans('auto')");
-    expect(researchBranch).toContain('deliver(asResearch(text)');
+    expect(researchBranch).toContain('deliver(asResearch(text, chosenDepth())');
     expect(app).not.toMatch(/classifyResearch|researchCases|PROCEED_RE/);
   });
 
   it('turns only the model-written implementation section into the build checklist', () => {
     const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
     expect(app).toContain('implementationPlanFromResearch(report)');
-    expect(app).toContain('parseProposal(planText).steps');
+    expect(app).toContain('parseProposal(planText)');
+    expect(app).toContain('const steps = proposal?.steps ?? []');
     expect(app).toContain('.buildSave(');
   });
 
   /* The same sweep every other word bank in the app stands: plain words on the
      surface, and none of the machinery underneath. */
   it('never names the machinery', () => {
-    const everything = [...Object.values(researchWords), RESEARCH_BRIEF].join(' ').toLowerCase();
+    const everything = [
+      ...Object.values(researchWords),
+      ...DEPTHS.flatMap((one) => [one.name, one.note]),
+      ...DEPTHS.map((one) => researchBrief(one.id)),
+      RESEARCH_BRIEF,
+    ]
+      .join(' ')
+      .toLowerCase();
     for (const banned of ['subagent', 'token', 'api', 'prompt', 'context window', 'llm', 'model']) {
       expect(everything).not.toContain(banned);
     }
@@ -117,10 +129,28 @@ describe('the answer to a look-around is built, not looked at again', () => {
     // Both send paths, and both ways into research.
     expect(app.match(/const answering = justLookedFirst\.current;/g)?.length).toBe(2);
     expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(4);
-    // Only the guess steps aside. A switch somebody deliberately set to
-    // "always" is not overruled by us deciding they meant something else.
-    expect(app).toContain("plans === 'auto' && !answering && worthPlanning(text)");
-    expect(app).not.toContain("!answering &&\n        howFar");
+    // The rule itself lives where it can be tested, and both paths call it.
+    expect(app.match(/shouldLookFirst\(\{ plans, answering, text \}\)/g)?.length).toBe(2);
+  });
+
+  /* The rule the window used to hold inline. Its own tests, because a rule
+     nobody can run is a rule that quietly stops holding — which is what
+     happened: full access turned the whole thing off. */
+  it('only the guess steps aside for the message that answers it', () => {
+    const text = 'now implement the redesign';
+    expect(shouldLookFirst({ plans: 'auto', answering: true, text })).toBe(false);
+    // A switch somebody deliberately set to "always" is not overruled by us
+    // deciding they meant something else.
+    expect(shouldLookFirst({ plans: 'always', answering: true, text })).toBe(true);
+    expect(shouldLookFirst({ plans: 'never', answering: false, text })).toBe(false);
+    expect(shouldLookFirst({ plans: 'research', answering: false, text })).toBe(false);
+  });
+
+  it('does not ask how far the run may go — that was the bug', () => {
+    // "Until it's done" is about not stopping to ask. It never meant working
+    // without a list, and the biggest jobs are the ones that most need one.
+    expect(app).not.toContain("howFar !== 'doing' &&\n        (plans ===");
+    expect(app).not.toContain("howFar !== 'doing' &&\n          (plans ===");
   });
 
   it('judges the message after that one fresh', () => {

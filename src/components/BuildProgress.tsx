@@ -9,6 +9,10 @@ type Props = {
 };
 
 export const SAYS = {
+  /* Not "PRD": the list is just as often a handful of jobs somebody typed, and
+     naming it after the one document that can start it made the other nine
+     times read as the wrong feature. */
+  name: 'Todo progress',
   done: 'complete',
   failed: (n: number) => (n === 1 ? '1 task failed' : `${n} tasks failed`),
   open: 'Show the plan',
@@ -45,7 +49,7 @@ export default function BuildProgress({ plan, running = false }: Props) {
         aria-label={open ? SAYS.close : SAYS.open}
       >
         <span className={`buildprogress__dot ${running ? 'buildprogress__dot--live' : ''}`} aria-hidden="true" />
-        <span className="buildprogress__name">PRD progress</span>
+        <span className="buildprogress__name">{SAYS.name}</span>
         <span className="buildprogress__count">{head}</span>
         <span className="buildprogress__caret" aria-hidden="true">
           <svg width="10" height="10" viewBox="0 0 12 12" fill="none">

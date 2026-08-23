@@ -2509,6 +2509,24 @@ a {
 }
 
 @media (max-width: 640px) {
+  .nav__inner {
+    padding: 12px 12px;
+    gap: 10px;
+  }
+
+  .nav__end {
+    gap: 8px;
+  }
+
+  .btn--small {
+    padding-inline: 12px;
+    font-size: 0.875rem;
+  }
+
+  .btn--small .btn__apple {
+    margin-inline-end: 4px;
+  }
+
   .evidence-board__bar {
     align-items: flex-start;
     flex-direction: column;
@@ -2625,6 +2643,16 @@ a {
 
   .carry__swap {
     margin-inline-start: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .mark__beta {
+    display: none;
+  }
+
+  .promises {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

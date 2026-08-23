@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { boundaryHere, hold } from '../src/agent/sandbox';
+import { credentialFoldersIn } from '../src/agent/sandbox/profile';
 
 const made: string[] = [];
 const outside = join(homedir(), `.graphe-read-proof-${String(process.pid)}`);
@@ -96,4 +97,24 @@ describe('what a bound command may read', () => {
     expect(runtime?.out).toContain('started');
     expect(runtime?.out).toContain('{"ok":true}');
   }, 90_000);
+});
+
+/* Keys kept inside the project, rather than in a home folder. The Guard
+   already refuses to read either; this is the floor under it, and a repository
+   with an `.aws` in it is exactly where a bypass would go looking. */
+describe('keys inside the project are covered over too', () => {
+  it('names the key-shaped folders under every writable root', () => {
+    const covered = credentialFoldersIn('/work/site');
+    for (const place of ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.config/gcloud']) {
+      expect(covered, place).toContain(`/work/site/${place}`);
+    }
+  });
+
+  /** A project's own code reads `.env` to run. Covering it over would stop the
+   *  thing being built rather than protect it — that one belongs to the Guard,
+   *  which refuses it on the way in while leaving the project itself able to. */
+  it('leaves the one file the project itself has to read', () => {
+    const covered = credentialFoldersIn('/work/site');
+    expect(covered.some((one) => one.endsWith('.env'))).toBe(false);
+  });
 });

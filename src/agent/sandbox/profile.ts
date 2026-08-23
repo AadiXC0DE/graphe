@@ -81,6 +81,20 @@ export function privatePlaces(home = homedir()): string[] {
   ].map((place) => `${home}/${place}`);
 }
 
+/**
+ * Key-shaped folders anywhere, named relative to a root.
+ *
+ * Deliberately not `.env`: a project's own code reads it to run, so covering it
+ * over would stop the thing being built rather than protect it. The Guard
+ * refuses `.env` on the way in, which is the right layer for a file that has to
+ * stay readable by the project itself.
+ */
+export function credentialFoldersIn(root: string): string[] {
+  return ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.config/gcloud', '.password-store'].map(
+    (place) => `${root}/${place}`,
+  );
+}
+
 /** The parts of the machine that have to be readable for anything to run at
  *  all: the loader, the system libraries, the shells, the developer tools and
  *  the usual places a package manager installs into. All public. */
@@ -216,7 +230,11 @@ export function seatbeltProfile(bounds: Bounds): Profile {
   }
 
   const kept: string[] = [];
-  for (const folder of bounds.private ?? privatePlaces()) {
+  // Keys kept inside the project itself, as well as the ones in a home folder.
+  // The Guard already refuses to read either; this is the floor under it, and a
+  // repository with an `.aws` in it is exactly where a bypass would look.
+  const alsoPrivate = bounds.writable.flatMap((where) => credentialFoldersIn(where));
+  for (const folder of [...(bounds.private ?? privatePlaces()), ...alsoPrivate]) {
     const usable = usableFolder(folder);
     if (usable === null || kept.includes(usable)) continue;
     const name = `PRIVATE${String(kept.length)}`;

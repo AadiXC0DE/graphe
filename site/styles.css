@@ -1697,6 +1697,13 @@ a {
   transition: color 200ms ease;
 }
 
+/* The complete catalogue belongs on the desktop contact sheet. On a phone, six
+   entries are enough to establish its breadth; the remainder stays one calm
+   press away instead of turning this stop in the page into a long catalog. */
+.sheet__more {
+  display: none;
+}
+
 /* ────────────────────────────────────────────────────── promises ── */
 
 .promises {
@@ -2509,6 +2516,24 @@ a {
 }
 
 @media (max-width: 640px) {
+  .nav__inner {
+    padding: 12px 12px;
+    gap: 10px;
+  }
+
+  .nav__end {
+    gap: 8px;
+  }
+
+  .btn--small {
+    padding-inline: 12px;
+    font-size: 0.875rem;
+  }
+
+  .btn--small .btn__apple {
+    margin-inline-end: 4px;
+  }
+
   .evidence-board__bar {
     align-items: flex-start;
     flex-direction: column;
@@ -2605,7 +2630,64 @@ a {
   }
 
   .frame__screens {
-    aspect-ratio: 4 / 3;
+    /* All four supplied screens are 8:5. Keeping that proportion means the
+       file rail and right-hand panel remain whole rather than being cropped by
+       the old 4:3 phone window. */
+    aspect-ratio: 8 / 5;
+  }
+
+  .pillar__shot {
+    height: auto;
+    object-fit: contain;
+    /* A screenshot is evidence, not a decorative crop. */
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .sheet--mobile-more:not(.is-expanded) .cell:nth-child(n + 7) {
+    display: none;
+  }
+
+  #page .sheet--mobile-more:not(.is-expanded) .cell:nth-child(n + 4) {
+    display: none;
+  }
+
+  .sheet__more {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 10px;
+    padding: 15px 18px 15px 20px;
+    border: 1px solid var(--edge);
+    border-radius: var(--r-sm);
+    background: var(--night-raised);
+    color: var(--haze);
+    font: 500 0.8125rem/1 var(--mono);
+    letter-spacing: 0.02em;
+    text-align: left;
+  }
+
+  .sheet__more-mark {
+    flex: 0 0 auto;
+    color: var(--coral);
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+
+  .sheet__more[aria-expanded="true"] .sheet__more-mark {
+    font-size: 0;
+  }
+
+  .sheet__more[aria-expanded="true"] .sheet__more-mark::before {
+    content: "−";
+    font-size: 1rem;
+  }
+
+  .sheet__more:focus-visible {
+    outline: 2px solid var(--coral);
+    outline-offset: 3px;
   }
 
   .pillar {
@@ -2625,6 +2707,52 @@ a {
 
   .carry__swap {
     margin-inline-start: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .mark__beta {
+    margin-inline-start: 0;
+    padding: 2px 5px;
+    font-size: 0.5625rem;
+  }
+
+  .nav__inner {
+    padding-inline: 8px;
+    gap: 6px;
+  }
+
+  .mark {
+    gap: 6px;
+    font-size: 1rem;
+  }
+
+  .mark__glyph {
+    width: 24px;
+    height: 24px;
+  }
+
+  .nav__end {
+    gap: 6px;
+  }
+
+  .chip--repo {
+    padding-inline: 8px;
+    height: 34px;
+  }
+
+  .btn--small {
+    height: 34px;
+    padding-inline: 10px;
+    font-size: 0.8125rem;
+  }
+
+  .btn--small .btn__apple {
+    display: none;
+  }
+
+  .promises {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

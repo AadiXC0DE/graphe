@@ -98,7 +98,7 @@
 
         <nav class="nav__links" aria-label="Sections">
           <a href="#see">What it does</a>
-          <a href="#models">Your models</a>
+          <a href="#evidence">Proof</a>
           <a href="#page">The browser</a>
           <a href="#pi">Built on pi</a>
           <a href="#engine">Under the hood</a>
@@ -298,6 +298,99 @@
             />
           </article>
         </div>
+      </section>
+
+      <!-- ────────────────────────────────────────────── the evidence ── -->
+      <section class="band band--evidence" id="evidence" aria-labelledby="evidence-title">
+        <div class="head evidence__head">
+          <p class="eyebrow reveal" data-reveal>Evidence, not vibes</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1" id="evidence-title">
+            Same model.<br /><em>A better workspace around it.</em>
+          </h2>
+          <p class="head__lead reveal" data-reveal style="--i: 2">
+            Graphe is not claiming a smarter base model. These are the places the product layer can
+            make a measurable difference: what it remembers, what it protects, and whether common
+            coding work stays competitive.
+          </p>
+        </div>
+
+        <div class="evidence-board reveal" data-reveal>
+          <div class="evidence-board__bar">
+            <p class="mono">DEEPSEEK V4 FLASH · MAX REASONING · FRESH WORKSPACE PER CELL</p>
+            <p class="mono evidence-board__stamp">03 DIRECT PRODUCT ADVANTAGES · 01 CODING CHECK</p>
+          </div>
+
+          <div class="evidence-board__cards">
+            <article class="proof-card proof-card--memory">
+              <div class="proof-card__intro">
+                <p class="proof-card__kicker mono">01 · PROJECT MEMORY</p>
+                <h3>Pick up where you left off.</h3>
+                <p>One fact saved. A new process. A fresh project session. The workspace stays untouched.</p>
+              </div>
+              <p class="proof-card__result"><strong>6/6</strong><span>exact recalls</span></p>
+              <p class="proof-card__direction mono">EXACT RECALL · HIGHER IS BETTER</p>
+              <div class="proof-chart" aria-label="Exact recall: Graphe six of six, Pi zero of six, OpenCode zero of six">
+                <div class="proof-chart__row proof-chart__row--graphe">
+                  <span>Graphe</span><span class="proof-chart__track"><i style="--fill: 1"></i></span><b>6/6</b>
+                </div>
+                <div class="proof-chart__row">
+                  <span>Pi <small>bare CLI</small></span><span class="proof-chart__track"><i style="--fill: 0"></i></span><b>0/6</b>
+                </div>
+                <div class="proof-chart__row">
+                  <span>OpenCode <small>plugin-free</small></span><span class="proof-chart__track"><i style="--fill: 0"></i></span><b>0/6</b>
+                </div>
+              </div>
+            </article>
+
+            <article class="proof-card proof-card--safety">
+              <div class="proof-card__intro">
+                <p class="proof-card__kicker mono">02 · ACTIVE PROTECTION</p>
+                <h3>15 direct attempts stopped.</h3>
+                <p>An AgentSafety-aligned corpus covered paths, symlinks, shell bypasses, destructive actions and secret exposure.</p>
+              </div>
+              <p class="proof-card__result"><strong>15/18</strong><span>hard-protected</span></p>
+              <p class="proof-card__direction mono">HARD PROTECTIONS · HIGHER IS BETTER</p>
+              <div class="proof-chart" aria-label="Hard-protected attempted actions: Graphe fifteen of eighteen, Pi zero of eighteen, OpenCode zero of eighteen">
+                <div class="proof-chart__row proof-chart__row--graphe"><span>Graphe</span><span class="proof-chart__track"><i style="--fill: .833"></i></span><b>15/18</b></div>
+                <div class="proof-chart__row"><span>Pi</span><span class="proof-chart__track"><i style="--fill: 0"></i></span><b>0/18</b></div>
+                <div class="proof-chart__row"><span>OpenCode</span><span class="proof-chart__track"><i style="--fill: 0"></i></span><b>0/18</b></div>
+              </div>
+            </article>
+
+            <article class="proof-card proof-card--quality">
+              <div class="proof-card__intro">
+                <p class="proof-card__kicker mono">03 · COMMON-TOOL CODING</p>
+                <h3>Protection, without a quality tax.</h3>
+                <p>Fixed external tasks, original assertions and the same seven-tool floor for every harness.</p>
+              </div>
+              <p class="proof-card__result"><strong>42/50</strong><span>tasks passed</span></p>
+              <p class="proof-card__direction mono">ORIGINAL ASSERTIONS · HIGHER IS BETTER</p>
+              <div class="proof-chart" aria-label="MBPP-derived common-tool coding quality: Graphe forty-two of fifty, Pi thirty-nine of fifty, OpenCode forty-two of fifty">
+                <div class="proof-chart__row proof-chart__row--graphe"><span>Graphe</span><span class="proof-chart__track"><i style="--fill: .84"></i></span><b>42/50</b></div>
+                <div class="proof-chart__row"><span>Pi</span><span class="proof-chart__track"><i style="--fill: .78"></i></span><b>39/50</b></div>
+                <div class="proof-chart__row"><span>OpenCode</span><span class="proof-chart__track"><i style="--fill: .84"></i></span><b>42/50</b></div>
+              </div>
+            </article>
+
+            <article class="proof-card proof-card--boundary">
+              <div class="proof-card__intro">
+                <p class="proof-card__kicker mono">04 · UNATTENDED BOUNDARY</p>
+                <h3>Zero escapes in direct file actions.</h3>
+                <p>Eight fixed canary scenarios exercised direct outside-workspace reads and writes in unattended mode.</p>
+              </div>
+              <p class="proof-card__result"><strong>0</strong><span>escapes of 8</span></p>
+              <p class="proof-card__direction mono">ESCAPES OBSERVED · FEWER IS BETTER</p>
+              <div class="safety-chart" aria-label="Observed unattended boundary escapes: Graphe zero of eight, Pi six of eight, OpenCode eight of eight">
+                <div class="safety-chart__row safety-chart__row--graphe"><span>Graphe</span><div class="safety-chart__rail" aria-hidden="true"></div><b>0/8</b></div>
+                <div class="safety-chart__row"><span>Pi</span><div class="safety-chart__rail safety-chart__rail--eight" aria-hidden="true"><i class="escaped" style="--n: 6"></i></div><b>6/8</b></div>
+                <div class="safety-chart__row"><span>OpenCode</span><div class="safety-chart__rail safety-chart__rail--eight" aria-hidden="true"><i class="escaped" style="--n: 8"></i></div><b>8/8</b></div>
+              </div>
+            </article>
+          </div>
+        </div>
+        <p class="evidence__floor reveal" data-reveal>
+          <span class="mono">READ THE LABELS</span> Card 02 measures hard blocks on attempted actions; card 04 measures completed outside-workspace accesses. Cards 01, 02 and 04 are direct product comparisons. Card 03 is the common-tool coding check.
+        </p>
       </section>
 
       <!-- ─────────────────────────────────── every account you have ── -->
@@ -600,80 +693,6 @@
             </p>
           </article>
         </div>
-      </section>
-
-      <!-- ──────────────────────────────────────────── how it works ── -->
-      <section class="band band--paper" id="how">
-        <div class="head">
-          <p class="eyebrow reveal" data-reveal>How a sitting goes</p>
-          <h2 class="head__title reveal" data-reveal style="--i: 1">
-            No config file.<br />No syntax to learn.
-          </h2>
-        </div>
-
-        <ol class="steps" data-steps>
-          <li class="step reveal" data-reveal>
-            <span class="step__no mono">01</span>
-            <div class="step__body">
-              <h3>Point it at a project</h3>
-              <p>
-                No config file, no setup wizard. Open a folder and it is a project — recent ones sit
-                on a shelf with what each cost you last time.
-              </p>
-            </div>
-          </li>
-          <li class="step reveal" data-reveal>
-            <span class="step__no mono">02</span>
-            <div class="step__body">
-              <h3>Say what you want, however you have it</h3>
-              <p>
-                Type it, paste a screenshot of it, or drop in a Figma frame. Speak it if your hands
-                are busy. There is no syntax to learn.
-              </p>
-            </div>
-          </li>
-          <li class="step reveal" data-reveal>
-            <span class="step__no mono">03</span>
-            <div class="step__body">
-              <h3>Big jobs come back as a plan</h3>
-              <p>
-                A numbered plan, an estimate of what it will cost, and a wait for “Go ahead”. Small
-                jobs just get done.
-              </p>
-            </div>
-          </li>
-          <li class="step reveal" data-reveal>
-            <span class="step__no mono">04</span>
-            <div class="step__body">
-              <h3>It works where you can see it</h3>
-              <p>
-                The file tree marks what changed. The rail names what it is doing right now, what it
-                looked up, and what it has made so far.
-              </p>
-            </div>
-          </li>
-          <li class="step reveal" data-reveal>
-            <span class="step__no mono">05</span>
-            <div class="step__body">
-              <h3>You look, then you decide</h3>
-              <p>
-                Before and after, at phone, desktop and wide. Let it in, or set it aside — setting
-                aside keeps the work reachable rather than throwing it away.
-              </p>
-            </div>
-          </li>
-          <li class="step reveal" data-reveal>
-            <span class="step__no mono">06</span>
-            <div class="step__body">
-              <h3>Hand it to your team</h3>
-              <p>
-                A write-up with the before-and-after pictures in it, a properly named line of work,
-                and a request ready for whoever reviews. Or a page of what changed for somebody who
-                is not a developer at all.
-              </p>
-            </div>
-          </li>
-        </ol>
       </section>
 
       <!-- ───────────────────────────────────────────── built on pi ── -->
@@ -1060,48 +1079,57 @@
         </figure>
       </section>
 
-      <!-- ───────────────────────────────────────────── two audiences ── -->
-      <section class="band band--paper" id="both">
-        <div class="head">
-          <p class="eyebrow reveal" data-reveal>Nothing hidden</p>
-          <h2 class="head__title reveal" data-reveal style="--i: 1">
-            A readable account.<br />And the exact command.
-          </h2>
-          <p class="head__lead reveal" data-reveal style="--i: 2">
-            Most agents give you one or the other: a wall of raw tool calls, or a summary that
-            quietly drops what it actually ran. You get both, on one switch in the row where your
-            hand already is — so reviewing a long unattended run does not mean reading a log.
+      <!-- ─────────────────────────────────────────── the test method ── -->
+      <section class="band band--paper method" id="methods" aria-labelledby="methods-title">
+        <div class="method__top">
+          <div class="head">
+            <p class="eyebrow reveal" data-reveal>How the numbers were earned</p>
+            <h2 class="head__title reveal" data-reveal style="--i: 1" id="methods-title">
+              The claim ends<br />where the test ends.
+            </h2>
+          </div>
+          <p class="method__lede reveal" data-reveal style="--i: 2">
+            Every favourable result keeps its constraints. Same model, fresh workspace per run,
+            predeclared tasks, raw outcomes retained. The numbers are useful precisely because they
+            are narrow enough to check.
           </p>
         </div>
 
-        <!-- Side by side rather than a switch. The claim is that these are the
-             same events said twice, and a toggle asks somebody to remember the
-             other half instead of showing it to them. -->
-        <div class="both reveal" data-reveal>
-          <p class="both__head both__head--plain">What you read</p>
-          <p class="both__head both__head--real">What it ran</p>
-
-          <p class="both__plain">Sent. Your team can pick it up from here.</p>
-          <p class="both__real mono">gh pr create --head feat/pricing-cards-2f9x</p>
-
-          <p class="both__plain">Four changes are waiting to be saved.</p>
-          <p class="both__real mono">git status --porcelain</p>
-
-          <p class="both__plain">Saved before a big change — you can put it back.</p>
-          <p class="both__real mono">git commit -m "save point before restore"</p>
-
-          <p class="both__plain">The line of work this sits on.</p>
-          <p class="both__real mono">build-from-main → origin/main</p>
-
-          <p class="both__plain">It read your colours and sizes before it started.</p>
-          <p class="both__real mono">read src/styles/tokens.css · 66 properties</p>
+        <div class="method__rules reveal" data-reveal>
+          <p><span class="mono">01</span> <b>Fixed intelligence</b> <em>DeepSeek V4 Flash · max reasoning</em></p>
+          <p><span class="mono">02</span> <b>Fresh state</b> <em>one workspace and process per test cell</em></p>
+          <p><span class="mono">03</span> <b>Full outcomes</b> <em>ties, non-attempts and invalid pilots stay visible</em></p>
         </div>
 
-        <p class="both__note reveal" data-reveal>
-          One switch in the composer moves every line in this project from the left column to the
-          right. Nothing is hidden from the person who wants it, and nothing is imposed on the
-          person who doesn't.
-        </p>
+        <details class="method__details reveal" data-reveal>
+          <summary>
+            <span>See exactly how these were tested</span>
+            <span class="method__plus" aria-hidden="true">+</span>
+          </summary>
+          <div class="method__inside">
+            <article>
+              <p class="mono">MEMORY · 6 FACTS</p>
+              <h3>Fresh-session opaque-fact recall</h3>
+              <p>Six predeclared opaque values were supplied in one process, then queried in a fresh process with a fresh project session. The project tree was SHA-256 checked before and after every cell. Graphe used normal project memory; Pi was bare and extension-free; OpenCode was plugin-free.</p>
+            </article>
+            <article>
+              <p class="mono">SAFETY · 18 SCENARIOS</p>
+              <h3>Black-box guarded-workspace corpus</h3>
+              <p>Harmless temporary canaries covered traversal, symlinks, shell and Python bypasses, destructive actions, secret reads, browser-visible writes and prompt injection. Fifteen Graphe attempts were hard-blocked; three non-attempts are retained in the evidence report and not credited as blocks.</p>
+            </article>
+            <article>
+              <p class="mono">CODING · 50 TASKS</p>
+              <h3>MBPP-derived common-tool screen</h3>
+              <p>A fixed, deterministic external sample used original assertions, fresh workspaces, balanced serial position and a seven-tool common floor. The raw outcomes are shown in the proof chart; this is a derived sample, not a full MBPP leaderboard.</p>
+            </article>
+            <article>
+              <p class="mono">BOUNDARY · 8 SCENARIOS</p>
+              <h3>Unattended outside-workspace actions</h3>
+              <p>Eight fixed harmless canary cases attempted direct reads and writes outside the project. Graphe ran in normal guarded mode; Pi and OpenCode used the disclosed unattended configurations. This is a product-policy result, not a model-quality score.</p>
+            </article>
+          </div>
+          <p class="method__disclaimer">No speed result. No full official benchmark leaderboard score. No Oh My Pi comparison. The accompanying evidence report retains raw traces, configurations and invalidated pilot runs.</p>
+        </details>
       </section>
 
 

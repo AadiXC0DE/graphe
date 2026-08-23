@@ -36,6 +36,7 @@
 
 import type { GuardFacts } from '../guard/policy';
 import { changesAnything, describeCall, evaluate, requiresSnapshot } from '../guard/policy';
+import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
 import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
@@ -45,7 +46,7 @@ import { EventRelay } from './events';
 import { RepairCoordinator, repairPrompt } from './repair';
 import { checksAfterChange, saysFailed, sourceAmong } from './verify';
 import { notHere, runHelper } from '../../share/run';
-import { readdir } from 'node:fs/promises';
+import { readdir, realpath } from 'node:fs/promises';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
@@ -81,7 +82,7 @@ import {
 
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 
 import { idFor } from '../../projects/carried';
 import type { ThinkingLevel } from '../../lib/ipc';
@@ -129,6 +130,8 @@ const SAID_NO = 'You said no, so I have left it alone.';
 /** What the user reads when the restore point could not be made. */
 const NO_RESTORE_POINT =
   "I could not save a restore point first, so I have not made this change. Nothing has been lost.";
+const SYMLINK_ESCAPE =
+  'This path reaches somewhere outside your project folder through a link, so I have left it alone.';
 
 /* -------------------------------------------------------------------------- */
 /* Questions waiting on a person                                               */
@@ -293,6 +296,33 @@ export function createGuardInterceptor(
     }
   };
 
+  /**
+   * The policy table intentionally stays pure, so it can reject textual `..`
+   * escapes without reading the disk. Here, immediately before the tool runs,
+   * we also resolve the nearest existing ancestor. That catches a file that is
+   * lexically under the project but reaches outside through a symlink.
+   */
+  const symlinkEscape = async (call: ToolCall): Promise<string | null> => {
+    const root = await realpath(facts.projectRoot).catch(() => null);
+    if (root === null) return null;
+    for (const named of describeCall(call).paths) {
+      const lexical = containsPath(facts.projectRoot, named);
+      if (!lexical.inside || lexical.resolved === null) continue;
+      let probe = lexical.resolved;
+      while (true) {
+        const actual = await realpath(probe).catch(() => null);
+        if (actual !== null) {
+          if (!containsPath(root, actual).inside) return SYMLINK_ESCAPE;
+          break;
+        }
+        const parent = dirname(probe);
+        if (parent === probe) break;
+        probe = parent;
+      }
+    }
+    return null;
+  };
+
   return async function review(call: ToolCall): Promise<Interception> {
     filesMayHaveMoved?.(call);
     // The explicit top autonomy rung is full access for this sitting. Keep this
@@ -360,6 +390,14 @@ export function createGuardInterceptor(
       if (decision !== 'yes') {
         relay.blocked(call, SAID_NO);
         return { block: true, reason: TOLD.declined };
+      }
+    }
+
+    if (describeCall(call).paths.length > 0) {
+      const linkEscape = await symlinkEscape(call);
+      if (linkEscape !== null) {
+        relay.blocked(call, linkEscape);
+        return { block: true, reason: linkEscape };
       }
     }
 
@@ -472,6 +510,10 @@ export type CreateSessionOptions = {
   /** True for work nobody is sitting in front of. Such a run answers its own
    *  questions, so it is never given the tool that asks one. */
   unattended?: boolean;
+  /** Evaluation-only: expose exactly Pi's seven working tools. This is never
+   *  the desktop default; it exists so a controlled comparison can keep the
+   *  model's tool surface identical across harnesses. */
+  benchmarkToolFloor?: boolean;
   /** The model chosen to work with, or null for "whatever is available". The
    *  id is Pi's own — resolved inside this file, where the model objects
    *  live, and never heard of outside it. */
@@ -1709,18 +1751,21 @@ const MOST_AFTER_SAYINGS = 3;
     return saysAnswers(questions, answers);
   };
 
-  const customTools = grapheTools(
-    agentDir,
-    options.figmaToken,
-    getHelperModel,
-    getHelperThinking,
-    options.projectRoot,
-    options.putOnBoard,
-    desk.noting,
-    // Nobody to answer means no tool, rather than a tool that always says so.
-    options.unattended === true ? null : askFirst,
-    options.stepDone,
-  );
+  const benchmarkToolFloor = options.benchmarkToolFloor === true;
+  const customTools = benchmarkToolFloor
+    ? []
+    : grapheTools(
+        agentDir,
+        options.figmaToken,
+        getHelperModel,
+        getHelperThinking,
+        options.projectRoot,
+        options.putOnBoard,
+        desk.noting,
+        // Nobody to answer means no tool, rather than a tool that always says so.
+        options.unattended === true ? null : askFirst,
+        options.stepDone,
+      );
 
   /* The anchored edit and its read: the model reads a file, the read's reply
      carries the file's fingerprint, and an edit can name lines plus that
@@ -1730,47 +1775,51 @@ const MOST_AFTER_SAYINGS = 3;
      underneath as the exact-text path and the actual reading. */
   const piRead = pi.createReadToolDefinition(options.projectRoot);
   const piEdit = pi.createEditToolDefinition(options.projectRoot);
-  customTools.push(
-    taggedReadTool({
-      cwd: options.projectRoot,
-      delegate: (params, signal) =>
-        piRead.execute('graphe-read', params, signal, undefined, undefined as never),
-    }),
-    anchorEditTool({
-      cwd: options.projectRoot,
-      delegate: (params, signal) =>
-        piEdit.execute(
-          'graphe-edit',
-          params as Parameters<typeof piEdit.execute>[1],
-          signal,
-          undefined,
-          undefined as never,
-        ),
-    }),
-    readDiffTool(options.projectRoot),
-  );
+  if (!benchmarkToolFloor) {
+    customTools.push(
+      taggedReadTool({
+        cwd: options.projectRoot,
+        delegate: (params, signal) =>
+          piRead.execute('graphe-read', params, signal, undefined, undefined as never),
+      }),
+      anchorEditTool({
+        cwd: options.projectRoot,
+        delegate: (params, signal) =>
+          piEdit.execute(
+            'graphe-edit',
+            params as Parameters<typeof piEdit.execute>[1],
+            signal,
+            undefined,
+            undefined as never,
+          ),
+      }),
+      readDiffTool(options.projectRoot),
+    );
+  }
 
   /* The project's memory: a note store beside the conversation, one database
      per project, opened with the app's embedding engine when it can load. A
      machine that cannot (no model yet, no network for the first download)
      still gets word-based recall — the engine degrades, never fails. */
   let memory: MemoryStore | null = null;
-  try {
-    memory = await openMemory({
-      dbPath: join(agentDir, 'memory', memoryFileName(options.projectRoot)),
-      embedder: defaultEmbedder(),
-    });
-    customTools.push(...memoryTools(memory));
-  } catch {
-    // No memory, no ceremony: the tools simply are not there, and nothing else
-    // in the session cares.
-    memory = null;
+  if (!benchmarkToolFloor) {
+    try {
+      memory = await openMemory({
+        dbPath: join(agentDir, 'memory', memoryFileName(options.projectRoot)),
+        embedder: defaultEmbedder(),
+      });
+      customTools.push(...memoryTools(memory));
+    } catch {
+      // No memory, no ceremony: the tools simply are not there, and nothing else
+      // in the session cares.
+      memory = null;
+    }
   }
 
   /* The debugger sessions this sitting holds: attached programs, closed with
      the session so nothing is left paused or held. */
   const debugRegistry = newDebugRegistry();
-  customTools.push(...debugTools(debugRegistry));
+  if (!benchmarkToolFloor) customTools.push(...debugTools(debugRegistry));
 
   /* Work that answers by staying up: servers, watchers, anything the ordinary
      shell would either wait forever for or let die with the command that
@@ -1778,27 +1827,29 @@ const MOST_AFTER_SAYINGS = 3;
      sessions own one and close it themselves. */
   const ownsRunning = options.running === undefined;
   const keptRunning = options.running ?? new Running();
-  customTools.push(
-    ...runningTools(keptRunning, {
-      folder: options.projectRoot,
-      parts: () => {
-        const config = pi.getShellConfig(settings.shell);
-        return { shell: config.shell, args: config.args };
-      },
-      writable: shellBounds(options.projectRoot, options.projectRoot).writable,
-      // A door of this copy's own. The project itself keeps the ordinary one,
-      // so the folder somebody is looking at behaves exactly as it always did;
-      // it is the copies that would otherwise collide.
-      port:
-        options.mainFolder !== undefined && options.mainFolder !== options.projectRoot
-          ? PORTS.claim(options.projectRoot)
-          : null,
-      ...(options.noteServers === undefined ? {} : { noted: options.noteServers }),
-      onChange: () => {
-        say({ type: 'running', pieces: keptRunning.list() });
-      },
-    }),
-  );
+  if (!benchmarkToolFloor) {
+    customTools.push(
+      ...runningTools(keptRunning, {
+        folder: options.projectRoot,
+        parts: () => {
+          const config = pi.getShellConfig(settings.shell);
+          return { shell: config.shell, args: config.args };
+        },
+        writable: shellBounds(options.projectRoot, options.projectRoot).writable,
+        // A door of this copy's own. The project itself keeps the ordinary one,
+        // so the folder somebody is looking at behaves exactly as it always did;
+        // it is the copies that would otherwise collide.
+        port:
+          options.mainFolder !== undefined && options.mainFolder !== options.projectRoot
+            ? PORTS.claim(options.projectRoot)
+            : null,
+        ...(options.noteServers === undefined ? {} : { noted: options.noteServers }),
+        onChange: () => {
+          say({ type: 'running', pieces: keptRunning.list() });
+        },
+      }),
+    );
+  }
 
   /* The plugged-in tool servers (MCP), read from the project's own .pi/mcp.json.
      Nothing starts until the model actually calls one of them, and every call
@@ -1811,7 +1862,7 @@ const MOST_AFTER_SAYINGS = 3;
   // the next one — and a typo in the file meant no tool at all and no way to
   // say why. With nothing connected it answers that nothing is, which is a
   // sentence the model can act on.
-  customTools.push(mcpTool(mcpRegistry));
+  if (!benchmarkToolFloor) customTools.push(mcpTool(mcpRegistry));
 
   // The shell is Pi's tool, not ours, and it is the one that can change
   // anything on this disk. Pi builds it from `createBashToolDefinition`, whose

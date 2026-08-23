@@ -87,6 +87,47 @@ behind a tier.
 
 ---
 
+## Benchmark evidence
+
+The agent model is only one part of an agentic coding product. The measurements below distinguish
+common-tool coding from the desktop workspace controls Graphe adds around the model.
+
+All direct comparison cells used `opencode-go/deepseek-v4-flash` at `max` reasoning, a fresh
+workspace per cell, and counterbalanced serial order. They were run on 2026-08-24 against the
+specific Pi and OpenCode configurations described below — not against every extension, plugin, or
+hosted variant of either project.
+
+| Evidence | Graphe | Pi | OpenCode | What it measures |
+|---|---:|---:|---:|---|
+| Fresh-session project-memory recall, 6 opaque facts | **6/6** exact | 0/6 | 0/6 | Built-in project memory after a fresh process and fresh project session |
+| AgentSafety-taxonomy-aligned guarded-workspace corpus, 18 scenarios | **15** hard-protected, 0 escaped, 3 not attempted | 0 hard-protected, 17 escaped, 1 not attempted | 0 hard-protected, 16 escaped, 2 not attempted | Guard enforcement under harmless path, symlink, shell, secret and prompt-injection canaries |
+| Unattended direct file-boundary corpus, 8 scenarios | **0** escaped | 6 escaped | 8 escaped | Completed outside-workspace reads or writes in disclosed unattended modes |
+| MBPP-derived fixed coding sample, 50 tasks | **42/50** | 39/50 | **42/50** | Common-tool coding, checked with the original assertions |
+| HumanEval-derived fixed coding sample, 10 tasks | **10/10** | **10/10** | **10/10** | Small external function-level parity check using the original checks |
+
+### How to read these numbers
+
+- **Memory:** Graphe used normal project memory. Pi was tested as a bare, extension-free CLI and
+  OpenCode as a plugin-free fresh session. This is an out-of-box product comparison; it is not a
+  claim that Pi extensions or Oh My Pi have no memory.
+- **Workspace protection:** every scenario used harmless temporary canaries. A non-attempt is left
+  visible and is never credited as a Graphe block. The 18-scenario corpus is mapped to the public
+  AgentSafety taxonomy, but is not presented as an official AgentSafety score.
+- **Coding:** all harnesses received the same seven-tool floor for the MBPP-derived run, so Graphe
+  features did not expand its tool surface. Graphe's 42/50 versus Pi's 39/50 is not statistically
+  significant on this fixed sample (two-sided exact McNemar p = .375); Graphe and OpenCode each
+  passed 42/50. These are derived samples, not full official benchmark leaderboards.
+- **What we do not claim:** no agent-latency chart, no full MBPP/HumanEval/AgentSafety leaderboard
+  score, no Oh My Pi result, and no universal statement about the security of other tools. The
+  comparisons are limited to the versions, configurations, tasks, and dates stated here.
+
+The landing page presents these as three direct product advantages — retained project memory,
+active guarded-workspace protection, and unattended file boundaries — plus common-tool coding
+checks. Technical details are kept beside the claims so a higher bar can be applied to them, not
+lowered.
+
+---
+
 ## How a sitting goes
 
 1. **Point it at a project.** Open a folder and it is one — recent ones sit on a shelf with what each cost last time.

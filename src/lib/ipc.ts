@@ -1165,6 +1165,7 @@ export const CHANNEL = {
   buildPlan: 'graphe:build-plan',
   buildAdvance: 'graphe:build-advance',
   buildSave: 'graphe:build-save',
+  buildCancel: 'graphe:build-cancel',
   chooseDocument: 'graphe:choose-document',
   designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
@@ -1354,6 +1355,8 @@ export type GrapheApi = {
   /** Record the plan the agent produced into the stored build-plan, so a
    *  resumed session has the real task list. */
   buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>>;
+  /** Cancel the current build checklist and clear it from the screen. */
+  buildCancel(where?: Where): Promise<Result<null>>;
   /** Pick a requirements document on disk and read its text, or null if closed. */
   chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>>;
   /** Move the project onto another of its lines of work. Refuses while the

@@ -40,7 +40,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // One line on purpose: the boundary test in tests/adapter.test.ts reads the
@@ -2283,6 +2283,50 @@ const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
   },
 });
 
+function buildPlanFileFor(project: string): string {
+  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const electron = require('electron') as { app?: { getPath: (name: string) => string } };
+    const maybeApp = electron.app;
+    if (maybeApp !== undefined && typeof maybeApp.getPath === 'function') {
+      return join(maybeApp.getPath('userData'), 'builds', `${key}.json`);
+    }
+  } catch {
+    void 0;
+  }
+  return join(tmpdir(), 'graphe-builds', `${key}.json`);
+}
+
+const cancelBuildTool = (cwd: string): ToolDefinition => ({
+  name: 'cancel_build',
+  label: 'Cancelling the build',
+  description:
+    'Cancel the current build checklist and remove it from the screen. Use it when the user says to cancel the todo list.',
+  promptSnippet: 'cancel_build() — cancel the current build checklist',
+  parameters: Type.Object({}),
+  executionMode: 'sequential',
+  execute: async (): ToolResult => {
+    const file = buildPlanFileFor(cwd);
+    await rm(file, { force: true }).catch(() => undefined);
+    try {
+      const electron = await import('electron');
+      const wins = (electron.BrowserWindow as unknown as { getAllWindows?: () => { webContents: { send: (c: string, v: unknown) => void }; isDestroyed: () => boolean }[] })?.getAllWindows?.() ?? [];
+      const win = wins[0];
+      if (win !== undefined && !win.isDestroyed()) {
+        const { CHANNEL } = await import('../../lib/ipc');
+        win.webContents.send(CHANNEL.buildPlanChanged, { project: cwd, plan: null });
+      }
+    } catch {
+      void 0;
+    }
+    return {
+      content: [{ type: 'text', text: 'The build checklist has been cancelled and removed from the screen.' }],
+      details: {},
+    };
+  },
+});
+
 const askFirstTool = (askFirst: AskFirst): ToolDefinition => ({
   name: 'ask_first',
   label: 'Asking before starting',
@@ -2347,6 +2391,7 @@ export const grapheTools = (
       // something connected, and the project with nothing yet is the whole
       // point of this one.
       connectingTool(projectRoot),
+      cancelBuildTool(projectRoot),
     );
   }
   const token = (figmaToken ?? '').trim();

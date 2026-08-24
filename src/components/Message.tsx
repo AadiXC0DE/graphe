@@ -14,6 +14,8 @@ type Props = {
   streaming?: boolean;
   /** A quiet aside under a Graphe turn, e.g. "This one's small, so I kept it Quick." */
   aside?: string;
+  /** True when this is the last turn in the thread — never clipped so the latest answer is always fully visible. */
+  isLast?: boolean;
 };
 
 /** One turn in the conversation.
@@ -35,7 +37,7 @@ type Props = {
  * composer people stop trusting with anything technical. What you typed is what
  * is shown.
  */
-export default function Message({ from, children, streaming, aside }: Props) {
+export default function Message({ from, children, streaming, aside, isLast }: Props) {
   const mine = from === 'you';
   const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
   const formatted = !mine && typeof children === 'string';
@@ -61,7 +63,7 @@ export default function Message({ from, children, streaming, aside }: Props) {
         aria-live={!mine && streaming ? 'polite' : undefined}
         aria-busy={streaming || undefined}
       >
-        {streaming || text === null ? (
+        {streaming || text === null || isLast ? (
           body
         ) : (
           <Clipped how={howMuch(text)} label="Show the rest">

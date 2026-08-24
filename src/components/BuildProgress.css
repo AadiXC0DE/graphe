@@ -55,6 +55,24 @@
   white-space: nowrap;
 }
 
+.buildprogress__cancel {
+  margin-left: var(--space-2);
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.buildprogress__cancel:hover {
+  color: #c0392b;
+  border-color: var(--border);
+  background: var(--bg-sunken);
+}
+
 .buildprogress__caret {
   display: inline-flex;
   color: var(--text-faint);

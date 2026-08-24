@@ -369,6 +369,10 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.buildSave, tasks, named(where)) as Promise<Result<BuildPlan | null>>;
   },
 
+  buildCancel(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.buildCancel, named(where)) as Promise<Result<null>>;
+  },
+
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {
     return ipcRenderer.invoke(CHANNEL.carried, named(where)) as Promise<Result<readonly CarriedExtension[]>>;
   },

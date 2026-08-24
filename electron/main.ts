@@ -6816,6 +6816,16 @@ function register(): void {
     });
   });
 
+  handle<null>(CHANNEL.buildCancel, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done(null);
+    return onePlanAtATime(open.path, async () => {
+      await rm(buildPlanFile(open.path), { force: true }).catch(() => undefined);
+      pushBuildPlan(open.path, null);
+      return done(null);
+    });
+  });
+
   handle<string>(CHANNEL.skillText, async (_event, args) => {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);

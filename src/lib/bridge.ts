@@ -1043,6 +1043,10 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(null));
     },
 
+    buildCancel(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -1903,6 +1907,7 @@ function connect(): Bridge {
     buildAdvance: (op, where) => api.buildAdvance(op, where),
     chooseDocument: (where) => api.chooseDocument(where),
     buildSave: (tasks, where) => api.buildSave(tasks, where),
+    buildCancel: (where) => api.buildCancel(where),
     stopAsking: (on, where) => api.stopAsking(on, where),
     goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
     running: (where) => api.running(where),

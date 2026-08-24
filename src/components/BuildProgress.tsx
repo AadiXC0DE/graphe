@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { BuildPlan } from '../lib/ipc';
+import { bridge } from '../lib/bridge';
 import './BuildProgress.css';
 
 type Props = {
@@ -38,6 +39,7 @@ export default function BuildProgress({ plan, running = false }: Props) {
   const head = failed > 0
     ? `${plan.done}/${plan.total} complete · ${SAYS.failed(failed)}`
     : `${plan.done}/${plan.total} ${SAYS.done}`;
+  const canCancel = plan.done < plan.total;
 
   return (
     <section className={`buildprogress ${open ? 'buildprogress--open' : ''}`} aria-label="Progress">
@@ -51,6 +53,19 @@ export default function BuildProgress({ plan, running = false }: Props) {
         <span className={`buildprogress__dot ${running ? 'buildprogress__dot--live' : ''}`} aria-hidden="true" />
         <span className="buildprogress__name">{SAYS.name}</span>
         <span className="buildprogress__count">{head}</span>
+        {canCancel ? (
+          <button
+            type="button"
+            className="buildprogress__cancel"
+            onClick={(event) => {
+              event.stopPropagation();
+              void bridge.buildCancel();
+            }}
+            aria-label="Cancel todo"
+          >
+            Cancel
+          </button>
+        ) : null}
         <span className="buildprogress__caret" aria-hidden="true">
           <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
             <path

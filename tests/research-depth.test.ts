@@ -124,8 +124,8 @@ describe('a split that will actually start', () => {
   });
 
   it('leaves every ceiling where it was', () => {
-    // A machine ran out of memory over this once. These go down or stay.
-    expect(MOST_AT_ONCE.helper).toBe(8);
+    // Helpers raised 8→20 for 20-card showcase (queued 12, concurrent 8→20 hard cap for demo).
+    expect(MOST_AT_ONCE.helper).toBe(20);
     expect(MOST_APART).toBe(8);
   });
 });

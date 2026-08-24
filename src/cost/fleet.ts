@@ -83,16 +83,22 @@ export const ceilingWords = {
  * keeps its own four, set where the board is.
  */
 export const MOST_AT_ONCE: Readonly<Record<RunKind, number>> = {
-  /* The same number a single request may break itself into (`MOST_APART`), so a
-     fan-out that the model was told it could ask for is never refused on the
-     way out by a ceiling nobody mentioned. Research splits a question fewer
-     ways than this on purpose, leaving room for whatever is already working. */
-  helper: 8,
+  /* How many helpers may run at once for the 20+ showcase — raised from 8
+     to 20 so a single fan-out can film 20 cards. Still bounded by
+     HELPER_TOTAL_MAX (20) and research MOST_TOGETHER, and by the machine's
+     memory via howManyFit when you want system-aware later. */
+  helper: 20,
   // Background work is already capped per project by the board that holds it,
   // and this fleet is one for the whole app: capping it here as well would mean
   // a second project could not start anything while the first was busy.
   away: Number.POSITIVE_INFINITY,
 };
+
+/** Showcase cap — 20 helpers in one fan-out for filming. Kept as a hard
+ *  concurrent cap for now (simplest, no queue). Future B can keep 8 concurrent
+ *  + 12 queued = 20 visible without 20×2G swap. */
+export const HELPER_QUEUED_MAX = 12;
+export const HELPER_TOTAL_MAX = 20;
 
 /** Said to the *person*, once, when their ceiling is in one currency and the
  *  account bills in another. There is no exchange rate in this codebase and

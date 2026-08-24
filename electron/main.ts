@@ -207,11 +207,11 @@ import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceO
 import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
 import { checkServer, inProject, mcpFile, readMcpConfig, savingFrom, writeMcpConfig } from '../src/agent/pi/mcp';
 import { holdsBack } from '../src/projects/heldback';
-import { AT_A_TIME, boardWords, howManyGoing, saysCannotKeep, waysNumbering } from '../src/work/board';
+import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
 import { saysTook } from '../src/work/stack';
 import { formatMoney } from '../src/cost/money';
 import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
-import { pressureNow, roomHere } from '../src/work/machine';
+
 import {
   addStanding,
   dueNow,
@@ -3675,10 +3675,11 @@ function deskFor(path: string, name: string): AwayDesk {
   const already = awayDesks.get(path);
   if (already !== undefined) return already;
   const history = new ProjectHistory(path);
-  // How many this computer can carry, not how many fill a sheet. A machine with
-  // less memory than the board assumes runs fewer, rather than running four and
-  // stalling.
-  const bench = new Workbench({ history, under: awayFolder(path), atOnce: roomHere(AT_A_TIME) });
+  // Board work now always gets the full sheet (4 at a time) — every piece
+  // asked to run in parallel starts in parallel, like "gets on with it" mode.
+  // The old roomHere/pressure gate throttled 4 → 1 on 8–16 GB machines and is
+  // what made "Waiting its turn" fill the board.
+  const bench = new Workbench({ history, under: awayFolder(path), atOnce: AT_A_TIME });
   const desk: AwayDesk = {
     path,
     name,
@@ -4092,11 +4093,11 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       figmaToken: figmaCredential(),
     });
     run.session = session;
-    // "Until it's done": full access for this run, no questions, and a wall
-    // clock so a stuck loop cannot burn the night. Ordinary background work
-    // keeps asking when it should.
+    // Every board run now gets full access like "Until it's done" — no questions,
+    // no "Run an instruction I do not fully recognise?" park. The wall clock
+    // stays only for true overnight goals.
     const untilDone = desk.goals.has(piece.id);
-    if (untilDone) session.goAsFarAs('doing');
+    session.goAsFarAs('doing');
     if (untilDone) {
       goalTimer = setTimeout(() => {
         held.stop();
@@ -4193,15 +4194,6 @@ function stopWhatFollows(desk: AwayDesk, id: string, because: string): void {
   for (const one of desk.chain.stopFollowing(id, because)) noteDown(desk, one);
 }
 
-/** Whether any project has background work going. The memory a run holds is the
- *  machine's, not the project's, so what may start next is asked of all of it. */
-function anythingGoing(): boolean {
-  for (const desk of awayDesks.values()) {
-    if (howManyGoing(desk.bench.pieces) > 0) return true;
-  }
-  return false;
-}
-
 /** Start as many as there is room for. Called when one is asked for and again
  *  whenever one finishes. */
 async function runWhatCan(desk: AwayDesk): Promise<void> {
@@ -4221,14 +4213,10 @@ async function runWhatCan(desk: AwayDesk): Promise<void> {
     if (await desk.history.hasUnsavedChanges()) {
       await desk.history.snapshot('Saved before working on its own');
     }
-    // On a machine already short of memory, nothing new starts until something
-    // frees up — counted across every project, because two of them filling the
-    // laptop is the case a per-project cap cannot see. Never a full stop: with
-    // nothing going anywhere there is nothing left to start the next one, and
-    // work that silently never begins is worse than work that takes longer.
-    const easy = (await pressureNow()) === 'fine';
-    const room = easy || !anythingGoing() ? undefined : 0;
-    began = await desk.bench.begin(room);
+    // Board runs are now fully parallel and fully autonomous — never gated by
+    // memory pressure. The sheet itself caps at AT_A_TIME (4), which is the
+    // only limit; "Waiting its turn" is queue order, not a throttle.
+    began = await desk.bench.begin(undefined);
   } catch (cause) {
     const why = cause instanceof Error ? cause.message : String(cause);
     const stopped: string[] = [];

@@ -4736,18 +4736,7 @@ function Conversation() {
       ) : null}
 
       {helpersAt !== null ? (
-        <HelpersView
-          helpers={helpers}
-          at={helpersAt.at}
-          onClose={() => setHelpersAt(null)}
-          onBringIn={(helper) => {
-            // Into the box rather than straight to the model: what a helper
-            // found is something to work from, and the next message is still
-            // the person's to write.
-            setDraft(`${helper.saying ?? ""}\n\n`);
-            setHelpersAt(null);
-          }}
-        />
+        <HelpersView helpers={helpers} at={helpersAt.at} onClose={() => setHelpersAt(null)} />
       ) : null}
 
       {!overviewed && desk !== null && desk.spent !== null ? (

@@ -164,7 +164,7 @@
 }
 
 /* Three answers where a switch would only offer two: following the computer is
-   a real choice, not the absence of one. */
+   a real choice, not the absence of one. Kept for any row that still uses it. */
 .settings__choice {
   display: inline-flex;
   flex: none;
@@ -212,5 +212,175 @@
 @media (prefers-reduced-motion: reduce) {
   .settings__pick {
     transition: none;
+  }
+}
+
+/* Theme — 5-pill Slack-style mini previews, instant switch, no reload */
+.settings__row--theme {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.settings__theme-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  align-items: stretch;
+}
+
+.settings__themes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  align-self: flex-start;
+}
+
+.settings__theme {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 6px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  min-width: 64px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.settings__theme:active {
+  transform: scale(0.97);
+}
+
+.settings__theme--on {
+  background: var(--bg-raised);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings__theme:not(.settings__theme--on):hover {
+    background: var(--bg);
+    border-color: var(--border);
+  }
+}
+
+.settings__theme:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.settings__thumb {
+  width: 52px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  display: block;
+  flex: none;
+}
+
+.settings__thumb-raised {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  right: 6px;
+  height: 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.settings__thumb-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+}
+
+.settings__thumb-line {
+  position: absolute;
+  left: 6px;
+  right: 14px;
+  height: 3px;
+  border-radius: 999px;
+  opacity: 0.9;
+}
+
+.settings__thumb-line:nth-of-type(3) {
+  top: 20px;
+}
+
+.settings__thumb-line--muted {
+  top: 25px;
+  right: 18px;
+  opacity: 0.45;
+}
+
+.settings__theme-label {
+  font-size: var(--text-2xs);
+  line-height: 1;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.settings__theme--on .settings__theme-label {
+  color: var(--text);
+}
+
+.settings__system {
+  align-self: flex-start;
+  padding: 4px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.settings__system--on {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--bg);
+  box-shadow: var(--shadow-sm);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings__system:not(.settings__system--on):hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+.settings__system:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings__theme,
+  .settings__system {
+    transition: none;
+  }
+
+  .settings__theme:active {
+    transform: none;
   }
 }

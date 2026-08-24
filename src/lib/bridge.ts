@@ -29,6 +29,7 @@ import {
   type Design,
 } from '../design/moved';
 import { howMuchBy } from '../design/gate';
+import { themeFrom } from './theme';
 import { pagesIn, type Page } from '../preview/pages';
 import { holdsBack } from '../projects/heldback';
 import { keeping } from '../projects/kept';
@@ -645,6 +646,7 @@ let previewHowFar: HowFar = 'asking';
     heldBack: {},
     howMuch: null,
     ceiling: null,
+    theme: 'system',
   };
 
   const send = (event: AgentEvent): void => {
@@ -912,6 +914,11 @@ let previewHowFar: HowFar = 'asking';
 
     setShowFiles(on: boolean): Promise<Result<Preferences>> {
       preferred = { ...preferred, showFiles: on };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    setTheme(theme: unknown): Promise<Result<Preferences>> {
+      preferred = { ...preferred, theme: themeFrom(theme) };
       return Promise.resolve(done({ ...preferred }));
     },
 
@@ -1888,6 +1895,7 @@ function connect(): Bridge {
     setShowMe: (on) => api.setShowMe(on),
     keepVersion: (versionId, keep) => api.keepVersion(versionId, keep),
     setShowFiles: (on) => api.setShowFiles(on),
+    setTheme: (theme) => api.setTheme(theme),
     projectFiles: () => api.projectFiles(),
     fileText: (path) => api.fileText(path),
     hatches: () => api.hatches(),

@@ -755,6 +755,14 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.setHoldBack, on, named(where)) as Promise<Result<Preferences>>;
   },
 
+  setTheme(theme: string): Promise<Result<Preferences>> {
+    const known = ['system', 'light', 'graphe', 'super', 'pink', 'slate', 'dark'];
+    if (typeof theme !== 'string' || !known.includes(theme)) {
+      return Promise.resolve(refuse<Preferences>('I could not tell which theme you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setTheme, theme) as Promise<Result<Preferences>>;
+  },
+
   setHowMuch(id: string): Promise<Result<Preferences>> {
     if (typeof id !== 'string' || id.trim() === '') {
       return Promise.resolve(refuse<Preferences>('I could not tell which line that was.'));

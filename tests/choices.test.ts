@@ -165,6 +165,7 @@ describe('D1 — the real name of what just happened', () => {
           heldBack: {},
           howMuch: null,
           ceiling: null,
+          theme: 'system',
         },
       });
     });

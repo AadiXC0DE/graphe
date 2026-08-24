@@ -8,26 +8,66 @@
  * happen at the edge; this only decides what the answer means.
  */
 
-export type Theme = 'system' | 'light' | 'dark';
+export type Theme = 'system' | 'light' | 'graphe' | 'super' | 'pink' | 'slate' | 'dark';
+
+export type ThemeExplicit = Exclude<Theme, 'system'>;
 
 export const THEME_WORDS = {
-  name: 'Light or dark',
-  note: 'Follow this computer, or pick one and keep it.',
+  name: 'Theme',
+  note: 'Five finishes — light, graphe, super, pink and slate. Pick one and keep it.',
   system: 'Match this computer',
   light: 'Light',
-  dark: 'Dark',
+  graphe: 'Graphe',
+  super: 'Super',
+  pink: 'Pink',
+  slate: 'Slate',
 } as const;
 
-export const THEMES: readonly { id: Theme; label: string }[] = [
-  { id: 'system', label: THEME_WORDS.system },
-  { id: 'light', label: THEME_WORDS.light },
-  { id: 'dark', label: THEME_WORDS.dark },
+/** The five explicit finishes, as a segmented control draws them.
+ *  Each carries a tiny preview palette (Slack-style) so the row reads as
+ *  swatches rather than words — bg / raised / border / text / accent. */
+export const THEMES: readonly {
+  id: ThemeExplicit;
+  label: string;
+  preview: { bg: string; raised: string; border: string; text: string; accent: string };
+}[] = [
+  {
+    id: 'light',
+    label: THEME_WORDS.light,
+    preview: { bg: '#fbfbfa', raised: '#ffffff', border: '#e4e4e1', text: '#1a1a19', accent: '#b8492c' },
+  },
+  {
+    id: 'graphe',
+    label: THEME_WORDS.graphe,
+    preview: { bg: '#131312', raised: '#1c1c1a', border: '#2b2b28', text: '#f2f2ef', accent: '#e0714d' },
+  },
+  {
+    id: 'super',
+    label: THEME_WORDS.super,
+    preview: { bg: '#0a0a0b', raised: '#18181b', border: '#27272a', text: '#fafafa', accent: '#f59e0b' },
+  },
+  {
+    id: 'pink',
+    label: THEME_WORDS.pink,
+    preview: { bg: '#fff1f2', raised: '#ffffff', border: '#fecdd3', text: '#1a0a13', accent: '#e11d48' },
+  },
+  {
+    id: 'slate',
+    label: THEME_WORDS.slate,
+    preview: { bg: '#0f172a', raised: '#1e293b', border: '#334155', text: '#f8fafc', accent: '#38bdf8' },
+  },
 ];
 
 /** Anything unreadable means "follow the computer" — the answer somebody gets
- *  when they have never chosen, which is the one that surprises nobody. */
+ *  when they have never chosen, which is the one that surprises nobody.
+ *  'dark' is the historic name for graphe and still maps there. */
 export function themeFrom(stored: unknown): Theme {
-  return stored === 'light' || stored === 'dark' ? stored : 'system';
+  if (stored === 'light') return 'light';
+  if (stored === 'graphe' || stored === 'dark') return 'graphe';
+  if (stored === 'super') return 'super';
+  if (stored === 'pink') return 'pink';
+  if (stored === 'slate') return 'slate';
+  return 'system';
 }
 
 /**
@@ -38,13 +78,15 @@ export function themeFrom(stored: unknown): Theme {
  * *removing* the mark rather than working out which one to write. A stamp that
  * guessed would stop tracking the moment the computer changed.
  */
-export function markFor(theme: Theme): 'light' | 'dark' | null {
-  return theme === 'system' ? null : theme;
+export function markFor(theme: Theme): ThemeExplicit | null {
+  if (theme === 'system') return null;
+  if (theme === 'dark') return 'graphe';
+  return theme;
 }
 
 /** Which palette is actually on screen, given a choice and what the computer
  *  says. Used for what the row reads under its own name. */
-export function showing(theme: Theme, computerIsDark: boolean): 'light' | 'dark' {
-  if (theme !== 'system') return theme;
-  return computerIsDark ? 'dark' : 'light';
+export function showing(theme: Theme, computerIsDark: boolean): ThemeExplicit {
+  if (theme !== 'system') return theme === 'dark' ? 'graphe' : theme;
+  return computerIsDark ? 'graphe' : 'light';
 }

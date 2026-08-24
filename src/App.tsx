@@ -481,6 +481,7 @@ function Conversation() {
     heldBack: {},
     howMuch: null,
     ceiling: null,
+    theme: 'system',
   });
   const [editor, setEditor] = useState<string | null>(null);
 
@@ -761,6 +762,20 @@ function Conversation() {
       // A window with no storage still gets the theme, just not next time.
     }
   }, [theme]);
+
+  const changeTheme = useCallback(
+    (next: Theme) => {
+      const wanted = themeFrom(next);
+      setTheme(wanted);
+      // Persist to preferences.json (desktop) and keep the in-memory copy in sync
+      // so the next launch reads the same value without waiting for the async reply.
+      setPreferences((was) => ({ ...was, theme: wanted }));
+      void bridge.setTheme(wanted).then((answer) => {
+        if (answer.ok) setPreferences(answer.value);
+      });
+    },
+    [],
+  );
   /** The project file rail keeps its setting when folded, just like the main
    *  sidebar: showing it again is one press rather than a trip to settings. */
   const [filesOpen, setFilesOpen] = useState(true);
@@ -1692,7 +1707,16 @@ function Conversation() {
   useEffect(() => {
     let stillHere = true;
     void bridge.preferences().then((answer) => {
-      if (stillHere && answer.ok) setPreferences(answer.value);
+      if (stillHere && answer.ok) {
+        setPreferences(answer.value);
+        // If the file knows a theme, it wins over the stale localStorage
+        // value we used for the first paint — one extra write would still be
+        // correct, but this is quieter and keeps the early paint from flashing.
+        if (answer.value.theme !== undefined) {
+          const fromFile = themeFrom(answer.value.theme);
+          setTheme((current) => (current === fromFile ? current : fromFile));
+        }
+      }
     });
     void bridge.hatches().then((answer) => {
       if (stillHere && answer.ok) setEditor(answer.value.editor);
@@ -4261,7 +4285,7 @@ function Conversation() {
         showFiles={preferences.showFiles}
         holdBack={holdsBack(preferences.heldBack, desk?.path)}
         theme={theme}
-        onTheme={setTheme}
+        onTheme={changeTheme}
         onToggleShowMe={() => changeShowMe(!preferences.showMe)}
         onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
         onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}

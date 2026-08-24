@@ -207,7 +207,8 @@
   --accent-ink: #ad4529;
 }
 
-:root[data-theme='dark'] {
+:root[data-theme='dark'],
+:root[data-theme='graphe'] {
   color-scheme: dark;
   --bg: #131312;
   --bg-raised: #1c1c1a;
@@ -222,4 +223,71 @@
   --accent-text: #1a1a19;
   --accent-soft: #2a1c17;
   --accent-ink: #e0714d;
+}
+
+/* super — zinc #0A0A0B + amber. Darkest of the three darks.
+   AA: text 18.9 / muted 7.7 / faint 6.0 on bg; control 4.0 on bg (3:1 for
+   WCAG 1.4.11); accent-ink 10.8 on soft, 11.8 on bg; accentText 9.2 on accent. */
+:root[data-theme='super'] {
+  color-scheme: dark;
+  --bg: #0a0a0b;
+  --bg-raised: #18181b;
+  --bg-sunken: #050507;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --border-control: #71717a;
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-faint: #8e8e96;
+  --accent: #f59e0b;
+  --accent-text: #0a0a0b;
+  --accent-soft: #1c1507;
+  --accent-ink: #fbbf24;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 20px rgb(0 0 0 / 0.5);
+}
+
+/* pink — rose hsl 340. Light, warm. Uses rose-50/100/200 tint.
+   AA: text 17.4 / muted 5.2 (hsl 340 30% 45% #955067) / faint 5.0 (hsl 340 20% 45% #8a5c6b) on bg;
+   faint 4.57 on sunken just clears; control 3.32 on bg / 3.04 on sunken (3:1);
+   accent-text 4.70 on accent, ink 7.3 on bg / 6.6 on soft. */
+:root[data-theme='pink'] {
+  color-scheme: light;
+  --bg: #fff1f2;
+  --bg-raised: #ffffff;
+  --bg-sunken: #ffe4e6;
+  --border: #fecdd3;
+  --border-strong: #fda4af;
+  --border-control: #868685;
+  --text: #1a0a13;
+  --text-muted: #955067;
+  --text-faint: #8a5c6b;
+  --accent: #e11d48;
+  --accent-text: #ffffff;
+  --accent-soft: #ffe4e6;
+  --accent-ink: #9f1239;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
+}
+
+/* slate — #0f172a slate-900. Cool, desaturated dark blue.
+   AA: text 17.0 / muted 6.9 / faint 5.7 on bg; control 3.75 on bg / 3.07 on raised;
+   ink 10.4 on soft, accentText 9.4 on accent. */
+:root[data-theme='slate'] {
+  color-scheme: dark;
+  --bg: #0f172a;
+  --bg-raised: #1e293b;
+  --bg-sunken: #020617;
+  --border: #334155;
+  --border-strong: #475569;
+  --border-control: #64748b;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-faint: #8293ad;
+  --accent: #38bdf8;
+  --accent-text: #020617;
+  --accent-soft: #0c1a2e;
+  --accent-ink: #7dd3fc;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 20px rgb(0 0 0 / 0.5);
 }

@@ -177,26 +177,52 @@ export default function Settings({
           if (one.kind === 'theme') {
             return (
               <li key={one.id}>
-                <div className="settings__row">
+                <div className="settings__row settings__row--theme">
                   <span className="settings__text">
                     <span className="settings__name">{one.name}</span>
                     <span className="settings__note">{one.note}</span>
                   </span>
-                  {/* Three states rather than a switch: "follow this computer"
-                      is a real answer and a two-way toggle cannot say it. */}
-                  <span className="settings__choice" role="group" aria-label={one.name}>
-                    {THEMES.map((pick) => (
-                      <button
-                        key={pick.id}
-                        type="button"
-                        className={`settings__pick ${theme === pick.id ? 'settings__pick--on' : ''}`}
-                        aria-pressed={theme === pick.id}
-                        onClick={() => onTheme(pick.id)}
-                      >
-                        {pick.label}
-                      </button>
-                    ))}
-                  </span>
+                  <div className="settings__theme-wrap">
+                    <span className="settings__themes" role="group" aria-label={one.name}>
+                      {THEMES.map((pick) => (
+                        <button
+                          key={pick.id}
+                          type="button"
+                          className={`settings__theme ${theme === pick.id ? 'settings__theme--on' : ''}`}
+                          aria-pressed={theme === pick.id}
+                          onClick={() => onTheme(pick.id)}
+                          title={pick.label}
+                        >
+                          <span
+                            className="settings__thumb"
+                            aria-hidden="true"
+                            style={
+                              {
+                                background: pick.preview.bg,
+                                borderColor: pick.preview.border,
+                                ['--thumb-accent' as string]: pick.preview.accent,
+                                ['--thumb-text' as string]: pick.preview.text,
+                              } as React.CSSProperties
+                            }
+                          >
+                            <span className="settings__thumb-raised" style={{ background: pick.preview.raised, borderColor: pick.preview.border }} />
+                            <span className="settings__thumb-dot" style={{ background: pick.preview.accent }} />
+                            <span className="settings__thumb-line" style={{ background: pick.preview.text }} />
+                            <span className="settings__thumb-line settings__thumb-line--muted" style={{ background: pick.preview.text }} />
+                          </span>
+                          <span className="settings__theme-label">{pick.label}</span>
+                        </button>
+                      ))}
+                    </span>
+                    <button
+                      type="button"
+                      className={`settings__system ${theme === 'system' ? 'settings__system--on' : ''}`}
+                      aria-pressed={theme === 'system'}
+                      onClick={() => onTheme('system')}
+                    >
+                      {THEME_WORDS.system}
+                    </button>
+                  </div>
                 </div>
               </li>
             );

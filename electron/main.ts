@@ -156,6 +156,7 @@ import { tellWhatHappened } from '../src/diff/summary';
 import { inDesignWords, readChanges, NOTHING_TO_SAY, type Edit } from '../src/design/words';
 import { isTrusted, trusting } from '../src/projects/carried';
 import { keeping, PreferenceFile } from '../src/projects/preferences';
+import { themeFrom } from '../src/lib/theme';
 import { Recents } from '../src/projects/recents';
 import { addressed, Workspaces, type Workspace } from '../src/projects/workspaces';
 import { findEditor, type Editor } from '../src/shell/editors';
@@ -5345,6 +5346,11 @@ function register(): void {
     if (open === null) return fail(NOTHING_OPEN);
     const held = (await preferences()).all().heldBack;
     return done(await (await preferences()).change({ heldBack: { ...held, [open.path]: on } }));
+  });
+
+  handle<Preferences>(CHANNEL.setTheme, async (_event, args) => {
+    const [theme] = args;
+    return done(await (await preferences()).change({ theme: themeFrom(theme) }));
   });
 
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {

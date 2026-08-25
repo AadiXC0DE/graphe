@@ -9,7 +9,7 @@ what we depend on and why lives in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.
 Graphe is not a fork of any of these projects. We depend on them as published packages and have
 not modified their source. Their names and marks belong to their respective owners.
 
-469 packages, generated 2026-08-23.
+462 packages, generated 2026-08-25.
 
 ## Summary
 
@@ -45,13 +45,13 @@ not modified their source. Their names and marks belong to their respective owne
 | [@babel/runtime](https://babel.dev/docs/en/next/babel-runtime) | 7.29.2 | MIT |
 | [@braintree/sanitize-url](https://github.com/braintree/sanitize-url#readme) | 7.1.2 | MIT |
 | [@chevrotain/types](https://chevrotain.io/documentation/) | 11.1.2 | Apache-2.0 |
-| [@earendil-works/pi-agent-core](https://github.com/earendil-works/pi) | 0.84.1 | MIT |
-| [@earendil-works/pi-ai](https://github.com/earendil-works/pi) | 0.84.1 | MIT |
-| [@earendil-works/pi-client](https://github.com/earendil-works/pi) | 0.84.1 | MIT |
-| [@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi) | 0.84.1 | MIT |
-| [@earendil-works/pi-protocol](https://github.com/earendil-works/pi) | 0.84.1 | MIT |
-| [@earendil-works/pi-telemetry](https://github.com/earendil-works/pi) | 0.84.1 | MIT |
-| [@earendil-works/pi-tui](https://github.com/earendil-works/pi) | 0.84.1 | MIT |
+| [@earendil-works/pi-agent-core](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
+| [@earendil-works/pi-ai](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
+| [@earendil-works/pi-client](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
+| [@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
+| [@earendil-works/pi-protocol](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
+| [@earendil-works/pi-telemetry](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
+| [@earendil-works/pi-tui](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
 | [@google/genai](https://github.com/googleapis/js-genai#readme) | 1.52.0 | Apache-2.0 |
 | [@hono/node-server](https://github.com/honojs/node-server) | 2.1.1 | MIT |
 | [@huggingface/jinja](https://github.com/huggingface/huggingface.js) | 0.5.9 | MIT |
@@ -67,11 +67,8 @@ not modified their source. Their names and marks belong to their respective owne
 | [@mariozechner/clipboard-darwin-arm64](https://github.com/badlogic/clipboard) | 0.3.9 | MIT |
 | [@mariozechner/clipboard-darwin-universal](https://github.com/badlogic/clipboard) | 0.3.9 | MIT |
 | [@mermaid-js/parser](https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme) | 1.2.0 | MIT |
-| [@mistralai/mistralai](https://github.com/mistralai/client-ts) | 2.2.6 | Apache-2.0 |
 | [@modelcontextprotocol/sdk](https://modelcontextprotocol.io) | 1.30.0 | MIT |
 | [@nodable/entities](https://github.com/nodable/val-parsers) | 2.1.0 | MIT |
-| [@opentelemetry/api](https://github.com/open-telemetry/opentelemetry-js/tree/main/api) | 1.9.0 | Apache-2.0 |
-| [@opentelemetry/semantic-conventions](https://github.com/open-telemetry/opentelemetry-js/tree/main/semantic-conventions) | 1.41.1 | Apache-2.0 |
 | [@protobufjs/aspromise](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
 | [@protobufjs/base64](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
 | [@protobufjs/codegen](https://github.com/dcodeIO/protobuf.js) | 2.0.5 | BSD-3-Clause |
@@ -274,7 +271,6 @@ not modified their source. Their names and marks belong to their respective owne
 | [get-east-asian-width](https://github.com/sindresorhus/get-east-asian-width) | 1.6.0 | MIT |
 | [get-intrinsic](https://github.com/ljharb/get-intrinsic#readme) | 1.3.0 | MIT |
 | [get-proto](https://github.com/ljharb/get-proto#readme) | 1.0.1 | MIT |
-| glob | 13.0.6 | BlueOak-1.0.0 |
 | [glob](https://github.com/isaacs/node-glob) | 7.2.3 | ISC |
 | [global-agent](https://github.com/gajus/global-agent) | 3.0.0 | BSD-3-Clause |
 | [globalthis](https://github.com/ljharb/System.global) | 1.0.4 | MIT |
@@ -350,7 +346,6 @@ not modified their source. Their names and marks belong to their respective owne
 | [minimatch](https://github.com/isaacs/minimatch) | 3.1.5 | ISC |
 | [minipass](https://github.com/isaacs/minipass) | 3.3.6 | ISC |
 | [minipass](https://github.com/isaacs/minipass) | 5.0.0 | ISC |
-| [minipass](https://github.com/isaacs/minipass) | 7.1.3 | BlueOak-1.0.0 |
 | [minizlib](https://github.com/isaacs/minizlib) | 2.1.2 | MIT |
 | [mkdirp](https://github.com/isaacs/node-mkdirp) | 1.0.4 | MIT |
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
@@ -372,7 +367,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [onnxruntime-common](https://github.com/Microsoft/onnxruntime) | 1.24.3 | MIT |
 | [onnxruntime-node](https://github.com/Microsoft/onnxruntime) | 1.24.3 | MIT |
 | [onnxruntime-web](https://github.com/Microsoft/onnxruntime) | 1.26.0-dev.20260416-b7804b056c | MIT |
-| [openai](https://github.com/openai/openai-node) | 6.26.0 | Apache-2.0 |
+| [openai](https://github.com/openai/openai-node) | 6.40.0 | Apache-2.0 |
 | [p-retry](https://github.com/sindresorhus/p-retry) | 4.6.2 | MIT |
 | [package-manager-detector](https://github.com/antfu-collective/package-manager-detector#readme) | 1.8.0 | MIT |
 | [parseurl](https://github.com/pillarjs/parseurl) | 1.3.3 | MIT |
@@ -381,7 +376,6 @@ not modified their source. Their names and marks belong to their respective owne
 | [path-expression-matcher](https://github.com/NaturalIntelligence/path-expression-matcher#readme) | 1.5.0 | MIT |
 | [path-is-absolute](https://github.com/sindresorhus/path-is-absolute) | 1.0.1 | MIT |
 | [path-key](https://github.com/sindresorhus/path-key) | 3.1.1 | MIT |
-| [path-scurry](https://github.com/isaacs/path-scurry) | 2.0.2 | BlueOak-1.0.0 |
 | [path-to-regexp](https://github.com/pillarjs/path-to-regexp) | 8.4.2 | MIT |
 | [pkce-challenge](https://github.com/crouchcd/pkce-challenge#readme) | 5.0.1 | MIT |
 | [platform](https://github.com/bestiejs/platform.js) | 1.3.6 | MIT |
@@ -480,7 +474,6 @@ not modified their source. Their names and marks belong to their respective owne
 | [xml-naming](https://github.com/NaturalIntelligence/xml-naming) | 0.1.0 | MIT |
 | [yallist](https://github.com/isaacs/yallist) | 4.0.0 | ISC |
 | [yaml](https://eemeli.org/yaml/) | 2.9.0 | ISC |
-| [zod](https://zod.dev) | 3.25.76 | MIT |
 | [zod](https://zod.dev) | 4.4.3 | MIT |
 | [zod-to-json-schema](https://github.com/StefanTerdell/zod-to-json-schema) | 3.25.2 | ISC |
 | [zwitch](https://github.com/wooorm/zwitch) | 2.0.4 | MIT |
@@ -820,7 +813,7 @@ Licence: Apache-2.0
 [object Object]
 ```
 
-### @earendil-works/pi-agent-core 0.84.1
+### @earendil-works/pi-agent-core 0.84.3
 
 <https://github.com/earendil-works/pi>
 
@@ -829,7 +822,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-ai 0.84.1
+### @earendil-works/pi-ai 0.84.3
 
 <https://github.com/earendil-works/pi>
 
@@ -838,7 +831,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-client 0.84.1
+### @earendil-works/pi-client 0.84.3
 
 <https://github.com/earendil-works/pi>
 
@@ -847,7 +840,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-coding-agent 0.84.1
+### @earendil-works/pi-coding-agent 0.84.3
 
 <https://github.com/earendil-works/pi>
 
@@ -856,7 +849,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-protocol 0.84.1
+### @earendil-works/pi-protocol 0.84.3
 
 <https://github.com/earendil-works/pi>
 
@@ -865,7 +858,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-telemetry 0.84.1
+### @earendil-works/pi-telemetry 0.84.3
 
 <https://github.com/earendil-works/pi>
 
@@ -874,7 +867,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-tui 0.84.1
+### @earendil-works/pi-tui 0.84.3
 
 <https://github.com/earendil-works/pi>
 
@@ -1029,16 +1022,6 @@ Licence: MIT
 [object Object]
 ```
 
-### @mistralai/mistralai 2.2.6
-
-<https://github.com/mistralai/client-ts>
-
-Licence: Apache-2.0
-
-```
-[object Object]
-```
-
 ### @modelcontextprotocol/sdk 1.30.0
 
 <https://modelcontextprotocol.io>
@@ -1057,26 +1040,6 @@ Licence: MIT
 
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
-
-### @opentelemetry/api 1.9.0
-
-<https://github.com/open-telemetry/opentelemetry-js/tree/main/api>
-
-Licence: Apache-2.0
-
-```
-[object Object]
-```
-
-### @opentelemetry/semantic-conventions 1.41.1
-
-<https://github.com/open-telemetry/opentelemetry-js/tree/main/semantic-conventions>
-
-Licence: Apache-2.0
-
-```
-[object Object]
-```
 
 ### @protobufjs/aspromise 1.1.2
 
@@ -3101,14 +3064,6 @@ Licence: MIT
 [object Object]
 ```
 
-### glob 13.0.6
-
-Licence: BlueOak-1.0.0
-
-```
-[object Object]
-```
-
 ### glob 7.2.3
 
 <https://github.com/isaacs/node-glob>
@@ -3851,16 +3806,6 @@ Licence: ISC
 [object Object]
 ```
 
-### minipass 7.1.3
-
-<https://github.com/isaacs/minipass>
-
-Licence: BlueOak-1.0.0
-
-```
-[object Object]
-```
-
 ### minizlib 2.1.2
 
 <https://github.com/isaacs/minizlib>
@@ -4067,7 +4012,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### openai 6.26.0
+### openai 6.40.0
 
 <https://github.com/openai/openai-node>
 
@@ -4152,16 +4097,6 @@ Licence: MIT
 <https://github.com/sindresorhus/path-key>
 
 Licence: MIT
-
-```
-[object Object]
-```
-
-### path-scurry 2.0.2
-
-<https://github.com/isaacs/path-scurry>
-
-Licence: BlueOak-1.0.0
 
 ```
 [object Object]
@@ -5138,16 +5073,6 @@ Licence: ISC
 <https://eemeli.org/yaml/>
 
 Licence: ISC
-
-```
-[object Object]
-```
-
-### zod 3.25.76
-
-<https://zod.dev>
-
-Licence: MIT
 
 ```
 [object Object]

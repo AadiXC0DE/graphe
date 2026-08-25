@@ -374,6 +374,13 @@
   outline-offset: 1px;
 }
 
+/* Which palette following the computer has actually landed on. */
+.settings__system-note {
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .settings__theme,
   .settings__system {

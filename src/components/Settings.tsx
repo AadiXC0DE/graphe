@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { THEMES, THEME_WORDS, type Theme } from '../lib/theme';
+import { THEMES, THEME_WORDS, showing, type Theme } from '../lib/theme';
 import Switch from './Switch';
 import './Settings.css';
 
@@ -133,6 +133,11 @@ export default function Settings({
 
   if (!open) return null;
 
+  /* Following the computer still lands somewhere; this is where. Read at the
+     render of the sheet — it is open for seconds, not for ever. */
+  const onScreen = showing('system', window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const onScreenName = onScreen === 'dark' ? THEME_WORDS.graphe : THEME_WORDS[onScreen];
+
   return (
     <section className="settings" aria-label="Settings" role="dialog" aria-modal="true">
       <header className="settings__top">
@@ -222,6 +227,12 @@ export default function Settings({
                     >
                       {THEME_WORDS.system}
                     </button>
+                    {theme === 'system' ? (
+                      /* Saying which palette the computer picked spares the
+                         reader five thumbnails and a guess about what they
+                         are actually looking at. */
+                      <p className="settings__system-note">{onScreenName} right now.</p>
+                    ) : null}
                   </div>
                 </div>
               </li>

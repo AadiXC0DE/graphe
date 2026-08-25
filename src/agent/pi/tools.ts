@@ -40,7 +40,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { readdir, readFile, rm } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // One line on purpose: the boundary test in tests/adapter.test.ts reads the
@@ -2260,6 +2260,11 @@ export type AskFirst = (questions: unknown) => Promise<string>;
  */
 export type StepDone = (note: string | null) => Promise<string>;
 
+/** Cancel the checklist the person can see. Wired by the shell, so the file is
+ *  found by the project it is stored under and deleted where the plan queue
+ *  can see it — never from here, where neither of those is true. */
+export type CancelBuild = () => Promise<string>;
+
 const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
   name: 'step_done',
   label: 'Ticking one off the list',
@@ -2283,22 +2288,7 @@ const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
   },
 });
 
-function buildPlanFileFor(project: string): string {
-  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const electron = require('electron') as { app?: { getPath: (name: string) => string } };
-    const maybeApp = electron.app;
-    if (maybeApp !== undefined && typeof maybeApp.getPath === 'function') {
-      return join(maybeApp.getPath('userData'), 'builds', `${key}.json`);
-    }
-  } catch {
-    void 0;
-  }
-  return join(tmpdir(), 'graphe-builds', `${key}.json`);
-}
-
-const cancelBuildTool = (cwd: string): ToolDefinition => ({
+const cancelBuildTool = (cancelBuild: CancelBuild): ToolDefinition => ({
   name: 'cancel_build',
   label: 'Cancelling the build',
   description:
@@ -2307,23 +2297,8 @@ const cancelBuildTool = (cwd: string): ToolDefinition => ({
   parameters: Type.Object({}),
   executionMode: 'sequential',
   execute: async (): ToolResult => {
-    const file = buildPlanFileFor(cwd);
-    await rm(file, { force: true }).catch(() => undefined);
-    try {
-      const electron = await import('electron');
-      const wins = (electron.BrowserWindow as unknown as { getAllWindows?: () => { webContents: { send: (c: string, v: unknown) => void }; isDestroyed: () => boolean }[] })?.getAllWindows?.() ?? [];
-      const win = wins[0];
-      if (win !== undefined && !win.isDestroyed()) {
-        const { CHANNEL } = await import('../../lib/ipc');
-        win.webContents.send(CHANNEL.buildPlanChanged, { project: cwd, plan: null });
-      }
-    } catch {
-      void 0;
-    }
-    return {
-      content: [{ type: 'text', text: 'The build checklist has been cancelled and removed from the screen.' }],
-      details: {},
-    };
+    const said = await cancelBuild();
+    return { content: [{ type: 'text', text: said }], details: {} };
   },
 });
 
@@ -2370,6 +2345,7 @@ export const grapheTools = (
   noted?: ChecksNoted,
   askFirst?: AskFirst | null,
   stepDone?: StepDone | null,
+  cancelBuild?: CancelBuild | null,
 ): ToolDefinition[] => {
   const tools: ToolDefinition[] = [
     websearchTool,
@@ -2383,6 +2359,9 @@ export const grapheTools = (
   if (askFirst !== undefined && askFirst !== null) tools.push(askFirstTool(askFirst));
   // Only where there is a list to tick. A helper has no checklist of its own.
   if (stepDone !== undefined && stepDone !== null) tools.push(stepDoneTool(stepDone));
+  // Same reach as the ticking: wherever a checklist can exist, saying no to it
+  // must exist too, and it comes from the shell so it lands on the right file.
+  if (cancelBuild !== undefined && cancelBuild !== null) tools.push(cancelBuildTool(cancelBuild));
   if (projectRoot !== undefined && projectRoot !== '') {
     tools.push(
       readMapTool(projectRoot),
@@ -2391,7 +2370,6 @@ export const grapheTools = (
       // something connected, and the project with nothing yet is the whole
       // point of this one.
       connectingTool(projectRoot),
-      cancelBuildTool(projectRoot),
     );
   }
   const token = (figmaToken ?? '').trim();

@@ -83,7 +83,7 @@ const estimate: Estimate = {
 const bigJob = biggerJob(estimate);
 const bigJobNote = estimateNote(estimate);
 
-type Theme = 'system' | 'light' | 'dark';
+type Theme = 'system' | 'light' | 'graphe' | 'super' | 'pink' | 'slate';
 
 /* -------------------------------------------------------------------------- */
 /* Copy for the formatting section                                             */
@@ -1053,7 +1053,10 @@ export default function Gallery() {
           </p>
         </div>
         <div className="gallery__themes" role="group" aria-label="Theme">
-          {(['system', 'light', 'dark'] as const).map((option) => (
+          {/* Every palette the app ships, so a piece can be reviewed in the
+              one it will actually be seen in. 'dark' is not offered: graphe is
+              its living name. */}
+          {(['system', 'light', 'graphe', 'super', 'pink', 'slate'] as const).map((option) => (
             <button
               key={option}
               type="button"

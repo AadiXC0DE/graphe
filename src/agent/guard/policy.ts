@@ -301,8 +301,12 @@ const SHELL_TOOLS = new Set([
 ]);
 
 /** Asking after something already agreed to, and ending it. Neither runs
- *  anything new, and a stop is the one action nobody should have to ask for. */
-const RUNNING_TOOLS = new Set(['running', 'stoprunning']);
+ *  anything new, and a stop is the one action nobody should have to ask for.
+ *  `cancelbuild` is ours: taking the build checklist off the screen when the
+ *  person says so — like `readmap` and `runchecks`, leaving it out meant the
+ *  exact moment somebody said "cancel the todo list" opened with the
+ *  unknown-command question about our own tool. */
+const RUNNING_TOOLS = new Set(['running', 'stoprunning', 'cancelbuild']);
 const SQL_TOOLS = new Set(['sql', 'query', 'dbquery', 'runsql', 'executesql', 'database', 'db', 'migrate']);
 const NETWORK_TOOLS = new Set(['fetch', 'http', 'httprequest', 'request', 'webfetch', 'download', 'upload', 'post', 'apicall']);
 /** Search engines. Their whole job is sending words out and bringing the

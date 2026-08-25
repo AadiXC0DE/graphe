@@ -14,7 +14,8 @@ type Props = {
   streaming?: boolean;
   /** A quiet aside under a Graphe turn, e.g. "This one's small, so I kept it Quick." */
   aside?: string;
-  /** True when this is the last turn in the thread — never clipped so the latest answer is always fully visible. */
+  /** True when this is the last turn in the thread — it starts unclipped, and
+   *  the reader can fold it once they are done with it. */
   isLast?: boolean;
 };
 
@@ -63,10 +64,14 @@ export default function Message({ from, children, streaming, aside, isLast }: Pr
         aria-live={!mine && streaming ? 'polite' : undefined}
         aria-busy={streaming || undefined}
       >
-        {streaming || text === null || isLast ? (
+        {streaming || text === null ? (
           body
         ) : (
-          <Clipped how={howMuch(text)} label="Show the rest">
+          /* The newest answer starts open — but as a starting position, not a
+             rule. Clipped holds its own state from there, so when the next
+             turn arrives and this one stops being last, nothing snaps: it
+             stays however the reader left it, still foldable. */
+          <Clipped how={howMuch(text)} label="Show the rest" defaultOpen={isLast}>
             {body}
           </Clipped>
         )}

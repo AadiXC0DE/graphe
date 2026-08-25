@@ -756,6 +756,9 @@ function Conversation() {
     // prefers-color-scheme block then decides, and keeps deciding.
     if (mark === null) document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', mark);
+    // Diagrams are drawn in the palette that was on screen when they rendered;
+    // this is their cue to draw again.
+    window.dispatchEvent(new Event('graphe:theme'));
     try {
       localStorage.setItem('graphe:theme', theme);
     } catch {
@@ -1709,13 +1712,11 @@ function Conversation() {
     void bridge.preferences().then((answer) => {
       if (stillHere && answer.ok) {
         setPreferences(answer.value);
-        // If the file knows a theme, it wins over the stale localStorage
-        // value we used for the first paint — one extra write would still be
-        // correct, but this is quieter and keeps the early paint from flashing.
-        if (answer.value.theme !== undefined) {
-          const fromFile = themeFrom(answer.value.theme);
-          setTheme((current) => (current === fromFile ? current : fromFile));
-        }
+        // The file knows the theme too. It wins over the localStorage value we
+        // used for the first paint — one extra write would still be correct,
+        // but this is quieter and keeps the early paint from flashing.
+        const fromFile = themeFrom(answer.value.theme);
+        setTheme((current) => (current === fromFile ? current : fromFile));
       }
     });
     void bridge.hatches().then((answer) => {
@@ -4482,7 +4483,7 @@ function Conversation() {
                 steps have, and nothing about the build is lost if the window
                 closes — the plan is written down and reopened. */}
             {buildPlan !== null && buildPlan.path === desk?.path && buildPlan.plan.total > 0 ? (
-              <BuildProgress plan={buildPlan.plan} running={frontBusy} />
+              <BuildProgress plan={buildPlan.plan} running={frontBusy} project={buildPlan.path} />
             ) : null}
 
             {/* Both bands sit above the composer rather than in the panel on

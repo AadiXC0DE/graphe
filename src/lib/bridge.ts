@@ -646,7 +646,11 @@ let previewHowFar: HowFar = 'asking';
     heldBack: {},
     howMuch: null,
     ceiling: null,
-    theme: 'system',
+    // There is no preferences file in a browser tab, so the choice lives where
+    // it always did — local storage. Seeding from it here means the first
+    // answer agrees with what painted, instead of a fresh 'system' clobbering
+    // the choice back on every reload.
+    theme: themeFrom(typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme')),
   };
 
   const send = (event: AgentEvent): void => {

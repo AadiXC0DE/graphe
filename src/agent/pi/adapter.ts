@@ -50,7 +50,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
-import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type HelperModel, type HelperPace } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type CancelBuild, type HelperModel, type HelperPace } from './tools';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
@@ -534,6 +534,9 @@ export type CreateSessionOptions = {
   putOnBoard?: PutOnBoard;
   /** Tick one thing off the checklist the person can see. */
   stepDone?: StepDone;
+  /** Cancel that checklist. Same reach as `stepDone`, so it only exists where
+   *  a list could. */
+  cancelBuild?: CancelBuild;
 };
 
 /**
@@ -1765,6 +1768,7 @@ const MOST_AFTER_SAYINGS = 3;
         // Nobody to answer means no tool, rather than a tool that always says so.
         options.unattended === true ? null : askFirst,
         options.stepDone,
+        options.cancelBuild,
       );
 
   /* The anchored edit and its read: the model reads a file, the read's reply

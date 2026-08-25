@@ -3120,10 +3120,16 @@ async function syncCheckoutBranch(project: string, held: Held, address: string):
   await saveCheckouts(project, held).catch(() => undefined);
 }
 
-/** Where a project's build plan lives, so it survives the window closing. */
+/** Where a project's build plan lives, so it survives the window closing.
+ *
+ *  The readable key is not enough on its own: flattening every non-alphanumeric
+ *  to a dash maps `/x/a-b`, `/x/a.b` and `/x/a b` to one file, and finishing one
+ *  project's checklist would take another's down with it. A short digest of the
+ *  real path breaks the ties. */
 function buildPlanFile(project: string): string {
   const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
-  return join(app.getPath('userData'), 'builds', `${key}.json`);
+  const digest = createHash('sha256').update(resolve(project)).digest('hex').slice(0, 8);
+  return join(app.getPath('userData'), 'builds', `${key}-${digest}.json`);
 }
 
 /** Opens asked for and not yet answered, by folder. Two requests for the same
@@ -3243,6 +3249,10 @@ async function startConversationUnlocked(
       // Whoever is doing the work says when a thing is done, rather than the
       // window guessing from where one reply ends and the next begins.
       stepDone: (note) => tickOneOff(open.path, note),
+      // And can be told to stand the whole list down. Keyed to this project
+      // here, so the tool cannot guess a path that does not match where plans
+      // are kept.
+      cancelBuild: () => cancelThePlan(open.path),
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -3663,6 +3673,12 @@ let tickOneOff: (project: string, note: string | null) => Promise<string> = () =
 
 const NO_LIST_TO_TICK =
   'There is no checklist on screen for this project, so there was nothing to tick. Carry on.';
+
+/** Cancelling the checklist, from inside a tool call. Same story as
+ *  `tickOneOff`: the session is built elsewhere and the plan helpers live in
+ *  `register`, so they meet through these lets. */
+let cancelThePlan: (project: string) => Promise<string> = () =>
+  Promise.resolve(NO_LIST_TO_TICK);
 
 /** Projects whose checklist the model has moved itself this turn. The window
  *  advances one step per reply for a plan worked a reply at a time; when the
@@ -6657,6 +6673,19 @@ function register(): void {
       return `“${was.title}” is ticked off — ${String(how.done)} of ${String(how.total)} done.${
         next === null ? '' : ` Next on the list: “${next.title}”.`
       }`;
+    });
+
+  /** Cancel the checklist. Through the same queue as every other plan change:
+   *  a bare delete beside an in-flight tick would race the write that follows
+   *  it and the list would walk back onto the screen mid-cancel. Says plainly
+   *  when there was nothing to cancel rather than claiming a success. */
+  cancelThePlan = async (project: string): Promise<string> =>
+    onePlanAtATime(project, async () => {
+      const stored = await readStoredTasks(project);
+      if (stored === null) return NO_LIST_TO_TICK;
+      await rm(buildPlanFile(project), { force: true }).catch(() => undefined);
+      pushBuildPlan(project, null);
+      return `The checklist “${stored.source}” is cancelled and gone from the screen.`;
     });
 
   /** Say the checklist moved, so it moves on screen while the reply is still

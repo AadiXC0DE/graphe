@@ -49,7 +49,7 @@ export const THEMES: readonly {
   {
     id: 'pink',
     label: THEME_WORDS.pink,
-    preview: { bg: '#fff1f2', raised: '#ffffff', border: '#fecdd3', text: '#1a0a13', accent: '#e11d48' },
+    preview: { bg: '#fff1f2', raised: '#ffffff', border: '#fecdd3', text: '#1a0a13', accent: '#be123c' },
   },
   {
     id: 'slate',

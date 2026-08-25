@@ -116,7 +116,7 @@ describe('an edge you can actually see', () => {
   it('leaves every piece of text clearing AA on both themes', () => {
     for (const block of ['/* Light theme */', 'prefers-color-scheme: dark']) {
       const bg = token(block, 'bg');
-      for (const name of ['text', 'text-muted', 'text-faint', 'accent']) {
+      for (const name of ['text', 'text-muted', 'text-faint', 'accent', 'danger']) {
         expect(contrast(token(block, name), bg), `${name} on ${block}`).toBeGreaterThanOrEqual(4.5);
       }
     }
@@ -134,14 +134,17 @@ describe('an edge you can actually see', () => {
       const raised = token(block, 'bg-raised');
       const sunken = token(block, 'bg-sunken');
       for (const surface of [bg, raised, sunken]) {
-        for (const name of ['text', 'text-muted', 'text-faint']) {
+        for (const name of ['text', 'text-muted', 'text-faint', 'accent', 'danger']) {
           expect(contrast(token(block, name), surface), `${name} on ${block} surface`).toBeGreaterThanOrEqual(4.5);
         }
       }
       // accent text on bg and ink on soft
       expect(contrast(token(block, 'accent-ink'), token(block, 'accent-soft')), `accent-ink on ${block}`).toBeGreaterThanOrEqual(4.5);
-      // control edge 3:1 on bg (WCAG 1.4.11)
-      expect(contrast(token(block, 'border-control'), bg), `control on ${block}`).toBeGreaterThanOrEqual(3);
+      // The edge of a control identified by its edge is 3:1 wherever it can
+      // sit — including sunken wells, where bare fields actually live.
+      for (const surface of [bg, raised, sunken]) {
+        expect(contrast(token(block, 'border-control'), surface), `control edge on ${block}`).toBeGreaterThanOrEqual(3);
+      }
     }
   });
 });

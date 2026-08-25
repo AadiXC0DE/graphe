@@ -75,10 +75,48 @@
   font-weight: 600;
 }
 
+/* The button that folds the toolbar away, so a diagram can be read without a
+   strip of controls sitting on its top-right corner. */
+.mermaid__btn--fold {
+  font-size: 13px;
+}
+
+.mermaid__btn--open {
+  transform: scaleX(-1);
+}
+
+.mermaid__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mermaid__btn:disabled:hover {
+  color: var(--text-muted);
+  background: var(--bg);
+}
+
+/* Where the zoom stands. Tabular figures so the digits do not shuffle as the
+   count changes. */
+.mermaid__zoom {
+  min-width: 38px;
+  text-align: center;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
 .mermaid__viewport {
   overflow: hidden;
+  /* Vertical stays with the page — a swipe over the diagram scrolls the
+     thread; horizontal belongs to the diagram once zoomed in. */
+  touch-action: pan-y;
+}
+
+/* A hand only when there is somewhere to drag. At 100% panning does nothing,
+   so the cursor should not promise it. */
+.mermaid__viewport--pannable {
   cursor: grab;
-  touch-action: none;
 }
 
 .mermaid__viewport--dragging {
@@ -87,7 +125,6 @@
 
 .mermaid__svg {
   padding: var(--space-3);
-  overflow-x: auto;
   will-change: transform;
   transition: transform 120ms var(--ease-out-quart);
 }

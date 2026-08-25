@@ -15,6 +15,11 @@ type Props = {
   how?: string | null;
   /** What the button says when there is more. */
   label?: string;
+  /** How it starts: open when the caller already knows this one should be
+   *  readable in full — the newest reply, say. A starting position, not a
+   *  leash: after mount the state belongs to whoever pressed the button, so a
+   *  block does not snap shut (or open) underneath somebody later. */
+  defaultOpen?: boolean;
 };
 
 /**
@@ -29,10 +34,10 @@ type Props = {
  * drawn exactly as it was given — no button, no border, no measured height — so
  * the ordinary case pays nothing for this.
  */
-export default function Clipped({ children, height = READING_HEIGHT, how, label = 'Show all' }: Props) {
+export default function Clipped({ children, height = READING_HEIGHT, how, label = 'Show all', defaultOpen = false }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [tall, setTall] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [full, setFull] = useState<number | null>(null);
   const reducedMotion = usePrefersReducedMotion();
 

@@ -24,11 +24,12 @@ export const SAYS = {
   close: 'Hide the plan',
   working: 'Working on',
   stuck: 'Needs another try',
-  /* "Clear", not "Cancel": this takes the list off the screen. A run that is
-     already going does not stop, and a word that promised otherwise would be
-     read as one that did. */
-  clear: 'Clear',
-  clearTitle: 'Clears the list from the screen — any run already going keeps going.',
+  /* "Stop", not "Clear": what ends is the todo itself, and Stop is the word
+     the rest of the app already uses for ending something. The title carries
+     the boundary — a run already going is not interrupted. */
+  stop: 'Stop',
+  stopTitle:
+    'Stops this todo: the list comes off the screen and stays gone. A run already going is not interrupted.',
 } as const;
 
 function glyph(status: BuildPlan['tasks'][number]['status']): string {
@@ -84,10 +85,10 @@ export default function BuildProgress({ plan, running = false, project }: Props)
             onClick={() => {
               void bridge.buildCancel(project === undefined ? undefined : { project });
             }}
-            aria-label={`${SAYS.clear} todo`}
-            title={SAYS.clearTitle}
+            aria-label={`${SAYS.stop} todo`}
+            title={SAYS.stopTitle}
           >
-            {SAYS.clear}
+            {SAYS.stop}
           </button>
         ) : null}
       </div>

@@ -369,6 +369,10 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.buildSave, tasks, named(where)) as Promise<Result<BuildPlan | null>>;
   },
 
+  buildCancel(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.buildCancel, named(where)) as Promise<Result<null>>;
+  },
+
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {
     return ipcRenderer.invoke(CHANNEL.carried, named(where)) as Promise<Result<readonly CarriedExtension[]>>;
   },
@@ -749,6 +753,14 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
     }
     return ipcRenderer.invoke(CHANNEL.setHoldBack, on, named(where)) as Promise<Result<Preferences>>;
+  },
+
+  setTheme(theme: string): Promise<Result<Preferences>> {
+    const known = ['system', 'light', 'graphe', 'super', 'pink', 'slate', 'dark'];
+    if (typeof theme !== 'string' || !known.includes(theme)) {
+      return Promise.resolve(refuse<Preferences>('I could not tell which theme you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setTheme, theme) as Promise<Result<Preferences>>;
   },
 
   setHowMuch(id: string): Promise<Result<Preferences>> {

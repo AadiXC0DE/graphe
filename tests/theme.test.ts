@@ -42,7 +42,10 @@ function token(block: string, name: string): string {
 
 describe('picking a theme', () => {
   it('offers following the computer as a real answer, not the absence of one', () => {
-    expect(THEMES.map((one) => one.id)).toEqual(['system', 'light', 'dark']);
+    expect(THEMES.map((one) => one.id)).toEqual(['light', 'graphe', 'super', 'pink', 'slate']);
+    // 'system' is still a valid Theme value via themeFrom/markFor, just not a pill
+    expect(themeFrom('system')).toBe('system');
+    expect(markFor('system')).toBeNull();
   });
 
   /** Following the computer means removing the mark, not writing one. A stamp
@@ -50,22 +53,31 @@ describe('picking a theme', () => {
   it('stamps nothing when following the computer', () => {
     expect(markFor('system')).toBeNull();
     expect(markFor('light')).toBe('light');
-    expect(markFor('dark')).toBe('dark');
+    expect(markFor('graphe')).toBe('graphe');
+    // historic 'dark' still stamps as graphe
+    expect(markFor('dark')).toBe('graphe');
   });
 
   it('falls back to following the computer on anything it cannot read', () => {
     for (const junk of [null, undefined, '', 'sepia', 7, {}]) {
       expect(themeFrom(junk)).toBe('system');
     }
-    expect(themeFrom('dark')).toBe('dark');
+    expect(themeFrom('dark')).toBe('graphe');
+    expect(themeFrom('graphe')).toBe('graphe');
+    expect(themeFrom('super')).toBe('super');
+    expect(themeFrom('pink')).toBe('pink');
+    expect(themeFrom('slate')).toBe('slate');
   });
 
   it('says which palette is actually on screen', () => {
-    expect(showing('system', true)).toBe('dark');
+    expect(showing('system', true)).toBe('graphe');
     expect(showing('system', false)).toBe('light');
     // A choice outranks the computer in both directions.
     expect(showing('light', true)).toBe('light');
-    expect(showing('dark', false)).toBe('dark');
+    expect(showing('graphe', false)).toBe('graphe');
+    expect(showing('super', false)).toBe('super');
+    expect(showing('pink', false)).toBe('pink');
+    expect(showing('slate', true)).toBe('slate');
   });
 
   it('names it the way somebody would say it', () => {
@@ -104,8 +116,34 @@ describe('an edge you can actually see', () => {
   it('leaves every piece of text clearing AA on both themes', () => {
     for (const block of ['/* Light theme */', 'prefers-color-scheme: dark']) {
       const bg = token(block, 'bg');
-      for (const name of ['text', 'text-muted', 'text-faint', 'accent']) {
+      for (const name of ['text', 'text-muted', 'text-faint', 'accent', 'danger']) {
         expect(contrast(token(block, name), bg), `${name} on ${block}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it('leaves every piece of text clearing AA on the five explicit themes', () => {
+    for (const block of [
+      "[data-theme='light']",
+      "[data-theme='graphe']",
+      "[data-theme='super']",
+      "[data-theme='pink']",
+      "[data-theme='slate']",
+    ]) {
+      const bg = token(block, 'bg');
+      const raised = token(block, 'bg-raised');
+      const sunken = token(block, 'bg-sunken');
+      for (const surface of [bg, raised, sunken]) {
+        for (const name of ['text', 'text-muted', 'text-faint', 'accent', 'danger']) {
+          expect(contrast(token(block, name), surface), `${name} on ${block} surface`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+      // accent text on bg and ink on soft
+      expect(contrast(token(block, 'accent-ink'), token(block, 'accent-soft')), `accent-ink on ${block}`).toBeGreaterThanOrEqual(4.5);
+      // The edge of a control identified by its edge is 3:1 wherever it can
+      // sit — including sunken wells, where bare fields actually live.
+      for (const surface of [bg, raised, sunken]) {
+        expect(contrast(token(block, 'border-control'), surface), `control edge on ${block}`).toBeGreaterThanOrEqual(3);
       }
     }
   });

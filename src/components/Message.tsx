@@ -14,6 +14,9 @@ type Props = {
   streaming?: boolean;
   /** A quiet aside under a Graphe turn, e.g. "This one's small, so I kept it Quick." */
   aside?: string;
+  /** True when this is the last turn in the thread — it starts unclipped, and
+   *  the reader can fold it once they are done with it. */
+  isLast?: boolean;
 };
 
 /** One turn in the conversation.
@@ -35,7 +38,7 @@ type Props = {
  * composer people stop trusting with anything technical. What you typed is what
  * is shown.
  */
-export default function Message({ from, children, streaming, aside }: Props) {
+export default function Message({ from, children, streaming, aside, isLast }: Props) {
   const mine = from === 'you';
   const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
   const formatted = !mine && typeof children === 'string';
@@ -64,7 +67,11 @@ export default function Message({ from, children, streaming, aside }: Props) {
         {streaming || text === null ? (
           body
         ) : (
-          <Clipped how={howMuch(text)} label="Show the rest">
+          /* The newest answer starts open — but as a starting position, not a
+             rule. Clipped holds its own state from there, so when the next
+             turn arrives and this one stops being last, nothing snaps: it
+             stays however the reader left it, still foldable. */
+          <Clipped how={howMuch(text)} label="Show the rest" defaultOpen={isLast}>
             {body}
           </Clipped>
         )}

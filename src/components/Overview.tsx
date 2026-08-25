@@ -333,23 +333,6 @@ export default function Overview({
       <div role="tabpanel" id="overview-panel-work" aria-labelledby="overview-tab-work" hidden={tab !== 'work'}>
       {/* Only while something is running. A permanent band that says "nothing"
           is a band that has taught you to stop looking at it. */}
-      {busy && (now.step !== null || now.helpers.length > 0) ? (
-        <section className="overview__block overview__block--now">
-          <h2 className="overview__title">Now</h2>
-          {now.step === null ? null : (
-            <p className="overview__step">
-              <span className="overview__pulse" aria-hidden="true" />
-              <span className="overview__steptext">
-                <span className="overview__steplabel">{now.step.label}</span>
-                {now.step.detail === undefined ? null : (
-                  <span className="overview__stepdetail">{now.step.detail}</span>
-                )}
-              </span>
-            </p>
-          )}
-        </section>
-      ) : null}
-
       {/* Helpers used to be a band here. They belong beside the composer: this
           panel is a reading of what has already happened, and a helper is now. */}
 

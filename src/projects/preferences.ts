@@ -22,6 +22,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
 import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
+import type { Theme } from '../lib/theme';
+import { themeFrom } from '../lib/theme';
 import { asTrusted, sameTrusted, type Trusted } from './carried';
 import { asKept, sameKept, type Kept } from './kept';
 
@@ -110,6 +112,9 @@ export type Preferences = {
    * afternoon would hold nobody to anything.
    */
   ceiling: Money | null;
+  /** Which finishing the window wears. 'system' follows the computer;
+   *  any other value is stamped as data-theme and wins over the media query. */
+  theme: Theme;
 };
 
 export const defaultPreferences: Preferences = {
@@ -122,6 +127,7 @@ export const defaultPreferences: Preferences = {
   heldBack: {},
   howMuch: null,
   ceiling: null,
+  theme: 'system',
 };
 
 type Stored = { version: 1; preferences: Preferences };
@@ -162,6 +168,7 @@ function asPreferences(value: unknown): Preferences {
     heldBack: asHeldBack(record['heldBack']),
     howMuch: typeof record['howMuch'] === 'string' ? record['howMuch'] : null,
     ceiling: asCeiling(record['ceiling']),
+    theme: themeFrom(record['theme']),
   };
 }
 
@@ -248,6 +255,7 @@ export class PreferenceFile {
       sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted) &&
+      next.theme === this.#preferences.theme &&
       // Left out, a ceiling was the one preference that never reached the file:
       // nothing else about it had changed, so nothing was written, and it was
       // gone by the next launch while the window still said it was set.

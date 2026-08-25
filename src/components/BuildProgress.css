@@ -12,11 +12,18 @@
   overflow: hidden;
 }
 
+/* The fold and the Clear sit side by side: two real buttons in one row. */
+.buildprogress__bar {
+  display: flex;
+  align-items: center;
+}
+
 .buildprogress__head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 6px var(--space-3);
   border: 0;
   background: transparent;
@@ -53,6 +60,25 @@
   margin-left: auto;
   color: var(--text-faint);
   white-space: nowrap;
+}
+
+.buildprogress__cancel {
+  flex: none;
+  margin-right: var(--space-2);
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.buildprogress__cancel:hover {
+  color: var(--danger);
+  border-color: var(--border);
+  background: var(--bg-sunken);
 }
 
 .buildprogress__caret {

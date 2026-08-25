@@ -2260,6 +2260,11 @@ export type AskFirst = (questions: unknown) => Promise<string>;
  */
 export type StepDone = (note: string | null) => Promise<string>;
 
+/** Cancel the checklist the person can see. Wired by the shell, so the file is
+ *  found by the project it is stored under and deleted where the plan queue
+ *  can see it — never from here, where neither of those is true. */
+export type CancelBuild = () => Promise<string>;
+
 const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
   name: 'step_done',
   label: 'Ticking one off the list',
@@ -2279,6 +2284,20 @@ const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
   executionMode: 'parallel',
   execute: async (_callId, params: { note?: string }): ToolResult => {
     const said = await stepDone(typeof params.note === 'string' ? params.note : null);
+    return { content: [{ type: 'text', text: said }], details: {} };
+  },
+});
+
+const cancelBuildTool = (cancelBuild: CancelBuild): ToolDefinition => ({
+  name: 'cancel_build',
+  label: 'Cancelling the build',
+  description:
+    'Cancel the current build checklist and remove it from the screen. Use it when the user says to cancel the todo list.',
+  promptSnippet: 'cancel_build() — cancel the current build checklist',
+  parameters: Type.Object({}),
+  executionMode: 'sequential',
+  execute: async (): ToolResult => {
+    const said = await cancelBuild();
     return { content: [{ type: 'text', text: said }], details: {} };
   },
 });
@@ -2326,6 +2345,7 @@ export const grapheTools = (
   noted?: ChecksNoted,
   askFirst?: AskFirst | null,
   stepDone?: StepDone | null,
+  cancelBuild?: CancelBuild | null,
 ): ToolDefinition[] => {
   const tools: ToolDefinition[] = [
     websearchTool,
@@ -2339,6 +2359,9 @@ export const grapheTools = (
   if (askFirst !== undefined && askFirst !== null) tools.push(askFirstTool(askFirst));
   // Only where there is a list to tick. A helper has no checklist of its own.
   if (stepDone !== undefined && stepDone !== null) tools.push(stepDoneTool(stepDone));
+  // Same reach as the ticking: wherever a checklist can exist, saying no to it
+  // must exist too, and it comes from the shell so it lands on the right file.
+  if (cancelBuild !== undefined && cancelBuild !== null) tools.push(cancelBuildTool(cancelBuild));
   if (projectRoot !== undefined && projectRoot !== '') {
     tools.push(
       readMapTool(projectRoot),

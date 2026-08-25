@@ -156,6 +156,7 @@ import { tellWhatHappened } from '../src/diff/summary';
 import { inDesignWords, readChanges, NOTHING_TO_SAY, type Edit } from '../src/design/words';
 import { isTrusted, trusting } from '../src/projects/carried';
 import { keeping, PreferenceFile } from '../src/projects/preferences';
+import { themeFrom } from '../src/lib/theme';
 import { Recents } from '../src/projects/recents';
 import { addressed, Workspaces, type Workspace } from '../src/projects/workspaces';
 import { findEditor, type Editor } from '../src/shell/editors';
@@ -207,11 +208,11 @@ import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceO
 import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
 import { checkServer, inProject, mcpFile, readMcpConfig, savingFrom, writeMcpConfig } from '../src/agent/pi/mcp';
 import { holdsBack } from '../src/projects/heldback';
-import { AT_A_TIME, boardWords, howManyGoing, saysCannotKeep, waysNumbering } from '../src/work/board';
+import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
 import { saysTook } from '../src/work/stack';
 import { formatMoney } from '../src/cost/money';
 import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
-import { pressureNow, roomHere } from '../src/work/machine';
+
 import {
   addStanding,
   dueNow,
@@ -3119,10 +3120,16 @@ async function syncCheckoutBranch(project: string, held: Held, address: string):
   await saveCheckouts(project, held).catch(() => undefined);
 }
 
-/** Where a project's build plan lives, so it survives the window closing. */
+/** Where a project's build plan lives, so it survives the window closing.
+ *
+ *  The readable key is not enough on its own: flattening every non-alphanumeric
+ *  to a dash maps `/x/a-b`, `/x/a.b` and `/x/a b` to one file, and finishing one
+ *  project's checklist would take another's down with it. A short digest of the
+ *  real path breaks the ties. */
 function buildPlanFile(project: string): string {
   const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
-  return join(app.getPath('userData'), 'builds', `${key}.json`);
+  const digest = createHash('sha256').update(resolve(project)).digest('hex').slice(0, 8);
+  return join(app.getPath('userData'), 'builds', `${key}-${digest}.json`);
 }
 
 /** Opens asked for and not yet answered, by folder. Two requests for the same
@@ -3242,6 +3249,10 @@ async function startConversationUnlocked(
       // Whoever is doing the work says when a thing is done, rather than the
       // window guessing from where one reply ends and the next begins.
       stepDone: (note) => tickOneOff(open.path, note),
+      // And can be told to stand the whole list down. Keyed to this project
+      // here, so the tool cannot guess a path that does not match where plans
+      // are kept.
+      cancelBuild: () => cancelThePlan(open.path),
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -3663,6 +3674,12 @@ let tickOneOff: (project: string, note: string | null) => Promise<string> = () =
 const NO_LIST_TO_TICK =
   'There is no checklist on screen for this project, so there was nothing to tick. Carry on.';
 
+/** Cancelling the checklist, from inside a tool call. Same story as
+ *  `tickOneOff`: the session is built elsewhere and the plan helpers live in
+ *  `register`, so they meet through these lets. */
+let cancelThePlan: (project: string) => Promise<string> = () =>
+  Promise.resolve(NO_LIST_TO_TICK);
+
 /** Projects whose checklist the model has moved itself this turn. The window
  *  advances one step per reply for a plan worked a reply at a time; when the
  *  model has said where it is, its word is the better one and the reply-boundary
@@ -3675,10 +3692,11 @@ function deskFor(path: string, name: string): AwayDesk {
   const already = awayDesks.get(path);
   if (already !== undefined) return already;
   const history = new ProjectHistory(path);
-  // How many this computer can carry, not how many fill a sheet. A machine with
-  // less memory than the board assumes runs fewer, rather than running four and
-  // stalling.
-  const bench = new Workbench({ history, under: awayFolder(path), atOnce: roomHere(AT_A_TIME) });
+  // Board work now always gets the full sheet (4 at a time) — every piece
+  // asked to run in parallel starts in parallel, like "gets on with it" mode.
+  // The old roomHere/pressure gate throttled 4 → 1 on 8–16 GB machines and is
+  // what made "Waiting its turn" fill the board.
+  const bench = new Workbench({ history, under: awayFolder(path), atOnce: AT_A_TIME });
   const desk: AwayDesk = {
     path,
     name,
@@ -4092,11 +4110,11 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       figmaToken: figmaCredential(),
     });
     run.session = session;
-    // "Until it's done": full access for this run, no questions, and a wall
-    // clock so a stuck loop cannot burn the night. Ordinary background work
-    // keeps asking when it should.
+    // Every board run now gets full access like "Until it's done" — no questions,
+    // no "Run an instruction I do not fully recognise?" park. The wall clock
+    // stays only for true overnight goals.
     const untilDone = desk.goals.has(piece.id);
-    if (untilDone) session.goAsFarAs('doing');
+    session.goAsFarAs('doing');
     if (untilDone) {
       goalTimer = setTimeout(() => {
         held.stop();
@@ -4193,15 +4211,6 @@ function stopWhatFollows(desk: AwayDesk, id: string, because: string): void {
   for (const one of desk.chain.stopFollowing(id, because)) noteDown(desk, one);
 }
 
-/** Whether any project has background work going. The memory a run holds is the
- *  machine's, not the project's, so what may start next is asked of all of it. */
-function anythingGoing(): boolean {
-  for (const desk of awayDesks.values()) {
-    if (howManyGoing(desk.bench.pieces) > 0) return true;
-  }
-  return false;
-}
-
 /** Start as many as there is room for. Called when one is asked for and again
  *  whenever one finishes. */
 async function runWhatCan(desk: AwayDesk): Promise<void> {
@@ -4221,14 +4230,10 @@ async function runWhatCan(desk: AwayDesk): Promise<void> {
     if (await desk.history.hasUnsavedChanges()) {
       await desk.history.snapshot('Saved before working on its own');
     }
-    // On a machine already short of memory, nothing new starts until something
-    // frees up — counted across every project, because two of them filling the
-    // laptop is the case a per-project cap cannot see. Never a full stop: with
-    // nothing going anywhere there is nothing left to start the next one, and
-    // work that silently never begins is worse than work that takes longer.
-    const easy = (await pressureNow()) === 'fine';
-    const room = easy || !anythingGoing() ? undefined : 0;
-    began = await desk.bench.begin(room);
+    // Board runs are now fully parallel and fully autonomous — never gated by
+    // memory pressure. The sheet itself caps at AT_A_TIME (4), which is the
+    // only limit; "Waiting its turn" is queue order, not a throttle.
+    began = await desk.bench.begin(undefined);
   } catch (cause) {
     const why = cause instanceof Error ? cause.message : String(cause);
     const stopped: string[] = [];
@@ -5357,6 +5362,11 @@ function register(): void {
     if (open === null) return fail(NOTHING_OPEN);
     const held = (await preferences()).all().heldBack;
     return done(await (await preferences()).change({ heldBack: { ...held, [open.path]: on } }));
+  });
+
+  handle<Preferences>(CHANNEL.setTheme, async (_event, args) => {
+    const [theme] = args;
+    return done(await (await preferences()).change({ theme: themeFrom(theme) }));
   });
 
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
@@ -6665,6 +6675,19 @@ function register(): void {
       }`;
     });
 
+  /** Cancel the checklist. Through the same queue as every other plan change:
+   *  a bare delete beside an in-flight tick would race the write that follows
+   *  it and the list would walk back onto the screen mid-cancel. Says plainly
+   *  when there was nothing to cancel rather than claiming a success. */
+  cancelThePlan = async (project: string): Promise<string> =>
+    onePlanAtATime(project, async () => {
+      const stored = await readStoredTasks(project);
+      if (stored === null) return NO_LIST_TO_TICK;
+      await rm(buildPlanFile(project), { force: true }).catch(() => undefined);
+      pushBuildPlan(project, null);
+      return `The checklist “${stored.source}” is cancelled and gone from the screen.`;
+    });
+
   /** Say the checklist moved, so it moves on screen while the reply is still
    *  going rather than catching up once nobody is watching. */
   function pushBuildPlan(project: string, plan: import('../src/lib/ipc').BuildPlan | null): void {
@@ -6813,6 +6836,16 @@ function register(): void {
       }
       await writeBuildPlan(open.path, stored.source, tasks);
       return done(await readBuildPlan(open.path));
+    });
+  });
+
+  handle<null>(CHANNEL.buildCancel, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done(null);
+    return onePlanAtATime(open.path, async () => {
+      await rm(buildPlanFile(open.path), { force: true }).catch(() => undefined);
+      pushBuildPlan(open.path, null);
+      return done(null);
     });
   });
 

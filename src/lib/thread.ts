@@ -514,12 +514,18 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
        has to hold even when the shell cannot say anything. */
     case 'settled': {
       /* A plan or an estimate left open is not stranded — it is waiting on
-         somebody, which is what it is for. These two are: a question nothing
-         can answer now, and a wait that cannot outlive the turn it was in. */
+         somebody, which is what it is for. These are: a question nothing can
+         answer now, a wait that cannot outlive the turn it was in, and a reply
+         still marked as arriving. That last one matters after Stop: deltas
+         already in flight can land once the window has optimistically marked
+         everything stopped, opening a fresh streaming turn that no message-end
+         will ever reach. Settled is the reckoning that closes it, or Stop's
+         own quiet mark stays out for the rest of the sitting. */
       const stranded = turns.some(
         (turn) =>
           ((turn.kind === 'asked' || turn.kind === 'asked-first') && turn.answered === null) ||
-          (turn.kind === 'holding' && turn.state === 'running'),
+          (turn.kind === 'holding' && turn.state === 'running') ||
+          (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming),
       );
       if (!stranded) return turns;
       // Whatever was being asked, the turn it belonged to is over and nothing
@@ -534,6 +540,9 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
         }
         if (turn.kind === 'holding' && turn.state === 'running') {
           return { ...turn, state: 'done' as const };
+        }
+        if (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) {
+          return { ...turn, streaming: false };
         }
         return turn;
       });

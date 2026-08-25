@@ -101,8 +101,27 @@
 }
 
 .ways__name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   font-size: var(--text-sm);
   color: var(--text);
+}
+
+.ways__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  padding: 1px var(--space-1);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent-ink, var(--accent));
+  font-size: var(--text-2xs);
+  line-height: 1;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .ways__note {

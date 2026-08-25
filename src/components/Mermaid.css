@@ -5,18 +5,150 @@
 
 .mermaid {
   margin: var(--space-3) 0;
+  position: relative;
 }
 
-.mermaid__svg {
+.mermaid__wrap {
+  position: relative;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.mermaid__toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.mermaid__btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.mermaid__btn:hover {
+  color: var(--text);
+  background: var(--bg-hover, var(--bg-sunken));
+}
+
+.mermaid__btn:active {
+  transform: scale(0.96);
+}
+
+.mermaid__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mermaid__btn--zoom {
+  width: 28px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* The button that folds the toolbar away, so a diagram can be read without a
+   strip of controls sitting on its top-right corner. */
+.mermaid__btn--fold {
+  font-size: 13px;
+}
+
+.mermaid__btn--open {
+  transform: scaleX(-1);
+}
+
+.mermaid__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mermaid__btn:disabled:hover {
+  color: var(--text-muted);
+  background: var(--bg);
+}
+
+/* Where the zoom stands. Tabular figures so the digits do not shuffle as the
+   count changes. */
+.mermaid__zoom {
+  min-width: 38px;
+  text-align: center;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.mermaid__viewport {
+  overflow: hidden;
+  /* Vertical stays with the page — a swipe over the diagram scrolls the
+     thread; horizontal belongs to the diagram once zoomed in. */
+  touch-action: pan-y;
+}
+
+/* A hand only when there is somewhere to drag. At 100% panning does nothing,
+   so the cursor should not promise it. */
+.mermaid__viewport--pannable {
+  cursor: grab;
+}
+
+.mermaid__viewport--dragging {
+  cursor: grabbing;
+}
+
+.mermaid__svg {
   padding: var(--space-3);
-  overflow-x: auto;
+  will-change: transform;
+  transition: transform 120ms var(--ease-out-quart);
+}
+
+.mermaid__viewport--dragging .mermaid__svg {
+  transition: none;
 }
 
 .mermaid__svg svg {
   display: block;
   max-width: 100%;
   height: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mermaid__btn {
+    transition:
+      color var(--dur-micro) var(--ease-hover),
+      background var(--dur-micro) var(--ease-hover);
+  }
+  .mermaid__btn:active {
+    transform: none;
+  }
+  .mermaid__svg {
+    transition: none;
+  }
 }

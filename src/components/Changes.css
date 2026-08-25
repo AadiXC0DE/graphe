@@ -21,17 +21,26 @@
   --line-out-edge: var(--border-control);
 }
 
+/* The stronger tint belongs to the dark palettes, by name. The media query
+   only answers while the window is following this computer — an explicit
+   choice stamps data-theme and outranks it. Pink is a light palette and takes
+   the default tint above; 'dark' stays for histories still carrying the old
+   mark. */
 @media (prefers-color-scheme: dark) {
-  .changes {
+  :root:not([data-theme]) .changes {
     --line-in: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
   }
 }
 
-:root[data-theme='dark'] .changes {
+:root[data-theme='dark'] .changes,
+:root[data-theme='graphe'] .changes,
+:root[data-theme='super'] .changes,
+:root[data-theme='slate'] .changes {
   --line-in: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
 }
 
-:root[data-theme='light'] .changes {
+:root[data-theme='light'] .changes,
+:root[data-theme='pink'] .changes {
   --line-in: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
 }
 

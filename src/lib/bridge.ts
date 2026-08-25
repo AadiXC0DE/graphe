@@ -29,6 +29,7 @@ import {
   type Design,
 } from '../design/moved';
 import { howMuchBy } from '../design/gate';
+import { themeFrom } from './theme';
 import { pagesIn, type Page } from '../preview/pages';
 import { holdsBack } from '../projects/heldback';
 import { keeping } from '../projects/kept';
@@ -645,6 +646,11 @@ let previewHowFar: HowFar = 'asking';
     heldBack: {},
     howMuch: null,
     ceiling: null,
+    // There is no preferences file in a browser tab, so the choice lives where
+    // it always did — local storage. Seeding from it here means the first
+    // answer agrees with what painted, instead of a fresh 'system' clobbering
+    // the choice back on every reload.
+    theme: themeFrom(typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme')),
   };
 
   const send = (event: AgentEvent): void => {
@@ -915,6 +921,11 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setTheme(theme: unknown): Promise<Result<Preferences>> {
+      preferred = { ...preferred, theme: themeFrom(theme) };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
     /** A whole project, made up, so the panel can be opened and reviewed in a
      *  browser tab — folders inside folders, and the same files the overview
      *  says have moved. */
@@ -1040,6 +1051,10 @@ let previewHowFar: HowFar = 'asking';
     },
 
     buildSave(): Promise<Result<BuildPlan | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    buildCancel(): Promise<Result<null>> {
       return Promise.resolve(done(null));
     },
 
@@ -1884,6 +1899,7 @@ function connect(): Bridge {
     setShowMe: (on) => api.setShowMe(on),
     keepVersion: (versionId, keep) => api.keepVersion(versionId, keep),
     setShowFiles: (on) => api.setShowFiles(on),
+    setTheme: (theme) => api.setTheme(theme),
     projectFiles: () => api.projectFiles(),
     fileText: (path) => api.fileText(path),
     hatches: () => api.hatches(),
@@ -1903,6 +1919,7 @@ function connect(): Bridge {
     buildAdvance: (op, where) => api.buildAdvance(op, where),
     chooseDocument: (where) => api.chooseDocument(where),
     buildSave: (tasks, where) => api.buildSave(tasks, where),
+    buildCancel: (where) => api.buildCancel(where),
     stopAsking: (on, where) => api.stopAsking(on, where),
     goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
     running: (where) => api.running(where),

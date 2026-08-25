@@ -105,10 +105,13 @@
   --border: #cdcdc7;
   --border-strong: #a8a8a1;
   /* The edge of a control that is identified by its edge — a bare text field, a
-     switch that is off. WCAG 1.4.11 asks 3:1 for those, and --border-strong
-     measures 1.46:1 on this background, so it cannot be the one doing that job.
-     Everything decorative stays on --border / --border-strong. */
-  --border-control: #8f8f89;
+      switch that is off. WCAG 1.4.11 asks 3:1 for those, and --border-strong
+      measures 1.46:1 on this background, so it cannot be the one doing that job.
+      Everything decorative stays on --border / --border-strong. Darkened until
+      it also clears 3:1 on --bg-sunken, where bare fields actually sit
+      (#8f8f89 measured 2.90 there); #80807a is 3.84 on --bg and 3.54 on
+      --bg-sunken. */
+  --border-control: #80807a;
   --text: #1a1a19;
   --text-muted: #6b6b66;
   /* Faint still has to clear AA as text — we cannot ship an inaccessible tool
@@ -122,11 +125,14 @@
   --accent-text: #ffffff;
   --accent-soft: #f6e9e4;
   /* Accent-coloured *text* sitting on --accent-soft — the "On screen" and "Open"
-     badges. --accent on --accent-soft is 4.39:1, just under AA; this is 4.83:1
-     there and 5.54:1 on --bg, so one token covers both places a badge can sit.
-     In the dark theme the plain accent already clears it, so the two are the
-     same value there and nothing is tinted twice. */
+    badges. --accent on --accent-soft is 4.39:1, just under AA; this is 4.83:1
+    there and 5.54:1 on --bg, so one token covers both places a badge can sit.
+    In the dark theme the plain accent already clears it, so the two are the
+    same value there and nothing is tinted twice. */
   --accent-ink: #ad4529;
+  /* The colour of a destructive press's hover. Text-level contrast, because it
+     is read as text against whatever surface it lands on. */
+  --danger: #b03528;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
 
@@ -184,6 +190,7 @@
     --accent-text: #1a1a19;
     --accent-soft: #2a1c17;
     --accent-ink: #e0714d;
+    --danger: #e2574b;
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
     --shadow-md: 0 4px 20px rgb(0 0 0 / 0.4);
   }
@@ -197,7 +204,7 @@
   --bg-sunken: #f2f2f0;
   --border: #e4e4e1;
   --border-strong: #d2d2ce;
-  --border-control: #8f8f89;
+  --border-control: #80807a;
   --text: #1a1a19;
   --text-muted: #6b6b66;
   --text-faint: #6e6e68;
@@ -205,9 +212,11 @@
   --accent-text: #ffffff;
   --accent-soft: #f6e9e4;
   --accent-ink: #ad4529;
+  --danger: #b03528;
 }
 
-:root[data-theme='dark'] {
+:root[data-theme='dark'],
+:root[data-theme='graphe'] {
   color-scheme: dark;
   --bg: #131312;
   --bg-raised: #1c1c1a;
@@ -222,4 +231,79 @@
   --accent-text: #1a1a19;
   --accent-soft: #2a1c17;
   --accent-ink: #e0714d;
+  --danger: #e2574b;
+}
+
+/* super — zinc #0A0A0B + amber. Darkest of the three darks.
+   AA: text 18.9 / muted 7.7 / faint 6.0 on bg; control 4.0 on bg (3:1 for
+   WCAG 1.4.11); accent-ink 10.8 on soft, 11.8 on bg; accentText 9.2 on accent. */
+:root[data-theme='super'] {
+  color-scheme: dark;
+  --bg: #0a0a0b;
+  --bg-raised: #18181b;
+  --bg-sunken: #050507;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --border-control: #71717a;
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-faint: #8e8e96;
+  --accent: #f59e0b;
+  --accent-text: #0a0a0b;
+  --accent-soft: #1c1507;
+  --accent-ink: #fbbf24;
+  --danger: #ef4444;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 20px rgb(0 0 0 / 0.5);
+}
+
+/* pink — rose hsl 340. Light, warm. Uses rose-50/100/200 tint.
+   AA: text 17.4 / muted 5.2 (hsl 340 30% 45% #955067) / faint 5.0 (hsl 340 20% 45% #8a5c6b) on bg;
+   faint 4.57 on sunken just clears; control 3.81 on bg / 3.49 on sunken (3:1);
+   accent-text 6.3 on accent, ink 7.3 on bg / 6.6 on soft.
+   The accent is rose-700 #be123c, not rose-600 #e11d48: the accent is read as
+   plain text in several places (skill eyebrows, code keywords), and #e11d48
+   measured 4.28:1 on --bg and 3.91:1 on --bg-sunken — under AA where it is
+   actually used. #be123c is 5.72 / 6.28 / 5.23. */
+:root[data-theme='pink'] {
+  color-scheme: light;
+  --bg: #fff1f2;
+  --bg-raised: #ffffff;
+  --bg-sunken: #ffe4e6;
+  --border: #fecdd3;
+  --border-strong: #fda4af;
+  --border-control: #7c7c7a;
+  --text: #1a0a13;
+  --text-muted: #955067;
+  --text-faint: #8a5c6b;
+  --accent: #be123c;
+  --accent-text: #ffffff;
+  --accent-soft: #ffe4e6;
+  --accent-ink: #9f1239;
+  --danger: #9f1239;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
+}
+
+/* slate — #0f172a slate-900. Cool, desaturated dark blue.
+   AA: text 17.0 / muted 6.9 / faint 5.7 on bg; control 3.75 on bg / 3.07 on raised;
+   ink 10.4 on soft, accentText 9.4 on accent. */
+:root[data-theme='slate'] {
+  color-scheme: dark;
+  --bg: #0f172a;
+  --bg-raised: #1e293b;
+  --bg-sunken: #020617;
+  --border: #334155;
+  --border-strong: #475569;
+  --border-control: #64748b;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-faint: #8293ad;
+  --accent: #38bdf8;
+  --accent-text: #020617;
+  --accent-soft: #0c1a2e;
+  --accent-ink: #7dd3fc;
+  --danger: #f87171;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 20px rgb(0 0 0 / 0.5);
 }

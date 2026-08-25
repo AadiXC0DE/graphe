@@ -135,7 +135,18 @@ export default function HowToWork({ plans, onPlans }: Props) {
                 ) : null}
               </span>
               <span className="ways__text">
-                <span className="ways__name">{choice.name}</span>
+                <span className="ways__name">
+                  {choice.name}
+                  {choice.id === 'research' ? (
+                    <span className="ways__badge">
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                        <circle cx="5.2" cy="5.2" r="3.2" stroke="currentColor" strokeWidth="1.2" />
+                        <path d="M7.5 7.5 10 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                      </svg>
+                      Deep research
+                    </span>
+                  ) : null}
+                </span>
                 <span className="ways__note">{choice.note}</span>
               </span>
             </button>

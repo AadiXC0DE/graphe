@@ -481,6 +481,7 @@ function Conversation() {
     heldBack: {},
     howMuch: null,
     ceiling: null,
+    theme: 'system',
   });
   const [editor, setEditor] = useState<string | null>(null);
 
@@ -755,12 +756,29 @@ function Conversation() {
     // prefers-color-scheme block then decides, and keeps deciding.
     if (mark === null) document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', mark);
+    // Diagrams are drawn in the palette that was on screen when they rendered;
+    // this is their cue to draw again.
+    window.dispatchEvent(new Event('graphe:theme'));
     try {
       localStorage.setItem('graphe:theme', theme);
     } catch {
       // A window with no storage still gets the theme, just not next time.
     }
   }, [theme]);
+
+  const changeTheme = useCallback(
+    (next: Theme) => {
+      const wanted = themeFrom(next);
+      setTheme(wanted);
+      // Persist to preferences.json (desktop) and keep the in-memory copy in sync
+      // so the next launch reads the same value without waiting for the async reply.
+      setPreferences((was) => ({ ...was, theme: wanted }));
+      void bridge.setTheme(wanted).then((answer) => {
+        if (answer.ok) setPreferences(answer.value);
+      });
+    },
+    [],
+  );
   /** The project file rail keeps its setting when folded, just like the main
    *  sidebar: showing it again is one press rather than a trip to settings. */
   const [filesOpen, setFilesOpen] = useState(true);
@@ -1692,7 +1710,14 @@ function Conversation() {
   useEffect(() => {
     let stillHere = true;
     void bridge.preferences().then((answer) => {
-      if (stillHere && answer.ok) setPreferences(answer.value);
+      if (stillHere && answer.ok) {
+        setPreferences(answer.value);
+        // The file knows the theme too. It wins over the localStorage value we
+        // used for the first paint — one extra write would still be correct,
+        // but this is quieter and keeps the early paint from flashing.
+        const fromFile = themeFrom(answer.value.theme);
+        setTheme((current) => (current === fromFile ? current : fromFile));
+      }
     });
     void bridge.hatches().then((answer) => {
       if (stillHere && answer.ok) setEditor(answer.value.editor);
@@ -2003,6 +2028,22 @@ function Conversation() {
     // would end whatever the shell has in front — which, with two tabs open,
     // may not be the one on screen (see the `where` fixes in bridge.ts).
     const desk = currentDesk(desksNow.current);
+    if (desk !== null) {
+      // Optimistic: make the UI feel stopped within the same tick, before the
+      // shell answers. Clears the "sends in the air" count and marks any
+      // streaming turn as done so frontBusy becomes false immediately.
+      const owner = `${desk.path}\u0000${desk.address ?? ''}`;
+      setSendsInTheAir((current) => {
+        const { [owner]: _gone, ...rest } = current as Record<string, number>;
+        return rest;
+      });
+      setDesks((current) =>
+        changeDesk(current, desk.path, (one) => ({
+          ...one,
+          turns: one.turns.map((t) => (t.kind === 'said' && (t as { streaming: boolean }).streaming ? { ...t, streaming: false } : t)),
+        })),
+      );
+    }
     void bridge.stop({
       ...(desk === null ? {} : { project: desk.path }),
       ...(desk?.address == null ? {} : { conversation: desk.address }),
@@ -4245,7 +4286,7 @@ function Conversation() {
         showFiles={preferences.showFiles}
         holdBack={holdsBack(preferences.heldBack, desk?.path)}
         theme={theme}
-        onTheme={setTheme}
+        onTheme={changeTheme}
         onToggleShowMe={() => changeShowMe(!preferences.showMe)}
         onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
         onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}
@@ -4346,7 +4387,11 @@ function Conversation() {
             </header>
 
             <div className="thread">
-            {rows(desk.turns, new Set(pictures.under.keys())).map((row) =>
+            {(() => {
+              const all = rows(desk.turns, new Set(pictures.under.keys()));
+              const lastGrapheIdx = [...all].reverse().findIndex((r) => r.kind !== 'steps' && r.turn.kind === 'said' && r.turn.from === 'graphe');
+              const lastIdx = lastGrapheIdx === -1 ? -1 : all.length - 1 - lastGrapheIdx;
+              return all.map((row, idx) =>
               row.kind === "steps" ? (
                 <Steps key={row.id} steps={row.steps} showMe={preferences.showMe} />
               ) : (
@@ -4361,13 +4406,14 @@ function Conversation() {
                     onFixReview={fixReview}
                     onPostReview={postReview}
                     showMe={preferences.showMe}
+                    isLast={idx === lastIdx}
                   />
                   {(pictures.under.get(row.turn.id) ?? []).map((one) => (
                     <Picture key={one.change.id} change={one.change} />
                   ))}
                 </Fragment>
               ),
-            )}
+            ); })()}
               {frontBusy && !runningNow ? <WorkingMark /> : null}
               {pictures.last.map((one) => (
                 <Picture key={one.change.id} change={one.change} />
@@ -4437,7 +4483,7 @@ function Conversation() {
                 steps have, and nothing about the build is lost if the window
                 closes — the plan is written down and reopened. */}
             {buildPlan !== null && buildPlan.path === desk?.path && buildPlan.plan.total > 0 ? (
-              <BuildProgress plan={buildPlan.plan} running={frontBusy} />
+              <BuildProgress plan={buildPlan.plan} running={frontBusy} project={buildPlan.path} />
             ) : null}
 
             {/* Both bands sit above the composer rather than in the panel on
@@ -4715,18 +4761,7 @@ function Conversation() {
       ) : null}
 
       {helpersAt !== null ? (
-        <HelpersView
-          helpers={helpers}
-          at={helpersAt.at}
-          onClose={() => setHelpersAt(null)}
-          onBringIn={(helper) => {
-            // Into the box rather than straight to the model: what a helper
-            // found is something to work from, and the next message is still
-            // the person's to write.
-            setDraft(`${helper.saying ?? ""}\n\n`);
-            setHelpersAt(null);
-          }}
-        />
+        <HelpersView helpers={helpers} at={helpersAt.at} onClose={() => setHelpersAt(null)} />
       ) : null}
 
       {!overviewed && desk !== null && desk.spent !== null ? (
@@ -4880,6 +4915,7 @@ function Turnstile({
   onFixReview,
   onPostReview,
   showMe,
+  isLast,
 }: {
   turn: Turn;
   onRespond: (turnId: string, callId: string, decision: Decision) => void;
@@ -4901,11 +4937,12 @@ function Turnstile({
    *  The words themselves were recorded when the step happened, so turning this
    *  on explains the conversation you already had. */
   showMe: boolean;
+  isLast?: boolean;
 }) {
   switch (turn.kind) {
     case "said":
       return (
-        <Message from={turn.from} streaming={turn.streaming}>
+        <Message from={turn.from} streaming={turn.streaming} isLast={isLast}>
           {turn.text}
         </Message>
       );

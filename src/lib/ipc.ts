@@ -16,6 +16,7 @@ import type { AgentEvent, Money, RunningPiece, SpendSummary } from '../agent/typ
 
 export type { RunningPiece } from '../agent/types';
 import type { HowFar } from '../agent/guard/policy';
+import type { Theme } from './theme';
 import type { Frame, Recording } from '../diff/flow';
 import type { SpendLimit } from '../cost/limits';
 import type { Move } from '../design/moved';
@@ -446,6 +447,8 @@ export type Preferences = {
   /** The ceiling somebody set on spending, or null when they have not set one.
    *  Remembered across launches: a ceiling that forgets itself is not one. */
   ceiling: Money | null;
+  /** Which finishing the window wears. 'system' follows the computer. */
+  theme: Theme;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1165,6 +1168,7 @@ export const CHANNEL = {
   buildPlan: 'graphe:build-plan',
   buildAdvance: 'graphe:build-advance',
   buildSave: 'graphe:build-save',
+  buildCancel: 'graphe:build-cancel',
   chooseDocument: 'graphe:choose-document',
   designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
@@ -1201,6 +1205,7 @@ export const CHANNEL = {
   openLink: 'graphe:open-link',
   landing: 'graphe:landing',
   setHoldBack: 'graphe:set-hold-back',
+  setTheme: 'graphe:set-theme',
   setHowMuch: 'graphe:set-how-much',
   decideOnWork: 'graphe:decide-on-work',
   handToDeveloper: 'graphe:hand-to-developer',
@@ -1354,6 +1359,8 @@ export type GrapheApi = {
   /** Record the plan the agent produced into the stored build-plan, so a
    *  resumed session has the real task list. */
   buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>>;
+  /** Cancel the current build checklist and clear it from the screen. */
+  buildCancel(where?: Where): Promise<Result<null>>;
   /** Pick a requirements document on disk and read its text, or null if closed. */
   chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>>;
   /** Move the project onto another of its lines of work. Refuses while the
@@ -1513,6 +1520,7 @@ export type GrapheApi = {
   landing(where?: Where): Promise<Result<Landing>>;
   /** Check new work in a copy before it reaches the files. Sticky. */
   setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>>;
+  setTheme(theme: Theme): Promise<Result<Preferences>>;
   /** Move the line a picture has to cross before the work is stopped. One of
    *  `HOW_MUCH` in `src/design/gate.ts`. Sticky. */
   setHowMuch(id: string): Promise<Result<Preferences>>;

@@ -73,6 +73,12 @@ export const ceilingWords = {
   },
 };
 
+/** Showcase ceiling — twenty helpers in one fan-out for filming. A hard
+ *  concurrent cap for now (simplest, no queue); if a machine strains under it,
+ *  this is the one number to bring down, and `howManyFit` is where a
+ *  system-aware gate would go. */
+export const HELPER_TOTAL_MAX = 20;
+
 /**
  * How many of each kind run at once.
  *
@@ -83,11 +89,9 @@ export const ceilingWords = {
  * keeps its own four, set where the board is.
  */
 export const MOST_AT_ONCE: Readonly<Record<RunKind, number>> = {
-  /* The same number a single request may break itself into (`MOST_APART`), so a
-     fan-out that the model was told it could ask for is never refused on the
-     way out by a ceiling nobody mentioned. Research splits a question fewer
-     ways than this on purpose, leaving room for whatever is already working. */
-  helper: 8,
+  /* The showcase fan-out. One number, and HELPER_TOTAL_MAX is it: the cap and
+     the constant cannot drift apart, because they are the same constant. */
+  helper: HELPER_TOTAL_MAX,
   // Background work is already capped per project by the board that holds it,
   // and this fleet is one for the whole app: capping it here as well would mean
   // a second project could not start anything while the first was busy.

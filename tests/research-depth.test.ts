@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { MOST_AT_ONCE } from '../src/cost/fleet';
+import { HELPER_TOTAL_MAX, MOST_AT_ONCE } from '../src/cost/fleet';
 import { MOST_APART } from '../src/agent/pi/tools';
 import {
   asResearch,
@@ -123,9 +123,12 @@ describe('a split that will actually start', () => {
     expect(tools).toContain('At most ${String(MOST_AT_ONCE.helper)} helpers work at once');
   });
 
-  it('leaves every ceiling where it was', () => {
-    // A machine ran out of memory over this once. These go down or stay.
-    expect(MOST_AT_ONCE.helper).toBe(8);
+  it('keeps the helper ceiling at the showcase total, and away uncapped', () => {
+    // One number, not two: the cap IS the total, so they cannot drift apart.
+    // This guards against a future raise sneaking past HELPER_TOTAL_MAX, and
+    // against someone re-capping `away` and stalling a second project.
+    expect(MOST_AT_ONCE.helper).toBe(HELPER_TOTAL_MAX);
+    expect(MOST_AT_ONCE.away).toBe(Number.POSITIVE_INFINITY);
     expect(MOST_APART).toBe(8);
   });
 });

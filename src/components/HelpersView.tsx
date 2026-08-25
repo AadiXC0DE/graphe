@@ -10,9 +10,6 @@ type Props = {
   /** Which one to open on. Null opens on the newest. */
   at: string | null;
   onClose: () => void;
-  /** Put what this one found into the message box, as a reference to work
-   *  from. The same move an attachment makes. */
-  onBringIn: (helper: Helper) => void;
 };
 
 export const SAYS = {
@@ -24,7 +21,6 @@ export const SAYS = {
   asked: 'What it was asked',
   said: 'What it said',
   nothingSaid: 'Nothing yet.',
-  bringIn: 'Bring this in',
   started: (when: string) => `Started ${when}`,
 } as const;
 
@@ -37,7 +33,7 @@ export const SAYS = {
  * the two things that are otherwise cut to a line each, and the reason this
  * surface exists at all.
  */
-export default function HelpersView({ helpers, at, onClose, onBringIn }: Props) {
+export default function HelpersView({ helpers, at, onClose }: Props) {
   const shut = useRef<HTMLButtonElement>(null);
   const [picked, setPicked] = useState<string | null>(at);
 
@@ -134,16 +130,6 @@ export default function HelpersView({ helpers, at, onClose, onBringIn }: Props) 
                     <p className="helpersview__said">{chosen.saying}</p>
                   )}
                 </section>
-
-                {chosen.saying === null ? null : (
-                  <button
-                    type="button"
-                    className="helpersview__bring"
-                    onClick={() => onBringIn(chosen)}
-                  >
-                    {SAYS.bringIn}
-                  </button>
-                )}
               </article>
             )}
           </>

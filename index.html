@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Graphe</title>
+    <script>
+      /* The palette, before the first paint. Without this the stylesheet's
+         default wins for a frame or more — light on a dark machine, or the
+         wrong one of the five entirely. Same key and same reading as
+         src/lib/theme.ts; kept in step by tests/theme.test.ts. */
+      try {
+        var t = localStorage.getItem('graphe:theme');
+        if (t === 'light' || t === 'super' || t === 'pink' || t === 'slate') {
+          document.documentElement.setAttribute('data-theme', t);
+        } else if (t === 'graphe' || t === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'graphe');
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

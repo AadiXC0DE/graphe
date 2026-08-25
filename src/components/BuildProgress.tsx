@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import type { BuildPlan } from '../lib/ipc';
+import { bridge } from '../lib/bridge';
 import './BuildProgress.css';
 
 type Props = {
   plan: BuildPlan;
   /** True while a turn is still running, so the collapsed line can say so. */
   running?: boolean;
+  /** Which project's list this is. Given, Clear lands on that project even if
+   *  the front tab has moved; left out, it cancels whatever is in front, which
+   *  is the same thing whenever the tracker is on screen. */
+  project?: string;
 };
 
 export const SAYS = {
@@ -19,6 +24,12 @@ export const SAYS = {
   close: 'Hide the plan',
   working: 'Working on',
   stuck: 'Needs another try',
+  /* "Stop", not "Clear": what ends is the todo itself, and Stop is the word
+     the rest of the app already uses for ending something. The title carries
+     the boundary — a run already going is not interrupted. */
+  stop: 'Stop',
+  stopTitle:
+    'Stops this todo: the list comes off the screen and stays gone. A run already going is not interrupted.',
 } as const;
 
 function glyph(status: BuildPlan['tasks'][number]['status']): string {
@@ -32,37 +43,55 @@ function glyph(status: BuildPlan['tasks'][number]['status']): string {
  * source of truth, so the line survives whatever happened to the window and a
  * resumed build simply picks it up.
  */
-export default function BuildProgress({ plan, running = false }: Props) {
+export default function BuildProgress({ plan, running = false, project }: Props) {
   const [open, setOpen] = useState(false);
   const failed = plan.tasks.filter((one) => one.status === 'failed').length;
   const head = failed > 0
     ? `${plan.done}/${plan.total} complete · ${SAYS.failed(failed)}`
     : `${plan.done}/${plan.total} ${SAYS.done}`;
+  const canCancel = plan.done < plan.total;
 
   return (
     <section className={`buildprogress ${open ? 'buildprogress--open' : ''}`} aria-label="Progress">
-      <button
-        type="button"
-        className="buildprogress__head"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        aria-label={open ? SAYS.close : SAYS.open}
-      >
-        <span className={`buildprogress__dot ${running ? 'buildprogress__dot--live' : ''}`} aria-hidden="true" />
-        <span className="buildprogress__name">{SAYS.name}</span>
-        <span className="buildprogress__count">{head}</span>
-        <span className="buildprogress__caret" aria-hidden="true">
-          <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-            <path
-              d="M4.5 2.5 8 6l-3.5 3.5"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </span>
-      </button>
+      {/* The fold and the Clear are two controls, so they are two buttons in a
+          row — a button inside a button is not a thing HTML can say. */}
+      <div className="buildprogress__bar">
+        <button
+          type="button"
+          className="buildprogress__head"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-label={open ? SAYS.close : SAYS.open}
+        >
+          <span className={`buildprogress__dot ${running ? 'buildprogress__dot--live' : ''}`} aria-hidden="true" />
+          <span className="buildprogress__name">{SAYS.name}</span>
+          <span className="buildprogress__count">{head}</span>
+          <span className="buildprogress__caret" aria-hidden="true">
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+              <path
+                d="M4.5 2.5 8 6l-3.5 3.5"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+        </button>
+        {canCancel ? (
+          <button
+            type="button"
+            className="buildprogress__cancel"
+            onClick={() => {
+              void bridge.buildCancel(project === undefined ? undefined : { project });
+            }}
+            aria-label={`${SAYS.stop} todo`}
+            title={SAYS.stopTitle}
+          >
+            {SAYS.stop}
+          </button>
+        ) : null}
+      </div>
 
       {open ? (
         <ul className="buildprogress__list">

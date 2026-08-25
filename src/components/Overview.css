@@ -242,6 +242,26 @@
   min-width: 0;
 }
 
+/* A folder that holds several projects names each one, then says where it
+   stands. The name is what somebody picks by; the state is what they check.
+   The figures line up as they change, because a count that shuffles is a
+   count nobody trusts. */
+.overview__repo-name {
+  flex: none;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.overview__repo-state {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* A thing the last turn made is itself a press: open the file to look at it.
    The row keeps the ref look, so the panel does not read as buttons every-
    where; the hover is the only thing that says it is one. */

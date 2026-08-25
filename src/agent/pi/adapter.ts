@@ -537,6 +537,11 @@ export type CreateSessionOptions = {
   /** Cancel that checklist. Same reach as `stepDone`, so it only exists where
    *  a list could. */
   cancelBuild?: CancelBuild;
+  /** A few sentences of fact about this folder, appended to the system prompt.
+   *  For things the folder itself cannot say — that it holds several projects
+   *  and git belongs inside each one, say. Facts only; never instructions
+   *  somebody did not choose. */
+  contextNotes?: readonly string[];
 };
 
 /**
@@ -1655,6 +1660,11 @@ const MOST_AFTER_SAYINGS = 3;
   const loader = new pi.DefaultResourceLoader({
     cwd: options.projectRoot,
     agentDir,
+    // A few sentences about the folder itself, when there is something a folder
+    // listing cannot say. Empty is the ordinary case and passes nothing through.
+    ...(options.contextNotes === undefined || options.contextNotes.length === 0
+      ? {}
+      : { appendSystemPrompt: [...options.contextNotes] }),
     // Extensions are on, but only the ones the person chose for themselves.
     // `extensionsOverride` runs after discovery and before anything is
     // installed into the session, so it is the one place a rule like that can

@@ -82,6 +82,7 @@ import {
   tooBig,
   type Found,
 } from '../src/files/listing';
+import { changedAcross, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
@@ -108,6 +109,7 @@ import {
   type OpenedProject,
   type WentOnline,
   type Overview,
+  type RepoOverview,
   type PointedAt,
   type Preferences,
   type PromptOptions,
@@ -460,6 +462,16 @@ function couldNotUseModel(named: string, many: number): Trouble {
 const NOTHING_OPEN: Trouble = {
   what: 'I do not have a folder to work in yet.',
   because: 'Pick the folder your project lives in and I will start there.',
+  actionLabel: 'Got it',
+};
+
+/** The one answer this folder gives while it is a parent holding several
+ *  projects rather than a project itself. Said the same way everywhere, so the
+ *  second card is never a surprise: open the child project and do it there. */
+const SEVERAL_PROJECTS: Trouble = {
+  what: 'This folder holds several projects.',
+  because:
+    'This works on one project at a time. Open the one you mean — it is a folder inside this one — and try again there.',
   actionLabel: 'Got it',
 };
 
@@ -1458,7 +1470,15 @@ function rememberPicture(looking: Looking, versionId: string, picture: string): 
 const CONVERSATIONS = 3;
 
 type Held = {
-  timeline: Timeline;
+  /** The project's saved work, or null when this folder is a plain folder
+   *  holding several projects beside each other — there is no folder-level
+   *  repository to keep, and inventing one would write into somebody's working
+   *  directory. Each child keeps its own; the parent simply has none. */
+  timeline: Timeline | null;
+  /** The child repositories found when this folder was opened, one level deep.
+   *  Empty for every folder that is itself one project — the ordinary case,
+   *  which nothing here may disturb. */
+  childRepos: readonly DetectedRepo[];
   spend: SpendRecorder;
   /** The conversations live in this project, in front first. Empty only for the
    *  moment between the timeline opening and the first session starting, which
@@ -1700,6 +1720,9 @@ function asSaved(version: Version, currentId: string | null): SavedVersion {
  *  an empty list rather than a failure: the rail simply has nothing to draw, and
  *  a card saying so would be a card about us. */
 async function versionsOf(held: Held): Promise<readonly SavedVersion[]> {
+  // A folder holding several projects has no folder-level history to list;
+  // empty is the true answer, and the rail draws nothing.
+  if (held.timeline === null) return [];
   const [versions, current] = await Promise.all([held.timeline.versions(), held.timeline.currentVersion()]);
   return versions.map((version) => asSaved(version, current?.id ?? null));
 }
@@ -1807,6 +1830,30 @@ async function readBranches(cwd: string): Promise<readonly GitBranch[]> {
   if (refs.code !== 0 || refs.out === undefined) return [];
   const current = head.code === 0 && head.out !== undefined ? head.out.trim() : null;
   return parseBranches(refs.out, current);
+}
+
+/** One child project's saved-state summary, read in its own folder. Null when
+ *  the child is not a repository after all — folders move. */
+async function readRepoOverview(one: DetectedRepo): Promise<RepoOverview | null> {
+  const git = await readGitStatus(one.path);
+  if (git === null) return null;
+  return { name: one.rel, path: one.path, git: { ...git, branches: await readBranches(one.path) } };
+}
+
+/** What the agent is told about a folder holding several projects: the names,
+ *  and where each one stands, because a command run from the parent lands in
+ *  no repository at all and the agent has no other way of knowing that. */
+async function childRepoNotes(children: readonly DetectedRepo[]): Promise<readonly string[]> {
+  const parts = await Promise.all(
+    children.map(async (one) => {
+      const git = await readGitStatus(one.path);
+      return git?.branch == null ? one.rel : `${one.rel} (on "${git.branch}")`;
+    }),
+  );
+  return [
+    `This folder itself is not a repository. It holds ${parts.length} projects beside each other: ${parts.join(', ')}.`,
+    'Run git and package commands inside the project folder they belong to — for example `git -C backend status` — never from this folder.',
+  ];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2109,8 +2156,10 @@ async function look(project: string, held: Held): Promise<void> {
     void forget(shelved.forget.map((one) => one.file));
 
     // The picture is of the project as it now stands, which is the version it
-    // now stands at. That is the only moment the two are known to match.
-    const at = await timeline.currentVersion().catch(() => null);
+    // now stands at. That is the only moment the two are known to match. A
+    // folder holding several projects has no folder-level version to name —
+    // the picture still lands, it just remembers no version.
+    const at = timeline === null ? null : await timeline.currentVersion().catch(() => null);
     if (at !== null) rememberPicture(looking, at.id, taken.thumbnail);
 
     // The older half. Usually still in hand from last time; read back off the
@@ -2147,7 +2196,8 @@ async function look(project: string, held: Held): Promise<void> {
 
     looking.frames.set(id, { before: before.file, after: taken.picture.file });
 
-    const said = await saidInDesignWords(timeline, project, changed);
+    const said =
+      timeline === null ? null : await saidInDesignWords(timeline, project, changed);
     // The same words the strip shows, kept for whoever this work is handed to.
     // Two descriptions of one change is how somebody starts wondering which is
     // true, so there is only ever the one.
@@ -2514,6 +2564,10 @@ async function checkItFirst(
   const held = open.held;
   const history = new ProjectHistory(open.path);
   held.pictures = null;
+  // Checking work first runs it in a copy of one project's history. A folder
+  // holding several projects has none to copy, so this is said plainly rather
+  // than half-working.
+  if (held.timeline === null) return fail(SEVERAL_PROJECTS);
 
   // Work starts from a version. Anything unfinished becomes one first, silently
   // and without a question, exactly as going back does.
@@ -3231,12 +3285,24 @@ async function startConversationUnlocked(
       mainFolder: open.path,
       onEvent: forwardTo(open.path, held, from),
       // Restore points must describe the tree this session is actually changing.
-      timeline: checkout === null ? held.timeline : await Timeline.open(checkout.folder),
+      timeline:
+        checkout === null
+          ? // Null only for a folder holding several projects; the session then
+            // runs with no restore points, which is the honest answer for a
+            // folder with no repository of its own.
+            (held.timeline ?? undefined)
+          : await Timeline.open(checkout.folder),
       model: prefs.model,
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
       running: held.running,
       noteServers,
+      // A folder holding several projects cannot say so itself, and the agent
+      // would otherwise learn it from git failing. Facts only — names and
+      // where each project stands.
+      ...(held.childRepos.length >= SEVERAL_CHILDREN
+        ? { contextNotes: await childRepoNotes(held.childRepos) }
+        : {}),
       // Without this the agent's own way into Figma is never built, so pasting
       // a link got its text read back while the panel beside it could open the
       // file. The panel and the agent read the same credential now.
@@ -3318,16 +3384,26 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     });
   }
 
-  let timeline: Timeline;
-  try {
-    timeline = await Timeline.open(path);
-  } catch (cause) {
-    return fail(noSafetyNet(cause));
+  // Children first: a folder holding several projects gets no folder-level
+  // history at all. Opening it used to run `git init` right here and leave a
+  // .gitignore behind — writing into somebody's working directory to pretend
+  // their folder was one project. With two or more child repositories the
+  // parent keeps its hands off, and each child is read where it lives.
+  const children = await childRepos(path);
+
+  let timeline: Timeline | null = null;
+  if (children.length < SEVERAL_CHILDREN) {
+    try {
+      timeline = await Timeline.open(path);
+    } catch (cause) {
+      return fail(noSafetyNet(cause));
+    }
   }
 
   const restoredCheckouts = await readCheckouts(path);
   const held: Held = {
     timeline,
+    childRepos: children,
     spend: new SpendRecorder(),
     sessions: conversationsIn(path),
     running: new Running(),
@@ -4934,12 +5010,20 @@ function register(): void {
     // project's primary checkout — otherwise a successful `git switch` looks
     // like it never happened.
     const cwd = checkoutEntryFor(open, where)?.folder ?? open.path;
-    const git = await readGitStatus(cwd);
+    // Several projects in one folder: each child answers where it lives; the parent answers nothing.
+    const many = open.held.childRepos.length >= SEVERAL_CHILDREN;
+    const repos = many
+      ? (await Promise.all(open.held.childRepos.map(readRepoOverview))).filter(
+          (one): one is RepoOverview => one !== null,
+        )
+      : undefined;
+    const git = many ? null : await readGitStatus(cwd);
     return done({
       git:
         git === null
           ? null
           : { ...git, branches: await readBranches(cwd) },
+      ...(repos === undefined ? {} : { repos }),
       preview: open.held.serving?.address ?? null,
       artifacts: made,
       swatches,
@@ -4952,6 +5036,7 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof changes !== 'object' || changes === null) return fail(NOTHING_OPEN);
+    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
     const given = changes as Partial<DesignChange>;
     const tokens = Array.isArray(given.tokens)
       ? given.tokens.filter((one) => typeof one.name === 'string' && typeof one.value === 'string')
@@ -5012,7 +5097,7 @@ function register(): void {
         }
       }
       for (const [where, css] of perFile) await writeFile(where, css, 'utf8');
-      await open.held.timeline.snapshot({ boundary: 'user-asked', by: 'you' });
+      await open.held.timeline?.snapshot({ boundary: 'user-asked', by: 'you' });
       return done(await versionsOf(open.held));
     } catch (cause) {
       const raw = cause instanceof Error ? cause.message : String(cause);
@@ -5025,6 +5110,7 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof versionId !== 'string' || versionId.trim() === '') return fail(NO_SUCH_VERSION);
+    if (open.held.timeline === null) return fail(SEVERAL_PROJECTS);
     try {
       const restored = await open.held.timeline.restoreTo(versionId);
       filesMovedIn(open);
@@ -5044,6 +5130,7 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof versionId !== 'string' || typeof name !== 'string') return fail(NO_SUCH_VERSION);
+    if (open.held.timeline === null) return fail(SEVERAL_PROJECTS);
     try {
       await open.held.timeline.nameVersion(versionId, name);
       return done(await versionsOf(open.held));
@@ -5079,11 +5166,24 @@ function register(): void {
   handle<readonly FileEntry[]>(CHANNEL.projectFiles, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) return done([]);
-    const [walked, git] = await Promise.all([
+    const children = open.held.childRepos;
+    // A folder holding several projects has no git of its own to ask; each
+    // child is asked where it lives, and its files are spelled the way the
+    // parent's listing spells them — `backend/src/app.ts` — so the markers
+    // land on the right rows.
+    const [walked, ...childStatuses] = await Promise.all([
       everythingIn(open.path, insideFolder),
-      readGitStatus(open.path),
+      ...(children.length >= SEVERAL_CHILDREN
+        ? children.map((one) => readGitStatus(one.path))
+        : [readGitStatus(open.path)]),
     ]);
-    return done(markChanged(walked.files, git?.files ?? []));
+    const changed =
+      children.length >= SEVERAL_CHILDREN
+        ? changedAcross(
+            children.map((one, at) => ({ rel: one.rel, files: childStatuses[at]?.files ?? [] })),
+          )
+        : (childStatuses[0]?.files ?? []);
+    return done(markChanged(walked.files, changed));
   });
 
   /** One file, to read. Everything that could go wrong here — a location
@@ -5269,6 +5369,7 @@ function register(): void {
     const [name] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
+    if (open.held.timeline === null) return fail(SEVERAL_PROJECTS);
     try {
       await open.held.timeline.snapshot({
         boundary: 'user-asked',
@@ -5405,7 +5506,7 @@ function register(): void {
     try {
       // Anything unfinished in the folder becomes a version first, the same way
       // going back does, so letting work in can never write over it.
-      await open.held.timeline.snapshot({ boundary: 'turn-ended' });
+      await open.held.timeline?.snapshot({ boundary: 'turn-ended' });
       const outcome = await waiting.approve(saysHeldWork(waiting.waiting.doing));
       open.held.waiting = null;
       open.held.pictures = null;
@@ -5443,11 +5544,12 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (open.held.sending) return fail(alreadyGoing);
+    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
 
     open.held.sending = true;
     try {
       const changes = await whatChanged(open);
-      const newest = await open.held.timeline.currentVersion().catch(() => null);
+      const newest = (await open.held.timeline?.currentVersion().catch(() => null)) ?? null;
       const handed = await handToDeveloper({
         history: new ProjectHistory(open.path),
         folder: open.path,
@@ -5481,6 +5583,7 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (open.held.sending) return fail(alreadyGoing);
+    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
 
     open.held.sending = true;
     try {
@@ -5591,7 +5694,7 @@ function register(): void {
       // was written for, and nothing said so. The agent's own path has refused
       // on this since it was written; this is the same rule for the press.
       const saved = await open.held.timeline
-        .snapshot({ boundary: 'before-risky-change' })
+        ?.snapshot({ boundary: 'before-risky-change' })
         .then(() => true)
         .catch(() => false);
       if (!saved) {
@@ -5770,7 +5873,7 @@ function register(): void {
     try {
       // A version first, the same way keeping one does, so the whole run has
       // somewhere to be undone to even before the first piece goes in.
-      await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
+      await open.held.timeline?.snapshot({ boundary: 'turn-ended' }).catch(() => null);
       const took = await desk.bench.keepSet(wanted, (piece) => saysHeldWork(piece.doing), {
         after: (id) => desk.after.get(id) ?? null,
         lettingGo: async (going) => {
@@ -5814,7 +5917,7 @@ function register(): void {
     try {
       // Anything unfinished in the folder becomes a version first, the same way
       // going back does, so keeping this can never write over it.
-      await open.held.timeline.snapshot({ boundary: 'turn-ended' }).catch(() => null);
+      await open.held.timeline?.snapshot({ boundary: 'turn-ended' }).catch(() => null);
       const kept = await desk.bench.keep(id, saysHeldWork(piece.doing), {
         lettingGo: async (ids) => {
           for (const one of ids) await stopWorkIn(desk, one);
@@ -6324,6 +6427,9 @@ function register(): void {
     const [at] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_TO_SHOW);
+    // Several projects in one folder: there is nothing at the parent to serve —
+    // the runnable thing lives inside one of the children.
+    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
 
     // One at a time per project. Pressing it again means "show me what it looks
     // like now", so the old one goes and a new one takes its place.
@@ -6451,10 +6557,12 @@ function register(): void {
     if (stillWriting(open.held)) {
       return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish and switch then. A line of work is only moved when nothing is still changing the files.', actionLabel: 'Got it' });
     }
+    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
     // Saved, not refused. Refusing on anything unsaved made this impossible to
     // come back from: moving to a line without a folder leaves that folder
     // behind untouched, which counts as unsaved, which blocks the way back.
     const timeline = entry === null ? open.held.timeline : await Timeline.open(cwd);
+    if (timeline === null) return fail(SEVERAL_PROJECTS);
     await timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
     const switched = await gitRun(cwd, ['checkout', name]);
     if (switched.code !== 0) {
@@ -6485,9 +6593,11 @@ function register(): void {
     if (stillWriting(open.held)) {
       return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish, then start the new line.', actionLabel: 'Got it' });
     }
+    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
     const entry = checkoutEntryFor(open, where);
     const cwd = entry?.folder ?? open.path;
     const timeline = entry === null ? open.held.timeline : await Timeline.open(cwd);
+    if (timeline === null) return fail(SEVERAL_PROJECTS);
     await timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
     const made = await gitRun(cwd, ['checkout', '-b', clean]);
     if (made.code !== 0) {
@@ -6530,6 +6640,10 @@ function register(): void {
     // this landed somebody else's branch.
     const entry = checkoutEntryFor(open, whereIn(args));
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    // Landing folds the copy back into the folder's own history; several
+    // projects have none to fold into.
+    const history = open.held.timeline;
+    if (history === null) return fail(SEVERAL_PROJECTS);
     await putDownCopyConversation(open, entry.address);
     if ((await reopenCheckout(open.path, entry)) === null) {
       return fail(worktreeTrouble(worktreeWords.gone));
@@ -6543,7 +6657,7 @@ function register(): void {
       return fail(worktreeTrouble(bringBackWords.heldBack(carried.value.conflicted)));
     }
     try {
-      await open.held.timeline.snapshot({ boundary: 'turn-ended' });
+      await history.snapshot({ boundary: 'turn-ended' });
     } catch (cause) {
       return fail(
         worktreeTrouble(cause instanceof Error ? cause.message : 'The project could not be saved.'),
@@ -6949,7 +7063,7 @@ function register(): void {
         // Nothing to show, so the work happens here and one press puts it back.
         // The save point is the whole difference between that and losing it.
         await open.held.timeline
-          .snapshot({ boundary: 'before-risky-change' })
+          ?.snapshot({ boundary: 'before-risky-change' })
           .catch(() => null);
       }
       // `@name` is a deliberate, per-turn selection — stronger than hoping a

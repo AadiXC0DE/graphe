@@ -17,6 +17,7 @@ import type {
   InStep as InStepState,
   Landing as LandingState,
   PutBack,
+  RepoOverview,
   SavedVersion,
   Money,
   SpendLimit,
@@ -28,11 +29,33 @@ import type { NowView, Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
 import './Overview.css';
 
+/** Words for the folder that holds several projects. Named for what somebody
+ *  sees — the projects, and where each stands — not for how they are found. */
+const SEVERAL = {
+  heading: 'Holds several projects',
+  quietly: 'Open a project directly to switch its lines of work, save versions, or see it running.',
+  changed: 'changed',
+  noLine: 'no line yet',
+} as const;
+
+/** One line on where a project stands: its line of work, then only what is
+ *  worth knowing beyond that. */
+function repoState(git: RepoOverview['git']): string {
+  const parts = [git.branch ?? SEVERAL.noLine];
+  if (git.ahead > 0) parts.push(`${String(git.ahead)} ahead`);
+  if (git.behind > 0) parts.push(`${String(git.behind)} behind`);
+  if (git.dirty && git.ahead === 0) parts.push(SEVERAL.changed);
+  return parts.join(' · ');
+}
+
 /** Everything the panel draws, in one object. It was eight props and the next
  *  band would have made it twelve. */
 export type OverviewView = {
   now: NowView;
   git: GitSnapshot | null;
+  /** The projects this folder holds, when it is a folder holding several
+   *  rather than one project itself. Empty the ordinary day. */
+  repos: readonly RepoOverview[];
   research: readonly ResearchEntry[];
   references: readonly Reference[];
   versions: readonly SavedVersion[];
@@ -282,6 +305,11 @@ export default function Overview({
   const { now, git, research, references, versions, pictures, kept, putBack, spent, onAPlan, ceiling, busy, showMe } =
     view;
   const { artifacts, swatches } = view;
+  /** A folder holding several projects is the one case the rest of this panel
+   *  does not apply to: there are no folder-level lines of work to move, no
+   *  folder-level save. The banner replaces both bands, and says where each
+   *  project stands instead. */
+  const several = view.repos.length >= 2;
 
   /* Which band of the panel is in front. Bands used to stack into one column
      that only got longer; now each has a home and nothing is buried. */
@@ -345,7 +373,25 @@ export default function Overview({
       {/* Where the work sits, and the press that moves it. Its own band rather
           than a label inside the save band: it is the thing people reach for,
           and it was reachable before only by opening a different view. */}
-      {git === null ? null : (
+      {/* A folder holding several projects shows where each one stands instead:
+          there are no folder-level lines of work to move between, and pretending
+          otherwise — showing one child's branches under the folder's name — is
+          how somebody ends up switching the wrong thing. */}
+      {several ? (
+        <section className="overview__block">
+          <h2 className="overview__title">{SEVERAL.heading}</h2>
+          <ul className="overview__refs">
+            {view.repos.map((one) => (
+              <li key={one.path} className="overview__ref">
+                <span className="overview__repo-name">{one.name}</span>
+                <span className="overview__repo-state">{repoState(one.git)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="overview__quiet">{SEVERAL.quietly}</p>
+        </section>
+      ) : null}
+      {git === null || several ? null : (
         <section className="overview__block">
           <h2 className="overview__title">
             {LINE_WORDS.heading}

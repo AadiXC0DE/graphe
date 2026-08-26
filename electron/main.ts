@@ -83,7 +83,7 @@ import {
   type Found,
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
-import { forgetLogins } from '../src/agent/pi/computer';
+import { forgetLogins, watchBrowser } from '../src/agent/pi/computer';
 import { alwaysFile, alwaysFrom, WHEN, type When } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
@@ -6612,6 +6612,13 @@ function register(): void {
 
   /* The `/word` ways of working. The body stays here — the window gets only
      what it needs to list them in a `/` menu and to hold the typed words. */
+  handle<string | null>(CHANNEL.watchBrowser, async (_event, args) => {
+    const [on] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null || typeof on !== 'boolean') return done(null);
+    return done(await watchBrowser(on, open.path).catch(() => null));
+  });
+
   /** What this project does without being asked. Read fresh each time: the file
    *  is the whole feature, so a change to it must show at once. */
   handle<AlwaysDoes>(CHANNEL.alwaysDoes, async (_event, args) => {

@@ -38,6 +38,12 @@ import { reviewAsMarkdown } from "./agent/pi/review";
 import { saysUseYours } from "./design/drift";
 import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
+import {
+  NOTHING_WATCHED,
+  readWatched,
+  watching,
+  type Watched,
+} from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
 import { drainStarted } from "./lib/queue";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
@@ -2043,6 +2049,41 @@ function Conversation() {
     return () => window.removeEventListener("pointerdown", away);
   }, [switching]);
 
+  /** Where the agent's browser is showing itself, or null when nobody asked. */
+  const [watchAt, setWatchAt] = useState<string | null>(null);
+  const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
+
+  /* One connection, opened when somebody asks to watch and closed the moment
+     they stop. A socket left open is a browser drawing itself for nobody. */
+  useEffect(() => {
+    if (watchAt === null) return;
+    const socket = new WebSocket(watchAt);
+    socket.onmessage = (event: MessageEvent) => {
+      const message = readWatched(event.data);
+      if (message !== null) setWatched((was) => watching(was, message));
+    };
+    return () => {
+      socket.onmessage = null;
+      socket.close();
+    };
+  }, [watchAt]);
+
+  const watchTheBrowser = useCallback((want: boolean) => {
+    const path = desksNow.current.current;
+    if (!want) {
+      setWatchAt(null);
+      setWatched(NOTHING_WATCHED);
+      void bridge.watchBrowser(false, path === null ? undefined : { project: path });
+      return;
+    }
+    setWatched(NOTHING_WATCHED);
+    void bridge
+      .watchBrowser(true, path === null ? undefined : { project: path })
+      .then((answer) => {
+        setWatchAt(answer.ok ? answer.value : null);
+      });
+  }, []);
+
   /** Whether each conversation's run is waiting for somebody, by its owner. */
   const [holding, setHolding] = useState<Readonly<Record<string, boolean>>>({});
 
@@ -3784,6 +3825,7 @@ function Conversation() {
   /* A native view paints above the window's own contents, so anything that
      would cover it has to take it off screen first. */
   const covered =
+    watchAt !== null ||
     designAt !== null ||
     graphOpen ||
     reviewsOpen ||
@@ -4854,6 +4896,9 @@ function Conversation() {
         }
         recording={recording}
         onRecord={record}
+        watched={watched}
+        watching={watchAt !== null}
+        onWatch={watchTheBrowser}
         variation={variations?.inFront ?? null}
         onVariation={variations === null ? undefined : (id) => {
           const chosen = variations.members.find((one) => one.id === id);

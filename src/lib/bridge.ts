@@ -1012,6 +1012,10 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(''));
     },
 
+    watchBrowser(): Promise<Result<string | null>> {
+      return Promise.resolve(done(null));
+    },
+
     alwaysDoes(): Promise<Result<AlwaysDoes>> {
       return Promise.resolve(done({ file: '', rows: [], trouble: null }));
     },
@@ -1933,6 +1937,7 @@ function connect(): Bridge {
     skillText: (id) => api.skillText(id),
     workflows: () => api.workflows(),
     alwaysDoes: (where) => api.alwaysDoes(where),
+    watchBrowser: (on, where) => api.watchBrowser(on, where),
     branchSwitch: (name, where) => api.branchSwitch(name, where),
     branchCreate: (name, where) => api.branchCreate(name, where),
     worktreeLand: (where) => api.worktreeLand(where),

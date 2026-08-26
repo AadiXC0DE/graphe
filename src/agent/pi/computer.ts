@@ -841,3 +841,51 @@ export async function forgetLogins(agentDir: string, projectRoot?: string): Prom
     () => undefined,
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* Watching it work                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** Where the browser can be watched, once it is showing itself. */
+export function watchAddress(port: number): string {
+  // One picture a second. Enough to follow along, and far too little to be a
+  // second thing the machine is busy drawing.
+  return `ws://127.0.0.1:${String(port)}/?maxFps=1`;
+}
+
+/** The port out of the program's own answer about showing itself. */
+export function readPort(data: Record<string, unknown> | null): number | null {
+  const port = data === null ? null : data['port'];
+  return typeof port === 'number' && port > 0 ? port : null;
+}
+
+/**
+ * Ask the browser to show what it is doing, or stop.
+ *
+ * A picture a second over a connection the window opens itself. Off is the
+ * ordinary state: a browser nobody is watching should not be drawing itself for
+ * nobody. Null when there is no browser to watch.
+ */
+export async function watchBrowser(
+  on: boolean,
+  projectRoot?: string,
+  host?: BrowserHost,
+): Promise<string | null> {
+  const run = host ?? defaultHost(projectRoot ?? tmpdir());
+  const found = await findWay(run).catch(() => null);
+  if (found === null) return null;
+  const setup = setupFrom(process.env, projectRoot);
+  const ask = async (command: readonly string[]): Promise<Answer> =>
+    readAnswer(
+      await run(found.tool, [...found.lead, ...browserArgs(command, setup)], { patience: 60_000 }),
+    );
+  if (!on) {
+    await ask(['stream', 'disable']).catch(() => undefined);
+    return null;
+  }
+  await ask(['stream', 'enable']);
+  // Asked for separately: turning it on answers without the port it chose.
+  const now = await ask(['stream', 'status']);
+  const port = readPort(now.data);
+  return port === null ? null : watchAddress(port);
+}

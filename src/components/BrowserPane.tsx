@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { walkthrough } from '../diff/flow';
+import { WATCH_WORDS, type Watched } from '../preview/watching';
 import './BrowserPane.css';
 
 /** How the window is split between the conversation and the page. */
@@ -29,6 +30,13 @@ type Props = {
   /** Hand the address to the machine's own browser. Left off, the control is
    *  not offered. */
   onElsewhere?: (address: string) => void;
+  /** What the agent's own browser is doing, when somebody is watching it. Left
+   *  off, the control is not offered. */
+  watched?: Watched;
+  /** True while the agent's browser is showing itself. */
+  watching?: boolean;
+  /** Start watching the agent's browser, and stop. */
+  onWatch?: (want: boolean) => void;
   /** True while what somebody does on the page is being recorded. */
   recording?: boolean;
   /** Start recording, and stop it. Left off, the control is not offered. */
@@ -108,6 +116,9 @@ export default function BrowserPane({
   onVariation,
   recording = false,
   onRecord,
+  watched,
+  watching = false,
+  onWatch,
 }: Props) {
   const stage = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLDivElement>(null);
@@ -230,6 +241,30 @@ export default function BrowserPane({
         </button>
         )}
 
+        {/* The agent's browser runs out of sight, which is the point. This is
+            the answer to "what is it doing" — a picture a second, in the room
+            already here for looking at pages. */}
+        {onWatch === undefined ? null : (
+          <button
+            type="button"
+            className={`pane__act ${watching ? 'pane__act--on' : ''}`}
+            onClick={() => onWatch(!watching)}
+            title={watching ? WATCH_WORDS.off : WATCH_WORDS.on}
+            aria-label={watching ? WATCH_WORDS.off : WATCH_WORDS.on}
+            aria-pressed={watching}
+          >
+            <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden="true">
+              <path
+                d="M1 7s2.2-3.5 6-3.5S13 7 13 7s-2.2 3.5-6 3.5S1 7 1 7Z"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinejoin="round"
+              />
+              <circle cx="7" cy="7" r="1.6" fill="currentColor" />
+            </svg>
+          </button>
+        )}
+
         {/* A page you are working against is a page you reload constantly. */}
         <button
           type="button"
@@ -280,7 +315,18 @@ export default function BrowserPane({
           until something is being served. */}
       <div className="pane__stage" ref={stage}>
         <div className={`pane__screen pane__screen--${size}`} ref={screen}>
-          {address === null ? <p className="pane__nothing">{SAYS.nothing}</p> : null}
+          {/* The agent's own browser, drawn here rather than painted over by
+              the shell — it is a picture, not a page, and it takes the room
+              while somebody is watching it. */}
+          {watching === true ? (
+            watched?.picture == null ? (
+              <p className="pane__nothing">{WATCH_WORDS.waiting}</p>
+            ) : (
+              <img className="pane__watched" src={watched.picture} alt={WATCH_WORDS.on} />
+            )
+          ) : address === null ? (
+            <p className="pane__nothing">{SAYS.nothing}</p>
+          ) : null}
         </div>
       </div>
     </section>

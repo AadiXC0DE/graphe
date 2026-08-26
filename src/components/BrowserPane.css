@@ -325,3 +325,20 @@
     padding: 0 var(--space-2);
   }
 }
+
+/* The agent's own browser, shown a picture at a time. It fills the room the
+   served page would have had, and never grows past it. */
+
+.pane__watched {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: top center;
+  background: var(--bg-sunken);
+}
+
+.pane__act--on {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}

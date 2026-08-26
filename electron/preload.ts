@@ -334,6 +334,15 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
   },
 
+  watchBrowser(on: boolean, where?: Where): Promise<Result<string | null>> {
+    if (typeof on !== 'boolean') {
+      return Promise.resolve(refuse<string | null>('I could not tell whether that was on or off.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.watchBrowser, on, named(where)) as Promise<
+      Result<string | null>
+    >;
+  },
+
   alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>> {
     return ipcRenderer.invoke(CHANNEL.alwaysDoes, named(where)) as Promise<Result<AlwaysDoes>>;
   },

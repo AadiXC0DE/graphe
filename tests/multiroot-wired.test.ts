@@ -75,7 +75,8 @@ describe('what reads and what refuses', () => {
     const block = MAIN.slice(at, at + 900);
     expect(block).toContain('open.held.childTimelines.get(child.path)');
     expect(block).toContain('open.held.childTimelines.set(child.path, made)');
-    expect(MAIN).toContain('childTimelines: Map<string, Timeline>;');
+    // The promise, so two calls at once share one opening rather than racing.
+    expect(MAIN).toContain('childTimelines: Map<string, Promise<Timeline>>;');
     expect(MAIN).toContain('childTimelines: new Map(),');
   });
 

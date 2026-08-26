@@ -207,9 +207,37 @@ function closeActivity(
       detail: detail ?? turn.detail,
       ...(shown === undefined ? {} : { shown }),
     };
-    return next;
+    return shown === undefined ? next : onlyTheNewestPictures(next);
   }
   return turns;
+}
+
+/**
+ * The most pictures a conversation keeps.
+ *
+ * Each is a few hundred kilobytes held in the window's own memory and copied
+ * again every time the conversation is redrawn, so a long run of screenshots
+ * would grow without a ceiling. The older ones are not what anybody scrolls
+ * back for — the line above each still says what it was.
+ */
+export const MOST_PICTURES = 6;
+
+/** Drop the bytes from all but the newest few, leaving every line intact. */
+function onlyTheNewestPictures(turns: readonly Turn[]): readonly Turn[] {
+  const at: number[] = [];
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index];
+    if (turn?.kind === 'did' && turn.shown !== undefined) at.push(index);
+  }
+  if (at.length <= MOST_PICTURES) return turns;
+  const next = [...turns];
+  for (const index of at.slice(0, at.length - MOST_PICTURES)) {
+    const turn = next[index];
+    if (turn?.kind !== 'did') continue;
+    const { shown: _dropped, ...rest } = turn;
+    next[index] = rest;
+  }
+  return next;
 }
 
 /**

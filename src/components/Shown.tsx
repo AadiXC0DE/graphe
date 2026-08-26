@@ -20,7 +20,9 @@ export function Shown({ picture, caption }: { picture: ImageCard; caption?: stri
       <img
         className="shown__image"
         src={`data:${picture.mimeType};base64,${picture.bytes}`}
-        alt={caption ?? 'What was on screen'}
+        // The caption below already says what this is, and a screen reader
+        // reading the same words twice is worse than reading them once.
+        alt={caption === undefined ? 'What was on screen' : ''}
       />
       {caption === undefined ? null : <figcaption className="shown__caption">{caption}</figcaption>}
     </figure>

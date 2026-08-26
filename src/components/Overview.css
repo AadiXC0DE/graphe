@@ -685,6 +685,7 @@
    than a menu that has to be opened to say what is in it. */
 .projects__strip {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-1);
   margin-bottom: var(--space-3);
 }

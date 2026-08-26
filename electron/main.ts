@@ -1481,7 +1481,7 @@ type Held = {
   childRepos: readonly DetectedRepo[];
   /** Each child project's own saved work, opened the first time somebody asks
    *  it for anything and kept afterwards. Empty for an ordinary folder. */
-  childTimelines: Map<string, Timeline>;
+  childTimelines: Map<string, Promise<Timeline>>;
   spend: SpendRecorder;
   /** The conversations live in this project, in front first. Empty only for the
    *  moment between the timeline opening and the first session starting, which
@@ -2665,11 +2665,14 @@ async function checkItFirst(
  * titles — but only the ones that name a change. The rest of the timeline is
  * housekeeping, and housekeeping is for the window that shows the timeline.
  */
-async function whatChanged(open: { name: string; held: Held }): Promise<readonly Change[]> {
+async function whatChanged(
+  open: { name: string; held: Held },
+  timeline: Timeline | null = open.held.timeline,
+): Promise<readonly Change[]> {
   const told = [...open.held.looking.told.values()];
   if (told.length > 0) return told.slice(-6);
 
-  const versions = await versionsOf(open.held.timeline).catch(() => []);
+  const versions = await versionsOf(timeline).catch(() => []);
   return versions
     .slice(0, LOOK_BACK)
     .filter((one) => worthTelling(one.title))
@@ -2973,9 +2976,14 @@ async function timelineFor(open: Workspace<Held>, where: Where): Promise<Timelin
   if (entry !== null) return Timeline.open(entry.folder);
   const child = childRepoFor(open, where);
   if (child === null) return open.held.timeline;
+  // The promise, not the timeline: two calls arriving together would otherwise
+  // both open one, and the second would replace the first.
   const already = open.held.childTimelines.get(child.path);
   if (already !== undefined) return already;
-  const made = await Timeline.open(child.path);
+  const made = Timeline.open(child.path).catch((cause: unknown) => {
+    open.held.childTimelines.delete(child.path);
+    throw cause;
+  });
   open.held.childTimelines.set(child.path, made);
   return made;
 }
@@ -5599,8 +5607,8 @@ function register(): void {
 
     open.held.sending = true;
     try {
-      const changes = await whatChanged(open);
       const timeline = await timelineFor(open, where);
+      const changes = await whatChanged(open, timeline);
       const newest = (await timeline?.currentVersion().catch(() => null)) ?? null;
       const handed = await handToDeveloper({
         history: new ProjectHistory(folder),

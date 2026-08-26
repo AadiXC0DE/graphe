@@ -6,6 +6,8 @@
  * agreed to. Both are pinned here.
  */
 
+import { writeFile } from 'node:fs/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import type { ToolCall, Verdict } from '../src/agent/types';
@@ -19,6 +21,8 @@ import {
   keyLine,
   quoted,
   readBounds,
+  readLooksLike,
+  readPixels,
   refusedPointing,
   type DesktopHost,
 } from '../src/agent/pi/desktop';
@@ -110,6 +114,24 @@ describe('one move at a time', () => {
 });
 
 describe('the picture and the pointing agree', () => {
+  it('keeps a line ending out of a string the computer has to read', () => {
+    expect(quoted('one\ntwo')).toBe('"one" & return & "two"');
+    expect(quoted('plain')).toBe('"plain"');
+  });
+
+  it('has a second way to ask how big the screen is', () => {
+    expect(readLooksLike('  Resolution: 3024 x 1964 Retina\n  UI Looks like: 1512 x 982')).toEqual({
+      width: 1512,
+      height: 982,
+    });
+    expect(readLooksLike('no displays here')).toBeNull();
+  });
+
+  it('measures the picture it is about to hand over', () => {
+    expect(readPixels('  pixelWidth: 1440\n  pixelHeight: 900')).toEqual({ width: 1440, height: 900 });
+    expect(readPixels('pixelWidth: 1440')).toBeNull();
+  });
+
   it('reads the screen’s own size off the computer', () => {
     expect(readBounds('0, 0, 1440, 900')).toEqual({ width: 1440, height: 900 });
     expect(readBounds('nothing useful')).toBeNull();
@@ -134,6 +156,59 @@ describe('the picture and the pointing agree', () => {
     const result = await shot?.execute('call-1', {}, undefined, undefined, undefined as never);
     const said = result?.content[0];
     expect(said?.type === 'text' ? said.text : '').toBe(DESKTOP_WORDS.cannotSee);
+  });
+});
+
+describe('a picture nobody can trust is no picture', () => {
+  /** The picture and the pointing have to agree. A picture handed over at a
+   *  size the screen is not sends every press somewhere else. */
+  function machine(over: Partial<Record<string, string>> = {}): DesktopHost {
+    return async (tool, args) => {
+      if (tool === 'osascript' && args.join(' ').includes('bounds')) {
+        return ran({ out: over['bounds'] ?? '0, 0, 1440, 900' });
+      }
+      if (tool === 'system_profiler') return ran({ out: over['displays'] ?? '' });
+      // The real ones write a file; so do these, or the reading below is of
+      // nothing and every answer is the same answer.
+      if (tool === 'screencapture') {
+        await writeFile(args[args.length - 1] ?? '', 'a picture', 'utf8');
+        return ran();
+      }
+      if (tool === 'sips' && args.includes('pixelWidth')) {
+        return ran({ out: over['measured'] ?? '  pixelWidth: 1440\n  pixelHeight: 900' });
+      }
+      if (tool === 'sips') {
+        if (over['sips'] === 'no') return ran({ code: 1 });
+        await writeFile(args[args.length - 1] ?? '', 'a smaller picture', 'utf8');
+        return ran();
+      }
+      return ran({ out: 'Figma' });
+    };
+  }
+
+  async function pictureSays(host: DesktopHost): Promise<string> {
+    const shot = desktopTools(ROOT, host).find((one) => one.name === 'desktop_picture');
+    const result = await shot?.execute('call-1', {}, undefined, undefined, undefined as never);
+    const said = result?.content[0];
+    return said?.type === 'text' ? said.text : '';
+  }
+
+  it('says it cannot size the screen rather than guessing at one', async () => {
+    expect(await pictureSays(machine({ bounds: 'nothing', displays: '' }))).toBe(DESKTOP_WORDS.noSize);
+  });
+
+  it('falls back to what the computer says about its displays', async () => {
+    const said = await pictureSays(
+      machine({ bounds: 'nothing', displays: 'UI Looks like: 1440 x 900' }),
+    );
+    expect(said).toContain('1440 across');
+  });
+
+  it('hands nothing over when the picture did not come back the size it asked for', async () => {
+    expect(await pictureSays(machine({ measured: '  pixelWidth: 2880\n  pixelHeight: 1800' }))).toBe(
+      DESKTOP_WORDS.noSize,
+    );
+    expect(await pictureSays(machine({ sips: 'no' }))).toBe(DESKTOP_WORDS.noSize);
   });
 });
 
@@ -235,13 +310,16 @@ describe('the Guard has an opinion about every one of them', () => {
   });
 
   it('refuses to type a key into a program on this computer', () => {
-    expect(
-      kindOf(
-        call('desktop_do', {
-          steps: [{ do: 'type', text: 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' }],
-        }),
-      ),
-    ).toBe('deny');
+    for (const field of ['text', 'keys']) {
+      expect(
+        kindOf(
+          call('desktop_do', {
+            steps: [{ do: 'type', [field]: 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' }],
+          }),
+        ),
+        field,
+      ).toBe('deny');
+    }
   });
 
   it('keeps its questions when the ladder is only quiet about files', () => {

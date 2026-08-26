@@ -56,6 +56,8 @@ export const BROWSER_WORDS = {
   nothingOpen:
     'No page is open in the browser yet. Open one first, and then there is something to read.',
   stopped: 'That was stopped.',
+  notTheWeb:
+    'That is not a page on the web. This browser opens web addresses; anything on this computer I read as a file instead.',
   closed: 'The browser is closed.',
   /** Said when a press or a piece of typing did not land. The program's own
    *  reason is worth passing on — "something is covering it" is the whole
@@ -81,6 +83,15 @@ export type Way = { tool: string; lead: readonly string[] };
 
 function defaultHost(folder: string): BrowserHost {
   return (tool, args, options) => runHelper(tool, args, { folder, ...options });
+}
+
+/** The installed program if it is here, and a fetched one if it is not. */
+async function findWay(run: BrowserHost): Promise<Way | null> {
+  const installed = await run('agent-browser', ['--version'], { patience: 30_000 });
+  if (!notHere(installed)) return { tool: 'agent-browser', lead: [] };
+  const fetcher = await run('npx', ['--version'], { patience: 30_000 });
+  if (notHere(fetcher)) return null;
+  return { tool: 'npx', lead: ['--yes', BROWSER_PACKAGE] };
 }
 
 /** Everything one browser gets. A name per project keeps two projects from
@@ -215,6 +226,15 @@ export function trimmed(text: string): string {
 /* Aiming at things                                                            */
 /* -------------------------------------------------------------------------- */
 
+/** A browser is for the web. An address naming this computer instead is read
+ *  as a file, by the tools that read files. */
+export function onTheWeb(url: string): boolean {
+  const asked = url.trim();
+  if (asked === '') return false;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(asked);
+  return scheme === null || /^https?$/i.test(scheme[1] ?? '');
+}
+
 /** A handle from the last reading, or a way of naming a thing in the markup.
  *  Anything else is words somebody would read off the screen. */
 export function isHandle(target: string): boolean {
@@ -326,19 +346,11 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
   /** Fetching a browser is tried once per run of the app, whatever comes of it. */
   let fetched = false;
 
-  const findWay = async (): Promise<Way | null> => {
-    const installed = await run('agent-browser', ['--version'], { patience: 30_000 });
-    if (!notHere(installed)) return { tool: 'agent-browser', lead: [] };
-    const fetcher = await run('npx', ['--version'], { patience: 30_000 });
-    if (notHere(fetcher)) return null;
-    return { tool: 'npx', lead: ['--yes', BROWSER_PACKAGE] };
-  };
-
   const one = async (
     command: readonly string[],
     options: { signal?: AbortSignal; input?: string; patience?: number } = {},
   ): Promise<Answer> => {
-    way ??= findWay();
+    way ??= findWay(run);
     const found = await way;
     if (found === null) return { ok: false, text: BROWSER_WORDS.noProgram, data: null };
     const ran = await run(found.tool, [...found.lead, ...browserArgs(command, setup())], {
@@ -398,6 +410,7 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
       }),
       executionMode: 'sequential',
       execute: async (_callId, params: { url: string }, signal): ToolResult => {
+        if (!onTheWeb(params.url)) return say(BROWSER_WORDS.notTheWeb);
         const answer = await one(['open', params.url.trim()], {
           ...(signal === undefined ? {} : { signal }),
         });
@@ -549,12 +562,12 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
         const said = await one(['console'], { ...(signal === undefined ? {} : { signal }) });
         const wrong = await one(['errors'], { ...(signal === undefined ? {} : { signal }) });
         const parts: string[] = [];
-        if (said.ok && said.text.trim() !== '') parts.push(`What the page printed:\n${trimmed(said.text)}`);
-        if (wrong.ok && wrong.text.trim() !== '') parts.push(`What went wrong:\n${trimmed(wrong.text)}`);
+        if (said.ok && said.text.trim() !== '') parts.push(`What the page printed:\n${said.text}`);
+        if (wrong.ok && wrong.text.trim() !== '') parts.push(`What went wrong:\n${wrong.text}`);
         if (parts.length === 0) {
           return say('Nothing since the page loaded: it has printed no messages and thrown no errors.');
         }
-        return say(parts.join('\n\n'));
+        return say(trimmed(parts.join('\n\n')));
       },
     },
     {
@@ -621,8 +634,10 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
  *  calls, so it outlives the conversation unless somebody says otherwise. */
 export async function closeBrowser(projectRoot?: string, host?: BrowserHost): Promise<void> {
   const run = host ?? defaultHost(projectRoot ?? tmpdir());
+  const found = await findWay(run).catch(() => null);
+  if (found === null) return;
   const setup = setupFrom(process.env, projectRoot);
-  await run('agent-browser', browserArgs(['close'], setup), { patience: 30_000 }).catch(
-    () => undefined,
-  );
+  await run(found.tool, [...found.lead, ...browserArgs(['close'], setup)], {
+    patience: 30_000,
+  }).catch(() => undefined);
 }

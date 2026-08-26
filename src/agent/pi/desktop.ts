@@ -58,6 +58,8 @@ export const DESKTOP_WORDS = {
     'This computer has not been given permission to let me point at things on screen. I have opened the setting for you — switch Graphe on under the list for controlling the computer, then ask me again.',
   noPicture:
     'I could not get a picture of the screen, so I have not tried to do anything to it.',
+  noSize:
+    'I could not work out how big this screen is, and without that a picture of it would send every press to the wrong place. I have not tried to do anything to it.',
   noDrag:
     'Dragging something across the screen needs a small helper this computer does not have, so I have left that step undone. Everything else here works without it.',
   nothingToDo: 'None of those is a move I can make, so I have done nothing.',
@@ -84,9 +86,14 @@ export function refusedPointing(said: string): boolean {
 /* Saying it in the computer's own language                                    */
 /* -------------------------------------------------------------------------- */
 
-/** A string, as the computer's scripting wants to read it. */
+/** A string, as the computer's scripting wants to read it. A line ending cannot
+ *  live inside one, so it becomes the computer's own word for one. */
 export function quoted(text: string): string {
-  return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  const safe = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return safe
+    .split(/\r\n|\r|\n/)
+    .map((part) => `"${part}"`)
+    .join(' & return & ');
 }
 
 /** The keys that have a number rather than a letter. */
@@ -160,6 +167,12 @@ export type Doing = {
 
 /** What one step turns into: a command to run, a step to skip, or a reason it
  *  cannot be done at all. */
+/** A picture of the screen, or why there is not one: not allowed to see it, or
+ *  not able to say how big it is. */
+type Shot =
+  | { ok: true; bytes: string; width: number; height: number }
+  | { ok: false; why: 'see' | 'size' };
+
 export type Move =
   | { kind: 'script'; script: string; said: string }
   | { kind: 'drag'; args: string[]; said: string }
@@ -254,6 +267,26 @@ export function asScript(lines: readonly string[]): string {
 /* The screen                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/** How big the screen is, out of what the computer says about its displays.
+ *  The line reads "UI Looks like: 1512 x 982", which is the point grid rather
+ *  than the pixels the screen is really made of. */
+export function readLooksLike(said: string): { width: number; height: number } | null {
+  const found = /UI Looks like:\s*(\d+)\s*x\s*(\d+)/i.exec(said);
+  if (found === null) return null;
+  const width = Number(found[1]);
+  const height = Number(found[2]);
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+/** The size of a picture, out of what the computer says about the file. */
+export function readPixels(said: string): { width: number; height: number } | null {
+  const width = /pixelWidth:\s*(\d+)/.exec(said);
+  const height = /pixelHeight:\s*(\d+)/.exec(said);
+  if (width === null || height === null) return null;
+  const both = { width: Number(width[1]), height: Number(height[1]) };
+  return both.width > 0 && both.height > 0 ? both : null;
+}
+
 /** The screen's own point grid, which is the grid every coordinate here is in. */
 export function readBounds(said: string): { width: number; height: number } | null {
   const numbers = said.match(/-?\d+/g);
@@ -304,9 +337,16 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
     return say(which === 'see' ? DESKTOP_WORDS.cannotSee : DESKTOP_WORDS.cannotPoint);
   };
 
-  const screenSize = async (signal?: AbortSignal): Promise<{ width: number; height: number }> => {
+  /** Null rather than a guess: a picture reported at a size the screen is not
+   *  puts every press somewhere other than where it was aimed. */
+  const screenSize = async (
+    signal?: AbortSignal,
+  ): Promise<{ width: number; height: number } | null> => {
     const ran = await script('tell application "Finder" to get bounds of window of desktop', signal);
-    return readBounds(ran.out) ?? { width: 1440, height: 900 };
+    const bounds = readBounds(ran.out);
+    if (bounds !== null) return bounds;
+    const displays = await run('system_profiler', ['SPDisplaysDataType'], { patience: PATIENCE_MS });
+    return readLooksLike(displays.out);
   };
 
   const frontmost = async (signal?: AbortSignal): Promise<string | null> => {
@@ -318,11 +358,17 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
     return ran.code === 0 && name !== '' ? name : null;
   };
 
-  /** A picture of the screen, in the screen's own point grid. */
-  const picture = async (
-    signal?: AbortSignal,
-  ): Promise<{ bytes: string; width: number; height: number } | null> => {
+  /**
+   * A picture of the screen, in the screen's own point grid.
+   *
+   * The size is not taken on trust: the scaled file is measured before it goes
+   * anywhere, and a picture that did not come back the size it was asked for is
+   * no picture at all. Reporting one size and handing over another is how every
+   * press for the rest of the turn lands somewhere else.
+   */
+  const picture = async (signal?: AbortSignal): Promise<Shot> => {
     const size = await screenSize(signal);
+    if (size === null) return { ok: false, why: 'size' };
     const where = await mkdtemp(join(tmpdir(), 'graphe-screen-'));
     const raw = join(where, 'screen.jpg');
     const sized = join(where, 'sized.jpg');
@@ -331,11 +377,9 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
         patience: PATIENCE_MS,
         ...(signal === undefined ? {} : { signal }),
       });
-      if (shot.code !== 0) return null;
+      if (shot.code !== 0) return { ok: false, why: 'see' };
       const big = await stat(raw).catch(() => null);
-      if (big === null || big.size === 0) return null;
-      // Scaled to points, so a coordinate in the picture is a coordinate on the
-      // screen and nobody has to carry a scale factor around.
+      if (big === null || big.size === 0) return { ok: false, why: 'see' };
       const scaled = await run(
         'sips',
         [
@@ -347,9 +391,15 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
         ],
         { patience: PATIENCE_MS },
       );
-      const bytes = await readFile(scaled.code === 0 ? sized : raw).catch(() => null);
-      if (bytes === null) return null;
-      return { bytes: bytes.toString('base64'), width: size.width, height: size.height };
+      if (scaled.code !== 0) return { ok: false, why: 'size' };
+      const measured = await run('sips', ['-g', 'pixelWidth', '-g', 'pixelHeight', sized], {
+        patience: PATIENCE_MS,
+      });
+      const really = readPixels(measured.out);
+      if (really === null || really.width !== size.width) return { ok: false, why: 'size' };
+      const bytes = await readFile(sized).catch(() => null);
+      if (bytes === null) return { ok: false, why: 'size' };
+      return { ok: true, bytes: bytes.toString('base64'), ...really };
     } finally {
       await rm(where, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -357,7 +407,7 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
 
   const shown = async (signal?: AbortSignal): Promise<AgentToolResult<unknown>> => {
     const shot = await picture(signal);
-    if (shot === null) return askFor('see');
+    if (!shot.ok) return shot.why === 'see' ? askFor('see') : say(DESKTOP_WORDS.noSize);
     const front = await frontmost(signal);
     const where = front === null ? '' : ` ${front} is in front.`;
     return {

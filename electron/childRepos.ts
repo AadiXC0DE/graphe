@@ -96,7 +96,12 @@ export function childNamed(
   name: string | undefined,
 ): DetectedRepo | null {
   if (name === undefined || children.length < SEVERAL_CHILDREN) return null;
-  return children.find((one) => one.rel === name) ?? null;
+  const exact = children.find((one) => one.rel === name);
+  if (exact !== undefined) return exact;
+  // Most Mac disks do not tell "Backend" from "backend", so neither does this.
+  // Still a lookup among the folders already found, never a path.
+  const folded = name.toLowerCase();
+  return children.find((one) => one.rel.toLowerCase() === folded) ?? null;
 }
 
 /**

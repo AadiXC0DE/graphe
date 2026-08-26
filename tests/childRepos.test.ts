@@ -124,9 +124,17 @@ describe('choosing which project a call is about', () => {
   });
 
   it('says nothing for a name nobody found, whatever it is trying to be', () => {
-    for (const nonsense of ['', '..', '../..', 'backend/..', '/etc', 'BACKEND', 'note', undefined]) {
+    for (const nonsense of ['', '..', '../..', 'backend/..', '/etc', 'note', undefined]) {
       expect(childNamed(found, nonsense), String(nonsense)).toBeNull();
     }
+  });
+
+  /** Most Mac disks do not tell one from the other, so a name that differs only
+   *  in case names the same folder. It is still a lookup: nothing here can name
+   *  a folder that was not found. */
+  it('matches a name the way the disk does', () => {
+    expect(childNamed(found, 'BACKEND')?.rel).toBe('backend');
+    expect(childNamed(found, 'FrontEnd')?.rel).toBe('frontend');
   });
 
   it('says nothing at all for a folder that is one project', () => {

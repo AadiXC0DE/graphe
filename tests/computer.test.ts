@@ -21,6 +21,7 @@ import {
   isHandle,
   pressArgs,
   readAnswer,
+  onTheWeb,
   scrollArgs,
   sessionFor,
   setupFrom,
@@ -73,6 +74,17 @@ describe('the words that go out to the program', () => {
     expect(args).toContain('--max-output');
     expect(args).toContain('--content-boundaries');
     expect(args[args.length - 1]).toBe('snapshot');
+  });
+
+  it('cuts what one call may hand back, so a page cannot fill the conversation', () => {
+    const args = browserArgs(['snapshot'], setupFrom({}, ROOT));
+    expect(args[args.indexOf('--max-output') + 1]).toBe('20000');
+  });
+
+  it('takes each site once, however many times it is named', () => {
+    const held = setupFrom({ GRAPHE_BROWSER_HOSTS: 'Figma.com, figma.com  figma.com,,' }, ROOT);
+    expect(held.hosts).toEqual(['figma.com']);
+    expect(setupFrom({ GRAPHE_BROWSER_HOSTS: '   ' }, ROOT).hosts).toEqual([]);
   });
 
   it('holds the browser to the sites somebody named, and only then', () => {
@@ -252,6 +264,32 @@ describe('what the tools do', () => {
   });
 });
 
+describe('what counts as a page to open', () => {
+  it('is the web, and only the web', () => {
+    for (const good of ['https://figma.com', 'http://localhost:3000', 'example.com/a', 'HTTPS://X.COM']) {
+      expect(onTheWeb(good), good).toBe(true);
+    }
+    for (const bad of ['file:///etc/passwd', 'data:text/html,<b>hi', 'javascript:alert(1)', 'ftp://x', '']) {
+      expect(onTheWeb(bad), bad).toBe(false);
+    }
+  });
+
+  it('says so rather than opening it', async () => {
+    const { host, asked } = recorder();
+    const open = browserTools(ROOT, host).find((one) => one.name === 'browser_open');
+    const result = await open?.execute(
+      'call-1',
+      { url: 'file:///etc/passwd' },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    const said = result?.content[0];
+    expect(said?.type === 'text' ? said.text : '').toBe(BROWSER_WORDS.notTheWeb);
+    expect(asked.some((one) => one.includes('open'))).toBe(false);
+  });
+});
+
 describe('the Guard has an opinion about every one of them', () => {
   it('leaves no tool for it to guess about', () => {
     for (const tool of browserTools(ROOT, recorder().host)) {
@@ -291,6 +329,13 @@ describe('the Guard has an opinion about every one of them', () => {
       ctx,
     );
     expect(verdict.kind).toBe('deny');
+  });
+
+  it('refuses to open anything that is not a page on the web', () => {
+    for (const bad of ['file:///etc/passwd', 'data:text/html,<b>hi', 'javascript:alert(1)']) {
+      expect(kindOf(call('browser_open', { url: bad })), bad).toBe('deny');
+      expect(kindOf(call('browser_steps', { steps: [{ do: 'open', url: bad }] })), bad).toBe('deny');
+    }
   });
 
   it('judges a run of steps as the strictest step in it', () => {

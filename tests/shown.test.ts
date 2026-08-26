@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { applyEvent, type Turn } from '../src/lib/thread';
+import { MOST_PICTURES, applyEvent, type Turn } from '../src/lib/thread';
 import { translatePiEvent } from '../src/agent/pi/events';
 
 const PIXEL = 'iVBORw0KGgo=';
@@ -75,5 +75,28 @@ describe('a picture a step took', () => {
     const turns = applyEvent(started(), { type: 'tool-end', id: 'call-1', ok: true });
     const step = turns[turns.length - 1];
     expect(step?.kind === 'did' ? step.shown : 'missing').toBeUndefined();
+  });
+
+  it('keeps only the newest few, so a long run of them cannot grow forever', () => {
+    let turns: readonly Turn[] = [];
+    const many = MOST_PICTURES + 4;
+    for (let at = 0; at < many; at += 1) {
+      turns = applyEvent(turns, {
+        type: 'tool-start',
+        call: { id: `call-${String(at)}`, name: 'desktop_picture', input: {} },
+      });
+      turns = applyEvent(turns, {
+        type: 'tool-end',
+        id: `call-${String(at)}`,
+        ok: true,
+        shown: { bytes: `picture-${String(at)}`, mimeType: 'image/jpeg' },
+      });
+    }
+    const steps = turns.filter((one) => one.kind === 'did');
+    const kept = steps.filter((one) => one.shown !== undefined);
+    expect(kept).toHaveLength(MOST_PICTURES);
+    // The newest ones, and every line is still there saying what it was.
+    expect(steps).toHaveLength(many);
+    expect(kept.at(-1)?.shown?.bytes).toBe(`picture-${String(many - 1)}`);
   });
 });

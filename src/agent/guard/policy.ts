@@ -225,6 +225,8 @@ const SAY = {
     "This would send one of your private keys out to another website. I've stopped it.",
   keyIntoPage:
     "This would type one of your private keys into the page you have open, and that page can keep it and pass it anywhere. I've stopped it. Save it as a project secret and I will read it from there.",
+  notAWebAddress:
+    "That is not a page on the web — it would open something on this computer in the browser and read it into our conversation. I've stopped it. Ask me to read the file instead and I will.",
   elsewhere:
     "This would work on another copy of your project instead of the one I'm in, and I can't tell what it would change over there. I've stopped it.",
   pointedElsewhere:
@@ -729,6 +731,9 @@ const CONTENT_KEYS = [
   'code',
   'file_text',
   'fileText',
+  // A run of moves on this computer carries its words under `keys` as well as
+  // `text`. A field the secret scan cannot see is a field it cannot refuse.
+  'keys',
 ];
 const COMMAND_KEYS = ['command', 'cmd', 'script', 'commandLine', 'input'];
 const SQL_KEYS = ['sql', 'query', 'statement', 'statements'];
@@ -1944,6 +1949,7 @@ function stepWords(input: Record<string, unknown>): string {
 function judgeBrowserOpen(input: Record<string, unknown>, ctx: GuardFacts): Judgement {
   const url = readString(input, URL_KEYS) ?? readString(input, ['target']) ?? '';
   if (findSecret(url) !== null || findKnownSecret(url, ctx)) return deny(SAY.sendKeyOut);
+  if (!onTheWeb(url)) return deny(SAY.notAWebAddress);
   const where = siteOf(url);
   return ask(
     where === null ? 'Open a page in a browser?' : `Open ${where} in a browser?`,
@@ -1981,6 +1987,16 @@ function judgeBrowserAct(
       ? 'Sending it can order something, sign you up or write to somebody, and I cannot take that back.'
       : 'The page sees every word as it goes in, and can act on it before anything is sent.',
   );
+}
+
+/** A browser is for the web. Anything else with a colon in it — a file on this
+ *  computer, a page written into the address itself — is a way to read this
+ *  machine into the conversation rather than a place to visit. */
+export function onTheWeb(url: string): boolean {
+  const asked = url.trim();
+  if (asked === '') return false;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(asked);
+  return scheme === null || /^https?$/i.test(scheme[1] ?? '');
 }
 
 /** The site an address belongs to, for a question that can name it. Null when
@@ -2618,7 +2634,10 @@ export function describeCall(call: ToolCall): CallShape {
     if (READ_TOOLS.has(name) || LIST_TOOLS.has(name) || SEARCH_TOOLS.has(name)) return 'reads';
     if (DESIGN_READ_TOOLS.has(name) || CODE_READ_TOOLS.has(name) || PAGE_READ_TOOLS.has(name)) return 'reads';
     if (BROWSER_LOOK_TOOLS.has(name) || DESKTOP_LOOK_TOOLS.has(name)) return 'reads';
-    if (BROWSER_REACH_TOOLS.has(name) || name === BROWSER_STEPS) return 'reaches the internet';
+    if (BROWSER_REACH_TOOLS.has(name) || BROWSER_ACT_TOOLS.has(name) || name === BROWSER_STEPS) {
+      return 'reaches the internet';
+    }
+    if (DESKTOP_ACT_TOOLS.has(name) || DESKTOP_PICTURE_TOOLS.has(name)) return 'runs a command';
     return 'something else';
   })();
 

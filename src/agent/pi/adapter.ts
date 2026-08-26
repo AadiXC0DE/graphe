@@ -38,6 +38,14 @@ import type { GuardFacts } from '../guard/policy';
 import { changesAnything, describeCall, evaluate, requiresSnapshot } from '../guard/policy';
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
+import {
+  ALWAYS_WORDS,
+  alwaysFile,
+  alwaysFrom,
+  commandFor,
+  worthRunning,
+  type When,
+} from '../../work/always';
 import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
@@ -1501,6 +1509,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       const dropped = asking.abandonAll();
       if (dropped.length > 0) options.onEvent({ type: 'asking-withdrawn', ids: dropped });
       sayWhatTheRulesHeld();
+      void runAlways('whenItFinishes', []);
     }
   };
 
@@ -1525,6 +1534,50 @@ const MOST_AFTER_SAYINGS = 3;
   const house = readRules(
     await readFile(rulesFile(options.projectRoot), 'utf8').catch(() => null),
   );
+  /* What this project always does, read at the same moment and for the same
+     reason. A file that will not read runs none of them and says so once. */
+  const always = alwaysFrom(
+    await readFile(alwaysFile(options.projectRoot ?? ''), 'utf8').catch(() => null),
+  );
+
+  /**
+   * Run the things this project always does, at one of the three moments.
+   *
+   * Only what the Guard would allow outright. Nobody is being asked — that is
+   * the whole point — so anything that would have raised a question does not
+   * run, and is named once rather than silently skipped.
+   */
+  const alreadySaid = new Set<string>();
+  async function runAlways(when: When, touched: readonly string[]): Promise<void> {
+    const root = options.projectRoot;
+    if (root === undefined) return;
+    for (const one of always.all[when]) {
+      if (!worthRunning(one, touched)) continue;
+      const command = commandFor(one, touched);
+      const allowed = evaluate({ id: `always-${one.name}`, name: 'bash', input: { command } }, facts);
+      if (allowed.kind !== 'allow') {
+        if (!alreadySaid.has(one.name)) {
+          alreadySaid.add(one.name);
+          options.onEvent({ type: 'message-delta', text: `\n\n${ALWAYS_WORDS.refused(one.name)}` });
+          options.onEvent({ type: 'message-end' });
+        }
+        continue;
+      }
+      const ran = await runHelper('/bin/sh', ['-c', command], {
+        folder: root,
+        patience: VERIFY_PATIENCE,
+      }).catch(() => null);
+      if (ran === null || ran.code === 0) continue;
+      const said = ran.said.trim().slice(-2000);
+      options.onEvent({
+        type: 'message-delta',
+        text: `\n\n${ALWAYS_WORDS.failed(one.name, said)}`,
+      });
+      options.onEvent({ type: 'message-end' });
+    }
+  }
+
+  let openedAlready = false;
   let rulesDiagnosticsSaid = false;
   const sayRulesDiagnostics = (): void => {
     if (rulesDiagnosticsSaid) return;
@@ -1532,6 +1585,7 @@ const MOST_AFTER_SAYINGS = 3;
     const diagnostics = [
       ...(house.trouble === null ? [] : [RULE_WORDS.fileTrouble(house.trouble)]),
       ...house.skipped,
+      ...(always.trouble === null ? [] : [always.trouble]),
     ];
     if (diagnostics.length === 0) return;
     options.onEvent({ type: 'message-delta', text: `\n\n${diagnostics.join('\n')}` });
@@ -1613,8 +1667,12 @@ const MOST_AFTER_SAYINGS = 3;
   async function verifyWhatChanged(call: ToolCall): Promise<void> {
     const root = options.projectRoot;
     if (root === undefined || !changesAnything(call, facts)) return;
-    if (!repairIsListening()) return;
     const touched = sourceAmong(describeCall(call).paths);
+    // The project's own, whether or not anything is listening for a repair:
+    // formatting what was just written is not a nudge, it is the thing the
+    // project asked for.
+    if (touched.length > 0) await runAlways('afterEachChange', touched);
+    if (!repairIsListening()) return;
     if (touched.length === 0) return;
 
     const entries = await readdir(root).catch(() => [] as string[]);
@@ -2153,6 +2211,11 @@ const MOST_AFTER_SAYINGS = 3;
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
       sayRulesDiagnostics();
+      // Once a sitting, before the first request goes anywhere.
+      if (!openedAlready) {
+        openedAlready = true;
+        await runAlways('whenItOpens', []);
+      }
       repairs.beginTurn();
       typesAskedThisTurn = false;
       // A new request may ask again; a follow-up landing mid-run may not. The

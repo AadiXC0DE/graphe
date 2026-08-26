@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import type { AlwaysDoes } from '../lib/ipc';
 import { THEMES, THEME_WORDS, showing, type Theme } from '../lib/theme';
 import Switch from './Switch';
 import './Settings.css';
@@ -11,7 +12,8 @@ export type SettingsLink =
   | 'show-me'
   | 'files'
   | 'folder'
-  | 'editor';
+  | 'editor'
+  | 'always';
 
 type Props = {
   open: boolean;
@@ -22,6 +24,8 @@ type Props = {
   holdBack: boolean;
   /** The browser this project drives keeps what it is signed in to. */
   keepLogins: boolean;
+  /** What this project does without being asked, or null before it is read. */
+  always: AlwaysDoes | null;
   /** Which palette somebody has chosen, or to follow the computer. */
   theme: Theme;
   onTheme: (theme: Theme) => void;
@@ -40,6 +44,7 @@ const LINKS: readonly (
   | { id: 'files'; name: string; note: string; kind: 'files' }
   | { id: 'hold-back'; name: string; note: string; kind: 'hold-back' }
   | { id: 'keep-logins'; name: string; note: string; kind: 'keep-logins' }
+  | { id: 'always'; name: string; note: string; kind: 'always' }
   | { id: 'theme'; name: string; note: string; kind: 'theme' }
 )[] = [
   {
@@ -83,6 +88,12 @@ const LINKS: readonly (
     name: 'Check new work first',
     note: 'Where there is something to look at, changes are made in a copy and shown to you before anything reaches your files. Everywhere else a save point goes down before the work starts. Off, your files change as the work happens and every moment is one press from undone.',
     kind: 'hold-back',
+  },
+  {
+    id: 'always',
+    name: 'Things this project always does',
+    note: 'Commands that run without being asked — format what was just written, type-check before handing work back, run the tests. Written down in one file that travels with the project.',
+    kind: 'always',
   },
   {
     id: 'keep-logins',
@@ -130,6 +141,7 @@ export default function Settings({
   onToggleHoldBack,
   keepLogins,
   onToggleKeepLogins,
+  always,
   onGo,
 }: Props) {
   useEffect(() => {
@@ -175,6 +187,23 @@ export default function Settings({
                   </span>
                   <Switch on={showMe} onChange={onToggleShowMe} label={one.name} />
                 </label>
+              </li>
+            );
+          }
+          if (one.kind === 'always') {
+            return (
+              <li key={one.id}>
+                <button type="button" className="settings__row" onClick={() => onGo('always')}>
+                  <span className="settings__text">
+                    <span className="settings__name">{one.name}</span>
+                    <span className="settings__note">{one.note}</span>
+                  </span>
+                  <span className="settings__meta">
+                    {always === null || always.rows.length === 0
+                      ? 'None yet'
+                      : `${String(always.rows.length)} of them`}
+                  </span>
+                </button>
               </li>
             );
           }

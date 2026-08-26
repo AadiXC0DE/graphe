@@ -110,7 +110,13 @@ A press at a point takes the pointer out from under your hand. A press on someth
 **34 · Wait, and carry on**
 Stop ends a turn. Wait holds it between steps, so you can take the machine back for a moment — look at something, put something right — and let it carry on from wherever things now are.
 
-**35 · Show me the real commands**
+**35 · Things this project always does**
+Format what was just written, type-check before handing work back, run the tests — written down once in the project, in one file that travels with it, and run without anybody asking. Only what would not have been asked about: a command the Guard would stop is named rather than run.
+
+**36 · `/` offers the ways of working**
+The prompt templates a project keeps have always been commands. Now typing `/` offers them, the way `@` offers skills.
+
+**37 · Show me the real commands**
 The commands, paths and git operations under every plain sentence — for the developer who wants the wheel.
 
 ---

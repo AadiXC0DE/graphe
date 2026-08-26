@@ -941,6 +941,16 @@ export type RepoOverview = {
   git: GitSnapshot;
 };
 
+/** What a project does without being asked, as the window shows it. */
+export type AlwaysDoes = {
+  /** The file it is all written in, so somebody can open it. */
+  file: string;
+  /** Every one, with the moment it runs at said in plain words. */
+  rows: readonly { when: string; name: string; run: string }[];
+  /** Present when the file itself will not read, so none of them are running. */
+  trouble: string | null;
+};
+
 /** One thing a turn produced that a designer would look at. */
 export type Artifact = {
   path: string;
@@ -1195,6 +1205,7 @@ export const CHANNEL = {
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
   workflows: 'graphe:workflows',
+  alwaysDoes: 'graphe:always-does',
   branchSwitch: 'graphe:branch-switch',
   branchCreate: 'graphe:branch-create',
   worktreeLand: 'graphe:worktree-land',
@@ -1387,6 +1398,9 @@ export type GrapheApi = {
   skills(where?: Where): Promise<Result<readonly Skill[]>>;
   /** The `/word` ways of working this project can ask for. */
   workflows(where?: Where): Promise<Result<readonly Workflow[]>>;
+  /** The commands this project runs without being asked, and where they are
+   *  written down. Empty for a project that has written none. */
+  alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>>;
   /** Start a document-to-build: name a document and an optional instruction,
    *  and the shell turns it into a plan. */
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>>;

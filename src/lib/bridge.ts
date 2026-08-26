@@ -81,6 +81,7 @@ import {
   type Room,
   type SideOfWork,
   type Skill,
+  type AlwaysDoes,
   type Workflow,
   type BuildPlan,
   type BuildAdvance,
@@ -1011,6 +1012,10 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(''));
     },
 
+    alwaysDoes(): Promise<Result<AlwaysDoes>> {
+      return Promise.resolve(done({ file: '', rows: [], trouble: null }));
+    },
+
     workflows(): Promise<Result<readonly Workflow[]>> {
       return Promise.resolve(done([]));
     },
@@ -1927,6 +1932,7 @@ function connect(): Bridge {
     skills: () => api.skills(),
     skillText: (id) => api.skillText(id),
     workflows: () => api.workflows(),
+    alwaysDoes: (where) => api.alwaysDoes(where),
     branchSwitch: (name, where) => api.branchSwitch(name, where),
     branchCreate: (name, where) => api.branchCreate(name, where),
     worktreeLand: (where) => api.worktreeLand(where),

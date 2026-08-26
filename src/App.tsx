@@ -119,6 +119,7 @@ import {
   type Workflow,
   type HowFar,
   type Money,
+  type AlwaysDoes,
   type SavedVersion,
   type ShowProgress,
   type SpendLimit,
@@ -805,6 +806,8 @@ function Conversation() {
   const [usageOpen, setUsageOpen] = useState(false);
   const [skills, setSkills] = useState<readonly Skill[]>([]);
   const [workflows, setWorkflows] = useState<readonly Workflow[]>([]);
+  /** What the open project does without being asked. Null until it is read. */
+  const [alwaysNow, setAlwaysNow] = useState<AlwaysDoes | null>(null);
 
   /** Which band of the design view is open, or null when it is not. Both of the
    *  surfaces that take the whole width live here rather than inside a panel:
@@ -3885,6 +3888,12 @@ function Conversation() {
           refreshWorkflows();
           setSkillsOpen(true);
           return;
+        case 'always': {
+          // The file is the whole feature, so this opens the file.
+          const file = alwaysNow?.file ?? '';
+          if (file !== '') void bridge.openInEditor(file);
+          return;
+        }
         case 'connected':
           goToScreen("connected");
           setConnectedOpen(true);
@@ -4270,6 +4279,15 @@ function Conversation() {
           onSettings={() => {
             goToScreen("settings");
             setSettingsOpen(true);
+            // Read when the sheet opens rather than kept in step: the file is
+            // edited outside this window, so the only true reading is a fresh
+            // one.
+            const path = desks.current;
+            void bridge
+              .alwaysDoes(path === null ? undefined : { project: path })
+              .then((answer) => {
+                if (answer.ok) setAlwaysNow(answer.value);
+              });
           }}
         />
       ) : null}
@@ -4361,6 +4379,7 @@ function Conversation() {
         onToggleShowMe={() => changeShowMe(!preferences.showMe)}
         onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
         onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}
+        always={alwaysNow}
         keepLogins={keepsLogins(preferences.keptLogins, desk?.path)}
         onToggleKeepLogins={() =>
           changeKeepLogins(!keepsLogins(preferences.keptLogins, desk?.path))
@@ -4625,6 +4644,7 @@ function Conversation() {
               onConnect={openConnect}
               onThinking={changeThinking}
               skills={skills}
+              workflows={workflows}
               onAttachmentsChange={(next) => {
                 if (desks.current === null) setLoose(next);
                 else {

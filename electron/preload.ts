@@ -59,6 +59,7 @@ import {
   type Room,
   type SideOfWork,
   type Skill,
+  type AlwaysDoes,
   type Workflow,
   type BuildPlan,
   type BuildAdvance,
@@ -331,6 +332,10 @@ const api: GrapheApi = {
   skillText(id: string, where?: Where): Promise<Result<string>> {
     if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<string>('I could not tell which skill to open.'));
     return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
+  },
+
+  alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>> {
+    return ipcRenderer.invoke(CHANNEL.alwaysDoes, named(where)) as Promise<Result<AlwaysDoes>>;
   },
 
   workflows(where?: Where): Promise<Result<readonly Workflow[]>> {

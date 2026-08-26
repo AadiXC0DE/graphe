@@ -84,6 +84,7 @@ import {
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
 import { forgetLogins } from '../src/agent/pi/computer';
+import { alwaysFile, alwaysFrom, WHEN, type When } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
@@ -122,6 +123,7 @@ import {
   type CarriedExtension,
   type Room,
   type Skill,
+  type AlwaysDoes,
   type Workflow,
   type SavedVersion,
   type DesignChange,
@@ -6610,6 +6612,24 @@ function register(): void {
 
   /* The `/word` ways of working. The body stays here — the window gets only
      what it needs to list them in a `/` menu and to hold the typed words. */
+  /** What this project does without being asked. Read fresh each time: the file
+   *  is the whole feature, so a change to it must show at once. */
+  handle<AlwaysDoes>(CHANNEL.alwaysDoes, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done({ file: '', rows: [], trouble: null });
+    const file = alwaysFile(open.path);
+    const read = alwaysFrom(await readFile(file, 'utf8').catch(() => null));
+    const said: Readonly<Record<When, string>> = {
+      afterEachChange: 'After every change',
+      whenItFinishes: 'When it finishes',
+      whenItOpens: 'When this project opens',
+    };
+    const rows = WHEN.flatMap((when) =>
+      read.all[when].map((one) => ({ when: said[when], name: one.name, run: one.run })),
+    );
+    return done({ file, rows, trouble: read.trouble });
+  });
+
   handle<readonly Workflow[]>(CHANNEL.workflows, async (_event, args) => {
     const open = projectAt(whereIn(args));
     const all = await availableWorkflows(open?.path ?? null, await defaultAgentDir());

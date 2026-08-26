@@ -24,14 +24,6 @@
   gap: var(--space-1);
 }
 
-.branches__plainly {
-  margin-left: var(--space-2);
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  opacity: 0.75;
-}
-
 .branches__heading {
   margin: 0;
   font-size: var(--text-2xs);
@@ -64,9 +56,10 @@
   text-align: left;
 }
 
+/* The dot and the tint say which one; a full accent box around it reads as a
+   stuck focus ring. */
 .branches__row--current {
   background: var(--accent-soft);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .branches__row--switch {
@@ -212,6 +205,7 @@
   background: var(--bg-raised);
   font-size: var(--text-xs);
   color: var(--text-muted);
+  white-space: nowrap;
   cursor: pointer;
   transition:
     color var(--dur-micro) var(--ease-hover),
@@ -224,13 +218,6 @@
   display: inline-flex;
   align-items: baseline;
   gap: var(--space-1);
-}
-
-/* The gloss, quieter than the label it explains. */
-.history__doplain {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
 }
 
 .history__doarrow {

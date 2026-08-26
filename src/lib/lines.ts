@@ -11,10 +11,6 @@ import type { GitBranch } from './ipc';
 
 export const LINE_WORDS = {
   heading: 'Branch',
-  /** Beside the name, for anybody who has not met the word. The word a
-   *  developer already uses comes first; this is the plain answer to "which
-   *  one am I on?" for anybody who has not. */
-  plainly: 'the line of work',
   open: 'Switch branch',
   find: 'Find a branch',
   /** Said on the row the project is already on. */

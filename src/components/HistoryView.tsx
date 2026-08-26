@@ -30,7 +30,7 @@ export const SAYS = {
   came: 'Came after',
   cameNothing: 'Nothing — this is where the project starts.',
   wentBack: 'Made by going back to an earlier moment.',
-  joined: 'Two lines of work joined here.',
+  joined: 'Merge commit — two branches joined here.',
   names: 'Named',
   now: 'Not saved yet',
   nowNothing: 'Everything here is saved.',

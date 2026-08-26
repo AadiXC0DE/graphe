@@ -360,7 +360,9 @@
   background: var(--bg-raised);
 }
 
-.moment--current .moment__still {
+/* Only around a real picture: with nothing photographed the still box is just
+   the title, and an accent edge on it reads as a stray ring. */
+.moment--current .moment__still:has(.moment__shot) {
   border-color: var(--accent);
 }
 

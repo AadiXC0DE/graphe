@@ -136,7 +136,10 @@
   gap: 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* A dozen folders is the most that is ever remembered, and a dozen rows is
+     taller than a short window. Bound it and let it scroll. */
+  max-height: min(432px, 46vh);
+  overflow: hidden auto;
   background: var(--border);
   box-shadow: var(--shadow-sm);
 }
@@ -347,6 +350,8 @@
 }
 
 .picker--compact .picker__list {
+  max-height: min(320px, 40vh);
+  overflow: hidden auto;
   border: none;
   background: transparent;
   gap: 0;

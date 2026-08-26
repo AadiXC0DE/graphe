@@ -109,13 +109,11 @@ describe('a name the machine would refuse', () => {
 });
 
 describe('the words', () => {
-  /** This is one of the few surfaces that says the real word first. Somebody
-   *  went looking for it, and a developer reading "line of work" where they
-   *  expected "branch" has to translate before they can act. The plain words
-   *  stay, beside it, for anybody who has not met the real one. */
-  it('says the real word, and glosses it in the same breath', () => {
-    expect(LINE_WORDS.heading).toMatch(/branch/i);
-    expect(LINE_WORDS.plainly).toMatch(/line of work/i);
+  /** The audience is developers. "Branch" needs no translation, and a gloss
+   *  under it reads as a lesson nobody asked for. */
+  it('says the real word, without glossing it', () => {
+    expect(LINE_WORDS.heading).toBe('Branch');
+    expect(Object.values(LINE_WORDS)).not.toContain('the line of work');
   });
 
   it('names the thing being done, not the machinery doing it', () => {
@@ -123,23 +121,15 @@ describe('the words', () => {
       expect(said).not.toMatch(/checkout|HEAD|ref\b/i);
     }
   });
-});
 
-describe('the real word is actually shown, not just written down', () => {
-  it('names it the way a developer would, with the plain words beside it', () => {
-    expect(LINE_WORDS.heading).toBe('Branch');
-    expect(LINE_WORDS.plainly).toMatch(/line of work/i);
-  });
-
-  it('is rendered where the heading is, or it may as well not exist', async () => {
-    // It was defined and never put on screen for long enough that somebody
-    // asked what a line of work was.
+  it('is the word actually shown, not just written down', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const overview = readFileSync(
       fileURLToPath(new URL('../src/components/Overview.tsx', import.meta.url)),
       'utf8',
     );
-    expect(overview).toContain('LINE_WORDS.plainly');
+    expect(overview).toContain('LINE_WORDS.heading');
+    expect(overview).not.toContain('LINE_WORDS.plainly');
   });
 });

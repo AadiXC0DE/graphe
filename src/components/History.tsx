@@ -26,17 +26,11 @@ type Props = {
 export const SAYS = {
   heading: 'History',
   branches: 'Branches',
-  /** Beside the name. Says what the list is in the words somebody would say,
-   *  without a lesson about who named what. */
-  branchesPlainly: 'lines of work',
   newBranch: 'New branch',
   newBranchPlaceholder: 'feature/short-name',
-  create: 'Start it',
+  create: 'Create',
   graph: 'Commit graph',
-  /** The word the rest of the world uses, for whoever came here from a
-   *  terminal and wants to know what they are looking at. */
-  graphPlainly: 'every version, drawn as lines',
-  graphHint: 'Every moment, what came after what, and where two goes at the same thing joined.',
+  graphHint: 'Every commit, what came after what, and where two branches merged.',
 } as const;
 
 /** A branch name, as it is really spelled. */
@@ -101,10 +95,7 @@ export default function History({
 
       {git === null || branches.length === 0 ? null : (
         <section className="branches" aria-label={SAYS.branches}>
-          <h3 className="branches__heading">
-            {SAYS.branches}
-            <span className="branches__plainly">{SAYS.branchesPlainly}</span>
-          </h3>
+          <h3 className="branches__heading">{SAYS.branches}</h3>
 
           <ul className="branches__list">
             {branches.map((branch) => (
@@ -187,10 +178,7 @@ export default function History({
 
       {versions.length === 0 ? null : (
         <button type="button" className="history__do" onClick={onOpenGraph}>
-          <span className="history__dowords">
-            {SAYS.graph}
-            <span className="history__doplain">({SAYS.graphPlainly})</span>
-          </span>
+          <span className="history__dowords">{SAYS.graph}</span>
           <span className="history__doarrow" aria-hidden="true">
             →
           </span>

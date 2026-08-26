@@ -35,7 +35,14 @@
  */
 
 import type { GuardFacts } from '../guard/policy';
-import { changesAnything, worksAScreen, describeCall, evaluate, requiresSnapshot } from '../guard/policy';
+import {
+  asksAboutTheScreen,
+  changesAnything,
+  describeCall,
+  evaluate,
+  requiresSnapshot,
+  worksAScreen,
+} from '../guard/policy';
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
 import {
@@ -453,6 +460,7 @@ export function createGuardInterceptor(
         relay.blocked(call, SAID_NO);
         return { block: true, reason: TOLD.declined };
       }
+      if (asksAboutTheScreen(call)) facts.screenSaidYes = true;
     }
 
     if (describeCall(call).paths.length > 0) {
@@ -2220,6 +2228,9 @@ const MOST_AFTER_SAYINGS = 3;
       }
       repairs.beginTurn();
       typesAskedThisTurn = false;
+      // A yes to working the screen is worth one turn. Asking again for every
+      // press turned a run of twenty moves into a queue of twenty questions.
+      if (activePrompts === 0) facts.screenSaidYes = false;
       // A new request may ask again; a follow-up landing mid-run may not. The
       // second is somebody adding to work already going, and stopping that to
       // put a form up is exactly what this must never do.

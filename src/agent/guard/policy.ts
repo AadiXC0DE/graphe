@@ -108,6 +108,15 @@ export type GuardFacts = GuardContext & {
    */
   stopAsking?: boolean;
   /**
+   * The person has already said yes to working the screen, this turn.
+   *
+   * Asking once is the safeguard; asking twenty times is a queue the person
+   * has to stand in. The answer holds for the turn they gave it in and is
+   * dropped at the next one, so it never becomes a switch nobody remembers
+   * leaving on. Denials are untouched: this only spends a yes already given.
+   */
+  screenSaidYes?: boolean;
+  /**
    * How far it may go on its own. Four rungs rather than a switch, because
    * "check with me" and "get on with it" are not the only two things anybody
    * ever wants — and because the difference between changing a file and running
@@ -149,6 +158,10 @@ const STRICTNESS: Record<Verdict['kind'], number> = {
   confirm: 2,
   deny: 3,
 };
+
+/** Shell binaries whose whole purpose is to work the screen. There is a tool
+ *  for this, and it can be read; a shell string cannot. */
+const SCREEN_DRIVERS = new Set(['cliclick', 'osascript', 'xdotool', 'ydotool']);
 
 function allow(mutates = false): Judgement {
   return { verdict: { kind: 'allow' }, snapshot: false, mutates };
@@ -211,6 +224,8 @@ const SAY = {
     "This would fetch a program from the internet and run it straight away, with neither of us seeing what is inside it. I've stopped it.",
   unreadable:
     "I could not work out what this would actually do, so I did not run it. Tell me what you want in your own words and I will do it a way we can both see.",
+  driveTheScreen:
+    'Working the screen from a shell command hides what it would click, so I have not run it. Use desktop_do instead: it takes the whole run at once (click, double, right, drag, type, key, scroll, wait), aims at what a program has named rather than at guessed coordinates, and hands back a picture of where it got to.',
   fullControl:
     "This asks for control of your whole computer, not just your project. I've stopped it.",
   remoteControl:
@@ -1456,6 +1471,8 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
     return decide(judgeCd(meaningful, ctx));
   }
 
+  if (SCREEN_DRIVERS.has(name)) return deny(SAY.driveTheScreen);
+
   if (ELEVATION.has(name)) return deny(SAY.fullControl);
   if (ALWAYS_DENY_COMMANDS.has(name)) {
     if (name === 'env' || name === 'printenv' || name === 'export' || name === 'set') {
@@ -2262,7 +2279,10 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
 
   if (BROWSER_REACH_TOOLS.has(name)) return judgeBrowserOpen(input, ctx);
 
-  if (BROWSER_ACT_TOOLS.has(name)) return judgeBrowserAct(name, input, ctx);
+  if (BROWSER_ACT_TOOLS.has(name)) {
+    const said = judgeBrowserAct(name, input, ctx);
+    return ctx.screenSaidYes === true && said.verdict.kind === 'confirm' ? allow(said.mutates) : said;
+  }
 
   if (name === BROWSER_STEPS) {
     // Judged as the strictest step in it, so a run cannot carry a press past a
@@ -2280,7 +2300,11 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
         folded = strictest(folded, judgeBrowserAct('browsertype', one, ctx));
       }
     }
-    return folded;
+    // A yes already given covers the run, but only where the run was going to
+    // ask. A step that is refused stays refused.
+    return ctx.screenSaidYes === true && folded.verdict.kind === 'confirm'
+      ? allow(folded.mutates)
+      : folded;
   }
 
   /* This computer itself. A list of what is open is a read; a picture of the
@@ -2288,6 +2312,7 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   if (DESKTOP_LOOK_TOOLS.has(name)) return allow();
 
   if (DESKTOP_PICTURE_TOOLS.has(name)) {
+    if (ctx.screenSaidYes === true) return allow();
     return ask(
       'Take a picture of your screen?',
       'It comes into this conversation, so whatever is on screen comes with it: other windows, other people\u2019s messages, anything left open.',
@@ -2311,6 +2336,9 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     // somebody gave in a hurry.
     const words = `${collectText(input)}\n${stepWords(input)}`;
     if (findSecret(words) !== null || findKnownSecret(words, ctx)) return deny(SAY.keyIntoPage);
+    // The refusal above is checked first, so a yes given earlier in the turn
+    // can never carry a key past it.
+    if (ctx.screenSaidYes === true) return allow(true);
     return ask(
       'Work your computer for you?',
       'I press, type and scroll on the screen exactly as you would, in whatever is in front.',
@@ -2611,6 +2639,18 @@ export function requiresSnapshot(call: ToolCall, ctx: GuardFacts): boolean {
  * they are there — and the question worth asking ("which file should I draw
  * this in?") is one nothing could have asked before it looked.
  */
+/** Whether a yes to this call is a yes to working the screen. Wider than
+ *  `worksAScreen`: a picture of the screen is the same permission. */
+export function asksAboutTheScreen(call: ToolCall): boolean {
+  const name = normalizeToolName(call.name);
+  return (
+    DESKTOP_ACT_TOOLS.has(name) ||
+    DESKTOP_PICTURE_TOOLS.has(name) ||
+    BROWSER_ACT_TOOLS.has(name) ||
+    name === BROWSER_STEPS
+  );
+}
+
 export function worksAScreen(call: ToolCall): boolean {
   const name = normalizeToolName(call.name);
   return DESKTOP_ACT_TOOLS.has(name) || BROWSER_ACT_TOOLS.has(name) || name === BROWSER_STEPS;

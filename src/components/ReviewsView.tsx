@@ -64,8 +64,8 @@ export function whereToRead(item: RepoItem, here: Here): string {
   const where =
     here === null
       ? 'somewhere this app could not read'
-      : `${here.branch ?? 'no line of work'}, at ${short(here.sha)}`;
-  return `- **this folder is not this pull request's code.** It is on ${where}; the pull request is ${item.headRef ?? 'its own line'} at ${short(item.headSha)}. Do not read files from the folder — every line you quoted would be from a different line of work, and every finding would be about code this pull request does not contain. Bring its files in first with \`git fetch origin pull/${String(item.number)}/head\`, then read any one of them with \`git show ${item.headSha}:<path>\`.`;
+      : `${here.branch ?? 'detached HEAD'}, at ${short(here.sha)}`;
+  return `- **this folder is not this pull request's code.** It is on ${where}; the pull request is ${item.headRef ?? 'its own branch'} at ${short(item.headSha)}. Do not read files from the folder — every line you quoted would be from a different branch, and every finding would be about code this pull request does not contain. Bring its files in first with \`git fetch origin pull/${String(item.number)}/head\`, then read any one of them with \`git show ${item.headSha}:<path>\`.`;
 }
 
 /** What the folder is on, as the shell reported it. */

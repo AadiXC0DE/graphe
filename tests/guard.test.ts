@@ -977,12 +977,9 @@ describe('every word a user reads is plain', () => {
     call('mystery_tool', {}),
   ];
 
-  /** research/03: the words a designer has told us mean nothing to them. */
+  /** The plumbing under an operation. Operation names themselves — commit,
+   *  revert, branch, deploy — are what the thing is, and the Guard says them. */
   const retired = [
-    'commit',
-    'repository',
-    'repo ',
-    'deploy',
     'terminal',
     'shell',
     'stack trace',
@@ -992,8 +989,6 @@ describe('every word a user reads is plain', () => {
     'schema',
     'row-level',
     'row level security',
-    'rollback',
-    'revert',
     'stdout',
     'stderr',
     'symlink',

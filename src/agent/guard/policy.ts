@@ -239,7 +239,7 @@ const SAY = {
     "This would change the rules your project's history runs by, and those rules can quietly run things later on. I've stopped it.",
   ownInstructions:
     "This would rewrite the instructions I work from. I can read those, and I leave them exactly as you installed them. I've stopped it.",
-  restorePoint: 'I will save a restore point first, so you can put this back the way it was.',
+  restorePoint: 'I will commit a checkpoint first, so this is one restore away.',
 } as const;
 
 /* -------------------------------------------------------------------------- */

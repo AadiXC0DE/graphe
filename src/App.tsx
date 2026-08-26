@@ -3436,7 +3436,7 @@ function Conversation() {
         run: () => togglePane(), ready: here, whyNot: needsProject },
       { id: 'shelf', name: 'Show or hide the shelf', where: 'Conversation', keys: 'mod+b',
         run: () => setShelfOpen((was) => !was) },
-      { id: 'changes', name: 'Look through the change', where: 'Project',
+      { id: 'changes', name: 'Review the working diff', where: 'Project',
         run: () => {
           setChangeText(null);
           setChangesOpen(true);
@@ -3454,7 +3454,7 @@ function Conversation() {
       { id: 'model', name: 'Change which model answers', where: 'Graphe', run: () => openConnect() },
       { id: 'usage', name: 'See what this cost', where: 'Graphe', run: () => goToScreen('usage') },
       { id: 'open', name: 'Open another project', where: 'Project', keys: 'mod+o', run: () => void browse() },
-      { id: 'tidy', name: 'Shorten this conversation', where: 'Conversation',
+      { id: 'tidy', name: 'Compact the context', where: 'Conversation',
         run: () => tidyNow(), ready: here, whyNot: needsProject },
       { id: 'stop', name: 'Stop what is running', where: 'Conversation',
         run: () => halt(), ready: busy, whyNot: 'Nothing is running.' },

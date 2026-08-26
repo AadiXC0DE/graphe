@@ -24,11 +24,11 @@ export const SAYS = {
   /** The same, plus the reason the size moves when nobody changed anything. */
   whatFull:
     'How much of this conversation the model is still holding — the model in use decides how much room there is.',
-  tidy: 'Tidy up',
-  tidying: 'Tidying…',
-  tidyingWhat: 'Shortening this conversation now. The numbers settle when it is done.',
-  tidyHint: 'Sums up what has been covered so far and keeps going with more room.',
-  full: 'Nearly full — tidying now would give it room.',
+  tidy: 'Compact',
+  tidying: 'Compacting…',
+  tidyingWhat: 'Compacting the context now. The numbers settle when it is done.',
+  tidyHint: 'Summarises the conversation so far and frees the context it was using.',
+  full: 'Nearly full — compacting now would free room.',
 } as const;
 
 /** Past this it is worth saying so. Pi tidies by itself before it overflows;

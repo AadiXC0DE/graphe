@@ -16,8 +16,8 @@ export const LINE_WORDS = {
   /** Said on the row the project is already on. */
   onThisOne: 'You are here',
   /** When a line tracks nothing shared yet. */
-  notShared: 'not shared yet',
-  inStep: 'in step',
+  notShared: 'no upstream',
+  inStep: 'up to date',
   none: 'No other branches yet.',
   noneFound: 'Nothing by that name.',
   newLine: 'New branch…',
@@ -25,8 +25,8 @@ export const LINE_WORDS = {
   create: 'Create',
   cancel: 'Cancel',
   /** A name the machine will not take. Said before the press, not after. */
-  badName: 'A line’s name cannot have spaces, or start with a dash.',
-  taken: 'There is already a line called that.',
+  badName: 'A branch name cannot have spaces, or start with a dash.',
+  taken: 'A branch called that already exists.',
 } as const;
 
 /** How a line stands against what it tracks, as one short phrase. Null when

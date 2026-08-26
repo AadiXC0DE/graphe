@@ -161,11 +161,17 @@ describe('OC-05 the words on the controls', () => {
     OWN_COPY_WORDS.no,
   ];
 
-  /* The machinery under this is a worktree, a branch and a merge. None of the
-     three is a word anybody reaching for the control has to learn. */
-  it('names nothing a designer would have to look up', () => {
+  /* The machinery under this is a worktree and a merge, and the controls say
+     so — talking around it left people guessing what "the work" meant. */
+  it('names the operation it performs', () => {
+    expect(OWN_COPY_WORDS.says).toMatch(/worktree/i);
+    expect(OWN_COPY_WORDS.bring).toMatch(/merge/i);
+    expect(OWN_COPY_WORDS.away).toMatch(/delete/i);
+  });
+
+  it('stops short of the plumbing under it', () => {
     for (const said of visible) {
-      expect(said, said).not.toMatch(/\b(git|commit|branch|merge|merged|worktree|checkout|repository|staged)\b/i);
+      expect(said, said).not.toMatch(/\b(refspec|HEAD|SHA|blob|stderr|exit code)\b/i);
     }
   });
 

@@ -23,13 +23,13 @@ export const SAYS = {
   none: 'Nothing saved here yet.',
   more: (count: number): string => `Show ${String(count)} more`,
   onScreen: 'On screen',
-  putBack: 'Put this back',
+  putBack: 'Restore this commit',
   by: { you: 'You', graphe: 'Graphe' },
   /** The head of the detail column. */
-  about: 'This moment',
-  came: 'Came after',
+  about: 'This commit',
+  came: 'Parents',
   cameNothing: 'Nothing — this is where the project starts.',
-  wentBack: 'Made by going back to an earlier moment.',
+  wentBack: 'A restore of an earlier commit.',
   joined: 'Merge commit — two branches joined here.',
   names: 'Named',
   now: 'Not saved yet',
@@ -116,8 +116,8 @@ export default function HistoryView({
           <h1 className="sheet__title">{SAYS.heading}</h1>
           <p className="sheet__from">
             {versions.length === 1
-              ? '1 moment saved'
-              : `${String(versions.length)} moments saved`}
+              ? '1 commit'
+              : `${String(versions.length)} commits`}
             {git?.branch === null || git === null ? '' : ` · ${git.branch}`}
           </p>
         </div>

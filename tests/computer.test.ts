@@ -266,12 +266,45 @@ describe('what the tools do', () => {
 
 describe('what counts as a page to open', () => {
   it('is the web, and only the web', () => {
-    for (const good of ['https://figma.com', 'http://localhost:3000', 'example.com/a', 'HTTPS://X.COM']) {
-      expect(onTheWeb(good), good).toBe(true);
-    }
-    for (const bad of ['file:///etc/passwd', 'data:text/html,<b>hi', 'javascript:alert(1)', 'ftp://x', '']) {
-      expect(onTheWeb(bad), bad).toBe(false);
-    }
+    const good = [
+      'https://figma.com',
+      'http://localhost:3000',
+      'example.com/a',
+      'HTTPS://X.COM',
+      // A name and a port reads like a scheme and is neither.
+      'localhost:3000',
+      'localhost:3000/app',
+    ];
+    for (const one of good) expect(onTheWeb(one), one).toBe(true);
+    const bad = [
+      'file:///etc/passwd',
+      'data:text/html,<b>hi',
+      'javascript:alert(1)',
+      'mailto:someone@example.com',
+      'ftp://x',
+      // A place on this computer, however it is spelled.
+      '/etc/passwd',
+      '../secret',
+      '~/.ssh/id_rsa',
+      'C:\\Users',
+      '',
+    ];
+    for (const one of bad) expect(onTheWeb(one), one).toBe(false);
+  });
+
+  it('will not open one inside a run of steps either', async () => {
+    const { host, asked } = recorder();
+    const steps = browserTools(ROOT, host).find((one) => one.name === 'browser_steps');
+    const result = await steps?.execute(
+      'call-1',
+      { steps: [{ do: 'read' }, { do: 'open', url: '/etc/passwd' }] },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    const said = result?.content[0];
+    expect(said?.type === 'text' ? said.text : '').toBe(BROWSER_WORDS.notTheWeb);
+    expect(asked.some((one) => one.includes('batch'))).toBe(false);
   });
 
   it('says so rather than opening it', async () => {
@@ -321,6 +354,24 @@ describe('the Guard has an opinion about every one of them', () => {
   it('asks before pressing and before typing', () => {
     expect(kindOf(call('browser_click', { target: '@e1' }))).toBe('confirm');
     expect(kindOf(call('browser_type', { target: '@e1', text: 'hello' }))).toBe('confirm');
+  });
+
+  /** The rung is about being asked, not about a key leaving the machine. */
+  it('keeps refusing a key even when questions are off altogether', () => {
+    const key = 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const wide: GuardFacts = { projectRoot: ROOT, howFar: 'doing', stopAsking: true };
+    expect(evaluate(call('browser_type', { target: '@e1', text: key }), wide).kind).toBe('deny');
+    expect(evaluate(call('browser_open', { url: `https://x.com/?k=${key}` }), wide).kind).toBe('deny');
+    expect(
+      evaluate(call('desktop_do', { steps: [{ do: 'type', text: key }] }), wide).kind,
+    ).toBe('deny');
+    // Everything that is only about scope still gets on with it on that rung.
+    expect(evaluate(call('browser_click', { target: '@e1' }), wide).kind).toBe('allow');
+  });
+
+  it('refuses a key aimed at, as well as one typed', () => {
+    const key = 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    expect(kindOf(call('browser_type', { target: key, text: 'hello' }))).toBe('deny');
   });
 
   it('refuses to type a key into a page', () => {

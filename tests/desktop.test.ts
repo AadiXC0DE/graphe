@@ -24,6 +24,7 @@ import {
   readLooksLike,
   readPixels,
   refusedPointing,
+  refusedSeeing,
   type DesktopHost,
 } from '../src/agent/pi/desktop';
 import type { Ran } from '../src/share/run';
@@ -145,9 +146,7 @@ describe('the picture and the pointing agree', () => {
       }
       if (tool === 'osascript') return Promise.resolve(ran({ out: 'Figma' }));
       if (tool === 'screencapture') {
-        // Nothing is written, so the picture cannot be read back — which is the
-        // path a refused permission takes too.
-        return Promise.resolve(ran({ code: 1, said: 'no' }));
+        return Promise.resolve(ran({ code: 1, said: 'screen recording permission denied' }));
       }
       return Promise.resolve(ran());
     };
@@ -156,6 +155,13 @@ describe('the picture and the pointing agree', () => {
     const result = await shot?.execute('call-1', {}, undefined, undefined, undefined as never);
     const said = result?.content[0];
     expect(said?.type === 'text' ? said.text : '').toBe(DESKTOP_WORDS.cannotSee);
+  });
+
+  /** A full disk is not a permission to go and give. */
+  it('knows a refusal to let us see the screen from anything else going wrong', () => {
+    expect(refusedSeeing('screencapture: cannot run, screen recording permission denied')).toBe(true);
+    expect(refusedSeeing('not authorized')).toBe(true);
+    expect(refusedSeeing('could not write file: no space left on device')).toBe(false);
   });
 });
 

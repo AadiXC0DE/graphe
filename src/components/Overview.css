@@ -691,6 +691,10 @@
 }
 
 .projects__pick {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: 1px solid var(--border);
   background: var(--bg-raised);
   border-radius: var(--radius-sm);

@@ -7,24 +7,18 @@ import './Shown.css';
  * The agent can look at a page in a browser or at the screen itself, and until
  * this existed it looked alone: the model saw the picture, the person saw a
  * line of text claiming one had been taken. A screenshot nobody can see is a
- * step nobody can check, which is the opposite of what the feed is for.
+ * step nobody can check.
  *
- * Quiet on purpose. It sits in the icon column's shadow rather than beside it,
- * it never grows past a third of the window, and the whole of it is always
- * visible — a picture cropped to fit is a picture that hides the thing somebody
- * wanted to look at.
+ * Quiet on purpose. It sits in the icon column's shadow, never grows past a
+ * third of the window, and is never blown up past its own size — the line above
+ * already says what it is, so it says nothing itself.
  */
-export function Shown({ picture, caption }: { picture: ImageCard; caption?: string }) {
+export function Shown({ picture, label }: { picture: ImageCard; label?: string }) {
   return (
-    <figure className="shown">
-      <img
-        className="shown__image"
-        src={`data:${picture.mimeType};base64,${picture.bytes}`}
-        // The caption below already says what this is, and a screen reader
-        // reading the same words twice is worse than reading them once.
-        alt={caption === undefined ? 'What was on screen' : ''}
-      />
-      {caption === undefined ? null : <figcaption className="shown__caption">{caption}</figcaption>}
-    </figure>
+    <img
+      className="shown"
+      src={`data:${picture.mimeType};base64,${picture.bytes}`}
+      alt={label ?? 'What was on screen'}
+    />
   );
 }

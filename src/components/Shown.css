@@ -1,35 +1,23 @@
 /* A picture a step took, sitting under that step's line.
 
    Indented to the activity line's text column, so a run of steps still reads as
-   one column with one spine and the picture belongs to the line above it rather
-   than floating between two. */
+   one column with one spine and the picture belongs to the line above it. */
 
 .shown {
+  display: block;
   margin: var(--space-2) 0 var(--space-1);
   margin-left: calc(var(--activity-icon, 16px) + var(--space-3));
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  animation: shown-in var(--dur-ui) var(--ease-out-quart) both;
-}
-
-.shown__image {
-  display: block;
-  width: 100%;
-  /* Never taller than a comfortable glance. `contain` rather than `cover`: the
-     point of the picture is what is in it, and cropping hides the corner
-     somebody is asking about. */
+  /* Its own size, up to the room there is. A small picture stretched to fill a
+     column is a small picture nobody can read. */
+  width: auto;
+  max-width: calc(100% - var(--activity-icon, 16px) - var(--space-3));
   max-height: 42vh;
   object-fit: contain;
   object-position: top left;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-sunken);
-}
-
-.shown__caption {
-  font-size: var(--text-xs);
-  color: var(--text-faint);
+  animation: shown-in var(--dur-ui) var(--ease-out-quart) both;
 }
 
 @keyframes shown-in {

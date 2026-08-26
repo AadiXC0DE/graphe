@@ -231,8 +231,13 @@ export function trimmed(text: string): string {
 export function onTheWeb(url: string): boolean {
   const asked = url.trim();
   if (asked === '') return false;
-  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(asked);
-  return scheme === null || /^https?$/i.test(scheme[1] ?? '');
+  // A place on this computer, not a place on the web.
+  if (/^[/~.]/.test(asked) || /^[a-z]:[\\/]/i.test(asked)) return false;
+  const scheme = /^([a-z][a-z0-9+.-]*):(.*)$/i.exec(asked);
+  if (scheme === null) return true;
+  if (/^https?$/i.test(scheme[1] ?? '')) return true;
+  // `localhost:3000` reads like a scheme and is a name and a port.
+  return /^\d+(\/|$)/.test(scheme[2] ?? '');
 }
 
 /** A handle from the last reading, or a way of naming a thing in the markup.
@@ -601,6 +606,10 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
       }),
       executionMode: 'sequential',
       execute: async (_callId, params: { steps: readonly Step[] }, signal): ToolResult => {
+        const wrong = params.steps.find(
+          (one) => (one.do ?? '').trim().toLowerCase() === 'open' && !onTheWeb(one.url ?? one.target ?? ''),
+        );
+        if (wrong !== undefined) return say(BROWSER_WORDS.notTheWeb);
         const commands = stepCommands(params.steps);
         if (commands.length === 0) {
           return say('None of those steps is something I can do to a page, so I have done nothing.');

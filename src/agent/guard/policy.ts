@@ -1967,7 +1967,7 @@ function judgeBrowserAct(
 ): Judgement {
   const typing = name === 'browsertype';
   if (typing) {
-    const words = collectText(input);
+    const words = `${collectText(input)}\n${readString(input, ['target']) ?? ''}`;
     if (findSecret(words) !== null || findKnownSecret(words, ctx)) return deny(SAY.keyIntoPage);
   }
   if (!typing) {
@@ -1995,8 +1995,13 @@ function judgeBrowserAct(
 export function onTheWeb(url: string): boolean {
   const asked = url.trim();
   if (asked === '') return false;
-  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(asked);
-  return scheme === null || /^https?$/i.test(scheme[1] ?? '');
+  // A place on this computer, not a place on the web.
+  if (/^[/~.]/.test(asked) || /^[a-z]:[\\/]/i.test(asked)) return false;
+  const scheme = /^([a-z][a-z0-9+.-]*):(.*)$/i.exec(asked);
+  if (scheme === null) return true;
+  if (/^https?$/i.test(scheme[1] ?? '')) return true;
+  // `localhost:3000` reads like a scheme and is a name and a port.
+  return /^\d+(\/|$)/.test(scheme[2] ?? '');
 }
 
 /** The site an address belongs to, for a question that can name it. Null when
@@ -2488,6 +2493,20 @@ function leavesTheFiles(call: ToolCall): boolean {
   );
 }
 
+/** The refusals no rung reaches past: a key leaving the machine, and anything
+ *  reaching for the Guard's own switches. */
+function alwaysRefused(judgement: Judgement): boolean {
+  if (judgement.verdict.kind !== 'deny') return false;
+  return NEVER_ON_ANY_RUNG.has(judgement.verdict.reason);
+}
+
+const NEVER_ON_ANY_RUNG: ReadonlySet<string> = new Set([
+  SAY.sendKeyOut,
+  SAY.keyIntoPage,
+  SAY.keyInBrowserFile,
+  SAY.guardOff,
+]);
+
 /**
  * How far it may go on its own.
  *
@@ -2524,7 +2543,11 @@ function judge(call: ToolCall, ctx: GuardFacts): Judgement {
   // questions. The terminal runner is widened for this same mode; leaving this
   // earlier policy gate in place was why harmless uses of /tmp were still
   // rejected before the shell ever saw them.
-  if (ctx.howFar === 'doing') return allow(raw.mutates);
+  //
+  // The handful below are the exception, and they are not about scope: a person
+  // saying "get on with it" is agreeing to work they cannot see, not to one of
+  // their keys leaving the machine. Those refusals hold on every rung.
+  if (ctx.howFar === 'doing') return alwaysRefused(raw) ? raw : allow(raw.mutates);
 
   const first = asFarAs(applyStandingInstruction(raw, ctx), ctx);
   return withoutQuestions(first, { ...ctx, stopAsking: quietFor(call, ctx) });

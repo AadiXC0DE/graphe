@@ -419,6 +419,9 @@ export default function Overview({
                       <button
                         type="button"
                         className="projects__act"
+                        // Two rows of the same two words: the name has to be in
+                        // the label, or one press cannot be told from another.
+                        aria-label={`${SEVERAL.save} ${one.name}`}
                         onClick={() => onSave(one.name)}
                         disabled={busy}
                       >
@@ -429,6 +432,7 @@ export default function Overview({
                       <button
                         type="button"
                         className="projects__act"
+                        aria-label={`${SEVERAL.see} ${one.name}`}
                         onClick={() => onSeeProject(one.name)}
                         disabled={busy}
                       >
@@ -652,7 +656,9 @@ export default function Overview({
                 key={one.path}
                 type="button"
                 className={`projects__pick ${one.name === whose.name ? 'projects__pick--on' : ''}`}
-                aria-pressed={one.name === whose.name}
+                // One of them is the one being shown, rather than each being
+                // separately on or off.
+                aria-current={one.name === whose.name}
                 onClick={() => setWhose(one.name)}
               >
                 {one.name}

@@ -78,6 +78,12 @@ const SETTINGS = {
 
 /** What a refusal to let us point at things reads like, in every wording the
  *  computer uses for it. */
+/** What a refusal to let us see the screen reads like. Anything else that goes
+ *  wrong taking one is not a permission to go and give. */
+export function refusedSeeing(said: string): boolean {
+  return /screen recording|not authoriz|not permitted|permission|denied|-3802/i.test(said);
+}
+
 export function refusedPointing(said: string): boolean {
   return /assistive access|not authorized|-1743|-25211|osascript is not allowed/i.test(said);
 }
@@ -171,7 +177,7 @@ export type Doing = {
  *  not able to say how big it is. */
 type Shot =
   | { ok: true; bytes: string; width: number; height: number }
-  | { ok: false; why: 'see' | 'size' };
+  | { ok: false; why: 'see' | 'size' | 'other' };
 
 export type Move =
   | { kind: 'script'; script: string; said: string }
@@ -345,7 +351,10 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
     const ran = await script('tell application "Finder" to get bounds of window of desktop', signal);
     const bounds = readBounds(ran.out);
     if (bounds !== null) return bounds;
-    const displays = await run('system_profiler', ['SPDisplaysDataType'], { patience: PATIENCE_MS });
+    const displays = await run('system_profiler', ['SPDisplaysDataType'], {
+      patience: PATIENCE_MS,
+      ...(signal === undefined ? {} : { signal }),
+    });
     return readLooksLike(displays.out);
   };
 
@@ -377,7 +386,9 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
         patience: PATIENCE_MS,
         ...(signal === undefined ? {} : { signal }),
       });
-      if (shot.code !== 0) return { ok: false, why: 'see' };
+      // Not every refusal is a refusal of permission. A full disk sent to the
+      // privacy settings is a person looking in the wrong place.
+      if (shot.code !== 0) return { ok: false, why: refusedSeeing(shot.said) ? 'see' : 'other' };
       const big = await stat(raw).catch(() => null);
       if (big === null || big.size === 0) return { ok: false, why: 'see' };
       const scaled = await run(
@@ -407,7 +418,10 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
 
   const shown = async (signal?: AbortSignal): Promise<AgentToolResult<unknown>> => {
     const shot = await picture(signal);
-    if (!shot.ok) return shot.why === 'see' ? askFor('see') : say(DESKTOP_WORDS.noSize);
+    if (!shot.ok) {
+      if (shot.why === 'see') return askFor('see');
+      return say(shot.why === 'size' ? DESKTOP_WORDS.noSize : DESKTOP_WORDS.noPicture);
+    }
     const front = await frontmost(signal);
     const where = front === null ? '' : ` ${front} is in front.`;
     return {

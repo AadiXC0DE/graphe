@@ -5013,7 +5013,7 @@ function Turnstile({
             real={showMe ? turn.real : undefined}
           />
           {turn.shown === undefined ? null : (
-            <Shown picture={turn.shown} caption={turn.label} />
+            <Shown picture={turn.shown} label={turn.label} />
           )}
         </>
       );

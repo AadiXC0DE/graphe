@@ -1,4 +1,4 @@
-import { type ReactElement, useMemo, useState } from 'react';
+import { type ReactElement, useEffect, useMemo, useState } from 'react';
 import Away from './Away';
 import CostMeter from './CostMeter';
 import { SAYS as DESIGN, type DesignPart } from './DesignView';
@@ -141,14 +141,16 @@ type Props = {
   /** Put one of the projects here in front of you, running. */
   onSeeProject?: (repo: string) => void;
   /** Write a page of what changed, for somebody who is not you. */
-  onShare: () => void;
+  onShare: (repo?: string) => void;
+  /** Said whenever the panel changes which project it is showing. */
+  onWhose?: (name: string | null) => void;
 
   /** Let the work that is waiting in, or set it aside. */
   onDecide: (letIn: boolean) => void;
   /** Move the line the work has to cross before it is stopped. */
   onHowMuch: (id: string) => void;
   /** Write the work up and put it where a developer picks it up. */
-  onHandOver: () => void;
+  onHandOver: (repo?: string) => void;
   /** Open an address in the person's own browser. */
   onOpenLink: (address: string) => void;
   /** Open one of the files the last turn made, in the person's editor. */
@@ -294,6 +296,7 @@ export default function Overview({
   onCreateBranch,
   onSeeProject,
   onShare,
+  onWhose,
 
   onDecide,
   onHowMuch,
@@ -329,6 +332,10 @@ export default function Overview({
   const whose = several
     ? (view.repos.find((one) => one.name === pickedRepo) ?? view.repos[0] ?? null)
     : null;
+
+  useEffect(() => {
+    onWhose?.(whose?.name ?? null);
+  }, [whose?.name, onWhose]);
 
   /* Which band of the panel is in front. Bands used to stack into one column
      that only got longer; now each has a home and nothing is buried. */
@@ -697,9 +704,9 @@ export default function Overview({
           howMuch={view.howMuch}
           onDecide={onDecide}
           onHowMuch={onHowMuch}
-          onUndo={onPutBack}
-          onHandOver={onHandOver}
-          onShare={onShare}
+          onUndo={(versionId) => onPutBack(versionId, whose?.name)}
+          onHandOver={() => onHandOver(whose?.name)}
+          onShare={() => onShare(whose?.name)}
           onOpenLink={onOpenLink}
         />
       </div>

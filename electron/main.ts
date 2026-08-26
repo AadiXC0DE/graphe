@@ -5491,11 +5491,16 @@ function register(): void {
   });
 
   handle<{ looks: readonly Look[]; says: string }>(CHANNEL.checkWidths, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_TO_SHOW);
+    const widthFolder = folderFor(open, where);
+    if (widthFolder === open.path && open.held.childRepos.length >= SEVERAL_CHILDREN) {
+      return fail(SEVERAL_PROJECTS);
+    }
     let ready;
     try {
-      ready = await makeAndServe({ folder: open.path, says: () => undefined });
+      ready = await makeAndServe({ folder: widthFolder, says: () => undefined });
     } catch (cause) {
       return fail(couldNotShow(cause));
     }
@@ -5503,7 +5508,7 @@ function register(): void {
     try {
       // The sizes this project designs at, out of its own stylesheets. Three
       // sizes it has never written a line about answer somebody else's question.
-      const sizes = sizesFor(await styleSheets(open.path));
+      const sizes = sizesFor(await styleSheets(widthFolder));
       const looks = await lookAtEveryWidth(ready.serving.address, sizes);
       return done({ looks, says: readsWell(looks).says });
     } finally {
@@ -5512,9 +5517,10 @@ function register(): void {
   });
 
   handle<string | null>(CHANNEL.shareReview, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const asked = whereIn(args);
+    const open = projectAt(asked);
     if (open === null) return fail(NOTHING_OPEN);
-    const versions = await versionsOf(open.held.timeline);
+    const versions = await versionsOf(await timelineFor(open, asked));
     const changes: Shown[] = versions.slice(0, 12).map((version) => ({
       title: version.title,
       when: version.at,
@@ -5550,9 +5556,10 @@ function register(): void {
   /* ------------------------------------------------------------ landing it */
 
   handle<Landing>(CHANNEL.landing, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    return done(await landingNow(open.path, open.held));
+    return done(await landingNow(folderFor(open, where), open.held));
   });
 
   handle<Preferences>(CHANNEL.setHowMuch, async (_event, args) => {
@@ -5591,13 +5598,14 @@ function register(): void {
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
     const [letIn, observed] = args;
     if (typeof observed !== 'boolean') return fail(NOTHING_OPEN);
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     const waiting = open.held.waiting;
 
     const asItStands = async (undoTo: string | null): Promise<Decided> => ({
-      landing: await landingNow(open.path, open.held),
-      versions: await versionsOf(open.held.timeline).catch(() => []),
+      landing: await landingNow(folderFor(open, where), open.held),
+      versions: await versionsOf(await timelineFor(open, where)).catch(() => []),
       letIn: letIn === true,
       undoTo,
     });
@@ -5804,10 +5812,13 @@ function register(): void {
   });
 
   handle<string>(CHANNEL.changesLook, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     try {
-      return done(await new ProjectHistory(open.path).diffFor({ kind: 'working' }));
+      return done(
+        await new ProjectHistory(folderFor(open, where)).diffFor({ kind: 'working' }),
+      );
     } catch (cause) {
       return fail(historyTrouble(cause));
     }
@@ -5815,7 +5826,8 @@ function register(): void {
 
   handle<null>(CHANNEL.changesDrop, async (_event, args) => {
     const [patch] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof patch !== 'string') return done(null);
     try {
@@ -5824,7 +5836,7 @@ function register(): void {
       // is this. Swallowed, the sentence above became untrue in the one case it
       // was written for, and nothing said so. The agent's own path has refused
       // on this since it was written; this is the same rule for the press.
-      const saved = await open.held.timeline
+      const saved = await (await timelineFor(open, where))
         ?.snapshot({ boundary: 'before-risky-change' })
         .then(() => true)
         .catch(() => false);
@@ -5836,7 +5848,7 @@ function register(): void {
           actionLabel: 'Got it',
         });
       }
-      const answer = await new ProjectHistory(open.path).dropChanges(patch);
+      const answer = await new ProjectHistory(folderFor(open, where)).dropChanges(patch);
       if (!answer.ok) return fail(plainTrouble(answer.because));
       return done(null);
     } catch (cause) {
@@ -6549,9 +6561,10 @@ function register(): void {
   });
 
   handle<readonly Page[]>(CHANNEL.pages, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return done([]);
-    return done(pagesIn(await filesUnder(open.path)));
+    return done(pagesIn(await filesUnder(folderFor(open, where))));
   });
 
   handle<ShowOutcome>(CHANNEL.show, async (_event, args) => {
@@ -6668,9 +6681,10 @@ function register(): void {
   /** What this project does without being asked. Read fresh each time: the file
    *  is the whole feature, so a change to it must show at once. */
   handle<AlwaysDoes>(CHANNEL.alwaysDoes, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return done({ file: '', rows: [], trouble: null });
-    const file = alwaysFile(open.path);
+    const file = alwaysFile(folderFor(open, where));
     const read = alwaysFrom(await readFile(file, 'utf8').catch(() => null));
     const said: Readonly<Record<When, string>> = {
       afterEachChange: 'After every change',

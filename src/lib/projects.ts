@@ -102,6 +102,10 @@ export type Desk = {
   /** Each project's own timeline, by its folder name, when this folder holds
    *  several projects rather than being one. Empty every ordinary day. */
   repoVersions: Readonly<Record<string, readonly SavedVersion[]>>;
+  /** Each project's own stylesheet, by folder name. A folder holding several
+   *  projects has no stylesheet of its own, so the design view reads one of
+   *  these instead of finding nothing. */
+  repoStyles: Readonly<Record<string, Overview['styles']>>;
   /** The offer to undo the last "put back", while it is still on offer. */
   putBack: PutBack | null;
 
@@ -226,6 +230,7 @@ function blankDesk(path: string, name: string): Desk {
     overview: null,
     versions: [],
     repoVersions: {},
+    repoStyles: {},
     putBack: null,
     jobs: [],
     doing: null,

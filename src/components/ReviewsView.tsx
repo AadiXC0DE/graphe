@@ -185,6 +185,22 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
           </a>
         </div>
 
+        {repos === undefined || repos.length < 2 || onWhich === undefined ? null : (
+          <div className="projects__strip" role="group" aria-label={SAYS.whose}>
+            {repos.map((one) => (
+              <button
+                key={one.path}
+                type="button"
+                className={`projects__pick ${one.name === which ? 'projects__pick--on' : ''}`}
+                aria-current={one.name === which ? 'true' : undefined}
+                onClick={() => onWhich(one.name)}
+              >
+                {one.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="sheet__chips">
           {(['prs', 'issues'] as const).map((part) => (
             <button

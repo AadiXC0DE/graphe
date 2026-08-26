@@ -51,9 +51,9 @@ cask "graphe" do
   # smaller download of the two.
   arch arm: "arm64", intel: "x64"
 
-  version "0.4.1"                     # FILL IN — match package.json
-  sha256 arm:   "f614f54b6229ee6ccc59186172235000e36bc701d8f806d130d385d342ba5545", # FILL IN
-         intel: "554e3fd81f48659171735d15ae8d812b478c92ccd3ecf441d4f7a61805da7930"  # FILL IN
+  version "0.4.2"                     # FILL IN — match package.json
+  sha256 arm:   "800974f4655e66158155a88fccb084c254faa3b4d083824338c6a07f196940b3", # FILL IN
+         intel: "b71e74f34aeb0bc2c78265b8c906ee98c5ec19ea9589f8b75f94b82b6ea9f074"  # FILL IN
 
   url "https://github.com/AadiXC0DE/graphe/releases/download/v#{version}/Graphe-#{version}-#{arch}.zip",
       verified: "github.com/AadiXC0DE/graphe/"

@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { asksAboutTheScreen, evaluate, worksAScreen } from '../src/agent/guard/policy';
 import type { GuardFacts } from '../src/agent/guard/policy';
-import type { ToolCall } from '../src/agent/guard/policy';
+import type { ToolCall } from '../src/agent/types';
 
 const call = (name: string, input: Record<string, unknown>): ToolCall =>
   ({ name, input, id: '1' }) as ToolCall;

@@ -52,7 +52,7 @@ describe('what runs without being asked', () => {
 
 describe('a way of working, offered as it is typed', () => {
   it('offers them on a slash at the start of a message, and only there', () => {
-    expect(COMPOSER).toContain("before.match(/^\\/([a-z0-9:_-]*)$/i)");
+    expect(COMPOSER).toContain("before.match(/^\\/([a-z0-9-]*)$/i)");
     expect(COMPOSER).toContain('chooseCommand');
     expect(COMPOSER).toContain('aria-label="Ways of working"');
   });

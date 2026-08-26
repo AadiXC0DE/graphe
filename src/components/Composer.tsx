@@ -669,7 +669,9 @@ export default function Composer({
           const match = before.match(/(?:^|\s)@([a-z0-9-]*)$/i);
           const query = match?.[1];
           setMention(query === undefined ? null : { from: cursor - (query.length + 1), query });
-          const slash = before.match(/^\/([a-z0-9:_-]*)$/i);
+          // The same characters a command can be named with, so the menu never
+          // opens on something that could not match anything.
+          const slash = before.match(/^\/([a-z0-9-]*)$/i);
           setCommand(slash === null ? null : { query: slash[1] ?? '' });
           setMentionAt(0);
           resize(e.target);

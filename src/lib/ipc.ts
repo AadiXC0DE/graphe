@@ -113,14 +113,14 @@ export function whereIn(args: readonly unknown[]): Where {
   const where: Where = {};
   const project = fields['project'];
   const conversation = fields['conversation'];
-  // A child name is a folder name, not a path. Separators and control
-  // characters go; spaces stay, because "my app" is a folder somebody really
-  // has and stripping them would name a folder that does not exist.
+  // A child name is a folder name, not a path. One with a separator or a
+  // control character in it is refused rather than flattened: taking the slash
+  // out of "a/b" makes "ab", which is a different project that might exist.
+  // Spaces stay, because "my app" is a folder somebody really has.
   const repo = typeof fields['repo'] === 'string' ? fields['repo'].trim() : '';
-  if (repo !== '') {
-    // eslint-disable-next-line no-control-regex
-    const clean = repo.slice(0, 80).replace(/[/\\\u0000-\u001f\u007f]/g, '').trim();
-    if (clean !== '') where.repo = clean;
+  // eslint-disable-next-line no-control-regex
+  if (repo !== '' && repo.length <= 80 && !/[/\\\u0000-\u001f\u007f]/.test(repo)) {
+    where.repo = repo;
   }
   if (typeof project === 'string' && project.trim() !== '') where.project = project;
   if (typeof conversation === 'string' && conversation.trim() !== '') {

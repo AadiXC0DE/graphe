@@ -814,6 +814,9 @@ function Conversation() {
   const [workflows, setWorkflows] = useState<readonly Workflow[]>([]);
   /** What the open project does without being asked. Null until it is read. */
   const [alwaysNow, setAlwaysNow] = useState<AlwaysDoes | null>(null);
+  /** Whose history the full-screen graph is drawing, in a folder holding
+   *  several projects. Null for a folder that is one project. */
+  const [graphRepo, setGraphRepo] = useState<string | null>(null);
 
   /** Which band of the design view is open, or null when it is not. Both of the
    *  surfaces that take the whole width live here rather than inside a panel:
@@ -2068,21 +2071,36 @@ function Conversation() {
     };
   }, [watchAt]);
 
+  /** Which ask for the stream is the live one. A second press while the first
+   *  is still travelling must not have its answer arrive afterwards and turn
+   *  watching back on. */
+  const watchAsked = useRef(0);
+
   const watchTheBrowser = useCallback((want: boolean) => {
     const path = desksNow.current.current;
+    const mine = watchAsked.current + 1;
+    watchAsked.current = mine;
+    setWatched(NOTHING_WATCHED);
     if (!want) {
       setWatchAt(null);
-      setWatched(NOTHING_WATCHED);
       void bridge.watchBrowser(false, path === null ? undefined : { project: path });
       return;
     }
-    setWatched(NOTHING_WATCHED);
     void bridge
       .watchBrowser(true, path === null ? undefined : { project: path })
       .then((answer) => {
+        if (watchAsked.current !== mine) return;
         setWatchAt(answer.ok ? answer.value : null);
       });
   }, []);
+
+  /* A browser nobody is watching should not be drawing itself. Switching
+     project, or closing the pane, is nobody watching. */
+  useEffect(() => {
+    if (watchAt === null) return;
+    if (desks.current !== null && pane !== 'off') return;
+    watchTheBrowser(false);
+  }, [desks.current, pane, watchAt, watchTheBrowser]);
 
   /** Whether each conversation's run is waiting for somebody, by its owner. */
   const [holding, setHolding] = useState<Readonly<Record<string, boolean>>>({});
@@ -4738,8 +4756,8 @@ function Conversation() {
             project: desks.current === null ? "" : folderCalled(desks.current),
             clock: now,
           }}
-          onPutBack={(versionId) => void putBack(versionId)}
-          onName={(versionId, name) => void nameVersion(versionId, name)}
+          onPutBack={(versionId, repo) => void putBack(versionId, repo)}
+          onName={(versionId, name, repo) => void nameVersion(versionId, name, repo)}
           onKeep={keepVersion}
           onDismissPutBack={dismissPutBack}
           onShowSplit={() => void showSplit()}
@@ -4748,8 +4766,9 @@ function Conversation() {
             goToScreen("design");
             setDesignAt(part);
           }}
-          onOpenGraph={() => {
+          onOpenGraph={(repo) => {
             goToScreen("graph");
+            setGraphRepo(repo ?? null);
             setGraphOpen(true);
           }}
           onSwitchBranch={switchBranch}
@@ -4859,12 +4878,16 @@ function Conversation() {
 
       {graphOpen && desk !== null ? (
         <HistoryView
-          versions={desk.versions}
+          versions={graphRepo === null ? desk.versions : (desk.repoVersions[graphRepo] ?? [])}
           pictures={versionPictures[desk.path] ?? {}}
-          git={desk.overview?.git ?? null}
+          git={
+            graphRepo === null
+              ? (desk.overview?.git ?? null)
+              : (desk.overview?.repos?.find((one) => one.name === graphRepo)?.git ?? null)
+          }
           busy={busy}
           onClose={() => setGraphOpen(false)}
-          onPutBack={(versionId) => void putBack(versionId)}
+          onPutBack={(versionId) => void putBack(versionId, graphRepo ?? undefined)}
           onOpenFile={(file) => void bridge.openInEditor(file)}
         />
       ) : null}

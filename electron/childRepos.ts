@@ -98,10 +98,17 @@ export function childNamed(
   if (name === undefined || children.length < SEVERAL_CHILDREN) return null;
   const exact = children.find((one) => one.rel === name);
   if (exact !== undefined) return exact;
-  // Most Mac disks do not tell "Backend" from "backend", so neither does this.
-  // Still a lookup among the folders already found, never a path.
+  // Most Mac disks do not tell "Backend" from "backend", so neither does this
+  // — but a disk that does tell them apart has two different folders, and
+  // matching one to the other would work on the wrong project.
+  if (!foldsCase()) return null;
   const folded = name.toLowerCase();
   return children.find((one) => one.rel.toLowerCase() === folded) ?? null;
+}
+
+/** Whether this computer's disk tells "Backend" from "backend". */
+function foldsCase(platform: string = process.platform): boolean {
+  return platform === 'darwin' || platform === 'win32';
 }
 
 /**

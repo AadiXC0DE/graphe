@@ -98,6 +98,26 @@ describe('what reads and what refuses', () => {
     }
   });
 
+  /** The timeline was per project and the folder was not, so saving the design
+   *  view read one project's stylesheets and wrote into the folder above it. */
+  it('saves the design view into the project it is saving, not the folder above', () => {
+    const at = MAIN.indexOf('handle<readonly SavedVersion[]>(CHANNEL.designCommit');
+    expect(at).toBeGreaterThan(-1);
+    const block = MAIN.slice(at, MAIN.indexOf('handle<PutBack>(CHANNEL.putBack'));
+    expect(block).toContain('const folder = folderFor(open, where)');
+    expect(block).toContain('styleTokens(folder)');
+    expect(block).not.toContain('open.path');
+  });
+
+  /** The panel names the project on every one of these; the window has to pass
+   *  it on, or going back from the strip answers "this folder holds several". */
+  it('passes the project the panel named all the way to the shell', () => {
+    expect(APP).toContain('onPutBack={(versionId, repo) => void putBack(versionId, repo)}');
+    expect(APP).toContain('onName={(versionId, name, repo) => void nameVersion(versionId, name, repo)}');
+    expect(APP).toContain('graphRepo === null ? desk.versions : (desk.repoVersions[graphRepo]');
+    expect(OVERVIEW).toContain('onOpenGraph={() => onOpenGraph(whose?.name)}');
+  });
+
   it('carries the named project across the bridge rather than dropping it', () => {
     const at = PRELOAD.indexOf('function named(');
     expect(at).toBeGreaterThan(-1);

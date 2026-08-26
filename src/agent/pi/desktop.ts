@@ -63,6 +63,8 @@ export const DESKTOP_WORDS = {
   noDrag:
     'Dragging something across the screen needs a small helper this computer does not have, so I have left that step undone. Everything else here works without it.',
   nothingToDo: 'None of those is a move I can make, so I have done nothing.',
+  needsAPlace: (kind: string, target: string): string =>
+    `A ${kind === 'double' ? 'double press' : 'right press'} is not something a program can be asked to do to itself, so ${target} needs a place on screen to press instead. I have left that step out.`,
   offScreen: (app: string): string =>
     `${app} has no window on the desktop you are looking at. Bring its window over to this one and ask me again.`,
   notOpen: (app: string): string => `There is nothing called ${app} open on this computer.`,
@@ -217,10 +219,19 @@ export function asMove(step: Doing): Move {
     if (kind === 'focus') {
       return { kind: 'named', at: handle, doing: 'focus', value: '', said: `Moved to ${target}` };
     }
-    if (kind === 'click' || kind === 'press' || kind === 'double' || kind === 'right') {
+    if (kind === 'click' || kind === 'press') {
       return { kind: 'named', at: handle, doing: 'press', value: '', said: `Pressed ${target}` };
     }
-    return { kind: 'skip', because: null };
+    // A double press and a right press are not things a program can be asked to
+    // do to itself. Where the step also says a place, the pointer does it; where
+    // it does not, saying so beats quietly doing an ordinary press instead.
+    if (kind === 'double' || kind === 'right') {
+      if (place(step) === null) {
+        return { kind: 'skip', because: DESKTOP_WORDS.needsAPlace(kind, target) };
+      }
+    } else {
+      return { kind: 'skip', because: null };
+    }
   }
   const at = place(step);
   const clicking: Readonly<Record<string, string>> = {
@@ -774,7 +785,7 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
             done.push(move.said);
             continue;
           }
-          missed.push('One of those is not a move I can make, so I left it out.');
+          missed.push(move.because ?? 'One of those is not a move I can make, so I left it out.');
         }
         const stopped = await flush();
         if (stopped !== null) return stopped;

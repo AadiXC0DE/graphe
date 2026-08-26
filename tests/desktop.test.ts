@@ -293,7 +293,7 @@ describe('when the computer has not been given permission', () => {
 
   it('says all of it in plain words', () => {
     const every = Object.values(DESKTOP_WORDS).map((said) =>
-      typeof said === 'function' ? said('Figma') : said,
+      typeof said === 'function' ? (said as (...args: string[]) => string)('Figma', '@a1') : said,
     );
     for (const said of every) {
       expect(said).not.toMatch(/\b(AppleScript|osascript|System Events|accessibility API|CGEvent|AXPress)\b/);

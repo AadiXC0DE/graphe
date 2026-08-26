@@ -83,7 +83,7 @@ import {
   type Found,
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
-import { forgetLogins, watchBrowser } from '../src/agent/pi/computer';
+import { browserFolder, forgetLogins, watchBrowser } from '../src/agent/pi/computer';
 import { alwaysFile, alwaysFrom, WHEN, type When } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
@@ -5097,6 +5097,10 @@ function register(): void {
     if (typeof changes !== 'object' || changes === null) return fail(NOTHING_OPEN);
     const timeline = await timelineFor(open, where);
     if (timeline === null) return fail(SEVERAL_PROJECTS);
+    // The folder the timeline belongs to. In a folder holding several projects
+    // these are not the same place, and writing one project's tokens into the
+    // folder above it is a change nobody asked for and nobody would find.
+    const folder = folderFor(open, where);
     const given = changes as Partial<DesignChange>;
     const tokens = Array.isArray(given.tokens)
       ? given.tokens.filter((one) => typeof one.name === 'string' && typeof one.value === 'string')
@@ -5109,7 +5113,7 @@ function register(): void {
     // The whole design view is one saved moment. Anything sent here is written
     // back where each token lived and then kept as a single version — the
     // window holds the edits so nothing is committed on a slide.
-    const styles = await styleTokens(open.path);
+    const styles = await styleTokens(folder);
     if (styles === null && tokens.length === 0 && motions.length === 0) return fail(NOTHING_OPEN);
     try {
       // Apply edits per file, so a token that came from a component sheet is
@@ -5131,7 +5135,7 @@ function register(): void {
         file: string,
         list: readonly { name: string; value: string }[],
       ): Promise<void> => {
-        const where = join(open.path, file);
+        const where = join(folder, file);
         let css = await readFile(where, 'utf8');
         let wrote = false;
         for (const one of list) {
@@ -5146,7 +5150,7 @@ function register(): void {
       for (const [file, list] of edits) await writeFileEdits(file, list);
       // Motion edits land in the primary stylesheet.
       if (styles !== null && motions.length > 0) {
-        const where = join(open.path, styles.file);
+        const where = join(folder, styles.file);
         let css = perFile.get(where) ?? (await readFile(where, 'utf8'));
         for (const one of motions) {
           const next = writeMotionAll(css, one.places as Parameters<typeof writeMotionAll>[1], one.change as Parameters<typeof writeMotionAll>[2]);
@@ -6616,7 +6620,10 @@ function register(): void {
     const [on] = args;
     const open = projectAt(whereIn(args));
     if (open === null || typeof on !== 'boolean') return done(null);
-    return done(await watchBrowser(on, open.path).catch(() => null));
+    const keeps = keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path)
+      ? browserFolder(await defaultAgentDir(), open.path)
+      : null;
+    return done(await watchBrowser(on, open.path, undefined, keeps).catch(() => null));
   });
 
   /** What this project does without being asked. Read fresh each time: the file

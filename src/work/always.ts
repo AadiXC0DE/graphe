@@ -100,11 +100,20 @@ export function alwaysFrom(text: string | null): { all: Everything; trouble: str
  * One command, with the files that just changed put into it.
  *
  * `$FILES` is the only thing substituted, and a command that does not mention
- * it runs unchanged — a formatter wants the list, a test run does not.
+ * it runs unchanged — a formatter wants the list, a test run does not. Each
+ * name goes in as one word, so a file with a space or a semicolon in its name
+ * is a file and never a second command.
  */
 export function commandFor(one: Always, touched: readonly string[]): string {
   if (!one.run.includes('$FILES')) return one.run;
-  return one.run.replaceAll('$FILES', touched.join(' ')).trim();
+  return one.run.replaceAll('$FILES', touched.map(quoted).join(' ')).trim();
+}
+
+/** One name, as a shell reads a single word. A file called `a; rm -rf .` is a
+ *  file somebody may really have, and it must arrive as a name rather than as
+ *  a second command. */
+export function quoted(name: string): string {
+  return `'${name.replaceAll("'", `'\\''`)}'`;
 }
 
 /** Whether this one has anything to do right now. A command that wants the

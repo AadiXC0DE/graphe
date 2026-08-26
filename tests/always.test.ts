@@ -17,6 +17,7 @@ import {
   alwaysFile,
   alwaysFrom,
   commandFor,
+  quoted,
   worthRunning,
 } from '../src/work/always';
 
@@ -81,9 +82,23 @@ describe('reading what a project always does', () => {
 describe('putting the changed files into a command', () => {
   it('substitutes them, and leaves a command that does not ask alone', () => {
     expect(commandFor({ name: 'f', run: 'prettier --write $FILES' }, ['a.ts', 'b.ts'])).toBe(
-      'prettier --write a.ts b.ts',
+      "prettier --write 'a.ts' 'b.ts'",
     );
     expect(commandFor({ name: 't', run: 'npm test' }, ['a.ts'])).toBe('npm test');
+  });
+
+  /** A file called `a; rm -rf .` is a file somebody may really have. It has to
+   *  arrive as a name and never as a second command. */
+  it('puts each name in as one word, whatever is in it', () => {
+    expect(quoted('a.ts')).toBe("'a.ts'");
+    expect(quoted('my file.ts')).toBe("'my file.ts'");
+    expect(quoted("a'b.ts")).toBe("'a'\\''b.ts'");
+    const command = commandFor({ name: 'p', run: 'prettier $FILES' }, [
+      'a; echo PWNED',
+      '$(echo no)',
+      'x`echo no`',
+    ]);
+    expect(command).toBe("prettier 'a; echo PWNED' '$(echo no)' 'x`echo no`'");
   });
 
   it('does not run one that wants the changed files when there are none', () => {

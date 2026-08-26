@@ -567,7 +567,9 @@ export function browserTools(
         await one(['console', '--clear'], {}).catch(() => undefined);
         await one(['network', 'requests', '--clear'], {}).catch(() => undefined);
         const threw = await one(['errors'], {}).catch(() => null);
-        errorsBefore = threw?.ok === true ? saysList(threw.data, 'errors').length : errorsBefore;
+        // A reading that failed leaves no count worth keeping: counting past an
+        // old number would hide this page's own errors.
+        errorsBefore = threw?.ok === true ? saysList(threw.data, 'errors').length : 0;
         const answer = await one(['open', params.url.trim()], {
           ...(signal === undefined ? {} : { signal }),
         });
@@ -819,11 +821,15 @@ export function browserTools(
 
 /** Close whatever browser this project left open. It is kept warm between
  *  calls, so it outlives the conversation unless somebody says otherwise. */
-export async function closeBrowser(projectRoot?: string, host?: BrowserHost): Promise<void> {
+export async function closeBrowser(
+  projectRoot?: string,
+  host?: BrowserHost,
+  keeps: string | null = null,
+): Promise<void> {
   const run = host ?? defaultHost(projectRoot ?? tmpdir());
   const found = await findWay(run).catch(() => null);
   if (found === null) return;
-  const setup = setupFrom(process.env, projectRoot);
+  const setup = setupFrom(process.env, projectRoot, keeps);
   await run(found.tool, [...found.lead, ...browserArgs(['close'], setup)], {
     patience: 30_000,
   }).catch(() => undefined);
@@ -870,11 +876,12 @@ export async function watchBrowser(
   on: boolean,
   projectRoot?: string,
   host?: BrowserHost,
+  keeps: string | null = null,
 ): Promise<string | null> {
   const run = host ?? defaultHost(projectRoot ?? tmpdir());
   const found = await findWay(run).catch(() => null);
   if (found === null) return null;
-  const setup = setupFrom(process.env, projectRoot);
+  const setup = setupFrom(process.env, projectRoot, keeps);
   const ask = async (command: readonly string[]): Promise<Answer> =>
     readAnswer(
       await run(found.tool, [...found.lead, ...browserArgs(command, setup)], { patience: 60_000 }),

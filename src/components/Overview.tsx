@@ -132,8 +132,8 @@ type Props = {
   onSave: (repo?: string) => void;
   /** Open everything about how the project looks, at one of its bands. */
   onOpenDesign: (part: DesignPart) => void;
-  /** Open the whole history, drawn as lines. */
-  onOpenGraph: () => void;
+  /** Open the whole history, drawn as lines, for one of the projects here. */
+  onOpenGraph: (repo?: string) => void;
   /** Move the project onto another of its lines of work. */
   onSwitchBranch: (name: string, repo?: string) => void;
   /** Start a new line of work and move the project onto it. */
@@ -675,7 +675,7 @@ export default function Overview({
           onName={(versionId, name) => onName(versionId, name, whose?.name)}
           onKeep={onKeep}
           onDismissPutBack={onDismissPutBack}
-          onOpenGraph={onOpenGraph}
+          onOpenGraph={() => onOpenGraph(whose?.name)}
           onSwitchBranch={(name) => onSwitchBranch(name, whose?.name)}
           onCreateBranch={(name) => onCreateBranch(name, whose?.name)}
           busy={busy}

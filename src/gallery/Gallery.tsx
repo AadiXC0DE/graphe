@@ -1722,6 +1722,7 @@ export default function Gallery() {
             <div className="gallery__overview">
               <Overview
                 view={{
+                  repos: [],
                   now: {
                     step: { label: 'Changing pricing.tsx', detail: 'the second card' },
                     helpers: [

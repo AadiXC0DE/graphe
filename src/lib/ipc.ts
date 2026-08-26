@@ -89,6 +89,10 @@ export type Result<T> = { ok: true; value: T } | { ok: false; trouble: Trouble }
 export type Where = {
   project?: string;
   conversation?: string;
+  /** One project inside a folder that holds several, by its folder name
+   *  ("backend"). Present only where a call means one child of such a folder;
+   *  every call that leaves it out means exactly what it always meant. */
+  repo?: string;
 };
 
 /**
@@ -105,10 +109,18 @@ export function whereIn(args: readonly unknown[]): Where {
   const fields = last as Record<string, unknown>;
   const keys = Object.keys(fields);
   if (keys.length === 0) return {};
-  if (!keys.every((key) => key === 'project' || key === 'conversation')) return {};
+  if (!keys.every((key) => key === 'project' || key === 'conversation' || key === 'repo')) return {};
   const where: Where = {};
   const project = fields['project'];
   const conversation = fields['conversation'];
+  // A child name is a folder name, not a path: flattened to its safe
+  // characters, because it is joined onto the project folder by the shell and
+  // never allowed to point somewhere else.
+  const repo = typeof fields['repo'] === 'string' ? fields['repo'].trim() : '';
+  if (repo !== '') {
+    const clean = repo.slice(0, 80).replace(/[^a-zA-Z0-9._-]/g, '');
+    if (clean !== '') where.repo = clean;
+  }
   if (typeof project === 'string' && project.trim() !== '') where.project = project;
   if (typeof conversation === 'string' && conversation.trim() !== '') {
     where.conversation = conversation;
@@ -891,6 +903,14 @@ export type Overview = {
    */
   git: GitSnapshot | null;
   /**
+   * The projects inside this one — present only when the opened folder is a
+   * plain folder holding several repositories beside each other (`backend/`,
+   * `frontend/`). Absent for every folder that is itself one project, so
+   * nothing about the ordinary case changes. Each child carries its own
+   * snapshot; the parent's own `git` stays null, because the parent has none.
+   */
+  repos?: readonly RepoOverview[];
+  /**
    * The address of the live preview being served for this folder, or null when
    * nothing is being served. The window shows its preview button only while
    * this is set — a preview that exists gets a button; one that does not gets
@@ -905,6 +925,14 @@ export type Overview = {
   /** `text` is the stylesheet as written, so what drifted from these values can
    *  be worked out without reading the file twice. */
   styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
+};
+
+/** One project inside a folder that holds several: its name as the folder
+ *  spells it, and its own saved-state summary read in its own folder. */
+export type RepoOverview = {
+  name: string;
+  path: string;
+  git: GitSnapshot;
 };
 
 /** One thing a turn produced that a designer would look at. */

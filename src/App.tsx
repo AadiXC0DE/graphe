@@ -4033,6 +4033,10 @@ function Conversation() {
   pageAtNow.current = pageAt ?? previewUrl;
   const pillShown = desk !== null && (previewUrl !== null || progress !== null);
   const pillLabel = progress !== null ? progress.says : PREVIEW;
+  // A folder holding several projects has nothing at the top level to show —
+  // what runs lives inside one of the children — so the pill waits, and says
+  // why if somebody finds it anyway.
+  const severalProjects = (desk?.overview?.repos?.length ?? 0) >= 2;
 
   // The one region nobody is given: it is here because somebody went and asked
   // for it, and it stays until they say otherwise.
@@ -4140,7 +4144,12 @@ function Conversation() {
             type="button"
             className="previewpill"
             onClick={() => void seeIt()}
-            disabled={busy || (progress !== null && !progress.done)}
+            disabled={busy || severalProjects || (progress !== null && !progress.done)}
+            title={
+              severalProjects
+                ? 'This folder holds several projects. Open one directly to see it running.'
+                : undefined
+            }
           >
             {pillLabel}
           </button>
@@ -4564,6 +4573,7 @@ function Conversation() {
           view={{
             now: nowThere,
             git: desk.overview?.git ?? null,
+            repos: desk.overview?.repos ?? [],
             research,
             references: desk.references,
             versions: desk.versions,

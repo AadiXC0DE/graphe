@@ -4170,6 +4170,14 @@ function Conversation() {
   // what runs lives inside one of them, and its row is where it is started.
   const severalProjects = (desk?.overview?.repos?.length ?? 0) >= 2;
 
+  /* A folder holding several projects has no history of its own, so "no project
+     chosen" cannot mean the parent — it means the first one. */
+  const historyRepo = ((): string | null => {
+    const inside = desk?.overview?.repos ?? [];
+    if (inside.length === 0) return null;
+    return inside.find((one) => one.name === graphRepo)?.name ?? inside[0]?.name ?? null;
+  })();
+
   // The one region nobody is given: it is here because somebody went and asked
   // for it, and it stays until they say otherwise.
   const filesShown = desk !== null && preferences.showFiles;
@@ -4882,17 +4890,20 @@ function Conversation() {
 
       {graphOpen && desk !== null ? (
         <HistoryView
-          versions={graphRepo === null ? desk.versions : (desk.repoVersions[graphRepo] ?? [])}
+          versions={historyRepo === null ? desk.versions : (desk.repoVersions[historyRepo] ?? [])}
           pictures={versionPictures[desk.path] ?? {}}
           git={
-            graphRepo === null
+            historyRepo === null
               ? (desk.overview?.git ?? null)
-              : (desk.overview?.repos?.find((one) => one.name === graphRepo)?.git ?? null)
+              : (desk.overview?.repos?.find((one) => one.name === historyRepo)?.git ?? null)
           }
           busy={busy}
           onClose={() => setGraphOpen(false)}
-          onPutBack={(versionId) => void putBack(versionId, graphRepo ?? undefined)}
+          onPutBack={(versionId) => void putBack(versionId, historyRepo ?? undefined)}
           onOpenFile={(file) => void bridge.openInEditor(file)}
+          repos={desk.overview?.repos ?? []}
+          repo={historyRepo}
+          onRepo={(name) => setGraphRepo(name)}
         />
       ) : null}
 

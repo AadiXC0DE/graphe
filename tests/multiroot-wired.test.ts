@@ -114,7 +114,7 @@ describe('what reads and what refuses', () => {
   it('passes the project the panel named all the way to the shell', () => {
     expect(APP).toContain('onPutBack={(versionId, repo) => void putBack(versionId, repo)}');
     expect(APP).toContain('onName={(versionId, name, repo) => void nameVersion(versionId, name, repo)}');
-    expect(APP).toContain('graphRepo === null ? desk.versions : (desk.repoVersions[graphRepo]');
+    expect(APP).toContain('historyRepo === null ? desk.versions : (desk.repoVersions[historyRepo]');
     expect(OVERVIEW).toContain('onOpenGraph={() => onOpenGraph(whose?.name)}');
   });
 

@@ -15,6 +15,12 @@ type Props = {
   onPutBack: (versionId: string) => void;
   /** Open a file where the person actually edits things. */
   onOpenFile: (path: string) => void;
+  /** The projects inside this folder, when it holds several. Left off for the
+   *  ordinary folder that is one project. */
+  repos?: readonly { name: string; path: string }[];
+  /** Whose history is being shown, and how to show another's. */
+  repo?: string | null;
+  onRepo?: (name: string) => void;
 };
 
 export const SAYS = {
@@ -22,6 +28,7 @@ export const SAYS = {
   close: 'Close',
   none: 'Nothing saved here yet.',
   more: (count: number): string => `Show ${String(count)} more`,
+  whose: 'Whose history',
   onScreen: 'On screen',
   putBack: 'Restore this commit',
   by: { you: 'You', graphe: 'Graphe' },
@@ -78,6 +85,9 @@ export default function HistoryView({
   onClose,
   onPutBack,
   onOpenFile,
+  repos,
+  repo,
+  onRepo,
 }: Props) {
   const shut = useRef<HTMLButtonElement>(null);
   const [room, setRoom] = useState(AT_ONCE);
@@ -122,7 +132,25 @@ export default function HistoryView({
           </p>
         </div>
 
-        <div className="sheet__chips" />
+        {/* A folder holding several projects has several histories, and the
+            one on screen has to be both named and switchable from here. */}
+        {repos === undefined || repos.length < 2 || onRepo === undefined ? (
+          <div className="sheet__chips" />
+        ) : (
+          <div className="sheet__chips projects__strip" role="group" aria-label={SAYS.whose}>
+            {repos.map((one) => (
+              <button
+                key={one.path}
+                type="button"
+                className={`projects__pick ${one.name === repo ? 'projects__pick--on' : ''}`}
+                aria-current={one.name === repo ? 'true' : undefined}
+                onClick={() => onRepo(one.name)}
+              >
+                {one.name}
+              </button>
+            ))}
+          </div>
+        )}
 
         <button ref={shut} type="button" className="sheet__close" onClick={onClose}>
           {SAYS.close}

@@ -275,6 +275,10 @@
 .moment__still {
   position: relative;
   display: grid;
+  /* Without this the box shrinks to whatever is inside it, and a card with no
+     screenshot ends up as a small tile floating in the corner of a big one. */
+  width: 100%;
+  place-items: center;
   aspect-ratio: 16 / 10;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -295,7 +299,9 @@
 /* No picture yet. A grey frame with three bars in it is a skeleton screen that
    never finished loading, so the tile carries the words instead. */
 .moment__words {
+  max-width: 100%;
   padding: var(--space-2);
+  text-align: center;
   font-size: var(--text-2xs);
   line-height: 1.35;
   color: var(--text-muted);

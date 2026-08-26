@@ -763,6 +763,13 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.setHoldBack, on, named(where)) as Promise<Result<Preferences>>;
   },
 
+  setKeepLogins(on: boolean, where?: Where): Promise<Result<Preferences>> {
+    if (typeof on !== 'boolean') {
+      return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setKeepLogins, on, named(where)) as Promise<Result<Preferences>>;
+  },
+
   setTheme(theme: string): Promise<Result<Preferences>> {
     const known = ['system', 'light', 'graphe', 'super', 'pink', 'slate', 'dark'];
     if (typeof theme !== 'string' || !known.includes(theme)) {

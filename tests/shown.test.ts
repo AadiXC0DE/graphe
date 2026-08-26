@@ -49,6 +49,26 @@ describe('a picture a step took', () => {
     expect(event?.type === 'tool-end' ? event.shown?.bytes : null).toBe('last');
   });
 
+  it('carries the line a step wants under itself', () => {
+    const event = translatePiEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'call-1',
+      isError: false,
+      result: { content: [{ type: 'text', text: 'the page' }], details: { note: '2 errors' } },
+    });
+    expect(event?.type === 'tool-end' ? event.detail : null).toBe('2 errors');
+  });
+
+  it('lets a real failure keep the line instead', () => {
+    const event = translatePiEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'call-1',
+      isError: true,
+      result: { content: [{ type: 'text', text: 'went wrong' }], details: { note: '2 errors' } },
+    });
+    expect(event?.type === 'tool-end' ? event.detail : 'missing').not.toBe('2 errors');
+  });
+
   it('is not carried off a step that failed', () => {
     const event = translatePiEvent({
       type: 'tool_execution_end',

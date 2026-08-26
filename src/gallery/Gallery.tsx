@@ -658,6 +658,7 @@ const LANDING: LandingState = {
   },
   held: HELD,
   holdBack: true,
+  keepLogins: false,
   canHandOver: true,
   handOverSays: 'Everything needed is here.',
   canPutOnline: true,

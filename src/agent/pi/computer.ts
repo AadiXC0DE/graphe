@@ -56,6 +56,12 @@ export const BROWSER_WORDS = {
   nothingOpen:
     'No page is open in the browser yet. Open one first, and then there is something to read.',
   stopped: 'That was stopped.',
+  notBoth:
+    'This browser is held to a few named sites, and one held that way has to start clean every time — so it is not keeping what it is signed in to. Take the list of sites away if staying signed in matters more.',
+  keeping:
+    'This browser keeps what it is signed in to between sittings, so a site you have signed into once stays signed in.',
+  nothingWrong:
+    'Nothing since the page loaded: it has printed no messages, thrown no errors and every request came back.',
   notTheWeb:
     'That is not a page on the web. This browser opens web addresses; anything on this computer I read as a file instead.',
   closed: 'The browser is closed.',
@@ -103,17 +109,45 @@ export type Setup = {
   hosts: readonly string[];
   /** Show the window, instead of running it out of sight. */
   watch: boolean;
+  /** Where this project's browser keeps its logins, or null to start clean
+   *  every time — which is where it starts. */
+  keeps: string | null;
 };
 
 /** Read off the environment, so it is one pure function and not a scattering of
  *  `process.env` reads inside the tools. */
-export function setupFrom(env: Record<string, string | undefined>, root?: string): Setup {
+export function setupFrom(
+  env: Record<string, string | undefined>,
+  root?: string,
+  keeps: string | null = null,
+): Setup {
   const named = (env['GRAPHE_BROWSER_HOSTS'] ?? '')
     .split(/[,\s]+/)
     .map((one) => one.trim().toLowerCase())
     .filter((one) => one !== '');
   const watch = /^(1|on|true|yes)$/i.test((env['GRAPHE_BROWSER_WATCH'] ?? '').trim());
-  return { session: sessionFor(root), hosts: [...new Set(named)], watch };
+  return { session: sessionFor(root), hosts: [...new Set(named)], watch, keeps };
+}
+
+/** Where a project's browser keeps what it is signed in to. Its own folder per
+ *  project, under the app's own, so nothing lands in somebody's project. */
+export function browserFolder(agentDir: string, root?: string): string {
+  return join(agentDir, 'browsers', sessionFor(root));
+}
+
+/**
+ * Whether a browser may keep its logins on this run.
+ *
+ * The two cannot both be had: holding the browser to a handful of sites needs a
+ * browser with nothing set up in it beforehand, so a profile and an allowlist
+ * are exclusive. The containment wins — it is the one somebody set to be safe
+ * rather than to be quick — and the answer says so once rather than silently
+ * doing the other thing.
+ */
+export function keepingLogins(setup: Setup): { keeps: string | null; because: string | null } {
+  if (setup.keeps === null) return { keeps: null, because: null };
+  if (setup.hosts.length > 0) return { keeps: null, because: BROWSER_WORDS.notBoth };
+  return { keeps: setup.keeps, because: null };
 }
 
 /** One browser per project, named so it cannot be mistaken for somebody's own. */
@@ -137,6 +171,8 @@ export function browserArgs(command: readonly string[], setup: Setup): string[] 
     '--content-boundaries',
   ];
   if (setup.hosts.length > 0) args.push('--allowed-domains', setup.hosts.join(','));
+  const keeping = keepingLogins(setup).keeps;
+  if (keeping !== null) args.push('--profile', keeping, '--restore');
   if (setup.watch) args.push('--headed');
   return [...args, ...command];
 }
@@ -198,6 +234,50 @@ function saysData(data: Record<string, unknown> | null): string | null {
   const { lifecycle: _bookkeeping, ...rest } = data;
   const left = JSON.stringify(rest);
   return left === '{}' ? null : left;
+}
+
+/** The requests that did not come back well, as lines worth reading. Anything
+ *  under 400 came back fine and is not what somebody asking "why is this page
+ *  blank" wants to wade through. */
+export function saysRequests(data: Record<string, unknown> | null): readonly string[] {
+  const rows = data === null ? null : data['requests'];
+  if (!Array.isArray(rows)) return [];
+  const bad: string[] = [];
+  for (const row of rows) {
+    const one = asRecord(row);
+    if (one === null) continue;
+    const status = typeof one['status'] === 'number' ? one['status'] : 0;
+    const url = typeof one['url'] === 'string' ? one['url'] : '';
+    if (url === '' || (status >= 200 && status < 400)) continue;
+    const method = typeof one['method'] === 'string' ? one['method'] : 'GET';
+    bad.push(`${method} ${url} — ${status === 0 ? 'never came back' : String(status)}`);
+  }
+  return bad;
+}
+
+/** One list out of a structured answer, as lines. */
+export function saysList(data: Record<string, unknown> | null, key: string): readonly string[] {
+  const rows = data === null ? null : data[key];
+  if (!Array.isArray(rows)) return [];
+  return rows.map(saysOne).filter((one) => one !== '');
+}
+
+/** How many things are wrong with the page, as one line for the feed. Null when
+ *  nothing is. */
+export function saysTrouble(counts: {
+  printed: number;
+  threw: number;
+  failed: number;
+}): string | null {
+  const parts: string[] = [];
+  if (counts.threw > 0) parts.push(`${String(counts.threw)} error${counts.threw === 1 ? '' : 's'}`);
+  if (counts.failed > 0) {
+    parts.push(`${String(counts.failed)} request${counts.failed === 1 ? '' : 's'} failed`);
+  }
+  if (parts.length === 0 && counts.printed > 0) {
+    parts.push(`${String(counts.printed)} message${counts.printed === 1 ? '' : 's'}`);
+  }
+  return parts.length === 0 ? null : parts.join(', ');
 }
 
 /** One line of what a page said about itself. */
@@ -329,6 +409,20 @@ function say(text: string): AgentToolResult<unknown> {
   return { content: [{ type: 'text', text }], details: {} };
 }
 
+/** The same, with one line for the feed to put under the step. */
+function noted(text: string, note: string | null): AgentToolResult<unknown> {
+  return { content: [{ type: 'text', text }], details: note === null ? {} : { note } };
+}
+
+/** What is worth saying once about how this browser is set up. Said on opening
+ *  a page rather than on every call: it is a fact about the browser, not about
+ *  the page. */
+function said(setup: Setup): string | null {
+  const keeping = keepingLogins(setup);
+  if (keeping.because !== null) return keeping.because;
+  return keeping.keeps === null ? null : BROWSER_WORDS.keeping;
+}
+
 /** Something that reads like a browser being missing rather than a page being
  *  wrong. Matched loosely on purpose: fetching one twice costs a moment, and
  *  not fetching it at all costs the feature. */
@@ -342,14 +436,24 @@ function wantsABrowser(text: string): boolean {
  * Read before pressing, read again afterwards: that is the whole method, and
  * every answer here ends with a fresh reading so nobody has to remember to ask.
  */
-export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefinition[] {
+export function browserTools(
+  projectRoot?: string,
+  host?: BrowserHost,
+  keeps?: () => string | null,
+): ToolDefinition[] {
   const run = host ?? defaultHost(projectRoot ?? tmpdir());
-  const setup = (): Setup => setupFrom(process.env, projectRoot);
+  const setup = (): Setup => setupFrom(process.env, projectRoot, keeps?.() ?? null);
 
   /** Where the program is, worked out once. Null once we know there is none. */
   let way: Promise<Way | null> | null = null;
   /** Fetching a browser is tried once per run of the app, whatever comes of it. */
   let fetched = false;
+  /** Recording starts with the browser rather than with the first page: a
+   *  request that has already happened cannot be recorded afterwards, and the
+   *  first page is the one somebody usually wants to ask about. */
+  let recording: Promise<unknown> | null = null;
+  /** How many errors had been thrown before this page. */
+  let errorsBefore = 0;
 
   const one = async (
     command: readonly string[],
@@ -358,6 +462,13 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
     way ??= findWay(run);
     const found = await way;
     if (found === null) return { ok: false, text: BROWSER_WORDS.noProgram, data: null };
+    if (recording === null && command[0] !== 'network' && command[0] !== 'close') {
+      // Names and codes only — the bodies would be the size of the page again.
+      recording = run(found.tool, [...found.lead, ...browserArgs(['network', 'har', 'start', '--content', 'none'], setup())], {
+        patience: 60_000,
+      }).catch(() => undefined);
+      await recording;
+    }
     const ran = await run(found.tool, [...found.lead, ...browserArgs(command, setup())], {
       patience: options.patience ?? BROWSER_PATIENCE_MS,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -380,12 +491,47 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
     return after.ok ? { ...after, text: `${BROWSER_WORDS.fetched}\n\n${after.text}` } : after;
   };
 
+  /** Everything the page has complained about, read in one go. */
+  const trouble = async (
+    signal?: AbortSignal,
+  ): Promise<{ lines: readonly string[]; note: string | null }> => {
+    const [said, threw, sent] = await Promise.all([
+      one(['console'], { ...(signal === undefined ? {} : { signal }) }),
+      one(['errors'], { ...(signal === undefined ? {} : { signal }) }),
+      one(['network', 'requests'], { ...(signal === undefined ? {} : { signal }) }),
+    ]);
+    const printed = said.ok ? saysList(said.data, 'messages') : [];
+    // Errors are the one list the program cannot be told to forget, so the ones
+    // an earlier page threw are counted past rather than reported again.
+    const errors = threw.ok ? saysList(threw.data, 'errors').slice(errorsBefore) : [];
+    const failed = sent.ok ? saysRequests(sent.data) : [];
+    const lines: string[] = [];
+    if (printed.length > 0) lines.push(`What the page printed:\n${printed.join('\n')}`);
+    if (errors.length > 0) lines.push(`What went wrong:\n${errors.join('\n')}`);
+    if (failed.length > 0) lines.push(`Requests that did not come back:\n${failed.join('\n')}`);
+    return {
+      lines,
+      note: saysTrouble({ printed: printed.length, threw: errors.length, failed: failed.length }),
+    };
+  };
+
   /** The outline, as it stands right now. Every acting tool ends with one. */
   const reading = async (signal?: AbortSignal, controls = false): Promise<string> => {
     const command = controls ? ['snapshot', '-i', '-c', '-u'] : ['snapshot', '-c', '-u'];
     const answer = await one(command, { ...(signal === undefined ? {} : { signal }) });
     if (!answer.ok) return answer.text.trim() === '' ? BROWSER_WORDS.nothingOpen : answer.text;
     return trimmed(answer.text);
+  };
+
+  /** A reading, and under it what the page complained about while it loaded —
+   *  the answer to "why is this blank" without anybody having to ask for it. */
+  const readingAndTrouble = async (
+    signal?: AbortSignal,
+    controls = false,
+  ): Promise<{ text: string; note: string | null }> => {
+    const [outline, found] = await Promise.all([reading(signal, controls), trouble(signal)]);
+    if (found.lines.length === 0) return { text: outline, note: null };
+    return { text: `${outline}\n\n${trimmed(found.lines.join('\n\n'))}`, note: found.note };
   };
 
   /** Do one thing, then say what the page looks like afterwards. */
@@ -416,12 +562,23 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
       executionMode: 'sequential',
       execute: async (_callId, params: { url: string }, signal): ToolResult => {
         if (!onTheWeb(params.url)) return say(BROWSER_WORDS.notTheWeb);
+        // A new page starts with a clean sheet, or it reports what the last one
+        // complained about and sends everybody looking in the wrong place.
+        await one(['console', '--clear'], {}).catch(() => undefined);
+        await one(['network', 'requests', '--clear'], {}).catch(() => undefined);
+        const threw = await one(['errors'], {}).catch(() => null);
+        errorsBefore = threw?.ok === true ? saysList(threw.data, 'errors').length : errorsBefore;
         const answer = await one(['open', params.url.trim()], {
           ...(signal === undefined ? {} : { signal }),
         });
         if (!answer.ok) return say(BROWSER_WORDS.didNot(`Opening ${params.url.trim()}`, answer.text));
-        const note = answer.text.startsWith(BROWSER_WORDS.fetched) ? `${BROWSER_WORDS.fetched}\n\n` : '';
-        return say(`${note}${params.url.trim()}\n\n${await reading(signal)}`);
+        const notes = [
+          answer.text.startsWith(BROWSER_WORDS.fetched) ? BROWSER_WORDS.fetched : null,
+          said(setup()),
+        ].filter((one): one is string => one !== null);
+        const head = notes.length === 0 ? '' : `${notes.join('\n')}\n\n`;
+        const found = await readingAndTrouble(signal);
+        return noted(`${head}${params.url.trim()}\n\n${found.text}`, found.note);
       },
     },
     {
@@ -439,8 +596,10 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
         ),
       }),
       executionMode: 'sequential',
-      execute: async (_callId, params: { controls?: boolean }, signal): ToolResult =>
-        say(await reading(signal, params.controls === true)),
+      execute: async (_callId, params: { controls?: boolean }, signal): ToolResult => {
+        const found = await readingAndTrouble(signal, params.controls === true);
+        return noted(found.text, found.note);
+      },
     },
     {
       name: 'browser_click',
@@ -559,20 +718,14 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
       name: 'browser_trouble',
       label: 'Reading what the browser complained about',
       description:
-        'What the page the browser is on has complained about: the messages it printed, and the errors it threw. Read it when something on a page does not work and the markup looks right.',
-      promptSnippet: 'browser_trouble() — messages and errors from the page the browser is on',
+        'What the page the browser is on has complained about: the messages it printed, the errors it threw, and the requests that came back wrong or never came back. Read it when something on a page does not work and the markup looks right.',
+      promptSnippet: 'browser_trouble() — messages, errors and failed requests from the page',
       parameters: Type.Object({}),
       executionMode: 'sequential',
       execute: async (_callId, _params, signal): ToolResult => {
-        const said = await one(['console'], { ...(signal === undefined ? {} : { signal }) });
-        const wrong = await one(['errors'], { ...(signal === undefined ? {} : { signal }) });
-        const parts: string[] = [];
-        if (said.ok && said.text.trim() !== '') parts.push(`What the page printed:\n${said.text}`);
-        if (wrong.ok && wrong.text.trim() !== '') parts.push(`What went wrong:\n${wrong.text}`);
-        if (parts.length === 0) {
-          return say('Nothing since the page loaded: it has printed no messages and thrown no errors.');
-        }
-        return say(trimmed(parts.join('\n\n')));
+        const found = await trouble(signal);
+        if (found.lines.length === 0) return say(BROWSER_WORDS.nothingWrong);
+        return noted(trimmed(found.lines.join('\n\n')), found.note);
       },
     },
     {
@@ -624,6 +777,31 @@ export function browserTools(projectRoot?: string, host?: BrowserHost): ToolDefi
       },
     },
     {
+      name: 'browser_trace',
+      label: 'Saving what the browser did',
+      description:
+        'Save everything the browser has asked for since it started — every request, with its address, what came back and how long it took — as a file. Use it when a page half-works and the outline looks right: the answer is usually in what it asked for and did not get. The file opens in the tools a developer already has.',
+      promptSnippet: 'browser_trace() — save every request the page made, as a file',
+      parameters: Type.Object({}),
+      executionMode: 'sequential',
+      execute: async (_callId, _params, signal): ToolResult => {
+        const folder = await mkdtemp(join(tmpdir(), 'graphe-trace-'));
+        const file = join(folder, 'what-the-page-asked-for.har');
+        const saved = await one(['network', 'har', 'stop', file], {
+          ...(signal === undefined ? {} : { signal }),
+        });
+        // Straight back on: stopping is how it is saved, and a browser that
+        // stops recording the first time somebody looks is no use twice.
+        recording = null;
+        if (!saved.ok) return say(BROWSER_WORDS.didNot('Saving what the browser did', saved.text));
+        const many = saved.data?.['requestCount'];
+        const count = typeof many === 'number' ? many : 0;
+        return say(
+          `${String(count)} request${count === 1 ? '' : 's'}, saved to ${file}. Read it with read() if you want to see what came back.`,
+        );
+      },
+    },
+    {
       name: 'browser_close',
       label: 'Closing the browser',
       description:
@@ -649,4 +827,17 @@ export async function closeBrowser(projectRoot?: string, host?: BrowserHost): Pr
   await run(found.tool, [...found.lead, ...browserArgs(['close'], setup)], {
     patience: 30_000,
   }).catch(() => undefined);
+}
+
+/**
+ * Throw away what a project's browser was signed in to.
+ *
+ * Turning "stay signed in" off has to mean it: leaving the accounts on disk
+ * under a switch that says they are not kept is the one thing worse than not
+ * having the switch.
+ */
+export async function forgetLogins(agentDir: string, projectRoot?: string): Promise<void> {
+  await rm(browserFolder(agentDir, projectRoot), { recursive: true, force: true }).catch(
+    () => undefined,
+  );
 }

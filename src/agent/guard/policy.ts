@@ -445,6 +445,7 @@ const BROWSER_LOOK_TOOLS = new Set([
   'browserread',
   'browserpicture',
   'browsertrouble',
+  'browsertrace',
   'browserscroll',
   'browserclose',
 ]);

@@ -38,6 +38,7 @@ import { reviewAsMarkdown } from "./agent/pi/review";
 import { saysUseYours } from "./design/drift";
 import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
+import { keepsLogins } from "./projects/logins";
 import { drainStarted } from "./lib/queue";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
 import type { ConnectedState } from "./lib/ipc";
@@ -481,6 +482,7 @@ function Conversation() {
     kept: {},
     showFiles: false,
     heldBack: {},
+    keptLogins: {},
     howMuch: null,
     ceiling: null,
     theme: 'system',
@@ -3164,6 +3166,19 @@ function Conversation() {
     [troubleHere],
   );
 
+  const changeKeepLogins = useCallback(
+    (on: boolean) => {
+      const path = desks.current;
+      setPreferences((was) =>
+        path === null ? was : { ...was, keptLogins: { ...was.keptLogins, [path]: on } },
+      );
+      void bridge.setKeepLogins(on, { project: path ?? undefined }).then((answer) => {
+        if (answer.ok) setPreferences(answer.value);
+      });
+    },
+    [desks.current],
+  );
+
   const changeHoldBack = useCallback(
     (on: boolean) => {
       const path = desks.current;
@@ -4328,6 +4343,10 @@ function Conversation() {
         onToggleShowMe={() => changeShowMe(!preferences.showMe)}
         onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
         onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}
+        keepLogins={keepsLogins(preferences.keptLogins, desk?.path)}
+        onToggleKeepLogins={() =>
+          changeKeepLogins(!keepsLogins(preferences.keptLogins, desk?.path))
+        }
         onGo={openSettingsLink}
       />
 

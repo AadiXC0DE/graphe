@@ -163,6 +163,7 @@ describe('D1 — the real name of what just happened', () => {
           trusted: {},
           showFiles: false,
           heldBack: {},
+          keptLogins: {},
           howMuch: null,
           ceiling: null,
           theme: 'system',

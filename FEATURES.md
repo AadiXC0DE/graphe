@@ -98,7 +98,13 @@ For the tools that aren't websites. A picture of the screen, then press, type, d
 **30 · A folder that holds several projects**
 Open a working directory with `backend/` and `frontend/` beside each other and both are simply there: each with its own line of work to move between, its own versions to save and go back to, its own press to see it running or hand it on. The folder itself is left a plain folder — nothing is created in it to make it look like one project.
 
-**31 · Show me the real commands**
+**31 · The browser stays signed in, when you say so**
+One switch per project. On, the browser keeps what it is signed in to between sittings, so a staging site or a dashboard is signed into once rather than every run. Off — where it starts — every page opens in a browser that has never been anywhere, and turning it off again forgets what was kept.
+
+**32 · Why the page is blank, without asking**
+Every reading of a page carries what it complained about while it loaded: what it printed, what it threw, and the requests that came back wrong or never came back. One line under the step says how much. Everything the browser asked for can be saved as a file the tools a developer already has will open.
+
+**33 · Show me the real commands**
 The commands, paths and git operations under every plain sentence — for the developer who wants the wheel.
 
 ---

@@ -96,6 +96,14 @@ export type Preferences = {
    */
   heldBack: Readonly<Record<string, boolean>>;
   /**
+   * Whether each project's browser keeps its logins between sittings, by path.
+   *
+   * Off where nothing has been said: a browser that remembers is a browser
+   * holding somebody's signed-in accounts on this disk, and that is a thing to
+   * turn on rather than a thing to discover. Read it through `keepsLogins`.
+   */
+  keptLogins: Readonly<Record<string, boolean>>;
+  /**
    * How much a picture has to move before work is stopped, by id.
    *
    * One of `HOW_MUCH` in `src/design/gate.ts`, or null for the middle one. Not
@@ -125,6 +133,7 @@ export const defaultPreferences: Preferences = {
   trusted: {},
   showFiles: false,
   heldBack: {},
+  keptLogins: {},
   howMuch: null,
   ceiling: null,
   theme: 'system',
@@ -166,6 +175,7 @@ function asPreferences(value: unknown): Preferences {
     trusted: asTrusted(record['trusted']),
     showFiles: record['showFiles'] === true,
     heldBack: asHeldBack(record['heldBack']),
+    keptLogins: asHeldBack(record['keptLogins']),
     howMuch: typeof record['howMuch'] === 'string' ? record['howMuch'] : null,
     ceiling: asCeiling(record['ceiling']),
     theme: themeFrom(record['theme']),
@@ -250,6 +260,7 @@ export class PreferenceFile {
       next.showFiles === this.#preferences.showFiles &&
       next.howMuch === this.#preferences.howMuch &&
       sameHeldBack(next.heldBack, this.#preferences.heldBack) &&
+      sameHeldBack(next.keptLogins, this.#preferences.keptLogins) &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
       sameThinking(next.thinking, this.#preferences.thinking) &&

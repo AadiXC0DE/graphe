@@ -538,6 +538,9 @@ export type CreateSessionOptions = {
   /** Cancel that checklist. Same reach as `stepDone`, so it only exists where
    *  a list could. */
   cancelBuild?: CancelBuild;
+  /** Whether this project's browser keeps what it is signed in to between
+   *  sittings. Asked each time, so turning it off takes effect at once. */
+  keepsBrowserLogins?: () => boolean;
   /** A few sentences of fact about this folder, appended to the system prompt.
    *  For things the folder itself cannot say — that it holds several projects
    *  and git belongs inside each one, say. Facts only; never instructions
@@ -1780,6 +1783,7 @@ const MOST_AFTER_SAYINGS = 3;
         options.unattended === true ? null : askFirst,
         options.stepDone,
         options.cancelBuild,
+        options.keepsBrowserLogins,
       );
 
   /* The anchored edit and its read: the model reads a file, the read's reply

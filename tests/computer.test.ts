@@ -16,11 +16,16 @@ import {
   BROWSER_WORDS,
   MOST_BROWSER_LINES,
   browserArgs,
+  browserFolder,
   browserTools,
+  keepingLogins,
   fillArgs,
   isHandle,
   pressArgs,
   readAnswer,
+  saysList,
+  saysRequests,
+  saysTrouble,
   onTheWeb,
   scrollArgs,
   sessionFor,
@@ -32,6 +37,9 @@ import {
 import type { Ran } from '../src/share/run';
 
 const ROOT = '/Users/mira/Projects/portfolio';
+/** The words a command can start with, so a fake can tell the command from the
+ *  options in front of it. */
+const SAYS = ['open', 'snapshot', 'click', 'fill', 'find', 'scroll', 'scrollintoview', 'press', 'screenshot', 'console', 'errors', 'network', 'batch', 'close'];
 const ctx: GuardFacts = { projectRoot: ROOT };
 
 function call(name: string, input: Record<string, unknown> = {}): ToolCall {
@@ -47,15 +55,24 @@ function ran(over: Partial<Ran> = {}): Ran {
 
 /** A program that is always there and always answers well, remembering what it
  *  was asked. */
-function recorder(answers: readonly string[] = []): { host: BrowserHost; asked: string[][] } {
+function recorder(over: Readonly<Record<string, string>> = {}): {
+  host: BrowserHost;
+  asked: string[][];
+} {
   const asked: string[][] = [];
-  let at = 0;
   const host: BrowserHost = (tool, args) => {
     asked.push([tool, ...args]);
     if (args.includes('--version')) return Promise.resolve(ran({ out: '0.35.0' }));
-    const next = answers[at] ?? '{"success":true,"data":{"snapshot":"heading \\"Hello\\""}}';
-    at += 1;
-    return Promise.resolve(ran({ out: next }));
+    const rest = [...args];
+    while (rest.length > 0 && !SAYS.includes(rest[0] ?? '')) rest.shift();
+    const command = rest.join(' ');
+    for (const [what, said] of Object.entries(over)) {
+      if (command.startsWith(what)) return Promise.resolve(ran({ out: said }));
+    }
+    if (command.startsWith('snapshot')) {
+      return Promise.resolve(ran({ out: '{"success":true,"data":{"snapshot":"heading \\"Example\\""}}' }));
+    }
+    return Promise.resolve(ran({ out: '{"success":true,"data":{}}' }));
   };
   return { host, asked };
 }
@@ -95,6 +112,32 @@ describe('the words that go out to the program', () => {
     );
     expect(held).toContain('--allowed-domains');
     expect(held).toContain('figma.com,*.railway.app');
+  });
+
+  it('keeps what a project is signed in to, in a folder of its own', () => {
+    const kept = browserFolder('/data/agent', ROOT);
+    expect(kept).toContain('browsers');
+    expect(kept).toContain(sessionFor(ROOT));
+    expect(browserFolder('/data/agent', '/other')).not.toBe(kept);
+    const args = browserArgs(['open'], setupFrom({}, ROOT, kept));
+    expect(args).toContain('--profile');
+    expect(args).toContain(kept);
+    expect(args).toContain('--restore');
+  });
+
+  it('starts clean unless somebody said otherwise', () => {
+    expect(browserArgs(['open'], setupFrom({}, ROOT))).not.toContain('--profile');
+  });
+
+  /** A browser held to a few sites has to start with nothing set up in it, so
+   *  the two cannot both be had. The containment wins and the answer says so. */
+  it('will not both hold the browser to a few sites and keep its logins', () => {
+    const both = setupFrom({ GRAPHE_BROWSER_HOSTS: 'figma.com' }, ROOT, '/data/agent/browsers/x');
+    expect(keepingLogins(both).keeps).toBeNull();
+    expect(keepingLogins(both).because).toBe(BROWSER_WORDS.notBoth);
+    const args = browserArgs(['open'], both);
+    expect(args).not.toContain('--profile');
+    expect(args).toContain('--allowed-domains');
   });
 
   it('shows the window only when somebody asked to watch', () => {
@@ -160,6 +203,35 @@ describe('reading what the program said', () => {
   });
 });
 
+describe('what the page complained about', () => {
+  it('keeps the requests that did not come back well, and no others', () => {
+    const lines = saysRequests({
+      requests: [
+        { method: 'GET', url: 'https://x.com/a', status: 200 },
+        { method: 'GET', url: 'https://x.com/b.css', status: 404 },
+        { method: 'POST', url: 'https://x.com/api', status: 500 },
+        { method: 'GET', url: 'https://x.com/c', status: 0 },
+        { method: 'GET', url: 'https://x.com/d', status: 302 },
+      ],
+    });
+    expect(lines).toEqual([
+      'GET https://x.com/b.css — 404',
+      'POST https://x.com/api — 500',
+      'GET https://x.com/c — never came back',
+    ]);
+    expect(saysRequests(null)).toEqual([]);
+    expect(saysRequests({ requests: 'nonsense' })).toEqual([]);
+  });
+
+  it('says how much is wrong in one line, or says nothing', () => {
+    expect(saysTrouble({ printed: 0, threw: 0, failed: 0 })).toBeNull();
+    expect(saysTrouble({ printed: 4, threw: 0, failed: 0 })).toBe('4 messages');
+    expect(saysTrouble({ printed: 4, threw: 1, failed: 0 })).toBe('1 error');
+    expect(saysTrouble({ printed: 0, threw: 2, failed: 3 })).toBe('2 errors, 3 requests failed');
+    expect(saysTrouble({ printed: 0, threw: 0, failed: 1 })).toBe('1 request failed');
+  });
+});
+
 describe('a run of steps', () => {
   it('turns plain words into the program’s own list', () => {
     expect(
@@ -184,7 +256,7 @@ describe('a run of steps', () => {
 });
 
 describe('what the tools do', () => {
-  it('offers exactly the nine, named for what they do', () => {
+  it('offers exactly the ten, named for what they do', () => {
     expect(browserTools(ROOT, recorder().host).map((one) => one.name).sort()).toEqual([
       'browser_click',
       'browser_close',
@@ -193,16 +265,14 @@ describe('what the tools do', () => {
       'browser_read',
       'browser_scroll',
       'browser_steps',
+      'browser_trace',
       'browser_trouble',
       'browser_type',
     ]);
   });
 
   it('opens a page and comes back with what is on it', async () => {
-    const { host, asked } = recorder([
-      '{"success":true,"data":{"url":"https://example.com"}}',
-      '{"success":true,"data":{"snapshot":"heading \\"Example\\""}}',
-    ]);
+    const { host, asked } = recorder();
     const tools = browserTools(ROOT, host);
     const open = tools.find((one) => one.name === 'browser_open');
     const result = await open?.execute(
@@ -216,6 +286,38 @@ describe('what the tools do', () => {
     expect(said?.type === 'text' ? said.text : '').toContain('Example');
     expect(asked.some((one) => one.includes('open'))).toBe(true);
     expect(asked.some((one) => one.includes('snapshot'))).toBe(true);
+  });
+
+  /** The list a page keeps of what it threw cannot be cleared, so a page that
+   *  loads cleanly after a broken one reported the broken one's errors. */
+  it('starts each page with a clean sheet', async () => {
+    const { host, asked } = recorder({
+      errors: '{"success":true,"data":{"errors":[{"text":"an old one"}]}}',
+    });
+    const tools = browserTools(ROOT, host);
+    const open = tools.find((one) => one.name === 'browser_open');
+    const result = await open?.execute(
+      'call-1',
+      { url: 'https://example.com' },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    const flat = asked.map((one) => one.join(' '));
+    expect(flat.some((one) => one.includes('console --clear'))).toBe(true);
+    expect(flat.some((one) => one.includes('network requests --clear'))).toBe(true);
+    const said = result?.content[0];
+    expect(said?.type === 'text' ? said.text : '').not.toContain('an old one');
+    expect(result?.details).toEqual({});
+  });
+
+  it('reads a list out of an answer, and nothing out of nonsense', () => {
+    expect(saysList({ messages: [{ type: 'log', text: 'hi' }, 'plain'] }, 'messages')).toEqual([
+      'log: hi',
+      'plain',
+    ]);
+    expect(saysList(null, 'messages')).toEqual([]);
+    expect(saysList({ messages: 3 }, 'messages')).toEqual([]);
   });
 
   it('says the program is missing rather than failing obscurely', async () => {

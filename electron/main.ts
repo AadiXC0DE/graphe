@@ -83,6 +83,7 @@ import {
   type Found,
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
+import { forgetLogins } from '../src/agent/pi/computer';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
@@ -210,6 +211,7 @@ import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceO
 import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
 import { checkServer, inProject, mcpFile, readMcpConfig, savingFrom, writeMcpConfig } from '../src/agent/pi/mcp';
 import { holdsBack } from '../src/projects/heldback';
+import { keepsLogins } from '../src/projects/logins';
 import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
 import { saysTook } from '../src/work/stack';
 import { formatMoney } from '../src/cost/money';
@@ -1652,9 +1654,17 @@ function recents(): Promise<Recents> {
  * cannot change while the app is open.
  */
 let preferencesPromise: Promise<PreferenceFile> | null = null;
+/** The same file, once it is open, for the few readers that cannot wait — a
+ *  tool being built has to answer now or not at all. */
+let preferencesNow: PreferenceFile | null = null;
 
 function preferences(): Promise<PreferenceFile> {
-  preferencesPromise ??= PreferenceFile.open(join(app.getPath('userData'), 'preferences.json'));
+  preferencesPromise ??= PreferenceFile.open(join(app.getPath('userData'), 'preferences.json')).then(
+    (file) => {
+      preferencesNow = file;
+      return file;
+    },
+  );
   return preferencesPromise;
 }
 
@@ -2520,6 +2530,7 @@ async function landingNow(folder: string, held: Held): Promise<Landing> {
     // nothing for a picture to be a picture of.
     held: held.waiting === null ? null : held.pictures,
     holdBack: holdsBack(chosen.heldBack, folder),
+    keepLogins: keepsLogins(chosen.keptLogins, folder),
     canHandOver: reach.canHandOver,
     handOverSays: reach.handOverSays,
     canPutOnline: reach.canPutOnline,
@@ -3361,6 +3372,7 @@ async function startConversationUnlocked(
       // here, so the tool cannot guess a path that does not match where plans
       // are kept.
       cancelBuild: () => cancelThePlan(open.path),
+      keepsBrowserLogins: () => keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path),
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -5515,6 +5527,18 @@ function register(): void {
     if (open === null) return fail(NOTHING_OPEN);
     const held = (await preferences()).all().heldBack;
     return done(await (await preferences()).change({ heldBack: { ...held, [open.path]: on } }));
+  });
+
+  handle<Preferences>(CHANNEL.setKeepLogins, async (_event, args) => {
+    const [on] = args;
+    if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const kept = (await preferences()).all().keptLogins;
+    // Turning it off throws away what was kept, rather than leaving somebody's
+    // signed-in accounts on this disk under a switch that says they are not.
+    if (!on) await forgetLogins(await defaultAgentDir(), open.path);
+    return done(await (await preferences()).change({ keptLogins: { ...kept, [open.path]: on } }));
   });
 
   handle<Preferences>(CHANNEL.setTheme, async (_event, args) => {

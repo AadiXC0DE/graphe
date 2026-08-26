@@ -20,12 +20,15 @@ type Props = {
   showFiles: boolean;
   /** Check new work before it lands, rather than as it happens. */
   holdBack: boolean;
+  /** The browser this project drives keeps what it is signed in to. */
+  keepLogins: boolean;
   /** Which palette somebody has chosen, or to follow the computer. */
   theme: Theme;
   onTheme: (theme: Theme) => void;
   onToggleShowMe: () => void;
   onToggleShowFiles: () => void;
   onToggleHoldBack: () => void;
+  onToggleKeepLogins: () => void;
   onGo: (link: SettingsLink) => void;
 };
 
@@ -36,6 +39,7 @@ const LINKS: readonly (
   | { id: 'show-me'; name: string; note: string; kind: 'show-me' }
   | { id: 'files'; name: string; note: string; kind: 'files' }
   | { id: 'hold-back'; name: string; note: string; kind: 'hold-back' }
+  | { id: 'keep-logins'; name: string; note: string; kind: 'keep-logins' }
   | { id: 'theme'; name: string; note: string; kind: 'theme' }
 )[] = [
   {
@@ -81,6 +85,12 @@ const LINKS: readonly (
     kind: 'hold-back',
   },
   {
+    id: 'keep-logins',
+    name: 'Stay signed in while I browse',
+    note: 'The browser I open pages in keeps what it is signed in to, so a site you sign into once stays signed in for this project. Off, every page opens in a browser that has never been anywhere. Turning it off again forgets what was kept.',
+    kind: 'keep-logins',
+  },
+  {
     id: 'theme',
     name: THEME_WORDS.name,
     note: THEME_WORDS.note,
@@ -118,6 +128,8 @@ export default function Settings({
   onToggleShowMe,
   onToggleShowFiles,
   onToggleHoldBack,
+  keepLogins,
+  onToggleKeepLogins,
   onGo,
 }: Props) {
   useEffect(() => {
@@ -162,6 +174,19 @@ export default function Settings({
                     <span className="settings__note">{one.note}</span>
                   </span>
                   <Switch on={showMe} onChange={onToggleShowMe} label={one.name} />
+                </label>
+              </li>
+            );
+          }
+          if (one.kind === 'keep-logins') {
+            return (
+              <li key={one.id}>
+                <label className="settings__row settings__row--switch">
+                  <span className="settings__text">
+                    <span className="settings__name">{one.name}</span>
+                    <span className="settings__note">{one.note}</span>
+                  </span>
+                  <Switch on={keepLogins} onChange={onToggleKeepLogins} label={one.name} />
                 </label>
               </li>
             );

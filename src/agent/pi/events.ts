@@ -240,13 +240,25 @@ function fromToolExecutionEnd(source: Fields): AgentEvent | null {
   const failed = flagAt(source, 'isError') === true;
   const detail = failed ? failureFromResult(source['result']) : undefined;
   const shown = failed ? null : pictureIn(source['result']);
+  const note = failed ? null : noteIn(source['result']);
   return {
     type: 'tool-end',
     id,
     ok: !failed,
-    ...(detail === undefined ? {} : { detail }),
+    ...(detail === undefined ? { ...(note === null ? {} : { detail: note }) } : { detail }),
     ...(shown === null ? {} : { shown }),
   };
+}
+
+/** A line a step wants under itself in the feed — "2 errors, 1 request failed".
+ *  A tool says it in `details.note`; nothing else is read from there. */
+function noteIn(value: unknown): string | null {
+  const fields = fieldsOf(value);
+  if (fields === null) return null;
+  const details = fieldsOf(fields['details']);
+  if (details === null) return null;
+  const note = textAt(details, 'note');
+  return note === null || note.trim() === '' ? null : note.trim();
 }
 
 /** The picture a step took, if it took one.

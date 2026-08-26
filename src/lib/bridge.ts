@@ -32,6 +32,7 @@ import { howMuchBy } from '../design/gate';
 import { themeFrom } from './theme';
 import { pagesIn, type Page } from '../preview/pages';
 import { holdsBack } from '../projects/heldback';
+import { keepsLogins } from '../projects/logins';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
 import { createLimit } from '../cost/limits';
@@ -644,6 +645,7 @@ let previewHowFar: HowFar = 'asking';
     kept: {},
     showFiles: true,
     heldBack: {},
+    keptLogins: {},
     howMuch: null,
     ceiling: null,
     // There is no preferences file in a browser tab, so the choice lives where
@@ -1437,6 +1439,7 @@ let previewHowFar: HowFar = 'asking';
         done({
           waiting: null,
           holdBack: heldBackOf(preferred, openPath),
+          keepLogins: keepsLogins(preferred.keptLogins, openPath),
           canHandOver: false,
           handOverSays: PREVIEW_LANDING,
           canPutOnline: false,
@@ -1453,6 +1456,13 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setKeepLogins(on: boolean, _where?: Where): Promise<Result<Preferences>> {
+      if (openPath !== null) {
+        preferred = { ...preferred, keptLogins: { ...preferred.keptLogins, [openPath]: on } };
+      }
+      return Promise.resolve(done({ ...preferred }));
+    },
+
     setHowMuch(id: string): Promise<Result<Preferences>> {
       preferred = { ...preferred, howMuch: howMuchBy(id).id };
       return Promise.resolve(done({ ...preferred }));
@@ -1464,6 +1474,7 @@ let previewHowFar: HowFar = 'asking';
           landing: {
             waiting: null,
             holdBack: heldBackOf(preferred, openPath),
+            keepLogins: keepsLogins(preferred.keptLogins, openPath),
             canHandOver: false,
             handOverSays: PREVIEW_LANDING,
             canPutOnline: false,
@@ -1881,6 +1892,7 @@ function connect(): Bridge {
     // Same complaint, same fix: stop must say *which* conversation it is
     // stopping, or press Stop ends the shell's front conversation instead of
     // the one on screen.
+    setKeepLogins: (on, where) => api.setKeepLogins(on, where),
     stop: (where) => api.stop(where),
     steer: (text, where) => api.steer(text, where),
     answer: (callId, decision, where) => api.answer(callId, decision, where),

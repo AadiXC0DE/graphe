@@ -454,6 +454,9 @@ export type Preferences = {
    *  path. Per project, so saying “ask me first” in one folder never changes
    *  another. Absent is off — read it through `holdsBack`. */
   heldBack: Readonly<Record<string, boolean>>;
+  /** Whether each project's browser keeps its logins between sittings, keyed by
+   *  its path. Absent is off — read it through `keepsLogins`. */
+  keptLogins: Readonly<Record<string, boolean>>;
   /** How much a picture has to move before work is stopped, by id, or null for
    *  the middle one. */
   howMuch: string | null;
@@ -499,6 +502,8 @@ export type Landing = {
   held: Held | null;
   /** True when new work is checked before it lands. */
   holdBack: boolean;
+  /** Whether the browser this project drives keeps its logins. */
+  keepLogins: boolean;
   /** Can the work go all the way to where the team keeps this project? */
   canHandOver: boolean;
   handOverSays: string;
@@ -1234,6 +1239,7 @@ export const CHANNEL = {
   openLink: 'graphe:open-link',
   landing: 'graphe:landing',
   setHoldBack: 'graphe:set-hold-back',
+  setKeepLogins: 'graphe:set-keep-logins',
   setTheme: 'graphe:set-theme',
   setHowMuch: 'graphe:set-how-much',
   decideOnWork: 'graphe:decide-on-work',
@@ -1549,6 +1555,9 @@ export type GrapheApi = {
   landing(where?: Where): Promise<Result<Landing>>;
   /** Check new work in a copy before it reaches the files. Sticky. */
   setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>>;
+  /** Keep this project's browser signed in between sittings, or stop keeping
+   *  it. Off keeps nothing and starts every browser clean. */
+  setKeepLogins(on: boolean, where?: Where): Promise<Result<Preferences>>;
   setTheme(theme: Theme): Promise<Result<Preferences>>;
   /** Move the line a picture has to cross before the work is stopped. One of
    *  `HOW_MUCH` in `src/design/gate.ts`. Sticky. */

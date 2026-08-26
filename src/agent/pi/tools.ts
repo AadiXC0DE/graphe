@@ -69,7 +69,7 @@ import {
   type ProjectCheck,
 } from './checks';
 import { selectCorrect, type CandidateSignals } from './correctness';
-import { browserTools } from './computer';
+import { browserFolder, browserTools } from './computer';
 import { desktopHere, desktopTools } from './desktop';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet, MOST_AT_ONCE } from '../../cost/fleet';
@@ -2348,6 +2348,9 @@ export const grapheTools = (
   askFirst?: AskFirst | null,
   stepDone?: StepDone | null,
   cancelBuild?: CancelBuild | null,
+  /** Whether this project's browser keeps what it is signed in to. Asked each
+   *  time rather than read once, so turning it off takes effect at once. */
+  keepsBrowserLogins?: () => boolean,
 ): ToolDefinition[] => {
   const tools: ToolDefinition[] = [
     websearchTool,
@@ -2358,7 +2361,9 @@ export const grapheTools = (
     // and hides it behind a plugin; this one is simply there, and the program
     // behind it is fetched the first time somebody asks for a page rather than
     // being homework they have to do before the feature exists.
-    ...browserTools(projectRoot),
+    ...browserTools(projectRoot, undefined, () =>
+      keepsBrowserLogins?.() === true ? browserFolder(agentDir, projectRoot) : null,
+    ),
   ];
   // Only where there is a screen we know how to read. Everywhere else these are
   // not on the list at all, rather than four tools that answer "not here".

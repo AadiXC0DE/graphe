@@ -210,7 +210,10 @@ describe('the gate closes the moment work begins', () => {
     // model told it was too late to ask before anything had happened.
     expect(adapter).toContain('const workBegan = (call: ToolCall): void => {');
     expect(adapter).toContain(
-      "if (asksLeft === 'open' && changesAnything(call, facts)) asksLeft = 'started';",
+      // Work on a screen somebody is sitting in front of is the exception: it
+      // only happens while they are there, and the question worth asking is one
+      // nothing could have asked before it looked.
+      "changesAnything(call, facts) && !worksAScreen(call)",
     );
     expect(adapter).toContain('workBegan,');
     // And it is no longer the check-staleness hook's business.

@@ -34,8 +34,8 @@ import './Overview.css';
 const SEVERAL = {
   heading: 'The projects',
   changed: 'changed',
-  save: 'Save',
-  see: 'See it',
+  save: 'Commit',
+  see: 'Preview',
   /** The strip above the timeline, when there is more than one timeline. */
   whose: 'Whose history',
 } as const;

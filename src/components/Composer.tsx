@@ -694,7 +694,10 @@ export default function Composer({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => chooseCommand(one)}
             >
-              <span><strong>{one.command}</strong><small>{one.description}</small></span>
+              <span>
+                <strong>{one.command}</strong>
+                <small>{one.description.replace(`${one.command} — `, '')}</small>
+              </span>
               <em>{one.source === 'project' ? 'This project' : 'Your computer'}</em>
             </button>
           ))}

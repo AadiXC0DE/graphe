@@ -52,15 +52,28 @@ describe('what runs without being asked', () => {
 
 describe('watching the browser, minded', () => {
   const APP = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const MAIN = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 
-  it('stops watching when the stream stops, rather than leaving a still picture', () => {
-    expect(APP).toContain('socket.onclose = gone');
-    expect(APP).toContain('socket.onerror = gone');
+  /** The window is served from a file, and a socket opened there is refused by
+   *  anything on this machine before it carries a frame — so the shell takes
+   *  the pictures and hands them over. */
+  it('has the shell take the pictures, not the window', () => {
+    expect(APP).toContain('bridge.onBrowserFrame(');
+    expect(APP).not.toContain('new WebSocket(');
+    expect(MAIN).toContain('CHANNEL.browserFrame');
+  });
+
+  it('takes the next one only once the last has arrived', () => {
+    const at = MAIN.indexOf('function watchTheBrowser');
+    expect(at).toBeGreaterThan(-1);
+    const block = MAIN.slice(at, at + 900);
+    expect(block).toContain('while (!mine.stop)');
+    expect(block).toContain('await browserFrame(');
   });
 
   /** By the time somebody has switched project, the one that started the
-   *  stream is no longer the one in front. */
-  it('turns the stream off on the project that started it', () => {
+   *  watching is no longer the one in front. */
+  it('stops watching on the project that started it', () => {
     expect(APP).toContain('watchTheBrowser(false, watchedProject.current)');
     expect(APP).toContain('watchedProject.current = path');
   });

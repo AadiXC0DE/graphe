@@ -2595,6 +2595,21 @@ export function requiresSnapshot(call: ToolCall, ctx: GuardFacts): boolean {
  * Does this call change anything? Reads and searches do not, so they stay
  * silent even while a standing "ask me first" instruction is in force.
  */
+/**
+ * Whether this call works a screen the person is sitting in front of.
+ *
+ * It matters for one thing: whether the model may still put a question. The
+ * usual rule is that once work has begun the moment for asking has passed,
+ * because whoever asked for it may have walked away. That reasoning does not
+ * hold here — pressing things in somebody's own applications only works while
+ * they are there — and the question worth asking ("which file should I draw
+ * this in?") is one nothing could have asked before it looked.
+ */
+export function worksAScreen(call: ToolCall): boolean {
+  const name = normalizeToolName(call.name);
+  return DESKTOP_ACT_TOOLS.has(name) || BROWSER_ACT_TOOLS.has(name) || name === BROWSER_STEPS;
+}
+
 export function changesAnything(call: ToolCall, ctx: GuardFacts): boolean {
   return judge(call, ctx).mutates;
 }

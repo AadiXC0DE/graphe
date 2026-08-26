@@ -1207,6 +1207,7 @@ export const CHANNEL = {
   workflows: 'graphe:workflows',
   alwaysDoes: 'graphe:always-does',
   watchBrowser: 'graphe:watch-browser',
+  browserFrame: 'graphe:browser-frame',
   branchSwitch: 'graphe:branch-switch',
   branchCreate: 'graphe:branch-create',
   worktreeLand: 'graphe:worktree-land',
@@ -1402,9 +1403,11 @@ export type GrapheApi = {
   /** The commands this project runs without being asked, and where they are
    *  written down. Empty for a project that has written none. */
   alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>>;
-  /** Ask the browser to show what it is doing, a picture a second, and answer
-   *  with where to watch it. Null when there is no browser to watch. */
-  watchBrowser(on: boolean, where?: Where): Promise<Result<string | null>>;
+  /** Watch what the browser is doing, a picture at a time, or stop. The
+   *  pictures arrive on `onBrowserFrame`. */
+  watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>>;
+  /** Each picture of the browser, while somebody is watching one. */
+  onBrowserFrame(listener: (frame: { project: string; bytes: string }) => void): () => void;
   /** Start a document-to-build: name a document and an optional instruction,
    *  and the shell turns it into a plan. */
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>>;

@@ -35,7 +35,7 @@
  */
 
 import type { GuardFacts } from '../guard/policy';
-import { changesAnything, describeCall, evaluate, requiresSnapshot } from '../guard/policy';
+import { changesAnything, worksAScreen, describeCall, evaluate, requiresSnapshot } from '../guard/policy';
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
 import {
@@ -1619,7 +1619,9 @@ const MOST_AFTER_SAYINGS = 3;
    * so the model was told it was too late to ask before anything had happened.
    */
   const workBegan = (call: ToolCall): void => {
-    if (asksLeft === 'open' && changesAnything(call, facts)) asksLeft = 'started';
+    if (asksLeft === 'open' && changesAnything(call, facts) && !worksAScreen(call)) {
+      asksLeft = 'started';
+    }
   };
 
   /**

@@ -10,23 +10,22 @@
 import type { GitBranch } from './ipc';
 
 export const LINE_WORDS = {
-  heading: 'Line of work',
-  /** Beside the name, for anybody who has not met the word. Says what it is
-   *  rather than who named it: "working branch" is the plain answer to "which
-   *  one am I on?".
-   */
-  plainly: 'the working branch',
-  open: 'Change line of work',
-  find: 'Find a line',
+  heading: 'Branch',
+  /** Beside the name, for anybody who has not met the word. The word a
+   *  developer already uses comes first; this is the plain answer to "which
+   *  one am I on?" for anybody who has not. */
+  plainly: 'the line of work',
+  open: 'Switch branch',
+  find: 'Find a branch',
   /** Said on the row the project is already on. */
   onThisOne: 'You are here',
   /** When a line tracks nothing shared yet. */
   notShared: 'not shared yet',
   inStep: 'in step',
-  none: 'No other lines of work yet.',
+  none: 'No other branches yet.',
   noneFound: 'Nothing by that name.',
-  newLine: 'New line…',
-  newPlaceholder: 'what-you-are-trying',
+  newLine: 'New branch…',
+  newPlaceholder: 'feature/short-name',
   create: 'Create',
   cancel: 'Cancel',
   /** A name the machine will not take. Said before the press, not after. */

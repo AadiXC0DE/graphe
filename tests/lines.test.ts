@@ -109,12 +109,13 @@ describe('a name the machine would refuse', () => {
 });
 
 describe('the words', () => {
-  /** This is one of the few surfaces allowed to say the real word, because
-   *  somebody went looking for it — but the gloss has to be beside it. */
-  it('says the real word and glosses it in the same breath', () => {
-    expect(LINE_WORDS.plainly).toMatch(/branch/);
-    expect(LINE_WORDS.heading).not.toMatch(/branch|commit|git/i);
-    expect(LINE_WORDS.open).not.toMatch(/branch|commit|git/i);
+  /** This is one of the few surfaces that says the real word first. Somebody
+   *  went looking for it, and a developer reading "line of work" where they
+   *  expected "branch" has to translate before they can act. The plain words
+   *  stay, beside it, for anybody who has not met the real one. */
+  it('says the real word, and glosses it in the same breath', () => {
+    expect(LINE_WORDS.heading).toMatch(/branch/i);
+    expect(LINE_WORDS.plainly).toMatch(/line of work/i);
   });
 
   it('names the thing being done, not the machinery doing it', () => {
@@ -125,9 +126,9 @@ describe('the words', () => {
 });
 
 describe('the real word is actually shown, not just written down', () => {
-  it('keeps the plain name plain and the real one beside it', () => {
-    expect(LINE_WORDS.heading).toBe('Line of work');
-    expect(LINE_WORDS.plainly).toMatch(/branch/);
+  it('names it the way a developer would, with the plain words beside it', () => {
+    expect(LINE_WORDS.heading).toBe('Branch');
+    expect(LINE_WORDS.plainly).toMatch(/line of work/i);
   });
 
   it('is rendered where the heading is, or it may as well not exist', async () => {

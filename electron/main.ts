@@ -83,7 +83,7 @@ import {
   type Found,
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
-import { browserFolder, forgetLogins, watchBrowser } from '../src/agent/pi/computer';
+import { browserFolder, browserFrame, forgetLogins } from '../src/agent/pi/computer';
 import { alwaysFile, alwaysFrom, WHEN, type When } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
@@ -2888,6 +2888,38 @@ async function readingOf(folder: string, pointed: Pointed): Promise<PointedAt | 
   } catch {
     return null;
   }
+}
+
+/** Who is watching which browser, so a second press or a closed project ends
+ *  the right one. */
+const watching = new Map<string, { stop: boolean }>();
+
+function stopWatching(project: string): void {
+  const going = watching.get(project);
+  if (going !== undefined) going.stop = true;
+  watching.delete(project);
+}
+
+/**
+ * Take a picture of the browser every second or so and send it to the window.
+ *
+ * One at a time rather than on a timer: a picture that takes longer than the
+ * gap would otherwise pile up behind itself until there is nothing left to
+ * take a picture with.
+ */
+function watchTheBrowser(project: string, keeps: string | null): void {
+  const mine = { stop: false };
+  watching.set(project, mine);
+  void (async () => {
+    while (!mine.stop) {
+      const bytes = await browserFrame(project, undefined, keeps).catch(() => null);
+      if (mine.stop) return;
+      if (bytes !== null && mainWindow !== null && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(CHANNEL.browserFrame, { project, bytes });
+      }
+      await new Promise((go) => setTimeout(go, bytes === null ? 2000 : 700));
+    }
+  })();
 }
 
 function sayPointed(folder: string, pointed: Pointed): void {
@@ -6618,14 +6650,17 @@ function register(): void {
 
   /* The `/word` ways of working. The body stays here — the window gets only
      what it needs to list them in a `/` menu and to hold the typed words. */
-  handle<string | null>(CHANNEL.watchBrowser, async (_event, args) => {
+  handle<boolean>(CHANNEL.watchBrowser, async (_event, args) => {
     const [on] = args;
     const open = projectAt(whereIn(args));
-    if (open === null || typeof on !== 'boolean') return done(null);
+    if (open === null || typeof on !== 'boolean') return done(false);
+    stopWatching(open.path);
+    if (!on) return done(false);
     const keeps = keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path)
       ? browserFolder(await defaultAgentDir(), open.path)
       : null;
-    return done(await watchBrowser(on, open.path, undefined, keeps).catch(() => null));
+    watchTheBrowser(open.path, keeps);
+    return done(true);
   });
 
   /** What this project does without being asked. Read fresh each time: the file

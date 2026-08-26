@@ -38,12 +38,7 @@ import { reviewAsMarkdown } from "./agent/pi/review";
 import { saysUseYours } from "./design/drift";
 import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
-import {
-  NOTHING_WATCHED,
-  readWatched,
-  watching,
-  type Watched,
-} from "./preview/watching";
+import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
 import { drainStarted } from "./lib/queue";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
@@ -1325,7 +1320,13 @@ function Conversation() {
           }))
         : current,
     );
-  }, []);
+    // Which projects a folder holds is only known once this has answered, so
+    // the first ask for their timelines has to be here rather than earlier —
+    // otherwise the panel says "nothing saved yet" about a project that has.
+    const held = answer.value.repos ?? [];
+    const already = desksNow.current.byPath[path]?.repoVersions ?? {};
+    if (held.some((one) => already[one.name] === undefined)) void refreshVersions(path);
+  }, [refreshVersions]);
 
   /** Read the build plan for the project in front, for the tracker above the
    *  box. Same in-front guard as everything else that answers about a folder. */
@@ -2052,33 +2053,16 @@ function Conversation() {
     return () => window.removeEventListener("pointerdown", away);
   }, [switching]);
 
-  /** Where the agent's browser is showing itself, or null when nobody asked. */
+  /** Which project's browser is being watched, or null when nobody is. */
   const [watchAt, setWatchAt] = useState<string | null>(null);
   const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
 
-  /* One connection, opened when somebody asks to watch and closed the moment
-     they stop. A socket left open is a browser drawing itself for nobody. */
+  /* The pictures arrive from the shell, which is the only side of the app that
+     can reach a service on this machine. */
   useEffect(() => {
-    if (watchAt === null) return;
-    const socket = new WebSocket(watchAt);
-    socket.onmessage = (event: MessageEvent) => {
-      const message = readWatched(event.data);
-      if (message !== null) setWatched((was) => watching(was, message));
-    };
-    // A stream that has stopped is not a stream: stop watching rather than
-    // leave the last picture on screen looking live.
-    const gone = (): void => {
-      setWatchAt(null);
-      setWatched(NOTHING_WATCHED);
-    };
-    socket.onclose = gone;
-    socket.onerror = gone;
-    return () => {
-      socket.onmessage = null;
-      socket.onclose = null;
-      socket.onerror = null;
-      socket.close();
-    };
+    return bridge.onBrowserFrame((frame) => {
+      setWatched((was) => (frame.project === watchAt ? watching(was, frame.bytes) : was));
+    });
   }, [watchAt]);
 
   /** Which ask for the stream is the live one. A second press while the first
@@ -2107,7 +2091,7 @@ function Conversation() {
       .watchBrowser(true, path === null ? undefined : { project: path })
       .then((answer) => {
         if (watchAsked.current !== mine) return;
-        setWatchAt(answer.ok ? answer.value : null);
+        setWatchAt(answer.ok && answer.value ? path : null);
       });
   }, []);
 
@@ -4809,12 +4793,16 @@ function Conversation() {
           onSwitchRepeat={switchRepeat}
           onForgetRepeat={forgetRepeat}
           onSave={(repo?: string) => {
-            const path = desks.current;
-            if (path === null) return;
+            const here = currentDesk(desksNow.current);
+            if (here === null) return;
+            const path = here.path;
             void bridge
               .saveVersion(undefined, { project: path, ...(repo === undefined ? {} : { repo }) })
               .then((answer) => {
-                if (!answer.ok) return;
+                if (!answer.ok) {
+                  troubleHere(answer.trouble);
+                  return;
+                }
                 setDesks((current) =>
                   changeDesk(current, path, (one) => ({
                     ...one,

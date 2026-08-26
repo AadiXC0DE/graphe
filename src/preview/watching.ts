@@ -1,32 +1,26 @@
 /**
- * Watching the browser work, a picture a second.
+ * Watching the browser work, a picture at a time.
  *
  * The agent's browser runs out of sight, which is the point — it never takes
  * the screen from anybody. The cost is that "what is it doing" has no answer
- * until it says something. This is the answer: the browser shows itself over a
- * connection the window opens, and the pane draws the last picture it sent.
+ * until it says something. This is the answer: while somebody is watching, the
+ * shell takes a picture of it every second or so and the pane draws the last
+ * one.
  *
- * Pure. Reading one message and deciding what the pane now shows happens here;
- * opening the connection happens in the window, which is the only part of the
- * app with a socket.
+ * The pictures come from the shell rather than from a connection the window
+ * opens itself. The window is served from a file, which has no origin a
+ * localhost service will accept, so a socket opened here is refused before it
+ * carries anything — and a feature that works everywhere except in the app is
+ * not a feature.
  */
 
 /** What the pane is showing right now. */
 export type Watched = {
   /** The last picture, ready for an `img` src, or null before the first. */
   picture: string | null;
-  /** Where the browser is, when it has said. */
-  address: string | null;
-  /** The last thing the page complained about, if it has. */
-  trouble: string | null;
 };
 
-export const NOTHING_WATCHED: Watched = { picture: null, address: null, trouble: null };
-
-/** The most one picture may be. A frame arrives every second and the last one
- *  is held in the window's own memory; a browser sending something enormous is
- *  a browser to ignore rather than one to run out of room for. */
-export const MOST_PICTURE = 4_000_000;
+export const NOTHING_WATCHED: Watched = { picture: null };
 
 export const WATCH_WORDS = {
   on: 'Watch it work',
@@ -37,44 +31,13 @@ export const WATCH_WORDS = {
   nothing: 'There is no browser open to watch yet. Ask for a page and it will appear here.',
 } as const;
 
-function field(value: unknown, key: string): unknown {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[key] : undefined;
-}
+/** The most one picture may be. One arrives every second or so and the last is
+ *  held in the window's own memory; something enormous is one to ignore. */
+export const MOST_PICTURE = 4_000_000;
 
-/**
- * One message from the browser, folded into what the pane shows.
- *
- * Anything unrecognised leaves it exactly as it was: a stream that grows a new
- * kind of message must never blank the picture somebody is looking at.
- */
-export function watching(now: Watched, message: unknown): Watched {
-  const kind = field(message, 'type');
-  if (kind === 'frame') {
-    const data = field(message, 'data');
-    if (typeof data !== 'string' || data === '' || data.length > MOST_PICTURE) return now;
-    return { ...now, picture: `data:image/jpeg;base64,${data}` };
-  }
-  if (kind === 'url') {
-    const address = field(message, 'url');
-    return typeof address === 'string' && address !== '' ? { ...now, address } : now;
-  }
-  if (kind === 'page_error') {
-    const text = field(message, 'text');
-    return typeof text === 'string' && text !== '' ? { ...now, trouble: firstLine(text) } : now;
-  }
-  return now;
-}
-
-/** Read one message off the wire. Null for anything that is not one. */
-export function readWatched(data: unknown): unknown {
-  if (typeof data !== 'string') return null;
-  try {
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-}
-
-function firstLine(text: string): string {
-  return text.split('\n')[0]?.trim() ?? '';
+/** One picture from the shell, folded into what the pane shows. Anything
+ *  unreadable leaves the picture somebody is looking at exactly where it was. */
+export function watching(now: Watched, bytes: unknown): Watched {
+  if (typeof bytes !== 'string' || bytes === '' || bytes.length > MOST_PICTURE) return now;
+  return { picture: `data:image/jpeg;base64,${bytes}` };
 }

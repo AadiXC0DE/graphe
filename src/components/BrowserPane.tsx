@@ -51,7 +51,7 @@ export const SAYS = {
   elsewhere: 'Open it in your browser',
   wider: 'Give the page the whole window',
   narrower: 'Show the conversation too',
-  nothing: 'Nothing is being served yet. Press “See it” and the page will open here.',
+  nothing: 'Nothing is being served yet. Press “Preview” and the page will open here.',
   variations: 'Designs to compare',
   pick: (name: string): string => `Look at ${name}`,
 } as const;

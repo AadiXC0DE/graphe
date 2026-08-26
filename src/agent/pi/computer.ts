@@ -852,28 +852,14 @@ export async function forgetLogins(agentDir: string, projectRoot?: string): Prom
 /* Watching it work                                                            */
 /* -------------------------------------------------------------------------- */
 
-/** Where the browser can be watched, once it is showing itself. */
-export function watchAddress(port: number): string {
-  // One picture a second. Enough to follow along, and far too little to be a
-  // second thing the machine is busy drawing.
-  return `ws://127.0.0.1:${String(port)}/?maxFps=1`;
-}
-
-/** The port out of the program's own answer about showing itself. */
-export function readPort(data: Record<string, unknown> | null): number | null {
-  const port = data === null ? null : data['port'];
-  return typeof port === 'number' && port > 0 ? port : null;
-}
-
 /**
- * Ask the browser to show what it is doing, or stop.
+ * One picture of whatever the browser is on, for somebody watching it.
  *
- * A picture a second over a connection the window opens itself. Off is the
- * ordinary state: a browser nobody is watching should not be drawing itself for
- * nobody. Null when there is no browser to watch.
+ * Taken rather than streamed: the window is served from a file, and a socket
+ * opened there is refused by anything on this machine before it carries a
+ * single frame. A picture a second is what the pane needs anyway.
  */
-export async function watchBrowser(
-  on: boolean,
+export async function browserFrame(
   projectRoot?: string,
   host?: BrowserHost,
   keeps: string | null = null,
@@ -882,17 +868,24 @@ export async function watchBrowser(
   const found = await findWay(run).catch(() => null);
   if (found === null) return null;
   const setup = setupFrom(process.env, projectRoot, keeps);
-  const ask = async (command: readonly string[]): Promise<Answer> =>
-    readAnswer(
-      await run(found.tool, [...found.lead, ...browserArgs(command, setup)], { patience: 60_000 }),
+  const folder = await mkdtemp(join(tmpdir(), 'graphe-watch-'));
+  const file = join(folder, 'now.jpg');
+  try {
+    const ran = await run(
+      found.tool,
+      [
+        ...found.lead,
+        ...browserArgs(
+          ['screenshot', file, '--screenshot-format', 'jpeg', '--screenshot-quality', '60'],
+          setup,
+        ),
+      ],
+      { patience: 30_000 },
     );
-  if (!on) {
-    await ask(['stream', 'disable']).catch(() => undefined);
-    return null;
+    if (!readAnswer(ran).ok) return null;
+    const bytes = await readFile(file).catch(() => null);
+    return bytes === null ? null : bytes.toString('base64');
+  } finally {
+    await rm(folder, { recursive: true, force: true }).catch(() => undefined);
   }
-  await ask(['stream', 'enable']);
-  // Asked for separately: turning it on answers without the port it chose.
-  const now = await ask(['stream', 'status']);
-  const port = readPort(now.data);
-  return port === null ? null : watchAddress(port);
 }

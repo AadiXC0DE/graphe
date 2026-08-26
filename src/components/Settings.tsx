@@ -92,7 +92,7 @@ const LINKS: readonly (
   {
     id: 'always',
     name: 'Things this project always does',
-    note: 'Commands that run without being asked — format what was just written, type-check before handing work back, run the tests. Written down in one file that travels with the project.',
+    note: 'Commands that run without being asked — format what was written, run the tests. One file, kept with the project.',
     kind: 'always',
   },
   {

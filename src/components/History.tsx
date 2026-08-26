@@ -25,17 +25,17 @@ type Props = {
 
 export const SAYS = {
   heading: 'History',
-  branches: 'Lines of work',
+  branches: 'Branches',
   /** Beside the name. Says what the list is in the words somebody would say,
    *  without a lesson about who named what. */
-  branchesPlainly: 'working branches',
-  newBranch: 'New line',
-  newBranchPlaceholder: 'Name it',
+  branchesPlainly: 'lines of work',
+  newBranch: 'New branch',
+  newBranchPlaceholder: 'feature/short-name',
   create: 'Start it',
-  graph: 'See it as lines',
+  graph: 'Commit graph',
   /** The word the rest of the world uses, for whoever came here from a
    *  terminal and wants to know what they are looking at. */
-  graphPlainly: 'git graph',
+  graphPlainly: 'every version, drawn as lines',
   graphHint: 'Every moment, what came after what, and where two goes at the same thing joined.',
 } as const;
 

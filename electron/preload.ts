@@ -334,13 +334,17 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
   },
 
-  watchBrowser(on: boolean, where?: Where): Promise<Result<string | null>> {
+  watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>> {
     if (typeof on !== 'boolean') {
-      return Promise.resolve(refuse<string | null>('I could not tell whether that was on or off.'));
+      return Promise.resolve(refuse<boolean>('I could not tell whether that was on or off.'));
     }
-    return ipcRenderer.invoke(CHANNEL.watchBrowser, on, named(where)) as Promise<
-      Result<string | null>
-    >;
+    return ipcRenderer.invoke(CHANNEL.watchBrowser, on, named(where)) as Promise<Result<boolean>>;
+  },
+
+  onBrowserFrame(listener: (frame: { project: string; bytes: string }) => void): () => void {
+    const hear = (_event: unknown, frame: { project: string; bytes: string }): void => listener(frame);
+    ipcRenderer.on(CHANNEL.browserFrame, hear);
+    return () => ipcRenderer.removeListener(CHANNEL.browserFrame, hear);
   },
 
   alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>> {

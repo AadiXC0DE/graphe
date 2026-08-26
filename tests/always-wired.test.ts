@@ -50,6 +50,22 @@ describe('what runs without being asked', () => {
   });
 });
 
+describe('watching the browser, minded', () => {
+  const APP = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  it('stops watching when the stream stops, rather than leaving a still picture', () => {
+    expect(APP).toContain('socket.onclose = gone');
+    expect(APP).toContain('socket.onerror = gone');
+  });
+
+  /** By the time somebody has switched project, the one that started the
+   *  stream is no longer the one in front. */
+  it('turns the stream off on the project that started it', () => {
+    expect(APP).toContain('watchTheBrowser(false, watchedProject.current)');
+    expect(APP).toContain('watchedProject.current = path');
+  });
+});
+
 describe('a way of working, offered as it is typed', () => {
   it('offers them on a slash at the start of a message, and only there', () => {
     expect(COMPOSER).toContain("before.match(/^\\/([a-z0-9-]*)$/i)");

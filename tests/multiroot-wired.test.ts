@@ -183,8 +183,12 @@ describe('the window hears about the projects', () => {
     expect(APP).toContain('repoVersions: desk.repoVersions,');
   });
 
-  it('waits on the preview pill, and says why', () => {
+  /** Starting a preview needs a project, so it is a press on the project's own
+   *  row. The pill stays a way back to the page already being served — never a
+   *  disabled control behind a hint nobody can reach. */
+  it('leaves starting a preview to the project’s own row', () => {
     expect(APP).toContain('severalProjects');
-    expect(APP).toContain('Press \u201cSee it\u201d beside the one you mean.');
+    expect(APP).toContain("onClick={() => (severalProjects ? movePane('split') : void seeIt())}");
+    expect(OVERVIEW).toContain('onSeeProject(one.name)');
   });
 });

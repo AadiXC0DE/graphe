@@ -2506,6 +2506,9 @@ const NEVER_ON_ANY_RUNG: ReadonlySet<string> = new Set([
   SAY.keyIntoPage,
   SAY.keyInBrowserFile,
   SAY.guardOff,
+  // Reading this computer into the conversation through a browser is the same
+  // shape of thing as a key leaving it, and the rung is about being asked.
+  SAY.notAWebAddress,
 ]);
 
 /**

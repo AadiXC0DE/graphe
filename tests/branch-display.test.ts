@@ -8,10 +8,13 @@ const bridge = readFileSync(new URL('../src/lib/bridge.ts', import.meta.url), 'u
 describe('the branch panel describes the addressed conversation', () => {
   it('reads git and branches from its checkout rather than always open.path', () => {
     const start = main.indexOf('handle<Overview>(CHANNEL.overview');
-    const block = main.slice(start, start + 1700);
-    expect(block).toContain('checkoutEntryFor(open, where)?.folder ?? open.path');
+    const block = main.slice(start, start + 2400);
+    // `folderFor` is that same answer with one more case in it — the named
+    // project inside a folder that holds several.
+    expect(block).toContain('const cwd = folderFor(open, where)');
     expect(block).toContain('readGitStatus(cwd)');
     expect(block).toContain('readBranches(cwd)');
+    expect(block).toContain('styleTokens(cwd)');
     expect(block).not.toContain('readGitStatus(open.path)');
   });
 

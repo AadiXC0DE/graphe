@@ -5067,7 +5067,9 @@ function register(): void {
     // describe the folder its agent is actually changing, not always the
     // project's primary checkout — otherwise a successful `git switch` looks
     // like it never happened.
-    const cwd = checkoutEntryFor(open, where)?.folder ?? open.path;
+    // The same folder the design view saves into, so what is shown and what is
+    // written are never two different projects.
+    const cwd = folderFor(open, where);
     // Several projects in one folder: each child answers where it lives; the parent answers nothing.
     const many = open.held.childRepos.length >= SEVERAL_CHILDREN;
     const repos = many
@@ -5085,7 +5087,7 @@ function register(): void {
       preview: open.held.serving?.address ?? null,
       artifacts: made,
       swatches,
-      styles: await styleTokens(open.path),
+      styles: await styleTokens(cwd),
     });
   });
 

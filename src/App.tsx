@@ -2065,8 +2065,18 @@ function Conversation() {
       const message = readWatched(event.data);
       if (message !== null) setWatched((was) => watching(was, message));
     };
+    // A stream that has stopped is not a stream: stop watching rather than
+    // leave the last picture on screen looking live.
+    const gone = (): void => {
+      setWatchAt(null);
+      setWatched(NOTHING_WATCHED);
+    };
+    socket.onclose = gone;
+    socket.onerror = gone;
     return () => {
       socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
       socket.close();
     };
   }, [watchAt]);
@@ -2076,16 +2086,23 @@ function Conversation() {
    *  watching back on. */
   const watchAsked = useRef(0);
 
-  const watchTheBrowser = useCallback((want: boolean) => {
-    const path = desksNow.current.current;
+  /** Whose browser is being watched. Kept apart from whichever project is in
+   *  front: turning a stream off has to reach the project that turned it on,
+   *  and by the time somebody switches, that is no longer the one in front. */
+  const watchedProject = useRef<string | null>(null);
+
+  const watchTheBrowser = useCallback((want: boolean, project?: string | null) => {
+    const path = project === undefined ? desksNow.current.current : project;
     const mine = watchAsked.current + 1;
     watchAsked.current = mine;
     setWatched(NOTHING_WATCHED);
     if (!want) {
       setWatchAt(null);
+      watchedProject.current = null;
       void bridge.watchBrowser(false, path === null ? undefined : { project: path });
       return;
     }
+    watchedProject.current = path;
     void bridge
       .watchBrowser(true, path === null ? undefined : { project: path })
       .then((answer) => {
@@ -2095,11 +2112,12 @@ function Conversation() {
   }, []);
 
   /* A browser nobody is watching should not be drawing itself. Switching
-     project, or closing the pane, is nobody watching. */
+     project, or closing the pane, is nobody watching — and the stream is turned
+     off on the project that started it, not on whichever is now in front. */
   useEffect(() => {
     if (watchAt === null) return;
-    if (desks.current !== null && pane !== 'off') return;
-    watchTheBrowser(false);
+    if (desks.current === watchedProject.current && pane !== 'off') return;
+    watchTheBrowser(false, watchedProject.current);
   }, [desks.current, pane, watchAt, watchTheBrowser]);
 
   /** Whether each conversation's run is waiting for somebody, by its owner. */
@@ -4164,9 +4182,8 @@ function Conversation() {
   pageAtNow.current = pageAt ?? previewUrl;
   const pillShown = desk !== null && (previewUrl !== null || progress !== null);
   const pillLabel = progress !== null ? progress.says : PREVIEW;
-  // A folder holding several projects has nothing at the top level to show —
-  // what runs lives inside one of them — so the pill waits and points at the
-  // row that does have a press.
+  // A folder holding several projects has nothing at the top level to serve —
+  // what runs lives inside one of them, and its row is where it is started.
   const severalProjects = (desk?.overview?.repos?.length ?? 0) >= 2;
 
   // The one region nobody is given: it is here because somebody went and asked
@@ -4274,13 +4291,12 @@ function Conversation() {
           <button
             type="button"
             className="previewpill"
-            onClick={() => void seeIt()}
-            disabled={busy || severalProjects || (progress !== null && !progress.done)}
-            title={
-              severalProjects
-                ? 'This folder holds several projects. Press “See it” beside the one you mean.'
-                : undefined
-            }
+            /* In a folder holding several projects the pill is a way back to
+               the page already being served, not a way to start one — starting
+               is a press on the project's own row, which is the only place
+               that knows which project is meant. */
+            onClick={() => (severalProjects ? movePane('split') : void seeIt())}
+            disabled={busy || (progress !== null && !progress.done)}
           >
             {pillLabel}
           </button>

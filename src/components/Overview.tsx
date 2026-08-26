@@ -658,7 +658,7 @@ export default function Overview({
                 className={`projects__pick ${one.name === whose.name ? 'projects__pick--on' : ''}`}
                 // One of them is the one being shown, rather than each being
                 // separately on or off.
-                aria-current={one.name === whose.name}
+                aria-current={one.name === whose.name ? 'true' : undefined}
                 onClick={() => setWhose(one.name)}
               >
                 {one.name}

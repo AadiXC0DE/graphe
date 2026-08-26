@@ -23,6 +23,11 @@ export type Watched = {
 
 export const NOTHING_WATCHED: Watched = { picture: null, address: null, trouble: null };
 
+/** The most one picture may be. A frame arrives every second and the last one
+ *  is held in the window's own memory; a browser sending something enormous is
+ *  a browser to ignore rather than one to run out of room for. */
+export const MOST_PICTURE = 4_000_000;
+
 export const WATCH_WORDS = {
   on: 'Watch it work',
   off: 'Stop watching',
@@ -46,7 +51,7 @@ export function watching(now: Watched, message: unknown): Watched {
   const kind = field(message, 'type');
   if (kind === 'frame') {
     const data = field(message, 'data');
-    if (typeof data !== 'string' || data === '') return now;
+    if (typeof data !== 'string' || data === '' || data.length > MOST_PICTURE) return now;
     return { ...now, picture: `data:image/jpeg;base64,${data}` };
   }
   if (kind === 'url') {

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { NOTHING_WATCHED, readWatched, watching } from '../src/preview/watching';
+import { MOST_PICTURE, NOTHING_WATCHED, readWatched, watching } from '../src/preview/watching';
 import { readPort, watchAddress } from '../src/agent/pi/computer';
 
 describe('one message at a time', () => {
@@ -30,6 +30,16 @@ describe('one message at a time', () => {
     ]) {
       expect(watching(seen, other).picture, JSON.stringify(other)).toBe(seen.picture);
     }
+  });
+
+  /** A frame arrives every second and the last one is held in memory. One that
+   *  is enormous is one to ignore, not one to run out of room for. */
+  it('ignores a picture too big to be worth holding', () => {
+    const seen = watching(NOTHING_WATCHED, { type: 'frame', data: 'AAAA' });
+    const huge = watching(seen, { type: 'frame', data: 'A'.repeat(MOST_PICTURE + 1) });
+    expect(huge.picture).toBe(seen.picture);
+    const fine = watching(seen, { type: 'frame', data: 'B'.repeat(1000) });
+    expect(fine.picture).toContain('BBBB');
   });
 
   it('follows where the browser went, and what it complained about', () => {

@@ -21,7 +21,7 @@ import { containsPath, toPosix } from '../guard/paths';
 
 export const REVIEWER_TEST_WORDS = {
   onlyOne:
-    'A reviewer may run one local test file — npx --no-install vitest run <file>, pnpm exec vitest run <file>, yarn vitest run <file>, node --test <file> — or read the history with git (diff, log, show, status, blame and the like). Nothing else.',
+    'A reviewer may run one local test file (npx --no-install vitest run <file>, pnpm exec vitest run <file>, yarn vitest run <file>, node --test <file>) or read the history with git (diff, log, show, status, blame and the like). Nothing else.',
   outside: 'That test file is outside the project.',
   notTest: 'That path does not name a test file.',
   /** A git verb that could change something, or is not one we know. */

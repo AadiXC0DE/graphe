@@ -275,6 +275,13 @@
 .moment__still {
   position: relative;
   display: grid;
+  /* Without this the box shrinks to whatever is inside it, and a card with no
+     screenshot ends up as a small tile floating in the corner of a big one. */
+  width: 100%;
+  /* Centred when the words fit, top-aligned when they do not — plain `center`
+     clips the first line off a long title as well as the last. */
+  justify-items: center;
+  align-items: safe center;
   aspect-ratio: 16 / 10;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -295,15 +302,17 @@
 /* No picture yet. A grey frame with three bars in it is a skeleton screen that
    never finished loading, so the tile carries the words instead. */
 .moment__words {
+  max-width: 100%;
   padding: var(--space-2);
+  text-align: center;
   font-size: var(--text-2xs);
   line-height: 1.35;
   color: var(--text-muted);
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow-wrap: anywhere;
 }
 
@@ -360,12 +369,22 @@
   background: var(--bg-raised);
 }
 
-.moment--current .moment__still {
+/* Only around a real picture: with nothing photographed the still box is just
+   the title, and an accent edge on it reads as a stray ring. */
+.moment--current .moment__still:has(.moment__shot) {
   border-color: var(--accent);
 }
 
 .moment--naming {
   background: var(--bg-raised);
+}
+
+/* With nothing photographed the tile carries the title, and a star floating in
+   its corner sits on top of the words. It drops beside the time instead. */
+.moment:not(:has(.moment__shot)) .moment__keep {
+  top: auto;
+  bottom: 8px;
+  right: 8px;
 }
 
 /* Small enough to sit on a thumbnail without covering it; the target around it

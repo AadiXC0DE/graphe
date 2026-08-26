@@ -26,14 +26,12 @@ export type Found = {
 export type FoundForOnline = { helper: boolean; signedIn: boolean };
 
 export const toolWords = {
-  /** The helper is not here. Said without naming a command — the real name
-   *  lives under "Show me", where names are allowed. */
   noHelper:
-    'This computer has nothing set up to reach where your team keeps this project, so I have left the work ready in your own folder instead.',
+    'The GitHub CLI (gh) is not installed, so I have left the work committed in your own folder instead.',
   notSignedIn:
-    'This computer has the right helper but is not signed in to your team’s account, so I have left the work ready in your own folder instead.',
+    'gh is installed but not signed in, so I have left the work committed in your own folder instead. Run gh auth login and ask again.',
   noHome:
-    'This project is not kept anywhere shared, so there is nowhere for me to send the work to. It is ready in your own folder.',
+    'This project has no git remote, so there is nowhere to push to. The work is committed in your own folder.',
   ready: 'Everything needed is here.',
   onlineNoHelper: 'This computer has nothing set up to put a project online.',
   onlineNotSignedIn: 'This computer is not signed in to the place I put projects online.',

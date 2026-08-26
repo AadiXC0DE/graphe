@@ -55,7 +55,7 @@ export function stripSays(set: VariationSet): string {
   const open = set.inFront === null ? null : set.variations.find((one) => one.id === set.inFront);
   if (open === null || open === undefined)
     return `${count} ${count === 1 ? 'variation' : 'variations'} to compare.`;
-  return `${open.name} — one of ${count}.`;
+  return `${open.name}, one of ${count}.`;
 }
 
 /** Put one variation in front. Unknown ids are let go rather than guessed. */

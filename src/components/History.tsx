@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Versions from './Versions';
 import type { GitSnapshot, GitBranch, PutBack, SavedVersion } from '../lib/ipc';
+import { LINE_WORDS } from '../lib/lines';
 import './History.css';
 
 type Props = {
@@ -25,18 +26,12 @@ type Props = {
 
 export const SAYS = {
   heading: 'History',
-  branches: 'Lines of work',
-  /** Beside the name. Says what the list is in the words somebody would say,
-   *  without a lesson about who named what. */
-  branchesPlainly: 'working branches',
-  newBranch: 'New line',
-  newBranchPlaceholder: 'Name it',
-  create: 'Start it',
-  graph: 'See it as lines',
-  /** The word the rest of the world uses, for whoever came here from a
-   *  terminal and wants to know what they are looking at. */
-  graphPlainly: 'git graph',
-  graphHint: 'Every moment, what came after what, and where two goes at the same thing joined.',
+  branches: 'Branches',
+  newBranch: 'New branch',
+  newBranchPlaceholder: 'feature/short-name',
+  create: 'Create',
+  graph: 'Commit graph',
+  graphHint: 'Every commit, what came after what, and where two branches merged.',
 } as const;
 
 /** A branch name, as it is really spelled. */
@@ -101,10 +96,7 @@ export default function History({
 
       {git === null || branches.length === 0 ? null : (
         <section className="branches" aria-label={SAYS.branches}>
-          <h3 className="branches__heading">
-            {SAYS.branches}
-            <span className="branches__plainly">{SAYS.branchesPlainly}</span>
-          </h3>
+          <h3 className="branches__heading">{SAYS.branches}</h3>
 
           <ul className="branches__list">
             {branches.map((branch) => (
@@ -115,8 +107,8 @@ export default function History({
                     <span className="branches__name">{branchName(branch)}</span>
                     <span className="branches__meta">
                       {branch.upstream === null
-                        ? 'not shared yet'
-                        : (relation(branch) ?? 'in step')}
+                        ? LINE_WORDS.notShared
+                        : (relation(branch) ?? LINE_WORDS.inStep)}
                     </span>
                   </div>
                 ) : (
@@ -124,7 +116,7 @@ export default function History({
                     type="button"
                     className="branches__row branches__row--switch"
                     onClick={() => onSwitchBranch(branch.name)}
-                    title={SAYS.graphHint}
+                    title={`${LINE_WORDS.open}: ${branch.name}`}
                   >
                     <span className="branches__name">{branchName(branch)}</span>
                     <span className="branches__message">
@@ -187,10 +179,7 @@ export default function History({
 
       {versions.length === 0 ? null : (
         <button type="button" className="history__do" onClick={onOpenGraph}>
-          <span className="history__dowords">
-            {SAYS.graph}
-            <span className="history__doplain">({SAYS.graphPlainly})</span>
-          </span>
+          <span className="history__dowords">{SAYS.graph}</span>
           <span className="history__doarrow" aria-hidden="true">
             →
           </span>

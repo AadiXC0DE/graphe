@@ -32,6 +32,7 @@ import { howMuchBy } from '../design/gate';
 import { themeFrom } from './theme';
 import { pagesIn, type Page } from '../preview/pages';
 import { holdsBack } from '../projects/heldback';
+import { keepsLogins } from '../projects/logins';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
 import { createLimit } from '../cost/limits';
@@ -80,6 +81,7 @@ import {
   type Room,
   type SideOfWork,
   type Skill,
+  type AlwaysDoes,
   type Workflow,
   type BuildPlan,
   type BuildAdvance,
@@ -145,7 +147,7 @@ const PREVIEW_REPLY = `This is Graphe running in a browser tab, so there are no 
 - the questions I ask before I change anything, and the answers you give
 - the meter in the corner, with the same arithmetic behind it
 
-What is not real is anything that would reach a folder. In the app, this is where the work itself would arrive — written in your own tokens, with a version saved before it, so putting it back is one click:
+What is not real is anything that would reach a folder. In the app, this is where the work itself would arrive, written in your own tokens, with a version saved before it, so putting it back is one click:
 
 \`\`\`css
 .hero__title {
@@ -155,7 +157,7 @@ What is not real is anything that would reach a folder. In the app, this is wher
 }
 \`\`\`
 
-Open the desktop app and I will get to work. If you came to look at the interface rather than to use it, add \`?gallery\` to the address — every piece of it is on one page there, in both themes.`;
+Open the desktop app and I will get to work. If you came to look at the interface rather than to use it, add \`?gallery\` to the address: every piece of it is on one page there, in both themes.`;
 
 /**
  * A couple of words at a time, so the streaming path is genuinely exercised
@@ -528,7 +530,7 @@ function previewAway(): Away {
     /* Two goes at one job, so the comparison has something to open onto. */
     {
       id: 'away-w1',
-      doing: 'Rework the hero — one big line, everything else out of the way',
+      doing: 'Rework the hero: one big line, everything else out of the way',
       state: 'done',
       at: started - 14 * MINUTE,
       picture: null,
@@ -539,7 +541,7 @@ function previewAway(): Away {
     },
     {
       id: 'away-w2',
-      doing: 'Rework the hero — the photograph doing the work',
+      doing: 'Rework the hero: the photograph doing the work',
       state: 'done',
       at: started - 12 * MINUTE,
       picture: null,
@@ -644,6 +646,7 @@ let previewHowFar: HowFar = 'asking';
     kept: {},
     showFiles: true,
     heldBack: {},
+    keptLogins: {},
     howMuch: null,
     ceiling: null,
     // There is no preferences file in a browser tab, so the choice lives where
@@ -741,6 +744,10 @@ let previewHowFar: HowFar = 'asking';
     },
 
     stop(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
+    waitForMe(): Promise<Result<null>> {
       return Promise.resolve(done(null));
     },
 
@@ -1003,6 +1010,18 @@ let previewHowFar: HowFar = 'asking';
 
     skillText(): Promise<Result<string>> {
       return Promise.resolve(done(''));
+    },
+
+    watchBrowser(): Promise<Result<boolean>> {
+      return Promise.resolve(done(false));
+    },
+
+    onBrowserFrame(): () => void {
+      return () => undefined;
+    },
+
+    alwaysDoes(): Promise<Result<AlwaysDoes>> {
+      return Promise.resolve(done({ file: '', rows: [], trouble: null }));
     },
 
     workflows(): Promise<Result<readonly Workflow[]>> {
@@ -1437,6 +1456,7 @@ let previewHowFar: HowFar = 'asking';
         done({
           waiting: null,
           holdBack: heldBackOf(preferred, openPath),
+          keepLogins: keepsLogins(preferred.keptLogins, openPath),
           canHandOver: false,
           handOverSays: PREVIEW_LANDING,
           canPutOnline: false,
@@ -1453,6 +1473,13 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setKeepLogins(on: boolean, _where?: Where): Promise<Result<Preferences>> {
+      if (openPath !== null) {
+        preferred = { ...preferred, keptLogins: { ...preferred.keptLogins, [openPath]: on } };
+      }
+      return Promise.resolve(done({ ...preferred }));
+    },
+
     setHowMuch(id: string): Promise<Result<Preferences>> {
       preferred = { ...preferred, howMuch: howMuchBy(id).id };
       return Promise.resolve(done({ ...preferred }));
@@ -1464,6 +1491,7 @@ let previewHowFar: HowFar = 'asking';
           landing: {
             waiting: null,
             holdBack: heldBackOf(preferred, openPath),
+            keepLogins: keepsLogins(preferred.keptLogins, openPath),
             canHandOver: false,
             handOverSays: PREVIEW_LANDING,
             canPutOnline: false,
@@ -1881,7 +1909,9 @@ function connect(): Bridge {
     // Same complaint, same fix: stop must say *which* conversation it is
     // stopping, or press Stop ends the shell's front conversation instead of
     // the one on screen.
+    setKeepLogins: (on, where) => api.setKeepLogins(on, where),
     stop: (where) => api.stop(where),
+    waitForMe: (on, where) => api.waitForMe(on, where),
     steer: (text, where) => api.steer(text, where),
     answer: (callId, decision, where) => api.answer(callId, decision, where),
     answerAsked: (id, answers, where) => api.answerAsked(id, answers, where),
@@ -1889,27 +1919,30 @@ function connect(): Bridge {
     recentProjects: () => api.recentProjects(),
     overview: (where) => api.overview(where),
     forgetProject: (path) => api.forgetProject(path),
-    versions: () => api.versions(),
+    versions: (where) => api.versions(where),
     repoLook: (where) => api.repoLook(where),
     repoComment: (number, body, where) => api.repoComment(number, body, where),
-    putBack: (versionId) => api.putBack(versionId),
-    nameVersion: (versionId, name) => api.nameVersion(versionId, name),
-    versionPictures: () => api.versionPictures(),
+    putBack: (versionId, where) => api.putBack(versionId, where),
+    nameVersion: (versionId, name, where) => api.nameVersion(versionId, name, where),
+    versionPictures: (where) => api.versionPictures(where),
     preferences: () => api.preferences(),
     setShowMe: (on) => api.setShowMe(on),
-    keepVersion: (versionId, keep) => api.keepVersion(versionId, keep),
+    keepVersion: (versionId, keep, where) => api.keepVersion(versionId, keep, where),
     setShowFiles: (on) => api.setShowFiles(on),
     setTheme: (theme) => api.setTheme(theme),
-    projectFiles: () => api.projectFiles(),
-    fileText: (path) => api.fileText(path),
+    projectFiles: (where) => api.projectFiles(where),
+    fileText: (path, where) => api.fileText(path, where),
     hatches: () => api.hatches(),
-    openInEditor: (file) => api.openInEditor(file),
-    saveVersion: (name) => api.saveVersion(name),
+    openInEditor: (file, where) => api.openInEditor(file, where),
+    saveVersion: (name, where) => api.saveVersion(name, where),
     room: (where) => api.room(where),
     tidyNow: (where) => api.tidyNow(where),
-    skills: () => api.skills(),
-    skillText: (id) => api.skillText(id),
-    workflows: () => api.workflows(),
+    skills: (where) => api.skills(where),
+    skillText: (id, where) => api.skillText(id, where),
+    workflows: (where) => api.workflows(where),
+    alwaysDoes: (where) => api.alwaysDoes(where),
+    watchBrowser: (on, where) => api.watchBrowser(on, where),
+    onBrowserFrame: (listener) => api.onBrowserFrame(listener),
     branchSwitch: (name, where) => api.branchSwitch(name, where),
     branchCreate: (name, where) => api.branchCreate(name, where),
     worktreeLand: (where) => api.worktreeLand(where),
@@ -1924,24 +1957,24 @@ function connect(): Bridge {
     goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
     running: (where) => api.running(where),
     stopRunning: (id, where) => api.stopRunning(id, where),
-    carried: () => api.carried(),
-    trustCarried: (id, trust) => api.trustCarried(id, trust),
-    revealFolder: () => api.revealFolder(),
-    show: (at, point) => api.show(at, point),
+    carried: (where) => api.carried(where),
+    trustCarried: (id, trust, where) => api.trustCarried(id, trust, where),
+    revealFolder: (where) => api.revealFolder(where),
+    show: (at, point, where) => api.show(at, point, where),
     variationsServe: (parts, where) => api.variationsServe(parts, where),
     onPointed: (listener) => api.onPointed(listener),
-    pages: () => api.pages(),
-    shareReview: () => api.shareReview(),
-    checkWidths: () => api.checkWidths(),
-    conversations: () => api.conversations(),
+    pages: (where) => api.pages(where),
+    shareReview: (where) => api.shareReview(where),
+    checkWidths: (where) => api.checkWidths(where),
+    conversations: (where) => api.conversations(where),
     openConversation: (path, where) => api.openConversation(path, where),
     deleteConversation: (path, where) =>
       api.deleteConversation?.(path, where) ?? Promise.resolve(done([])),
     packages: (term) => api.packages(term),
-    designCommit: (changes) => api.designCommit(changes),
+    designCommit: (changes, where) => api.designCommit(changes, where),
     addPackage: (id) => api.addPackage(id),
     removePackage: (id) => api.removePackage(id),
-    explainPackage: (id) => api.explainPackage(id),
+    explainPackage: (id, where) => api.explainPackage(id, where),
     onWindowState: (listener) => api.onWindowState(listener),
     onShowProgress: (listener) => api.onShowProgress(listener),
     onEvent: (listener) => api.onEvent(listener),
@@ -1952,8 +1985,8 @@ function connect(): Bridge {
     connectAnswer: (promptId, value) => api.connectAnswer(promptId, value),
     cancelConnect: () => api.cancelConnect(),
     disconnect: (providerId) => api.disconnect(providerId),
-    selectModel: (choice) => api.selectModel(choice),
-    setThinking: (choice, level) => api.setThinking(choice, level),
+    selectModel: (choice, where) => api.selectModel(choice, where),
+    setThinking: (choice, level, where) => api.setThinking(choice, level, where),
     closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
     startAfter: (text, after, where) => api.startAfter(text, after, where),
     putAfter: (id, after, where) => api.putAfter(id, after, where),
@@ -1961,7 +1994,7 @@ function connect(): Bridge {
     pageHidden: (hidden) => api.pageHidden(hidden),
     watchStart: (says) => api.watchStart(says),
     watchStop: () => api.watchStop(),
-    spendSplit: () => api.spendSplit(),
+    spendSplit: (where) => api.spendSplit(where),
     tokenUsage: () => api.tokenUsage(),
     spendLimit: () => api.spendLimit(),
     setSpendLimit: (ceiling) => api.setSpendLimit(ceiling),
@@ -1969,12 +2002,12 @@ function connect(): Bridge {
     discoveredAccounts: () => api.discoveredAccounts(),
     importAccount: (account) => api.importAccount(account),
     openLink: (url) => api.openLink(url),
-    landing: () => api.landing(),
+    landing: (where) => api.landing(where),
     setHoldBack: (on, where) => api.setHoldBack(on, where),
     setHowMuch: (id) => api.setHowMuch(id),
     decideOnWork: (letIn, observed, where) => api.decideOnWork(letIn, observed, where),
-    handToDeveloper: (confirmed) => api.handToDeveloper(confirmed),
-    putOnline: (confirmed) => api.putOnline(confirmed),
+    handToDeveloper: (confirmed, where) => api.handToDeveloper(confirmed, where),
+    putOnline: (confirmed, where) => api.putOnline(confirmed, where),
     connectedLook: (where) => api.connectedLook(where),
     connectedCheck: (name, where) => api.connectedCheck(name, where),
     connectedSave: (tools, where) => api.connectedSave(tools, where),
@@ -1996,11 +2029,11 @@ function connect(): Bridge {
     forgetRepeat: (id, where) => api.forgetRepeat(id, where),
     onAway: (listener) => api.onAway(listener),
     onBuildPlan: (listener) => api.onBuildPlan(listener),
-    inStep: () => api.inStep(),
-    followDesign: (address) => api.followDesign(address),
-    lookAgain: () => api.lookAgain(),
-    caughtUp: () => api.caughtUp(),
-    stopFollowing: () => api.stopFollowing(),
+    inStep: (where) => api.inStep(where),
+    followDesign: (address, where) => api.followDesign(address, where),
+    lookAgain: (where) => api.lookAgain(where),
+    caughtUp: (where) => api.caughtUp(where),
+    stopFollowing: (where) => api.stopFollowing(where),
   };
 }
 

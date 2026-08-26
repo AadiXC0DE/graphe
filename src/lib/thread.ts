@@ -11,7 +11,7 @@
 
 import type { ActivityState } from '../components/ActivityLine';
 import type { MessageAuthor } from '../components/Message';
-import type { AgentEvent, ReviewVerdict } from '../agent/types';
+import type { AgentEvent, ImageCard, ReviewVerdict } from '../agent/types';
 import type { Answers, Question } from '../agent/asking';
 import type { Prompt } from '../cost/phrasing';
 import { PLAN_WORDS } from '../agent/plan';
@@ -50,6 +50,9 @@ export type Turn =
        *  every turn and shown only when "Show me" is on — see the note on
        *  `real` below. */
       real?: string;
+      /** A picture the step took. Drawn under the line, because a step that
+       *  says it took a picture and shows nothing is a step nobody can check. */
+      shown?: ImageCard;
     }
   | {
       kind: 'asked';
@@ -191,16 +194,50 @@ function closeActivity(
   callId: string,
   state: ActivityState,
   detail?: string,
+  shown?: ImageCard,
 ): readonly Turn[] {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
     if (turn === undefined) continue;
     if (turn.kind !== 'did' || turn.callId !== callId || turn.state !== 'running') continue;
     const next = [...turns];
-    next[index] = { ...turn, state, detail: detail ?? turn.detail };
-    return next;
+    next[index] = {
+      ...turn,
+      state,
+      detail: detail ?? turn.detail,
+      ...(shown === undefined ? {} : { shown }),
+    };
+    return shown === undefined ? next : onlyTheNewestPictures(next);
   }
   return turns;
+}
+
+/**
+ * The most pictures a conversation keeps.
+ *
+ * Each is a few hundred kilobytes held in the window's own memory and copied
+ * again every time the conversation is redrawn, so a long run of screenshots
+ * would grow without a ceiling. The older ones are not what anybody scrolls
+ * back for — the line above each still says what it was.
+ */
+export const MOST_PICTURES = 6;
+
+/** Drop the bytes from all but the newest few, leaving every line intact. */
+function onlyTheNewestPictures(turns: readonly Turn[]): readonly Turn[] {
+  const at: number[] = [];
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index];
+    if (turn?.kind === 'did' && turn.shown !== undefined) at.push(index);
+  }
+  if (at.length <= MOST_PICTURES) return turns;
+  const next = [...turns];
+  for (const index of at.slice(0, at.length - MOST_PICTURES)) {
+    const turn = next[index];
+    if (turn?.kind !== 'did') continue;
+    const { shown: _dropped, ...rest } = turn;
+    next[index] = rest;
+  }
+  return next;
 }
 
 /**
@@ -289,6 +326,12 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       ];
     }
 
+    /* Waiting between steps because somebody asked it to. Nothing is added to
+       the conversation: the run has not ended and nothing has happened, so a
+       line saying so would be a line about the button they just pressed. */
+    case 'waiting-for-you':
+      return turns;
+
     case 'tool-progress':
       return turns.map((turn) =>
         turn.kind === 'did' && turn.callId === event.id && turn.state === 'running'
@@ -297,7 +340,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       );
 
     case 'tool-end':
-      return closeActivity(turns, event.id, event.ok ? 'done' : 'failed', event.detail);
+      return closeActivity(turns, event.id, event.ok ? 'done' : 'failed', event.detail, event.shown);
 
     case 'blocked': {
       const closed = closeActivity(turns, event.call.id, 'failed', event.reason);

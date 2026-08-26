@@ -211,8 +211,8 @@ describe('E-02 honesty about what could not be captured', () => {
   });
 
   it('says when it stopped itself rather than pretending that was all of it', () => {
-    expect(saysItStopped(12)).toBe('Stopped after twelve states — there were more.');
-    expect(saysItStopped(40)).toBe('Stopped after 40 states — there were more.');
+    expect(saysItStopped(12)).toBe('Stopped after twelve states. There were more.');
+    expect(saysItStopped(40)).toBe('Stopped after 40 states. There were more.');
     expect(saysItMissed(1)).toBe('One state went by too quickly to photograph.');
   });
 });

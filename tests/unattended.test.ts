@@ -351,7 +351,7 @@ describe('U-06 the notice that arrives on screen', () => {
       state: 'done',
     });
     expect(notice.title).toBe('paper-street');
-    expect(notice.body).toBe('Check the site still builds — done, and waiting for you.');
+    expect(notice.body).toBe('Check the site still builds: done, and waiting for you.');
   });
 
   it('says what changed when there are words for it', () => {

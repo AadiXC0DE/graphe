@@ -60,11 +60,11 @@ export const ROOM_WORDS = {
   estimated:
     'The split is our own reading of the conversation on screen, not a count. The figure above is the closer of the two.',
   /** No total to report: the conversation has just been shortened. */
-  notKnown: 'Not known just now — the conversation was shortened, and nothing has been counted since.',
+  notKnown: 'Not known just now: the conversation was shortened, and nothing has been counted since.',
   /** Nothing said yet, but the figure above is not zero — what the model is
    *  already holding is its instructions and the tools it can reach. Saying
    *  "nothing in here" beside a real number reads as a contradiction. */
-  empty: 'Nothing said yet — what it is holding is its instructions and the tools it can reach.',
+  empty: 'Nothing said yet. What it is holding is its instructions and the tools it can reach.',
   /** Tail of the total sentence, saying how far the model's own reckoning
    *  reaches. It reports its usage when it replies; everything after that
    *  reply is sized by us until it replies again, so calling the whole figure
@@ -80,8 +80,8 @@ export const ROOM_WORDS = {
   shortened(times: number): string | null {
     if (times < 1) return null;
     return times === 1
-      ? 'Shortened once already — the earliest part is a summary now.'
-      : `Shortened ${String(times)} times already — the earliest parts are summaries now.`;
+      ? 'Shortened once already. The earliest part is a summary now.'
+      : `Shortened ${String(times)} times already. The earliest parts are summaries now.`;
   },
 } as const;
 

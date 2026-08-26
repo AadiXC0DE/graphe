@@ -35,9 +35,24 @@
  */
 
 import type { GuardFacts } from '../guard/policy';
-import { changesAnything, describeCall, evaluate, requiresSnapshot } from '../guard/policy';
+import {
+  asksAboutTheScreen,
+  changesAnything,
+  describeCall,
+  evaluate,
+  requiresSnapshot,
+  worksAScreen,
+} from '../guard/policy';
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
+import {
+  ALWAYS_WORDS,
+  alwaysFile,
+  alwaysFrom,
+  commandFor,
+  worthRunning,
+  type When,
+} from '../../work/always';
 import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
@@ -50,6 +65,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
+import { browserFolder, closeBrowser } from './computer';
 import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type CancelBuild, type HelperModel, type HelperPace } from './tools';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
@@ -187,6 +203,49 @@ export class Confirmations {
 }
 
 /**
+ * A turn held between steps, so somebody can take the machine back.
+ *
+ * The same parking as `Confirmations`: the promise the extension hook handed
+ * back has not resolved, so the agent loop has not reached the next
+ * `tool.execute`. What is different is that this is nobody's question — it is a
+ * person saying "wait there" while they look at a page, move a window or put
+ * something right. Letting go carries on from wherever things now are, because
+ * the next step reads the world again rather than trusting what it remembered.
+ *
+ * A step already running is not interrupted. Holding a turn is not stopping it,
+ * and a half-finished press is worse than either.
+ */
+export class Paused {
+  private held = false;
+  private waiting: (() => void)[] = [];
+
+  get on(): boolean {
+    return this.held;
+  }
+
+  hold(on: boolean): void {
+    this.held = on;
+    if (!on) this.letGo();
+  }
+
+  /** Where a turn waits. Resolves at once when nothing is holding it. */
+  gate(): Promise<void> {
+    if (!this.held) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.waiting.push(resolve);
+    });
+  }
+
+  /** Stopping releases everything: a held turn must never outlive the stop that
+   *  was meant to end it. */
+  letGo(): void {
+    const open = this.waiting;
+    this.waiting = [];
+    for (const resolve of open) resolve();
+  }
+}
+
+/**
  * The one set of questions a turn is allowed to stop for, and who has answered.
  *
  * The same parking as `Confirmations` and for the same reason: the promise
@@ -237,6 +296,9 @@ export type InterceptorOptions = {
   facts: GuardFacts;
   relay: EventRelay;
   confirmations: Confirmations;
+  /** Where a turn waits when somebody has asked it to. Left out, nothing ever
+   *  waits, which is what every caller meant before there was a way to ask. */
+  paused?: Paused;
   /** Where restore points go. Without one, a `snapshot-first` call still runs —
    *  the host chose to open a session with no history — but it runs with no way
    *  back, which is why `createSession` takes a Timeline and expects one. */
@@ -325,6 +387,13 @@ export function createGuardInterceptor(
 
   return async function review(call: ToolCall): Promise<Interception> {
     filesMayHaveMoved?.(call);
+    // Held before anything is judged, so a turn waits where it is rather than
+    // one more step landing after somebody asked it to wait.
+    if (options.paused?.on === true) {
+      relay.waitingForYou(true);
+      await options.paused.gate();
+      relay.waitingForYou(false);
+    }
     // The explicit top autonomy rung is full access for this sitting. Keep this
     // before planning too: otherwise a leftover plan-only state silently turns
     // "Get on with it" back into a restricted mode. `evaluate` mirrors this
@@ -391,6 +460,7 @@ export function createGuardInterceptor(
         relay.blocked(call, SAID_NO);
         return { block: true, reason: TOLD.declined };
       }
+      if (asksAboutTheScreen(call)) facts.screenSaidYes = true;
     }
 
     if (describeCall(call).paths.length > 0) {
@@ -537,6 +607,9 @@ export type CreateSessionOptions = {
   /** Cancel that checklist. Same reach as `stepDone`, so it only exists where
    *  a list could. */
   cancelBuild?: CancelBuild;
+  /** Whether this project's browser keeps what it is signed in to between
+   *  sittings. Asked each time, so turning it off takes effect at once. */
+  keepsBrowserLogins?: () => boolean;
   /** A few sentences of fact about this folder, appended to the system prompt.
    *  For things the folder itself cannot say — that it holds several projects
    *  and git belongs inside each one, say. Facts only; never instructions
@@ -622,6 +695,10 @@ export type GrapheSession = {
   setThinking(level: ThinkingLevel): ThinkingLevel;
   /** Stop what it is doing now. Open questions are answered no. */
   stop(): Promise<void>;
+  /** Hold the turn between steps, or let it go on. */
+  holdOn(on: boolean): void;
+  /** True while a turn is being held. */
+  readonly held: boolean;
   /** Put a message into a turn already in flight, without stopping it — the
    *  agent hears it between tool calls and carries on. This is the "insert
    *  into the loop" move other coding agents offer; Pi calls it steering.
@@ -1238,7 +1315,7 @@ export async function importAccount(
   const credential = await credentialFor(account);
   if (credential === null) {
     throw new AdapterError(
-      `That account is no longer saved on this computer — the tool that kept it must have forgotten it.`,
+      `That account is no longer saved on this computer. The tool that kept it must have forgotten it.`,
     );
   }
   const runtime = await runtimeFor(agentDir);
@@ -1440,6 +1517,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       const dropped = asking.abandonAll();
       if (dropped.length > 0) options.onEvent({ type: 'asking-withdrawn', ids: dropped });
       sayWhatTheRulesHeld();
+      void runAlways('whenItFinishes', []);
     }
   };
 
@@ -1464,6 +1542,50 @@ const MOST_AFTER_SAYINGS = 3;
   const house = readRules(
     await readFile(rulesFile(options.projectRoot), 'utf8').catch(() => null),
   );
+  /* What this project always does, read at the same moment and for the same
+     reason. A file that will not read runs none of them and says so once. */
+  const always = alwaysFrom(
+    await readFile(alwaysFile(options.projectRoot ?? ''), 'utf8').catch(() => null),
+  );
+
+  /**
+   * Run the things this project always does, at one of the three moments.
+   *
+   * Only what the Guard would allow outright. Nobody is being asked — that is
+   * the whole point — so anything that would have raised a question does not
+   * run, and is named once rather than silently skipped.
+   */
+  const alreadySaid = new Set<string>();
+  async function runAlways(when: When, touched: readonly string[]): Promise<void> {
+    const root = options.projectRoot;
+    if (root === undefined) return;
+    for (const one of always.all[when]) {
+      if (!worthRunning(one, touched)) continue;
+      const command = commandFor(one, touched);
+      const allowed = evaluate({ id: `always-${one.name}`, name: 'bash', input: { command } }, facts);
+      if (allowed.kind !== 'allow') {
+        if (!alreadySaid.has(one.name)) {
+          alreadySaid.add(one.name);
+          options.onEvent({ type: 'message-delta', text: `\n\n${ALWAYS_WORDS.refused(one.name)}` });
+          options.onEvent({ type: 'message-end' });
+        }
+        continue;
+      }
+      const ran = await runHelper('/bin/sh', ['-c', command], {
+        folder: root,
+        patience: VERIFY_PATIENCE,
+      }).catch(() => null);
+      if (ran === null || ran.code === 0) continue;
+      const said = ran.said.trim().slice(-2000);
+      options.onEvent({
+        type: 'message-delta',
+        text: `\n\n${ALWAYS_WORDS.failed(one.name, said)}`,
+      });
+      options.onEvent({ type: 'message-end' });
+    }
+  }
+
+  let openedAlready = false;
   let rulesDiagnosticsSaid = false;
   const sayRulesDiagnostics = (): void => {
     if (rulesDiagnosticsSaid) return;
@@ -1471,6 +1593,7 @@ const MOST_AFTER_SAYINGS = 3;
     const diagnostics = [
       ...(house.trouble === null ? [] : [RULE_WORDS.fileTrouble(house.trouble)]),
       ...house.skipped,
+      ...(always.trouble === null ? [] : [always.trouble]),
     ];
     if (diagnostics.length === 0) return;
     options.onEvent({ type: 'message-delta', text: `\n\n${diagnostics.join('\n')}` });
@@ -1504,7 +1627,9 @@ const MOST_AFTER_SAYINGS = 3;
    * so the model was told it was too late to ask before anything had happened.
    */
   const workBegan = (call: ToolCall): void => {
-    if (asksLeft === 'open' && changesAnything(call, facts)) asksLeft = 'started';
+    if (asksLeft === 'open' && changesAnything(call, facts) && !worksAScreen(call)) {
+      asksLeft = 'started';
+    }
   };
 
   /**
@@ -1552,8 +1677,12 @@ const MOST_AFTER_SAYINGS = 3;
   async function verifyWhatChanged(call: ToolCall): Promise<void> {
     const root = options.projectRoot;
     if (root === undefined || !changesAnything(call, facts)) return;
-    if (!repairIsListening()) return;
     const touched = sourceAmong(describeCall(call).paths);
+    // The project's own, whether or not anything is listening for a repair:
+    // formatting what was just written is not a nudge, it is the thing the
+    // project asked for.
+    if (touched.length > 0) await runAlways('afterEachChange', touched);
+    if (!repairIsListening()) return;
     if (touched.length === 0) return;
 
     const entries = await readdir(root).catch(() => [] as string[]);
@@ -1642,10 +1771,13 @@ const MOST_AFTER_SAYINGS = 3;
   const asking = new Asking();
   let askedSoFar = 0;
 
+  const paused = new Paused();
+
   const review = createGuardInterceptor({
     facts,
     relay,
     confirmations,
+    paused,
     timeline: options.timeline,
     planning: () => planning,
     rules: () => house,
@@ -1779,6 +1911,7 @@ const MOST_AFTER_SAYINGS = 3;
         options.unattended === true ? null : askFirst,
         options.stepDone,
         options.cancelBuild,
+        options.keepsBrowserLogins,
       );
 
   /* The anchored edit and its read: the model reads a file, the read's reply
@@ -2088,8 +2221,16 @@ const MOST_AFTER_SAYINGS = 3;
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
       sayRulesDiagnostics();
+      // Once a sitting, before the first request goes anywhere.
+      if (!openedAlready) {
+        openedAlready = true;
+        await runAlways('whenItOpens', []);
+      }
       repairs.beginTurn();
       typesAskedThisTurn = false;
+      // A yes to working the screen is worth one turn. Asking again for every
+      // press turned a run of twenty moves into a queue of twenty questions.
+      if (activePrompts === 0) facts.screenSaidYes = false;
       // A new request may ask again; a follow-up landing mid-run may not. The
       // second is somebody adding to work already going, and stopping that to
       // put a form up is exactly what this must never do.
@@ -2291,6 +2432,9 @@ const MOST_AFTER_SAYINGS = 3;
       // left a card on screen whose answer could never arrive — and an
       // unanswered card reads as "still working", which is why Stop looked
       // dead while the run behind it had already ended.
+      // A held turn is let go first: stopping a turn that is waiting must end
+      // it, not leave it waiting for a resume nobody is going to press.
+      paused.hold(false);
       const withdrawn = confirmations.abandonAll();
       if (withdrawn.length > 0) say({ type: 'questions-withdrawn', callIds: withdrawn });
       const letGo = asking.abandonAll();
@@ -2300,6 +2444,17 @@ const MOST_AFTER_SAYINGS = 3;
       // the composer back to Send; waiting for an event that may not come is
       // how the button stayed a spinner.
       say({ type: 'settled' });
+    },
+
+    /** Wait between steps, or carry on. Holding is not stopping: the turn stays
+     *  where it is and picks up from wherever things are when it is let go. */
+    holdOn(on: boolean): void {
+      paused.hold(on);
+      if (!on) say({ type: 'waiting-for-you', on: false });
+    },
+
+    get held(): boolean {
+      return paused.on;
     },
 
     get listening(): boolean {
@@ -2341,6 +2496,7 @@ const MOST_AFTER_SAYINGS = 3;
     dispose(): void {
       if (closed) return;
       closed = true;
+      paused.hold(false);
       confirmations.abandonAll();
       asking.abandonAll();
       unsubscribe();
@@ -2348,6 +2504,17 @@ const MOST_AFTER_SAYINGS = 3;
       void shell.close();
       void mcpRegistry.close();
       void memory?.close().catch(() => {});
+      // The browser is kept warm between calls, which is what makes it quick —
+      // and means it outlives the conversation unless somebody says otherwise.
+      if (!benchmarkToolFloor) {
+        void closeBrowser(
+          options.projectRoot,
+          undefined,
+          options.keepsBrowserLogins?.() === true && options.projectRoot !== undefined
+            ? browserFolder(agentDir, options.projectRoot)
+            : null,
+        );
+      }
       // A standalone/in-memory session owns its servers. Desktop project
       // sessions share a project register, so rebuilding one conversation must
       // not take down a server the project is still using.

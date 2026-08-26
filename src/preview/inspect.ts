@@ -230,7 +230,7 @@ function whereSays(component: string | undefined, file: string, line: number): s
   const where = `${fileWord(file)}, line ${line}`;
   return component === undefined
     ? `Written in ${where}.`
-    : `${component} made this — ${where}.`;
+    : `${component} made this, in ${where}.`;
 }
 
 function madeFrom(pointed: Pointed, material: Material, unsure: string[]): Made {

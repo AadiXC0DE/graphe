@@ -482,6 +482,47 @@ const GIT_DIRTY = {
   ],
 } as const;
 
+
+/** A folder holding two projects, each on its own line of work. */
+const SEVERAL_REPOS = [
+  {
+    name: 'backend',
+    path: '/Users/mira/Projects/shop/backend',
+    git: {
+      branch: 'main',
+      branches: [
+        { name: 'main', current: true, upstream: 'origin/main', ahead: 0, behind: 0, message: 'Tidy the seed data' },
+        { name: 'rates', current: false, upstream: null, ahead: 0, behind: 0, message: 'Try hourly rates' },
+      ],
+      dirty: true,
+      unstaged: 2,
+      staged: 0,
+      untracked: 0,
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'src/rates.ts', kind: 'changed' as const }],
+    },
+  },
+  {
+    name: 'frontend',
+    path: '/Users/mira/Projects/shop/frontend',
+    git: {
+      branch: 'new-checkout',
+      branches: [
+        { name: 'new-checkout', current: true, upstream: 'origin/new-checkout', ahead: 3, behind: 0, message: 'Second card' },
+        { name: 'main', current: false, upstream: 'origin/main', ahead: 0, behind: 0, message: 'Tidy the footer' },
+      ],
+      dirty: false,
+      unstaged: 0,
+      staged: 0,
+      untracked: 0,
+      ahead: 3,
+      behind: 0,
+      files: [],
+    },
+  },
+] as const;
+
 /** A header as it was built from, and the same header after somebody spent a
  *  Tuesday on it. The findings under it are not written here: they are what the
  *  comparison makes of these two. */
@@ -617,6 +658,7 @@ const LANDING: LandingState = {
   },
   held: HELD,
   holdBack: true,
+  keepLogins: false,
   canHandOver: true,
   handOverSays: 'Everything needed is here.',
   canPutOnline: true,
@@ -1012,6 +1054,67 @@ function Section({ title, note, children }: { title: string; note: string; child
 }
 
 function noop() {}
+
+/** Everything the panel draws, for a folder that is one project. */
+const OVERVIEW_VIEW = {
+  repos: [],
+  repoVersions: {},
+  now: {
+    step: { label: 'Changing pricing.tsx', detail: 'the second card' },
+    helpers: [
+      {
+        id: 'h1',
+        task: 'check the contrast on every button',
+        saying: 'Reading Button.tsx',
+        state: 'running' as const,
+        startedAt: NOW - 40_000,
+      },
+    ],
+    filesRead: 14,
+  },
+  git: GIT_DIRTY,
+  research: RESEARCH,
+  references: REFERENCES,
+  versions: TIMELINE,
+  pictures: {},
+  kept: [],
+  putBack: JUST_PUT_BACK,
+  spent: SPENT,
+  onAPlan: false,
+  ceiling: monthlyLimit,
+  busy: true,
+  showMe: false,
+  artifacts: [
+    { path: 'public/hero-bg.svg', name: 'hero-bg.svg', kind: 'vector' as const, note: 'SVG · a drawing' },
+  ],
+  swatches: [
+    { name: 'brand', value: '#b8492c' },
+    { name: 'ink', value: '#1a1a19' },
+  ],
+  styles: {
+    file: 'src/styles/tokens.css',
+    tokens: [
+      { name: '--space-4', value: '16px', kind: 'space' as const, line: 42, steps: ['8px', '12px', '16px', '24px'] },
+      { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 95, steps: [] },
+      { name: '--text', value: '#1a1a19', kind: 'colour' as const, line: 96, steps: [] },
+      { name: '--text-muted', value: '#a3a3a0', kind: 'colour' as const, line: 97, steps: [] },
+      { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 98, steps: [] },
+    ],
+    text: ':root { --accent: #b8492c; }',
+  },
+  reading: readDesign(null),
+  inStep: IN_STEP,
+  landing: LANDING,
+  going: null,
+  landed: null,
+  decided: null,
+  away: AWAY,
+  elsewhere: AWAY_ELSEWHERE,
+  project: 'paper-street',
+  gate: gateOf(HELD.changes),
+  howMuch: USUAL.id,
+  clock: NOW,
+} as const;
 
 export default function Gallery() {
   const [theme, setTheme] = useState<Theme>('system');
@@ -1723,6 +1826,7 @@ export default function Gallery() {
               <Overview
                 view={{
                   repos: [],
+                  repoVersions: {},
                   now: {
                     step: { label: 'Changing pricing.tsx', detail: 'the second card' },
                     helpers: [
@@ -1811,6 +1915,55 @@ onCreateBranch={() => {}}
               mono, because names are not translated. A search that worked leaves nothing but its
               question; only a failure says “stopped”. The meter docks into the foot, the way it
               docked into the foot of the rail.
+            </p>
+          </Section>
+
+          <Section
+            title="A folder that holds several projects"
+            note="Open a working directory with backend/ and frontend/ beside each other and there is no folder-level line of work to move, no folder-level save. Each project gets its own row, its own line of work, and its own press to save it or see it running — the same controls a folder with one project gets, said once per project."
+          >
+            <div className="gallery__overview">
+              <Overview
+                view={{
+                  ...OVERVIEW_VIEW,
+                  repos: SEVERAL_REPOS,
+                  repoVersions: { backend: TIMELINE, frontend: [] },
+                  git: null,
+                  busy: false,
+                  clock: NOW,
+                }}
+                onPutBack={noop}
+                onName={noop}
+                onKeep={noop}
+                onHowMuch={noop}
+                onDismissPutBack={noop}
+                onShowSplit={noop}
+                onLimit={noop}
+                onSave={noop}
+                onOpenDesign={noop}
+                onSwitchBranch={noop}
+                onCreateBranch={noop}
+                onSeeProject={noop}
+                onOpenGraph={noop}
+                onShare={noop}
+                onDecide={noop}
+                onHandOver={noop}
+                onOpenLink={noop}
+                onOpenFile={noop}
+                onKeepGoing={noop}
+                onStartAfter={noop}
+                onKeepAway={noop}
+                onDropAway={noop}
+                onAnswerAway={noop}
+                onAddRepeat={noop}
+                onSwitchRepeat={noop}
+                onForgetRepeat={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              The names are the projects' own folder names, because that is what the person typed
+              when they made them. Save only appears on a project with something to save; the row
+              of names above the timeline says whose history is in front.
             </p>
           </Section>
 

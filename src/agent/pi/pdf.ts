@@ -95,7 +95,7 @@ export function slicePages(
   for (let i = from - 1; i < to; i++) {
     const page = pages[i];
     if (page === undefined) break;
-    const marker = pages.length > 1 ? `\n\n— page ${i + 1} of ${pages.length} —\n\n` : '\n\n';
+    const marker = pages.length > 1 ? `\n\npage ${i + 1} of ${pages.length}\n\n` : '\n\n';
     if (kept.length + page.length > cap) {
       endedEarly = true;
       break;
@@ -112,6 +112,6 @@ export function slicePages(
   }
   return {
     text: kept.trim(),
-    note: notes.length > 0 ? `\n\n(You have the first pages, one at a time — ${notes.join(', and ')}. Ask again for a later page to keep reading.)` : '',
+    note: notes.length > 0 ? `\n\n(You have the first pages, one at a time: ${notes.join(', and ')}. Ask again for a later page to keep reading.)` : '',
   };
 }

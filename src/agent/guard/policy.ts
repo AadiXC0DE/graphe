@@ -108,6 +108,15 @@ export type GuardFacts = GuardContext & {
    */
   stopAsking?: boolean;
   /**
+   * The person has already said yes to working the screen, this turn.
+   *
+   * Asking once is the safeguard; asking twenty times is a queue the person
+   * has to stand in. The answer holds for the turn they gave it in and is
+   * dropped at the next one, so it never becomes a switch nobody remembers
+   * leaving on. Denials are untouched: this only spends a yes already given.
+   */
+  screenSaidYes?: boolean;
+  /**
    * How far it may go on its own. Four rungs rather than a switch, because
    * "check with me" and "get on with it" are not the only two things anybody
    * ever wants — and because the difference between changing a file and running
@@ -149,6 +158,10 @@ const STRICTNESS: Record<Verdict['kind'], number> = {
   confirm: 2,
   deny: 3,
 };
+
+/** Shell binaries whose whole purpose is to work the screen. There is a tool
+ *  for this, and it can be read; a shell string cannot. */
+const SCREEN_DRIVERS = new Set(['cliclick', 'osascript', 'xdotool', 'ydotool']);
 
 function allow(mutates = false): Judgement {
   return { verdict: { kind: 'allow' }, snapshot: false, mutates };
@@ -211,6 +224,8 @@ const SAY = {
     "This would fetch a program from the internet and run it straight away, with neither of us seeing what is inside it. I've stopped it.",
   unreadable:
     "I could not work out what this would actually do, so I did not run it. Tell me what you want in your own words and I will do it a way we can both see.",
+  driveTheScreen:
+    'Working the screen from a shell command hides what it would click, so I have not run it. Use desktop_do instead: it takes the whole run at once (click, double, right, drag, type, key, scroll, wait), aims at what a program has named rather than at guessed coordinates, and hands back a picture of where it got to.',
   fullControl:
     "This asks for control of your whole computer, not just your project. I've stopped it.",
   remoteControl:
@@ -225,6 +240,8 @@ const SAY = {
     "This would send one of your private keys out to another website. I've stopped it.",
   keyIntoPage:
     "This would type one of your private keys into the page you have open, and that page can keep it and pass it anywhere. I've stopped it. Save it as a project secret and I will read it from there.",
+  notAWebAddress:
+    "That is not a page on the web. It would open something on this computer in the browser and read it into our conversation. I've stopped it. Ask me to read the file instead and I will.",
   elsewhere:
     "This would work on another copy of your project instead of the one I'm in, and I can't tell what it would change over there. I've stopped it.",
   pointedElsewhere:
@@ -237,7 +254,7 @@ const SAY = {
     "This would change the rules your project's history runs by, and those rules can quietly run things later on. I've stopped it.",
   ownInstructions:
     "This would rewrite the instructions I work from. I can read those, and I leave them exactly as you installed them. I've stopped it.",
-  restorePoint: 'I will save a restore point first, so you can put this back the way it was.',
+  restorePoint: 'I will commit a checkpoint first, so this is one restore away.',
 } as const;
 
 /* -------------------------------------------------------------------------- */
@@ -307,6 +324,12 @@ const SHELL_TOOLS = new Set([
  *  exact moment somebody said "cancel the todo list" opened with the
  *  unknown-command question about our own tool. */
 const RUNNING_TOOLS = new Set(['running', 'stoprunning', 'cancelbuild']);
+
+/** Our own bookkeeping, on screen rather than on disk: ticking one thing off
+ *  the checklist somebody is watching, and choosing between answers already in
+ *  hand. Neither reads a file, runs anything or reaches anywhere — and a
+ *  question about either is a question in the middle of every turn. */
+const OUR_OWN_TOOLS = new Set(['stepdone', 'scorecandidates']);
 const SQL_TOOLS = new Set(['sql', 'query', 'dbquery', 'runsql', 'executesql', 'database', 'db', 'migrate']);
 const NETWORK_TOOLS = new Set(['fetch', 'http', 'httprequest', 'request', 'webfetch', 'download', 'upload', 'post', 'apicall']);
 /** Search engines. Their whole job is sending words out and bringing the
@@ -424,6 +447,58 @@ const PAGE_MOVE_TOOLS = new Set(['pagescroll']);
  * allowed to skip it.
  */
 const PAGE_ACT_TOOLS = new Set(['pageclick', 'pagetype']);
+
+/**
+ * Looking at the browser the work drives.
+ *
+ * A browser of its own is not the page beside the conversation, and the
+ * difference matters in one direction only: getting it to a site is a reach out
+ * to the internet and asks below, while looking at a page it is already on
+ * changes nothing at all. Reading it, scrolling it, taking its picture, reading
+ * what it complained about — none of that sends a request anybody has not
+ * already agreed to, and a question per glance is a question during every look
+ * at a page that takes a dozen looks to work through.
+ *
+ * Closing it is here for the reason a stop always is: nobody should have to ask
+ * permission to put something down.
+ */
+const BROWSER_LOOK_TOOLS = new Set([
+  'browserread',
+  'browserpicture',
+  'browsertrouble',
+  'browsertrace',
+  'browserscroll',
+  'browserclose',
+]);
+
+/** Pointing that browser at an address. This is the moment the machine reaches
+ *  out, and it is the moment worth naming — after it, a page is a page. */
+const BROWSER_REACH_TOOLS = new Set(['browseropen']);
+
+/** Pressing and typing in that browser. The same footing as the page beside the
+ *  conversation and a longer reach: this one keeps logins, so a press can order
+ *  something under somebody's own name. */
+const BROWSER_ACT_TOOLS = new Set(['browserclick', 'browsertype']);
+
+/** A run of steps in that browser, judged as the strictest step in it. Named
+ *  here so every place that asks "is this one of ours" agrees. */
+const BROWSER_STEPS = 'browsersteps';
+
+/**
+ * Looking at this computer's own screen.
+ *
+ * What is open is a list of names and nothing more, so it is silent. A picture
+ * is not: the screen has everything else on it — somebody's mail, somebody's
+ * messages, a password left showing — and the person sitting in front of it is
+ * the one who decides that goes into a conversation.
+ */
+const DESKTOP_LOOK_TOOLS = new Set(['desktopapps', 'desktopread']);
+const DESKTOP_PICTURE_TOOLS = new Set(['desktoppicture']);
+
+/** Working this computer: pressing, typing, dragging, opening a program. None
+ *  of it is a file, so none of it is anything a restore point can put back —
+ *  which is why the question is the whole of the protection here. */
+const DESKTOP_ACT_TOOLS = new Set(['desktopdo', 'desktopopen']);
 
 /** Anything that sounds like it is reaching for the Guard's own switches. */
 const GUARD_SWITCH = /(permission|policy|guard|approval|approve|allowlist|whitelist|yolo|autorun|bypass|unsafe|disablesafety)/;
@@ -678,6 +753,9 @@ const CONTENT_KEYS = [
   'code',
   'file_text',
   'fileText',
+  // A run of moves on this computer carries its words under `keys` as well as
+  // `text`. A field the secret scan cannot see is a field it cannot refuse.
+  'keys',
 ];
 const COMMAND_KEYS = ['command', 'cmd', 'script', 'commandLine', 'input'];
 const SQL_KEYS = ['sql', 'query', 'statement', 'statements'];
@@ -1393,6 +1471,8 @@ function judgeShellSegment(tokens: Token[], ctx: GuardFacts, depth = 0): Judgeme
     return decide(judgeCd(meaningful, ctx));
   }
 
+  if (SCREEN_DRIVERS.has(name)) return deny(SAY.driveTheScreen);
+
   if (ELEVATION.has(name)) return deny(SAY.fullControl);
   if (ALWAYS_DENY_COMMANDS.has(name)) {
     if (name === 'env' || name === 'printenv' || name === 'export' || name === 'set') {
@@ -1878,6 +1958,91 @@ function normalizeToolName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+/** The words inside a run of steps, which is where a key would be hiding. */
+function stepWords(input: Record<string, unknown>): string {
+  const steps: unknown[] = Array.isArray(input['steps']) ? (input['steps'] as unknown[]) : [];
+  return steps
+    .map((step) =>
+      typeof step === 'object' && step !== null ? collectText(step as Record<string, unknown>) : '',
+    )
+    .join('\n');
+}
+
+/** Pointing the browser at an address. The address itself travels, so a key in
+ *  one is a key handed to a stranger. */
+function judgeBrowserOpen(input: Record<string, unknown>, ctx: GuardFacts): Judgement {
+  const url = readString(input, URL_KEYS) ?? readString(input, ['target']) ?? '';
+  if (findSecret(url) !== null || findKnownSecret(url, ctx)) return deny(SAY.sendKeyOut);
+  if (!onTheWeb(url)) return deny(SAY.notAWebAddress);
+  const where = siteOf(url);
+  return ask(
+    where === null ? 'Open a page in a browser?' : `Open ${where} in a browser?`,
+    'I open it in a browser of my own and read what is on it.',
+    'The site sees the visit, and what comes back is not something I can check beforehand.',
+    { mutates: false },
+  );
+}
+
+/** Pressing or typing in that browser. */
+function judgeBrowserAct(
+  name: string,
+  input: Record<string, unknown>,
+  ctx: GuardFacts,
+): Judgement {
+  const typing = name === 'browsertype';
+  if (typing) {
+    const words = `${collectText(input)}\n${readString(input, ['target']) ?? ''}`;
+    if (findSecret(words) !== null || findKnownSecret(words, ctx)) return deny(SAY.keyIntoPage);
+  }
+  if (!typing) {
+    return ask(
+      'Press this in the browser?',
+      'I press it on the page the browser is on, and it behaves exactly as it would under your own finger.',
+      'A press on a live page can send a form, buy something or delete something, and I cannot take that back.',
+    );
+  }
+  const sending = input['submit'] === true;
+  return ask(
+    sending ? 'Type this into the page and send it?' : 'Type this into the page in the browser?',
+    sending
+      ? 'I put the words into the box and then send the form.'
+      : 'I put the words into the box. Nothing is sent unless I am asked to send it.',
+    sending
+      ? 'Sending it can order something, sign you up or write to somebody, and I cannot take that back.'
+      : 'The page sees every word as it goes in, and can act on it before anything is sent.',
+  );
+}
+
+/** A browser is for the web. Anything else with a colon in it — a file on this
+ *  computer, a page written into the address itself — is a way to read this
+ *  machine into the conversation rather than a place to visit. */
+export function onTheWeb(url: string): boolean {
+  const asked = url.trim();
+  if (asked === '') return false;
+  // A place on this computer, not a place on the web.
+  if (/^[/~.]/.test(asked) || /^[a-z]:[\\/]/i.test(asked)) return false;
+  const scheme = /^([a-z][a-z0-9+.-]*):(.*)$/i.exec(asked);
+  if (scheme === null) return true;
+  if (/^https?$/i.test(scheme[1] ?? '')) return true;
+  // `localhost:3000` reads like a scheme and is a name and a port.
+  return /^\d+(\/|$)/.test(scheme[2] ?? '');
+}
+
+/** The site an address belongs to, for a question that can name it. Null when
+ *  the address is not one we can read, because a question naming nonsense is
+ *  worse than a question naming nothing. */
+function siteOf(url: string): string | null {
+  const asked = url.trim();
+  if (asked === '') return null;
+  try {
+    const whole = /^[a-z][a-z0-9+.-]*:/i.test(asked) ? asked : `https://${asked}`;
+    const host = new URL(whole).hostname;
+    return host === '' ? null : host.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
 function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   const name = normalizeToolName(call.name);
   const input = call.input ?? {};
@@ -1885,7 +2050,7 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   // Nothing gets to turn the Guard off, however politely it asks.
   if (GUARD_SWITCH.test(name)) return deny(SAY.guardOff);
 
-  if (RUNNING_TOOLS.has(name)) return allow();
+  if (RUNNING_TOOLS.has(name) || OUR_OWN_TOOLS.has(name)) return allow();
 
   if (SHELL_TOOLS.has(name)) {
     // A command's relative locations are only safe if the folder it starts from
@@ -2108,6 +2273,79 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     );
   }
 
+  /* A browser of its own. Looking is silent; getting it to an address, and
+     pressing or typing once it is there, are the two moments worth a question. */
+  if (BROWSER_LOOK_TOOLS.has(name)) return allow();
+
+  if (BROWSER_REACH_TOOLS.has(name)) return judgeBrowserOpen(input, ctx);
+
+  if (BROWSER_ACT_TOOLS.has(name)) {
+    const said = judgeBrowserAct(name, input, ctx);
+    return ctx.screenSaidYes === true && said.verdict.kind === 'confirm' ? allow(said.mutates) : said;
+  }
+
+  if (name === BROWSER_STEPS) {
+    // Judged as the strictest step in it, so a run cannot carry a press past a
+    // question by wrapping it in a list.
+    const steps: unknown[] = Array.isArray(input['steps']) ? (input['steps'] as unknown[]) : [];
+    let folded = allow();
+    for (const step of steps) {
+      if (typeof step !== 'object' || step === null) continue;
+      const one = step as Record<string, unknown>;
+      const kind = String(one['do'] ?? '').trim().toLowerCase();
+      if (kind === 'open') folded = strictest(folded, judgeBrowserOpen(one, ctx));
+      else if (kind === 'click' || kind === 'press') {
+        folded = strictest(folded, judgeBrowserAct('browserclick', one, ctx));
+      } else if (kind === 'type' || kind === 'fill') {
+        folded = strictest(folded, judgeBrowserAct('browsertype', one, ctx));
+      }
+    }
+    // A yes already given covers the run, but only where the run was going to
+    // ask. A step that is refused stays refused.
+    return ctx.screenSaidYes === true && folded.verdict.kind === 'confirm'
+      ? allow(folded.mutates)
+      : folded;
+  }
+
+  /* This computer itself. A list of what is open is a read; a picture of the
+     whole screen, and every move made on it, are not. */
+  if (DESKTOP_LOOK_TOOLS.has(name)) return allow();
+
+  if (DESKTOP_PICTURE_TOOLS.has(name)) {
+    if (ctx.screenSaidYes === true) return allow();
+    return ask(
+      'Take a picture of your screen?',
+      'It comes into this conversation, so whatever is on screen comes with it: other windows, other people\u2019s messages, anything left open.',
+      'Close anything you would rather I did not see, and ask me again.',
+      { mutates: false },
+    );
+  }
+
+  if (DESKTOP_ACT_TOOLS.has(name)) {
+    if (name === 'desktopopen') {
+      const app = readString(input, ['app', 'name', 'program']) ?? 'a program';
+      return ask(
+        `Open ${app} on your computer?`,
+        'I open it the way you would from the dock, and take a picture so I can see it.',
+        'It comes to the front, over whatever you are looking at now.',
+      );
+    }
+    // Words typed into a program on this computer go wherever that program
+    // sends them, and there is no request to look inside on the way out.
+    // Checked before the question, so this is a refusal rather than a yes
+    // somebody gave in a hurry.
+    const words = `${collectText(input)}\n${stepWords(input)}`;
+    if (findSecret(words) !== null || findKnownSecret(words, ctx)) return deny(SAY.keyIntoPage);
+    // The refusal above is checked first, so a yes given earlier in the turn
+    // can never carry a key past it.
+    if (ctx.screenSaidYes === true) return allow(true);
+    return ask(
+      'Work your computer for you?',
+      'I press, type and scroll on the screen exactly as you would, in whatever is in front.',
+      'This is your real computer and not a copy, so what happens on it cannot be taken back.',
+    );
+  }
+
   if (MEMORY_TOOLS.has(name)) {
     // Memory takes ids and words, never paths, so there is nothing to check
     // outside the project for. It stays a read of the app's own notes.
@@ -2278,9 +2516,34 @@ function leavesTheFiles(call: ToolCall): boolean {
   // it is not undoable the way a file edit is.
   if (name === 'connecttool') return true;
   return (
-    SHELL_TOOLS.has(name) || NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name) || PAGE_ACT_TOOLS.has(name)
+    SHELL_TOOLS.has(name) ||
+    NETWORK_TOOLS.has(name) ||
+    WEB_TOOLS.has(name) ||
+    PAGE_ACT_TOOLS.has(name) ||
+    BROWSER_REACH_TOOLS.has(name) ||
+    BROWSER_ACT_TOOLS.has(name) ||
+    name === BROWSER_STEPS ||
+    DESKTOP_PICTURE_TOOLS.has(name) ||
+    DESKTOP_ACT_TOOLS.has(name)
   );
 }
+
+/** The refusals no rung reaches past: a key leaving the machine, and anything
+ *  reaching for the Guard's own switches. */
+function alwaysRefused(judgement: Judgement): boolean {
+  if (judgement.verdict.kind !== 'deny') return false;
+  return NEVER_ON_ANY_RUNG.has(judgement.verdict.reason);
+}
+
+const NEVER_ON_ANY_RUNG: ReadonlySet<string> = new Set([
+  SAY.sendKeyOut,
+  SAY.keyIntoPage,
+  SAY.keyInBrowserFile,
+  SAY.guardOff,
+  // Reading this computer into the conversation through a browser is the same
+  // shape of thing as a key leaving it, and the rung is about being asked.
+  SAY.notAWebAddress,
+]);
 
 /**
  * How far it may go on its own.
@@ -2318,7 +2581,11 @@ function judge(call: ToolCall, ctx: GuardFacts): Judgement {
   // questions. The terminal runner is widened for this same mode; leaving this
   // earlier policy gate in place was why harmless uses of /tmp were still
   // rejected before the shell ever saw them.
-  if (ctx.howFar === 'doing') return allow(raw.mutates);
+  //
+  // The handful below are the exception, and they are not about scope: a person
+  // saying "get on with it" is agreeing to work they cannot see, not to one of
+  // their keys leaving the machine. Those refusals hold on every rung.
+  if (ctx.howFar === 'doing') return alwaysRefused(raw) ? raw : allow(raw.mutates);
 
   const first = asFarAs(applyStandingInstruction(raw, ctx), ctx);
   return withoutQuestions(first, { ...ctx, stopAsking: quietFor(call, ctx) });
@@ -2362,6 +2629,33 @@ export function requiresSnapshot(call: ToolCall, ctx: GuardFacts): boolean {
  * Does this call change anything? Reads and searches do not, so they stay
  * silent even while a standing "ask me first" instruction is in force.
  */
+/**
+ * Whether this call works a screen the person is sitting in front of.
+ *
+ * It matters for one thing: whether the model may still put a question. The
+ * usual rule is that once work has begun the moment for asking has passed,
+ * because whoever asked for it may have walked away. That reasoning does not
+ * hold here — pressing things in somebody's own applications only works while
+ * they are there — and the question worth asking ("which file should I draw
+ * this in?") is one nothing could have asked before it looked.
+ */
+/** Whether a yes to this call is a yes to working the screen. Wider than
+ *  `worksAScreen`: a picture of the screen is the same permission. */
+export function asksAboutTheScreen(call: ToolCall): boolean {
+  const name = normalizeToolName(call.name);
+  return (
+    DESKTOP_ACT_TOOLS.has(name) ||
+    DESKTOP_PICTURE_TOOLS.has(name) ||
+    BROWSER_ACT_TOOLS.has(name) ||
+    name === BROWSER_STEPS
+  );
+}
+
+export function worksAScreen(call: ToolCall): boolean {
+  const name = normalizeToolName(call.name);
+  return DESKTOP_ACT_TOOLS.has(name) || BROWSER_ACT_TOOLS.has(name) || name === BROWSER_STEPS;
+}
+
 export function changesAnything(call: ToolCall, ctx: GuardFacts): boolean {
   return judge(call, ctx).mutates;
 }
@@ -2427,6 +2721,11 @@ export function describeCall(call: ToolCall): CallShape {
     if (ASKING_TOOLS.has(name)) return 'reads';
     if (READ_TOOLS.has(name) || LIST_TOOLS.has(name) || SEARCH_TOOLS.has(name)) return 'reads';
     if (DESIGN_READ_TOOLS.has(name) || CODE_READ_TOOLS.has(name) || PAGE_READ_TOOLS.has(name)) return 'reads';
+    if (BROWSER_LOOK_TOOLS.has(name) || DESKTOP_LOOK_TOOLS.has(name)) return 'reads';
+    if (BROWSER_REACH_TOOLS.has(name) || BROWSER_ACT_TOOLS.has(name) || name === BROWSER_STEPS) {
+      return 'reaches the internet';
+    }
+    if (DESKTOP_ACT_TOOLS.has(name) || DESKTOP_PICTURE_TOOLS.has(name)) return 'runs a command';
     return 'something else';
   })();
 

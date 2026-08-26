@@ -163,6 +163,7 @@ describe('D1 — the real name of what just happened', () => {
           trusted: {},
           showFiles: false,
           heldBack: {},
+          keptLogins: {},
           howMuch: null,
           ceiling: null,
           theme: 'system',
@@ -502,7 +503,7 @@ describe('F8 — tidying up, in our words and Pi’s machinery', () => {
     expect(turns[0]?.kind).toBe('tidying');
     // The sentence itself lives in phrasing.ts and is swept with the rest.
     expect(longConversation.tidying).toMatch(/covered a lot in here/);
-    expect(longConversation.tidying).toMatch(/nothing gets lost/);
+    expect(longConversation.tidying).toMatch(/Nothing gets lost/);
   });
 
   it('says it once, however many times the runtime announces itself', () => {

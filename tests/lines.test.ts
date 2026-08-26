@@ -109,12 +109,11 @@ describe('a name the machine would refuse', () => {
 });
 
 describe('the words', () => {
-  /** This is one of the few surfaces allowed to say the real word, because
-   *  somebody went looking for it — but the gloss has to be beside it. */
-  it('says the real word and glosses it in the same breath', () => {
-    expect(LINE_WORDS.plainly).toMatch(/branch/);
-    expect(LINE_WORDS.heading).not.toMatch(/branch|commit|git/i);
-    expect(LINE_WORDS.open).not.toMatch(/branch|commit|git/i);
+  /** The audience is developers. "Branch" needs no translation, and a gloss
+   *  under it reads as a lesson nobody asked for. */
+  it('says the real word, without glossing it', () => {
+    expect(LINE_WORDS.heading).toBe('Branch');
+    expect(Object.values(LINE_WORDS)).not.toContain('the line of work');
   });
 
   it('names the thing being done, not the machinery doing it', () => {
@@ -122,23 +121,15 @@ describe('the words', () => {
       expect(said).not.toMatch(/checkout|HEAD|ref\b/i);
     }
   });
-});
 
-describe('the real word is actually shown, not just written down', () => {
-  it('keeps the plain name plain and the real one beside it', () => {
-    expect(LINE_WORDS.heading).toBe('Line of work');
-    expect(LINE_WORDS.plainly).toMatch(/branch/);
-  });
-
-  it('is rendered where the heading is, or it may as well not exist', async () => {
-    // It was defined and never put on screen for long enough that somebody
-    // asked what a line of work was.
+  it('is the word actually shown, not just written down', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const overview = readFileSync(
       fileURLToPath(new URL('../src/components/Overview.tsx', import.meta.url)),
       'utf8',
     );
-    expect(overview).toContain('LINE_WORDS.plainly');
+    expect(overview).toContain('LINE_WORDS.heading');
+    expect(overview).not.toContain('LINE_WORDS.plainly');
   });
 });

@@ -120,7 +120,7 @@ describe('which component made it', () => {
     expect(reading.made.sure).toBe('exact');
     expect(reading.made.component).toBe('Buy');
     expect(reading.made.where).toEqual({ file: 'src/ui/Buy.tsx', line: 12, column: 4 });
-    expect(reading.made.says).toBe('Buy made this — Buy.tsx, line 12.');
+    expect(reading.made.says).toBe('Buy made this, in Buy.tsx, line 12.');
     expect(reading.unsure).toEqual([]);
   });
 
@@ -367,7 +367,7 @@ describe('the same reading, for the agent that gets asked to change it', () => {
     );
     const said = saysReading(reading);
 
-    expect(said).toContain('Buy made this — Buy.tsx, line 12.');
+    expect(said).toContain('Buy made this, in Buy.tsx, line 12.');
     expect(said).toContain('Also used in src/pages/Pricing.tsx and src/pages/Home.tsx.');
     expect(said).toContain('Appears on Pricing and Home.');
     expect(said).toContain('Make the buy button warmer');

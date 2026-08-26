@@ -75,7 +75,7 @@ describe('T-01 the words', () => {
 
   it('titles the kept version with what was asked for', () => {
     expect(saysKept('Second try', 'Make the hero calmer')).toBe(
-      'Make the hero calmer — kept the second try',
+      'Make the hero calmer: kept the second try',
     );
     expect(saysKept('First try', null)).toBe('Kept the first try');
   });

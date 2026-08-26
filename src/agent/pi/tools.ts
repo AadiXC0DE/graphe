@@ -69,6 +69,8 @@ import {
   type ProjectCheck,
 } from './checks';
 import { selectCorrect, type CandidateSignals } from './correctness';
+import { browserFolder, browserTools } from './computer';
+import { desktopHere, desktopTools } from './desktop';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet, MOST_AT_ONCE } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
@@ -96,7 +98,7 @@ export const HELPER_PATIENCE_MS = 5 * 60 * 1000;
 /** What the model is told when one runs out of time. Written for the model:
  *  one that understands it was cut off asks a smaller question next. */
 export const HELPER_TOOK_TOO_LONG =
-  'This helper was ended after five minutes without a word. Do not send the same piece of work again — either split it into smaller pieces, or do it yourself.';
+  'This helper was ended after five minutes without a word. Do not send the same piece of work again. Either split it into smaller pieces, or do it yourself.';
 
 /** The results the child keeps on its own. Plain data; nothing crosses the wire
  *  except this. */
@@ -393,7 +395,7 @@ export const webfetchTool: ToolDefinition = {
         }
         const { pages } = await readPdfPages(bytes);
         if (pages.length === 0) {
-          return say('That paper is pictures, not words — I could not read any text out of it.');
+          return say('That paper is pictures, not words, and I could not read any text out of it.');
         }
         const meta = id === null ? null : await arxivMeta(id, patience.signal);
         const front =
@@ -461,7 +463,7 @@ const CHANGE_PARAMETERS = Type.Object({
 export function reviewTargetOf(params: ChangeAsked): ReviewTarget | string {
   if (params.target === 'version') {
     return params.id === undefined || params.id === ''
-      ? 'To read one saved version, tell me which one — its id from the versions list.'
+      ? 'To read one saved version, tell me which one: its id from the versions list.'
       : { kind: 'version', id: params.id };
   }
   if (params.target === 'line') {
@@ -503,7 +505,7 @@ export const readDiffTool = (cwd: string): ToolDefinition => ({
     try {
       const diff = await new ProjectHistory(cwd).diffFor(target);
       if (diff.trim() === '') {
-        return say('There is no change at that target to check — nothing has changed there to look at.');
+        return say('There is no change at that target to check. Nothing has changed there to look at.');
       }
       const own = await projectChecks(cwd);
       const checks = own.length > 0 ? own : usualChecks();
@@ -598,7 +600,7 @@ export const runChecksTool = (
       throw new Error(`I could not read the change: ${message}`);
     }
     if (diff.trim() === '') {
-      return say('There is no change at that target to check — nothing has changed there to look at.');
+      return say('There is no change at that target to check. Nothing has changed there to look at.');
     }
 
     const checks = await projectChecks(cwd);
@@ -804,7 +806,7 @@ export function newDebugRegistry(): DebugRegistry {
 function framesText(frames: readonly debug.Frame[]): string {
   const lines = frames.map((frame, index) => {
     const place = frame.file !== undefined ? `${frame.file}${frame.line !== undefined ? `:${frame.line}` : ''}` : frame.source ?? '?';
-    const head = `${index === 0 ? '\u25b8 ' : '  '}${frame.name} — ${place}`;
+    const head = `${index === 0 ? '\u25b8 ' : '  '}${frame.name} at ${place}`;
     if (index === 0 && frame.variables !== undefined && frame.variables.length > 0) {
       const values = frame.variables.map((variable) => `${variable.name} = ${variable.value}`).join(', ');
       return `${head}\n    ${values}`;
@@ -1445,7 +1447,7 @@ const BUILT_NOTHING = 'It changed no files.';
 const FIGMA_TOOL_NAME = 'figma_read';
 
 const NOT_A_FIGMA_LINK =
-  'That is not a Figma link I can read. Copy the address out of Figma itself — the one with the file in it — and I will try again.';
+  'That is not a Figma link I can read. Copy the address out of Figma itself (the one with the file in it) and I will try again.';
 
 const NO_EMPTY_TOKENS: TokenSet = { colors: {}, spacing: {}, text: {} };
 
@@ -1544,7 +1546,7 @@ function tail(text: string, most = SAID_AT_ONCE): string {
 }
 
 function describePiece(piece: RunningPiece): string {
-  const where = piece.address === null ? '' : ` — ${piece.address}`;
+  const where = piece.address === null ? '' : `  ${piece.address}`;
   const how =
     piece.state === 'stopped'
       ? `stopped${piece.exitCode === null ? '' : ` (${String(piece.exitCode)})`}`
@@ -1617,7 +1619,7 @@ export function runningTools(
         }
         const found =
           piece.address === null
-            ? 'It is up. It has not printed an address, so either it is not one that listens or it is still starting — ask running() again in a moment.'
+            ? 'It is up. It has not printed an address, so either it is not one that listens or it is still starting. Ask running() again in a moment.'
             : `It is up at ${piece.address}.`;
         return {
           content: [{ type: 'text', text: `${describePiece(piece)}\n\n${found}\n\n${tail(said)}` }],
@@ -1758,13 +1760,13 @@ export const MOST_WAYS = 3;
 export const WAYS_WORDS = {
   none: 'Say what to make, and two or three different ways of going about it.',
   one: 'Two ways at least, or it is not a choice. One way is ordinary work.',
-  tooMany: `Three ways at most — past that nobody looks at the fourth, and each one costs what the first did.`,
+  tooMany: `Three ways at most. Past that nobody looks at the fourth, and each one costs what the first did.`,
   went: (count: number): string =>
-    `${count === 2 ? 'Two' : String(count)} goes at the same thing are running, each in its own copy. They finish as pictures on the board, side by side, with what each one cost. Keeping one throws the others away — say what you set going and stop.`,
+    `${count === 2 ? 'Two' : String(count)} goes at the same thing are running, each in its own copy. They finish as pictures on the board, side by side, with what each one cost. Keeping one throws the others away, so say what you set going and stop.`,
 } as const;
 
 export const APART_WORDS = {
-  none: 'Nothing to set going — say what each piece of work is.',
+  none: 'Nothing to set going: say what each piece of work is.',
   tooMany: `That is more than ${String(MOST_APART)} pieces at once. Put the biggest ${String(MOST_APART)} on and ask again when they are done.`,
   /** What comes back to the model once the pieces are on the board. */
   went: (count: number): string =>
@@ -1773,7 +1775,7 @@ export const APART_WORDS = {
       : `${String(count)} pieces of work are on the board, each in its own copy of the project. Four run at a time and the rest wait their turn; they carry on whether or not this conversation does.`,
   /** Said alongside, so the model does not sit and wait for them. */
   dontWait:
-    'Do not wait for them or ask about them again — the person watches them finish on the board and decides which to keep. Say what you set going and stop.',
+    'Do not wait for them or ask about them again. The person watches them finish on the board and decides which to keep. Say what you set going and stop.',
   /** When the piece it could not start without never went on itself. */
   lostItsTurn: 'the piece it waits for did not go on, so this one did not either.',
 } as const;
@@ -1841,13 +1843,13 @@ export const setGoingTool = (put: PutOnBoard): ToolDefinition => ({
       // it now is the opposite of what was asked for.
       if (wanted !== null && after === null) {
         names.push(null);
-        refused.push(`${doing} — ${APART_WORDS.lostItsTurn}`);
+        refused.push(`${doing}: ${APART_WORDS.lostItsTurn}`);
         continue;
       }
       const answer = await put(doing, after);
       names.push(answer.ok ? answer.id : null);
       if (answer.ok) went.push(doing);
-      else refused.push(`${doing} — ${answer.because}`);
+      else refused.push(`${doing}: ${answer.because}`);
     }
 
     if (went.length === 0) {
@@ -1983,9 +1985,9 @@ export const tryWaysTool = (put: PutOnBoard): ToolDefinition => ({
     const went: string[] = [];
     const refused: string[] = [];
     for (const way of ways) {
-      const answer = await put(`${doing} — ${way}`, null, group);
+      const answer = await put(`${doing}: ${way}`, null, group);
       if (answer.ok) went.push(way);
-      else refused.push(`${way} — ${answer.because}`);
+      else refused.push(`${way}: ${answer.because}`);
     }
 
     if (went.length === 0) return say(`Nothing went on the board.\n${refused.join('\n')}`);
@@ -2035,7 +2037,7 @@ const MOST_PAGE_LINES = 400;
 
 export const PAGE_WORDS = {
   closed:
-    'There is no page open beside the conversation. It is opened by hand, from the panel next to the chat, and I cannot open it — so either work from the files, or say that the page needs opening first.',
+    'There is no page open beside the conversation. It is opened by hand, from the panel next to the chat, and I cannot open it, so either work from the files, or say that the page needs opening first.',
   blank:
     'The page beside the conversation is open, but nothing is loaded in it yet. There is nothing on it to read.',
   /** The board runs each piece of work in a copy of its own, while the page
@@ -2068,7 +2070,7 @@ function saysReading(reading: PageReading, elsewhere: boolean): string {
   const rest = lines.length - MOST_PAGE_LINES;
   const more = rest > 0 ? `\n… ${String(rest)} more, further down the page.` : '';
   const warn = elsewhere ? `${PAGE_WORDS.notMine(reading.address)}\n\n` : '';
-  const called = reading.title === '' ? '' : ` — ${reading.title}`;
+  const called = reading.title === '' ? '' : ` (${reading.title})`;
   return `${warn}${reading.address}${called}\n\n${kept}${more}`;
 }
 
@@ -2346,13 +2348,26 @@ export const grapheTools = (
   askFirst?: AskFirst | null,
   stepDone?: StepDone | null,
   cancelBuild?: CancelBuild | null,
+  /** Whether this project's browser keeps what it is signed in to. Asked each
+   *  time rather than read once, so turning it off takes effect at once. */
+  keepsBrowserLogins?: () => boolean,
 ): ToolDefinition[] => {
   const tools: ToolDefinition[] = [
     websearchTool,
     webfetchTool,
     taskTool(agentDir, model, thinking, projectRoot),
     scoreCandidatesTool,
+    // A browser of its own, on from the first turn. Every other agent ships one
+    // and hides it behind a plugin; this one is simply there, and the program
+    // behind it is fetched the first time somebody asks for a page rather than
+    // being homework they have to do before the feature exists.
+    ...browserTools(projectRoot, undefined, () =>
+      keepsBrowserLogins?.() === true ? browserFolder(agentDir, projectRoot) : null,
+    ),
   ];
+  // Only where there is a screen we know how to read. Everywhere else these are
+  // not on the list at all, rather than four tools that answer "not here".
+  if (desktopHere()) tools.push(...desktopTools(projectRoot));
   // Only where somebody is there to answer. A helper in its own process and a
   // run nobody is watching both get no tool at all, rather than a tool that
   // always answers "there is nobody here".

@@ -83,7 +83,7 @@ export const PLAN_WORDS = {
   /** Handed back to the model when it reaches for something that would change
    *  the project while it is only supposed to be looking. */
   withheld:
-    'Not yet — this is the looking-around pass. Do not change anything. Say what you would do, as a short numbered list, and it will be put to the person to approve.',
+    'Not yet: this is the looking-around pass. Do not change anything. Say what you would do, as a short numbered list, and it will be put to the person to approve.',
   /** Sent when somebody agreed to some of the plan but not all of it. The
    *  dropped ones are named as well as the kept ones: a model told only what to
    *  do will helpfully do the rest of what it proposed. */
@@ -125,7 +125,7 @@ export const PLAN_WORDS = {
   },
   /** Under the questions. Answering is worth the twenty seconds and skipping it
    *  is allowed, so both have to be said. */
-  questionsHint: 'Answer what you like — anything left blank, I’ll use my best guess.',
+  questionsHint: 'Answer what you like. Anything left blank, I’ll use my best guess.',
   /** A plan longer than the list shows says so rather than ending mid-thought. */
   more(extra: number): string {
     return extra === 1

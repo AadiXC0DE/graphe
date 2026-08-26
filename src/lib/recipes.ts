@@ -35,7 +35,7 @@ export const STARTERS: readonly Recipe[] = [
     id: 'send-helpers',
     name: 'Send in a team',
     prompt:
-      'Split this across several helpers working at the same time — one per page or area. Each one reports what it found before anything is changed, and I decide what gets fixed.',
+      'Split this across several helpers working at the same time, one per page or area. Each one reports what it found before anything is changed, and I decide what gets fixed.',
     from: 'graphe',
   },
   {
@@ -49,7 +49,7 @@ export const STARTERS: readonly Recipe[] = [
     id: 'phone',
     name: 'Fix it on a phone',
     prompt:
-      'Go through this page at phone width and fix what breaks — anything overflowing, text that has gone too small to read, and controls sitting too close together to tap.',
+      'Go through this page at phone width and fix what breaks: anything overflowing, text that has gone too small to read, and controls sitting too close together to tap.',
     from: 'graphe',
   },
   {

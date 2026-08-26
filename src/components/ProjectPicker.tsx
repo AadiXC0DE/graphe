@@ -18,6 +18,11 @@ type Props = {
   compact?: boolean;
 };
 
+/** The recent ones, and no more. A list long enough to scroll is a list you
+ *  read instead of recognising — the folder you want is almost always one of
+ *  the last few, and everything else is one press of "Open another folder". */
+export const MOST_SHOWN = 5;
+
 /**
  * Where were we.
  *
@@ -35,6 +40,7 @@ export default function ProjectPicker({
   compact,
 }: Props) {
   const firstRun = projects.length === 0;
+  const shown = projects.slice(0, MOST_SHOWN);
 
   return (
     <section className={`picker ${compact ? 'picker--compact' : ''} ${firstRun && !compact ? 'picker--first' : ''}`}>
@@ -95,7 +101,7 @@ export default function ProjectPicker({
 
       {firstRun ? null : (
         <ul className="picker__list" aria-label="Recent projects">
-          {projects.map((project) => (
+          {shown.map((project) => (
             <li
               key={project.path}
               className={`pickerrow ${project.missing ? 'pickerrow--missing' : ''} ${project.path === openPath ? 'pickerrow--open' : ''}`}
@@ -172,7 +178,8 @@ export default function ProjectPicker({
 
       {compact ? null : (
         <p className="picker__foot">
-          Your code stays on this computer. Accounts you connect are yours.
+          Your prompts go to the model you picked, on your own account. Everything else
+          (keys, history, what it remembers) stays here.
         </p>
       )}
     </section>

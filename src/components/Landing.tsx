@@ -45,9 +45,9 @@ type Props = {
  *  "what now?" — work that waits for a decision, and the one thing that leaves
  *  the machine. Nothing else lives here. */
 export const SAYS = {
-  heading: 'When the work is done',
+  heading: 'Handoff',
   nothingWaiting:
-    'Nothing waiting — everything you asked for is in your project.',
+    'Nothing waiting, everything you asked for is in your project.',
 } as const;
 
 /**
@@ -192,7 +192,7 @@ export default function Landing({
           onClick={onShare}
           disabled={busy}
         >
-          Save a page of what changed
+          Export a changelog
         </button>
       </div>
     </section>

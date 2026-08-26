@@ -211,11 +211,17 @@ export type AgentEvent =
   | { type: 'message-delta'; text: string }
   | { type: 'message-end' }
   | { type: 'tool-start'; call: ToolCall }
-  | { type: 'tool-end'; id: string; ok: boolean; detail?: string }
+  /** A step that finished. `shown` is a picture the step took — of a page, of
+   *  the screen — which the conversation draws under the line, because a
+   *  picture nobody sees is a picture nobody asked for. */
+  | { type: 'tool-end'; id: string; ok: boolean; detail?: string; shown?: ImageCard }
   /** A tool that is still running has something to say — the helper the `task`
    *  tool spawns, reporting as it reads. Replaces the step's own detail line. */
   | { type: 'tool-progress'; id: string; text: string }
   | { type: 'blocked'; call: ToolCall; reason: string }
+  /** The turn is waiting between steps because somebody asked it to. Not an
+   *  ending: the run is still there, waiting, until it is let go. */
+  | { type: 'waiting-for-you'; on: boolean }
   | { type: 'needs-confirmation'; call: ToolCall; verdict: Extract<Verdict, { kind: 'confirm' }> }
   | { type: 'error'; message: string }
   /**

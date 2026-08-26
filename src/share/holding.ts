@@ -10,7 +10,7 @@
 export const holdWords = {
   /** The control, in the panel band where the rest of landing lives. */
   label: 'Check new work before it lands',
-  hint: 'Off: I change your files as I go, and every change is one undo away. On: where there is something to look at, I do the work in a copy and show you the result, and your own files are not touched until you say yes — and everywhere else I save first, so one press puts it back.',
+  hint: 'Off: I change your files as I go, and every change is one undo away. On: where there is something to look at, I do the work in a copy and show you the result, and your own files are not touched until you say yes, and everywhere else I save first, so one press puts it back.',
   making: 'Working on it in a copy of your project. Your own files are untouched.',
   waiting: 'This is finished and waiting for you. Nothing has reached your project yet.',
   approve: 'Let it in',

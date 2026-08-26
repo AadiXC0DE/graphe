@@ -182,7 +182,7 @@ export const AGAINST_WORDS = {
   summary: (differing: number, same: number): string => {
     if (differing === 0 && same === 0) return 'None of them changed anything.';
     if (differing === 0)
-      return `Nothing to decide — all of them made the same change to ${many(same, 'file', 'files')}.`;
+      return `Nothing to decide: all of them made the same change to ${many(same, 'file', 'files')}.`;
     if (same === 0) return `${many(differing, 'file', 'files')} to decide about.`;
     return `${many(differing, 'file', 'files')} to decide about, and ${many(same, 'file', 'files')} that came out the same in all of them.`;
   },

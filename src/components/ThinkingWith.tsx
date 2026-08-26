@@ -190,7 +190,7 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, o
           nothingConnected
             ? 'No account is connected yet'
             : current === null
-              ? 'Nothing chosen yet — this is the one that will answer'
+              ? 'Nothing chosen yet. This is the one that will answer'
               : `${current.providerName} · ${current.label}`
         }
       >

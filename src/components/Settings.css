@@ -128,6 +128,21 @@
   color: var(--text-faint);
 }
 
+/* The count beside a row that leads somewhere. Never squeezed by the note
+   beside it, and never squeezing it. */
+.settings__meta {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A row is as tall as what is in it. A button does not grow on its own. */
+button.settings__row {
+  height: auto;
+  overflow: visible;
+}
+
 .settings__chev {
   flex: none;
   color: var(--text-faint);

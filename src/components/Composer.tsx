@@ -15,7 +15,7 @@ import HowToWork, { type Plans } from './HowToWork';
 import Room from './Room';
 import type { Turn } from '../lib/thread';
 import ThinkingWith from './ThinkingWith';
-import type { ConnectionState, ModelChoice, Room as RoomState, Skill, ThinkingLevel } from '../lib/ipc';
+import type { ConnectionState, ModelChoice, Room as RoomState, Skill, ThinkingLevel, Workflow } from '../lib/ipc';
 import {
   NOT_DRAGGING,
   carriesSomething,
@@ -47,6 +47,10 @@ import './Composer.css';
 
 type Props = {
   onSend: (text: string) => void;
+  /** True while the run is waiting between steps because somebody asked it to. */
+  waiting?: boolean;
+  /** Hold the run between steps, or let it go on. */
+  onWait?: (on: boolean) => void;
   /** Called instead of send while a turn is running: the same button in its
    *  other state (BACKLOG A1). Send and Stop are one affordance in opposite
    *  states — swapping in place is why the layout does not jump. */
@@ -101,6 +105,9 @@ type Props = {
   onHowFar?: (howFar: HowFar) => void;
   /** The native preview yields while one of the composer popovers is open. */
   onComposerPopoverOpenChange?: (open: boolean) => void;
+  /** Ways of working the project has written down. `/` at the start of a
+   *  message offers them, the way `@` offers skills. */
+  workflows?: readonly Workflow[];
   /** Skills the open project can use. `@` turns this quiet library into an
    * explicit per-turn choice instead of a command someone has to memorise. */
   skills?: readonly Skill[];
@@ -188,6 +195,9 @@ export default function Composer({
   onHowFar,
   onComposerPopoverOpenChange,
   skills = [],
+  workflows,
+  waiting,
+  onWait,
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -203,6 +213,7 @@ export default function Composer({
    *  message, because a box with no words beside it is half a thought. */
   const [drawn, setDrawn] = useState<string | null>(null);
   const [mention, setMention] = useState<{ from: number; query: string } | null>(null);
+  const [command, setCommand] = useState<{ query: string } | null>(null);
 
   /* A picture in the box that the model in front cannot read. Worked out here
      rather than after a turn is spent: the provider's own refusal arrives as a
@@ -231,6 +242,24 @@ export default function Composer({
 
   const attachedRef = useRef(attachments);
   attachedRef.current = attachments;
+
+  /* A slash at the start of a message is a command. Only at the start: a slash
+     inside a sentence is a slash, and a menu that opens on one is a menu that
+     opens while somebody is writing a path. */
+  const commands = command === null
+    ? []
+    : (workflows ?? [])
+        .filter((one) => `${one.name} ${one.description}`.toLowerCase().includes(command.query.toLowerCase()))
+        .slice(0, 6);
+
+  const chooseCommand = (workflow: Workflow): void => {
+    const after = value.slice(areaRef.current?.selectionStart ?? value.length);
+    const next = `${workflow.command} ${after}`;
+    setValue(next);
+    setCaret(workflow.command.length + 1);
+    setCommand(null);
+    setMentionAt(0);
+  };
 
   const mentions = mention === null ? [] : skills
     .filter((skill) => `${skill.name} ${skill.handle}`.toLowerCase().includes(mention.query.toLowerCase()))
@@ -353,6 +382,28 @@ export default function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (command !== null && commands.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionAt((was) =>
+          e.key === 'ArrowDown'
+            ? (was + 1) % commands.length
+            : (was + commands.length - 1) % commands.length,
+        );
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const chosen = commands[mentionAt] ?? commands[0];
+        if (chosen !== undefined) chooseCommand(chosen);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setCommand(null);
+        return;
+      }
+    }
     if (mention !== null && mentions.length > 0) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -607,7 +658,7 @@ export default function Composer({
         value={value}
         rows={1}
         autoFocus={autoFocus}
-        placeholder={placeholder ?? 'Describe what you want — or paste a screenshot of it'}
+        placeholder={placeholder ?? 'Describe what you want, or paste a screenshot of it'}
         onChange={(e) => {
           // Typing is taking over: stop listening rather than let the next
           // thing heard land on top of what was just written.
@@ -618,6 +669,10 @@ export default function Composer({
           const match = before.match(/(?:^|\s)@([a-z0-9-]*)$/i);
           const query = match?.[1];
           setMention(query === undefined ? null : { from: cursor - (query.length + 1), query });
+          // The same characters a command can be named with, so the menu never
+          // opens on something that could not match anything.
+          const slash = before.match(/^\/([a-z0-9-]*)$/i);
+          setCommand(slash === null ? null : { query: slash[1] ?? '' });
           setMentionAt(0);
           resize(e.target);
         }}
@@ -625,6 +680,29 @@ export default function Composer({
         onPaste={onPaste}
         aria-label="What do you want to make?"
       />
+
+      {command === null || commands.length === 0 ? null : (
+        <div className="composer__skills" role="listbox" aria-label="Ways of working">
+          <p><span>/</span> A way of working this project has written down</p>
+          {commands.map((one, index) => (
+            <button
+              key={one.command}
+              type="button"
+              role="option"
+              aria-selected={index === mentionAt}
+              className={index === mentionAt ? 'composer__skill--active' : ''}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => chooseCommand(one)}
+            >
+              <span>
+                <strong>{one.command}</strong>
+                <small>{one.description}</small>
+              </span>
+              <em>{one.source === 'project' ? 'This project' : 'Your computer'}</em>
+            </button>
+          ))}
+        </div>
+      )}
 
       {mention === null || mentions.length === 0 ? null : (
         <div className="composer__skills" role="listbox" aria-label="Skills">
@@ -722,7 +800,7 @@ export default function Composer({
           {listening
             ? SAYING.listening
             : attachments.length > 0
-              ? 'I can see this — say what you want changed.'
+              ? 'I can see this. Say what you want changed.'
               : ''}
         </span>
 
@@ -745,6 +823,18 @@ export default function Composer({
             Words in the box while a turn is running are a second thought, and a
             second thought is a choice: queue it behind the run, or interrupt
             with it. Two quiet buttons, asked once, never guessed. */}
+        {/* Wait, beside Stop and never instead of it. Stop ends the run; this
+            holds it between steps so the machine is yours for a moment, and
+            letting go picks up from wherever things now are. */}
+        {stopping && onWait !== undefined ? (
+          <button
+            type="button"
+            className={`composer__wait ${waiting === true ? 'composer__wait--on' : ''}`}
+            onClick={() => onWait(waiting !== true)}
+          >
+            {waiting === true ? 'Go on' : 'Wait'}
+          </button>
+        ) : null}
         {busy && onQueue !== undefined && value.trim() !== '' ? (
           <span className="composer__queue">
             <button

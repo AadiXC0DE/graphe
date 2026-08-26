@@ -37,20 +37,20 @@ export type Handover = {
  *  can be read whole and swept. */
 export const handoverWords = {
   /** The control itself. */
-  label: 'Hand it to your team',
-  hint: 'Puts the work, the pictures and a written summary where your team already keeps this project.',
+  label: 'Open a pull request',
+  hint: 'Branches off your work, pushes it, and opens a PR with the summary and the screenshots in the body.',
   /** Said before anything leaves. */
   aboutTo:
-    'This is the only part of Graphe that sends anything off this computer. Your work, the pictures of it and the description below go to the place your team already keeps this project.',
-  working: 'Writing it up and sending it over…',
-  sent: 'Sent. Your team can pick it up from here.',
-  /** The work made it; the write-up did not. Said exactly, rather than as
-   *  either "it worked" or "it did not". */
+    'This is the only part of Graphe that pushes anything off this computer. Your commits, the screenshots and the description below go to the remote this project already has.',
+  working: 'Pushing and opening the pull request…',
+  sent: 'Pull request opened.',
+  /** The push landed; the body did not. Said exactly, rather than as either
+   *  "it worked" or "it did not". */
   sentWithoutWriteUp:
-    'The work is over with your team and they can pick it up. I could not put the write-up alongside it, so that part is still only here.',
+    'The branch is pushed and the pull request is open. I could not write the description into it, so that part is still only here.',
   nothingToHandOver:
-    'There is nothing to send yet. Ask me for a change first, and this will have something to send.',
-  couldNotSend: 'I could not send it, so nothing has left this computer.',
+    'Nothing to open a pull request with yet. Ask me for a change first.',
+  couldNotSend: 'I could not push, so nothing has left this computer.',
   /** The picture problem, said honestly rather than shipped broken. Only said
    *  when there are pictures to say it about. */
   picturesTravel:
@@ -229,7 +229,7 @@ function shownPictures(pictures: Pictures, title: string): string {
     return [
       '| Before | After |',
       '| --- | --- |',
-      `| <img src="${before}" alt="${cell(title)} — before" width="420"> | <img src="${after}" alt="${cell(title)} — after" width="420"> |`,
+      `| <img src="${before}" alt="${cell(title)} (before)" width="420"> | <img src="${after}" alt="${cell(title)} (after)" width="420"> |`,
     ].join('\n');
   }
   const only = after ?? before;

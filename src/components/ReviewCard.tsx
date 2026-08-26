@@ -89,7 +89,7 @@ export default function ReviewCard({ verdict, asked, onFix, onPost }: Props) {
         </button>
       )}
       {verdict.kind !== "ships" && asked && (
-        <p className="review__ondone">On it — fixing the blocking findings now.</p>
+        <p className="review__ondone">On it. Fixing the blocking findings now.</p>
       )}
       {verdict.pull !== undefined && onPost !== undefined && posting !== "done" && (
         <button

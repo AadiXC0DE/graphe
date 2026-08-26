@@ -123,6 +123,51 @@ export function realWords(call: ToolCall): string {
       return where === null ? name : `${name} · ${trimmed(where)}`;
     }
 
+    /* A browser of its own, and this computer's own screen. The real thing
+       behind these is a program on the machine, so both the command and what it
+       was aimed at are named here where names are allowed. */
+    case 'browser_open': {
+      const url = textField(input, ['url']);
+      return url === null ? 'agent-browser open' : `agent-browser open ${trimmed(url)}`;
+    }
+
+    case 'browser_click':
+    case 'browser_type': {
+      const target = textField(input, ['target']);
+      const verb = name === 'browser_click' ? 'click' : 'fill';
+      return target === null ? `agent-browser ${verb}` : `agent-browser ${verb} ${trimmed(target)}`;
+    }
+
+    case 'browser_read':
+      return 'agent-browser snapshot';
+    case 'browser_scroll':
+      return 'agent-browser scroll';
+    case 'browser_picture':
+      return 'agent-browser screenshot';
+    case 'browser_trouble':
+      return 'agent-browser console && agent-browser errors';
+    case 'browser_steps':
+      return 'agent-browser batch --bail';
+    case 'browser_close':
+      return 'agent-browser close';
+    case 'browser_trace':
+      return 'agent-browser network har stop';
+
+    case 'desktop_picture':
+      return 'screencapture -x -t jpg';
+    case 'desktop_read': {
+      const app = textField(input, ['app']);
+      return `osascript · System Events: named elements of ${app === null ? 'the app in front' : trimmed(app)}`;
+    }
+    case 'desktop_apps':
+      return 'osascript · System Events: name of every application process';
+    case 'desktop_do':
+      return 'osascript · System Events: click / keystroke / key code';
+    case 'desktop_open': {
+      const app = textField(input, ['app']);
+      return app === null ? 'open -a' : `open -a ${trimmed(app)}`;
+    }
+
     default: {
       // A tool we have no translation for. The name is the real name, and the
       // first string argument is usually the interesting one — but we are
@@ -171,7 +216,7 @@ export const behind = {
     'Putting back restores the project to that saved moment. It is kept as its own moment, so it can be undone too.',
   /** Beside a version somebody named. */
   naming:
-    'A name you type is kept with that saved moment — nothing else about the moment changes.',
+    'A name you type is kept with that saved moment. Nothing else about the moment changes.',
   /** In the corner, beside the money. */
   spend:
     'Counted from what your account was actually charged, converted at the moment it is read. Graphe takes no cut and never sees the number.',
@@ -197,7 +242,7 @@ export const reallyRuns = {
   handOver:
     'Runs gh: makes a branch off your work, pushes it, and opens a pull request with the write-up and the pictures in it.',
   online:
-    'Runs vercel — fetched with npx if this computer has not got it — and gives you back the address it returns.',
+    'Runs vercel (fetched with npx if this computer has not got it) and gives you back the address it returns.',
   page: 'Writes one .html file wherever you choose. Nothing is uploaded and nothing is installed.',
 } as const;
 

@@ -95,16 +95,6 @@
   background: var(--accent);
 }
 
-/** The real word beside the plain one. Lower case and unspaced against an
- *  upper-case heading, so it reads as a gloss rather than part of the name. */
-.overview__plainly {
-  margin-left: var(--space-2);
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  opacity: 0.75;
-}
-
 .overview__title {
   margin: 0 0 var(--space-2);
   font-size: var(--text-xs);
@@ -591,4 +581,138 @@
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--text-faint);
+}
+
+/* A folder that holds several projects, one row each.
+
+   The row is the project: what it is called, where it stands, and the same
+   line-of-work control a folder with one project gets — so nothing here is a
+   second way of doing something that already has a way. */
+
+.projects {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.projects__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.projects__name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.projects__state {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The control and the two quiet actions share a line: the line of work is the
+   wide half, and what you can do to the project sits at the end of it. */
+.projects__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.projects__row > .lines {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.projects__acts {
+  flex: none;
+  display: flex;
+  gap: var(--space-1);
+  padding-top: 1px;
+}
+
+.projects__act {
+  border: 1px solid transparent;
+  background: none;
+  border-radius: var(--radius-sm);
+  padding: 3px var(--space-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .projects__act:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border);
+  }
+}
+
+.projects__act:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.projects__act:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Whose history is in front. Two or three names, so a row of them reads faster
+   than a menu that has to be opened to say what is in it. */
+.projects__strip {
+  display: flex;
+  flex-wrap: wrap;
+  /* Room of its own above: with three long names the row wraps, and the top
+     one sat against the band's edge. */
+  gap: var(--space-1) var(--space-1);
+  margin: var(--space-3) 0;
+}
+
+.projects__pick {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm);
+  padding: 3px var(--space-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-hover),
+    background var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .projects__pick:hover {
+    color: var(--text);
+  }
+}
+
+.projects__pick:active {
+  transform: scale(0.97);
+}
+
+.projects__pick--on {
+  background: var(--bg-sunken);
+  border-color: var(--border-strong);
+  color: var(--text);
 }

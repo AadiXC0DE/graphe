@@ -359,7 +359,7 @@ export default function Sidebar({
                   type="button"
                   className="shelf__row shelf__row--quiet shelf__more"
                   onClick={onAsk}
-                  title="Find anything — ⌘K"
+                  title="Find anything (⌘K)"
                 >
                   <span className="shelf__moremark" aria-hidden="true">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -375,7 +375,7 @@ export default function Sidebar({
                   type="button"
                   className="shelf__row shelf__row--quiet shelf__more"
                   onClick={onDesign}
-                  title="Colour, type and spacing — ⌘D"
+                  title="Colour, type and spacing (⌘D)"
                 >
                   <span className="shelf__moremark" aria-hidden="true">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -541,7 +541,7 @@ export default function Sidebar({
               className="shelf__act"
               onClick={onAsk}
               aria-label="Find anything"
-              data-tip="Find anything — ⌘K"
+              data-tip="Find anything (⌘K)"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <circle
@@ -566,7 +566,7 @@ export default function Sidebar({
               className="shelf__act"
               onClick={onDesign}
               aria-label="How this project looks"
-              data-tip="Design — ⌘D"
+              data-tip="Design (⌘D)"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path

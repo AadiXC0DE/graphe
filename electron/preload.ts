@@ -59,6 +59,7 @@ import {
   type Room,
   type SideOfWork,
   type Skill,
+  type AlwaysDoes,
   type Workflow,
   type BuildPlan,
   type BuildAdvance,
@@ -114,7 +115,15 @@ function named(where?: Where): Where | undefined {
   if (typeof where.conversation === 'string' && where.conversation.trim() !== '') {
     asked.conversation = where.conversation;
   }
-  return asked.project === undefined && asked.conversation === undefined ? undefined : asked;
+  // Which project inside a folder that holds several. Sent as written; the
+  // shell matches it against the children it actually found, so a name that
+  // names nothing means the folder itself and never a folder elsewhere.
+  if (typeof where.repo === 'string' && where.repo.trim() !== '') {
+    asked.repo = where.repo;
+  }
+  return asked.project === undefined && asked.conversation === undefined && asked.repo === undefined
+    ? undefined
+    : asked;
 }
 
 const api: GrapheApi = {
@@ -156,6 +165,13 @@ const api: GrapheApi = {
 
   stop(where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.stop, named(where)) as Promise<Result<null>>;
+  },
+
+  waitForMe(on: boolean, where?: Where): Promise<Result<null>> {
+    if (typeof on !== 'boolean') {
+      return Promise.resolve(refuse<null>('I could not tell whether that was on or off.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.waitForMe, on, named(where)) as Promise<Result<null>>;
   },
 
   steer(text: string, where?: Where): Promise<Result<null>> {
@@ -316,6 +332,23 @@ const api: GrapheApi = {
   skillText(id: string, where?: Where): Promise<Result<string>> {
     if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<string>('I could not tell which skill to open.'));
     return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
+  },
+
+  watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>> {
+    if (typeof on !== 'boolean') {
+      return Promise.resolve(refuse<boolean>('I could not tell whether that was on or off.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.watchBrowser, on, named(where)) as Promise<Result<boolean>>;
+  },
+
+  onBrowserFrame(listener: (frame: { project: string; bytes: string }) => void): () => void {
+    const hear = (_event: unknown, frame: { project: string; bytes: string }): void => listener(frame);
+    ipcRenderer.on(CHANNEL.browserFrame, hear);
+    return () => ipcRenderer.removeListener(CHANNEL.browserFrame, hear);
+  },
+
+  alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>> {
+    return ipcRenderer.invoke(CHANNEL.alwaysDoes, named(where)) as Promise<Result<AlwaysDoes>>;
   },
 
   workflows(where?: Where): Promise<Result<readonly Workflow[]>> {
@@ -753,6 +786,13 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
     }
     return ipcRenderer.invoke(CHANNEL.setHoldBack, on, named(where)) as Promise<Result<Preferences>>;
+  },
+
+  setKeepLogins(on: boolean, where?: Where): Promise<Result<Preferences>> {
+    if (typeof on !== 'boolean') {
+      return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setKeepLogins, on, named(where)) as Promise<Result<Preferences>>;
   },
 
   setTheme(theme: string): Promise<Result<Preferences>> {

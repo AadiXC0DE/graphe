@@ -202,7 +202,7 @@ export function sessionSummary(summary: SessionSummary, voice: Voice = {}): Summ
     summary.retry.minor === 0
       ? 'Nothing went on attempts that didn’t work this time.'
       : summary.largestRetry
-        ? `${amount(summary.retry, voice)} on attempts that didn’t work — mostly me retrying ${midSentence(summary.largestRetry.label)}`
+        ? `${amount(summary.retry, voice)} on attempts that didn’t work, mostly me retrying ${midSentence(summary.largestRetry.label)}`
         : `${amount(summary.retry, voice)} on attempts that didn’t work`;
 
   return { headline, work, retry, lines: [headline, work, retry] };
@@ -216,13 +216,13 @@ export const nothingSpentYet =
 /** Shown beside the split, once, so the number is never mistaken for a charge
  *  from us. It is also the reason we can show it at all. */
 export const retryHonesty =
-  'Attempts that didn’t work are on me, and we take no cut of any of it — you pay your own account directly.';
+  'Attempts that didn’t work are on me, and we take no cut of any of it: you pay your own account directly.';
 
 /* ------------------------------------------------------------- the ceiling */
 
 export function limitNudge(status: LimitStatus, voice: Voice = {}): string {
   const when = periodPhrase(status.limit.period);
-  return `You’ve used ${amount(status.spent, voice)} of the ${amount(status.limit.ceiling, voice)} you set for ${when}. Nothing changes yet — this is just so it isn’t a surprise later.`;
+  return `You’ve used ${amount(status.spent, voice)} of the ${amount(status.limit.ceiling, voice)} you set for ${when}. Nothing changes yet. This is just so it isn’t a surprise later.`;
 }
 
 /** Reached, not exceeded, and nothing is abandoned to get here. */
@@ -306,7 +306,7 @@ export function choseStyle(style: 'quick' | 'careful'): string {
  *  losing what they already said. */
 export const longConversation = {
   tidying:
-    'We’ve covered a lot in here. I’ll tidy up my notes so things stay quick — nothing gets lost, and you can still scroll back through everything.',
+    'We’ve covered a lot in here. I’ll tidy up my notes so things stay quick. Nothing gets lost, and you can still scroll back through everything.',
   stayedAsIs:
     'I kept this conversation as it is for now. Nothing was changed or lost.',
   newThing: {
@@ -352,7 +352,7 @@ export function stuckAfterAttempts(
 ): Prompt {
   return {
     title: 'I’m going round in circles',
-    body: `I’ve tried ${midSentence(label)} ${count(attempts)} times and it still isn’t right. I’ve stopped rather than keep spending on it — that’s ${amount(spentSoFar, voice)} so far. Everything is saved as it was.`,
+    body: `I’ve tried ${midSentence(label)} ${count(attempts)} times and it still isn’t right. I’ve stopped rather than keep spending on it, and that’s ${amount(spentSoFar, voice)} so far. Everything is saved as it was.`,
     confirm: 'Try a different way',
     alternative: 'Let me take a look',
   };

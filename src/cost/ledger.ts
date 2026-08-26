@@ -61,7 +61,7 @@ export class Ledger {
       throw new TypeError(`This ledger is in ${this.currency}, not ${draft.amount.currency}`);
     }
     if (draft.amount.minor < 0) {
-      throw new RangeError('Spend cannot be negative — record a refund as its own ledger');
+      throw new RangeError('Spend cannot be negative; record a refund as its own ledger');
     }
     const entry: SpendEntry = {
       id: draft.id ?? newId(),

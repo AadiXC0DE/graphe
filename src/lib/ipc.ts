@@ -113,13 +113,14 @@ export function whereIn(args: readonly unknown[]): Where {
   const where: Where = {};
   const project = fields['project'];
   const conversation = fields['conversation'];
-  // A child name is a folder name, not a path: flattened to its safe
-  // characters, because it is joined onto the project folder by the shell and
-  // never allowed to point somewhere else.
+  // A child name is a folder name, not a path. One with a separator or a
+  // control character in it is refused rather than flattened: taking the slash
+  // out of "a/b" makes "ab", which is a different project that might exist.
+  // Spaces stay, because "my app" is a folder somebody really has.
   const repo = typeof fields['repo'] === 'string' ? fields['repo'].trim() : '';
-  if (repo !== '') {
-    const clean = repo.slice(0, 80).replace(/[^a-zA-Z0-9._-]/g, '');
-    if (clean !== '') where.repo = clean;
+  // eslint-disable-next-line no-control-regex
+  if (repo !== '' && repo.length <= 80 && !/[/\\\u0000-\u001f\u007f]/.test(repo)) {
+    where.repo = repo;
   }
   if (typeof project === 'string' && project.trim() !== '') where.project = project;
   if (typeof conversation === 'string' && conversation.trim() !== '') {
@@ -453,6 +454,9 @@ export type Preferences = {
    *  path. Per project, so saying “ask me first” in one folder never changes
    *  another. Absent is off — read it through `holdsBack`. */
   heldBack: Readonly<Record<string, boolean>>;
+  /** Whether each project's browser keeps its logins between sittings, keyed by
+   *  its path. Absent is off — read it through `keepsLogins`. */
+  keptLogins: Readonly<Record<string, boolean>>;
   /** How much a picture has to move before work is stopped, by id, or null for
    *  the middle one. */
   howMuch: string | null;
@@ -498,6 +502,8 @@ export type Landing = {
   held: Held | null;
   /** True when new work is checked before it lands. */
   holdBack: boolean;
+  /** Whether the browser this project drives keeps its logins. */
+  keepLogins: boolean;
   /** Can the work go all the way to where the team keeps this project? */
   canHandOver: boolean;
   handOverSays: string;
@@ -935,6 +941,16 @@ export type RepoOverview = {
   git: GitSnapshot;
 };
 
+/** What a project does without being asked, as the window shows it. */
+export type AlwaysDoes = {
+  /** The file it is all written in, so somebody can open it. */
+  file: string;
+  /** Every one, with the moment it runs at said in plain words. */
+  rows: readonly { when: string; name: string; run: string }[];
+  /** Present when the file itself will not read, so none of them are running. */
+  trouble: string | null;
+};
+
 /** One thing a turn produced that a designer would look at. */
 export type Artifact = {
   path: string;
@@ -1054,7 +1070,7 @@ export const swapWords = {
   busy: {
     what: 'Let me finish this thought first.',
     because:
-      'I am part-way through answering. Moving to another conversation now would lose it — stop me if you would rather go anyway.',
+      'I am part-way through answering. Moving to another conversation now would lose it. Stop me if you would rather go anyway.',
     actionLabel: 'Got it',
   },
   unreadable: {
@@ -1069,7 +1085,7 @@ export const swapWords = {
  *  the view goes: it is still written down, and opening it again carries on. */
 export const setDownWords = {
   said:
-    'I have put this conversation down to make room for the ones you moved to. Nothing is lost — open it again and I will pick up where we left off.',
+    'I have put this conversation down to make room for the ones you moved to. Nothing is lost. Open it again and I will pick up where we left off.',
 } as const;
 
 /**
@@ -1143,6 +1159,7 @@ export const CHANNEL = {
   openProject: 'graphe:open-project',
   prompt: 'graphe:prompt',
   stop: 'graphe:stop',
+  waitForMe: 'graphe:wait-for-me',
   steer: 'graphe:steer',
   answer: 'graphe:answer',
   answerAsked: 'graphe:answer-asked',
@@ -1188,6 +1205,9 @@ export const CHANNEL = {
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
   workflows: 'graphe:workflows',
+  alwaysDoes: 'graphe:always-does',
+  watchBrowser: 'graphe:watch-browser',
+  browserFrame: 'graphe:browser-frame',
   branchSwitch: 'graphe:branch-switch',
   branchCreate: 'graphe:branch-create',
   worktreeLand: 'graphe:worktree-land',
@@ -1233,6 +1253,7 @@ export const CHANNEL = {
   openLink: 'graphe:open-link',
   landing: 'graphe:landing',
   setHoldBack: 'graphe:set-hold-back',
+  setKeepLogins: 'graphe:set-keep-logins',
   setTheme: 'graphe:set-theme',
   setHowMuch: 'graphe:set-how-much',
   decideOnWork: 'graphe:decide-on-work',
@@ -1294,6 +1315,10 @@ export type GrapheApi = {
   ): Promise<Result<null>>;
   /** Stop what it is doing. Open questions are answered no. */
   stop(where?: Where): Promise<Result<null>>;
+  /** Hold the run between steps so you can take the machine back, or let it go
+   *  on. Not stopping: the turn stays where it is and picks up from wherever
+   *  things are when it is let go. */
+  waitForMe(on: boolean, where?: Where): Promise<Result<null>>;
   /** Put a message into the turn already in flight, without stopping it. The
    *  agent hears it between tool calls and carries on — the "insert into the
    *  loop" move. */
@@ -1375,6 +1400,14 @@ export type GrapheApi = {
   skills(where?: Where): Promise<Result<readonly Skill[]>>;
   /** The `/word` ways of working this project can ask for. */
   workflows(where?: Where): Promise<Result<readonly Workflow[]>>;
+  /** The commands this project runs without being asked, and where they are
+   *  written down. Empty for a project that has written none. */
+  alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>>;
+  /** Watch what the browser is doing, a picture at a time, or stop. The
+   *  pictures arrive on `onBrowserFrame`. */
+  watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>>;
+  /** Each picture of the browser, while somebody is watching one. */
+  onBrowserFrame(listener: (frame: { project: string; bytes: string }) => void): () => void;
   /** Start a document-to-build: name a document and an optional instruction,
    *  and the shell turns it into a plan. */
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>>;
@@ -1548,6 +1581,9 @@ export type GrapheApi = {
   landing(where?: Where): Promise<Result<Landing>>;
   /** Check new work in a copy before it reaches the files. Sticky. */
   setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>>;
+  /** Keep this project's browser signed in between sittings, or stop keeping
+   *  it. Off keeps nothing and starts every browser clean. */
+  setKeepLogins(on: boolean, where?: Where): Promise<Result<Preferences>>;
   setTheme(theme: Theme): Promise<Result<Preferences>>;
   /** Move the line a picture has to cross before the work is stopped. One of
    *  `HOW_MUCH` in `src/design/gate.ts`. Sticky. */

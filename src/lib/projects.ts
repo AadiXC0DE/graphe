@@ -32,7 +32,7 @@ import type { Task, TaskObservation } from '../cost/estimate';
 import type { AgentNotice, Overview, PutBack, SavedVersion } from './ipc';
 import { applySpend, type SpendView } from './spend';
 import { applyEvent, type Turn } from './thread';
-import { TASK_LABEL, WEB_SEARCH_LABEL } from './describe';
+import { readsAFile, TASK_LABEL, WEB_SEARCH_LABEL } from './describe';
 
 /** One thing the agent was given to work from — a screenshot it was sent, or a
  *  design file its link named. Recorded in the overview the moment it is sent,
@@ -99,6 +99,13 @@ export type Desk = {
   overview: Overview | null;
   /** The timeline, newest first. Empty until the shell has been asked. */
   versions: readonly SavedVersion[];
+  /** Each project's own timeline, by its folder name, when this folder holds
+   *  several projects rather than being one. Empty every ordinary day. */
+  repoVersions: Readonly<Record<string, readonly SavedVersion[]>>;
+  /** Each project's own stylesheet, by folder name. A folder holding several
+   *  projects has no stylesheet of its own, so the design view reads one of
+   *  these instead of finding nothing. */
+  repoStyles: Readonly<Record<string, Overview['styles']>>;
   /** The offer to undo the last "put back", while it is still on offer. */
   putBack: PutBack | null;
 
@@ -222,6 +229,8 @@ function blankDesk(path: string, name: string): Desk {
     references: [],
     overview: null,
     versions: [],
+    repoVersions: {},
+    repoStyles: {},
     putBack: null,
     jobs: [],
     doing: null,
@@ -504,7 +513,7 @@ export function nowDoing(turns: readonly Turn[], at: number = Date.now()): NowVi
   let atWork = false;
   for (const turn of turns) {
     if (turn.kind !== 'did') continue;
-    if (turn.label.startsWith('Reading') && turn.state !== 'failed') filesRead += 1;
+    if (readsAFile(turn.label) && turn.state !== 'failed') filesRead += 1;
     // A helper stays on the board once it has come back. What it was asked and
     // what it found are the most interesting things in the whole sitting, and
     // they should not vanish the moment it finishes.

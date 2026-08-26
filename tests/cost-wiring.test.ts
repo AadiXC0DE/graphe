@@ -528,7 +528,7 @@ describe('C-01 — the language audit, over the new strings', () => {
     expect(lines.headline).toBe('Today: $0.06');
     expect(lines.work).toBe('$0.04 building what you asked for');
     expect(lines.retry).toBe(
-      '$0.02 on attempts that didn’t work — mostly me retrying changing contact.html',
+      '$0.02 on attempts that didn’t work, mostly me retrying changing contact.html',
     );
     // Money, in money. Not a fraction of a cent anywhere near a screen.
     expect(toMajor(summary!.total)).toBeCloseTo(0.06, 10);

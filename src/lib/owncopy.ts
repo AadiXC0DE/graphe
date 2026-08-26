@@ -14,10 +14,10 @@ import type { Where } from './ipc';
 
 export const OWN_COPY_WORDS = {
   /** Said on the row, so the two controls under it are not a surprise. */
-  says: 'This one works on its own copy of your project.',
-  bring: 'Bring the work back',
+  says: 'This conversation works in its own worktree.',
+  bring: 'Merge the worktree back',
   bringHint: 'Put everything this conversation wrote into your project, and close its copy.',
-  away: 'Throw the work away',
+  away: 'Delete the worktree',
   awayHint: 'Delete everything this conversation wrote.',
   sure: 'Everything this conversation wrote goes with it, and there is no getting it back.',
   yes: 'Yes, throw it away',

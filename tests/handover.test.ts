@@ -377,27 +377,34 @@ describe('HO-05 a key stops it going anywhere', () => {
 /* ========================================================================== */
 
 describe('HO-06 the words in front of somebody', () => {
-  const retired =
-    /\b(git|commit(s|ted|ting)?|branch(es)?|merg(e|es|ed|ing)|push(es|ed|ing)?|pull request|PR|repo(sitory)?|worktree|stag(e|ed|ing)|rebas(e|ed|ing)|checkout|deploy(s|ed|ing|ment)?|token|API|session)\b/i;
+  /* Naming the operation is the point of this surface — somebody pressing it is
+     opening a pull request and wants to read that. What stays out is the layer
+     below it: the plumbing nobody pressed a button to reach. */
+  const plumbing = /\b(regex|json|stdout|stderr|exit code|refspec|HEAD|SHA|blob|worktree|oauth|bearer)\b/i;
 
-  it('says nothing about the machinery', () => {
+  it('says nothing about the plumbing under the operation', () => {
     for (const sentence of Object.values(handoverWords)) {
-      expect(sentence).not.toMatch(retired);
+      expect(sentence).not.toMatch(plumbing);
     }
     for (const sentence of Object.values(toolWords)) {
-      expect(sentence).not.toMatch(retired);
+      expect(sentence).not.toMatch(plumbing);
+    }
+  });
+
+  it('names the operation it performs, rather than talking around it', () => {
+    expect(handoverWords.label).toMatch(/pull request/i);
+    for (const vague of ['hand it to your team', 'send it over', 'where your team keeps']) {
+      expect(handoverWords.label.toLowerCase()).not.toContain(vague);
     }
   });
 
   it('would notice a violation if one were written', () => {
     for (const bad of [
-      'Opened a pull request',
-      'Pushed the branch',
-      'Created a PR for review',
-      'Deployed to production',
-      'Your API token is missing',
+      'The refspec was rejected',
+      'Check stderr for the exit code',
+      'Your oauth bearer is missing',
     ]) {
-      expect(bad).toMatch(retired);
+      expect(bad).toMatch(plumbing);
     }
   });
 

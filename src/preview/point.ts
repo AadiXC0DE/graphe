@@ -427,7 +427,7 @@ export function asksAbout(pointed: Pointed): string {
     (trace): trace is Extract<Trace, { file: string; line: number }> =>
       (trace.how === 'stamp' || trace.how === 'stack') && typeof trace.file === 'string',
   );
-  const where = written === undefined ? '' : ` — ${written.file}:${String(written.line)}`;
+  const where = written === undefined ? '' : `, in ${written.file}:${String(written.line)}`;
   const about = `About ${what.charAt(0).toLowerCase()}${what.slice(1)}${where}`;
   return said === '' ? about : `${said}\n\n${about}`;
 }

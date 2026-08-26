@@ -120,7 +120,7 @@ export default function ConnectModal({
             <h2 className="connectmodal__title">Who should I think with?</h2>
             <p className="connectmodal__sub">
               One account, or a key from a service you already pay for. Open any
-              of them to see its models — or change model later from the chip
+              of them to see its models, or change model later from the chip
               beside the box you type in.
             </p>
           </div>
@@ -354,7 +354,7 @@ export default function ConnectModal({
           )}
           {connected ? null : (
             <span className="connectmodal__fineprint">
-              Nothing connected yet — this window stays up until one is.
+              Nothing connected yet. This window stays up until one is.
             </span>
           )}
         </footer>
@@ -397,7 +397,7 @@ function StepLine({
       <div className="connectmodal__step">
         <p className="connectmodal__stepmessage">
           I opened your browser{host === null ? '' : <> for <span className="connectmodal__host">{host}</span></>}. Sign in
-          there — this window will notice when you’re done. If it doesn’t, paste
+          there. This window will notice when you’re done. If it doesn’t, paste
           the address you end up on into the box that appears.
         </p>
       </div>
@@ -408,7 +408,7 @@ function StepLine({
     return (
       <div className="connectmodal__step">
         <p className="connectmodal__stepmessage">
-          This provider wants a code. It should have opened its site — enter
+          This provider wants a code. It should have opened its site. Enter
           this there:
         </p>
         <code className="connectmodal__usercode">{step.userCode}</code>

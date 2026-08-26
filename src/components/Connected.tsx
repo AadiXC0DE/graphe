@@ -15,10 +15,10 @@ type Props = {
 
 export const SAYS = {
   heading: 'Other tools',
-  what: 'Give me a way into a tool you already use — the Figma file you are drawing in, a real browser, the code your editor understands — so I work from the real thing instead of my reading of a picture of it.',
+  what: 'Give me a way into a tool you already use (the Figma file you are drawing in, a real browser, the code your editor understands) so I work from the real thing instead of my reading of a picture of it.',
   how: 'Each one is an MCP server: a small program on this computer, or an address something already answers on. Nothing starts until I ask it for something.',
   none: 'Nothing is connected to this project yet.',
-  offers: 'Ready to connect — we have checked these',
+  offers: 'Ready to connect (we have checked these)',
   offersNote: 'One press each, and nothing else to fill in.',
   hasSome: 'Connected to this project',
   connect: 'Connect',

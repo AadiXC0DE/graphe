@@ -43,6 +43,10 @@
   flex: none;
   display: flex;
   align-items: flex-start;
+  /* With the panel open the room left for this bar is narrow, and four groups
+     that refuse to shrink spilled over the edge of the sheet. */
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
   gap: var(--space-4);
   /* Its first line sits on the same band as the conversation's and the
      overview's, the way every other region here does. */
@@ -56,10 +60,17 @@
 }
 
 .sheet__titles {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.sheet__titles > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sheet__title {
@@ -80,7 +91,7 @@
 /* One row, always. Wrapping turned the head into a column of chips on a narrow
    window and pushed the work itself off the bottom of the screen. */
 .sheet__chips {
-  flex: 1 1 auto;
+  flex: 1 1 0%;
   min-width: 0;
   display: flex;
   align-items: center;

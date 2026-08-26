@@ -1,4 +1,4 @@
-import { type ReactElement, useMemo, useState } from 'react';
+import { type ReactElement, useEffect, useMemo, useState } from 'react';
 import Away from './Away';
 import CostMeter from './CostMeter';
 import { SAYS as DESIGN, type DesignPart } from './DesignView';
@@ -32,19 +32,22 @@ import './Overview.css';
 /** Words for the folder that holds several projects. Named for what somebody
  *  sees — the projects, and where each stands — not for how they are found. */
 const SEVERAL = {
-  heading: 'Holds several projects',
-  quietly: 'Open a project directly to switch its lines of work, save versions, or see it running.',
+  heading: 'The projects',
   changed: 'changed',
-  noLine: 'no line yet',
+  save: 'Commit',
+  see: 'Preview',
+  /** The strip above the timeline, when there is more than one timeline. */
+  whose: 'Whose history',
 } as const;
 
-/** One line on where a project stands: its line of work, then only what is
- *  worth knowing beyond that. */
-function repoState(git: RepoOverview['git']): string {
-  const parts = [git.branch ?? SEVERAL.noLine];
+/** Where a project stands, beyond the line of work its own control already
+ *  names. Empty when there is nothing to say — a project in step says it by
+ *  saying nothing, and a row with a word on the end of it reads as a warning. */
+export function repoState(git: RepoOverview['git']): string {
+  const parts: string[] = [];
   if (git.ahead > 0) parts.push(`${String(git.ahead)} ahead`);
   if (git.behind > 0) parts.push(`${String(git.behind)} behind`);
-  if (git.dirty && git.ahead === 0) parts.push(SEVERAL.changed);
+  if (git.dirty) parts.push(SEVERAL.changed);
   return parts.join(' · ');
 }
 
@@ -56,6 +59,8 @@ export type OverviewView = {
   /** The projects this folder holds, when it is a folder holding several
    *  rather than one project itself. Empty the ordinary day. */
   repos: readonly RepoOverview[];
+  /** Each of those projects' own timeline, by folder name. */
+  repoVersions: Readonly<Record<string, readonly SavedVersion[]>>;
   research: readonly ResearchEntry[];
   references: readonly Reference[];
   versions: readonly SavedVersion[];
@@ -111,8 +116,11 @@ export type OverviewView = {
 
 type Props = {
   view: OverviewView;
-  onPutBack: (versionId: string) => void;
-  onName: (versionId: string, name: string) => void;
+  /** Every one of these takes the project it is about, by folder name, when
+   *  this folder holds several. Left out means the folder itself, which is
+   *  what it always meant. */
+  onPutBack: (versionId: string, repo?: string) => void;
+  onName: (versionId: string, name: string, repo?: string) => void;
   /** Keep a version at the top of the rail, or stop keeping it. */
   onKeep: (versionId: string, keep: boolean) => void;
   onDismissPutBack: () => void;
@@ -121,24 +129,28 @@ type Props = {
   onLimit: (ceiling: Money | null) => void;
   /** Save where the project stands right now, so it can be come back to. This
    is the commit: the one thing the hand can do with the changed set as a whole. */
-  onSave: () => void;
+  onSave: (repo?: string) => void;
   /** Open everything about how the project looks, at one of its bands. */
   onOpenDesign: (part: DesignPart) => void;
-  /** Open the whole history, drawn as lines. */
-  onOpenGraph: () => void;
+  /** Open the whole history, drawn as lines, for one of the projects here. */
+  onOpenGraph: (repo?: string) => void;
   /** Move the project onto another of its lines of work. */
-  onSwitchBranch: (name: string) => void;
+  onSwitchBranch: (name: string, repo?: string) => void;
   /** Start a new line of work and move the project onto it. */
-  onCreateBranch: (name: string) => void;
+  onCreateBranch: (name: string, repo?: string) => void;
+  /** Put one of the projects here in front of you, running. */
+  onSeeProject?: (repo: string) => void;
   /** Write a page of what changed, for somebody who is not you. */
-  onShare: () => void;
+  onShare: (repo?: string) => void;
+  /** Said whenever the panel changes which project it is showing. */
+  onWhose?: (name: string | null) => void;
 
   /** Let the work that is waiting in, or set it aside. */
   onDecide: (letIn: boolean) => void;
   /** Move the line the work has to cross before it is stopped. */
   onHowMuch: (id: string) => void;
   /** Write the work up and put it where a developer picks it up. */
-  onHandOver: () => void;
+  onHandOver: (repo?: string) => void;
   /** Open an address in the person's own browser. */
   onOpenLink: (address: string) => void;
   /** Open one of the files the last turn made, in the person's editor. */
@@ -231,7 +243,7 @@ const TABS: readonly { id: TabId; name: string }[] = [
  *  says what it holds, because a list of six nouns down a panel is a list
  *  nobody presses. */
 const LOOKS: readonly { id: DesignPart; note: string; trouble?: boolean }[] = [
-  { id: 'styles', note: 'Colour, type, spacing — move any of them' },
+  { id: 'styles', note: 'Colour, type, spacing (move any of them)' },
   { id: 'motion', note: 'How long things take, and how they start and stop' },
   { id: 'drift', note: 'Written by hand, a hair off one of yours', trouble: true },
   { id: 'legible', note: 'Pairings nobody can read', trouble: true },
@@ -282,7 +294,9 @@ export default function Overview({
   onOpenGraph,
   onSwitchBranch,
   onCreateBranch,
+  onSeeProject,
   onShare,
+  onWhose,
 
   onDecide,
   onHowMuch,
@@ -310,6 +324,18 @@ export default function Overview({
    *  folder-level save. The banner replaces both bands, and says where each
    *  project stands instead. */
   const several = view.repos.length >= 2;
+
+  /* Whose history the timeline is showing. The first project until somebody
+     says otherwise, and it survives a project being renamed out from under it
+     by falling back to the first again rather than to nothing. */
+  const [pickedRepo, setWhose] = useState<string | null>(null);
+  const whose = several
+    ? (view.repos.find((one) => one.name === pickedRepo) ?? view.repos[0] ?? null)
+    : null;
+
+  useEffect(() => {
+    onWhose?.(whose?.name ?? null);
+  }, [whose?.name, onWhose]);
 
   /* Which band of the panel is in front. Bands used to stack into one column
      that only got longer; now each has a home and nothing is buried. */
@@ -380,22 +406,57 @@ export default function Overview({
       {several ? (
         <section className="overview__block">
           <h2 className="overview__title">{SEVERAL.heading}</h2>
-          <ul className="overview__refs">
+          <ul className="projects">
             {view.repos.map((one) => (
-              <li key={one.path} className="overview__ref">
-                <span className="overview__repo-name">{one.name}</span>
-                <span className="overview__repo-state">{repoState(one.git)}</span>
+              <li key={one.path} className="projects__one">
+                <div className="projects__head">
+                  <span className="projects__name">{one.name}</span>
+                  <span className="projects__state">{repoState(one.git)}</span>
+                </div>
+                <div className="projects__row">
+                  <Lines
+                    branches={one.git.branches}
+                    fallback={one.git.branch}
+                    busy={busy}
+                    onSwitch={(name) => onSwitchBranch(name, one.name)}
+                    onCreate={(name) => onCreateBranch(name, one.name)}
+                  />
+                  <div className="projects__acts">
+                    {one.git.dirty ? (
+                      <button
+                        type="button"
+                        className="projects__act"
+                        // Two rows of the same two words: the name has to be in
+                        // the label, or one press cannot be told from another.
+                        aria-label={`${SEVERAL.save} ${one.name}`}
+                        onClick={() => onSave(one.name)}
+                        disabled={busy}
+                      >
+                        {SEVERAL.save}
+                      </button>
+                    ) : null}
+                    {onSeeProject === undefined ? null : (
+                      <button
+                        type="button"
+                        className="projects__act"
+                        aria-label={`${SEVERAL.see} ${one.name}`}
+                        onClick={() => onSeeProject(one.name)}
+                        disabled={busy}
+                      >
+                        {SEVERAL.see}
+                      </button>
+                    )}
+                  </div>
+                </div>
               </li>
             ))}
           </ul>
-          <p className="overview__quiet">{SEVERAL.quietly}</p>
         </section>
       ) : null}
       {git === null || several ? null : (
         <section className="overview__block">
           <h2 className="overview__title">
             {LINE_WORDS.heading}
-            <span className="overview__plainly">{LINE_WORDS.plainly}</span>
           </h2>
           <Lines
             branches={git.branches}
@@ -416,7 +477,7 @@ export default function Overview({
               : `${changedCount} changes are waiting to be saved.`}
           </p>
           <div className="overview__actions">
-            <button type="button" className="overview__do" onClick={onSave} disabled={busy}>
+            <button type="button" className="overview__do" onClick={() => onSave()} disabled={busy}>
               Commit
               <span className="overview__plainsay">Save it now</span>
             </button>
@@ -594,21 +655,38 @@ export default function Overview({
 
       <div role="tabpanel" id="overview-panel-history" aria-labelledby="overview-tab-history" hidden={tab !== 'history'}>
       <div className="overview__timeline">
+        {whose === null ? null : (
+          <div className="projects__strip" role="group" aria-label={SEVERAL.whose}>
+            {view.repos.map((one) => (
+              <button
+                key={one.path}
+                type="button"
+                className={`projects__pick ${one.name === whose.name ? 'projects__pick--on' : ''}`}
+                // One of them is the one being shown, rather than each being
+                // separately on or off.
+                aria-current={one.name === whose.name ? 'true' : undefined}
+                onClick={() => setWhose(one.name)}
+              >
+                {one.name}
+              </button>
+            ))}
+          </div>
+        )}
         <History
-          versions={versions}
+          versions={whose === null ? versions : (view.repoVersions[whose.name] ?? [])}
           pictures={pictures}
           kept={kept}
           putBack={putBack}
-          onPutBack={onPutBack}
-          onName={onName}
+          onPutBack={(versionId) => onPutBack(versionId, whose?.name)}
+          onName={(versionId, name) => onName(versionId, name, whose?.name)}
           onKeep={onKeep}
           onDismissPutBack={onDismissPutBack}
-          onOpenGraph={onOpenGraph}
-          onSwitchBranch={onSwitchBranch}
-          onCreateBranch={onCreateBranch}
+          onOpenGraph={() => onOpenGraph(whose?.name)}
+          onSwitchBranch={(name) => onSwitchBranch(name, whose?.name)}
+          onCreateBranch={(name) => onCreateBranch(name, whose?.name)}
           busy={busy}
           showMe={showMe}
-          git={git}
+          git={whose === null ? git : whose.git}
         />
       </div>
 
@@ -626,9 +704,9 @@ export default function Overview({
           howMuch={view.howMuch}
           onDecide={onDecide}
           onHowMuch={onHowMuch}
-          onUndo={onPutBack}
-          onHandOver={onHandOver}
-          onShare={onShare}
+          onUndo={(versionId) => onPutBack(versionId, whose?.name)}
+          onHandOver={() => onHandOver(whose?.name)}
+          onShare={() => onShare(whose?.name)}
           onOpenLink={onOpenLink}
         />
       </div>

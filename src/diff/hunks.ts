@@ -317,5 +317,5 @@ export const WORDS = {
   summary: (counts: Counts): string =>
     counts.files === 0
       ? NOTHING
-      : `${many(counts.files, 'file', 'files')}, ${many(counts.hunks, 'change', 'changes')} — ${String(counts.added)} lines added, ${String(counts.removed)} removed`,
+      : `${many(counts.files, 'file', 'files')}, ${many(counts.hunks, 'change', 'changes')}: ${String(counts.added)} lines added, ${String(counts.removed)} removed`,
 } as const;

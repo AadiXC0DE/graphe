@@ -128,8 +128,58 @@ export function describeCall(call: ToolCall): Described {
 
     case 'fetch':
     case 'web_fetch':
+    case 'webfetch':
     case 'browse':
       return { label: 'Reading something on the web', detail: short(textField(input, ['url'])) };
+
+    /* The page beside the conversation. */
+    case 'page_read':
+      return { label: 'Reading the page beside us' };
+    case 'page_click':
+      return { label: 'Pressing something on the page', detail: short(textField(input, ['target'])) };
+    case 'page_type':
+      return { label: 'Typing into the page', detail: short(textField(input, ['target'])) };
+    case 'page_scroll':
+      return { label: 'Moving down the page' };
+    case 'page_trouble':
+      return { label: 'Reading what the page complained about' };
+    case 'page_picture':
+      return { label: 'Taking a picture of the page' };
+
+    /* A browser of its own. */
+    case 'browser_open':
+      return { label: BROWSER_LABEL, detail: short(textField(input, ['url'])) };
+    case 'browser_read':
+      return { label: 'Reading the page in the browser' };
+    case 'browser_click':
+      return { label: 'Pressing something in the browser', detail: short(textField(input, ['target'])) };
+    case 'browser_type':
+      return { label: 'Typing into the browser', detail: short(textField(input, ['target'])) };
+    case 'browser_scroll':
+      return { label: 'Moving down the page in the browser' };
+    case 'browser_picture':
+      return { label: 'Taking a picture of the browser' };
+    case 'browser_trouble':
+      return { label: 'Reading what the browser complained about' };
+    case 'browser_steps':
+      return { label: 'Working through the page in the browser' };
+    case 'browser_close':
+      return { label: 'Closing the browser' };
+
+    case 'browser_trace':
+      return { label: 'Saving what the browser did' };
+
+    /* This computer itself. */
+    case 'desktop_picture':
+      return { label: SCREEN_LABEL, detail: short(textField(input, ['app'])) };
+    case 'desktop_read':
+      return { label: 'Reading what a program has named', detail: short(textField(input, ['app'])) };
+    case 'desktop_do':
+      return { label: 'Working your computer' };
+    case 'desktop_apps':
+      return { label: 'Looking at what is open on your computer' };
+    case 'desktop_open':
+      return { label: 'Opening something on your computer', detail: short(textField(input, ['app'])) };
 
     case 'websearch':
     case 'searchweb':
@@ -155,6 +205,49 @@ export function describeCall(call: ToolCall): Described {
     case 'askfirst':
       return { label: ASKING_LABEL };
 
+    /* Graphe's own, which appear in nearly every turn. Left unnamed they all
+       read "Working on your project", which is the one sentence that says
+       nothing — and it was every other line of a working feed. */
+    case 'step_done':
+      return { label: 'Ticking one off the list', detail: short(textField(input, ['note'])) };
+    case 'cancel_build':
+      return { label: 'Taking the checklist off the screen' };
+    case 'score_candidates':
+      return { label: 'Choosing between the answers' };
+    case 'read_map':
+      return { label: 'Reading the shape of the project' };
+    case 'read_diff':
+      return { label: 'Reading the changes so far' };
+    case 'run_checks':
+      return { label: "Running the project's own checks" };
+    case 'figma_read':
+      return { label: 'Reading the design file', detail: short(textField(input, ['url'])) };
+    case 'keep_running':
+      return { label: 'Starting something up', detail: short(textField(input, ['command'])) };
+    case 'running':
+      return { label: 'Checking what is running' };
+    case 'stop_running':
+      return { label: 'Stopping what was running' };
+    case 'set_going':
+      return { label: 'Setting work going in the background', detail: short(textField(input, ['doing'])) };
+    case 'try_ways':
+      return { label: 'Making a few versions to compare', detail: short(textField(input, ['doing'])) };
+    case 'mcp':
+      return { label: 'Using a tool you connected', detail: short(textField(input, ['tool', 'server'])) };
+    case 'connect_tool':
+      return { label: 'Connecting another tool', detail: short(textField(input, ['name', 'known'])) };
+    case 'retain':
+    case 'remember':
+      return { label: 'Making a note to remember' };
+    case 'recall':
+      return { label: 'Looking through what it remembers', detail: short(textField(input, ['query'])) };
+    case 'reflect':
+      return { label: 'Thinking over what it remembers' };
+    case 'memory_edit':
+      return { label: 'Changing a note it kept' };
+    case 'forget':
+      return { label: 'Forgetting a note' };
+
     default:
       return { label: 'Working on your project' };
   }
@@ -170,3 +263,21 @@ export const TASK_LABEL = 'Sending a piece of work to a helper';
 
 /** Above the card that holds the questions. */
 export const ASKING_LABEL = 'Asking you first';
+
+/**
+ * Whether a step whose label begins "Reading" was reading a *file*.
+ *
+ * The overview counts files read straight off the label, which was fine while
+ * the only thing anybody read was a file. A page, a screen and a web address
+ * all read too, and counting those as files told somebody their project had
+ * forty files in it when it has six.
+ */
+export function readsAFile(label: string): boolean {
+  return label.startsWith('Reading ') && !/^Reading (the|what|something) /.test(label);
+}
+
+/** The words a page opened in a browser of its own wears in the thread. */
+export const BROWSER_LABEL = 'Opening a page in the browser';
+
+/** The words a picture of this computer's screen wears in the thread. */
+export const SCREEN_LABEL = 'Taking a picture of your screen';

@@ -63,7 +63,7 @@ export default function Swatches({ swatches, onCopy }: Props) {
                 type="button"
                 className="swatches__chip swatches__chip--live"
                 onClick={() => take(swatch)}
-                title={`${swatch.name} — ${swatch.value}`}
+                title={`${swatch.name}: ${swatch.value}`}
               >
                 {inside}
               </button>

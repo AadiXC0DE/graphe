@@ -141,7 +141,7 @@ function Card({
             type="button"
             className="work__open"
             onClick={() => onLook(piece.id, piece.where)}
-            aria-label={`${boardWords.look} — ${piece.doing}`}
+            aria-label={`${boardWords.look}: ${piece.doing}`}
           >
             <img className="work__picture" src={picture} alt={alt} />
           </button>
@@ -186,7 +186,7 @@ function Card({
             type="button"
             className="work__keep"
             onClick={() => onKeep(piece.id, piece.where)}
-            aria-label={`${boardWords.keep} — ${piece.doing}`}
+            aria-label={`${boardWords.keep}: ${piece.doing}`}
             title={
               piece.oneOf === null || piece.oneOf === undefined
                 ? undefined
@@ -201,7 +201,7 @@ function Card({
             type="button"
             className="work__say"
             onClick={() => onStopWaiting(piece.id, piece.where)}
-            aria-label={`${boardWords.stopWaiting} — ${piece.doing}`}
+            aria-label={`${boardWords.stopWaiting}: ${piece.doing}`}
           >
             {boardWords.stopWaiting}
           </button>
@@ -213,7 +213,7 @@ function Card({
             onClick={() => {
               if (piece.oneOf != null) onAgainst(piece.oneOf.named, piece.where);
             }}
-            aria-label={`${boardWords.against} — ${piece.doing}`}
+            aria-label={`${boardWords.against}: ${piece.doing}`}
           >
             {boardWords.against}
           </button>
@@ -227,7 +227,7 @@ function Card({
               setSaying((was) => !was);
               setHeard(false);
             }}
-            aria-label={`${boardWords.say} — ${piece.doing}`}
+            aria-label={`${boardWords.say}: ${piece.doing}`}
           >
             {boardWords.say}
           </button>
@@ -237,7 +237,7 @@ function Card({
             type="button"
             className="work__drop"
             onClick={() => onDrop(piece.id, piece.where)}
-            aria-label={`${saysDrop(piece.state)} — ${piece.doing}`}
+            aria-label={`${saysDrop(piece.state)}: ${piece.doing}`}
           >
             {saysDrop(piece.state)}
           </button>
@@ -251,7 +251,7 @@ function Card({
             value={words}
             autoFocus
             placeholder={boardWords.sayPlaceholder}
-            aria-label={`${boardWords.say} — ${piece.doing}`}
+            aria-label={`${boardWords.say}: ${piece.doing}`}
             onChange={(event) => setWords(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') say();

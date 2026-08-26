@@ -10,28 +10,23 @@
 import type { GitBranch } from './ipc';
 
 export const LINE_WORDS = {
-  heading: 'Line of work',
-  /** Beside the name, for anybody who has not met the word. Says what it is
-   *  rather than who named it: "working branch" is the plain answer to "which
-   *  one am I on?".
-   */
-  plainly: 'the working branch',
-  open: 'Change line of work',
-  find: 'Find a line',
+  heading: 'Branch',
+  open: 'Switch branch',
+  find: 'Find a branch',
   /** Said on the row the project is already on. */
   onThisOne: 'You are here',
   /** When a line tracks nothing shared yet. */
-  notShared: 'not shared yet',
-  inStep: 'in step',
-  none: 'No other lines of work yet.',
+  notShared: 'no upstream',
+  inStep: 'up to date',
+  none: 'No other branches yet.',
   noneFound: 'Nothing by that name.',
-  newLine: 'New line…',
-  newPlaceholder: 'what-you-are-trying',
+  newLine: 'New branch…',
+  newPlaceholder: 'feature/short-name',
   create: 'Create',
   cancel: 'Cancel',
   /** A name the machine will not take. Said before the press, not after. */
-  badName: 'A line’s name cannot have spaces, or start with a dash.',
-  taken: 'There is already a line called that.',
+  badName: 'A branch name cannot have spaces, or start with a dash.',
+  taken: 'A branch called that already exists.',
 } as const;
 
 /** How a line stands against what it tracks, as one short phrase. Null when

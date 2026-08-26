@@ -8,10 +8,13 @@ const bridge = readFileSync(new URL('../src/lib/bridge.ts', import.meta.url), 'u
 describe('the branch panel describes the addressed conversation', () => {
   it('reads git and branches from its checkout rather than always open.path', () => {
     const start = main.indexOf('handle<Overview>(CHANNEL.overview');
-    const block = main.slice(start, start + 1700);
-    expect(block).toContain('checkoutEntryFor(open, where)?.folder ?? open.path');
+    const block = main.slice(start, start + 2400);
+    // `folderFor` is that same answer with one more case in it — the named
+    // project inside a folder that holds several.
+    expect(block).toContain('const cwd = folderFor(open, where)');
     expect(block).toContain('readGitStatus(cwd)');
     expect(block).toContain('readBranches(cwd)');
+    expect(block).toContain('styleTokens(cwd)');
     expect(block).not.toContain('readGitStatus(open.path)');
   });
 
@@ -23,13 +26,16 @@ describe('the branch panel describes the addressed conversation', () => {
   });
 
   it('targets branch controls at that same conversation checkout', () => {
-    expect(app).toContain('branchMove((where) => bridge.branchSwitch(name, where))');
-    expect(app).toContain('branchMove((where) => bridge.branchCreate(name, where))');
+    expect(app).toContain('branchMove((where) => bridge.branchSwitch(name, where), repo)');
+    expect(app).toContain('branchMove((where) => bridge.branchCreate(name, where), repo)');
     const switched = main.slice(
       main.indexOf('handle<null>(CHANNEL.branchSwitch'),
       main.indexOf('handle<null>(CHANNEL.branchCreate'),
     );
-    expect(switched).toContain('const cwd = entry?.folder ?? open.path');
+    // `folderFor` is the same answer with one more case in it: a conversation's
+    // own copy first, then the named project inside a folder that holds
+    // several, then the folder itself.
+    expect(switched).toContain('const cwd = folderFor(open, where)');
     expect(switched).toContain("gitRun(cwd, ['checkout', name])");
   });
 

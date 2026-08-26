@@ -14,7 +14,7 @@ export type ThemeExplicit = Exclude<Theme, 'system'>;
 
 export const THEME_WORDS = {
   name: 'Theme',
-  note: 'Five finishes — light, graphe, super, pink and slate. Pick one and keep it.',
+  note: 'Five finishes: light, graphe, super, pink and slate. Pick one and keep it.',
   system: 'Match this computer',
   light: 'Light',
   graphe: 'Graphe',

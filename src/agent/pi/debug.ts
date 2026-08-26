@@ -246,7 +246,7 @@ export async function backendFor(kind: DebugTarget['kind']): Promise<{ backend: 
   }
   const lldb = (await find('lldb-dap').catch(() => null)) ?? null;
   if (lldb === null) {
-    return { error: 'I could not find the debugger (lldb-dap). It comes with Xcode or the Command Line Tools — install either and try again.' };
+    return { error: 'I could not find the debugger (lldb-dap). It comes with Xcode or the Command Line Tools, so install either and try again.' };
   }
   return { backend: 'lldb', command: lldb, args: [] };
 }
@@ -432,7 +432,7 @@ export async function detach(session: DebuggerSession): Promise<void> {
 
 /** The sentence a refused attach gets on a Mac: the one-time permission. */
 export function permissionHint(): string {
-  return 'macOS let the attach be refused because this app has not been allowed to debug yet. Open System Settings → Privacy & Security → Developer Tools, let Graphe debug, and try again. A program that cannot be attached to for other reasons — a system one, for instance — needs a different approach: run it under the debugger from the start instead.';
+  return 'macOS let the attach be refused because this app has not been allowed to debug yet. Open System Settings → Privacy & Security → Developer Tools, let Graphe debug, and try again. A program that cannot be attached to for other reasons (a system one, for instance) needs a different approach: run it under the debugger from the start instead.';
 }
 
 /** The one-shot fallbacks, when a real attach is not possible. */

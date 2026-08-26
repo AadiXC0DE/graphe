@@ -70,18 +70,18 @@ export type Kept = {
  */
 export const SAID = {
   needName: 'Give this a name, so you can find it again later.',
-  nameTooLong: 'That name is too long to sit on a row — a word or two is plenty.',
+  nameTooLong: 'That name is too long to sit on a row. A word or two is plenty.',
   alreadyCalled: (name: string): string =>
     `You already have one called “${name}”. Give this one a different name.`,
   needWhere: 'Say where to find it: the address it answers on, or the program that starts it.',
   whereTooLong: 'That is far longer than anything I could start.',
   badAddress: 'I can only reach an address beginning http:// or https://.',
   strayQuote: 'There is a quote mark in there that never closes.',
-  strangeSymbols: 'Take the symbols out — just the program, then the words that follow it.',
+  strangeSymbols: 'Take the symbols out: just the program, then the words that follow it.',
   tooManyWords: 'That is more words than I can hand to a program.',
   wordTooLong: 'One of those words is far too long to be real.',
   badValueName: (name: string): string =>
-    `“${name}” cannot be the name of one of the values — letters, numbers and underscores only.`,
+    `“${name}” cannot be the name of one of the values: letters, numbers and underscores only.`,
   valueNotText: 'Each value has to be plain text.',
   tooManyValues: 'That is more values than I can hand over.',
   valueTooLong: 'One of those values is far too long.',
@@ -110,7 +110,7 @@ export const REACHABLE: readonly Reach[] = [
   {
     id: 'figma',
     name: 'Figma',
-    what: 'Lets me open the Figma files you point me at and build from the real thing — the actual spacing, colours and words, rather than my reading of a picture of them.',
+    what: 'Lets me open the Figma files you point me at and build from the real thing: the actual spacing, colours and words, rather than my reading of a picture of them.',
     needs: 'Keep Figma open on this computer while I work.',
     start: { how: 'address', address: 'http://127.0.0.1:3845/mcp' },
     curated: true,
@@ -129,8 +129,11 @@ export const REACHABLE: readonly Reach[] = [
   },
   {
     id: 'browser',
-    name: 'A real browser',
-    what: 'Lets me open your work in a real browser, click through it and see what actually happens, instead of reasoning about it from the files.',
+    name: 'Another browser',
+    // Driving a browser is built in now, so this row can no longer promise the
+    // thing somebody already has. What it still offers is a second one, driven
+    // a different way, for the sites where the built-in one gets stuck.
+    what: 'Lets me fall back on a second browser, driven a different way, for the odd site the built-in one cannot get through.',
     needs: null,
     start: { how: 'program', command: 'npx', args: ['-y', '@playwright/mcp@latest'], values: {} },
     curated: true,
@@ -142,7 +145,7 @@ export const REACHABLE: readonly Reach[] = [
     // own would show as already connected against somebody else's.
     id: 'code-read',
     name: 'A read of your code',
-    what: 'Lets me jump straight to where something is really defined, find every place it is used, rename it everywhere at once and see the errors your editor sees — instead of searching the text and hoping I caught them all.',
+    what: 'Lets me jump straight to where something is really defined, find every place it is used, rename it everywhere at once and see the errors your editor sees, instead of searching the text and hoping I caught them all.',
     needs: 'Works on TypeScript and JavaScript projects.',
     start: { how: 'program', command: 'npx', args: ['-y', 'ts-language-mcp'], values: {} },
     curated: true,

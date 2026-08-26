@@ -51,7 +51,7 @@ export const afterWords = {
   free: 'Start it now instead',
   /** The first option in the list, which is no wait at all. Said as an answer
    *  to the question above it, not as a repeat of the button below. */
-  noWait: 'Nothing — start it straight away',
+  noWait: 'Nothing: start it straight away',
   itself: 'This would be waiting for itself, so it could never start.',
   loop: 'These would end up waiting for each other, so neither could ever start.',
   missing: 'I could not find the one you asked it to wait for.',

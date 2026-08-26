@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { changedAcross, childRepos, MOST_CHILDREN } from '../electron/childRepos';
+import { changedAcross, childNamed, childRepos, MOST_CHILDREN } from '../electron/childRepos';
 
 let root: string;
 
@@ -110,5 +110,35 @@ describe('naming child changes so they match the parent walk', () => {
 
   it('says nothing when a child has nothing changed', () => {
     expect(changedAcross([{ rel: 'backend', files: [] }])).toEqual([]);
+  });
+});
+
+describe('choosing which project a call is about', () => {
+  const found = [
+    { rel: 'backend', path: '/Users/mira/Projects/shop/backend' },
+    { rel: 'frontend', path: '/Users/mira/Projects/shop/frontend' },
+  ] as const;
+
+  it('picks the one named, out of the ones actually found', () => {
+    expect(childNamed(found, 'frontend')?.path).toBe('/Users/mira/Projects/shop/frontend');
+  });
+
+  it('says nothing for a name nobody found, whatever it is trying to be', () => {
+    for (const nonsense of ['', '..', '../..', 'backend/..', '/etc', 'note', undefined]) {
+      expect(childNamed(found, nonsense), String(nonsense)).toBeNull();
+    }
+  });
+
+  /** Most Mac disks do not tell one from the other, so a name that differs only
+   *  in case names the same folder. It is still a lookup: nothing here can name
+   *  a folder that was not found. */
+  it('matches a name the way the disk does', () => {
+    expect(childNamed(found, 'BACKEND')?.rel).toBe('backend');
+    expect(childNamed(found, 'FrontEnd')?.rel).toBe('frontend');
+  });
+
+  it('says nothing at all for a folder that is one project', () => {
+    expect(childNamed([], 'backend')).toBeNull();
+    expect(childNamed([found[0]], 'backend')).toBeNull();
   });
 });

@@ -235,7 +235,7 @@ function Chip({
           onBlur={settle}
         />
       </span>
-      <span className="styles__swname" title={`${name} — ${value}`}>
+      <span className="styles__swname" title={`${name}: ${value}`}>
         {name}
       </span>
       <span className="styles__swmeta" title={`${token.name}: ${value}`} aria-hidden="true">
@@ -459,7 +459,7 @@ function Shadows({ tokens }: { tokens: readonly StyleToken[] }) {
         <li
           key={token.name}
           className="styles__lift"
-          title={`${readable(token.name)} — ${token.value}`}
+          title={`${readable(token.name)}: ${token.value}`}
         >
           <span className="styles__card" style={{ boxShadow: token.value }} />
           <span className="styles__name">{readable(token.name)}</span>

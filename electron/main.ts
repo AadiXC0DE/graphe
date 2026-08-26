@@ -82,7 +82,9 @@ import {
   tooBig,
   type Found,
 } from '../src/files/listing';
-import { changedAcross, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
+import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
+import { browserFolder, browserFrame, forgetLogins } from '../src/agent/pi/computer';
+import { alwaysFile, alwaysFrom, WHEN, type When } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
@@ -121,6 +123,7 @@ import {
   type CarriedExtension,
   type Room,
   type Skill,
+  type AlwaysDoes,
   type Workflow,
   type SavedVersion,
   type DesignChange,
@@ -210,6 +213,7 @@ import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceO
 import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
 import { checkServer, inProject, mcpFile, readMcpConfig, savingFrom, writeMcpConfig } from '../src/agent/pi/mcp';
 import { holdsBack } from '../src/projects/heldback';
+import { keepsLogins } from '../src/projects/logins';
 import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
 import { saysTook } from '../src/work/stack';
 import { formatMoney } from '../src/cost/money';
@@ -440,7 +444,7 @@ function movedOrGone(name: string): Trouble {
   return {
     what: `I cannot find ${name} any more.`,
     because:
-      'The folder has been moved, renamed or thrown away since you last opened it. Nothing of yours has been touched — I just do not know where to look.',
+      'The folder has been moved, renamed or thrown away since you last opened it. Nothing of yours has been touched, I just do not know where to look.',
     actionLabel: 'Take it off the list',
   };
 }
@@ -471,7 +475,7 @@ const NOTHING_OPEN: Trouble = {
 const SEVERAL_PROJECTS: Trouble = {
   what: 'This folder holds several projects.',
   because:
-    'This works on one project at a time. Open the one you mean — it is a folder inside this one — and try again there.',
+    'This works on one project at a time. Open the one you mean, a folder inside this one, and try again there.',
   actionLabel: 'Got it',
 };
 
@@ -1479,6 +1483,9 @@ type Held = {
    *  Empty for every folder that is itself one project — the ordinary case,
    *  which nothing here may disturb. */
   childRepos: readonly DetectedRepo[];
+  /** Each child project's own saved work, opened the first time somebody asks
+   *  it for anything and kept afterwards. Empty for an ordinary folder. */
+  childTimelines: Map<string, Promise<Timeline>>;
   spend: SpendRecorder;
   /** The conversations live in this project, in front first. Empty only for the
    *  moment between the timeline opening and the first session starting, which
@@ -1649,9 +1656,17 @@ function recents(): Promise<Recents> {
  * cannot change while the app is open.
  */
 let preferencesPromise: Promise<PreferenceFile> | null = null;
+/** The same file, once it is open, for the few readers that cannot wait — a
+ *  tool being built has to answer now or not at all. */
+let preferencesNow: PreferenceFile | null = null;
 
 function preferences(): Promise<PreferenceFile> {
-  preferencesPromise ??= PreferenceFile.open(join(app.getPath('userData'), 'preferences.json'));
+  preferencesPromise ??= PreferenceFile.open(join(app.getPath('userData'), 'preferences.json')).then(
+    (file) => {
+      preferencesNow = file;
+      return file;
+    },
+  );
   return preferencesPromise;
 }
 
@@ -1719,11 +1734,11 @@ function asSaved(version: Version, currentId: string | null): SavedVersion {
 /** The whole timeline of the project in front, newest first. No project open is
  *  an empty list rather than a failure: the rail simply has nothing to draw, and
  *  a card saying so would be a card about us. */
-async function versionsOf(held: Held): Promise<readonly SavedVersion[]> {
+async function versionsOf(timeline: Timeline | null): Promise<readonly SavedVersion[]> {
   // A folder holding several projects has no folder-level history to list;
   // empty is the true answer, and the rail draws nothing.
-  if (held.timeline === null) return [];
-  const [versions, current] = await Promise.all([held.timeline.versions(), held.timeline.currentVersion()]);
+  if (timeline === null) return [];
+  const [versions, current] = await Promise.all([timeline.versions(), timeline.currentVersion()]);
   return versions.map((version) => asSaved(version, current?.id ?? null));
 }
 
@@ -1852,7 +1867,7 @@ async function childRepoNotes(children: readonly DetectedRepo[]): Promise<readon
   );
   return [
     `This folder itself is not a repository. It holds ${parts.length} projects beside each other: ${parts.join(', ')}.`,
-    'Run git and package commands inside the project folder they belong to — for example `git -C backend status` — never from this folder.',
+    'Run git and package commands inside the project folder they belong to, for example `git -C backend status`, never from this folder.',
   ];
 }
 
@@ -1925,7 +1940,7 @@ function ghJSON(
 const GH_WORDS = {
   tooSlow: 'github did not answer in time.',
   noTool:
-    'I could not start the github command (`gh`). It needs to be installed and logged in — the same one your terminal uses.',
+    'I could not start the github command (`gh`). It needs to be installed and logged in, the same one your terminal uses.',
   refused: 'github refused the request.',
   unreadable: 'github answered with something this could not read.',
 } as const;
@@ -2517,6 +2532,7 @@ async function landingNow(folder: string, held: Held): Promise<Landing> {
     // nothing for a picture to be a picture of.
     held: held.waiting === null ? null : held.pictures,
     holdBack: holdsBack(chosen.heldBack, folder),
+    keepLogins: keepsLogins(chosen.keptLogins, folder),
     canHandOver: reach.canHandOver,
     handOverSays: reach.handOverSays,
     canPutOnline: reach.canPutOnline,
@@ -2662,11 +2678,14 @@ async function checkItFirst(
  * titles — but only the ones that name a change. The rest of the timeline is
  * housekeeping, and housekeeping is for the window that shows the timeline.
  */
-async function whatChanged(open: { name: string; held: Held }): Promise<readonly Change[]> {
+async function whatChanged(
+  open: { name: string; held: Held },
+  timeline: Timeline | null = open.held.timeline,
+): Promise<readonly Change[]> {
   const told = [...open.held.looking.told.values()];
   if (told.length > 0) return told.slice(-6);
 
-  const versions = await versionsOf(open.held).catch(() => []);
+  const versions = await versionsOf(timeline).catch(() => []);
   return versions
     .slice(0, LOOK_BACK)
     .filter((one) => worthTelling(one.title))
@@ -2871,6 +2890,38 @@ async function readingOf(folder: string, pointed: Pointed): Promise<PointedAt | 
   }
 }
 
+/** Who is watching which browser, so a second press or a closed project ends
+ *  the right one. */
+const watching = new Map<string, { stop: boolean }>();
+
+function stopWatching(project: string): void {
+  const going = watching.get(project);
+  if (going !== undefined) going.stop = true;
+  watching.delete(project);
+}
+
+/**
+ * Take a picture of the browser every second or so and send it to the window.
+ *
+ * One at a time rather than on a timer: a picture that takes longer than the
+ * gap would otherwise pile up behind itself until there is nothing left to
+ * take a picture with.
+ */
+function watchTheBrowser(project: string, keeps: string | null): void {
+  const mine = { stop: false };
+  watching.set(project, mine);
+  void (async () => {
+    while (!mine.stop) {
+      const bytes = await browserFrame(project, undefined, keeps).catch(() => null);
+      if (mine.stop) return;
+      if (bytes !== null && mainWindow !== null && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(CHANNEL.browserFrame, { project, bytes });
+      }
+      await new Promise((go) => setTimeout(go, bytes === null ? 2000 : 700));
+    }
+  })();
+}
+
 function sayPointed(folder: string, pointed: Pointed): void {
   void readingOf(folder, pointed).then((at) => {
     if (at === null || mainWindow === null || mainWindow.isDestroyed()) return;
@@ -2945,6 +2996,42 @@ function checkoutEntryFor(
   return one === undefined ? null : { address: found.path, ...one };
 }
 
+
+/**
+ * The child project a call names, in a folder that holds several.
+ *
+ * Matched against what was actually found on disk rather than joined onto the
+ * folder, so a name off the wire can only ever be one of the projects already
+ * there — there is no path arithmetic here to get wrong.
+ */
+function childRepoFor(open: Workspace<Held>, where: Where): DetectedRepo | null {
+  return childNamed(open.held.childRepos, where.repo);
+}
+
+/** The folder a call means: a conversation's own copy, one of the projects
+ *  inside a folder that holds several, or the folder itself. */
+function folderFor(open: Workspace<Held>, where: Where): string {
+  return checkoutEntryFor(open, where)?.folder ?? childRepoFor(open, where)?.path ?? open.path;
+}
+
+/** The saved work behind that folder. A child project's is opened the first
+ *  time it is asked for and kept, so its versions are its own. */
+async function timelineFor(open: Workspace<Held>, where: Where): Promise<Timeline | null> {
+  const entry = checkoutEntryFor(open, where);
+  if (entry !== null) return Timeline.open(entry.folder);
+  const child = childRepoFor(open, where);
+  if (child === null) return open.held.timeline;
+  // The promise, not the timeline: two calls arriving together would otherwise
+  // both open one, and the second would replace the first.
+  const already = open.held.childTimelines.get(child.path);
+  if (already !== undefined) return already;
+  const made = Timeline.open(child.path).catch((cause: unknown) => {
+    open.held.childTimelines.delete(child.path);
+    throw cause;
+  });
+  open.held.childTimelines.set(child.path, made);
+  return made;
+}
 
 /** Where a project's conversation checkouts live — outside the project, like a
  *  copy, so nothing the worktree writes ever appears in the folder the person
@@ -3319,6 +3406,7 @@ async function startConversationUnlocked(
       // here, so the tool cannot guess a path that does not match where plans
       // are kept.
       cancelBuild: () => cancelThePlan(open.path),
+      keepsBrowserLogins: () => keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path),
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -3404,6 +3492,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   const held: Held = {
     timeline,
     childRepos: children,
+    childTimelines: new Map(),
     spend: new SpendRecorder(),
     sessions: conversationsIn(path),
     running: new Running(),
@@ -4956,20 +5045,22 @@ function register(): void {
   });
 
   handle<readonly SavedVersion[]>(CHANNEL.versions, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return done([]);
     try {
-      return done(await versionsOf(open.held));
+      return done(await versionsOf(await timelineFor(open, where)));
     } catch (cause) {
       return fail(historyTrouble(cause));
     }
   });
 
   handle<RepoLook>(CHANNEL.repoLook, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return done(null);
     try {
-      return done(await readRepo(open));
+      return done(await readRepo({ path: folderFor(open, where) }));
     } catch (cause) {
       return fail(plainTrouble(
         'I could not read the github folder.',
@@ -4985,9 +5076,10 @@ function register(): void {
     if (typeof number !== 'number' || number <= 0 || typeof body !== 'string' || body.trim() === '') {
       return fail(plainTrouble('There was nothing to post.'));
     }
-    const full = await githubRepo(open.path);
+    const folder = folderFor(open, whereIn(args));
+    const full = await githubRepo(folder);
     if (full === null) return fail(plainTrouble('This folder does not look like a github repository.'));
-    const exit = await ghComment(open.path, full, number, body);
+    const exit = await ghComment(folder, full, number, body);
     return exit === 0 ? done(null) : fail(plainTrouble('The comment did not reach github.'));
   });
 
@@ -5009,7 +5101,9 @@ function register(): void {
     // describe the folder its agent is actually changing, not always the
     // project's primary checkout — otherwise a successful `git switch` looks
     // like it never happened.
-    const cwd = checkoutEntryFor(open, where)?.folder ?? open.path;
+    // The same folder the design view saves into, so what is shown and what is
+    // written are never two different projects.
+    const cwd = folderFor(open, where);
     // Several projects in one folder: each child answers where it lives; the parent answers nothing.
     const many = open.held.childRepos.length >= SEVERAL_CHILDREN;
     const repos = many
@@ -5027,16 +5121,22 @@ function register(): void {
       preview: open.held.serving?.address ?? null,
       artifacts: made,
       swatches,
-      styles: await styleTokens(open.path),
+      styles: await styleTokens(cwd),
     });
   });
 
   handle<readonly SavedVersion[]>(CHANNEL.designCommit, async (_event, args) => {
     const [changes] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof changes !== 'object' || changes === null) return fail(NOTHING_OPEN);
-    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
+    const timeline = await timelineFor(open, where);
+    if (timeline === null) return fail(SEVERAL_PROJECTS);
+    // The folder the timeline belongs to. In a folder holding several projects
+    // these are not the same place, and writing one project's tokens into the
+    // folder above it is a change nobody asked for and nobody would find.
+    const folder = folderFor(open, where);
     const given = changes as Partial<DesignChange>;
     const tokens = Array.isArray(given.tokens)
       ? given.tokens.filter((one) => typeof one.name === 'string' && typeof one.value === 'string')
@@ -5049,7 +5149,7 @@ function register(): void {
     // The whole design view is one saved moment. Anything sent here is written
     // back where each token lived and then kept as a single version — the
     // window holds the edits so nothing is committed on a slide.
-    const styles = await styleTokens(open.path);
+    const styles = await styleTokens(folder);
     if (styles === null && tokens.length === 0 && motions.length === 0) return fail(NOTHING_OPEN);
     try {
       // Apply edits per file, so a token that came from a component sheet is
@@ -5071,7 +5171,7 @@ function register(): void {
         file: string,
         list: readonly { name: string; value: string }[],
       ): Promise<void> => {
-        const where = join(open.path, file);
+        const where = join(folder, file);
         let css = await readFile(where, 'utf8');
         let wrote = false;
         for (const one of list) {
@@ -5086,7 +5186,7 @@ function register(): void {
       for (const [file, list] of edits) await writeFileEdits(file, list);
       // Motion edits land in the primary stylesheet.
       if (styles !== null && motions.length > 0) {
-        const where = join(open.path, styles.file);
+        const where = join(folder, styles.file);
         let css = perFile.get(where) ?? (await readFile(where, 'utf8'));
         for (const one of motions) {
           const next = writeMotionAll(css, one.places as Parameters<typeof writeMotionAll>[1], one.change as Parameters<typeof writeMotionAll>[2]);
@@ -5097,8 +5197,8 @@ function register(): void {
         }
       }
       for (const [where, css] of perFile) await writeFile(where, css, 'utf8');
-      await open.held.timeline?.snapshot({ boundary: 'user-asked', by: 'you' });
-      return done(await versionsOf(open.held));
+      await timeline.snapshot({ boundary: 'user-asked', by: 'you' });
+      return done(await versionsOf(timeline));
     } catch (cause) {
       const raw = cause instanceof Error ? cause.message : String(cause);
       return fail(plainTrouble(raw, detailsOf(cause)));
@@ -5107,18 +5207,20 @@ function register(): void {
 
   handle<PutBack>(CHANNEL.putBack, async (_event, args) => {
     const [versionId] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof versionId !== 'string' || versionId.trim() === '') return fail(NO_SUCH_VERSION);
-    if (open.held.timeline === null) return fail(SEVERAL_PROJECTS);
+    const timeline = await timelineFor(open, where);
+    if (timeline === null) return fail(SEVERAL_PROJECTS);
     try {
-      const restored = await open.held.timeline.restoreTo(versionId);
+      const restored = await timeline.restoreTo(versionId);
       filesMovedIn(open);
       return done({
         title: restored.wentBackTo.title,
         at: restored.wentBackTo.at,
         undoTo: restored.undoTo,
-        versions: await versionsOf(open.held),
+        versions: await versionsOf(timeline),
       });
     } catch (cause) {
       return fail(historyTrouble(cause));
@@ -5127,13 +5229,15 @@ function register(): void {
 
   handle<readonly SavedVersion[]>(CHANNEL.nameVersion, async (_event, args) => {
     const [versionId, name] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof versionId !== 'string' || typeof name !== 'string') return fail(NO_SUCH_VERSION);
-    if (open.held.timeline === null) return fail(SEVERAL_PROJECTS);
+    const timeline = await timelineFor(open, where);
+    if (timeline === null) return fail(SEVERAL_PROJECTS);
     try {
-      await open.held.timeline.nameVersion(versionId, name);
-      return done(await versionsOf(open.held));
+      await timeline.nameVersion(versionId, name);
+      return done(await versionsOf(timeline));
     } catch (cause) {
       return fail(historyTrouble(cause));
     }
@@ -5367,17 +5471,19 @@ function register(): void {
 
   handle<readonly SavedVersion[]>(CHANNEL.saveVersion, async (_event, args) => {
     const [name] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    if (open.held.timeline === null) return fail(SEVERAL_PROJECTS);
+    const timeline = await timelineFor(open, where);
+    if (timeline === null) return fail(SEVERAL_PROJECTS);
     try {
-      await open.held.timeline.snapshot({
+      await timeline.snapshot({
         boundary: 'user-asked',
         by: 'you',
         name: typeof name === 'string' && name.trim() !== '' ? name.trim() : undefined,
         evenIfNothingChanged: true,
       });
-      return done(await versionsOf(open.held));
+      return done(await versionsOf(timeline));
     } catch (cause) {
       const raw = cause instanceof Error ? cause.message : String(cause);
       return fail(plainTrouble(raw, detailsOf(cause)));
@@ -5385,11 +5491,16 @@ function register(): void {
   });
 
   handle<{ looks: readonly Look[]; says: string }>(CHANNEL.checkWidths, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_TO_SHOW);
+    const widthFolder = folderFor(open, where);
+    if (widthFolder === open.path && open.held.childRepos.length >= SEVERAL_CHILDREN) {
+      return fail(SEVERAL_PROJECTS);
+    }
     let ready;
     try {
-      ready = await makeAndServe({ folder: open.path, says: () => undefined });
+      ready = await makeAndServe({ folder: widthFolder, says: () => undefined });
     } catch (cause) {
       return fail(couldNotShow(cause));
     }
@@ -5397,7 +5508,7 @@ function register(): void {
     try {
       // The sizes this project designs at, out of its own stylesheets. Three
       // sizes it has never written a line about answer somebody else's question.
-      const sizes = sizesFor(await styleSheets(open.path));
+      const sizes = sizesFor(await styleSheets(widthFolder));
       const looks = await lookAtEveryWidth(ready.serving.address, sizes);
       return done({ looks, says: readsWell(looks).says });
     } finally {
@@ -5406,9 +5517,10 @@ function register(): void {
   });
 
   handle<string | null>(CHANNEL.shareReview, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const asked = whereIn(args);
+    const open = projectAt(asked);
     if (open === null) return fail(NOTHING_OPEN);
-    const versions = await versionsOf(open.held);
+    const versions = await versionsOf(await timelineFor(open, asked));
     const changes: Shown[] = versions.slice(0, 12).map((version) => ({
       title: version.title,
       when: version.at,
@@ -5444,9 +5556,10 @@ function register(): void {
   /* ------------------------------------------------------------ landing it */
 
   handle<Landing>(CHANNEL.landing, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    return done(await landingNow(open.path, open.held));
+    return done(await landingNow(folderFor(open, where), open.held));
   });
 
   handle<Preferences>(CHANNEL.setHowMuch, async (_event, args) => {
@@ -5465,6 +5578,18 @@ function register(): void {
     return done(await (await preferences()).change({ heldBack: { ...held, [open.path]: on } }));
   });
 
+  handle<Preferences>(CHANNEL.setKeepLogins, async (_event, args) => {
+    const [on] = args;
+    if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const kept = (await preferences()).all().keptLogins;
+    // Turning it off throws away what was kept, rather than leaving somebody's
+    // signed-in accounts on this disk under a switch that says they are not.
+    if (!on) await forgetLogins(await defaultAgentDir(), open.path);
+    return done(await (await preferences()).change({ keptLogins: { ...kept, [open.path]: on } }));
+  });
+
   handle<Preferences>(CHANNEL.setTheme, async (_event, args) => {
     const [theme] = args;
     return done(await (await preferences()).change({ theme: themeFrom(theme) }));
@@ -5473,13 +5598,14 @@ function register(): void {
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
     const [letIn, observed] = args;
     if (typeof observed !== 'boolean') return fail(NOTHING_OPEN);
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     const waiting = open.held.waiting;
 
     const asItStands = async (undoTo: string | null): Promise<Decided> => ({
-      landing: await landingNow(open.path, open.held),
-      versions: await versionsOf(open.held).catch(() => []),
+      landing: await landingNow(folderFor(open, where), open.held),
+      versions: await versionsOf(await timelineFor(open, where)).catch(() => []),
       letIn: letIn === true,
       undoTo,
     });
@@ -5541,19 +5667,27 @@ function register(): void {
   handle<HandedOver>(CHANNEL.handToDeveloper, async (_event, args) => {
     const [confirmed] = args;
     if (confirmed !== true) return fail(notPressed);
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (open.held.sending) return fail(alreadyGoing);
-    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
+    // Work is handed on from one project. In a folder holding several, the
+    // call says which — and the row it came from is that project's own.
+    const folder = folderFor(open, where);
+    if (folder === open.path && open.held.childRepos.length >= SEVERAL_CHILDREN) {
+      return fail(SEVERAL_PROJECTS);
+    }
+    const child = childRepoFor(open, where);
 
     open.held.sending = true;
     try {
-      const changes = await whatChanged(open);
-      const newest = (await open.held.timeline?.currentVersion().catch(() => null)) ?? null;
+      const timeline = await timelineFor(open, where);
+      const changes = await whatChanged(open, timeline);
+      const newest = (await timeline?.currentVersion().catch(() => null)) ?? null;
       const handed = await handToDeveloper({
-        history: new ProjectHistory(open.path),
-        folder: open.path,
-        name: open.name,
+        history: new ProjectHistory(folder),
+        folder,
+        name: child?.rel ?? open.name,
         under: workFolder(),
         title: newest?.title ?? changes[changes.length - 1]?.title ?? open.name,
         changes,
@@ -5580,14 +5714,19 @@ function register(): void {
   handle<WentOnline>(CHANNEL.putOnline, async (_event, args) => {
     const [confirmed] = args;
     if (confirmed !== true) return fail(notPressed);
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (open.held.sending) return fail(alreadyGoing);
-    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
+    // Put one project online, never a folder that holds several.
+    const folder = folderFor(open, where);
+    if (folder === open.path && open.held.childRepos.length >= SEVERAL_CHILDREN) {
+      return fail(SEVERAL_PROJECTS);
+    }
 
     open.held.sending = true;
     try {
-      return done(await putOnline({ folder: open.path, says: tell }));
+      return done(await putOnline({ folder, says: tell }));
     } catch (cause) {
       if (cause instanceof OnlineError) {
         return fail({
@@ -5673,10 +5812,13 @@ function register(): void {
   });
 
   handle<string>(CHANNEL.changesLook, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     try {
-      return done(await new ProjectHistory(open.path).diffFor({ kind: 'working' }));
+      return done(
+        await new ProjectHistory(folderFor(open, where)).diffFor({ kind: 'working' }),
+      );
     } catch (cause) {
       return fail(historyTrouble(cause));
     }
@@ -5684,7 +5826,8 @@ function register(): void {
 
   handle<null>(CHANNEL.changesDrop, async (_event, args) => {
     const [patch] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof patch !== 'string') return done(null);
     try {
@@ -5693,7 +5836,7 @@ function register(): void {
       // is this. Swallowed, the sentence above became untrue in the one case it
       // was written for, and nothing said so. The agent's own path has refused
       // on this since it was written; this is the same rule for the press.
-      const saved = await open.held.timeline
+      const saved = await (await timelineFor(open, where))
         ?.snapshot({ boundary: 'before-risky-change' })
         .then(() => true)
         .catch(() => false);
@@ -5705,7 +5848,7 @@ function register(): void {
           actionLabel: 'Got it',
         });
       }
-      const answer = await new ProjectHistory(open.path).dropChanges(patch);
+      const answer = await new ProjectHistory(folderFor(open, where)).dropChanges(patch);
       if (!answer.ok) return fail(plainTrouble(answer.because));
       return done(null);
     } catch (cause) {
@@ -6391,7 +6534,7 @@ function register(): void {
     // Asked and answered inside the conversation, because that is where the
     // model already is. The window shows it beside the row it asked about.
     await agent.prompt(askAbout(found));
-    return done('Asked — the answer is in the conversation.');
+    return done('Asked. The answer is in the conversation.');
   });
 
   handle<readonly Conversation[]>(CHANNEL.conversations, async (_event, args) => {
@@ -6418,18 +6561,23 @@ function register(): void {
   });
 
   handle<readonly Page[]>(CHANNEL.pages, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return done([]);
-    return done(pagesIn(await filesUnder(open.path)));
+    return done(pagesIn(await filesUnder(folderFor(open, where))));
   });
 
   handle<ShowOutcome>(CHANNEL.show, async (_event, args) => {
     const [at] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_TO_SHOW);
-    // Several projects in one folder: there is nothing at the parent to serve —
-    // the runnable thing lives inside one of the children.
-    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
+    // Several projects in one folder: there is nothing at the parent to serve,
+    // so the call has to name the project whose row was pressed.
+    const folder = folderFor(open, where);
+    if (folder === open.path && open.held.childRepos.length >= SEVERAL_CHILDREN) {
+      return fail(SEVERAL_PROJECTS);
+    }
 
     // One at a time per project. Pressing it again means "show me what it looks
     // like now", so the old one goes and a new one takes its place.
@@ -6438,7 +6586,7 @@ function register(): void {
 
     try {
       const outcome = await makeAndServe({
-        folder: open.path,
+        folder,
         says: tell,
         // Every serving can be pointed at; the page only listens once the
         // address says so, which is what the button does.
@@ -6517,6 +6665,38 @@ function register(): void {
 
   /* The `/word` ways of working. The body stays here — the window gets only
      what it needs to list them in a `/` menu and to hold the typed words. */
+  handle<boolean>(CHANNEL.watchBrowser, async (_event, args) => {
+    const [on] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null || typeof on !== 'boolean') return done(false);
+    stopWatching(open.path);
+    if (!on) return done(false);
+    const keeps = keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path)
+      ? browserFolder(await defaultAgentDir(), open.path)
+      : null;
+    watchTheBrowser(open.path, keeps);
+    return done(true);
+  });
+
+  /** What this project does without being asked. Read fresh each time: the file
+   *  is the whole feature, so a change to it must show at once. */
+  handle<AlwaysDoes>(CHANNEL.alwaysDoes, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done({ file: '', rows: [], trouble: null });
+    const file = alwaysFile(folderFor(open, where));
+    const read = alwaysFrom(await readFile(file, 'utf8').catch(() => null));
+    const said: Readonly<Record<When, string>> = {
+      afterEachChange: 'After every change',
+      whenItFinishes: 'When it finishes',
+      whenItOpens: 'When this project opens',
+    };
+    const rows = WHEN.flatMap((when) =>
+      read.all[when].map((one) => ({ when: said[when], name: one.name, run: one.run })),
+    );
+    return done({ file, rows, trouble: read.trouble });
+  });
+
   handle<readonly Workflow[]>(CHANNEL.workflows, async (_event, args) => {
     const open = projectAt(whereIn(args));
     const all = await availableWorkflows(open?.path ?? null, await defaultAgentDir());
@@ -6549,19 +6729,21 @@ function register(): void {
       return fail(NOTHING_OPEN);
     }
     const entry = checkoutEntryFor(open, where);
-    const cwd = entry?.folder ?? open.path;
+    const cwd = folderFor(open, where);
     const git = await readGitStatus(cwd);
     if (git === null || git.branch === null) {
       return fail({ what: 'There is nothing to switch between yet.', because: 'This project has no saved work, so it has no lines of work.', actionLabel: 'Got it' });
     }
     if (stillWriting(open.held)) {
-      return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish and switch then. A line of work is only moved when nothing is still changing the files.', actionLabel: 'Got it' });
+      return fail({ what: 'Not yet. This is still being written.', because: 'Let it finish and switch then. A line of work is only moved when nothing is still changing the files.', actionLabel: 'Got it' });
     }
-    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
     // Saved, not refused. Refusing on anything unsaved made this impossible to
     // come back from: moving to a line without a folder leaves that folder
     // behind untouched, which counts as unsaved, which blocks the way back.
-    const timeline = entry === null ? open.held.timeline : await Timeline.open(cwd);
+    // A folder holding several projects has no line of its own to move: the
+    // call has to say which project, and it does when the row it came from is
+    // that project's own.
+    const timeline = await timelineFor(open, where);
     if (timeline === null) return fail(SEVERAL_PROJECTS);
     await timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
     const switched = await gitRun(cwd, ['checkout', name]);
@@ -6588,20 +6770,19 @@ function register(): void {
     if (open === null || typeof name !== 'string') return fail(NOTHING_OPEN);
     const clean = name.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(clean)) {
-      return fail({ what: 'That is not a usable name for a line of work.', because: 'Letters, numbers, dots, dashes and slashes — and it cannot start with a dash.', actionLabel: 'Got it' });
+      return fail({ what: 'That is not a usable name for a line of work.', because: 'Letters, numbers, dots, dashes and slashes, and it cannot start with a dash.', actionLabel: 'Got it' });
     }
     if (stillWriting(open.held)) {
-      return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish, then start the new line.', actionLabel: 'Got it' });
+      return fail({ what: 'Not yet. This is still being written.', because: 'Let it finish, then start the new line.', actionLabel: 'Got it' });
     }
-    if (open.held.childRepos.length >= SEVERAL_CHILDREN) return fail(SEVERAL_PROJECTS);
     const entry = checkoutEntryFor(open, where);
-    const cwd = entry?.folder ?? open.path;
-    const timeline = entry === null ? open.held.timeline : await Timeline.open(cwd);
+    const cwd = folderFor(open, where);
+    const timeline = await timelineFor(open, where);
     if (timeline === null) return fail(SEVERAL_PROJECTS);
     await timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
     const made = await gitRun(cwd, ['checkout', '-b', clean]);
     if (made.code !== 0) {
-      return fail({ what: 'I could not start that line of work.', because: 'git refused the new branch — the name may already exist.', actionLabel: 'Got it' });
+      return fail({ what: 'I could not start that line of work.', because: 'git refused the new branch. The name may already exist.', actionLabel: 'Got it' });
     }
     if (entry !== null) {
       const remembered = open.held.checkouts.get(entry.address);
@@ -7124,6 +7305,19 @@ function register(): void {
     await open.held.checking?.stop();
     await sessionAt(open, where)?.stop();
     return done(null);
+  });
+
+  /** Hold the run between steps, or let it go on. Both the conversation's own
+   *  session and any check running beside it, so pressing it once holds
+   *  everything the person can see. */
+  handle<null>(CHANNEL.waitForMe, (_event, args) => {
+    const [on] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null || typeof on !== 'boolean') return Promise.resolve(done(null));
+    open.held.checking?.holdOn(on);
+    sessionAt(open, where)?.holdOn(on);
+    return Promise.resolve(done(null));
   });
 
   /**

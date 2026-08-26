@@ -93,6 +93,18 @@ describe('D-01 which project, which conversation', () => {
     for (const args of asked) expect(whereIn(args)).toEqual({});
   });
 
+  /** A child project is named by its folder name. Spaces belong to real folder
+   *  names; separators and control characters never do. */
+  it('keeps a project name a name, and never a path', () => {
+    expect(whereIn([{ project: '/a/one', repo: 'my app' }]).repo).toBe('my app');
+    expect(whereIn([{ repo: '..' }]).repo).toBe('..');
+    // Refused rather than flattened: taking the slash out of "a/b" makes "ab",
+    // which is a different project that might exist.
+    for (const path of ['a/b', '../../etc', 'a\\b', 'a\u0000b', '   ', 'x'.repeat(200)]) {
+      expect(whereIn([{ repo: path }]).repo, path).toBeUndefined();
+    }
+  });
+
   it('never mistakes a payload for an address', () => {
     expect(whereIn([{ project: '/a/one', doing: 'something else' }])).toEqual({});
     expect(whereIn([['/a/one']])).toEqual({});

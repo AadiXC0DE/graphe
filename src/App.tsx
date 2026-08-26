@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
+import { Shown } from "./components/Shown";
 import AskFirst from "./components/AskFirst";
 import type { Attachment } from "./components/Attachments";
 import BuildProgress from "./components/BuildProgress";
@@ -37,6 +38,8 @@ import { reviewAsMarkdown } from "./agent/pi/review";
 import { saysUseYours } from "./design/drift";
 import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
+import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
+import { keepsLogins } from "./projects/logins";
 import { drainStarted } from "./lib/queue";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
 import type { ConnectedState } from "./lib/ipc";
@@ -117,6 +120,9 @@ import {
   type Workflow,
   type HowFar,
   type Money,
+  type AlwaysDoes,
+  type SavedVersion,
+  type Overview as OverviewNow,
   type ShowProgress,
   type SpendLimit,
   type ThinkingLevel,
@@ -479,6 +485,7 @@ function Conversation() {
     kept: {},
     showFiles: false,
     heldBack: {},
+    keptLogins: {},
     howMuch: null,
     ceiling: null,
     theme: 'system',
@@ -801,6 +808,22 @@ function Conversation() {
   const [usageOpen, setUsageOpen] = useState(false);
   const [skills, setSkills] = useState<readonly Skill[]>([]);
   const [workflows, setWorkflows] = useState<readonly Workflow[]>([]);
+  /** What the open project does without being asked. Null until it is read. */
+  const [alwaysNow, setAlwaysNow] = useState<AlwaysDoes | null>(null);
+  /** Whose history the full-screen graph is drawing, in a folder holding
+   *  several projects. Null for a folder that is one project. */
+  const [graphRepo, setGraphRepo] = useState<string | null>(null);
+  /* Which project the panel is showing, mirrored up so the band at its foot is
+     read for the same one its buttons act on. */
+  const [panelRepo, setPanelRepo] = useState<string | null>(null);
+  const panelRepoNow = useRef<string | null>(null);
+  panelRepoNow.current = panelRepo;
+  const actingRepoNow = useRef<string | null>(null);
+  /* Whose pull requests the reviews screen is showing. A ref beside it, because
+     the fetch reads it and re-creating the fetch on every pick would refetch. */
+  const [reviewsRepo, setReviewsRepo] = useState<string | null>(null);
+  const reviewsRepoNow = useRef<string | null>(null);
+  reviewsRepoNow.current = reviewsRepo;
 
   /** Which band of the design view is open, or null when it is not. Both of the
    *  surfaces that take the whole width live here rather than inside a panel:
@@ -1162,12 +1185,25 @@ function Conversation() {
     if (seen.ok && desksNow.current.current === path) {
       setVersionPictures((current) => ({ ...current, [path]: seen.value }));
     }
-    if (!answer.ok) return;
+    // A folder holding several projects has no timeline of its own. Each
+    // project answers where it lives, and the panel shows whichever is chosen.
+    const several = desksNow.current.byPath[path]?.overview?.repos ?? [];
+    const each = await Promise.all(
+      several.map(
+        async (one) =>
+          [one.name, await bridge.versions({ project: path, repo: one.name })] as const,
+      ),
+    );
+    if (desksNow.current.current !== path) return;
+    const perRepo: Record<string, readonly SavedVersion[]> = {};
+    for (const [name, got] of each) if (got.ok) perRepo[name] = got.value;
+    if (!answer.ok && several.length === 0) return;
     setDesks((current) =>
       current.current === path
         ? changeDesk(current, path, (one) => ({
             ...one,
-            versions: answer.value,
+            versions: answer.ok ? answer.value : one.versions,
+            ...(several.length === 0 ? {} : { repoVersions: perRepo }),
           }))
         : current,
     );
@@ -1296,7 +1332,28 @@ function Conversation() {
           }))
         : current,
     );
-  }, []);
+    // Which projects a folder holds is only known once this has answered, so
+    // the first ask for their timelines has to be here rather than earlier —
+    // otherwise the panel says "nothing saved yet" about a project that has.
+    const held = answer.value.repos ?? [];
+    const already = desksNow.current.byPath[path]?.repoVersions ?? {};
+    if (held.some((one) => already[one.name] === undefined)) void refreshVersions(path);
+    if (held.length === 0) return;
+    const styled = await Promise.all(
+      held.map(
+        async (one) =>
+          [one.name, await bridge.overview({ ...where, repo: one.name })] as const,
+      ),
+    );
+    if (desksNow.current.current !== path) return;
+    const perRepo: Record<string, OverviewNow['styles']> = {};
+    for (const [name, got] of styled) if (got.ok) perRepo[name] = got.value.styles;
+    setDesks((current) =>
+      current.current === path
+        ? changeDesk(current, path, (one) => ({ ...one, repoStyles: perRepo }))
+        : current,
+    );
+  }, [refreshVersions]);
 
   /** Read the build plan for the project in front, for the tracker above the
    *  box. Same in-front guard as everything else that answers about a folder. */
@@ -2023,6 +2080,71 @@ function Conversation() {
     return () => window.removeEventListener("pointerdown", away);
   }, [switching]);
 
+  /** Which project's browser is being watched, or null when nobody is. */
+  const [watchAt, setWatchAt] = useState<string | null>(null);
+  const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
+
+  /* The pictures arrive from the shell, which is the only side of the app that
+     can reach a service on this machine. */
+  useEffect(() => {
+    return bridge.onBrowserFrame((frame) => {
+      setWatched((was) => (frame.project === watchAt ? watching(was, frame.bytes) : was));
+    });
+  }, [watchAt]);
+
+  /** Which ask for the stream is the live one. A second press while the first
+   *  is still travelling must not have its answer arrive afterwards and turn
+   *  watching back on. */
+  const watchAsked = useRef(0);
+
+  /** Whose browser is being watched. Kept apart from whichever project is in
+   *  front: turning a stream off has to reach the project that turned it on,
+   *  and by the time somebody switches, that is no longer the one in front. */
+  const watchedProject = useRef<string | null>(null);
+
+  const watchTheBrowser = useCallback((want: boolean, project?: string | null) => {
+    const path = project === undefined ? desksNow.current.current : project;
+    const mine = watchAsked.current + 1;
+    watchAsked.current = mine;
+    setWatched(NOTHING_WATCHED);
+    if (!want) {
+      setWatchAt(null);
+      watchedProject.current = null;
+      void bridge.watchBrowser(false, path === null ? undefined : { project: path });
+      return;
+    }
+    watchedProject.current = path;
+    void bridge
+      .watchBrowser(true, path === null ? undefined : { project: path })
+      .then((answer) => {
+        if (watchAsked.current !== mine) return;
+        setWatchAt(answer.ok && answer.value ? path : null);
+      });
+  }, []);
+
+  /* A browser nobody is watching should not be drawing itself. Switching
+     project, or closing the pane, is nobody watching — and the stream is turned
+     off on the project that started it, not on whichever is now in front. */
+  useEffect(() => {
+    if (watchAt === null) return;
+    if (desks.current === watchedProject.current && pane !== 'off') return;
+    watchTheBrowser(false, watchedProject.current);
+  }, [desks.current, pane, watchAt, watchTheBrowser]);
+
+  /** Whether each conversation's run is waiting for somebody, by its owner. */
+  const [holding, setHolding] = useState<Readonly<Record<string, boolean>>>({});
+
+  const waitForMe = useCallback((on: boolean) => {
+    const desk = currentDesk(desksNow.current);
+    if (desk === null) return;
+    const owner = `${desk.path}\u0000${desk.address ?? ''}`;
+    setHolding((current) => ({ ...current, [owner]: on }));
+    void bridge.waitForMe(on, {
+      project: desk.path,
+      ...(desk.address == null ? {} : { conversation: desk.address }),
+    });
+  }, []);
+
   const halt = useCallback(() => {
     // Name *which* conversation is being stopped. Without the `where`, Stop
     // would end whatever the shell has in front — which, with two tabs open,
@@ -2043,6 +2165,10 @@ function Conversation() {
           turns: one.turns.map((t) => (t.kind === 'said' && (t as { streaming: boolean }).streaming ? { ...t, streaming: false } : t)),
         })),
       );
+    }
+    if (desk !== null) {
+      const owner = `${desk.path}\u0000${desk.address ?? ''}`;
+      setHolding((current) => ({ ...current, [owner]: false }));
     }
     void bridge.stop({
       ...(desk === null ? {} : { project: desk.path }),
@@ -2634,12 +2760,16 @@ function Conversation() {
   const refreshRepo = useCallback(() => {
     const desk = currentDesk(desksNow.current);
     const project = desk?.path ?? null;
+    const inside = desk?.overview?.repos ?? [];
+    const named =
+      inside.find((one) => one.name === reviewsRepoNow.current)?.name ?? inside[0]?.name ?? null;
     setRepo(null);
     setReviewsBusy(true);
     void bridge
       .repoLook({
         ...(desk === null ? {} : { project: desk.path }),
         ...(desk?.address == null ? {} : { conversation: desk.address }),
+        ...(named === null ? {} : { repo: named }),
       })
       .then((answer) => {
         if (currentDesk(desksNow.current)?.path !== project) return;
@@ -2920,7 +3050,7 @@ function Conversation() {
         })),
       );
       const text =
-        "Fix the blocking findings from the review I just asked for — the P0 and P1 ones — and tell me what you changed.";
+        "Fix the blocking findings from the review I just asked for, the P0 and P1 ones, and tell me what you changed.";
       void deliver(text, sizeUp(text), { lookFirst: false });
     },
     [deliver],
@@ -3009,12 +3139,15 @@ function Conversation() {
   /* -------------------------------------------------------------- versions */
 
   const putBack = useCallback(
-    async (versionId: string) => {
+    async (versionId: string, repo?: string) => {
       const path = desks.current;
       if (path === null) return;
       goBusy();
       try {
-        const answer = await bridge.putBack(versionId);
+        const answer = await bridge.putBack(versionId, {
+          project: path,
+          ...(repo === undefined ? {} : { repo }),
+        });
         if (!answer.ok) {
           troubleHere(answer.trouble);
           return;
@@ -3022,7 +3155,9 @@ function Conversation() {
         setDesks((current) =>
           changeDesk(current, path, (one) => ({
             ...one,
-            versions: answer.value.versions,
+            ...(repo === undefined
+              ? { versions: answer.value.versions }
+              : { repoVersions: { ...one.repoVersions, [repo]: answer.value.versions } }),
             putBack: answer.value,
           })),
         );
@@ -3034,10 +3169,13 @@ function Conversation() {
   );
 
   const nameVersion = useCallback(
-    async (versionId: string, name: string) => {
+    async (versionId: string, name: string, repo?: string) => {
       const path = desks.current;
       if (path === null) return;
-      const answer = await bridge.nameVersion(versionId, name);
+      const answer = await bridge.nameVersion(versionId, name, {
+        project: path,
+        ...(repo === undefined ? {} : { repo }),
+      });
       if (!answer.ok) {
         troubleHere(answer.trouble);
         return;
@@ -3045,7 +3183,9 @@ function Conversation() {
       setDesks((current) =>
         changeDesk(current, path, (one) => ({
           ...one,
-          versions: answer.value,
+          ...(repo === undefined
+            ? { versions: answer.value }
+            : { repoVersions: { ...one.repoVersions, [repo]: answer.value } }),
         })),
       );
     },
@@ -3089,9 +3229,12 @@ function Conversation() {
     if (path === null) return;
     // A project is named so a slow answer from another project cannot land here
     // and repaint this panel — the same gap the away board had until that fix.
-    void bridge.landing({ project: path }).then((answer) => {
-      setLanding(answer.ok ? answer.value : null);
-    });
+    const named = panelRepoNow.current;
+    void bridge
+      .landing({ project: path, ...(named === null ? {} : { repo: named }) })
+      .then((answer) => {
+        setLanding(answer.ok ? answer.value : null);
+      });
   }, []);
 
   useEffect(() => {
@@ -3137,6 +3280,19 @@ function Conversation() {
         .finally(() => setLookingAtFigma(false));
     },
     [troubleHere],
+  );
+
+  const changeKeepLogins = useCallback(
+    (on: boolean) => {
+      const path = desks.current;
+      setPreferences((was) =>
+        path === null ? was : { ...was, keptLogins: { ...was.keptLogins, [path]: on } },
+      );
+      void bridge.setKeepLogins(on, { project: path ?? undefined }).then((answer) => {
+        if (answer.ok) setPreferences(answer.value);
+      });
+    },
+    [desks.current],
   );
 
   const changeHoldBack = useCallback(
@@ -3222,11 +3378,11 @@ function Conversation() {
   /** The two that can send something off this computer. Both are only ever
    *  called from the band's own confirmation, which has already said what is
    *  about to happen — this is the press, not the offer. */
-  const handToDeveloper = useCallback(() => {
+  const handToDeveloper = useCallback((repo?: string) => {
     setGoing("developer");
     setLanded(null);
     void bridge
-      .handToDeveloper(true)
+      .handToDeveloper(true, repo === undefined ? undefined : { repo })
       .then((answer) => {
         if (!answer.ok) {
           troubleHere(answer.trouble);
@@ -3249,12 +3405,13 @@ function Conversation() {
      must address that conversation rather than silently moving the project’s
      primary checkout. */
   const branchMove = useCallback(
-    (move: (where: Where) => Promise<Result<null>>) => {
+    (move: (where: Where) => Promise<Result<null>>, repo?: string) => {
       const here = currentDesk(desksNow.current);
       if (here === null) return;
       const where: Where = {
         project: here.path,
         ...(here.address == null ? {} : { conversation: here.address }),
+        ...(repo === undefined ? {} : { repo }),
       };
       void move(where).then((answer) => {
         if (!answer.ok) {
@@ -3271,15 +3428,15 @@ function Conversation() {
 
   // One place reads which folder/conversation is in front, and it is the one above.
   const switchBranch = useCallback(
-    (name: string) => {
-      branchMove((where) => bridge.branchSwitch(name, where));
+    (name: string, repo?: string) => {
+      branchMove((where) => bridge.branchSwitch(name, where), repo);
     },
     [branchMove],
   );
 
   const createBranch = useCallback(
-    (name: string) => {
-      branchMove((where) => bridge.branchCreate(name, where));
+    (name: string, repo?: string) => {
+      branchMove((where) => bridge.branchCreate(name, where), repo);
     },
     [branchMove],
   );
@@ -3313,11 +3470,22 @@ function Conversation() {
         run: () => togglePane(), ready: here, whyNot: needsProject },
       { id: 'shelf', name: 'Show or hide the shelf', where: 'Conversation', keys: 'mod+b',
         run: () => setShelfOpen((was) => !was) },
-      { id: 'changes', name: 'Look through the change', where: 'Project',
+      { id: 'changes', name: 'Review the working diff', where: 'Project',
         run: () => {
           setChangeText(null);
           setChangesOpen(true);
-          void bridge.changesLook().then((answer) => setChangeText(answer.ok ? answer.value : ''));
+          void bridge
+            .changesLook(actingRepo === null ? undefined : { repo: actingRepo })
+            .then((answer) => {
+              // A refusal read as "nothing has changed", which is a different
+              // sentence and not a true one.
+              if (!answer.ok) {
+                setChangesOpen(false);
+                troubleHere(answer.trouble);
+                return;
+              }
+              setChangeText(answer.value);
+            });
         }, ready: here, whyNot: needsProject },
       { id: 'history', name: 'Look through the history', where: 'Project',
         run: () => goToScreen('graph'), ready: here, whyNot: needsProject },
@@ -3331,7 +3499,7 @@ function Conversation() {
       { id: 'model', name: 'Change which model answers', where: 'Graphe', run: () => openConnect() },
       { id: 'usage', name: 'See what this cost', where: 'Graphe', run: () => goToScreen('usage') },
       { id: 'open', name: 'Open another project', where: 'Project', keys: 'mod+o', run: () => void browse() },
-      { id: 'tidy', name: 'Shorten this conversation', where: 'Conversation',
+      { id: 'tidy', name: 'Compact the context', where: 'Conversation',
         run: () => tidyNow(), ready: here, whyNot: needsProject },
       { id: 'stop', name: 'Stop what is running', where: 'Conversation',
         run: () => halt(), ready: busy, whyNot: 'Nothing is running.' },
@@ -3660,8 +3828,17 @@ function Conversation() {
     if (draft === undefined) return;
     const tokens = Object.entries(draft.tokens).map(([name, value]) => ({ name, value }));
     if (tokens.length === 0 && draft.motions.length === 0) return;
-    void bridge.designCommit({ tokens, motions: draft.motions }).then((answer) => {
-      if (!answer.ok) return;
+    const named = panelRepoNow.current ?? actingRepoNow.current;
+    void bridge
+      .designCommit(
+        { tokens, motions: draft.motions },
+        named === null ? undefined : { repo: named },
+      )
+      .then((answer) => {
+      if (!answer.ok) {
+        troubleHere(answer.trouble);
+        return;
+      }
       setDesignDraft((current) => {
         if (current[path] === undefined) return current;
         const next = { ...current };
@@ -3701,13 +3878,13 @@ function Conversation() {
 
   /** The stylesheet with the draft edits laid over it, so the design view shows
    *  what is being tested without anything reaching the project. */
-  const designStyles = useMemo(
-    () => withDesignDraft(desk?.overview?.styles ?? null, desk === null ? undefined : designDraft[desk.path]),
-    [desk,
-      desk?.overview?.styles,
-      designDraft,
-    ],
-  );
+  const designStyles = useMemo(() => {
+    const inside = desk?.overview?.repos ?? [];
+    const named = inside.find((one) => one.name === panelRepo)?.name ?? inside[0]?.name ?? null;
+    const sheet =
+      named === null ? (desk?.overview?.styles ?? null) : (desk?.repoStyles[named] ?? null);
+    return withDesignDraft(sheet, desk === null ? undefined : designDraft[desk.path]);
+  }, [desk, desk?.overview?.styles, desk?.repoStyles, panelRepo, designDraft]);
 
   /** What the project's own stylesheet says about itself: how it moves, what
    *  was written by hand, what cannot be read. One reading, shared by the panel
@@ -3722,6 +3899,7 @@ function Conversation() {
   /* A native view paints above the window's own contents, so anything that
      would cover it has to take it off screen first. */
   const covered =
+    watchAt !== null ||
     designAt !== null ||
     graphOpen ||
     reviewsOpen ||
@@ -3826,6 +4004,12 @@ function Conversation() {
           refreshWorkflows();
           setSkillsOpen(true);
           return;
+        case 'always': {
+          // The file is the whole feature, so this opens the file.
+          const file = alwaysNow?.file ?? '';
+          if (file !== '') void bridge.openInEditor(file);
+          return;
+        }
         case 'connected':
           goToScreen("connected");
           setConnectedOpen(true);
@@ -3862,14 +4046,17 @@ function Conversation() {
    * decision belongs to notes/strategy/SHARING.md §1 and is not the window's to
    * revisit; all this does is press the button and put the answer in the thread.
    */
-  const seeIt = useCallback(async (at?: string, point?: boolean) => {
+  const seeIt = useCallback(async (at?: string, point?: boolean, repo?: string) => {
     const askedFor = desks.current;
     if (askedFor === null) return;
     // Said here as well as by the shell, so pressing the button has an answer
     // inside 100ms rather than after a folder has been read.
     setProgress({ says: showWords.puttingTogether, done: false });
     try {
-      const answer = await bridge.show(at, point);
+      const answer = await bridge.show(at, point, {
+        project: askedFor,
+        ...(repo === undefined ? {} : { repo }),
+      });
       if (!answer.ok) {
         setProgress(null);
         troubleHere(answer.trouble);
@@ -3912,6 +4099,27 @@ function Conversation() {
     }
   }, [desks.current, say, troubleHere, refreshOverview, movePane]);
 
+  /* The commits the bar can search. A folder of several projects keeps them per
+     project, so they are gathered up and each one remembers where it came from. */
+  const fromRepo = useRef<Record<string, string>>({});
+  const barVersions = useMemo(() => {
+    const inside = desk?.overview?.repos ?? [];
+    if (inside.length === 0) {
+      fromRepo.current = {};
+      return desk?.versions ?? [];
+    }
+    const seen: Record<string, string> = {};
+    const all: SavedVersion[] = [];
+    for (const one of inside) {
+      for (const version of desk?.repoVersions[one.name] ?? []) {
+        seen[version.id] = one.name;
+        all.push(version);
+      }
+    }
+    fromRepo.current = seen;
+    return all;
+  }, [desk?.overview?.repos, desk?.versions, desk?.repoVersions]);
+
   /* Everything the bar can reach. Held still between renders so the search does
      not re-run on every keystroke elsewhere. */
   const reachable: Things = useMemo(
@@ -3919,9 +4127,9 @@ function Conversation() {
       projects: recent ?? [],
       conversations,
       pages,
-      versions: desk?.versions ?? [],
+      versions: barVersions,
     }),
-    [recent, conversations, pages, desk?.versions],
+    [recent, conversations, pages, barVersions],
   );
 
   const pick = useCallback(
@@ -3934,12 +4142,12 @@ function Conversation() {
           void swapConversation(found.conversation.path);
           return;
         case "page":
-          void seeIt(found.page.route);
+          void seeIt(found.page.route, undefined, panelRepoNow.current ?? undefined);
           return;
         // Going back is snapshotted first and is itself undoable, which is what
         // makes it safe to reach from here rather than only from the rail.
         case "version":
-          void putBack(found.version.id);
+          void putBack(found.version.id, fromRepo.current[found.version.id]);
           return;
         case "say":
           setDraft(found.say);
@@ -4019,7 +4227,8 @@ function Conversation() {
     )?.subscription === true;
   const hasOverview =
     desk !== null &&
-    (desk.overview?.git !== null ||
+    ((desk.overview?.repos?.length ?? 0) > 0 ||
+      desk.overview?.git !== null ||
       research.length > 0 ||
       desk.references.length > 0 ||
       desk.versions.length >= 2);
@@ -4033,10 +4242,22 @@ function Conversation() {
   pageAtNow.current = pageAt ?? previewUrl;
   const pillShown = desk !== null && (previewUrl !== null || progress !== null);
   const pillLabel = progress !== null ? progress.says : PREVIEW;
-  // A folder holding several projects has nothing at the top level to show —
-  // what runs lives inside one of the children — so the pill waits, and says
-  // why if somebody finds it anyway.
+  // A folder holding several projects has nothing at the top level to serve —
+  // what runs lives inside one of them, and its row is where it is started.
   const severalProjects = (desk?.overview?.repos?.length ?? 0) >= 2;
+
+  /* A folder holding several projects has no history of its own, so "no project
+     chosen" cannot mean the parent — it means the first one. */
+  const actingRepo = ((): string | null => {
+    const inside = desk?.overview?.repos ?? [];
+    return inside.length === 0 ? null : (inside[0]?.name ?? null);
+  })();
+  actingRepoNow.current = actingRepo;
+  const historyRepo = ((): string | null => {
+    const inside = desk?.overview?.repos ?? [];
+    if (inside.length === 0) return null;
+    return inside.find((one) => one.name === graphRepo)?.name ?? inside[0]?.name ?? null;
+  })();
 
   // The one region nobody is given: it is here because somebody went and asked
   // for it, and it stays until they say otherwise.
@@ -4108,7 +4329,7 @@ function Conversation() {
                   onShowMe={changeShowMe}
                   showFiles={preferences.showFiles}
                   onShowFiles={changeShowFiles}
-                  onPreview={() => void seeIt()}
+                  onPreview={() => (severalProjects ? movePane('split') : void seeIt())}
                   onAccount={openConnect}
                   onAddMore={openAddMore}
                 />
@@ -4143,13 +4364,12 @@ function Conversation() {
           <button
             type="button"
             className="previewpill"
-            onClick={() => void seeIt()}
-            disabled={busy || severalProjects || (progress !== null && !progress.done)}
-            title={
-              severalProjects
-                ? 'This folder holds several projects. Open one directly to see it running.'
-                : undefined
-            }
+            /* In a folder holding several projects the pill is a way back to
+               the page already being served, not a way to start one — starting
+               is a press on the project's own row, which is the only place
+               that knows which project is meant. */
+            onClick={() => (severalProjects ? movePane('split') : void seeIt())}
+            disabled={busy || (progress !== null && !progress.done)}
           >
             {pillLabel}
           </button>
@@ -4208,6 +4428,22 @@ function Conversation() {
           onSettings={() => {
             goToScreen("settings");
             setSettingsOpen(true);
+            // Read when the sheet opens rather than kept in step: the file is
+            // edited outside this window, so the only true reading is a fresh
+            // one.
+            const path = desks.current;
+            void bridge
+              .alwaysDoes(
+                path === null
+                  ? undefined
+                  : {
+                      project: path,
+                      ...(panelRepoNow.current === null ? {} : { repo: panelRepoNow.current }),
+                    },
+              )
+              .then((answer) => {
+                if (answer.ok) setAlwaysNow(answer.value);
+              });
           }}
         />
       ) : null}
@@ -4299,6 +4535,11 @@ function Conversation() {
         onToggleShowMe={() => changeShowMe(!preferences.showMe)}
         onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
         onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}
+        always={alwaysNow}
+        keepLogins={keepsLogins(preferences.keptLogins, desk?.path)}
+        onToggleKeepLogins={() =>
+          changeKeepLogins(!keepsLogins(preferences.keptLogins, desk?.path))
+        }
         onGo={openSettingsLink}
       />
 
@@ -4397,7 +4638,13 @@ function Conversation() {
 
             <div className="thread">
             {(() => {
-              const all = rows(desk.turns, new Set(pictures.under.keys()));
+              // A step that took a picture stays on its own line: a picture
+              // folded into a collapsed run is a picture nobody sees.
+              const showing = new Set(pictures.under.keys());
+              for (const turn of desk.turns) {
+                if (turn.kind === 'did' && turn.shown !== undefined) showing.add(turn.id);
+              }
+              const all = rows(desk.turns, showing);
               const lastGrapheIdx = [...all].reverse().findIndex((r) => r.kind !== 'steps' && r.turn.kind === 'said' && r.turn.from === 'graphe');
               const lastIdx = lastGrapheIdx === -1 ? -1 : all.length - 1 - lastGrapheIdx;
               return all.map((row, idx) =>
@@ -4535,6 +4782,8 @@ function Conversation() {
               // turn in another tab — a tab working beside you must not turn
               // your Send into Stop or its own work into a wait.
               busy={frontBusy}
+              waiting={desk !== null && holding[`${desk.path}\u0000${desk.address ?? ''}`] === true}
+              onWait={waitForMe}
               draft={draft}
               attachments={attachments}
               connection={connection}
@@ -4551,6 +4800,7 @@ function Conversation() {
               onConnect={openConnect}
               onThinking={changeThinking}
               skills={skills}
+              workflows={workflows}
               onAttachmentsChange={(next) => {
                 if (desks.current === null) setLoose(next);
                 else {
@@ -4574,6 +4824,7 @@ function Conversation() {
             now: nowThere,
             git: desk.overview?.git ?? null,
             repos: desk.overview?.repos ?? [],
+            repoVersions: desk.repoVersions,
             research,
             references: desk.references,
             versions: desk.versions,
@@ -4601,8 +4852,8 @@ function Conversation() {
             project: desks.current === null ? "" : folderCalled(desks.current),
             clock: now,
           }}
-          onPutBack={(versionId) => void putBack(versionId)}
-          onName={(versionId, name) => void nameVersion(versionId, name)}
+          onPutBack={(versionId, repo) => void putBack(versionId, repo)}
+          onName={(versionId, name, repo) => void nameVersion(versionId, name, repo)}
           onKeep={keepVersion}
           onDismissPutBack={dismissPutBack}
           onShowSplit={() => void showSplit()}
@@ -4611,17 +4862,24 @@ function Conversation() {
             goToScreen("design");
             setDesignAt(part);
           }}
-          onOpenGraph={() => {
+          onOpenGraph={(repo) => {
             goToScreen("graph");
+            setGraphRepo(repo ?? null);
             setGraphOpen(true);
           }}
           onSwitchBranch={switchBranch}
           onCreateBranch={createBranch}
-          onShare={() => void bridge.shareReview()}
+          onSeeProject={(repo) => void seeIt(undefined, undefined, repo)}
+          onShare={(repo) => void bridge.shareReview(repo === undefined ? undefined : { repo })}
           onDecide={decideOnWork}
           onHowMuch={changeHowMuch}
           onHandOver={handToDeveloper}
           onOpenLink={(address) => void bridge.openLink(address)}
+          onWhose={(name) => {
+            panelRepoNow.current = name;
+            setPanelRepo((was) => (was === name ? was : name));
+            refreshLanding(desks.current);
+          }}
           onOpenFile={(file) => void bridge.openInEditor(file)}
           onKeepGoing={keepGoing}
           onStartAfter={startAfter}
@@ -4635,15 +4893,26 @@ function Conversation() {
           onAddRepeat={addRepeat}
           onSwitchRepeat={switchRepeat}
           onForgetRepeat={forgetRepeat}
-          onSave={() => {
-            void bridge.saveVersion().then((answer) => {
-              if (!answer.ok) return;
-              const path = desks.current;
-              if (path === null) return;
-              setDesks((current) =>
-                changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
-              );
-            });
+          onSave={(repo?: string) => {
+            const here = currentDesk(desksNow.current);
+            if (here === null) return;
+            const path = here.path;
+            void bridge
+              .saveVersion(undefined, { project: path, ...(repo === undefined ? {} : { repo }) })
+              .then((answer) => {
+                if (!answer.ok) {
+                  troubleHere(answer.trouble);
+                  return;
+                }
+                setDesks((current) =>
+                  changeDesk(current, path, (one) => ({
+                    ...one,
+                    ...(repo === undefined
+                      ? { versions: answer.value }
+                      : { repoVersions: { ...one.repoVersions, [repo]: answer.value } }),
+                  })),
+                );
+              });
           }}
         />
       ) : null}
@@ -4691,7 +4960,9 @@ function Conversation() {
           onCheckWidths={() => {
             setCheckingWidths(true);
             void bridge
-              .checkWidths()
+              .checkWidths(
+                panelRepoNow.current === null ? undefined : { repo: panelRepoNow.current },
+              )
               .then((answer) => {
                 if (answer.ok) setLooks(answer.value);
               })
@@ -4714,13 +4985,20 @@ function Conversation() {
 
       {graphOpen && desk !== null ? (
         <HistoryView
-          versions={desk.versions}
+          versions={historyRepo === null ? desk.versions : (desk.repoVersions[historyRepo] ?? [])}
           pictures={versionPictures[desk.path] ?? {}}
-          git={desk.overview?.git ?? null}
+          git={
+            historyRepo === null
+              ? (desk.overview?.git ?? null)
+              : (desk.overview?.repos?.find((one) => one.name === historyRepo)?.git ?? null)
+          }
           busy={busy}
           onClose={() => setGraphOpen(false)}
-          onPutBack={(versionId) => void putBack(versionId)}
+          onPutBack={(versionId) => void putBack(versionId, historyRepo ?? undefined)}
           onOpenFile={(file) => void bridge.openInEditor(file)}
+          repos={desk.overview?.repos ?? []}
+          repo={historyRepo}
+          onRepo={(name) => setGraphRepo(name)}
         />
       ) : null}
 
@@ -4731,6 +5009,17 @@ function Conversation() {
           onRefresh={refreshRepo}
           onClose={() => setReviewsOpen(false)}
           onReview={startReview}
+          repos={desk.overview?.repos ?? []}
+          which={
+            (desk.overview?.repos ?? []).find((one) => one.name === reviewsRepo)?.name ??
+            (desk.overview?.repos ?? [])[0]?.name ??
+            null
+          }
+          onWhich={(name) => {
+            setReviewsRepo(name);
+            reviewsRepoNow.current = name;
+            refreshRepo();
+          }}
         />
       ) : null}
 
@@ -4751,6 +5040,9 @@ function Conversation() {
         }
         recording={recording}
         onRecord={record}
+        watched={watched}
+        watching={watchAt !== null}
+        onWatch={watchTheBrowser}
         variation={variations?.inFront ?? null}
         onVariation={variations === null ? undefined : (id) => {
           const chosen = variations.members.find((one) => one.id === id);
@@ -4959,14 +5251,19 @@ function Turnstile({
 
     case "did":
       return (
-        <ActivityLine
-          state={turn.state}
-          label={turn.label}
-          detail={
-            turn.progress === undefined ? turn.detail : lastSaid(turn.progress)
-          }
-          real={showMe ? turn.real : undefined}
-        />
+        <>
+          <ActivityLine
+            state={turn.state}
+            label={turn.label}
+            detail={
+              turn.progress === undefined ? turn.detail : lastSaid(turn.progress)
+            }
+            real={showMe ? turn.real : undefined}
+          />
+          {turn.shown === undefined ? null : (
+            <Shown picture={turn.shown} label={turn.label} />
+          )}
+        </>
       );
 
     case "asked":

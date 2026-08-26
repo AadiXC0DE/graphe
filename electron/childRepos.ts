@@ -83,6 +83,35 @@ async function hasDotGit(folder: string): Promise<boolean> {
 }
 
 /**
+ * The child a call names, out of the ones actually found.
+ *
+ * A lookup rather than a join: the name crosses a wire, and matching it against
+ * what is already there is the one way it can never point at a folder that was
+ * not found by walking this parent. Null for a name nobody recognises, and for
+ * a folder holding fewer than several projects — there is nothing to choose
+ * between, and the folder itself is the answer.
+ */
+export function childNamed(
+  children: readonly DetectedRepo[],
+  name: string | undefined,
+): DetectedRepo | null {
+  if (name === undefined || children.length < SEVERAL_CHILDREN) return null;
+  const exact = children.find((one) => one.rel === name);
+  if (exact !== undefined) return exact;
+  // Most Mac disks do not tell "Backend" from "backend", so neither does this
+  // — but a disk that does tell them apart has two different folders, and
+  // matching one to the other would work on the wrong project.
+  if (!foldsCase()) return null;
+  const folded = name.toLowerCase();
+  return children.find((one) => one.rel.toLowerCase() === folded) ?? null;
+}
+
+/** Whether this computer's disk tells "Backend" from "backend". */
+function foldsCase(platform: string = process.platform): boolean {
+  return platform === 'darwin' || platform === 'win32';
+}
+
+/**
  * Changed files from several child repositories, named so they can be matched
  * against a walk of the parent: every path gains the child's name as a prefix,
  * which is exactly how the parent's own listing spells that file.

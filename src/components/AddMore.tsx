@@ -33,7 +33,7 @@ export const SAYS = {
   close: 'Close',
   searchLabel: 'Search everything else',
   searchPlaceholder: 'Search for something to add',
-  vouchedHeading: 'Ready to use — we have checked these',
+  vouchedHeading: 'Ready to use (we have checked these)',
   vouchedNote: 'These come from us, and they work the moment you add them.',
   restHeading: 'Made by other people',
   add: 'Add',
@@ -72,7 +72,7 @@ export const SAYS = {
   handAdd: 'Add it',
   carriedHeading: 'Came with this project',
   carriedNote:
-    'You did not choose these — they came down with the project. Everything else Graphe does is checked as it goes; these run as part of Graphe itself, so they stay off until you turn one on.',
+    'You did not choose these. They came down with the project. Everything else Graphe does is checked as it goes; these run as part of Graphe itself, so they stay off until you turn one on.',
   carriedRestart: 'Turning one on starts a fresh conversation in this project, so it can be loaded.',
 } as const;
 

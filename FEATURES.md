@@ -89,7 +89,34 @@ The folder as a tree you can walk, changed files marked, open anything in the ed
 **27 · Skills & workflows**
 `@skill` pulls craft you installed off the shelf; `/command` files are prompts that expand. The agent's capabilities are a shelf you can add to.
 
-**28 · Show me the real commands**
+**28 · A browser it can actually drive**
+Any address, not just your own site: open it, read it, press things, type into them, take its picture. On from the first turn — nothing to connect and nothing to switch on — and the first page it opens fetches what it needs on its own. Getting it to a site asks once; pressing and typing ask too.
+
+**29 · Working the computer itself**
+For the tools that aren't websites. A picture of the screen, then press, type, drag and scroll on it — the same moves you would make. The two permissions are the ones every other agent asks for, and until they are given it says so and opens the right setting rather than failing quietly.
+
+**30 · A folder that holds several projects**
+Open a working directory with `backend/` and `frontend/` beside each other and both are simply there: each with its own line of work to move between, its own versions to save and go back to, its own press to see it running or hand it on. The folder itself is left a plain folder — nothing is created in it to make it look like one project.
+
+**31 · The browser stays signed in, when you say so**
+One switch per project. On, the browser keeps what it is signed in to between sittings, so a staging site or a dashboard is signed into once rather than every run. Off — where it starts — every page opens in a browser that has never been anywhere, and turning it off again forgets what was kept.
+
+**32 · Why the page is blank, without asking**
+Every reading of a page carries what it complained about while it loaded: what it printed, what it threw, and the requests that came back wrong or never came back. One line under the step says how much. Everything the browser asked for can be saved as a file the tools a developer already has will open.
+
+**33 · It works the computer without taking your mouse**
+A press at a point takes the pointer out from under your hand. A press on something a program has named does not: it asks the program to press its own button, in a window that need not even be in front, with the mouse exactly where you left it. Reading what a program has named comes first, and pressing by point stays for the programs that name nothing.
+
+**34 · Wait, and carry on**
+Stop ends a turn. Wait holds it between steps, so you can take the machine back for a moment — look at something, put something right — and let it carry on from wherever things now are.
+
+**35 · Things this project always does**
+Format what was just written, type-check before handing work back, run the tests — written down once in the project, in one file that travels with it, and run without anybody asking. Only what would not have been asked about: a command the Guard would stop is named rather than run.
+
+**36 · `/` offers the ways of working**
+The prompt templates a project keeps have always been commands. Now typing `/` offers them, the way `@` offers skills.
+
+**37 · Show me the real commands**
 The commands, paths and git operations under every plain sentence — for the developer who wants the wheel.
 
 ---

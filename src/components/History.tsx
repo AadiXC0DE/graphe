@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Versions from './Versions';
 import type { GitSnapshot, GitBranch, PutBack, SavedVersion } from '../lib/ipc';
+import { LINE_WORDS } from '../lib/lines';
 import './History.css';
 
 type Props = {
@@ -106,8 +107,8 @@ export default function History({
                     <span className="branches__name">{branchName(branch)}</span>
                     <span className="branches__meta">
                       {branch.upstream === null
-                        ? 'not shared yet'
-                        : (relation(branch) ?? 'in step')}
+                        ? LINE_WORDS.notShared
+                        : (relation(branch) ?? LINE_WORDS.inStep)}
                     </span>
                   </div>
                 ) : (
@@ -115,7 +116,7 @@ export default function History({
                     type="button"
                     className="branches__row branches__row--switch"
                     onClick={() => onSwitchBranch(branch.name)}
-                    title={SAYS.graphHint}
+                    title={`${LINE_WORDS.open}: ${branch.name}`}
                   >
                     <span className="branches__name">{branchName(branch)}</span>
                     <span className="branches__message">

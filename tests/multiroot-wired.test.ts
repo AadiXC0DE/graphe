@@ -17,6 +17,7 @@ const IPC = readFileSync(new URL('../src/lib/ipc.ts', import.meta.url), 'utf8');
 const APP = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const OVERVIEW = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
 const ADAPTER = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
+const PRELOAD = readFileSync(new URL('../electron/preload.ts', import.meta.url), 'utf8');
 
 describe('the parent never becomes a repository', () => {
   it('looks for children before any history is opened', () => {
@@ -59,6 +60,49 @@ describe('what reads and what refuses', () => {
     expect(CHILDREN).toContain('${one.rel}/${file.path}');
   });
 
+  it('resolves the folder a call means, without any path arithmetic to get wrong', () => {
+    const at = MAIN.indexOf('function childRepoFor');
+    expect(at).toBeGreaterThan(-1);
+    const block = MAIN.slice(at, MAIN.indexOf('async function timelineFor'));
+    // Matched against what was found on disk. A name off the wire can only ever
+    // be one of the projects already there.
+    expect(block).toContain('childNamed(open.held.childRepos, where.repo)');
+    expect(block).toContain('checkoutEntryFor(open, where)?.folder ?? childRepoFor(open, where)?.path ?? open.path');
+  });
+
+  it('keeps each project’s saved work its own, opened once and remembered', () => {
+    const at = MAIN.indexOf('async function timelineFor');
+    const block = MAIN.slice(at, at + 900);
+    expect(block).toContain('open.held.childTimelines.get(child.path)');
+    expect(block).toContain('open.held.childTimelines.set(child.path, made)');
+    expect(MAIN).toContain('childTimelines: Map<string, Timeline>;');
+    expect(MAIN).toContain('childTimelines: new Map(),');
+  });
+
+  it('answers each verb for the project the call names', () => {
+    for (const channel of ['CHANNEL.putBack', 'CHANNEL.nameVersion', 'CHANNEL.saveVersion', 'CHANNEL.designCommit']) {
+      const at = MAIN.indexOf(`handle<`, MAIN.indexOf(channel) - 200);
+      const block = MAIN.slice(MAIN.indexOf(channel), MAIN.indexOf(channel) + 1500);
+      expect(at, channel).toBeGreaterThan(-1);
+      expect(block, channel).toContain('await timelineFor(open, where)');
+    }
+    for (const channel of ['CHANNEL.branchSwitch', 'CHANNEL.branchCreate']) {
+      const block = MAIN.slice(MAIN.indexOf(`handle<null>(${channel}`), MAIN.indexOf(`handle<null>(${channel}`) + 1500);
+      expect(block, channel).toContain('folderFor(open, where)');
+      expect(block, channel).toContain('timelineFor(open, where)');
+    }
+    for (const marker of ['handle<ShowOutcome>(CHANNEL.show', 'handle<HandedOver>(CHANNEL.handToDeveloper', 'handle<WentOnline>(CHANNEL.putOnline']) {
+      const block = MAIN.slice(MAIN.indexOf(marker), MAIN.indexOf(marker) + 1200);
+      expect(block, marker).toContain('folderFor(open, where)');
+    }
+  });
+
+  it('carries the named project across the bridge rather than dropping it', () => {
+    const at = PRELOAD.indexOf('function named(');
+    expect(at).toBeGreaterThan(-1);
+    expect(PRELOAD.slice(at, at + 900)).toContain('asked.repo = where.repo;');
+  });
+
   it('refuses the verbs that need one repository, in the same words everywhere', () => {
     const refusals = [
       'CHANNEL.designCommit',
@@ -76,7 +120,7 @@ describe('what reads and what refuses', () => {
       const at = channel === 'CHANNEL.show' ? MAIN.indexOf('handle<ShowOutcome>(CHANNEL.show') : MAIN.indexOf(channel);
       expect(at, channel).toBeGreaterThan(-1);
       const window = MAIN.slice(at, at + 1500);
-      expect(window, `${channel} never answers for several projects`).toContain(
+      expect(window, `${channel} never answers for several projects unasked`).toContain(
         'return fail(SEVERAL_PROJECTS)',
       );
     }
@@ -94,8 +138,32 @@ describe('the window hears about the projects', () => {
     expect(OVERVIEW).toContain('SEVERAL.heading');
   });
 
+  it('gives every project the same line-of-work control a lone project gets', () => {
+    const at = OVERVIEW.indexOf('{several ? (');
+    expect(at).toBeGreaterThan(-1);
+    const block = OVERVIEW.slice(at, at + 2200);
+    expect(block).toContain('onSwitch={(name) => onSwitchBranch(name, one.name)}');
+    expect(block).toContain('onCreate={(name) => onCreateBranch(name, one.name)}');
+    expect(block).toContain('onSave(one.name)');
+    expect(block).toContain('onSeeProject(one.name)');
+  });
+
+  it('shows one project’s history at a time, and says whose', () => {
+    const at = OVERVIEW.indexOf('className="overview__timeline"');
+    const block = OVERVIEW.slice(at, at + 2200);
+    expect(block).toContain('projects__strip');
+    expect(block).toContain('view.repoVersions[whose.name]');
+    expect(block).toContain('onPutBack(versionId, whose?.name)');
+    expect(block).toContain('git={whose === null ? git : whose.git}');
+  });
+
+  it('asks each project for its own timeline', () => {
+    expect(APP).toContain("bridge.versions({ project: path, repo: one.name })");
+    expect(APP).toContain('repoVersions: desk.repoVersions,');
+  });
+
   it('waits on the preview pill, and says why', () => {
     expect(APP).toContain('severalProjects');
-    expect(APP).toContain('Open one directly to see it running.');
+    expect(APP).toContain('Press \u201cSee it\u201d beside the one you mean.');
   });
 });

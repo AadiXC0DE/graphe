@@ -23,13 +23,16 @@ describe('the branch panel describes the addressed conversation', () => {
   });
 
   it('targets branch controls at that same conversation checkout', () => {
-    expect(app).toContain('branchMove((where) => bridge.branchSwitch(name, where))');
-    expect(app).toContain('branchMove((where) => bridge.branchCreate(name, where))');
+    expect(app).toContain('branchMove((where) => bridge.branchSwitch(name, where), repo)');
+    expect(app).toContain('branchMove((where) => bridge.branchCreate(name, where), repo)');
     const switched = main.slice(
       main.indexOf('handle<null>(CHANNEL.branchSwitch'),
       main.indexOf('handle<null>(CHANNEL.branchCreate'),
     );
-    expect(switched).toContain('const cwd = entry?.folder ?? open.path');
+    // `folderFor` is the same answer with one more case in it: a conversation's
+    // own copy first, then the named project inside a folder that holds
+    // several, then the folder itself.
+    expect(switched).toContain('const cwd = folderFor(open, where)');
     expect(switched).toContain("gitRun(cwd, ['checkout', name])");
   });
 

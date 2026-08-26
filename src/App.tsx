@@ -118,6 +118,7 @@ import {
   type Workflow,
   type HowFar,
   type Money,
+  type SavedVersion,
   type ShowProgress,
   type SpendLimit,
   type ThinkingLevel,
@@ -1163,12 +1164,25 @@ function Conversation() {
     if (seen.ok && desksNow.current.current === path) {
       setVersionPictures((current) => ({ ...current, [path]: seen.value }));
     }
-    if (!answer.ok) return;
+    // A folder holding several projects has no timeline of its own. Each
+    // project answers where it lives, and the panel shows whichever is chosen.
+    const several = desksNow.current.byPath[path]?.overview?.repos ?? [];
+    const each = await Promise.all(
+      several.map(
+        async (one) =>
+          [one.name, await bridge.versions({ project: path, repo: one.name })] as const,
+      ),
+    );
+    if (desksNow.current.current !== path) return;
+    const perRepo: Record<string, readonly SavedVersion[]> = {};
+    for (const [name, got] of each) if (got.ok) perRepo[name] = got.value;
+    if (!answer.ok && several.length === 0) return;
     setDesks((current) =>
       current.current === path
         ? changeDesk(current, path, (one) => ({
             ...one,
-            versions: answer.value,
+            versions: answer.ok ? answer.value : one.versions,
+            ...(several.length === 0 ? {} : { repoVersions: perRepo }),
           }))
         : current,
     );
@@ -3010,12 +3024,15 @@ function Conversation() {
   /* -------------------------------------------------------------- versions */
 
   const putBack = useCallback(
-    async (versionId: string) => {
+    async (versionId: string, repo?: string) => {
       const path = desks.current;
       if (path === null) return;
       goBusy();
       try {
-        const answer = await bridge.putBack(versionId);
+        const answer = await bridge.putBack(versionId, {
+          project: path,
+          ...(repo === undefined ? {} : { repo }),
+        });
         if (!answer.ok) {
           troubleHere(answer.trouble);
           return;
@@ -3023,7 +3040,9 @@ function Conversation() {
         setDesks((current) =>
           changeDesk(current, path, (one) => ({
             ...one,
-            versions: answer.value.versions,
+            ...(repo === undefined
+              ? { versions: answer.value.versions }
+              : { repoVersions: { ...one.repoVersions, [repo]: answer.value.versions } }),
             putBack: answer.value,
           })),
         );
@@ -3035,10 +3054,13 @@ function Conversation() {
   );
 
   const nameVersion = useCallback(
-    async (versionId: string, name: string) => {
+    async (versionId: string, name: string, repo?: string) => {
       const path = desks.current;
       if (path === null) return;
-      const answer = await bridge.nameVersion(versionId, name);
+      const answer = await bridge.nameVersion(versionId, name, {
+        project: path,
+        ...(repo === undefined ? {} : { repo }),
+      });
       if (!answer.ok) {
         troubleHere(answer.trouble);
         return;
@@ -3046,7 +3068,9 @@ function Conversation() {
       setDesks((current) =>
         changeDesk(current, path, (one) => ({
           ...one,
-          versions: answer.value,
+          ...(repo === undefined
+            ? { versions: answer.value }
+            : { repoVersions: { ...one.repoVersions, [repo]: answer.value } }),
         })),
       );
     },
@@ -3250,12 +3274,13 @@ function Conversation() {
      must address that conversation rather than silently moving the project’s
      primary checkout. */
   const branchMove = useCallback(
-    (move: (where: Where) => Promise<Result<null>>) => {
+    (move: (where: Where) => Promise<Result<null>>, repo?: string) => {
       const here = currentDesk(desksNow.current);
       if (here === null) return;
       const where: Where = {
         project: here.path,
         ...(here.address == null ? {} : { conversation: here.address }),
+        ...(repo === undefined ? {} : { repo }),
       };
       void move(where).then((answer) => {
         if (!answer.ok) {
@@ -3272,15 +3297,15 @@ function Conversation() {
 
   // One place reads which folder/conversation is in front, and it is the one above.
   const switchBranch = useCallback(
-    (name: string) => {
-      branchMove((where) => bridge.branchSwitch(name, where));
+    (name: string, repo?: string) => {
+      branchMove((where) => bridge.branchSwitch(name, where), repo);
     },
     [branchMove],
   );
 
   const createBranch = useCallback(
-    (name: string) => {
-      branchMove((where) => bridge.branchCreate(name, where));
+    (name: string, repo?: string) => {
+      branchMove((where) => bridge.branchCreate(name, where), repo);
     },
     [branchMove],
   );
@@ -3863,14 +3888,17 @@ function Conversation() {
    * decision belongs to notes/strategy/SHARING.md §1 and is not the window's to
    * revisit; all this does is press the button and put the answer in the thread.
    */
-  const seeIt = useCallback(async (at?: string, point?: boolean) => {
+  const seeIt = useCallback(async (at?: string, point?: boolean, repo?: string) => {
     const askedFor = desks.current;
     if (askedFor === null) return;
     // Said here as well as by the shell, so pressing the button has an answer
     // inside 100ms rather than after a folder has been read.
     setProgress({ says: showWords.puttingTogether, done: false });
     try {
-      const answer = await bridge.show(at, point);
+      const answer = await bridge.show(at, point, {
+        project: askedFor,
+        ...(repo === undefined ? {} : { repo }),
+      });
       if (!answer.ok) {
         setProgress(null);
         troubleHere(answer.trouble);
@@ -4035,8 +4063,8 @@ function Conversation() {
   const pillShown = desk !== null && (previewUrl !== null || progress !== null);
   const pillLabel = progress !== null ? progress.says : PREVIEW;
   // A folder holding several projects has nothing at the top level to show —
-  // what runs lives inside one of the children — so the pill waits, and says
-  // why if somebody finds it anyway.
+  // what runs lives inside one of them — so the pill waits and points at the
+  // row that does have a press.
   const severalProjects = (desk?.overview?.repos?.length ?? 0) >= 2;
 
   // The one region nobody is given: it is here because somebody went and asked
@@ -4148,7 +4176,7 @@ function Conversation() {
             disabled={busy || severalProjects || (progress !== null && !progress.done)}
             title={
               severalProjects
-                ? 'This folder holds several projects. Open one directly to see it running.'
+                ? 'This folder holds several projects. Press “See it” beside the one you mean.'
                 : undefined
             }
           >
@@ -4581,6 +4609,7 @@ function Conversation() {
             now: nowThere,
             git: desk.overview?.git ?? null,
             repos: desk.overview?.repos ?? [],
+            repoVersions: desk.repoVersions,
             research,
             references: desk.references,
             versions: desk.versions,
@@ -4624,6 +4653,7 @@ function Conversation() {
           }}
           onSwitchBranch={switchBranch}
           onCreateBranch={createBranch}
+          onSeeProject={(repo) => void seeIt(undefined, undefined, repo)}
           onShare={() => void bridge.shareReview()}
           onDecide={decideOnWork}
           onHowMuch={changeHowMuch}
@@ -4642,15 +4672,22 @@ function Conversation() {
           onAddRepeat={addRepeat}
           onSwitchRepeat={switchRepeat}
           onForgetRepeat={forgetRepeat}
-          onSave={() => {
-            void bridge.saveVersion().then((answer) => {
-              if (!answer.ok) return;
-              const path = desks.current;
-              if (path === null) return;
-              setDesks((current) =>
-                changeDesk(current, path, (one) => ({ ...one, versions: answer.value })),
-              );
-            });
+          onSave={(repo?: string) => {
+            const path = desks.current;
+            if (path === null) return;
+            void bridge
+              .saveVersion(undefined, { project: path, ...(repo === undefined ? {} : { repo }) })
+              .then((answer) => {
+                if (!answer.ok) return;
+                setDesks((current) =>
+                  changeDesk(current, path, (one) => ({
+                    ...one,
+                    ...(repo === undefined
+                      ? { versions: answer.value }
+                      : { repoVersions: { ...one.repoVersions, [repo]: answer.value } }),
+                  })),
+                );
+              });
           }}
         />
       ) : null}

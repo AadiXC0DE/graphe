@@ -95,7 +95,10 @@ Any address, not just your own site: open it, read it, press things, type into t
 **29 · Working the computer itself**
 For the tools that aren't websites. A picture of the screen, then press, type, drag and scroll on it — the same moves you would make. The two permissions are the ones every other agent asks for, and until they are given it says so and opens the right setting rather than failing quietly.
 
-**30 · Show me the real commands**
+**30 · A folder that holds several projects**
+Open a working directory with `backend/` and `frontend/` beside each other and both are simply there: each with its own line of work to move between, its own versions to save and go back to, its own press to see it running or hand it on. The folder itself is left a plain folder — nothing is created in it to make it look like one project.
+
+**31 · Show me the real commands**
 The commands, paths and git operations under every plain sentence — for the developer who wants the wheel.
 
 ---

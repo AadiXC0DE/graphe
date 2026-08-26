@@ -234,7 +234,7 @@ describe('checks let go when the files move underneath them', () => {
   });
 
   it('says so after going back to an earlier moment', () => {
-    const at = MAIN.indexOf('await open.held.timeline.restoreTo(versionId)');
+    const at = MAIN.indexOf('await timeline.restoreTo(versionId)');
     expect(at).toBeGreaterThan(-1);
     expect(MAIN.slice(at, at + 200)).toContain('filesMovedIn(open)');
   });

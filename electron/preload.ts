@@ -114,7 +114,15 @@ function named(where?: Where): Where | undefined {
   if (typeof where.conversation === 'string' && where.conversation.trim() !== '') {
     asked.conversation = where.conversation;
   }
-  return asked.project === undefined && asked.conversation === undefined ? undefined : asked;
+  // Which project inside a folder that holds several. Sent as written; the
+  // shell matches it against the children it actually found, so a name that
+  // names nothing means the folder itself and never a folder elsewhere.
+  if (typeof where.repo === 'string' && where.repo.trim() !== '') {
+    asked.repo = where.repo;
+  }
+  return asked.project === undefined && asked.conversation === undefined && asked.repo === undefined
+    ? undefined
+    : asked;
 }
 
 const api: GrapheApi = {

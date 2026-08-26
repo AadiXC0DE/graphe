@@ -99,6 +99,9 @@ export type Desk = {
   overview: Overview | null;
   /** The timeline, newest first. Empty until the shell has been asked. */
   versions: readonly SavedVersion[];
+  /** Each project's own timeline, by its folder name, when this folder holds
+   *  several projects rather than being one. Empty every ordinary day. */
+  repoVersions: Readonly<Record<string, readonly SavedVersion[]>>;
   /** The offer to undo the last "put back", while it is still on offer. */
   putBack: PutBack | null;
 
@@ -222,6 +225,7 @@ function blankDesk(path: string, name: string): Desk {
     references: [],
     overview: null,
     versions: [],
+    repoVersions: {},
     putBack: null,
     jobs: [],
     doing: null,

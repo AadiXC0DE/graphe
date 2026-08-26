@@ -243,7 +243,7 @@ const TABS: readonly { id: TabId; name: string }[] = [
  *  says what it holds, because a list of six nouns down a panel is a list
  *  nobody presses. */
 const LOOKS: readonly { id: DesignPart; note: string; trouble?: boolean }[] = [
-  { id: 'styles', note: 'Colour, type, spacing — move any of them' },
+  { id: 'styles', note: 'Colour, type, spacing (move any of them)' },
   { id: 'motion', note: 'How long things take, and how they start and stop' },
   { id: 'drift', note: 'Written by hand, a hair off one of yours', trouble: true },
   { id: 'legible', note: 'Pairings nobody can read', trouble: true },

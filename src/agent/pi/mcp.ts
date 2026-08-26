@@ -85,7 +85,7 @@ export const MCP_WORDS = {
    *  screen already, so this says what happened and what to do about it. */
   cannotSave: 'I did not save that: the list of connected tools would not read.',
   cannotSaveBecause: (because: string): string =>
-    `${because} Saving now would replace the whole file with what this panel can see, and anything else in it — a key, a folder — would go with it. Open the file, put it right, and try again.`,
+    `${because} Saving now would replace the whole file with what this panel can see, and anything else in it (a key, a folder) would go with it. Open the file, put it right, and try again.`,
   /** Where the panel would have offered Connect and Disconnect. */
   cannotChange: 'Nothing can be connected or disconnected until this file reads.',
   gotIt: 'Got it',
@@ -349,7 +349,7 @@ export async function readMcpConfig(projectRoot: string): Promise<McpConfig> {
     parsed = JSON.parse(raw) as { servers?: unknown };
   } catch (cause) {
     const said = cause instanceof Error ? cause.message : 'it is not readable.';
-    return { servers: [], trouble: `the file is there but not valid JSON — ${said}`, skipped: [] };
+    return { servers: [], trouble: `the file is there but not valid JSON: ${said}`, skipped: [] };
   }
 
   if (parsed === null || typeof parsed !== 'object') {
@@ -541,16 +541,16 @@ const PLAIN_SERVER_NAME = /^[a-z0-9][a-z0-9_-]*$/i;
 
 export const CONNECTING = {
   cannot: (because: string): string =>
-    `I did not connect that: the list of connected tools would not read — ${because} Adding to it now would replace the whole file with what I can see, and anything else in it would go with it. Open .pi/mcp.json, put it right, and ask me again.`,
+    `I did not connect that: the list of connected tools would not read. ${because} Adding to it now would replace the whole file with what I can see, and anything else in it would go with it. Open .pi/mcp.json, put it right, and ask me again.`,
   nothingCalled: (asked: string): string =>
     `I do not vouch for anything called "${asked}". The ones I do: ${REACHABLE.map((one) => one.id).join(', ')}. For anything else, give me a name and the line that starts it.`,
-  oddName: 'Give it a plain name — letters, numbers, dashes and underscores — because that is the name everything else refers to it by afterwards.',
+  oddName: 'Give it a plain name (letters, numbers, dashes and underscores), because that is the name everything else refers to it by afterwards.',
   taken: (name: string): string =>
     `Something is already connected under the name "${name}", and I will not quietly put something else in its place. Pick another name, or disconnect that one first under Other tools.`,
   looksLikeAKey:
-    'There is something on that line that looks like a key. I do not write keys into this file — connect the tool without it, then put the value in .pi/mcp.json by hand.',
+    'There is something on that line that looks like a key. I do not write keys into this file, so connect the tool without it, then put the value in .pi/mcp.json by hand.',
   done: (name: string, line: string, file: string): string =>
-    `Connected "${name}" — ${line}. It is written down in ${file}, and it shows up under Other tools, where it can be checked or disconnected in one press. It starts only when something asks it for a tool, and I can reach it from the next conversation in this project rather than this one. Anything it needs alongside — a key, a folder — goes into that file by hand.`,
+    `Connected "${name}": ${line}. It is written down in ${file}, and it shows up under Other tools, where it can be checked or disconnected in one press. It starts only when something asks it for a tool, and I can reach it from the next conversation in this project rather than this one. Anything it needs alongside (a key, a folder) goes into that file by hand.`,
 } as const;
 
 /** Anything on a start line that we would rather not write down. Deliberately

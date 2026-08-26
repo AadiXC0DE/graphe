@@ -216,7 +216,7 @@ export const behind = {
     'Putting back restores the project to that saved moment. It is kept as its own moment, so it can be undone too.',
   /** Beside a version somebody named. */
   naming:
-    'A name you type is kept with that saved moment — nothing else about the moment changes.',
+    'A name you type is kept with that saved moment. Nothing else about the moment changes.',
   /** In the corner, beside the money. */
   spend:
     'Counted from what your account was actually charged, converted at the moment it is read. Graphe takes no cut and never sees the number.',
@@ -242,7 +242,7 @@ export const reallyRuns = {
   handOver:
     'Runs gh: makes a branch off your work, pushes it, and opens a pull request with the write-up and the pictures in it.',
   online:
-    'Runs vercel — fetched with npx if this computer has not got it — and gives you back the address it returns.',
+    'Runs vercel (fetched with npx if this computer has not got it) and gives you back the address it returns.',
   page: 'Writes one .html file wherever you choose. Nothing is uploaded and nothing is installed.',
 } as const;
 

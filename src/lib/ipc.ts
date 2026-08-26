@@ -1070,7 +1070,7 @@ export const swapWords = {
   busy: {
     what: 'Let me finish this thought first.',
     because:
-      'I am part-way through answering. Moving to another conversation now would lose it — stop me if you would rather go anyway.',
+      'I am part-way through answering. Moving to another conversation now would lose it. Stop me if you would rather go anyway.',
     actionLabel: 'Got it',
   },
   unreadable: {
@@ -1085,7 +1085,7 @@ export const swapWords = {
  *  the view goes: it is still written down, and opening it again carries on. */
 export const setDownWords = {
   said:
-    'I have put this conversation down to make room for the ones you moved to. Nothing is lost — open it again and I will pick up where we left off.',
+    'I have put this conversation down to make room for the ones you moved to. Nothing is lost. Open it again and I will pick up where we left off.',
 } as const;
 
 /**

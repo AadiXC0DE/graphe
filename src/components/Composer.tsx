@@ -658,7 +658,7 @@ export default function Composer({
         value={value}
         rows={1}
         autoFocus={autoFocus}
-        placeholder={placeholder ?? 'Describe what you want — or paste a screenshot of it'}
+        placeholder={placeholder ?? 'Describe what you want, or paste a screenshot of it'}
         onChange={(e) => {
           // Typing is taking over: stop listening rather than let the next
           // thing heard land on top of what was just written.
@@ -696,7 +696,7 @@ export default function Composer({
             >
               <span>
                 <strong>{one.command}</strong>
-                <small>{one.description.replace(`${one.command} — `, '')}</small>
+                <small>{one.description}</small>
               </span>
               <em>{one.source === 'project' ? 'This project' : 'Your computer'}</em>
             </button>
@@ -800,7 +800,7 @@ export default function Composer({
           {listening
             ? SAYING.listening
             : attachments.length > 0
-              ? 'I can see this — say what you want changed.'
+              ? 'I can see this. Say what you want changed.'
               : ''}
         </span>
 

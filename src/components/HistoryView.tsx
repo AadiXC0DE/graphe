@@ -35,9 +35,9 @@ export const SAYS = {
   /** The head of the detail column. */
   about: 'This commit',
   came: 'Parents',
-  cameNothing: 'Nothing — this is where the project starts.',
+  cameNothing: 'Nothing. This is where the project starts.',
   wentBack: 'A restore of an earlier commit.',
-  joined: 'Merge commit — two branches joined here.',
+  joined: 'Merge commit: two branches joined here.',
   names: 'Named',
   now: 'Not saved yet',
   nowNothing: 'Everything here is saved.',

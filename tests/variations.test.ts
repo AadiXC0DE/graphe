@@ -52,6 +52,6 @@ describe('the shape of a variation set', () => {
     const empty = setFrom('x', []);
     expect(stripSays(empty)).toBe('Nothing to compare yet.');
     const set = setFrom('x', [{ name: 'Editorial', brief: '' }, { name: 'Playful', brief: '' }]);
-    expect(stripSays(set)).toBe('Editorial — one of 2.');
+    expect(stripSays(set)).toBe('Editorial, one of 2.');
   });
 });

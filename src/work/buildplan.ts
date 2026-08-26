@@ -150,7 +150,7 @@ export function standing(plan: readonly Task[]): { done: number; total: number; 
 export function toMarkdown(plan: readonly Task[]): string {
   const lines = plan.map((one) => {
     const box = one.status === 'done' ? '[x]' : '[ ]';
-    const test = one.test === null ? '' : ` — runs \`${one.test}\``;
+    const test = one.test === null ? '' : ` (runs \`${one.test}\`)`;
     return `- ${box} ${one.title}${test}`;
   });
   return lines.join('\n');

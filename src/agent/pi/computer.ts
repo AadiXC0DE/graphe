@@ -57,7 +57,7 @@ export const BROWSER_WORDS = {
     'No page is open in the browser yet. Open one first, and then there is something to read.',
   stopped: 'That was stopped.',
   notBoth:
-    'This browser is held to a few named sites, and one held that way has to start clean every time — so it is not keeping what it is signed in to. Take the list of sites away if staying signed in matters more.',
+    'This browser is held to a few named sites, and one held that way has to start clean every time, so it is not keeping what it is signed in to. Take the list of sites away if staying signed in matters more.',
   keeping:
     'This browser keeps what it is signed in to between sittings, so a site you have signed into once stays signed in.',
   nothingWrong:
@@ -250,7 +250,7 @@ export function saysRequests(data: Record<string, unknown> | null): readonly str
     const url = typeof one['url'] === 'string' ? one['url'] : '';
     if (url === '' || (status >= 200 && status < 400)) continue;
     const method = typeof one['method'] === 'string' ? one['method'] : 'GET';
-    bad.push(`${method} ${url} — ${status === 0 ? 'never came back' : String(status)}`);
+    bad.push(`${method} ${url}: ${status === 0 ? 'never came back' : String(status)}`);
   }
   return bad;
 }

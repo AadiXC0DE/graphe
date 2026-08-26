@@ -211,7 +211,7 @@ export function reviewAsMarkdown(verdict: ReviewVerdict): string {
         : ` \`${finding.file}${finding.line === undefined ? '' : `:${String(finding.line)}`}\``;
     const impact = finding.impact === undefined ? '' : ` ${finding.impact}`;
     lines.push(
-      `- **${PRIORITY_WORDS[finding.priority]}**${place} — ${finding.issue}${impact} (${REVIEW_WORDS.confidence} ${String(finding.confidence)}%)`,
+      `- **${PRIORITY_WORDS[finding.priority]}**${place}: ${finding.issue}${impact} (${REVIEW_WORDS.confidence} ${String(finding.confidence)}%)`,
     );
   }
   return `${lines.join('\n')}\n`;

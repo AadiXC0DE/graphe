@@ -235,11 +235,11 @@ export function saysNotice(project: string, piece: Finished, said?: string | nul
   const doing = trimmed(piece.doing, 80);
   const title = trimmed(project, 40);
   if (piece.state === 'needs-you') {
-    return { title, body: `${doing} — I stopped and I need you for a moment.` };
+    return { title, body: `${doing}: I stopped and I need you for a moment.` };
   }
   if (piece.state === 'failed') {
-    return { title, body: `${doing} — it didn’t work. Nothing in your project changed.` };
+    return { title, body: `${doing}: it didn’t work. Nothing in your project changed.` };
   }
   const detail = said === undefined || said === null || said.trim() === '' ? null : trimmed(said, 90);
-  return { title, body: detail === null ? `${doing} — done, and waiting for you.` : detail };
+  return { title, body: detail === null ? `${doing}: done, and waiting for you.` : detail };
 }

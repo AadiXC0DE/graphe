@@ -444,7 +444,7 @@ function movedOrGone(name: string): Trouble {
   return {
     what: `I cannot find ${name} any more.`,
     because:
-      'The folder has been moved, renamed or thrown away since you last opened it. Nothing of yours has been touched — I just do not know where to look.',
+      'The folder has been moved, renamed or thrown away since you last opened it. Nothing of yours has been touched, I just do not know where to look.',
     actionLabel: 'Take it off the list',
   };
 }
@@ -475,7 +475,7 @@ const NOTHING_OPEN: Trouble = {
 const SEVERAL_PROJECTS: Trouble = {
   what: 'This folder holds several projects.',
   because:
-    'This works on one project at a time. Open the one you mean — it is a folder inside this one — and try again there.',
+    'This works on one project at a time. Open the one you mean, a folder inside this one, and try again there.',
   actionLabel: 'Got it',
 };
 
@@ -1867,7 +1867,7 @@ async function childRepoNotes(children: readonly DetectedRepo[]): Promise<readon
   );
   return [
     `This folder itself is not a repository. It holds ${parts.length} projects beside each other: ${parts.join(', ')}.`,
-    'Run git and package commands inside the project folder they belong to — for example `git -C backend status` — never from this folder.',
+    'Run git and package commands inside the project folder they belong to, for example `git -C backend status`, never from this folder.',
   ];
 }
 
@@ -1940,7 +1940,7 @@ function ghJSON(
 const GH_WORDS = {
   tooSlow: 'github did not answer in time.',
   noTool:
-    'I could not start the github command (`gh`). It needs to be installed and logged in — the same one your terminal uses.',
+    'I could not start the github command (`gh`). It needs to be installed and logged in, the same one your terminal uses.',
   refused: 'github refused the request.',
   unreadable: 'github answered with something this could not read.',
 } as const;
@@ -6534,7 +6534,7 @@ function register(): void {
     // Asked and answered inside the conversation, because that is where the
     // model already is. The window shows it beside the row it asked about.
     await agent.prompt(askAbout(found));
-    return done('Asked — the answer is in the conversation.');
+    return done('Asked. The answer is in the conversation.');
   });
 
   handle<readonly Conversation[]>(CHANNEL.conversations, async (_event, args) => {
@@ -6735,7 +6735,7 @@ function register(): void {
       return fail({ what: 'There is nothing to switch between yet.', because: 'This project has no saved work, so it has no lines of work.', actionLabel: 'Got it' });
     }
     if (stillWriting(open.held)) {
-      return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish and switch then. A line of work is only moved when nothing is still changing the files.', actionLabel: 'Got it' });
+      return fail({ what: 'Not yet. This is still being written.', because: 'Let it finish and switch then. A line of work is only moved when nothing is still changing the files.', actionLabel: 'Got it' });
     }
     // Saved, not refused. Refusing on anything unsaved made this impossible to
     // come back from: moving to a line without a folder leaves that folder
@@ -6770,10 +6770,10 @@ function register(): void {
     if (open === null || typeof name !== 'string') return fail(NOTHING_OPEN);
     const clean = name.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(clean)) {
-      return fail({ what: 'That is not a usable name for a line of work.', because: 'Letters, numbers, dots, dashes and slashes — and it cannot start with a dash.', actionLabel: 'Got it' });
+      return fail({ what: 'That is not a usable name for a line of work.', because: 'Letters, numbers, dots, dashes and slashes, and it cannot start with a dash.', actionLabel: 'Got it' });
     }
     if (stillWriting(open.held)) {
-      return fail({ what: 'Not yet — this is still being written.', because: 'Let it finish, then start the new line.', actionLabel: 'Got it' });
+      return fail({ what: 'Not yet. This is still being written.', because: 'Let it finish, then start the new line.', actionLabel: 'Got it' });
     }
     const entry = checkoutEntryFor(open, where);
     const cwd = folderFor(open, where);
@@ -6782,7 +6782,7 @@ function register(): void {
     await timeline.snapshot({ boundary: 'before-going-back' }).catch(() => null);
     const made = await gitRun(cwd, ['checkout', '-b', clean]);
     if (made.code !== 0) {
-      return fail({ what: 'I could not start that line of work.', because: 'git refused the new branch — the name may already exist.', actionLabel: 'Got it' });
+      return fail({ what: 'I could not start that line of work.', because: 'git refused the new branch. The name may already exist.', actionLabel: 'Got it' });
     }
     if (entry !== null) {
       const remembered = open.held.checkouts.get(entry.address);

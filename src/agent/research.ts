@@ -214,10 +214,10 @@ export function lookingInto(
     going.length === 1
       ? back === 0
         ? 'Looking into one thing'
-        : `Looking into one more thing — ${String(back)} answered so far`
+        : `Looking into one more thing, ${String(back)} answered so far`
       : back === 0
         ? `Looking into ${String(going.length)} things at once`
-        : `Looking into ${String(going.length)} things at once — ${String(back)} answered so far`;
+        : `Looking into ${String(going.length)} things at once, ${String(back)} answered so far`;
   const named = going
     .slice(0, NAMED)
     .map((one) => lineOfEnquiry(one.task) ?? '')

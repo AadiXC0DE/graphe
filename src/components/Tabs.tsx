@@ -117,7 +117,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
                 // years. Nobody is taught this and everybody who knows it uses it.
                 if (event.button === 1) onClose(tab.id);
               }}
-              title={`${tab.title} — ${tab.project}`}
+              title={`${tab.title} (${tab.project})`}
             >
               <Mark state={tab.state} />
               <span className="tabs__text">

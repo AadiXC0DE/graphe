@@ -90,7 +90,7 @@ export default function Skills({ open, skills, workflows, onClose, onRefresh, on
           {rows(global, 'Your computer', 'Available in every project')}
           <section className="skills__group">
             <div className="skills__grouphead"><span>Workflows</span><small>Runs with /</small></div>
-            {shownWorkflows.length === 0 ? <p className="skills__empty">None here yet — ask the agent to make you one.</p> : shownWorkflows.map((one) => (
+            {shownWorkflows.length === 0 ? <p className="skills__empty">None here yet. Ask the agent to make you one.</p> : shownWorkflows.map((one) => (
               <div key={one.command} className="skills__row skills__row--workflow">
                 <span className="skills__rowtop"><strong>{one.command}</strong></span>
                 <span>{one.description}</span>

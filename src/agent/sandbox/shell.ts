@@ -269,9 +269,9 @@ export function refusedByBoundary(
  *  alternative is the same command tried again five times and charged for. */
 export const REFUSED: Record<Refusal, string> = {
   place:
-    'That was not the command failing — it was refused by the boundary around it. What runs here reaches this project’s folder and the tools it needs, and nothing else on the computer; a path outside the folder is turned down however the command is written. Try it again inside the folder, or find another way to what you need. Running the same thing again will get the same answer.',
+    'That was not the command failing. It was refused by the boundary around it. What runs here reaches this project’s folder and the tools it needs, and nothing else on the computer; a path outside the folder is turned down however the command is written. Try it again inside the folder, or find another way to what you need. Running the same thing again will get the same answer.',
   address:
-    'That was not the command failing — the boundary around it would not open that address. Work here reaches the places it ordinarily needs and nothing else, so this one is not on the list. Carry on without it, or tell the person which address you need and why. Running the same thing again will get the same answer.',
+    'That was not the command failing. The boundary around it would not open that address. Work here reaches the places it ordinarily needs and nothing else, so this one is not on the list. Carry on without it, or tell the person which address you need and why. Running the same thing again will get the same answer.',
 };
 
 /** Enough of the end of the output to recognise a refusal in, without holding a
@@ -279,7 +279,7 @@ export const REFUSED: Record<Refusal, string> = {
 const TAIL = 8_000;
 
 export const CANNOT_LISTEN =
-  'I did not run that here. A command run this way is waited on until it finishes, and this kind never does — and what I run has no port of its own to be reached on. Start it with the keep_running tool instead: it stays up after this turn, several can run at once, and it comes back with the address it is reachable at. Ask it about them again with running(), and end one with stop_running(id).';
+  'I did not run that here. A command run this way is waited on until it finishes, and this kind never does, and what I run has no port of its own to be reached on. Start it with the keep_running tool instead: it stays up after this turn, several can run at once, and it comes back with the address it is reachable at. Ask it about them again with running(), and end one with stop_running(id).';
 
 /** End a detached shell's entire process group. Killing its shell alone leaves
  * Vite/npm behind; killing the group is what makes the chat Stop button real. */

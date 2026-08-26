@@ -232,8 +232,8 @@ export const ATTACH_WORDS = {
    *  the worst of the three possible answers. */
   onlyPictures: (names: readonly string[]): string =>
     names.length === 1
-      ? `${names[0] ?? ''} will not be read — only pictures go with a message. Put it in your project folder and ask me to open it.`
-      : `${String(names.length)} of these will not be read — only pictures go with a message. Put them in your project folder and ask me to open them.`,
+      ? `${names[0] ?? ''} will not be read. Only pictures go with a message. Put it in your project folder and ask me to open it.`
+      : `${String(names.length)} of these will not be read. Only pictures go with a message. Put them in your project folder and ask me to open them.`,
 } as const;
 
 /**
@@ -259,7 +259,7 @@ export function fromConnectLine(
 export const PICTURE_WORDS = {
   /** Said the moment a picture is put in the box, not after a turn is spent. */
   cannotRead: (model: string): string =>
-    `${model} cannot read pictures. Take it out, or pick a model that can — the model is named beside the box.`,
+    `${model} cannot read pictures. Take it out, or pick a model that can. The model is named beside the box.`,
 } as const;
 
 export const MAX_AT_ONCE = 12;
@@ -326,7 +326,7 @@ export function readDropped<F extends FileFacts>(payload: Dropped<F>): Landed<F>
     }
 
     if (given.length > MAX_AT_ONCE) {
-      because ??= `I took the first ${MAX_AT_ONCE} — that is as many as I can look at in one go.`;
+      because ??= `I took the first ${MAX_AT_ONCE}. That is as many as I can look at in one go.`;
     }
 
     return { taken, link: null, because };

@@ -45,7 +45,7 @@ describe('what it is looking into, while it looks', () => {
       { task: 'Looking into: who else has hit this', state: 'done' as const },
     ];
     expect(lookingInto(helpers)).toEqual({
-      label: 'Looking into 2 things at once — 1 answered so far',
+      label: 'Looking into 2 things at once, 1 answered so far',
       detail: 'why the nav is slow · what the type scale is',
     });
     expect(lookingInto([{ task: 'Looking into: one thing', state: 'running' }])).toEqual({

@@ -18,7 +18,7 @@ export default function WorkingMark() {
         <span className="workingmark__dot" />
         <span className="workingmark__dot" />
       </span>
-      <span className="workingmark__words">On it — working this through.</span>
+      <span className="workingmark__words">On it. Working this through.</span>
     </div>
   );
 }

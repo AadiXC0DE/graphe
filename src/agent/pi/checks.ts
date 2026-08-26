@@ -97,9 +97,9 @@ export const CHECK_WORDS = {
   /** How to say what was checked, so the person reading the verdict knows. */
   name: 'Name the checks you ran in the review block, as a "checks" list of their names.',
   /** What a person is told when they ask where checks come from. */
-  where: 'Checks live in .agents/checks — one file each, a name and what to look for.',
+  where: 'Checks live in .agents/checks: one file each, a name and what to look for.',
   /** Under the list, when there are checks to actually run. */
-  runThem: 'Run them with run_checks — it puts a reviewer on each of them at once and brings back what they found.',
+  runThem: 'Run them with run_checks, which puts a reviewer on each of them at once and brings back what they found.',
   /** When there is nothing written down, so nothing was run and nothing spent. */
   nothingWritten: 'This project has not written any checks down, so there was nothing to run and no reviewer was sent.',
   /** Above the gathered answers. */

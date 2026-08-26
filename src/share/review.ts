@@ -94,7 +94,7 @@ function opening(changes: readonly Shown[]): string {
 function frame(source: string, label: string, title: string): string {
   const which = label.toLowerCase();
   return `<figure class="frame ${which}">
-        <img src="${escapeHtml(source)}" alt="${escapeHtml(title)} — ${escapeHtml(which)}">
+        <img src="${escapeHtml(source)}" alt="${escapeHtml(title)} (${escapeHtml(which)})">
         <figcaption>${escapeHtml(label)}</figcaption>
       </figure>`;
 }
@@ -135,7 +135,7 @@ function pictures(change: Shown, index: number): string {
   if (after !== null) {
     return `<div class="pair">
       <div class="frames one">${frame(after, 'After', change.title)}</div>
-      <p class="aside">This part is new — there was nothing here before it.</p>
+      <p class="aside">This part is new. There was nothing here before it.</p>
     </div>`;
   }
   if (before !== null) {
@@ -460,7 +460,7 @@ export function reviewPage(review: Review): string {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex">
-    <title>${project} — what changed</title>
+    <title>${project}: what changed</title>
     <style>
     ${STYLE}
     </style>
@@ -479,7 +479,7 @@ export function reviewPage(review: Review): string {
 
       ${body}
 
-      <p class="foot">This page is a picture of the work at one moment. It is only for reading —
+      <p class="foot">This page is a picture of the work at one moment. It is only for reading, and
       nothing on it can be changed from here.</p>
     </main>
   </body>

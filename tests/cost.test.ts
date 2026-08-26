@@ -295,7 +295,7 @@ describe('the ledger splits work from our own retries', () => {
     expect(lines.headline).toBe('Today: ₹120');
     expect(lines.work).toBe('₹85 building what you asked for');
     expect(lines.retry).toBe(
-      '₹35 on attempts that didn’t work — mostly me retrying building the contact form',
+      '₹35 on attempts that didn’t work, mostly me retrying building the contact form',
     );
   });
 });

@@ -55,7 +55,7 @@ export type Pack = {
 export const CURATED: readonly { id: string; why: string }[] = [
   {
     id: 'pi-mcp-adapter',
-    why: 'Lets me work directly with the other tools you already use — your notes, your tasks, the files you keep elsewhere — instead of you carrying things between them by hand.',
+    why: 'Lets me work directly with the other tools you already use (your notes, your tasks, the files you keep elsewhere) instead of you carrying things between them by hand.',
   },
   {
     id: 'pi-web-access',
@@ -76,7 +76,7 @@ const VOUCHED = new Map(CURATED.map((one, order) => [one.id, { order, why: one.w
 /** Shown once, before anything is installed. Calm on purpose: this is a real
  *  thing to weigh, and a red panel that shouts gets clicked through. */
 export const WARNING =
-  'Someone else wrote this, not us — installing it runs their code on this computer, with the same reach over your files that I have.';
+  'Someone else wrote this, not us. Installing it runs their code on this computer, with the same reach over your files that I have.';
 
 /* -------------------------------------------------------------------------- */
 /* Reading somebody else's catalogue                                           */

@@ -43,7 +43,7 @@ export const ALWAYS_WORDS = {
     'The list of things this project always does could not be read, so none of them are running. It is one file, and it needs to be a list of names and commands.',
   /** Said once, when a command is one the Guard would stop. */
   refused: (name: string): string =>
-    `“${name}” is not something I will run on my own. Things that run without being asked have to be safe to run without being asked — a check, a formatter, a test — and that one is not.`,
+    `“${name}” is not something I will run on my own. Things that run without being asked have to be safe to run without being asked (a check, a formatter, a test), and that one is not.`,
   failed: (name: string, said: string): string =>
     `“${name}” did not pass after that change.\n\n${said}`,
 } as const;

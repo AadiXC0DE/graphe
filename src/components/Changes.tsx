@@ -19,7 +19,7 @@ type Props = {
 export const SAYS = {
   heading: 'What changed',
   reading: 'Reading the change',
-  readingDetail: 'A moment — this is being read off the disk.',
+  readingDetail: 'A moment. This is being read off the disk.',
   nothing: 'Nothing has changed.',
   keptNothing: 'Nothing kept.',
   nothingDetail: 'When there is work to look through, it will show up here.',

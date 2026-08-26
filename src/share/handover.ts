@@ -229,7 +229,7 @@ function shownPictures(pictures: Pictures, title: string): string {
     return [
       '| Before | After |',
       '| --- | --- |',
-      `| <img src="${before}" alt="${cell(title)} — before" width="420"> | <img src="${after}" alt="${cell(title)} — after" width="420"> |`,
+      `| <img src="${before}" alt="${cell(title)} (before)" width="420"> | <img src="${after}" alt="${cell(title)} (after)" width="420"> |`,
     ].join('\n');
   }
   const only = after ?? before;

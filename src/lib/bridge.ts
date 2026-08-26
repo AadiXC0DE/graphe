@@ -147,7 +147,7 @@ const PREVIEW_REPLY = `This is Graphe running in a browser tab, so there are no 
 - the questions I ask before I change anything, and the answers you give
 - the meter in the corner, with the same arithmetic behind it
 
-What is not real is anything that would reach a folder. In the app, this is where the work itself would arrive — written in your own tokens, with a version saved before it, so putting it back is one click:
+What is not real is anything that would reach a folder. In the app, this is where the work itself would arrive, written in your own tokens, with a version saved before it, so putting it back is one click:
 
 \`\`\`css
 .hero__title {
@@ -157,7 +157,7 @@ What is not real is anything that would reach a folder. In the app, this is wher
 }
 \`\`\`
 
-Open the desktop app and I will get to work. If you came to look at the interface rather than to use it, add \`?gallery\` to the address — every piece of it is on one page there, in both themes.`;
+Open the desktop app and I will get to work. If you came to look at the interface rather than to use it, add \`?gallery\` to the address: every piece of it is on one page there, in both themes.`;
 
 /**
  * A couple of words at a time, so the streaming path is genuinely exercised
@@ -530,7 +530,7 @@ function previewAway(): Away {
     /* Two goes at one job, so the comparison has something to open onto. */
     {
       id: 'away-w1',
-      doing: 'Rework the hero — one big line, everything else out of the way',
+      doing: 'Rework the hero: one big line, everything else out of the way',
       state: 'done',
       at: started - 14 * MINUTE,
       picture: null,
@@ -541,7 +541,7 @@ function previewAway(): Away {
     },
     {
       id: 'away-w2',
-      doing: 'Rework the hero — the photograph doing the work',
+      doing: 'Rework the hero: the photograph doing the work',
       state: 'done',
       at: started - 12 * MINUTE,
       picture: null,

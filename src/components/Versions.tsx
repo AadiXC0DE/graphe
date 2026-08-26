@@ -161,14 +161,14 @@ export default function Versions({
               type="button"
               className="rail__only"
               aria-pressed={onlyChanged}
-              title="When on, moments where the picture did not change are hidden — usually a save with nothing visible to show."
+              title="When on, moments where the picture did not change are hidden, usually a save with nothing visible to show."
               onClick={() => setOnlyChanged(!onlyChanged)}
             >
               <span className="rail__onlydot" aria-hidden="true" />
               Hide look-alikes
             </button>
             {onlyChanged && folded > 0 ? (
-              <span className="rail__folded" title="Moments where the picture did not change — usually a save with no visible difference.">
+              <span className="rail__folded" title="Moments where the picture did not change, usually a save with no visible difference.">
                 {folded} {folded === 1 ? 'looked the same' : 'looked the same'}
               </span>
             ) : null}
@@ -347,7 +347,7 @@ function Moment({
         className="moment__keep"
         aria-pressed={kept}
         aria-label={kept ? `Stop keeping: ${version.title}` : `Keep: ${version.title}`}
-        title={kept ? 'Kept — click to let it go' : 'Keep this one at the top'}
+        title={kept ? 'Kept. Click to let it go' : 'Keep this one at the top'}
         onClick={onKeep}
       >
         {/* A five-point star is top-heavy: its filled mass sits below its

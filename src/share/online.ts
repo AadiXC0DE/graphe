@@ -21,13 +21,13 @@ export const onlineWords = {
   aboutTo: 'This puts your project on the internet at an address anyone you send it to can open.',
   /** The second half of that, so nobody is surprised by the shape of it. */
   andSo:
-    'Only the finished pages go — the files you work in stay on this computer. You can take it down again afterwards.',
+    'Only the finished pages go, and the files you work in stay on this computer. You can take it down again afterwards.',
   confirm: 'Yes, put it online',
   working: 'Getting your project ready and putting it online…',
   /** When it worked. The address itself is shown beside this. */
   live: 'It is online. Anyone with this address can open it.',
   nothingToPut:
-    'There is nothing here to put online yet — I could not find any finished pages in this project.',
+    'There is nothing here to put online yet. I could not find any finished pages in this project.',
   cannot:
     'This computer has nothing set up to put a project online, so nothing has left it. Once that is installed, this button will work.',
   notSignedIn:

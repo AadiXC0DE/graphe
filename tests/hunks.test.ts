@@ -399,8 +399,8 @@ describe('HK-05 saying it in one line', () => {
   });
 
   it('reads as a sentence, in words anybody has', () => {
-    expect(WORDS.summary(countsOf(parseDiff(TWO_FILES)))).toBe('2 files, 2 changes — 2 lines added, 2 removed');
-    expect(WORDS.summary(countsOf(parseDiff(THREE_PIECES)))).toBe('1 file, 3 changes — 3 lines added, 0 removed');
+    expect(WORDS.summary(countsOf(parseDiff(TWO_FILES)))).toBe('2 files, 2 changes: 2 lines added, 2 removed');
+    expect(WORDS.summary(countsOf(parseDiff(THREE_PIECES)))).toBe('1 file, 3 changes: 3 lines added, 0 removed');
     expect(WORDS.summary(countsOf([]))).toBe(WORDS.nothing);
   });
 

@@ -136,7 +136,7 @@ function readJob(): Promise<Job> {
  *  the parent turns this into the tool's error text, so the model reads it and
  *  says something true instead of reporting a finding it never made. */
 const NO_MODEL =
-  'The helper had nothing to think with — no account reached it. Nothing was looked at.';
+  'The helper had nothing to think with: no account reached it. Nothing was looked at.';
 
 /** A helper that ran and said nothing is not a helper that found nothing. */
 export const SAID_NOTHING =
@@ -247,7 +247,7 @@ async function work(
         type: 'done',
         outcome: {
           ok: false,
-          error: `The model you selected (${chosen.providerId}/${chosen.modelId}) is not available for this helper — it may have been removed or renamed. Select a model that is available and try again.`,
+          error: `The model you selected (${chosen.providerId}/${chosen.modelId}) is not available for this helper. It may have been removed or renamed. Select a model that is available and try again.`,
         },
       });
       return 1;

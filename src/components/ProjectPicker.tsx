@@ -179,7 +179,7 @@ export default function ProjectPicker({
       {compact ? null : (
         <p className="picker__foot">
           Your prompts go to the model you picked, on your own account. Everything else
-          — keys, history, what it remembers — stays here.
+          (keys, history, what it remembers) stays here.
         </p>
       )}
     </section>

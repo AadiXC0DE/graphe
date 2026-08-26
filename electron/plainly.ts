@@ -85,7 +85,7 @@ const KNOWN: readonly Known[] = [
     when: /(image|vision|multimodal)[^.]{0,40}(not supported|unsupported|not allowed|cannot|invalid)|(does not|doesn't) support (image|vision)|no support for image/i,
     what: 'This model cannot read pictures.',
     because:
-      'The picture went with your message and the model turned it away. Take it out and ask again, or pick a model that reads pictures — the model is named beside the box.',
+      'The picture went with your message and the model turned it away. Take it out and ask again, or pick a model that reads pictures. The model is named beside the box.',
   },
   {
     when: /context (length|window)|too (long|large)|token limit|maximum context/i,

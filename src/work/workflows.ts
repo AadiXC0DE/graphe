@@ -33,12 +33,12 @@ export type Workflow = {
 
 export const workflowWords = {
   /** A file that cannot answer to any command word. */
-  needName: 'A workflow is named by its file — “review.md” makes the command /review.',
-  needBody: 'A workflow needs something to do — the prompt it sends is the whole of it.',
+  needName: 'A workflow is named by its file: “review.md” makes the command /review.',
+  needBody: 'A workflow needs something to do: the prompt it sends is the whole of it.',
   /** Typed a `/` word nobody has. */
   noPage: 'I could not find a workflow with that name.',
   /** `/review` with nothing after it, when it needs a word to work on. */
-  missingArgument: 'Say what you want this to do — /review <this>.',
+  missingArgument: 'Say what you want this to do: /review <this>.',
 } as const;
 
 /** What a command word may be: letters, numbers and hyphens, nothing that could
@@ -113,7 +113,7 @@ export function readWorkflow(
     workflow: {
       command,
       name: command.slice(1),
-      description: seen.description ?? `${command} — a way of working this project added.`,
+      description: seen.description ?? 'A way of working this project added.',
       hint: seen.hint ?? null,
       source,
       body,

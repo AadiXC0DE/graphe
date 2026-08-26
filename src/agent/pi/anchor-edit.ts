@@ -90,7 +90,7 @@ export function applyAnchor(lines: readonly string[], anchor: Anchor): { lines: 
   const start = Math.floor(anchor.startLine);
   const end = anchor.endLine === undefined ? start : Math.floor(anchor.endLine);
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end < start) {
-    return { lines: [], error: 'The lines to change make no sense — they start after they end, or before line 1.' };
+    return { lines: [], error: 'The lines to change make no sense: they start after they end, or before line 1.' };
   }
   if (end > lines.length) {
     return { lines: [], error: `The file has ${lines.length} ${lines.length === 1 ? 'line' : 'lines'}, so lines ${start}–${end} are beyond it.` };
@@ -242,7 +242,7 @@ export function anchorEditTool(opts: { cwd: string; delegate: EditDelegate }): T
       try {
         current = await readFile(absolute, 'utf8');
       } catch {
-        return textResult(`I could not read ${params.path} to edit it — is it still there?`, {});
+        return textResult(`I could not read ${params.path} to edit it. Is it still there?`, {});
       }
       const last = edit.endLine ?? edit.startLine;
       const outcome = applyAnchor(current.split('\n'), {
@@ -253,7 +253,7 @@ export function anchorEditTool(opts: { cwd: string; delegate: EditDelegate }): T
       });
       if (outcome.error !== null) return textResult(outcome.error, {});
       if (outcome.lines.join('\n') === current) {
-        return textResult('That edit would change nothing — the lines already say that.', {});
+        return textResult('That edit would change nothing. The lines already say that.', {});
       }
 
       const written = outcome.lines.join('\n');

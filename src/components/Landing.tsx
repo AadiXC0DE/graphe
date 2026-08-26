@@ -47,7 +47,7 @@ type Props = {
 export const SAYS = {
   heading: 'Handoff',
   nothingWaiting:
-    'Nothing waiting — everything you asked for is in your project.',
+    'Nothing waiting, everything you asked for is in your project.',
 } as const;
 
 /**

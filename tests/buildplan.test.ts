@@ -127,7 +127,7 @@ describe('toMarkdown / readPlan — a plan that survives a restart', () => {
     ];
     const md = toMarkdown(plan);
     expect(md).toContain('- [x] Header');
-    expect(md).toContain('- [ ] Footer — runs `npm test`');
+    expect(md).toContain('- [ ] Footer (runs `npm test`)');
 
     const back = readPlan(plan);
     expect(back).toHaveLength(2);

@@ -159,7 +159,7 @@ export const SAYING = {
   start: 'Say it out loud',
   stop: 'Stop listening',
   /** Beside the box, for as long as it is on. */
-  listening: 'Listening — the words appear as you go',
+  listening: 'Listening: the words appear as you go',
   silence: 'I did not catch anything. A little closer to the microphone usually does it.',
   refused:
     'I am not allowed to listen yet. Letting Graphe use the microphone in your computer settings will fix that.',

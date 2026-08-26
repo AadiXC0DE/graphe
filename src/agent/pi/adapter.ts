@@ -1307,7 +1307,7 @@ export async function importAccount(
   const credential = await credentialFor(account);
   if (credential === null) {
     throw new AdapterError(
-      `That account is no longer saved on this computer — the tool that kept it must have forgotten it.`,
+      `That account is no longer saved on this computer. The tool that kept it must have forgotten it.`,
     );
   }
   const runtime = await runtimeFor(agentDir);

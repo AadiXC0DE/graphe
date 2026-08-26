@@ -58,12 +58,12 @@ export const RULE_WORDS = {
   notPassing: (check: string): string =>
     `"${check}" is not passing, and this project's rules want it passing first.`,
   /** The turn wanted to end and a rule would not let it. */
-  held: (name: string, because: string): string => `${because} I am not done yet — "${name}".`,
+  held: (name: string, because: string): string => `${because} I am not done yet: "${name}".`,
 
   /** When the file itself is wrong. Mirrors how the connected tools say it. */
   fileTrouble: (because: string): string =>
     `I could not read this project's own rules: ${because} Only my usual care is being applied until it reads.`,
-  notJson: (said: string): string => `the file is there but not valid JSON — ${said}`,
+  notJson: (said: string): string => `the file is there but not valid JSON: ${said}`,
   notAnObject: 'the file does not hold a list of rules.',
   noList: 'the file has no "rules" list in it.',
   notAList: '"rules" is there but is not a list.',
@@ -76,7 +76,7 @@ export const RULE_WORDS = {
   badMoment: (name: string, said: string): string =>
     `"${name}" happens "${said}", which is not a moment. Use "before", "after" or "at the end".`,
   badAnswer: (name: string, said: string): string =>
-    `"${name}" answers "${said}", which is not something a rule may say. A rule may only ask, refuse, or keep a way back — it cannot let something through.`,
+    `"${name}" answers "${said}", which is not something a rule may say. A rule may only ask, refuse, or keep a way back. It cannot let something through.`,
   badDoing: (name: string, said: string): string =>
     `"${name}" is about "${said}", which is not a kind of thing I do.`,
   endNeedsCheck: (name: string): string =>

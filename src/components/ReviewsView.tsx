@@ -40,7 +40,7 @@ export const SAYS = {
   noRepo:
     'This folder is not a github repository, or github is not set up on your terminal.',
   noRepoDetail:
-    'You need the github CLI (`gh`) installed and logged in — the same one your terminal uses — and the project needs a `github.com` remote.',
+    'You need the github CLI (`gh`) installed and logged in, the same one your terminal uses, and the project needs a `github.com` remote.',
   issues: 'Issues',
   prs: 'Pull requests',
   prAction: 'Review this PR',
@@ -65,13 +65,13 @@ export function whereToRead(item: RepoItem, here: Here): string {
     return `- this folder may be on a different line of work than the pull request. Before you read any file here, check \`git rev-parse HEAD\` against \`gh pr view ${String(item.number)} --json headRefOid\`. If they differ, read every file with \`git show <the pull request's commit>:<path>\` instead of from the folder.`;
   }
   if (here !== null && here.sha === item.headSha) {
-    return `- this folder is this pull request's code, at ${short(item.headSha)} — read it freely for the surrounding context.`;
+    return `- this folder is this pull request's code, at ${short(item.headSha)}. Read it freely for the surrounding context.`;
   }
   const where =
     here === null
       ? 'somewhere this app could not read'
       : `${here.branch ?? 'detached HEAD'}, at ${short(here.sha)}`;
-  return `- **this folder is not this pull request's code.** It is on ${where}; the pull request is ${item.headRef ?? 'its own branch'} at ${short(item.headSha)}. Do not read files from the folder — every line you quoted would be from a different branch, and every finding would be about code this pull request does not contain. Bring its files in first with \`git fetch origin pull/${String(item.number)}/head\`, then read any one of them with \`git show ${item.headSha}:<path>\`.`;
+  return `- **this folder is not this pull request's code.** It is on ${where}; the pull request is ${item.headRef ?? 'its own branch'} at ${short(item.headSha)}. Do not read files from the folder. Every line you quoted would be from a different branch, and every finding would be about code this pull request does not contain. Bring its files in first with \`git fetch origin pull/${String(item.number)}/head\`, then read any one of them with \`git show ${item.headSha}:<path>\`.`;
 }
 
 /** What the folder is on, as the shell reported it. */
@@ -86,9 +86,9 @@ export function reviewPrompt(item: RepoItem, full: string, here: Here = null): s
 This is the one thing you should do now: a careful, honest review of the whole PR. Assume there are bugs until you have read enough to believe otherwise.
 
 Read what you need through your terminal, where the person’s github is already logged in:
-- \`gh pr view ${item.number} -R ${full}\` — title, description, base branch, the issue(s) it links
-- \`gh pr diff ${item.number} -R ${full}\` — every line the PR changes, held against its base branch
-- \`gh issue view <n> -R ${full}\` — for each issue the PR says it closes (find them in the PR body)
+- \`gh pr view ${item.number} -R ${full}\`: title, description, base branch, the issue(s) it links
+- \`gh pr diff ${item.number} -R ${full}\`: every line the PR changes, held against its base branch
+- \`gh issue view <n> -R ${full}\`: for each issue the PR says it closes (find them in the PR body)
 ${whereToRead(item, here)}
 
 Review it like a senior engineer on the team, not a checklist:
@@ -99,7 +99,7 @@ Review it like a senior engineer on the team, not a checklist:
 - Whether names, shapes and structure match the rest of the codebase
 Be specific: name file paths and lines, and give a one-line reason for every point. Separate “must change” from “could be nicer”. If it is genuinely good to merge, say so plainly.
 
-Finish with a short plain summary followed by a fenced review block — a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, \`"pull": ${item.number}\`, and the findings, each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact and confidence (0-100). The findings then appear as a card with a button that posts them on the pull request, so do not post them yourself.`;
+Finish with a short plain summary followed by a fenced review block: a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, \`"pull": ${item.number}\`, and the findings, each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact and confidence (0-100). The findings then appear as a card with a button that posts them on the pull request, so do not post them yourself.`;
 }
 
 export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, repos, which, onWhich }: Props) {

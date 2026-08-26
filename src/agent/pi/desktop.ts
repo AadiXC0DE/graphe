@@ -53,9 +53,9 @@ export function desktopHere(platform: string = process.platform): boolean {
 
 export const DESKTOP_WORDS = {
   cannotSee:
-    'This computer has not been given permission to let me see the screen. I have opened the setting for you — switch Graphe on under the list for seeing the screen, then ask me again.',
+    'This computer has not been given permission to let me see the screen. I have opened the setting for you. Switch Graphe on under the list for seeing the screen, then ask me again.',
   cannotPoint:
-    'This computer has not been given permission to let me point at things on screen. I have opened the setting for you — switch Graphe on under the list for controlling the computer, then ask me again.',
+    'This computer has not been given permission to let me point at things on screen. I have opened the setting for you. Switch Graphe on under the list for controlling the computer, then ask me again.',
   noPicture:
     'I could not get a picture of the screen, so I have not tried to do anything to it.',
   noSize:
@@ -71,7 +71,7 @@ export const DESKTOP_WORDS = {
   nothingNamed: (app: string): string =>
     `${app} has not named anything on screen, so there is nothing here to aim at by name. A picture and a place to press is the way into this one.`,
   didNotPress: (what: string): string =>
-    `${what} is not there any more. Read what is on screen again — a window that has moved on renames everything.`,
+    `${what} is not there any more. Read what is on screen again, because a window that has moved on renames everything.`,
   stopped: 'That was stopped.',
 } as const;
 
@@ -452,7 +452,7 @@ export function readNamed(said: string): readonly Named[] {
 export function saysNamed(app: string, things: readonly Named[]): string {
   if (things.length === 0) return DESKTOP_WORDS.nothingNamed(app);
   const rows = things.map((one) => `${one.handle}  ${one.role}  ${one.name}`).join('\n');
-  return `${app} — ${String(things.length)} things it has named:\n${rows}`;
+  return `${app}: ${String(things.length)} things it has named:\n${rows}`;
 }
 
 /** The handle a step is aimed at, as the number the walk gave it. Zero when the
@@ -640,7 +640,7 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
       content: [
         {
           type: 'text',
-          text: `The screen is ${String(shot.width)} across and ${String(shot.height)} down, and so is this picture — point at it in these numbers.${where}`,
+          text: `The screen is ${String(shot.width)} across and ${String(shot.height)} down, and so is this picture, so point at it in these numbers.${where}`,
         },
         { type: 'image', data: shot.bytes, mimeType: 'image/jpeg' },
       ],

@@ -3050,7 +3050,7 @@ function Conversation() {
         })),
       );
       const text =
-        "Fix the blocking findings from the review I just asked for — the P0 and P1 ones — and tell me what you changed.";
+        "Fix the blocking findings from the review I just asked for, the P0 and P1 ones, and tell me what you changed.";
       void deliver(text, sizeUp(text), { lookFirst: false });
     },
     [deliver],

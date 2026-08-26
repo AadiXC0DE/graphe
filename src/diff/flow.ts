@@ -232,7 +232,7 @@ export function headlineFor(recording: Recording): string {
 
 /** Said when a run stops itself rather than run forever. */
 export function saysItStopped(most: number): string {
-  return `Stopped after ${lowerCounted(most)} states — there were more.`;
+  return `Stopped after ${lowerCounted(most)} states. There were more.`;
 }
 
 /** Said about states the page saw and could not hold on to. Counted rather than
@@ -260,7 +260,7 @@ export const walkthrough = {
   working: 'Recording. Use the page as you would, then stop.',
   stop: 'Stop recording',
   heading: 'Every state',
-  empty: 'Nothing recorded yet — press “Record me using it”, then use the page.',
+  empty: 'Nothing recorded yet. Press “Record me using it”, then use the page.',
   again: 'Record it again',
   /** On the frame itself, where the picture should have been. */
   missing: 'Didn’t come out',

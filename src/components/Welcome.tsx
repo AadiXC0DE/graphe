@@ -175,7 +175,7 @@ export default function Welcome({
           <div className="welcome__buildpanel">
             <p className="welcome__buildhint">
               Paste your requirements, pick a file, or add a sentence of your own. Graphe reads it,
-              plans the work, and builds it — task by task — showing you what it did.
+              plans the work, and builds it task by task, showing you what it did.
             </p>
             <div className="welcome__buildactions">
               {onPickDocument === undefined ? null : (

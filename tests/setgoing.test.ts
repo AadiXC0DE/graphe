@@ -209,8 +209,8 @@ describe('SG-04 trying it more than one way', () => {
 
     expect(asked).toHaveLength(2);
     // The same thing, said each way, so the cards can be told apart at a glance.
-    expect(asked[0]?.doing).toBe('Rework the hero — quieter, more white space');
-    expect(asked[1]?.doing).toBe('Rework the hero — bolder, the photograph doing the work');
+    expect(asked[0]?.doing).toBe('Rework the hero: quieter, more white space');
+    expect(asked[1]?.doing).toBe('Rework the hero: bolder, the photograph doing the work');
     // One name shared between them is what makes keeping one throw the rest away.
     expect(asked[0]?.ways).toBe(asked[1]?.ways);
     expect(asked[0]?.ways).not.toBeNull();

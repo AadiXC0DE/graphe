@@ -72,7 +72,7 @@ export function saysKept(name: string, asked: string | null): string {
   const which = name.toLowerCase();
   return asked === null || asked.trim() === ''
     ? `Kept the ${which}`
-    : `${asked.trim()} — kept the ${which}`;
+    : `${asked.trim()}: kept the ${which}`;
 }
 
 /** What came of taking a set. The order it was worked out to go in, how far it
@@ -112,7 +112,7 @@ export function nothingToTake(doing: string): {
 } {
   return {
     what: 'There is nothing to take from this one.',
-    because: `“${doing}” finished without changing any files — it answered rather than edited. Read what it said; there is nothing to bring into your project.`,
+    because: `“${doing}” finished without changing any files: it answered rather than edited. Read what it said; there is nothing to bring into your project.`,
     actionLabel: 'Got it',
   };
 }

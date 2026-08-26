@@ -226,7 +226,7 @@ const SAY = {
   keyIntoPage:
     "This would type one of your private keys into the page you have open, and that page can keep it and pass it anywhere. I've stopped it. Save it as a project secret and I will read it from there.",
   notAWebAddress:
-    "That is not a page on the web — it would open something on this computer in the browser and read it into our conversation. I've stopped it. Ask me to read the file instead and I will.",
+    "That is not a page on the web. It would open something on this computer in the browser and read it into our conversation. I've stopped it. Ask me to read the file instead and I will.",
   elsewhere:
     "This would work on another copy of your project instead of the one I'm in, and I can't tell what it would change over there. I've stopped it.",
   pointedElsewhere:
@@ -2290,7 +2290,7 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   if (DESKTOP_PICTURE_TOOLS.has(name)) {
     return ask(
       'Take a picture of your screen?',
-      'It comes into this conversation, so whatever is on screen comes with it — other windows, other people\u2019s messages, anything left open.',
+      'It comes into this conversation, so whatever is on screen comes with it: other windows, other people\u2019s messages, anything left open.',
       'Close anything you would rather I did not see, and ask me again.',
       { mutates: false },
     );

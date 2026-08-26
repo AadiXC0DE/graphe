@@ -215,9 +215,9 @@ describe('what the page complained about', () => {
       ],
     });
     expect(lines).toEqual([
-      'GET https://x.com/b.css — 404',
-      'POST https://x.com/api — 500',
-      'GET https://x.com/c — never came back',
+      'GET https://x.com/b.css: 404',
+      'POST https://x.com/api: 500',
+      'GET https://x.com/c: never came back',
     ]);
     expect(saysRequests(null)).toEqual([]);
     expect(saysRequests({ requests: 'nonsense' })).toEqual([]);

@@ -100,7 +100,7 @@ export default function Usage({ open, spent, onClose, onTokens }: Props) {
                         title={
                           day.tokens < 0
                             ? undefined
-                            : `${new Date(day.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${
+                            : `${new Date(day.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}: ${
                                 day.tokens === 0 ? 'nothing' : `${saysTokens(day.tokens)} tokens`
                               }`
                         }

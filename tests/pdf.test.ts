@@ -62,7 +62,7 @@ describe('reading one page at a time', () => {
 
   it('marks where each page begins when there is more than one', () => {
     const { text } = slicePages(pages, 10_000);
-    expect(text).toContain('— page 1 of 3 —');
+    expect(text).toContain('page 1 of 3');
     expect(text).toContain('page one words');
     expect(text).toContain('page three words');
   });

@@ -309,6 +309,12 @@ const SHELL_TOOLS = new Set([
  *  exact moment somebody said "cancel the todo list" opened with the
  *  unknown-command question about our own tool. */
 const RUNNING_TOOLS = new Set(['running', 'stoprunning', 'cancelbuild']);
+
+/** Our own bookkeeping, on screen rather than on disk: ticking one thing off
+ *  the checklist somebody is watching, and choosing between answers already in
+ *  hand. Neither reads a file, runs anything or reaches anywhere — and a
+ *  question about either is a question in the middle of every turn. */
+const OUR_OWN_TOOLS = new Set(['stepdone', 'scorecandidates']);
 const SQL_TOOLS = new Set(['sql', 'query', 'dbquery', 'runsql', 'executesql', 'database', 'db', 'migrate']);
 const NETWORK_TOOLS = new Set(['fetch', 'http', 'httprequest', 'request', 'webfetch', 'download', 'upload', 'post', 'apicall']);
 /** Search engines. Their whole job is sending words out and bringing the
@@ -2027,7 +2033,7 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   // Nothing gets to turn the Guard off, however politely it asks.
   if (GUARD_SWITCH.test(name)) return deny(SAY.guardOff);
 
-  if (RUNNING_TOOLS.has(name)) return allow();
+  if (RUNNING_TOOLS.has(name) || OUR_OWN_TOOLS.has(name)) return allow();
 
   if (SHELL_TOOLS.has(name)) {
     // A command's relative locations are only safe if the folder it starts from

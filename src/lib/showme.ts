@@ -150,9 +150,15 @@ export function realWords(call: ToolCall): string {
       return 'agent-browser batch --bail';
     case 'browser_close':
       return 'agent-browser close';
+    case 'browser_trace':
+      return 'agent-browser network har stop';
 
     case 'desktop_picture':
       return 'screencapture -x -t jpg';
+    case 'desktop_read': {
+      const app = textField(input, ['app']);
+      return `osascript · System Events: named elements of ${app === null ? 'the app in front' : trimmed(app)}`;
+    }
     case 'desktop_apps':
       return 'osascript · System Events: name of every application process';
     case 'desktop_do':

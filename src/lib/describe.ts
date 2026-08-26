@@ -166,9 +166,14 @@ export function describeCall(call: ToolCall): Described {
     case 'browser_close':
       return { label: 'Closing the browser' };
 
+    case 'browser_trace':
+      return { label: 'Saving what the browser did' };
+
     /* This computer itself. */
     case 'desktop_picture':
       return { label: SCREEN_LABEL, detail: short(textField(input, ['app'])) };
+    case 'desktop_read':
+      return { label: 'Reading what a program has named', detail: short(textField(input, ['app'])) };
     case 'desktop_do':
       return { label: 'Working your computer' };
     case 'desktop_apps':
@@ -199,6 +204,49 @@ export function describeCall(call: ToolCall): Described {
     case 'ask_first':
     case 'askfirst':
       return { label: ASKING_LABEL };
+
+    /* Graphe's own, which appear in nearly every turn. Left unnamed they all
+       read "Working on your project", which is the one sentence that says
+       nothing — and it was every other line of a working feed. */
+    case 'step_done':
+      return { label: 'Ticking one off the list', detail: short(textField(input, ['note'])) };
+    case 'cancel_build':
+      return { label: 'Taking the checklist off the screen' };
+    case 'score_candidates':
+      return { label: 'Choosing between the answers' };
+    case 'read_map':
+      return { label: 'Reading the shape of the project' };
+    case 'read_diff':
+      return { label: 'Reading the changes so far' };
+    case 'run_checks':
+      return { label: "Running the project's own checks" };
+    case 'figma_read':
+      return { label: 'Reading the design file', detail: short(textField(input, ['url'])) };
+    case 'keep_running':
+      return { label: 'Starting something up', detail: short(textField(input, ['command'])) };
+    case 'running':
+      return { label: 'Checking what is running' };
+    case 'stop_running':
+      return { label: 'Stopping what was running' };
+    case 'set_going':
+      return { label: 'Setting work going in the background', detail: short(textField(input, ['doing'])) };
+    case 'try_ways':
+      return { label: 'Making a few versions to compare', detail: short(textField(input, ['doing'])) };
+    case 'mcp':
+      return { label: 'Using a tool you connected', detail: short(textField(input, ['tool', 'server'])) };
+    case 'connect_tool':
+      return { label: 'Connecting another tool', detail: short(textField(input, ['name', 'known'])) };
+    case 'retain':
+    case 'remember':
+      return { label: 'Making a note to remember' };
+    case 'recall':
+      return { label: 'Looking through what it remembers', detail: short(textField(input, ['query'])) };
+    case 'reflect':
+      return { label: 'Thinking over what it remembers' };
+    case 'memory_edit':
+      return { label: 'Changing a note it kept' };
+    case 'forget':
+      return { label: 'Forgetting a note' };
 
     default:
       return { label: 'Working on your project' };

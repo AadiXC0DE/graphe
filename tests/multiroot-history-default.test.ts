@@ -54,3 +54,32 @@ describe('the full-screen history in a folder of several projects', () => {
     expect(app).toMatch(/repo=\{historyRepo\}/);
   });
 });
+
+describe('the reviews screen in a folder of several projects', () => {
+  const main = readFileSync(fileURLToPath(new URL('../electron/main.ts', import.meta.url)), 'utf8');
+  const reviews = readFileSync(
+    fileURLToPath(new URL('../src/components/ReviewsView.tsx', import.meta.url)),
+    'utf8',
+  );
+
+  it('reads the project the window named, not the folder holding it', () => {
+    expect(main).toContain('readRepo({ path: folderFor(open, where) })');
+    expect(main).not.toContain('return done(await readRepo(open));');
+  });
+
+  it('posts a comment against that same project', () => {
+    const at = main.indexOf('CHANNEL.repoComment');
+    const block = main.slice(at, at + 900);
+    expect(block).toContain('folderFor(open, whereIn(args))');
+    expect(block).not.toContain('githubRepo(open.path)');
+  });
+
+  it('lets somebody switch project from the sheet', () => {
+    expect(reviews).toContain('onWhich');
+    expect(app).toContain('onWhich={(name) => {');
+  });
+
+  it('asks the shell for that project rather than the parent', () => {
+    expect(app).toMatch(/\.\.\.\(named === null \? \{\} : \{ repo: named \}\)/);
+  });
+});

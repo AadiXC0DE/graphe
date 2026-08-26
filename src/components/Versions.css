@@ -278,7 +278,10 @@
   /* Without this the box shrinks to whatever is inside it, and a card with no
      screenshot ends up as a small tile floating in the corner of a big one. */
   width: 100%;
-  place-items: center;
+  /* Centred when the words fit, top-aligned when they do not — plain `center`
+     clips the first line off a long title as well as the last. */
+  justify-items: center;
+  align-items: safe center;
   aspect-ratio: 16 / 10;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -308,8 +311,8 @@
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow-wrap: anywhere;
 }
 

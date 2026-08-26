@@ -812,6 +812,11 @@ function Conversation() {
   /** Whose history the full-screen graph is drawing, in a folder holding
    *  several projects. Null for a folder that is one project. */
   const [graphRepo, setGraphRepo] = useState<string | null>(null);
+  /* Whose pull requests the reviews screen is showing. A ref beside it, because
+     the fetch reads it and re-creating the fetch on every pick would refetch. */
+  const [reviewsRepo, setReviewsRepo] = useState<string | null>(null);
+  const reviewsRepoNow = useRef<string | null>(null);
+  reviewsRepoNow.current = reviewsRepo;
 
   /** Which band of the design view is open, or null when it is not. Both of the
    *  surfaces that take the whole width live here rather than inside a panel:
@@ -2733,12 +2738,16 @@ function Conversation() {
   const refreshRepo = useCallback(() => {
     const desk = currentDesk(desksNow.current);
     const project = desk?.path ?? null;
+    const inside = desk?.overview?.repos ?? [];
+    const named =
+      inside.find((one) => one.name === reviewsRepoNow.current)?.name ?? inside[0]?.name ?? null;
     setRepo(null);
     setReviewsBusy(true);
     void bridge
       .repoLook({
         ...(desk === null ? {} : { project: desk.path }),
         ...(desk?.address == null ? {} : { conversation: desk.address }),
+        ...(named === null ? {} : { repo: named }),
       })
       .then((answer) => {
         if (currentDesk(desksNow.current)?.path !== project) return;
@@ -4914,6 +4923,17 @@ function Conversation() {
           onRefresh={refreshRepo}
           onClose={() => setReviewsOpen(false)}
           onReview={startReview}
+          repos={desk.overview?.repos ?? []}
+          which={
+            (desk.overview?.repos ?? []).find((one) => one.name === reviewsRepo)?.name ??
+            (desk.overview?.repos ?? [])[0]?.name ??
+            null
+          }
+          onWhich={(name) => {
+            setReviewsRepo(name);
+            reviewsRepoNow.current = name;
+            refreshRepo();
+          }}
         />
       ) : null}
 

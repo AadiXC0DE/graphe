@@ -676,8 +676,10 @@
 .projects__strip {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1);
-  margin-bottom: var(--space-3);
+  /* Room of its own above: with three long names the row wraps, and the top
+     one sat against the band's edge. */
+  gap: var(--space-1) var(--space-1);
+  margin: var(--space-3) 0;
 }
 
 .projects__pick {

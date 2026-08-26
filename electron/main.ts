@@ -5056,10 +5056,11 @@ function register(): void {
   });
 
   handle<RepoLook>(CHANNEL.repoLook, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return done(null);
     try {
-      return done(await readRepo(open));
+      return done(await readRepo({ path: folderFor(open, where) }));
     } catch (cause) {
       return fail(plainTrouble(
         'I could not read the github folder.',
@@ -5075,9 +5076,10 @@ function register(): void {
     if (typeof number !== 'number' || number <= 0 || typeof body !== 'string' || body.trim() === '') {
       return fail(plainTrouble('There was nothing to post.'));
     }
-    const full = await githubRepo(open.path);
+    const folder = folderFor(open, whereIn(args));
+    const full = await githubRepo(folder);
     if (full === null) return fail(plainTrouble('This folder does not look like a github repository.'));
-    const exit = await ghComment(open.path, full, number, body);
+    const exit = await ghComment(folder, full, number, body);
     return exit === 0 ? done(null) : fail(plainTrouble('The comment did not reach github.'));
   });
 

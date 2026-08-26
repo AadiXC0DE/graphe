@@ -14,10 +14,16 @@ type Props = {
   onClose: () => void;
   /** Open one pull request's review in the conversation. */
   onReview: (item: RepoItem) => void;
+  /** The projects inside this folder, when it holds several. */
+  repos?: readonly { name: string; path: string }[];
+  /** Whose pull requests are being shown, and how to show another's. */
+  which?: string | null;
+  onWhich?: (name: string) => void;
 };
 
 export const SAYS = {
   heading: 'Pull requests',
+  whose: 'Whose pull requests',
   from: (full: string): string => `github.com/${full}`,
   refresh: 'Refresh',
   empty: 'No pull requests here yet.',
@@ -96,7 +102,7 @@ Be specific: name file paths and lines, and give a one-line reason for every poi
 Finish with a short plain summary followed by a fenced review block — a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, \`"pull": ${item.number}\`, and the findings, each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact and confidence (0-100). The findings then appear as a card with a button that posts them on the pull request, so do not post them yourself.`;
 }
 
-export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview }: Props) {
+export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, repos, which, onWhich }: Props) {
   const shut = useRef<HTMLButtonElement>(null);
   const [tab, setTab] = useState<'prs' | 'issues'>('prs');
   const [open, setOpen] = useState<number | null>(null);
@@ -127,7 +133,23 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview }
           <div className="sheet__titles">
             <h1 className="sheet__title">{SAYS.heading}</h1>
           </div>
+        {repos === undefined || repos.length < 2 || onWhich === undefined ? (
           <div className="sheet__chips" />
+        ) : (
+          <div className="sheet__chips projects__strip" role="group" aria-label={SAYS.whose}>
+            {repos.map((one) => (
+              <button
+                key={one.path}
+                type="button"
+                className={`projects__pick ${one.name === which ? 'projects__pick--on' : ''}`}
+                aria-current={one.name === which ? 'true' : undefined}
+                onClick={() => onWhich(one.name)}
+              >
+                {one.name}
+              </button>
+            ))}
+          </div>
+        )}
           <button ref={shut} type="button" className="sheet__refresh" onClick={onRefresh} disabled={busy}>
             {busy ? 'Fetching…' : SAYS.refresh}
           </button>

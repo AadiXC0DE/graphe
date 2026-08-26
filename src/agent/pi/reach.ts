@@ -129,8 +129,11 @@ export const REACHABLE: readonly Reach[] = [
   },
   {
     id: 'browser',
-    name: 'A real browser',
-    what: 'Lets me open your work in a real browser, click through it and see what actually happens, instead of reasoning about it from the files.',
+    name: 'Another browser',
+    // Driving a browser is built in now, so this row can no longer promise the
+    // thing somebody already has. What it still offers is a second one, driven
+    // a different way, for the sites where the built-in one gets stuck.
+    what: 'Lets me fall back on a second browser, driven a different way, for the odd site the built-in one cannot get through.',
     needs: null,
     start: { how: 'program', command: 'npx', args: ['-y', '@playwright/mcp@latest'], values: {} },
     curated: true,

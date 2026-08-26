@@ -128,8 +128,53 @@ export function describeCall(call: ToolCall): Described {
 
     case 'fetch':
     case 'web_fetch':
+    case 'webfetch':
     case 'browse':
       return { label: 'Reading something on the web', detail: short(textField(input, ['url'])) };
+
+    /* The page beside the conversation. */
+    case 'page_read':
+      return { label: 'Reading the page beside us' };
+    case 'page_click':
+      return { label: 'Pressing something on the page', detail: short(textField(input, ['target'])) };
+    case 'page_type':
+      return { label: 'Typing into the page', detail: short(textField(input, ['target'])) };
+    case 'page_scroll':
+      return { label: 'Moving down the page' };
+    case 'page_trouble':
+      return { label: 'Reading what the page complained about' };
+    case 'page_picture':
+      return { label: 'Taking a picture of the page' };
+
+    /* A browser of its own. */
+    case 'browser_open':
+      return { label: BROWSER_LABEL, detail: short(textField(input, ['url'])) };
+    case 'browser_read':
+      return { label: 'Reading the page in the browser' };
+    case 'browser_click':
+      return { label: 'Pressing something in the browser', detail: short(textField(input, ['target'])) };
+    case 'browser_type':
+      return { label: 'Typing into the browser', detail: short(textField(input, ['target'])) };
+    case 'browser_scroll':
+      return { label: 'Moving down the page in the browser' };
+    case 'browser_picture':
+      return { label: 'Taking a picture of the browser' };
+    case 'browser_trouble':
+      return { label: 'Reading what the browser complained about' };
+    case 'browser_steps':
+      return { label: 'Working through the page in the browser' };
+    case 'browser_close':
+      return { label: 'Closing the browser' };
+
+    /* This computer itself. */
+    case 'desktop_picture':
+      return { label: SCREEN_LABEL, detail: short(textField(input, ['app'])) };
+    case 'desktop_do':
+      return { label: 'Working your computer' };
+    case 'desktop_apps':
+      return { label: 'Looking at what is open on your computer' };
+    case 'desktop_open':
+      return { label: 'Opening something on your computer', detail: short(textField(input, ['app'])) };
 
     case 'websearch':
     case 'searchweb':
@@ -170,3 +215,21 @@ export const TASK_LABEL = 'Sending a piece of work to a helper';
 
 /** Above the card that holds the questions. */
 export const ASKING_LABEL = 'Asking you first';
+
+/**
+ * Whether a step whose label begins "Reading" was reading a *file*.
+ *
+ * The overview counts files read straight off the label, which was fine while
+ * the only thing anybody read was a file. A page, a screen and a web address
+ * all read too, and counting those as files told somebody their project had
+ * forty files in it when it has six.
+ */
+export function readsAFile(label: string): boolean {
+  return label.startsWith('Reading ') && !/^Reading (the|what|something) /.test(label);
+}
+
+/** The words a page opened in a browser of its own wears in the thread. */
+export const BROWSER_LABEL = 'Opening a page in the browser';
+
+/** The words a picture of this computer's screen wears in the thread. */
+export const SCREEN_LABEL = 'Taking a picture of your screen';

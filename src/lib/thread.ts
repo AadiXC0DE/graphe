@@ -11,7 +11,7 @@
 
 import type { ActivityState } from '../components/ActivityLine';
 import type { MessageAuthor } from '../components/Message';
-import type { AgentEvent, ReviewVerdict } from '../agent/types';
+import type { AgentEvent, ImageCard, ReviewVerdict } from '../agent/types';
 import type { Answers, Question } from '../agent/asking';
 import type { Prompt } from '../cost/phrasing';
 import { PLAN_WORDS } from '../agent/plan';
@@ -50,6 +50,9 @@ export type Turn =
        *  every turn and shown only when "Show me" is on — see the note on
        *  `real` below. */
       real?: string;
+      /** A picture the step took. Drawn under the line, because a step that
+       *  says it took a picture and shows nothing is a step nobody can check. */
+      shown?: ImageCard;
     }
   | {
       kind: 'asked';
@@ -191,13 +194,19 @@ function closeActivity(
   callId: string,
   state: ActivityState,
   detail?: string,
+  shown?: ImageCard,
 ): readonly Turn[] {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
     if (turn === undefined) continue;
     if (turn.kind !== 'did' || turn.callId !== callId || turn.state !== 'running') continue;
     const next = [...turns];
-    next[index] = { ...turn, state, detail: detail ?? turn.detail };
+    next[index] = {
+      ...turn,
+      state,
+      detail: detail ?? turn.detail,
+      ...(shown === undefined ? {} : { shown }),
+    };
     return next;
   }
   return turns;
@@ -297,7 +306,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       );
 
     case 'tool-end':
-      return closeActivity(turns, event.id, event.ok ? 'done' : 'failed', event.detail);
+      return closeActivity(turns, event.id, event.ok ? 'done' : 'failed', event.detail, event.shown);
 
     case 'blocked': {
       const closed = closeActivity(turns, event.call.id, 'failed', event.reason);

@@ -69,6 +69,8 @@ import {
   type ProjectCheck,
 } from './checks';
 import { selectCorrect, type CandidateSignals } from './correctness';
+import { browserTools } from './computer';
+import { desktopHere, desktopTools } from './desktop';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet, MOST_AT_ONCE } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
@@ -2352,7 +2354,15 @@ export const grapheTools = (
     webfetchTool,
     taskTool(agentDir, model, thinking, projectRoot),
     scoreCandidatesTool,
+    // A browser of its own, on from the first turn. Every other agent ships one
+    // and hides it behind a plugin; this one is simply there, and the program
+    // behind it is fetched the first time somebody asks for a page rather than
+    // being homework they have to do before the feature exists.
+    ...browserTools(projectRoot),
   ];
+  // Only where there is a screen we know how to read. Everywhere else these are
+  // not on the list at all, rather than four tools that answer "not here".
+  if (desktopHere()) tools.push(...desktopTools(projectRoot));
   // Only where somebody is there to answer. A helper in its own process and a
   // run nobody is watching both get no tool at all, rather than a tool that
   // always answers "there is nobody here".

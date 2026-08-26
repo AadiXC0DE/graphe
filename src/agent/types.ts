@@ -211,7 +211,10 @@ export type AgentEvent =
   | { type: 'message-delta'; text: string }
   | { type: 'message-end' }
   | { type: 'tool-start'; call: ToolCall }
-  | { type: 'tool-end'; id: string; ok: boolean; detail?: string }
+  /** A step that finished. `shown` is a picture the step took — of a page, of
+   *  the screen — which the conversation draws under the line, because a
+   *  picture nobody sees is a picture nobody asked for. */
+  | { type: 'tool-end'; id: string; ok: boolean; detail?: string; shown?: ImageCard }
   /** A tool that is still running has something to say — the helper the `task`
    *  tool spawns, reporting as it reads. Replaces the step's own detail line. */
   | { type: 'tool-progress'; id: string; text: string }

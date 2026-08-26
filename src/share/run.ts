@@ -56,6 +56,11 @@ export type RunOptions = {
   patience?: number;
   /** Extra environment for this one call. */
   also?: Readonly<Record<string, string>>;
+  /** Stop it early. A stopped helper is a code, like every other ending. */
+  signal?: AbortSignal;
+  /** Handed to the helper on its own input, for anything too long or too
+   *  punctuated to survive being an argument. */
+  input?: string;
 };
 
 /** One helper, once. Never throws — a failure is a code and some words. */
@@ -65,7 +70,7 @@ export function runHelper(
   options: RunOptions,
 ): Promise<Ran> {
   return new Promise<Ran>((finished) => {
-    execFile(
+    const child = execFile(
       tool,
       [...args],
       {
@@ -73,6 +78,7 @@ export function runHelper(
         timeout: options.patience ?? PATIENCE,
         maxBuffer: 32 * 1024 * 1024,
         windowsHide: true,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
         env: {
           ...process.env,
           ...options.also,
@@ -99,5 +105,9 @@ export function runHelper(
         finished({ code, out, errors, said });
       },
     );
+    if (options.input !== undefined) {
+      child.stdin?.on('error', () => undefined);
+      child.stdin?.end(options.input);
+    }
   });
 }

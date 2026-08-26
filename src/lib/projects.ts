@@ -32,7 +32,7 @@ import type { Task, TaskObservation } from '../cost/estimate';
 import type { AgentNotice, Overview, PutBack, SavedVersion } from './ipc';
 import { applySpend, type SpendView } from './spend';
 import { applyEvent, type Turn } from './thread';
-import { TASK_LABEL, WEB_SEARCH_LABEL } from './describe';
+import { readsAFile, TASK_LABEL, WEB_SEARCH_LABEL } from './describe';
 
 /** One thing the agent was given to work from — a screenshot it was sent, or a
  *  design file its link named. Recorded in the overview the moment it is sent,
@@ -504,7 +504,7 @@ export function nowDoing(turns: readonly Turn[], at: number = Date.now()): NowVi
   let atWork = false;
   for (const turn of turns) {
     if (turn.kind !== 'did') continue;
-    if (turn.label.startsWith('Reading') && turn.state !== 'failed') filesRead += 1;
+    if (readsAFile(turn.label) && turn.state !== 'failed') filesRead += 1;
     // A helper stays on the board once it has come back. What it was asked and
     // what it found are the most interesting things in the whole sitting, and
     // they should not vanish the moment it finishes.

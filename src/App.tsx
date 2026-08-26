@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
+import { Shown } from "./components/Shown";
 import AskFirst from "./components/AskFirst";
 import type { Attachment } from "./components/Attachments";
 import BuildProgress from "./components/BuildProgress";
@@ -4397,7 +4398,13 @@ function Conversation() {
 
             <div className="thread">
             {(() => {
-              const all = rows(desk.turns, new Set(pictures.under.keys()));
+              // A step that took a picture stays on its own line: a picture
+              // folded into a collapsed run is a picture nobody sees.
+              const showing = new Set(pictures.under.keys());
+              for (const turn of desk.turns) {
+                if (turn.kind === 'did' && turn.shown !== undefined) showing.add(turn.id);
+              }
+              const all = rows(desk.turns, showing);
               const lastGrapheIdx = [...all].reverse().findIndex((r) => r.kind !== 'steps' && r.turn.kind === 'said' && r.turn.from === 'graphe');
               const lastIdx = lastGrapheIdx === -1 ? -1 : all.length - 1 - lastGrapheIdx;
               return all.map((row, idx) =>
@@ -4959,14 +4966,19 @@ function Turnstile({
 
     case "did":
       return (
-        <ActivityLine
-          state={turn.state}
-          label={turn.label}
-          detail={
-            turn.progress === undefined ? turn.detail : lastSaid(turn.progress)
-          }
-          real={showMe ? turn.real : undefined}
-        />
+        <>
+          <ActivityLine
+            state={turn.state}
+            label={turn.label}
+            detail={
+              turn.progress === undefined ? turn.detail : lastSaid(turn.progress)
+            }
+            real={showMe ? turn.real : undefined}
+          />
+          {turn.shown === undefined ? null : (
+            <Shown picture={turn.shown} caption={turn.label} />
+          )}
+        </>
       );
 
     case "asked":

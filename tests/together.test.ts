@@ -223,7 +223,21 @@ describe('what Graphe adds to Pi', () => {
 
     expect(modes.map((one) => one.name)).toContain('task');
     expect(modes.map((one) => one.name)).toContain('figma_read');
-    for (const one of modes) expect(one.executionMode).not.toBe('sequential');
+    // The exception, and the only one: a browser and a screen are each one
+    // shared thing, and two presses landing on one page at the same time is not
+    // a fan-out, it is a race. Everything else in the list stays parallel so a
+    // reply that sends six helpers still sends six helpers.
+    const drives = /^(browser|desktop)_/;
+    for (const one of modes) {
+      if (drives.test(one.name)) continue;
+      expect(one.executionMode).not.toBe('sequential');
+    }
+  });
+
+  it('runs anything that drives one shared thing one at a time', () => {
+    const driving = grapheTools('/tmp/agent').filter((tool) => /^(browser|desktop)_/.test(tool.name));
+    expect(driving.length).toBeGreaterThan(0);
+    for (const tool of driving) expect(tool.executionMode).toBe('sequential');
   });
 
   it('tells the model that several helpers belong in one reply', () => {

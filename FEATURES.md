@@ -89,7 +89,13 @@ The folder as a tree you can walk, changed files marked, open anything in the ed
 **27 · Skills & workflows**
 `@skill` pulls craft you installed off the shelf; `/command` files are prompts that expand. The agent's capabilities are a shelf you can add to.
 
-**28 · Show me the real commands**
+**28 · A browser it can actually drive**
+Any address, not just your own site: open it, read it, press things, type into them, take its picture. On from the first turn — nothing to connect and nothing to switch on — and the first page it opens fetches what it needs on its own. Getting it to a site asks once; pressing and typing ask too.
+
+**29 · Working the computer itself**
+For the tools that aren't websites. A picture of the screen, then press, type, drag and scroll on it — the same moves you would make. The two permissions are the ones every other agent asks for, and until they are given it says so and opens the right setting rather than failing quietly.
+
+**30 · Show me the real commands**
 The commands, paths and git operations under every plain sentence — for the developer who wants the wheel.
 
 ---

@@ -123,6 +123,45 @@ export function realWords(call: ToolCall): string {
       return where === null ? name : `${name} · ${trimmed(where)}`;
     }
 
+    /* A browser of its own, and this computer's own screen. The real thing
+       behind these is a program on the machine, so both the command and what it
+       was aimed at are named here where names are allowed. */
+    case 'browser_open': {
+      const url = textField(input, ['url']);
+      return url === null ? 'agent-browser open' : `agent-browser open ${trimmed(url)}`;
+    }
+
+    case 'browser_click':
+    case 'browser_type': {
+      const target = textField(input, ['target']);
+      const verb = name === 'browser_click' ? 'click' : 'fill';
+      return target === null ? `agent-browser ${verb}` : `agent-browser ${verb} ${trimmed(target)}`;
+    }
+
+    case 'browser_read':
+      return 'agent-browser snapshot';
+    case 'browser_scroll':
+      return 'agent-browser scroll';
+    case 'browser_picture':
+      return 'agent-browser screenshot';
+    case 'browser_trouble':
+      return 'agent-browser console && agent-browser errors';
+    case 'browser_steps':
+      return 'agent-browser batch --bail';
+    case 'browser_close':
+      return 'agent-browser close';
+
+    case 'desktop_picture':
+      return 'screencapture -x -t jpg';
+    case 'desktop_apps':
+      return 'osascript · System Events: name of every application process';
+    case 'desktop_do':
+      return 'osascript · System Events: click / keystroke / key code';
+    case 'desktop_open': {
+      const app = textField(input, ['app']);
+      return app === null ? 'open -a' : `open -a ${trimmed(app)}`;
+    }
+
     default: {
       // A tool we have no translation for. The name is the real name, and the
       // first string argument is usually the interesting one — but we are

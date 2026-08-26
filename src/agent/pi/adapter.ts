@@ -50,6 +50,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
+import { closeBrowser } from './computer';
 import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type CancelBuild, type HelperModel, type HelperPace } from './tools';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
@@ -2348,6 +2349,9 @@ const MOST_AFTER_SAYINGS = 3;
       void shell.close();
       void mcpRegistry.close();
       void memory?.close().catch(() => {});
+      // The browser is kept warm between calls, which is what makes it quick —
+      // and means it outlives the conversation unless somebody says otherwise.
+      if (!benchmarkToolFloor) void closeBrowser(options.projectRoot);
       // A standalone/in-memory session owns its servers. Desktop project
       // sessions share a project register, so rebuilding one conversation must
       // not take down a server the project is still using.

@@ -26,7 +26,7 @@
  * a blocked call produces exactly one `blocked` and nothing else.
  */
 
-import type { AgentEvent, ToolCall, Verdict } from '../types';
+import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import { SpendWatch, type SpendReport } from './spend';
 
 type ConfirmVerdict = Extract<Verdict, { kind: 'confirm' }>;
@@ -239,9 +239,37 @@ function fromToolExecutionEnd(source: Fields): AgentEvent | null {
   if (id === null) return null;
   const failed = flagAt(source, 'isError') === true;
   const detail = failed ? failureFromResult(source['result']) : undefined;
-  return detail === undefined
-    ? { type: 'tool-end', id, ok: !failed }
-    : { type: 'tool-end', id, ok: !failed, detail };
+  const shown = failed ? null : pictureIn(source['result']);
+  return {
+    type: 'tool-end',
+    id,
+    ok: !failed,
+    ...(detail === undefined ? {} : { detail }),
+    ...(shown === null ? {} : { shown }),
+  };
+}
+
+/** The picture a step took, if it took one.
+ *
+ * A tool hands the model pictures the same way it hands it words, in the same
+ * list. Until this read them, every screenshot the agent took was seen by the
+ * model and by nobody else — the line in the conversation said a picture had
+ * been taken and then showed nothing. The last one wins: a step that takes
+ * several is showing the person where it ended up. */
+function pictureIn(value: unknown): ImageCard | null {
+  const fields = fieldsOf(value);
+  if (fields === null) return null;
+  const content = fields['content'];
+  if (!Array.isArray(content)) return null;
+  let found: ImageCard | null = null;
+  for (const entry of content) {
+    const item = fieldsOf(entry);
+    if (item === null || textAt(item, 'type') !== 'image') continue;
+    const bytes = textAt(item, 'data');
+    const mimeType = textAt(item, 'mimeType') ?? 'image/png';
+    if (bytes !== null && bytes !== '') found = { bytes, mimeType };
+  }
+  return found;
 }
 
 /** A red cross without its reason makes a command failure look like a rendering

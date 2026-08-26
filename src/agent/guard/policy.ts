@@ -425,6 +425,57 @@ const PAGE_MOVE_TOOLS = new Set(['pagescroll']);
  */
 const PAGE_ACT_TOOLS = new Set(['pageclick', 'pagetype']);
 
+/**
+ * Looking at the browser the work drives.
+ *
+ * A browser of its own is not the page beside the conversation, and the
+ * difference matters in one direction only: getting it to a site is a reach out
+ * to the internet and asks below, while looking at a page it is already on
+ * changes nothing at all. Reading it, scrolling it, taking its picture, reading
+ * what it complained about — none of that sends a request anybody has not
+ * already agreed to, and a question per glance is a question during every look
+ * at a page that takes a dozen looks to work through.
+ *
+ * Closing it is here for the reason a stop always is: nobody should have to ask
+ * permission to put something down.
+ */
+const BROWSER_LOOK_TOOLS = new Set([
+  'browserread',
+  'browserpicture',
+  'browsertrouble',
+  'browserscroll',
+  'browserclose',
+]);
+
+/** Pointing that browser at an address. This is the moment the machine reaches
+ *  out, and it is the moment worth naming — after it, a page is a page. */
+const BROWSER_REACH_TOOLS = new Set(['browseropen']);
+
+/** Pressing and typing in that browser. The same footing as the page beside the
+ *  conversation and a longer reach: this one keeps logins, so a press can order
+ *  something under somebody's own name. */
+const BROWSER_ACT_TOOLS = new Set(['browserclick', 'browsertype']);
+
+/** A run of steps in that browser, judged as the strictest step in it. Named
+ *  here so every place that asks "is this one of ours" agrees. */
+const BROWSER_STEPS = 'browsersteps';
+
+/**
+ * Looking at this computer's own screen.
+ *
+ * What is open is a list of names and nothing more, so it is silent. A picture
+ * is not: the screen has everything else on it — somebody's mail, somebody's
+ * messages, a password left showing — and the person sitting in front of it is
+ * the one who decides that goes into a conversation.
+ */
+const DESKTOP_LOOK_TOOLS = new Set(['desktopapps']);
+const DESKTOP_PICTURE_TOOLS = new Set(['desktoppicture']);
+
+/** Working this computer: pressing, typing, dragging, opening a program. None
+ *  of it is a file, so none of it is anything a restore point can put back —
+ *  which is why the question is the whole of the protection here. */
+const DESKTOP_ACT_TOOLS = new Set(['desktopdo', 'desktopopen']);
+
 /** Anything that sounds like it is reaching for the Guard's own switches. */
 const GUARD_SWITCH = /(permission|policy|guard|approval|approve|allowlist|whitelist|yolo|autorun|bypass|unsafe|disablesafety)/;
 
@@ -1878,6 +1929,75 @@ function normalizeToolName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+/** The words inside a run of steps, which is where a key would be hiding. */
+function stepWords(input: Record<string, unknown>): string {
+  const steps: unknown[] = Array.isArray(input['steps']) ? (input['steps'] as unknown[]) : [];
+  return steps
+    .map((step) =>
+      typeof step === 'object' && step !== null ? collectText(step as Record<string, unknown>) : '',
+    )
+    .join('\n');
+}
+
+/** Pointing the browser at an address. The address itself travels, so a key in
+ *  one is a key handed to a stranger. */
+function judgeBrowserOpen(input: Record<string, unknown>, ctx: GuardFacts): Judgement {
+  const url = readString(input, URL_KEYS) ?? readString(input, ['target']) ?? '';
+  if (findSecret(url) !== null || findKnownSecret(url, ctx)) return deny(SAY.sendKeyOut);
+  const where = siteOf(url);
+  return ask(
+    where === null ? 'Open a page in a browser?' : `Open ${where} in a browser?`,
+    'I open it in a browser of my own and read what is on it.',
+    'The site sees the visit, and what comes back is not something I can check beforehand.',
+    { mutates: false },
+  );
+}
+
+/** Pressing or typing in that browser. */
+function judgeBrowserAct(
+  name: string,
+  input: Record<string, unknown>,
+  ctx: GuardFacts,
+): Judgement {
+  const typing = name === 'browsertype';
+  if (typing) {
+    const words = collectText(input);
+    if (findSecret(words) !== null || findKnownSecret(words, ctx)) return deny(SAY.keyIntoPage);
+  }
+  if (!typing) {
+    return ask(
+      'Press this in the browser?',
+      'I press it on the page the browser is on, and it behaves exactly as it would under your own finger.',
+      'A press on a live page can send a form, buy something or delete something, and I cannot take that back.',
+    );
+  }
+  const sending = input['submit'] === true;
+  return ask(
+    sending ? 'Type this into the page and send it?' : 'Type this into the page in the browser?',
+    sending
+      ? 'I put the words into the box and then send the form.'
+      : 'I put the words into the box. Nothing is sent unless I am asked to send it.',
+    sending
+      ? 'Sending it can order something, sign you up or write to somebody, and I cannot take that back.'
+      : 'The page sees every word as it goes in, and can act on it before anything is sent.',
+  );
+}
+
+/** The site an address belongs to, for a question that can name it. Null when
+ *  the address is not one we can read, because a question naming nonsense is
+ *  worse than a question naming nothing. */
+function siteOf(url: string): string | null {
+  const asked = url.trim();
+  if (asked === '') return null;
+  try {
+    const whole = /^[a-z][a-z0-9+.-]*:/i.test(asked) ? asked : `https://${asked}`;
+    const host = new URL(whole).hostname;
+    return host === '' ? null : host.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
 function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   const name = normalizeToolName(call.name);
   const input = call.input ?? {};
@@ -2108,6 +2228,68 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     );
   }
 
+  /* A browser of its own. Looking is silent; getting it to an address, and
+     pressing or typing once it is there, are the two moments worth a question. */
+  if (BROWSER_LOOK_TOOLS.has(name)) return allow();
+
+  if (BROWSER_REACH_TOOLS.has(name)) return judgeBrowserOpen(input, ctx);
+
+  if (BROWSER_ACT_TOOLS.has(name)) return judgeBrowserAct(name, input, ctx);
+
+  if (name === BROWSER_STEPS) {
+    // Judged as the strictest step in it, so a run cannot carry a press past a
+    // question by wrapping it in a list.
+    const steps: unknown[] = Array.isArray(input['steps']) ? (input['steps'] as unknown[]) : [];
+    let folded = allow();
+    for (const step of steps) {
+      if (typeof step !== 'object' || step === null) continue;
+      const one = step as Record<string, unknown>;
+      const kind = String(one['do'] ?? '').trim().toLowerCase();
+      if (kind === 'open') folded = strictest(folded, judgeBrowserOpen(one, ctx));
+      else if (kind === 'click' || kind === 'press') {
+        folded = strictest(folded, judgeBrowserAct('browserclick', one, ctx));
+      } else if (kind === 'type' || kind === 'fill') {
+        folded = strictest(folded, judgeBrowserAct('browsertype', one, ctx));
+      }
+    }
+    return folded;
+  }
+
+  /* This computer itself. A list of what is open is a read; a picture of the
+     whole screen, and every move made on it, are not. */
+  if (DESKTOP_LOOK_TOOLS.has(name)) return allow();
+
+  if (DESKTOP_PICTURE_TOOLS.has(name)) {
+    return ask(
+      'Take a picture of your screen?',
+      'It comes into this conversation, so whatever is on screen comes with it — other windows, other people\u2019s messages, anything left open.',
+      'Close anything you would rather I did not see, and ask me again.',
+      { mutates: false },
+    );
+  }
+
+  if (DESKTOP_ACT_TOOLS.has(name)) {
+    if (name === 'desktopopen') {
+      const app = readString(input, ['app', 'name', 'program']) ?? 'a program';
+      return ask(
+        `Open ${app} on your computer?`,
+        'I open it the way you would from the dock, and take a picture so I can see it.',
+        'It comes to the front, over whatever you are looking at now.',
+      );
+    }
+    // Words typed into a program on this computer go wherever that program
+    // sends them, and there is no request to look inside on the way out.
+    // Checked before the question, so this is a refusal rather than a yes
+    // somebody gave in a hurry.
+    const words = `${collectText(input)}\n${stepWords(input)}`;
+    if (findSecret(words) !== null || findKnownSecret(words, ctx)) return deny(SAY.keyIntoPage);
+    return ask(
+      'Work your computer for you?',
+      'I press, type and scroll on the screen exactly as you would, in whatever is in front.',
+      'This is your real computer and not a copy, so what happens on it cannot be taken back.',
+    );
+  }
+
   if (MEMORY_TOOLS.has(name)) {
     // Memory takes ids and words, never paths, so there is nothing to check
     // outside the project for. It stays a read of the app's own notes.
@@ -2278,7 +2460,15 @@ function leavesTheFiles(call: ToolCall): boolean {
   // it is not undoable the way a file edit is.
   if (name === 'connecttool') return true;
   return (
-    SHELL_TOOLS.has(name) || NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name) || PAGE_ACT_TOOLS.has(name)
+    SHELL_TOOLS.has(name) ||
+    NETWORK_TOOLS.has(name) ||
+    WEB_TOOLS.has(name) ||
+    PAGE_ACT_TOOLS.has(name) ||
+    BROWSER_REACH_TOOLS.has(name) ||
+    BROWSER_ACT_TOOLS.has(name) ||
+    name === BROWSER_STEPS ||
+    DESKTOP_PICTURE_TOOLS.has(name) ||
+    DESKTOP_ACT_TOOLS.has(name)
   );
 }
 
@@ -2427,6 +2617,8 @@ export function describeCall(call: ToolCall): CallShape {
     if (ASKING_TOOLS.has(name)) return 'reads';
     if (READ_TOOLS.has(name) || LIST_TOOLS.has(name) || SEARCH_TOOLS.has(name)) return 'reads';
     if (DESIGN_READ_TOOLS.has(name) || CODE_READ_TOOLS.has(name) || PAGE_READ_TOOLS.has(name)) return 'reads';
+    if (BROWSER_LOOK_TOOLS.has(name) || DESKTOP_LOOK_TOOLS.has(name)) return 'reads';
+    if (BROWSER_REACH_TOOLS.has(name) || name === BROWSER_STEPS) return 'reaches the internet';
     return 'something else';
   })();
 

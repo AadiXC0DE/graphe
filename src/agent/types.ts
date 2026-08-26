@@ -219,6 +219,9 @@ export type AgentEvent =
    *  tool spawns, reporting as it reads. Replaces the step's own detail line. */
   | { type: 'tool-progress'; id: string; text: string }
   | { type: 'blocked'; call: ToolCall; reason: string }
+  /** The turn is waiting between steps because somebody asked it to. Not an
+   *  ending: the run is still there, waiting, until it is let go. */
+  | { type: 'waiting-for-you'; on: boolean }
   | { type: 'needs-confirmation'; call: ToolCall; verdict: Extract<Verdict, { kind: 'confirm' }> }
   | { type: 'error'; message: string }
   /**

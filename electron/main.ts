@@ -7220,6 +7220,19 @@ function register(): void {
     return done(null);
   });
 
+  /** Hold the run between steps, or let it go on. Both the conversation's own
+   *  session and any check running beside it, so pressing it once holds
+   *  everything the person can see. */
+  handle<null>(CHANNEL.waitForMe, (_event, args) => {
+    const [on] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null || typeof on !== 'boolean') return Promise.resolve(done(null));
+    open.held.checking?.holdOn(on);
+    sessionAt(open, where)?.holdOn(on);
+    return Promise.resolve(done(null));
+  });
+
   /**
    * Answers as they arrive from the window, or null.
    *

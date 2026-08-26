@@ -1149,6 +1149,7 @@ export const CHANNEL = {
   openProject: 'graphe:open-project',
   prompt: 'graphe:prompt',
   stop: 'graphe:stop',
+  waitForMe: 'graphe:wait-for-me',
   steer: 'graphe:steer',
   answer: 'graphe:answer',
   answerAsked: 'graphe:answer-asked',
@@ -1301,6 +1302,10 @@ export type GrapheApi = {
   ): Promise<Result<null>>;
   /** Stop what it is doing. Open questions are answered no. */
   stop(where?: Where): Promise<Result<null>>;
+  /** Hold the run between steps so you can take the machine back, or let it go
+   *  on. Not stopping: the turn stays where it is and picks up from wherever
+   *  things are when it is let go. */
+  waitForMe(on: boolean, where?: Where): Promise<Result<null>>;
   /** Put a message into the turn already in flight, without stopping it. The
    *  agent hears it between tool calls and carries on — the "insert into the
    *  loop" move. */

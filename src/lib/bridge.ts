@@ -746,6 +746,10 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(null));
     },
 
+    waitForMe(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
     // No live agent in the preview, so steering is a no-op that still answers.
     steer(): Promise<Result<null>> {
       return Promise.resolve(done(null));
@@ -1894,6 +1898,7 @@ function connect(): Bridge {
     // the one on screen.
     setKeepLogins: (on, where) => api.setKeepLogins(on, where),
     stop: (where) => api.stop(where),
+    waitForMe: (on, where) => api.waitForMe(on, where),
     steer: (text, where) => api.steer(text, where),
     answer: (callId, decision, where) => api.answer(callId, decision, where),
     answerAsked: (id, answers, where) => api.answerAsked(id, answers, where),

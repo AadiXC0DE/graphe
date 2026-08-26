@@ -104,7 +104,13 @@ One switch per project. On, the browser keeps what it is signed in to between si
 **32 · Why the page is blank, without asking**
 Every reading of a page carries what it complained about while it loaded: what it printed, what it threw, and the requests that came back wrong or never came back. One line under the step says how much. Everything the browser asked for can be saved as a file the tools a developer already has will open.
 
-**33 · Show me the real commands**
+**33 · It works the computer without taking your mouse**
+A press at a point takes the pointer out from under your hand. A press on something a program has named does not: it asks the program to press its own button, in a window that need not even be in front, with the mouse exactly where you left it. Reading what a program has named comes first, and pressing by point stays for the programs that name nothing.
+
+**34 · Wait, and carry on**
+Stop ends a turn. Wait holds it between steps, so you can take the machine back for a moment — look at something, put something right — and let it carry on from wherever things now are.
+
+**35 · Show me the real commands**
 The commands, paths and git operations under every plain sentence — for the developer who wants the wheel.
 
 ---

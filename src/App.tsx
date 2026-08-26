@@ -2040,6 +2040,20 @@ function Conversation() {
     return () => window.removeEventListener("pointerdown", away);
   }, [switching]);
 
+  /** Whether each conversation's run is waiting for somebody, by its owner. */
+  const [holding, setHolding] = useState<Readonly<Record<string, boolean>>>({});
+
+  const waitForMe = useCallback((on: boolean) => {
+    const desk = currentDesk(desksNow.current);
+    if (desk === null) return;
+    const owner = `${desk.path}\u0000${desk.address ?? ''}`;
+    setHolding((current) => ({ ...current, [owner]: on }));
+    void bridge.waitForMe(on, {
+      project: desk.path,
+      ...(desk.address == null ? {} : { conversation: desk.address }),
+    });
+  }, []);
+
   const halt = useCallback(() => {
     // Name *which* conversation is being stopped. Without the `where`, Stop
     // would end whatever the shell has in front — which, with two tabs open,
@@ -2060,6 +2074,10 @@ function Conversation() {
           turns: one.turns.map((t) => (t.kind === 'said' && (t as { streaming: boolean }).streaming ? { ...t, streaming: false } : t)),
         })),
       );
+    }
+    if (desk !== null) {
+      const owner = `${desk.path}\u0000${desk.address ?? ''}`;
+      setHolding((current) => ({ ...current, [owner]: false }));
     }
     void bridge.stop({
       ...(desk === null ? {} : { project: desk.path }),
@@ -4589,6 +4607,8 @@ function Conversation() {
               // turn in another tab — a tab working beside you must not turn
               // your Send into Stop or its own work into a wait.
               busy={frontBusy}
+              waiting={desk !== null && holding[`${desk.path}\u0000${desk.address ?? ''}`] === true}
+              onWait={waitForMe}
               draft={draft}
               attachments={attachments}
               connection={connection}

@@ -35,7 +35,7 @@ type ToolResult = Promise<AgentToolResult<unknown>>;
 export type DesktopHost = (
   tool: string,
   args: readonly string[],
-  options: { patience?: number; signal?: AbortSignal },
+  options: { patience?: number; signal?: AbortSignal; input?: string },
 ) => Promise<Ran>;
 
 /** Short: these are single system calls, and a wedged one holds up a turn. */
@@ -63,6 +63,13 @@ export const DESKTOP_WORDS = {
   noDrag:
     'Dragging something across the screen needs a small helper this computer does not have, so I have left that step undone. Everything else here works without it.',
   nothingToDo: 'None of those is a move I can make, so I have done nothing.',
+  offScreen: (app: string): string =>
+    `${app} has no window on the desktop you are looking at. Bring its window over to this one and ask me again.`,
+  notOpen: (app: string): string => `There is nothing called ${app} open on this computer.`,
+  nothingNamed: (app: string): string =>
+    `${app} has not named anything on screen, so there is nothing here to aim at by name. A picture and a place to press is the way into this one.`,
+  didNotPress: (what: string): string =>
+    `${what} is not there any more. Read what is on screen again — a window that has moved on renames everything.`,
   stopped: 'That was stopped.',
 } as const;
 
@@ -160,6 +167,8 @@ export function keyLine(keys: string): string | null {
 /** One thing to do to the screen. */
 export type Doing = {
   do: string;
+  /** A handle from reading what a program has named, such as `a3`. */
+  target?: string;
   x?: number;
   y?: number;
   toX?: number;
@@ -182,6 +191,8 @@ type Shot =
 export type Move =
   | { kind: 'script'; script: string; said: string }
   | { kind: 'drag'; args: string[]; said: string }
+  /** Aimed at something the program named, so it happens in the background. */
+  | { kind: 'named'; at: number; doing: 'press' | 'set' | 'focus'; value: string; said: string }
   | { kind: 'skip'; because: string | null };
 
 function place(step: Doing): { x: number; y: number } | null {
@@ -195,6 +206,22 @@ function place(step: Doing): { x: number; y: number } | null {
  *  are possible and how they are worded is decided where a test can read it. */
 export function asMove(step: Doing): Move {
   const kind = (step.do ?? '').trim().toLowerCase();
+  // A handle wins over a place: it is the better way to reach the same thing,
+  // and a step that carries both meant the one that leaves the pointer alone.
+  const handle = handleNumber(step.target);
+  if (handle > 0) {
+    const target = (step.target ?? '').trim();
+    if (kind === 'type' || kind === 'set' || kind === 'fill') {
+      return { kind: 'named', at: handle, doing: 'set', value: step.text ?? '', said: `Put the words into ${target}` };
+    }
+    if (kind === 'focus') {
+      return { kind: 'named', at: handle, doing: 'focus', value: '', said: `Moved to ${target}` };
+    }
+    if (kind === 'click' || kind === 'press' || kind === 'double' || kind === 'right') {
+      return { kind: 'named', at: handle, doing: 'press', value: '', said: `Pressed ${target}` };
+    }
+    return { kind: 'skip', because: null };
+  }
   const at = place(step);
   const clicking: Readonly<Record<string, string>> = {
     click: 'click',
@@ -270,6 +297,161 @@ export function asScript(lines: readonly string[]): string {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Named things, without the pointer                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The things on screen a program has bothered to name, and pressing one.
+ *
+ * A press at a point takes the pointer: the cursor jumps out from under
+ * somebody's hand and whatever they were doing stops. A press on a named thing
+ * does not — it asks the program to press its own button, which happens in the
+ * background, in a window that is not even in front, with the mouse exactly
+ * where it was. That is the better way to work a program, and this is it.
+ *
+ * The two limits are real and reported rather than worked around: a program
+ * that names nothing has nothing here to aim at, and a window on another desktop
+ * cannot be reached at all.
+ */
+const NAMED_THINGS = `on run argv
+  set mode to item 1 of argv
+  set appName to item 2 of argv
+  set wanted to (item 3 of argv) as integer
+  set doing to item 4 of argv
+  set val to item 5 of argv
+  set mostMatched to 60
+  set mostSeen to 400
+  set out to ""
+  set n to 0
+  set seen to 0
+  tell application "System Events"
+    if appName is "" then
+      set p to first application process whose frontmost is true
+      set appName to name of p
+    else
+      try
+        set p to first application process whose name is appName
+      on error
+        return "NOAPP"
+      end try
+    end if
+    tell p
+      set ws to windows
+      if (count of ws) is 0 then return "NOWINDOWS"
+      repeat with wi from 1 to (count of ws)
+        set w to window wi
+        set kids to entire contents of w
+        repeat with e in kids
+          set seen to seen + 1
+          if n ≥ mostMatched or seen > mostSeen then exit repeat
+          try
+            set r to role of e
+            if r is in {"AXButton", "AXTextField", "AXTextArea", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXLink", "AXComboBox", "AXCell"} then
+              set nm to ""
+              try
+                set v to name of e
+                if v is not missing value then set nm to v as text
+              end try
+              if nm is "" then
+                try
+                  set v to title of e
+                  if v is not missing value then set nm to v as text
+                end try
+              end if
+              if nm is "" then
+                try
+                  set v to description of e
+                  if v is not missing value then set nm to v as text
+                end try
+              end if
+              if nm is "" then
+                try
+                  set v to value of e
+                  if v is not missing value then set nm to v as text
+                end try
+              end if
+              if nm is "" or nm is "button" then
+                try
+                  set v to help of e
+                  if v is not missing value and (v as text) is not "" then set nm to v as text
+                end try
+              end if
+              if nm is not "" and nm is not "cell" then
+                set n to n + 1
+                if mode is "act" and n = wanted then
+                  if doing is "press" then
+                    perform action "AXPress" of e
+                    return "DID"
+                  else if doing is "set" then
+                    set value of e to val
+                    return "DID"
+                  else if doing is "focus" then
+                    set focused of e to true
+                    return "DID"
+                  end if
+                  return "NOACTION"
+                end if
+                if mode is "read" then set out to out & "a" & n & "|" & r & "|" & nm & linefeed
+              end if
+            end if
+          end try
+        end repeat
+        if n ≥ mostMatched or seen > mostSeen then exit repeat
+      end repeat
+    end tell
+  end tell
+  if mode is "act" then return "NOSUCH"
+  return out
+end run`;
+
+/** What a walk of a window's named things came back with. */
+export type Named = { handle: string; role: string; name: string };
+
+/** The plain word for a role, since "AXPopUpButton" is not one. */
+const PLAINLY: Readonly<Record<string, string>> = {
+  AXButton: 'button',
+  AXTextField: 'box',
+  AXTextArea: 'box',
+  AXCheckBox: 'tick box',
+  AXRadioButton: 'choice',
+  AXPopUpButton: 'menu',
+  AXMenuButton: 'menu',
+  AXLink: 'link',
+  AXComboBox: 'box',
+  AXCell: 'row',
+};
+
+/** The walk's own lines, read back. Anything unreadable is left out rather than
+ *  guessed at — a handle that points at nothing is worse than one fewer. */
+export function readNamed(said: string): readonly Named[] {
+  const out: Named[] = [];
+  for (const line of said.split('\n')) {
+    const parts = line.split('|');
+    if (parts.length < 3) continue;
+    const handle = (parts[0] ?? '').trim();
+    const role = (parts[1] ?? '').trim();
+    const name = parts.slice(2).join('|').trim();
+    if (!/^a\d+$/.test(handle) || name === '') continue;
+    out.push({ handle, role: PLAINLY[role] ?? 'thing', name });
+  }
+  return out;
+}
+
+/** How a walk reads, for somebody deciding what to press. */
+export function saysNamed(app: string, things: readonly Named[]): string {
+  if (things.length === 0) return DESKTOP_WORDS.nothingNamed(app);
+  const rows = things.map((one) => `${one.handle}  ${one.role}  ${one.name}`).join('\n');
+  return `${app} — ${String(things.length)} things it has named:\n${rows}`;
+}
+
+/** The handle a step is aimed at, as the number the walk gave it. Zero when the
+ *  step names no handle at all. */
+export function handleNumber(target: string | undefined): number {
+  const found = /^@?a(\d+)$/.exec((target ?? '').trim());
+  return found === null ? 0 : Number(found[1]);
+}
+
+/* -------------------------------------------------------------------------- */
 /* The screen                                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -330,6 +512,25 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
     dragger ??= run('cliclick', ['-V'], { patience: 10_000 }).then((ran) => !notHere(ran));
     return dragger;
   };
+
+  /** The last program somebody read, so a run of moves aimed at handles knows
+   *  whose handles they are without being told twice. */
+  let lastRead = '';
+
+  /** One walk of a program's named things: reading them, or pressing one. */
+  const named = async (
+    mode: 'read' | 'act',
+    app: string,
+    at: number,
+    doing: string,
+    value: string,
+    signal?: AbortSignal,
+  ): Promise<Ran> =>
+    run('osascript', ['-', mode, app, String(at), doing, value], {
+      patience: PATIENCE_MS,
+      input: NAMED_THINGS,
+      ...(signal === undefined ? {} : { signal }),
+    });
 
   const script = async (body: string, signal?: AbortSignal): Promise<Ran> =>
     run('osascript', ['-e', body], {
@@ -466,10 +667,11 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
       name: 'desktop_do',
       label: 'Working the computer',
       description:
-        'Do a run of things to whatever is on screen: press somewhere, double-press, right-press, drag, type, press keys, scroll, wait. Give the whole run in one call rather than one call each — it is faster, and it is what keeps a long job from being a long line of questions. A picture of the screen comes back at the end, so you can see where it got to.',
+        "Do a run of things on this computer: press, double-press, right-press, drag, type, press keys, scroll, wait. Aim at a handle from reading what a program named — a3 — and it happens in the background, leaving the pointer where the person's hand is. Aim at a place instead and it uses the pointer, which takes the mouse away from them. Give the whole run in one call rather than one call each. A picture comes back at the end, so you can see where it got to.",
       promptSnippet: 'desktop_do(steps) — press, type and scroll on this computer, then see the result',
       promptGuidelines: [
-        'Take a picture first. Coordinates guessed from memory land on the wrong thing.',
+        'Read what the program has named first. A handle leaves the pointer alone; a place takes it.',
+        'Where there is no handle, take a picture first — coordinates guessed from memory land on the wrong thing.',
         'Keep runs short enough to check — five or six moves, then look at the picture that comes back.',
         'Never type a password or a key into a program this way.',
       ],
@@ -481,6 +683,12 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
                 "'click', 'double', 'right', 'drag', 'type', 'key', 'scroll' or 'wait'.",
               minLength: 1,
             }),
+            target: Type.Optional(
+              Type.String({
+                description:
+                  "A handle such as a3 from reading what is on screen. Aiming this way leaves the pointer where it is and works in a window that is not in front — prefer it to a place whenever there is one.",
+              }),
+            ),
             x: Type.Optional(Type.Number({ description: 'Across, in the picture\'s own pixels.' })),
             y: Type.Optional(Type.Number({ description: 'Down, in the picture\'s own pixels.' })),
             toX: Type.Optional(Type.Number({ description: 'For drag: where it ends up, across.' })),
@@ -495,9 +703,18 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
           }),
           { description: 'The moves, in order.', minItems: 1 },
         ),
+        app: Type.Optional(
+          Type.String({
+            description: 'Whose handles these are, by program name. The last one read by default.',
+          }),
+        ),
       }),
       executionMode: 'sequential',
-      execute: async (_callId, params: { steps: readonly Doing[] }, signal): ToolResult => {
+      execute: async (
+        _callId,
+        params: { steps: readonly Doing[]; app?: string },
+        signal,
+      ): ToolResult => {
         const moves = params.steps.map(asMove);
         const done: string[] = [];
         const missed: string[] = [];
@@ -514,6 +731,31 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
         for (const move of moves) {
           if (move.kind === 'script') {
             pending.push(move.script);
+            done.push(move.said);
+            continue;
+          }
+          if (move.kind === 'named') {
+            const stopped = await flush();
+            if (stopped !== null) return stopped;
+            const ran = await named(
+              'act',
+              (params.app ?? lastRead).trim(),
+              move.at,
+              move.doing,
+              move.value,
+              signal,
+            );
+            if (ran.code !== 0) {
+              return refusedPointing(ran.said) ? await askFor('point') : say(ran.said.trim());
+            }
+            const answer = ran.out.trim();
+            if (answer === 'NOWINDOWS') {
+              return say(DESKTOP_WORDS.offScreen((params.app ?? lastRead).trim() || 'That program'));
+            }
+            if (answer !== 'DID') {
+              missed.push(DESKTOP_WORDS.didNotPress(move.said));
+              continue;
+            }
             done.push(move.said);
             continue;
           }
@@ -543,6 +785,36 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
         const after = await shown(signal);
         const note = [...done, ...new Set(missed)].join('\n');
         return { ...after, content: [{ type: 'text', text: note }, ...after.content] };
+      },
+    },
+    {
+      name: 'desktop_read',
+      label: 'Reading what is on screen',
+      description:
+        "Read the things a program has named on screen — its buttons, boxes, tick boxes, menus and rows — each with a short handle to aim at. Prefer this to a picture wherever it answers: pressing something by its handle happens in the background, with the pointer left exactly where the person's hand is, and it works in a window that is not even in front. Read it again after every run of moves, because a window that has moved on renames everything.",
+      promptSnippet: 'desktop_read(app?) — the things a program has named, with handles to aim at',
+      promptGuidelines: [
+        'Try this before taking a picture. A press on a named thing does not take the pointer; a press at a point does.',
+      ],
+      parameters: Type.Object({
+        app: Type.Optional(
+          Type.String({ description: 'Which program, by its name. The one in front by default.' }),
+        ),
+      }),
+      executionMode: 'sequential',
+      execute: async (_callId, params: { app?: string }, signal): ToolResult => {
+        const wanted = (params.app ?? '').trim();
+        const ran = await named('read', wanted, 0, '', '', signal);
+        if (ran.code !== 0) {
+          return refusedPointing(ran.said) ? askFor('point') : say(ran.said.trim());
+        }
+        const answer = ran.out.trim();
+        if (answer === 'NOAPP') return say(DESKTOP_WORDS.notOpen(wanted));
+        if (answer === 'NOWINDOWS') return say(DESKTOP_WORDS.offScreen(wanted === '' ? 'That program' : wanted));
+        const things = readNamed(answer);
+        lastRead = wanted;
+        const front = wanted === '' ? ((await frontmost(signal)) ?? 'The program in front') : wanted;
+        return say(saysNamed(front, things));
       },
     },
     {

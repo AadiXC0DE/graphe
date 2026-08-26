@@ -471,7 +471,7 @@ const BROWSER_STEPS = 'browsersteps';
  * messages, a password left showing — and the person sitting in front of it is
  * the one who decides that goes into a conversation.
  */
-const DESKTOP_LOOK_TOOLS = new Set(['desktopapps']);
+const DESKTOP_LOOK_TOOLS = new Set(['desktopapps', 'desktopread']);
 const DESKTOP_PICTURE_TOOLS = new Set(['desktoppicture']);
 
 /** Working this computer: pressing, typing, dragging, opening a program. None

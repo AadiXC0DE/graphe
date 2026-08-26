@@ -20,8 +20,11 @@ import {
   desktopTools,
   keyLine,
   quoted,
+  handleNumber,
   readBounds,
   readLooksLike,
+  readNamed,
+  saysNamed,
   readPixels,
   refusedPointing,
   refusedSeeing,
@@ -111,6 +114,52 @@ describe('one move at a time', () => {
   it('does nothing at all rather than something else, for a move it has no idea about', () => {
     expect(asMove({ do: 'pinch' }).kind).toBe('skip');
     expect(asMove({ do: 'move', x: 1, y: 2 }).kind).toBe('skip');
+  });
+});
+
+describe('the things a program has named', () => {
+  it('reads a walk back, and leaves out anything it cannot use', () => {
+    const things = readNamed(
+      ['a1|AXButton|Save', 'a2|AXTextField|Email', 'rubbish', 'a3|AXCell|', 'a4|AXLink|Docs|more'].join('\n'),
+    );
+    expect(things).toEqual([
+      { handle: 'a1', role: 'button', name: 'Save' },
+      { handle: 'a2', role: 'box', name: 'Email' },
+      { handle: 'a4', role: 'link', name: 'Docs|more' },
+    ]);
+  });
+
+  it('says what it found in words a person would use', () => {
+    const said = saysNamed('Figma', [{ handle: 'a1', role: 'button', name: 'Export' }]);
+    expect(said).toContain('Figma');
+    expect(said).toContain('a1  button  Export');
+    expect(saysNamed('Figma', [])).toBe(DESKTOP_WORDS.nothingNamed('Figma'));
+  });
+
+  it('reads a handle off a step, however it was written', () => {
+    expect(handleNumber('@a3')).toBe(3);
+    expect(handleNumber('a12')).toBe(12);
+    expect(handleNumber(' @a7 ')).toBe(7);
+    for (const nothing of ['', undefined, 'a', '@e3', 'Save', '3']) {
+      expect(handleNumber(nothing), String(nothing)).toBe(0);
+    }
+  });
+
+  /** The whole point: a handle leaves the pointer where it is. */
+  it('turns a step aimed at a handle into a move that never touches the pointer', () => {
+    const pressed = asMove({ do: 'click', target: '@a3' });
+    expect(pressed.kind).toBe('named');
+    expect(pressed.kind === 'named' ? pressed.doing : '').toBe('press');
+    const typed = asMove({ do: 'type', target: 'a4', text: 'hello' });
+    expect(typed.kind === 'named' ? typed.doing : '').toBe('set');
+    expect(typed.kind === 'named' ? typed.value : '').toBe('hello');
+    expect(asMove({ do: 'focus', target: '@a1' }).kind).toBe('named');
+  });
+
+  /** A step carrying both meant the one that leaves the pointer alone. */
+  it('prefers the handle when a step carries a place as well', () => {
+    expect(asMove({ do: 'click', target: '@a2', x: 10, y: 10 }).kind).toBe('named');
+    expect(asMove({ do: 'click', x: 10, y: 10 }).kind).toBe('script');
   });
 });
 
@@ -243,19 +292,23 @@ describe('when the computer has not been given permission', () => {
   });
 
   it('says all of it in plain words', () => {
-    for (const said of Object.values(DESKTOP_WORDS)) {
-      expect(said).not.toMatch(/\b(AppleScript|osascript|System Events|accessibility API|CGEvent)\b/);
+    const every = Object.values(DESKTOP_WORDS).map((said) =>
+      typeof said === 'function' ? said('Figma') : said,
+    );
+    for (const said of every) {
+      expect(said).not.toMatch(/\b(AppleScript|osascript|System Events|accessibility API|CGEvent|AXPress)\b/);
     }
   });
 });
 
 describe('what the tools do', () => {
-  it('offers exactly the four, named for what they do', () => {
+  it('offers exactly the five, named for what they do', () => {
     expect(desktopTools(ROOT, () => Promise.resolve(ran())).map((one) => one.name).sort()).toEqual([
       'desktop_apps',
       'desktop_do',
       'desktop_open',
       'desktop_picture',
+      'desktop_read',
     ]);
   });
 

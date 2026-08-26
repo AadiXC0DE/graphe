@@ -466,3 +466,39 @@
     row-gap: var(--space-1);
   }
 }
+
+/* Wait, beside Stop. Quiet by default and plainly on while it is holding — a
+   control that looks the same either way is one people leave holding. */
+
+.composer__wait {
+  flex: none;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm);
+  padding: 4px var(--space-3);
+  margin-right: var(--space-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-hover),
+    background var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .composer__wait:hover {
+    color: var(--text);
+  }
+}
+
+.composer__wait:active {
+  transform: scale(0.97);
+}
+
+.composer__wait--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}

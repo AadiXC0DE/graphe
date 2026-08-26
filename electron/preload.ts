@@ -166,6 +166,13 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.stop, named(where)) as Promise<Result<null>>;
   },
 
+  waitForMe(on: boolean, where?: Where): Promise<Result<null>> {
+    if (typeof on !== 'boolean') {
+      return Promise.resolve(refuse<null>('I could not tell whether that was on or off.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.waitForMe, on, named(where)) as Promise<Result<null>>;
+  },
+
   steer(text: string, where?: Where): Promise<Result<null>> {
     if (typeof text !== 'string' || text.trim() === '') {
       return Promise.resolve({

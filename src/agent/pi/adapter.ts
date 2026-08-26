@@ -188,6 +188,49 @@ export class Confirmations {
 }
 
 /**
+ * A turn held between steps, so somebody can take the machine back.
+ *
+ * The same parking as `Confirmations`: the promise the extension hook handed
+ * back has not resolved, so the agent loop has not reached the next
+ * `tool.execute`. What is different is that this is nobody's question — it is a
+ * person saying "wait there" while they look at a page, move a window or put
+ * something right. Letting go carries on from wherever things now are, because
+ * the next step reads the world again rather than trusting what it remembered.
+ *
+ * A step already running is not interrupted. Holding a turn is not stopping it,
+ * and a half-finished press is worse than either.
+ */
+export class Paused {
+  private held = false;
+  private waiting: (() => void)[] = [];
+
+  get on(): boolean {
+    return this.held;
+  }
+
+  hold(on: boolean): void {
+    this.held = on;
+    if (!on) this.letGo();
+  }
+
+  /** Where a turn waits. Resolves at once when nothing is holding it. */
+  gate(): Promise<void> {
+    if (!this.held) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.waiting.push(resolve);
+    });
+  }
+
+  /** Stopping releases everything: a held turn must never outlive the stop that
+   *  was meant to end it. */
+  letGo(): void {
+    const open = this.waiting;
+    this.waiting = [];
+    for (const resolve of open) resolve();
+  }
+}
+
+/**
  * The one set of questions a turn is allowed to stop for, and who has answered.
  *
  * The same parking as `Confirmations` and for the same reason: the promise
@@ -238,6 +281,9 @@ export type InterceptorOptions = {
   facts: GuardFacts;
   relay: EventRelay;
   confirmations: Confirmations;
+  /** Where a turn waits when somebody has asked it to. Left out, nothing ever
+   *  waits, which is what every caller meant before there was a way to ask. */
+  paused?: Paused;
   /** Where restore points go. Without one, a `snapshot-first` call still runs —
    *  the host chose to open a session with no history — but it runs with no way
    *  back, which is why `createSession` takes a Timeline and expects one. */
@@ -326,6 +372,13 @@ export function createGuardInterceptor(
 
   return async function review(call: ToolCall): Promise<Interception> {
     filesMayHaveMoved?.(call);
+    // Held before anything is judged, so a turn waits where it is rather than
+    // one more step landing after somebody asked it to wait.
+    if (options.paused?.on === true) {
+      relay.waitingForYou(true);
+      await options.paused.gate();
+      relay.waitingForYou(false);
+    }
     // The explicit top autonomy rung is full access for this sitting. Keep this
     // before planning too: otherwise a leftover plan-only state silently turns
     // "Get on with it" back into a restricted mode. `evaluate` mirrors this
@@ -626,6 +679,10 @@ export type GrapheSession = {
   setThinking(level: ThinkingLevel): ThinkingLevel;
   /** Stop what it is doing now. Open questions are answered no. */
   stop(): Promise<void>;
+  /** Hold the turn between steps, or let it go on. */
+  holdOn(on: boolean): void;
+  /** True while a turn is being held. */
+  readonly held: boolean;
   /** Put a message into a turn already in flight, without stopping it — the
    *  agent hears it between tool calls and carries on. This is the "insert
    *  into the loop" move other coding agents offer; Pi calls it steering.
@@ -1646,10 +1703,13 @@ const MOST_AFTER_SAYINGS = 3;
   const asking = new Asking();
   let askedSoFar = 0;
 
+  const paused = new Paused();
+
   const review = createGuardInterceptor({
     facts,
     relay,
     confirmations,
+    paused,
     timeline: options.timeline,
     planning: () => planning,
     rules: () => house,
@@ -2296,6 +2356,9 @@ const MOST_AFTER_SAYINGS = 3;
       // left a card on screen whose answer could never arrive — and an
       // unanswered card reads as "still working", which is why Stop looked
       // dead while the run behind it had already ended.
+      // A held turn is let go first: stopping a turn that is waiting must end
+      // it, not leave it waiting for a resume nobody is going to press.
+      paused.hold(false);
       const withdrawn = confirmations.abandonAll();
       if (withdrawn.length > 0) say({ type: 'questions-withdrawn', callIds: withdrawn });
       const letGo = asking.abandonAll();
@@ -2305,6 +2368,17 @@ const MOST_AFTER_SAYINGS = 3;
       // the composer back to Send; waiting for an event that may not come is
       // how the button stayed a spinner.
       say({ type: 'settled' });
+    },
+
+    /** Wait between steps, or carry on. Holding is not stopping: the turn stays
+     *  where it is and picks up from wherever things are when it is let go. */
+    holdOn(on: boolean): void {
+      paused.hold(on);
+      if (!on) say({ type: 'waiting-for-you', on: false });
+    },
+
+    get held(): boolean {
+      return paused.on;
     },
 
     get listening(): boolean {
@@ -2346,6 +2420,7 @@ const MOST_AFTER_SAYINGS = 3;
     dispose(): void {
       if (closed) return;
       closed = true;
+      paused.hold(false);
       confirmations.abandonAll();
       asking.abandonAll();
       unsubscribe();

@@ -47,6 +47,10 @@ import './Composer.css';
 
 type Props = {
   onSend: (text: string) => void;
+  /** True while the run is waiting between steps because somebody asked it to. */
+  waiting?: boolean;
+  /** Hold the run between steps, or let it go on. */
+  onWait?: (on: boolean) => void;
   /** Called instead of send while a turn is running: the same button in its
    *  other state (BACKLOG A1). Send and Stop are one affordance in opposite
    *  states — swapping in place is why the layout does not jump. */
@@ -188,6 +192,8 @@ export default function Composer({
   onHowFar,
   onComposerPopoverOpenChange,
   skills = [],
+  waiting,
+  onWait,
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -745,6 +751,18 @@ export default function Composer({
             Words in the box while a turn is running are a second thought, and a
             second thought is a choice: queue it behind the run, or interrupt
             with it. Two quiet buttons, asked once, never guessed. */}
+        {/* Wait, beside Stop and never instead of it. Stop ends the run; this
+            holds it between steps so the machine is yours for a moment, and
+            letting go picks up from wherever things now are. */}
+        {stopping && onWait !== undefined ? (
+          <button
+            type="button"
+            className={`composer__wait ${waiting === true ? 'composer__wait--on' : ''}`}
+            onClick={() => onWait(waiting !== true)}
+          >
+            {waiting === true ? 'Go on' : 'Wait'}
+          </button>
+        ) : null}
         {busy && onQueue !== undefined && value.trim() !== '' ? (
           <span className="composer__queue">
             <button

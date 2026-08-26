@@ -357,6 +357,11 @@ export class EventRelay {
     this.deliver({ type: 'tool-start', call });
   }
 
+  /** Waiting between steps because somebody asked it to, and going again. */
+  waitingForYou(on: boolean): void {
+    this.deliver({ type: 'waiting-for-you', on });
+  }
+
   /** A call that will not run, and the plain-language reason it will not. */
   blocked(call: ToolCall, reason: string): void {
     this.running.delete(call.id);

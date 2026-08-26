@@ -326,6 +326,12 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       ];
     }
 
+    /* Waiting between steps because somebody asked it to. Nothing is added to
+       the conversation: the run has not ended and nothing has happened, so a
+       line saying so would be a line about the button they just pressed. */
+    case 'waiting-for-you':
+      return turns;
+
     case 'tool-progress':
       return turns.map((turn) =>
         turn.kind === 'did' && turn.callId === event.id && turn.state === 'running'

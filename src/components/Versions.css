@@ -379,6 +379,14 @@
   background: var(--bg-raised);
 }
 
+/* With nothing photographed the tile carries the title, and a star floating in
+   its corner sits on top of the words. It drops beside the time instead. */
+.moment:not(:has(.moment__shot)) .moment__keep {
+  top: auto;
+  bottom: 8px;
+  right: 8px;
+}
+
 /* Small enough to sit on a thumbnail without covering it; the target around it
    is not — ::after pushes the hit area out to a comfortable 40px. */
 .moment__keep {

@@ -3476,7 +3476,16 @@ function Conversation() {
           setChangesOpen(true);
           void bridge
             .changesLook(actingRepo === null ? undefined : { repo: actingRepo })
-            .then((answer) => setChangeText(answer.ok ? answer.value : ''));
+            .then((answer) => {
+              // A refusal read as "nothing has changed", which is a different
+              // sentence and not a true one.
+              if (!answer.ok) {
+                setChangesOpen(false);
+                troubleHere(answer.trouble);
+                return;
+              }
+              setChangeText(answer.value);
+            });
         }, ready: here, whyNot: needsProject },
       { id: 'history', name: 'Look through the history', where: 'Project',
         run: () => goToScreen('graph'), ready: here, whyNot: needsProject },

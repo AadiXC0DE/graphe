@@ -124,7 +124,7 @@ export const REACHABLE: readonly Reach[] = [
     name: 'Figma',
     what: 'Lets me open the Figma file you have in front of you and work in it — read the real spacing, colours and words, and draw into it as well.',
     needs:
-      'Figma keeps the last step for itself: point it at the file I put on your desktop, once, from its own menu. Then open it in whichever file you want me working in.',
+      'Figma keeps one step for itself. I fetch the helper it needs and open the folder at it; you point Figma at it from Figma’s own menu, once, and it is there from then on.',
     helper: {
       name: 'figwright-0.4.0',
       from: 'https://github.com/awdr74100/figwright/releases/download/v0.4.0/figwright-plugin-v0.4.0.zip',

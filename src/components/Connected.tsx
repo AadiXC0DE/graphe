@@ -24,7 +24,13 @@ export const SAYS = {
   offersNote: 'One press each, and nothing else to fill in.',
   hasSome: 'Connected to this project',
   connect: 'Connect',
-  fetched: 'I put the file it needs here, and opened the folder: ',
+  /* Precise on purpose. This is the one step Figma keeps for itself, and a
+     sentence like "point Figma at it from its own menu" leaves somebody hunting
+     through four menus for a word we would not say. The panel that draws the
+     curated shelf keeps the plainer wording; this is the moment somebody is
+     actually doing it. */
+  fetched: 'Ready — the folder is open at the file Figma wants. In Figma: Plugins → Development → Import plugin from manifest…, and choose it. Then Plugins → Development → Figwright to run it in whichever file you want me working in. Once only; it stays after that.',
+  fetchedWhere: 'The file is at',
   connecting: 'Connecting…',
   add: 'Connect something else',
   check: 'Check it',
@@ -231,7 +237,8 @@ export default function Connected({ open, state, onClose, onCheck, onSave, onGet
                         {fetched[tool.name] === undefined ? null : (
                           <p className="wired__fetched">
                             {SAYS.fetched}
-                            <code>{fetched[tool.name]}</code>
+                            <br />
+                            {SAYS.fetchedWhere} <code>{fetched[tool.name]}</code>
                           </p>
                         )}
                         <code className="wired__command">{asLine(tool)}</code>

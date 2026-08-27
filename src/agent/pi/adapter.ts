@@ -1953,7 +1953,7 @@ const MOST_AFTER_SAYINGS = 3;
     try {
       memory = await openMemory({
         dbPath: join(agentDir, 'memory', memoryFileName(options.projectRoot)),
-        embedder: defaultEmbedder(),
+        embedder: defaultEmbedder(join(agentDir, 'model')),
       });
       customTools.push(...memoryTools(memory));
     } catch {

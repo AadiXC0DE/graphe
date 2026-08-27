@@ -47,3 +47,16 @@ describe('the file Electron starts', () => {
     expect(BOOT).not.toMatch(/await\s+app\.whenReady\(\)/);
   });
 });
+
+describe('the model the meaning engine downloads', () => {
+  const MEMORY = readFileSync(new URL('../src/agent/memory.ts', import.meta.url), 'utf8');
+  const ADAPTER = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
+
+  it('is kept somewhere the app can actually write', () => {
+    // Left alone it goes in a folder inside the package, which in a shipped app
+    // is a read-only archive — so it is downloaded again on every launch, and
+    // nothing says so, because every embedding failure is the word path.
+    expect(MEMORY).toContain('env.cacheDir = cacheDir');
+    expect(ADAPTER).toContain("defaultEmbedder(join(agentDir, 'model'))");
+  });
+});

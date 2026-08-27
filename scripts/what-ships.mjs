@@ -66,6 +66,10 @@ const BUILDS_WE_DO_NOT_LOAD = {
   // dist/sql-wasm.wasm from beside itself. The asm.js and debug builds, the
   // web-worker variants and the source zips are nobody's import.
   'sql.js': { dir: 'dist', keep: (name) => name === 'sql-wasm.js' || name === 'sql-wasm.wasm' },
+  // Whatever the meaning engine downloaded on the machine that did the
+  // packaging. It is 23MB of somebody's afternoon, not part of the release, and
+  // its presence is the difference between a build here and a build in CI.
+  '@huggingface/transformers': { dir: '.cache', keep: () => false },
   // Every target in its `exports` map is a `.min.` build; the plain ones beside
   // them are for reading. The wasm binaries are four alternative CPU backends,
   // and none is opened: transformers points `wasm.wasmPaths` at a CDN, so the

@@ -14,6 +14,8 @@
 /* One thing it can reach                                                      */
 /* -------------------------------------------------------------------------- */
 
+import type { Helper } from './helper';
+
 /** Either it is already answering somewhere, or we start it ourselves. */
 export type Start =
   | { how: 'address'; address: string }
@@ -31,6 +33,9 @@ export type Reach = {
   what: string;
   /** What has to stay true for it to work, or null when nothing does. */
   needs: string | null;
+  /** A piece that has to live inside another app before this works. Graphe
+   *  fetches and unpacks it; the last step belongs to the app that keeps it. */
+  helper?: Helper;
   start: Start;
   curated: boolean;
   added: boolean;
@@ -119,7 +124,13 @@ export const REACHABLE: readonly Reach[] = [
     name: 'Figma',
     what: 'Lets me open the Figma file you have in front of you and work in it — read the real spacing, colours and words, and draw into it as well.',
     needs:
-      'Install the Figwright helper into Figma once — it is free and open, from github.com/awdr74100/figwright. Then open it in whichever file you want me working in.',
+      'Figma keeps the last step for itself: point it at the file I put on your desktop, once, from its own menu. Then open it in whichever file you want me working in.',
+    helper: {
+      name: 'figwright-0.4.0',
+      from: 'https://github.com/awdr74100/figwright/releases/download/v0.4.0/figwright-plugin-v0.4.0.zip',
+      sha256: 'af8170b02d171b0989e167eeb6071e31b16293f2135137355b2ec2b2e36fdfb2',
+      points: 'manifest.json',
+    },
     start: {
       how: 'program',
       command: 'npx',

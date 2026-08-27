@@ -4499,6 +4499,12 @@ function Conversation() {
           if (answer.ok) setConnected(answer.value);
           else troubleHere(answer.trouble);
         }}
+        onGetHelper={async (id) => {
+          const answer = await bridge.getHelper(id);
+          if (answer.ok) return { ok: true, value: answer.value };
+          troubleHere(answer.trouble);
+          return { ok: false };
+        }}
       />
 
       <Skills

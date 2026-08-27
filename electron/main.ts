@@ -221,6 +221,8 @@ import {
   signInThrough,
   writeMcpConfig,
 } from '../src/agent/pi/mcp';
+import { fetchHelper } from '../src/agent/pi/helper';
+import { REACHABLE } from '../src/agent/pi/reach';
 import { SecretFile } from '../src/projects/secrets';
 import { holdsBack } from '../src/projects/heldback';
 import { keepsLogins } from '../src/projects/logins';
@@ -5390,6 +5392,23 @@ function register(): void {
   });
 
   handle<Hatches>(CHANNEL.hatches, async () => done({ editor: (await editor())?.name ?? null }));
+
+  /* The piece a tool needs inside another app. Fetched, checked against the
+     version we meant, unpacked, and then shown in Finder — because the step
+     after this one is a file chooser in somebody else's menu, and the kindest
+     thing to do is have the file already sitting under their cursor. */
+  handle<string>(CHANNEL.getHelper, async (_event, args) => {
+    const [id] = args;
+    const reach = REACHABLE.find((one) => one.id === id);
+    if (reach?.helper === undefined) return fail(plainTrouble('There is nothing to fetch for that one.'));
+    try {
+      const where = await fetchHelper(app.getPath('userData'), reach.helper);
+      shell.showItemInFolder(where);
+      return done(where);
+    } catch (cause) {
+      return fail(plainTrouble(cause instanceof Error ? cause.message : 'I could not fetch it.'));
+    }
+  });
 
   /**
    * The escape hatch, D2.

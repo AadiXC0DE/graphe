@@ -342,18 +342,24 @@ function widenPath(): void {
   add(known);
 
   const shell = process.env['SHELL'] ?? '/bin/zsh';
-  asking = execFileAsync(shell, ['-lic', 'printf %s "$PATH"'], {
-    encoding: 'utf8',
-    timeout: 10_000,
-  })
-    .then(({ stdout }) => {
-      const found = stdout.trim();
-      if (found === '' || !found.includes('/')) return;
-      add(found.split(':'));
-    })
-    .catch(() => {
-      // The list above is the part that had to work, and it already has.
-    });
+  const ask = (how: readonly string[]): Promise<void> =>
+    execFileAsync(shell, [...how, 'printf %s "$PATH"'], { encoding: 'utf8', timeout: 10_000 })
+      .then(({ stdout }) => {
+        const found = stdout.trim();
+        if (found === '' || !found.includes('/')) return;
+        add(found.split(':'));
+      })
+      .catch(() => {
+        // The list above is the part that had to work, and it already has.
+      });
+
+  // Two questions rather than one, because they cost wildly different amounts.
+  // A login shell reads .zprofile and answers in about a sixth of a second. An
+  // interactive one also reads .zshrc — where nvm, mise and the prompt live —
+  // and takes a second and a half. Whoever is waiting waits for the first; the
+  // second widens PATH again whenever it gets round to it.
+  asking = ask(['-lc']);
+  void ask(['-lic']);
 }
 
 /** The shell's answer, once it comes. */

@@ -87,15 +87,31 @@ describe('the tools an app opened from the dock has to find', () => {
     expect(WIDEN).toContain('/usr/local/bin');
     // Before the shell is asked, so a shell that never answers cannot take the
     // common case down with it.
-    expect(WIDEN.indexOf('add(known)')).toBeLessThan(WIDEN.indexOf('spawnSync'));
+    expect(WIDEN.indexOf('add(known)')).toBeLessThan(WIDEN.indexOf('execFileAsync'));
   });
 
   it('does not give up on everything when the shell does not answer', () => {
     // The old shape: one probe, and `return` on an empty answer, which left
     // PATH narrow and gh unstartable until a launch where the timer won.
-    const afterProbe = WIDEN.slice(WIDEN.indexOf('spawnSync'));
+    const afterProbe = WIDEN.slice(WIDEN.indexOf('execFileAsync'));
     expect(afterProbe).toContain('add(found.split');
     expect(WIDEN).not.toMatch(/timeout:\s*4000/);
+  });
+
+  it('sends the question rather than sitting on the import line waiting for it', () => {
+    // An interactive login shell sources the file people keep nvm and starship
+    // in — a second or more, spent before the window has been asked for. It was
+    // spawnSync here, so every launch paid it up front.
+    expect(WIDEN).not.toContain('spawnSync');
+    expect(WIDEN).toContain('asking = execFileAsync');
+  });
+
+  it('makes whoever starts a program by name wait for the answer instead', () => {
+    // Every press arrives through the one wrapper, and work picked up from last
+    // time does not arrive through it at all — so both say so.
+    const wrapper = MAIN.slice(MAIN.indexOf('function handle<T>('), MAIN.indexOf('function handle<T>(') + 700);
+    expect(wrapper).toContain('await pathIsWide()');
+    expect(MAIN).toMatch(/await pathIsWide\(\);\n\s*await pickUpWhereWeLeftOff/);
   });
 
   it('says what to do when github cannot be started', () => {

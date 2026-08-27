@@ -29,3 +29,21 @@ export const LINK_FIGMA = {
   /** When it could not even be fetched, so the steps would be a lie. */
   failed: 'I could not fetch the helper, so there is nothing to point Figma at yet.',
 } as const;
+
+/** The same two steps, as one paragraph the agent can say out loud.
+ *
+ *  The window can draw a numbered list; a tool result is a sentence in a
+ *  conversation. Both come from here so they cannot drift apart. */
+export function stepsInWords(): string {
+  return [
+    LINK_FIGMA.title,
+    ...LINK_FIGMA.steps.map((step, at) => `${String(at + 1)}. ${step}`),
+  ].join(' ');
+}
+
+/** Said when a tool that lives inside another app does not answer: almost
+ *  always because the piece inside that app is not running. A timeout is a fact
+ *  about a socket; this is a fact somebody can act on. */
+export function notRunning(app: string): string {
+  return `${app} did not answer. The helper is probably not open in it — that is the usual reason. ${stepsInWords()}`;
+}

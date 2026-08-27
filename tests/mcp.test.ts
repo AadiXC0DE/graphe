@@ -877,3 +877,32 @@ describe('a tool connected while a conversation is open', () => {
     await registry.close();
   });
 });
+
+/* The two sentences somebody actually meets. Neither is read by a developer:
+   one is met by somebody who asked for a drawing before connecting anything,
+   the other by somebody who connected it and has not opened the helper. Both
+   used to answer with machinery. */
+describe('what somebody is told when it is not going to work', () => {
+  it('names the press, not the file, when nothing is connected', async () => {
+    const folder = await newFolder();
+    await writeMcpConfig(folder, []);
+    const registry = new McpRegistry(inProject(await readMcpConfig(folder), folder), null);
+    const said = await registry.list();
+    expect(said).toContain('Other tools');
+    expect(said).not.toContain('.pi/mcp.json');
+    await registry.close();
+  });
+
+  it('says the helper is probably not open, rather than that a socket timed out', async () => {
+    const folder = await newFolder();
+    // A command that exits immediately: reaching it fails, which is the same
+    // door the timeout comes through.
+    await writeMcpConfig(folder, [{ name: 'figma', command: 'true', args: [] }]);
+    const registry = new McpRegistry(inProject(await readMcpConfig(folder), folder), null);
+    const said = await registry.call('figma', 'create_rectangle', {});
+    expect(said).toContain('Figma did not answer');
+    expect(said).toContain('Plugins → Development');
+    expect(said).not.toMatch(/timeout|socket|ECONN/i);
+    await registry.close();
+  });
+});

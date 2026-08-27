@@ -59,6 +59,11 @@ export type McpHealth =
 
 export const MCP_WORDS = {
   none: 'No other tools are connected yet.',
+  /** Said to the model, so it can say it to somebody. Names the press, not the
+   *  file: the file is there for anyone who wants it and is no use to anyone
+   *  who does not. */
+  howToAdd:
+    'They are connected from “Other tools” in this window — Figma, a browser, a debugger and a few more are one press each, and anything else can be added there too. Tell them that rather than asking them to edit a file.',
   where: 'They live in this project, in .pi/mcp.json.',
   unknown: 'Not checked yet',
   working: 'Answering',
@@ -99,6 +104,13 @@ type Session = {
 };
 
 import { BrowserSignIn, type Keeps, type OpensPages } from './mcpauth';
+import { notRunning } from '../../lib/linkfigma';
+
+/** Tools that only work because a piece of them is running inside another app.
+ *  Named by the app, because that is what somebody has to go and open. */
+function livesInsideAnotherApp(serverName: string): string | null {
+  return serverName === 'figma' ? 'Figma' : null;
+}
 
 /** What it takes to sign in to a server: somewhere to keep what comes back, and
  *  a way to put a page in front of somebody. Both belong to the shell. */
@@ -246,7 +258,10 @@ export class McpRegistry {
     const trouble = now.trouble ?? null;
     if (trouble !== null) return MCP_WORDS.fileTrouble(trouble);
     if (now.servers.length === 0) {
-      return 'No other tools are connected yet. Add one to the project\'s .pi/mcp.json, under "servers", and I can reach its tools.';
+      // Somebody who asks for a Figma drawing and is told to edit a JSON file
+      // has been handed a developer's answer to a designer's question. The
+      // shelf is one press away and the model can say so.
+      return `${MCP_WORDS.none} ${MCP_WORDS.howToAdd}`;
     }
     const lines = now.servers.map((server) => {
       const how = server.address !== undefined && server.address !== '' ? server.address : server.command;
@@ -331,6 +346,8 @@ export class McpRegistry {
     } catch (cause) {
       // Starting or reaching a server is as much a part of the call as the call
       // is. Thrown from here it left the tool with no sentence at all.
+      const inside = livesInsideAnotherApp(serverName);
+      if (inside !== null) return notRunning(inside);
       return `I could not reach ${serverName}: ${cause instanceof Error ? cause.message : 'it did not answer.'}`;
     }
     const known = session.tools.some((tool) => tool.name === toolName);
@@ -342,6 +359,12 @@ export class McpRegistry {
       const result = await session.client.callTool({ name: toolName, arguments: arguments_ });
       if (result.isError === true) {
         const text = textOf(result as { content?: unknown });
+        // A tool that lives inside another app does not fail like other tools:
+        // nearly every failure is the piece inside that app not being open, and
+        // "plugin request timeout" is a fact about a socket rather than one
+        // anybody can act on.
+        const inside = livesInsideAnotherApp(serverName);
+        if (inside !== null) return notRunning(inside);
         return `The ${toolName} tool on ${serverName} answered with an error: ${text || 'no explanation given.'}`;
       }
       const text = textOf(result as { content?: unknown });

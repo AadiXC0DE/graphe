@@ -1,4 +1,4 @@
-import { type ReactElement, useEffect, useMemo, useState } from 'react';
+import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import Away from './Away';
 import CostMeter from './CostMeter';
 import { SAYS as DESIGN, type DesignPart } from './DesignView';
@@ -333,9 +333,16 @@ export default function Overview({
     ? (view.repos.find((one) => one.name === pickedRepo) ?? view.repos[0] ?? null)
     : null;
 
+  /* Told when the repo in front changes, and only then. The window above passes
+     a fresh function down on every render, so depending on the function itself
+     meant telling it on every commit — and being told asks for the panel again,
+     which renders again. That loop ran at the speed of the machine, with a trip
+     to the shell on each turn of it. */
+  const tellWhose = useRef(onWhose);
+  tellWhose.current = onWhose;
   useEffect(() => {
-    onWhose?.(whose?.name ?? null);
-  }, [whose?.name, onWhose]);
+    tellWhose.current?.(whose?.name ?? null);
+  }, [whose?.name]);
 
   /* Which band of the panel is in front. Bands used to stack into one column
      that only got longer; now each has a home and nothing is buried. */

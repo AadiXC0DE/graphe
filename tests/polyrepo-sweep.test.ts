@@ -66,7 +66,8 @@ describe('the window names the project it is acting on', () => {
   });
 
   it('the panel tells the window which project it is showing', () => {
-    expect(OVERVIEW).toContain('onWhose?.(whose?.name ?? null)');
+    // Through a ref, and only when the name changes — see tests/render-loop.
+    expect(OVERVIEW).toContain('tellWhose.current?.(whose?.name ?? null)');
     expect(APP).toContain('onWhose={(name) => {');
   });
 

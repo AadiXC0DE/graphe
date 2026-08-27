@@ -35,7 +35,7 @@ import {
   WebContentsView,
   type IpcMainInvokeEvent,
 } from 'electron';
-import { execFile, spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -311,6 +311,13 @@ patchWorkerThreads();
  * abandoned and PATH stayed narrow, so `gh` could not be started — and the next
  * launch, where the timer happened to win, worked. That is the intermittency
  * somebody reported as "restarting sometimes fixes it".
+ *
+ * Asking is slow, and it used to be asked for here, on the import line, with
+ * everything else waiting: an interactive login shell sources the file people
+ * keep nvm and starship in, which is a second or more of somebody's launch
+ * spent before the window is even asked for. So the question is now sent and
+ * not waited on. Whoever needs the answer waits — `pathIsWide` below — and by
+ * the time anything can, it has come back.
  */
 function widenPath(): void {
   if (process.platform === 'win32') return;
@@ -334,19 +341,31 @@ function widenPath(): void {
 
   add(known);
 
-  try {
-    const shell = process.env['SHELL'] ?? '/bin/zsh';
-    const asked = spawnSync(shell, ['-lic', 'printf %s "$PATH"'], {
-      encoding: 'utf8',
-      timeout: 10_000,
-      stdio: ['ignore', 'pipe', 'pipe'],
+  const shell = process.env['SHELL'] ?? '/bin/zsh';
+  asking = execFileAsync(shell, ['-lic', 'printf %s "$PATH"'], {
+    encoding: 'utf8',
+    timeout: 10_000,
+  })
+    .then(({ stdout }) => {
+      const found = stdout.trim();
+      if (found === '' || !found.includes('/')) return;
+      add(found.split(':'));
+    })
+    .catch(() => {
+      // The list above is the part that had to work, and it already has.
     });
-    const found = asked.stdout?.trim() ?? '';
-    if (found === '' || !found.includes('/')) return;
-    add(found.split(':'));
-  } catch {
-    // The list above is the part that had to work, and it already has.
-  }
+}
+
+/** The shell's answer, once it comes. */
+let asking: Promise<void> | null = null;
+
+/** Waited on by everything that starts a program by name.
+ *
+ *  Almost always already settled: the shell answers in about a second and the
+ *  window is not ready to be pressed for longer than that. When it is not, this
+ *  waits exactly as long as the old code made everybody wait, and no longer. */
+function pathIsWide(): Promise<void> {
+  return asking ?? Promise.resolve();
 }
 
 widenPath();
@@ -4761,6 +4780,8 @@ function handle<T>(channel: string, run: (event: IpcMainInvokeEvent, args: unkno
   ipcMain.handle(channel, async (event, ...args: unknown[]): Promise<Result<T>> => {
     if (!fromOurWindow(event)) return fail<T>(IGNORED);
     try {
+      // Nothing anybody presses should reach for `gh` before we know where it is.
+      await pathIsWide();
       return await run(event, args);
     } catch (cause) {
       // Nothing below is expected to throw. If one does, the window still gets a
@@ -7807,7 +7828,9 @@ if (!app.requestSingleInstanceLock()) {
     await rm(join(workFolder(), 'kept'), { recursive: true, force: true }).catch(
       () => undefined,
     );
-    // Work that was going when this last closed, back on its board.
+    // Work that was going when this last closed, back on its board. It starts
+    // programs by name like anything else, so it waits for the shell first.
+    await pathIsWide();
     await pickUpWhereWeLeftOff().catch(() => undefined);
     // What somebody asked for over and over, picked up where it left off. One
     // that came round while this was shut is done once — see whenNext.

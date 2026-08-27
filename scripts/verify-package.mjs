@@ -151,6 +151,27 @@ for (const bundle of bundles) {
     } catch (cause) {
       fault(`the runtime does not import inside the bundle: ${String(cause).split('\n')[0]}`);
     }
+
+    /* The memory store, for the same reason and one more: scripts/what-ships.mjs
+       leaves out every build of sql.js except the two the package's own entry
+       point reaches for, and if it ever leaves out the wrong two the app does
+       not fail — it quietly stops remembering anything between sittings. */
+    const opensADatabase = [
+      `import(${JSON.stringify(join(app, 'Contents/Resources/app.asar/node_modules/sql.js/dist/sql-wasm.js'))})`,
+      '  .then((m) => (m.default ?? m)())',
+      "  .then((SQL) => { const db = new SQL.Database(); db.run('create table t (a)'); console.log('rows:' + db.exec('select count(*) from t')[0].values[0][0]); })",
+      '  .catch((e) => { console.error(e); process.exit(1); });',
+    ].join('\n');
+    try {
+      const { stdout } = await run(binary, ['-e', opensADatabase], {
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        timeout: 60_000,
+      });
+      if (/rows:0/.test(stdout)) pass('the memory store opens inside the bundle');
+      else fault(`the memory store opened but answered oddly — ${stdout.trim()}`);
+    } catch (cause) {
+      fault(`the memory store does not open inside the bundle: ${String(cause).split('\n')[0]}`);
+    }
   }
 }
 

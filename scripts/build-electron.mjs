@@ -30,29 +30,18 @@ import { build, context } from 'esbuild';
 import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
+import { RUNTIME } from './what-ships.mjs';
+
 const root = fileURLToPath(new URL('..', import.meta.url));
 const watch = process.argv.includes('--watch');
 
-/** Left for the runtime to resolve.
+/** Left for the runtime to resolve, rather than compiled in.
  *
- *  `electron` is supplied by the process itself and cannot be bundled. Pi is
- *  external because it is a large Node package with its own binaries and lazy
- *  paths, and because bundling it would defeat the point of the adapter's
- *  dynamic import — which is that nothing about Pi is loaded, or can fail, until
- *  somebody actually opens a project. Node's own builtins are external already,
- *  by virtue of platform: 'node'. */
-const external = [
-  'electron',
-  '@earendil-works/pi-coding-agent',
-  // sql.js reads its wasm beside itself at runtime; bundling moves that file
-  // somewhere the loader cannot see, so it stays a runtime dependency.
-  'sql.js',
-  // The meaning engine carries a native onnx runtime for Node. We force the
-  // wasm backend at load time (memory.ts), but esbuild must not try to bundle
-  // the native binaries either way.
-  '@huggingface/transformers',
-  'onnxruntime-node',
-];
+ *  The same list decides what gets copied into the bundle — a package that is
+ *  not compiled in has to be on disk. scripts/what-ships.mjs holds it, and says
+ *  why each one is on it. Node's own builtins are external already, by virtue
+ *  of platform: 'node'. */
+const external = RUNTIME;
 
 /** @type {import('esbuild').BuildOptions} */
 const shared = {

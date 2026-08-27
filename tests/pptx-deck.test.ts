@@ -183,7 +183,6 @@ describe('D-03 what comes out is handed over as itself', () => {
 describe('D-04 the app can actually find what it brought with it', () => {
   const skills = readFileSync(new URL('../src/agent/pi/skills.ts', import.meta.url), 'utf8');
   const shell = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
-  const packaging = readFileSync(new URL('../electron-builder.yml', import.meta.url), 'utf8');
 
   it('reads a root for the skills that ship with it', () => {
     expect(skills).toContain('export function skillsShippedWith');
@@ -203,9 +202,8 @@ describe('D-04 the app can actually find what it brought with it', () => {
     expect(shell).toContain("join(app.getAppPath(), 'skills')");
   });
 
-  it('travels with the packaged app rather than only the checkout', () => {
-    const at = packaging.indexOf('extraResources:');
-    expect(at).toBeGreaterThan(-1);
-    expect(packaging.slice(at, at + 400)).toMatch(/^\s+- skills\s*$/m);
+  it('travels with the packaged app rather than only the checkout', async () => {
+    const { default: packaging } = await import('../electron-builder.js');
+    expect((await packaging()).extraResources).toContain('skills');
   });
 });

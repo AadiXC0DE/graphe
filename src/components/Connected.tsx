@@ -228,6 +228,9 @@ export default function Connected({ open, state, onClose, onCheck, onSave, onGet
                         {ours?.needs === undefined || ours.needs === null ? null : (
                           <p className="wired__needs">{ours.needs}</p>
                         )}
+                        {ours?.using === undefined ? null : (
+                          <p className="wired__using">{ours.using}</p>
+                        )}
                         {fetched[tool.name] === undefined ? null : (
                           <LinkFigma manifest={fetched[tool.name] ?? null} />
                         )}
@@ -281,6 +284,9 @@ export default function Connected({ open, state, onClose, onCheck, onSave, onGet
                       <p className="wired__lets">{reach.what}</p>
                       {reach.needs === null ? null : (
                         <p className="wired__needs">{reach.needs}</p>
+                      )}
+                      {reach.using === undefined ? null : (
+                        <p className="wired__using">{reach.using}</p>
                       )}
                     </div>
                     <div className="wired__does">

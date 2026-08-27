@@ -33,6 +33,10 @@ export type Reach = {
   what: string;
   /** What has to stay true for it to work, or null when nothing does. */
   needs: string | null;
+  /** How somebody uses it once it is in, in a line or two. Not every tool needs
+   *  saying — "a browser" explains itself — but one that works on whatever you
+   *  happen to have open somewhere else does. */
+  using?: string;
   /** A piece that has to live inside another app before this works. Graphe
    *  fetches and unpacks it; the last step belongs to the app that keeps it. */
   helper?: Helper;
@@ -125,6 +129,8 @@ export const REACHABLE: readonly Reach[] = [
     what: 'Lets me open the Figma file you have in front of you and work in it — read the real spacing, colours and words, and draw into it as well.',
     needs:
       'Figma keeps one step for itself. I fetch the helper it needs and open the folder at it; you point Figma at it from Figma’s own menu, once, and it is there from then on.',
+    using:
+      'Keep the Figma file you want me in open, with the helper running in it, and just ask: “make a 1080 square for the launch”, “tidy the spacing on this frame”, “read this and build it”. I work in whatever you have in front of you.',
     helper: {
       name: 'figwright-0.4.0',
       from: 'https://github.com/awdr74100/figwright/releases/download/v0.4.0/figwright-plugin-v0.4.0.zip',

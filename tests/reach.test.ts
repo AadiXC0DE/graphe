@@ -326,6 +326,7 @@ describe('what any of this says out loud', () => {
       noJargon(one.name, one.id);
       noJargon(one.what, one.id);
       noJargon(one.needs ?? '', one.id);
+      noJargon(one.using ?? '', one.id);
     }
   });
 

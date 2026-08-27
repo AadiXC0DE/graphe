@@ -1225,7 +1225,6 @@ export const CHANNEL = {
   openConversation: 'graphe:open-conversation',
   closeConversation: 'graphe:close-conversation',
   deleteConversation: 'graphe:delete-conversation',
-  copyConversation: 'graphe:copy-conversation',
   pageAt: 'graphe:page-at',
   pageHidden: 'graphe:page-hidden',
   watchStart: 'graphe:watch-start',
@@ -1489,8 +1488,6 @@ export type GrapheApi = {
   deleteConversation(path: string, where?: Where): Promise<Result<readonly Conversation[]>>;
 
   /** A second copy of a conversation, so another direction can be tried without
-   *  losing the one it came from. Hands back the copy's own file. */
-  copyConversation(path: string, where?: Where): Promise<Result<string>>;
   /** Point the page at an address and glue it to a rectangle in the window.
    *  A null rectangle closes it. */
   /** Where the page is drawn, and what it shows. Moving it never reloads it:

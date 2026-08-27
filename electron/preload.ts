@@ -838,9 +838,6 @@ const api: GrapheApi = {
   awayEverywhere(): Promise<Result<readonly AwayNotice[]>> {
     return ipcRenderer.invoke(CHANNEL.awayEverywhere) as Promise<Result<readonly AwayNotice[]>>;
   },
-  copyConversation(path: string, where?: Where): Promise<Result<string>> {
-    return ipcRenderer.invoke(CHANNEL.copyConversation, path, named(where)) as Promise<Result<string>>;
-  },
   connectedLook(where?: Where): Promise<Result<ConnectedState>> {
     return ipcRenderer.invoke(CHANNEL.connectedLook, named(where)) as Promise<Result<ConnectedState>>;
   },

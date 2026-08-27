@@ -1189,6 +1189,7 @@ export const CHANNEL = {
   keepVersion: 'graphe:keep-version',
   versionPictures: 'graphe:version-pictures',
   hatches: 'graphe:hatches',
+  getHelper: 'graphe:get-helper',
   openInEditor: 'graphe:open-in-editor',
   revealFolder: 'graphe:reveal-folder',
   saveVersion: 'graphe:save-version',
@@ -1386,6 +1387,9 @@ export type GrapheApi = {
 
   /** What the escape hatches can offer here — which editor, if any. */
   hatches(): Promise<Result<Hatches>>;
+  /** Fetch the piece a connected tool needs inside another app, unpack it, and
+   *  show it in Finder. Answers with where it put it. */
+  getHelper(id: string): Promise<Result<string>>;
   /** Open the project in the editor `hatches` named, or one file inside it. */
   openInEditor(file?: string, where?: Where): Promise<Result<null>>;
   /** Save a version of the project right now, named by the person if they

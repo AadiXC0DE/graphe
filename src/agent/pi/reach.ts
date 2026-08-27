@@ -14,6 +14,8 @@
 /* One thing it can reach                                                      */
 /* -------------------------------------------------------------------------- */
 
+import type { Helper } from './helper';
+
 /** Either it is already answering somewhere, or we start it ourselves. */
 export type Start =
   | { how: 'address'; address: string }
@@ -31,6 +33,13 @@ export type Reach = {
   what: string;
   /** What has to stay true for it to work, or null when nothing does. */
   needs: string | null;
+  /** How somebody uses it once it is in, in a line or two. Not every tool needs
+   *  saying — "a browser" explains itself — but one that works on whatever you
+   *  happen to have open somewhere else does. */
+  using?: string;
+  /** A piece that has to live inside another app before this works. Graphe
+   *  fetches and unpacks it; the last step belongs to the app that keeps it. */
+  helper?: Helper;
   start: Start;
   curated: boolean;
   added: boolean;
@@ -108,11 +117,34 @@ export const SAID = {
  */
 export const REACHABLE: readonly Reach[] = [
   {
+    // Figma's own two ways in are both shut to us. The one on the network only
+    // answers clients on a list it keeps (figma.com/mcp-catalog), and the one
+    // running on this computer needs Dev Mode, which the free plan does not
+    // have. This is the third way, and it is the one that works for everybody:
+    // Figma's plugin surface, which is not rate limited, reads the local
+    // variables the network one charges an enterprise plan for, and is the only
+    // way anything can be drawn rather than only read.
     id: 'figma',
     name: 'Figma',
-    what: 'Lets me open the Figma files you point me at and build from the real thing: the actual spacing, colours and words, rather than my reading of a picture of them.',
-    needs: 'Keep Figma open on this computer while I work.',
-    start: { how: 'address', address: 'http://127.0.0.1:3845/mcp' },
+    what: 'Lets me open the Figma file you have in front of you and work in it — read the real spacing, colours and words, and draw into it as well.',
+    needs:
+      'Figma keeps one step for itself. I fetch the helper it needs and open the folder at it; you point Figma at it from Figma’s own menu, once, and it is there from then on.',
+    using:
+      'Keep the Figma file you want me in open, with the helper running in it, and just ask: “make a 1080 square for the launch”, “tidy the spacing on this frame”, “read this and build it”. I work in whatever you have in front of you.',
+    helper: {
+      name: 'figwright-0.4.0',
+      from: 'https://github.com/awdr74100/figwright/releases/download/v0.4.0/figwright-plugin-v0.4.0.zip',
+      sha256: 'af8170b02d171b0989e167eeb6071e31b16293f2135137355b2ec2b2e36fdfb2',
+      points: 'manifest.json',
+    },
+    start: {
+      how: 'program',
+      command: 'npx',
+      // Pinned. This runs on somebody's machine with their designs in front of
+      // it, and "latest" is a decision made by a stranger after we shipped.
+      args: ['-y', '@figwright/mcp@0.4.0'],
+      values: {},
+    },
     curated: true,
     added: false,
   },

@@ -1,0 +1,10 @@
+{
+  "client_id": "https://usegraphe.com/oauth/client.json",
+  "client_name": "Graphe",
+  "client_uri": "https://usegraphe.com",
+  "application_type": "native",
+  "redirect_uris": ["http://127.0.0.1/callback", "http://localhost/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}

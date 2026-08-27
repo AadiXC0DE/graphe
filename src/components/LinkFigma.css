@@ -1,0 +1,39 @@
+/* Steps, not a paragraph. Somebody is reading this with Figma open beside them
+   and one hand on the menu bar, so the numbers do the work. */
+.letin {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+
+.letin__title {
+  font-size: var(--text-xs);
+  font-weight: 560;
+  color: var(--text);
+}
+
+.letin__steps {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.15em;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.letin__where,
+.letin__after {
+  margin-top: var(--space-2);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.letin__where code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}

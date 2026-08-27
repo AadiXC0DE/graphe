@@ -401,3 +401,28 @@
     transform: none;
   }
 }
+
+/* What the tool still needs from somebody, and where the piece it needed was
+   put. Quiet: both are read once and then never again. */
+.wired__needs,
+.wired__fetched {
+  margin-top: var(--space-1);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.wired__fetched code {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  overflow-wrap: anywhere;
+}
+
+/* How somebody uses it, once it is in. Read once, by somebody who has just
+   connected something and does not yet know what to say to it. */
+.wired__using {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}

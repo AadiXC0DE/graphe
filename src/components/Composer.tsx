@@ -9,6 +9,8 @@ import {
 import { createPortal } from 'react-dom';
 import Annotate from './Annotate';
 import Attachments, { type Attachment } from './Attachments';
+import LinkFigma from './LinkFigma';
+import { LINK_FIGMA } from '../lib/linkfigma';
 import Asking from './Asking';
 import type { HowFar } from '../agent/guard/policy';
 import HowToWork, { type Plans } from './HowToWork';
@@ -64,6 +66,11 @@ type Props = {
   /** What is currently attached. Held by whoever owns the conversation, because
    *  an attachment outlives the keystroke that produced it. */
   attachments?: readonly Attachment[];
+  /** Whether Figma has been linked. Only consulted once somebody has actually
+   *  put a Figma file in the box — until then it is nobody's business. */
+  figmaLinked?: boolean;
+  /** Link it, from here. Absent in the preview and the gallery. */
+  onLinkFigma?: () => Promise<string | null>;
   onAttachmentsChange?: (next: readonly Attachment[]) => void;
   /**
    * A sentence put into the box from outside it — one of the examples on the
@@ -170,6 +177,8 @@ function resize(el: HTMLTextAreaElement | null): void {
  * guilty of once.
  */
 export default function Composer({
+  figmaLinked,
+  onLinkFigma,
   onSend,
   onStop,
   onQueue,
@@ -209,6 +218,9 @@ export default function Composer({
   const [refused, setRefused] = useState<string | null>(null);
   /** The picture open in the drawing surface, by its chip id. */
   const [drawingOn, setDrawingOn] = useState<string | null>(null);
+  const [linking, setLinking] = useState(false);
+  /** Where the helper was put, once fetched. Undefined until somebody asks. */
+  const [steps, setSteps] = useState<string | null | undefined>(undefined);
   /** What was drawn on the last picture, in sentences. It goes out with the
    *  message, because a box with no words beside it is half a thought. */
   const [drawn, setDrawn] = useState<string | null>(null);
@@ -622,6 +634,35 @@ export default function Composer({
   return (
     <div className={`composer ${dropping ? 'composer--dropping' : ''}`}>
       <Attachments items={attachments} onRemove={remove} onDrawOn={setDrawingOn} />
+
+      {/* The moment somebody shows us a Figma file is the moment to say we
+          cannot open it yet — not a screen they would have to know to go and
+          find. It says nothing at all until there is a Figma file in the box,
+          and nothing ever again once it is linked. */}
+      {figmaLinked === false && onLinkFigma !== undefined &&
+      attachments.some((one) => one.kind === 'figma') ? (
+        <div className="composer__letin">
+          <p className="composer__letinsays">
+            {LINK_FIGMA.cannot}
+            {steps === undefined ? (
+              <button
+                type="button"
+                className="composer__letindo"
+                disabled={linking}
+                onClick={() => {
+                  setLinking(true);
+                  void onLinkFigma()
+                    .then((where) => setSteps(where))
+                    .finally(() => setLinking(false));
+                }}
+              >
+                {linking ? LINK_FIGMA.linking : LINK_FIGMA.link}
+              </button>
+            ) : null}
+          </p>
+          {steps === undefined ? null : <LinkFigma manifest={steps} />}
+        </div>
+      ) : null}
 
       {/* Drawn on rather than described. The marked picture replaces the one it
           came from, so the chip stays the same chip and the message still has

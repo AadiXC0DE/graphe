@@ -59,6 +59,11 @@ export type McpHealth =
 
 export const MCP_WORDS = {
   none: 'No other tools are connected yet.',
+  /** Said to the model, so it can say it to somebody. Names the press, not the
+   *  file: the file is there for anyone who wants it and is no use to anyone
+   *  who does not. */
+  howToAdd:
+    'They are connected from “Other tools” in this window — Figma, a browser, a debugger and a few more are one press each, and anything else can be added there too. Tell them that rather than asking them to edit a file.',
   where: 'They live in this project, in .pi/mcp.json.',
   unknown: 'Not checked yet',
   working: 'Answering',
@@ -97,6 +102,34 @@ type Session = {
   client: import('@modelcontextprotocol/sdk/client/index.js').Client;
   tools: readonly { name: string; description?: string }[];
 };
+
+import { BrowserSignIn, type Keeps, type OpensPages } from './mcpauth';
+import { notRunning } from '../../lib/linkfigma';
+
+/** Tools that only work because a piece of them is running inside another app.
+ *  Named by the app, because that is what somebody has to go and open. */
+function livesInsideAnotherApp(serverName: string): string | null {
+  return serverName === 'figma' ? 'Figma' : null;
+}
+
+/** What it takes to sign in to a server: somewhere to keep what comes back, and
+ *  a way to put a page in front of somebody. Both belong to the shell. */
+export type SignsIn = { keeps: Keeps; opens: OpensPages } | null;
+
+/** Set once by the shell, because the two things it takes — the keychain and a
+ *  way to open a browser — both belong to a running app, and everything between
+ *  here and there would otherwise have to carry them. Unset outside one, which
+ *  is what makes a server that wants a sign-in say so rather than half-try. */
+let howToSignIn: SignsIn = null;
+
+export function signInThrough(how: SignsIn): void {
+  howToSignIn = how;
+}
+
+/** Whether signing in is possible at all here — the panel asks before offering. */
+export function canSignIn(): boolean {
+  return howToSignIn !== null && howToSignIn.keeps.canKeep();
+}
 
 const MAX_RESULT_CHARACTERS = 20_000;
 
@@ -145,16 +178,37 @@ function addressOrTrouble(address: string): URL {
  * later, at connect — which is why an address ending `/sse` is taken at its
  * word instead.
  */
-async function alreadyRunning(address: string): Promise<Transport> {
+async function alreadyRunning(address: string, signIn: BrowserSignIn | null): Promise<Transport> {
   const where = addressOrTrouble(address);
+  // Handed to both transports. Without one, a server behind a sign-in answers
+  // 401 and the SDK gives up with "fetch failed", which tells nobody anything.
+  const options = signIn === null ? undefined : { authProvider: signIn };
   if (/\/sse\/?$/.test(where.pathname)) {
     const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
-    return new SSEClientTransport(where);
+    return new SSEClientTransport(where, options);
   }
   const { StreamableHTTPClientTransport } = await import(
     '@modelcontextprotocol/sdk/client/streamableHttp.js'
   );
-  return new StreamableHTTPClientTransport(where);
+  return new StreamableHTTPClientTransport(where, options);
+}
+
+/** A transport that can finish a sign-in. Both of ours can; the type the SDK
+ *  hands back through `Client['connect']` does not say so. */
+type CanFinish = Transport & { finishAuth(code: string): Promise<void> };
+
+/** The client, as a type. It arrives through a dynamic import, so the class
+ *  itself is only a value here. */
+type McpClient = InstanceType<
+  typeof import('@modelcontextprotocol/sdk/client/index.js').Client
+>;
+
+/** Whether the server said "not without signing in". The SDK throws its own
+ *  class for this; it is reached by name so this module keeps its one dynamic
+ *  import per SDK module. */
+async function isASignInProblem(cause: unknown): Promise<boolean> {
+  const { UnauthorizedError } = await import('@modelcontextprotocol/sdk/client/auth.js');
+  return cause instanceof UnauthorizedError;
 }
 
 type Transport = Parameters<
@@ -166,16 +220,50 @@ type Transport = Parameters<
 export class McpRegistry {
   private readonly sessions = new Map<string, Session>();
   private closed = false;
+  #config: McpConfig;
 
-  constructor(readonly config: McpConfig) {}
+  /** How to sign in to a server that asks. Null in a test, in the benchmark
+   *  floor, and anywhere the keychain is not reachable — a server that wants a
+   *  sign-in then says so plainly rather than half-trying. */
+  constructor(
+    config: McpConfig,
+    private readonly signsIn: SignsIn = howToSignIn,
+    /** How to read the list again. Without it the list is whatever it was when
+     *  the conversation started, which is wrong the moment somebody connects a
+     *  tool while one is open — and that is exactly when they connect one. */
+    private readonly readAgain?: () => Promise<McpConfig>,
+  ) {
+    this.#config = config;
+  }
+
+  get config(): McpConfig {
+    return this.#config;
+  }
+
+  /** The list as it is now. Cheap: a few hundred bytes of JSON, read only when
+   *  the model asks what is connected or reaches for something by name. */
+  private async fresh(): Promise<McpConfig> {
+    if (this.readAgain === undefined) return this.#config;
+    try {
+      this.#config = await this.readAgain();
+    } catch {
+      // Keep what we had. A file that has just been made unreadable is not a
+      // reason to forget the tools that were working a moment ago.
+    }
+    return this.#config;
+  }
 
   async list(): Promise<string> {
-    const trouble = this.config.trouble ?? null;
+    const now = await this.fresh();
+    const trouble = now.trouble ?? null;
     if (trouble !== null) return MCP_WORDS.fileTrouble(trouble);
-    if (this.config.servers.length === 0) {
-      return 'No other tools are connected yet. Add one to the project\'s .pi/mcp.json, under "servers", and I can reach its tools.';
+    if (now.servers.length === 0) {
+      // Somebody who asks for a Figma drawing and is told to edit a JSON file
+      // has been handed a developer's answer to a designer's question. The
+      // shelf is one press away and the model can say so.
+      return `${MCP_WORDS.none} ${MCP_WORDS.howToAdd}`;
     }
-    const lines = this.config.servers.map((server) => {
+    const lines = now.servers.map((server) => {
       const how = server.address !== undefined && server.address !== '' ? server.address : server.command;
       return `- ${server.name} (${how})`;
     });
@@ -191,12 +279,38 @@ export class McpRegistry {
     // Two kinds of server, told apart by what the entry carries: one we start,
     // and one already listening. A design tool with its own port is the second
     // kind, and treating it as the first meant it could not be reached at all.
-    const transport =
-      config.address === undefined || config.address.trim() === ''
-        ? await startedHere(config)
-        : await alreadyRunning(config.address.trim());
-    const client = new Client({ name: 'graphe', version: '0.1.0' });
-    await client.connect(transport);
+    const address = config.address === undefined ? '' : config.address.trim();
+    const here = address === '';
+    // A server we start ourselves is already running as the person who started
+    // it, so it is never asked to sign in to itself.
+    const signIn =
+      here || this.signsIn === null
+        ? null
+        : await BrowserSignIn.start(address, this.signsIn.keeps, this.signsIn.opens);
+
+    const clientNow = (): McpClient => new Client({ name: 'graphe', version: '0.1.0' });
+    const transportNow = async (): Promise<Transport> =>
+      here ? await startedHere(config) : await alreadyRunning(address, signIn);
+
+    let transport = await transportNow();
+    let client = clientNow();
+    try {
+      await client.connect(transport);
+    } catch (cause) {
+      // The SDK has already sent somebody to their browser by this point. All
+      // that is left is to wait for them to come back, hand over what they
+      // brought, and try once more with what that bought.
+      if (signIn === null || !(await isASignInProblem(cause))) {
+        signIn?.done();
+        throw cause;
+      }
+      const code = await signIn.waitForCode().finally(() => signIn.done());
+      await (transport as CanFinish).finishAuth(code);
+      transport = await transportNow();
+      client = clientNow();
+      await client.connect(transport);
+    }
+    signIn?.done();
 
     let listed: readonly { name: string; description?: string }[] = [];
     try {
@@ -214,7 +328,7 @@ export class McpRegistry {
 
   /** What one server offers, starting it if it is not already going. */
   async toolsOf(serverName: string): Promise<readonly string[]> {
-    const config = this.config.servers.find((server) => server.name === serverName);
+    const config = (await this.fresh()).servers.find((server) => server.name === serverName);
     if (config === undefined) throw new Error(`There is no connected tool named "${serverName}".`);
     const session = await this.connect(config);
     return session.tools.map((tool) => tool.name);
@@ -222,7 +336,7 @@ export class McpRegistry {
 
   /** Call one tool on one server. The server starts on first use. */
   async call(serverName: string, toolName: string, arguments_: Record<string, unknown>): Promise<string> {
-    const config = this.config.servers.find((server) => server.name === serverName);
+    const config = (await this.fresh()).servers.find((server) => server.name === serverName);
     if (config === undefined) {
       return `There is no connected tool named "${serverName}". ${await this.list()}`;
     }
@@ -232,6 +346,8 @@ export class McpRegistry {
     } catch (cause) {
       // Starting or reaching a server is as much a part of the call as the call
       // is. Thrown from here it left the tool with no sentence at all.
+      const inside = livesInsideAnotherApp(serverName);
+      if (inside !== null) return notRunning(inside);
       return `I could not reach ${serverName}: ${cause instanceof Error ? cause.message : 'it did not answer.'}`;
     }
     const known = session.tools.some((tool) => tool.name === toolName);
@@ -243,6 +359,12 @@ export class McpRegistry {
       const result = await session.client.callTool({ name: toolName, arguments: arguments_ });
       if (result.isError === true) {
         const text = textOf(result as { content?: unknown });
+        // A tool that lives inside another app does not fail like other tools:
+        // nearly every failure is the piece inside that app not being open, and
+        // "plugin request timeout" is a fact about a socket rather than one
+        // anybody can act on.
+        const inside = livesInsideAnotherApp(serverName);
+        if (inside !== null) return notRunning(inside);
         return `The ${toolName} tool on ${serverName} answered with an error: ${text || 'no explanation given.'}`;
       }
       const text = textOf(result as { content?: unknown });
@@ -499,6 +621,15 @@ export async function writeMcpConfig(
     ...(one.cwd === undefined ? {} : { cwd: one.cwd }),
   }));
   await writeFile(mcpFile(projectRoot), `${JSON.stringify({ servers: tidy }, null, 2)}\n`, 'utf8');
+}
+
+/** What this machine holds for a server, gone. Called when somebody takes a
+ *  server off the list: leaving a sign-in behind for a server nobody has any
+ *  more is keeping a key to a door that was removed. */
+export async function forgetSignIn(address: string | undefined): Promise<void> {
+  const where = address?.trim() ?? '';
+  if (where === '' || howToSignIn === null) return;
+  await BrowserSignIn.forget(where, howToSignIn.keeps).catch(() => undefined);
 }
 
 /**

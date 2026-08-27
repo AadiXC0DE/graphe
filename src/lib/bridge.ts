@@ -964,6 +964,10 @@ let previewHowFar: HowFar = 'asking';
 
     /** Named, so the escape hatches can be looked at and reviewed. Pressing
      *  either one says so rather than pretending it opened something. */
+    getHelper(): Promise<Result<string>> {
+      // Nothing is fetched in a browser tab; the sentence is what matters here.
+      return Promise.resolve(done('/Users/you/Library/Application Support/Graphe/helpers'));
+    },
     hatches(): Promise<Result<Hatches>> {
       return Promise.resolve(done({ editor: 'VS Code' }));
     },
@@ -1930,6 +1934,7 @@ function connect(): Bridge {
     projectFiles: (where) => api.projectFiles(where),
     fileText: (path, where) => api.fileText(path, where),
     hatches: () => api.hatches(),
+    getHelper: (id) => api.getHelper(id),
     openInEditor: (file, where) => api.openInEditor(file, where),
     saveVersion: (name, where) => api.saveVersion(name, where),
     room: (where) => api.room(where),

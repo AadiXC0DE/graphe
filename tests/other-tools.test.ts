@@ -107,7 +107,7 @@ describe('a project with nothing connected', () => {
     const { saved, press } = await draw(NOTHING);
     await press(SAYS.connect);
     expect(saved).toEqual([
-      [{ name: 'figma', command: '', args: [], address: 'http://127.0.0.1:3845/mcp' }],
+      [{ name: 'figma', command: 'npx', args: ['-y', '@figwright/mcp@0.4.0'] }],
     ]);
   });
 

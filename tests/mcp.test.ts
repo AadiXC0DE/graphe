@@ -346,12 +346,22 @@ describe('a tool somebody picked off the shelf', () => {
     expect(read.servers[0]?.args).toEqual(['-y', '@playwright/mcp@latest']);
   });
 
+  /* Made up rather than taken off the shelf: what is on the shelf changes with
+     what the tools themselves offer, and this is about the two shapes a start
+     line can have, not about which tool happens to have which today. */
   it('turns a listening tool into an address, not a command', () => {
-    const figma = REACHABLE.find((one) => one.id === 'figma');
-    if (figma === undefined) return;
-    const line = asServer(figma);
+    const line = asServer({
+      id: 'listening',
+      name: 'Listening',
+      what: 'Lets me reach something already running.',
+      needs: null,
+      start: { how: 'address', address: 'http://127.0.0.1:4242/mcp' },
+      curated: true,
+      added: false,
+    });
     expect(line.command).toBe('');
-    expect(line.address).toMatch(/^http/);
+    expect(line.address).toBe('http://127.0.0.1:4242/mcp');
+    expect(line.args).toEqual([]);
   });
 
   /* The shelf has to say which are already on, or it offers to connect
@@ -369,12 +379,20 @@ describe('a tool somebody picked off the shelf', () => {
 describe('a listening tool, end to end', () => {
   it('survives being saved and read again', async () => {
     const folder = await newFolder();
-    const figma = REACHABLE.find((one) => one.id === 'figma');
-    if (figma === undefined) return;
-    await writeMcpConfig(folder, [asServer(figma)]);
+    await writeMcpConfig(folder, [
+      asServer({
+        id: 'listening',
+        name: 'Listening',
+        what: 'Lets me reach something already running.',
+        needs: null,
+        start: { how: 'address', address: 'http://127.0.0.1:4242/mcp' },
+        curated: true,
+        added: false,
+      }),
+    ]);
     const read = await readMcpConfig(folder);
     expect(read.servers).toHaveLength(1);
-    expect(read.servers[0]?.address).toMatch(/^http/);
+    expect(read.servers[0]?.address).toBe('http://127.0.0.1:4242/mcp');
     expect(read.servers[0]?.command).toBe('');
     expect(read.trouble).toBeNull();
     expect(read.skipped).toEqual([]);
@@ -814,5 +832,77 @@ describe('the tool the agent actually calls', () => {
       'connect_tool',
     );
     expect(named(grapheTools('/tmp/agent'))).not.toContain('connect_tool');
+  });
+});
+
+/* A tool connected while a conversation is open is the ordinary case, not the
+   odd one — somebody connects it *because* they are in the middle of asking for
+   something. The list used to be whatever it was when the conversation started,
+   so the answer was "start a new conversation", which is not an answer. */
+describe('a tool connected while a conversation is open', () => {
+  it('is there the next time the model asks, without starting again', async () => {
+    const folder = await newFolder();
+    await writeMcpConfig(folder, []);
+    const registry = new McpRegistry(
+      inProject(await readMcpConfig(folder), folder),
+      null,
+      async () => inProject(await readMcpConfig(folder), folder),
+    );
+    expect(await registry.list()).toMatch(/no other tools are connected/i);
+
+    // Somebody presses Connect in the panel. The file changes underneath.
+    await writeMcpConfig(folder, [
+      { name: 'figma', command: 'npx', args: ['-y', '@figwright/mcp@0.4.0'] },
+    ]);
+
+    const said = await registry.list();
+    expect(said).toContain('figma');
+    expect(said).not.toMatch(/no other tools are connected/i);
+    await registry.close();
+  });
+
+  it('is reached by name too, not only listed', async () => {
+    const folder = await newFolder();
+    await writeMcpConfig(folder, []);
+    const registry = new McpRegistry(
+      inProject(await readMcpConfig(folder), folder),
+      null,
+      async () => inProject(await readMcpConfig(folder), folder),
+    );
+    await writeMcpConfig(folder, [{ name: 'late', command: 'true', args: [] }]);
+    // It is found now — whether it starts is a different question, and the
+    // sentence for "no such tool" is the one this must not give.
+    const said = await registry.call('late', 'anything', {});
+    expect(said).not.toMatch(/no connected tool named/i);
+    await registry.close();
+  });
+});
+
+/* The two sentences somebody actually meets. Neither is read by a developer:
+   one is met by somebody who asked for a drawing before connecting anything,
+   the other by somebody who connected it and has not opened the helper. Both
+   used to answer with machinery. */
+describe('what somebody is told when it is not going to work', () => {
+  it('names the press, not the file, when nothing is connected', async () => {
+    const folder = await newFolder();
+    await writeMcpConfig(folder, []);
+    const registry = new McpRegistry(inProject(await readMcpConfig(folder), folder), null);
+    const said = await registry.list();
+    expect(said).toContain('Other tools');
+    expect(said).not.toContain('.pi/mcp.json');
+    await registry.close();
+  });
+
+  it('says the helper is probably not open, rather than that a socket timed out', async () => {
+    const folder = await newFolder();
+    // A command that exits immediately: reaching it fails, which is the same
+    // door the timeout comes through.
+    await writeMcpConfig(folder, [{ name: 'figma', command: 'true', args: [] }]);
+    const registry = new McpRegistry(inProject(await readMcpConfig(folder), folder), null);
+    const said = await registry.call('figma', 'create_rectangle', {});
+    expect(said).toContain('Figma did not answer');
+    expect(said).toContain('Plugins → Development');
+    expect(said).not.toMatch(/timeout|socket|ECONN/i);
+    await registry.close();
   });
 });

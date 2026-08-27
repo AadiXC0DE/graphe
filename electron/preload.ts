@@ -304,6 +304,9 @@ const api: GrapheApi = {
   hatches(): Promise<Result<Hatches>> {
     return ipcRenderer.invoke(CHANNEL.hatches) as Promise<Result<Hatches>>;
   },
+  getHelper(id: string): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.getHelper, id) as Promise<Result<string>>;
+  },
 
   openInEditor(file?: string, where?: Where): Promise<Result<null>> {
     const one = typeof file === 'string' && file.trim() !== '' ? file : undefined;

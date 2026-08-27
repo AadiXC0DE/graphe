@@ -2003,6 +2003,10 @@ const MOST_AFTER_SAYINGS = 3;
      travels through the Guard like any other tool call. */
   const mcpRegistry = new McpRegistry(
     inProject(await readMcpConfig(options.projectRoot), options.projectRoot),
+    undefined,
+    // Read again whenever the model asks. Somebody connecting a tool while a
+    // conversation is open is the ordinary case, not the odd one.
+    async () => inProject(await readMcpConfig(options.projectRoot), options.projectRoot),
   );
   // Always registered. It used to appear only once a project already had a
   // server, so a tool connected during a conversation could not be used until

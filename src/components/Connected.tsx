@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Connected as Tool, ConnectedHealth, ConnectedState } from '../lib/ipc';
 import { fromConnectLine } from '../lib/attachments';
+import LinkFigma from './LinkFigma';
 import { asServer, notYetConnected, vouchedUnder, type Reach } from '../agent/pi/reach';
 import './Sheet.css';
 import './Connected.css';
@@ -11,6 +12,8 @@ type Props = {
   onClose: () => void;
   onCheck: (name: string) => Promise<ConnectedHealth>;
   onSave: (tools: readonly Tool[]) => Promise<void>;
+  /** Fetch the piece a tool needs inside another app. Absent in the gallery. */
+  onGetHelper?: (id: string) => Promise<{ ok: true; value: string } | { ok: false }>;
 };
 
 export const SAYS = {
@@ -70,10 +73,12 @@ function asLine(tool: Tool): string {
  * is the screen somebody opens when they want one and the shelf is not where
  * they went looking.
  */
-export default function Connected({ open, state, onClose, onCheck, onSave }: Props) {
+export default function Connected({ open, state, onClose, onCheck, onSave, onGetHelper }: Props) {
   const [health, setHealth] = useState<Readonly<Record<string, ConnectedHealth>>>({});
   const [checking, setChecking] = useState<string | null>(null);
   const [joining, setJoining] = useState<string | null>(null);
+  /** Where a helper was put, by tool id, so the row can say so. */
+  const [fetched, setFetched] = useState<Record<string, string>>({});
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [line, setLine] = useState('');
@@ -115,7 +120,17 @@ export default function Connected({ open, state, onClose, onCheck, onSave }: Pro
 
   const join = (reach: Reach): void => {
     setJoining(reach.id);
-    void onSave([...tools, asServer(reach)]).finally(() => setJoining(null));
+    void onSave([...tools, asServer(reach)])
+      .then(async () => {
+        // Some of these need a piece of themselves inside another app. Fetching
+        // and unpacking it is ours to do; only the last step, which is a file
+        // chooser in somebody else's menu, is not. Doing it on the same press
+        // means nobody has to be told to come back and do a second thing.
+        if (reach.helper === undefined) return;
+        const put = await onGetHelper?.(reach.id);
+        if (put?.ok === true) setFetched((was) => ({ ...was, [reach.id]: put.value }));
+      })
+      .finally(() => setJoining(null));
   };
 
   const connect = (): void => {
@@ -210,6 +225,15 @@ export default function Connected({ open, state, onClose, onCheck, onSave }: Pro
                         {ours === undefined ? null : (
                           <p className="wired__lets">{ours.what}</p>
                         )}
+                        {ours?.needs === undefined || ours.needs === null ? null : (
+                          <p className="wired__needs">{ours.needs}</p>
+                        )}
+                        {ours?.using === undefined ? null : (
+                          <p className="wired__using">{ours.using}</p>
+                        )}
+                        {fetched[tool.name] === undefined ? null : (
+                          <LinkFigma manifest={fetched[tool.name] ?? null} />
+                        )}
                         <code className="wired__command">{asLine(tool)}</code>
                         {said.state === 'working' ? (
                           <p className="wired__offers">
@@ -260,6 +284,9 @@ export default function Connected({ open, state, onClose, onCheck, onSave }: Pro
                       <p className="wired__lets">{reach.what}</p>
                       {reach.needs === null ? null : (
                         <p className="wired__needs">{reach.needs}</p>
+                      )}
+                      {reach.using === undefined ? null : (
+                        <p className="wired__using">{reach.using}</p>
                       )}
                     </div>
                     <div className="wired__does">

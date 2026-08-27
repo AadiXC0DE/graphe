@@ -298,9 +298,7 @@
   min-width: 0;
 }
 
-/* The same shape and the same reveal as throwing one away: two things you can
-   do to a conversation, sitting where the pointer already is. */
-.shelf__copy,
+/* Revealed where the pointer already is, rather than sitting on every row. */
 .shelf__forget {
   flex: none;
   align-self: center;
@@ -316,35 +314,24 @@
     background-color var(--dur-micro) var(--ease-hover);
 }
 
-.shelf__convo:hover .shelf__copy,
 .shelf__convo:hover .shelf__forget,
-.shelf__convo:focus-within .shelf__copy,
 .shelf__convo:focus-within .shelf__forget,
-.shelf__copy:focus-visible,
 .shelf__forget:focus-visible {
   opacity: 1;
 }
 
-.shelf__copy {
-  margin-right: 0;
-}
-
-.shelf__copy:hover,
-.shelf__copy:focus-visible,
 .shelf__forget:hover,
 .shelf__forget:focus-visible {
   color: var(--text);
   background: var(--bg-sunken);
 }
 
-.shelf__copy:focus-visible,
 .shelf__forget:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shelf__copy,
   .shelf__forget {
     transition: none;
   }

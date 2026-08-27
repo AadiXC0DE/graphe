@@ -32,3 +32,31 @@ describe('the recents list is a shortlist', () => {
     expect(css).not.toMatch(/max-height:\s*min\(/);
   });
 });
+
+/** Which of the two first screens is right depends on whether anything was open
+ *  last time, and that answer arrives over the wire. Until it does, the honest
+ *  state is "not known" — and the window has to say nothing rather than guess,
+ *  because a guess is a screen somebody starts reading and then has taken away.
+ *
+ *  This only became visible when the shell stopped blocking the launch: the
+ *  window now draws well before the first answer comes back. */
+describe('the first screen is not guessed at', () => {
+  const app = async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    return readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8');
+  };
+
+  it('tells "nothing was open" apart from "nobody has said yet"', async () => {
+    // `recent` is null until the answer lands and an array afterwards. Reading
+    // null as "none" is the bug: it draws the empty conversation for a moment.
+    expect(await app()).toContain('const undecided = desk === null && recent === null;');
+  });
+
+  it('draws neither first screen until it knows which', async () => {
+    const source = await app();
+    expect(source).toContain('undecided ? null : desk === null || desk.turns.length === 0 ?');
+    // And no composer under a screen that is not there yet.
+    expect(source).toContain('picking || undecided ? null : (');
+  });
+});

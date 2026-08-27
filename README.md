@@ -80,6 +80,7 @@ come back to a board of what finished, what's waiting, and what it cost.
 | **A browser it can drive anywhere** | Any address, not just your own site: opens it, reads it, presses things, types into them — on from the first turn |
 | **Works the computer itself** | For the tools that are not websites: a picture of the screen, then presses, typing and drags on it |
 | **A folder of several projects** | `backend/` and `frontend/` beside each other: each with its own lines of work, versions and preview |
+| **Things a project always does** | Format what was written, run the tests — whatever this project expects every time, in one file kept with the project |
 | **A real debugger** | Attaches lldb, dlv or debugpy to a stuck program; reads frames, steps, evaluates |
 | **Skills off the shelf** | `@skill` brings in craft you installed; `/command` expands a prompt you wrote |
 | **Money, in your currency** | Every turn accounted for, and a split that separates your work from our own retries |

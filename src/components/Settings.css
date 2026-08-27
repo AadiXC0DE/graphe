@@ -20,6 +20,7 @@
   max-width: 560px;
   margin: 0 auto;
   width: 100%;
+  flex: none;
 }
 
 .settings__eyebrow {
@@ -90,6 +91,11 @@
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--border);
+  /* A flex item shrinks before its parent scrolls, and this one hides what it
+     has been shrunk out of — so on a short window the rows below the fold were
+     not merely off-screen, they were unreachable. It keeps its own height; the
+     panel above scrolls. */
+  flex: none;
 }
 
 .settings__row {

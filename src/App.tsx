@@ -1713,22 +1713,6 @@ function Conversation() {
     [troubleHere],
   );
 
-  /** A second copy of a conversation, opened straight away: copying one and
-   *  then having to find it is two steps for one thought. */
-  const copyConversation = useCallback(
-    async (path: string) => {
-      const made = await bridge.copyConversation(path);
-      if (!made.ok) {
-        troubleHere(made.trouble);
-        return;
-      }
-      await swapConversation(made.value);
-      const listed = await bridge.conversations();
-      if (listed.ok) setConversations(listed.value);
-    },
-    [swapConversation, troubleHere],
-  );
-
   const browse = useCallback(async () => {
     const picked = await bridge.chooseFolder();
     if (!picked.ok) {
@@ -4167,6 +4151,12 @@ function Conversation() {
   );
 
   const picking = desk === null && recent !== null && recent.length > 0;
+  /** Nothing has been opened and the list of what was open last time has not
+   *  come back yet, so which of the two first screens is right is not known.
+   *  Neither is drawn: `recent` is null for "not asked", and reading it as
+   *  "none" puts somebody in front of a blank conversation for a moment and
+   *  then takes it away. */
+  const undecided = desk === null && recent === null;
   const empty = desk === null || desk.turns.length === 0;
   // Which regions have earned their place (notes/strategy/UI-DESIGN.md):
   // the shelf the moment there is a folder in front; the overview the moment
@@ -4421,7 +4411,6 @@ function Conversation() {
           }}
           onFiles={filesShown ? () => setFilesOpen(true) : undefined}
           onDeleteConversation={(path) => void deleteConversation(path)}
-          onCopyConversation={(path) => void copyConversation(path)}
           ownCopy={ownCopyHere}
           onBringWorkBack={(path) => void bringWorkBack(path)}
           onThrowWorkAway={(path) => void throwWorkAway(path)}
@@ -4597,7 +4586,7 @@ function Conversation() {
             onForget={(project) => void forget(project)}
             onBrowse={() => void browse()}
           />
-        ) : desk === null || desk.turns.length === 0 ? (
+        ) : undecided ? null : desk === null || desk.turns.length === 0 ? (
           <Welcome
             onUse={setDraft}
             project={desk?.name ?? null}
@@ -4704,7 +4693,7 @@ function Conversation() {
           />
         )}
 
-        {picking ? null : (
+        {picking || undecided ? null : (
           <div className="app__composer">
             {/* Only once somebody has scrolled away from the end, and quiet even
                 then: it is an offer, not an alert. It stays in the document while

@@ -33,6 +33,7 @@
 // just costs them a trip through System Settings until we pay Apple.
 
 import adhocSign from './scripts/adhoc-sign.mjs';
+import { squeezeDiskImages } from './scripts/squeeze-dmg.mjs';
 import { leaveOut, leaveOutTheLanguages } from './scripts/what-ships.mjs';
 
 export default async function config() {
@@ -158,6 +159,10 @@ export default async function config() {
       // Ask how we know.
       window: { width: 540, height: 380 },
     },
+
+    // The disk images are rewritten once more after they are built — a quarter
+    // off the download, for a few seconds. See scripts/squeeze-dmg.mjs.
+    afterAllArtifactBuild: squeezeDiskImages,
 
     // Artifact names that say what they are without a lookup table. Homebrew's
     // cask needs to write one of these out by hand, so they should be guessable.

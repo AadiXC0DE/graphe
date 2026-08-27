@@ -40,9 +40,9 @@ export const noEmbedder: Embedder = async () => null;
  *  cache after that. Any failure is the word path, never an error. */
 let embeddingPromise: Promise<Embedder> | null = null;
 
-async function loadTransformers(): Promise<Embedder> {
+async function loadTransformers(cacheDir: string | null): Promise<Embedder> {
   const { env, pipeline } = (await import('@huggingface/transformers')) as {
-    env?: { backends?: { onnx?: { backend?: string } } };
+    env?: { backends?: { onnx?: { backend?: string } }; cacheDir?: string };
     pipeline: (task: string, model: string, options: unknown) => Promise<unknown>;
   };
   // Node defaults to a native onnx runtime; the wasm one needs no native module,
@@ -51,6 +51,14 @@ async function loadTransformers(): Promise<Embedder> {
     if (env?.backends?.onnx !== undefined) env.backends.onnx.backend = 'web';
   } catch {
     // The wasm path it is, or no meaning engine at all.
+  }
+  // Where the model is kept once it has come down. Left alone it is a folder
+  // inside the package, which in a shipped app is a read-only archive — so the
+  // model cannot be written there, and every launch downloads it again.
+  try {
+    if (cacheDir !== null && env !== undefined) env.cacheDir = cacheDir;
+  } catch {
+    // Its own default, and a download each time, rather than no recall at all.
   }
   // The pipeline is a union of many shapes; the feature-extraction one is the
   // narrow slice we use, so it is cast to that slice once, here.
@@ -69,9 +77,12 @@ async function loadTransformers(): Promise<Embedder> {
   };
 }
 
-/** The default embedder: real when it can be, the word path when it cannot. */
-export function defaultEmbedder(): Embedder {
-  embeddingPromise ??= loadTransformers().catch(() => noEmbedder);
+/** The default embedder: real when it can be, the word path when it cannot.
+ *
+ *  `cacheDir` is where the model lives after its first download. It belongs
+ *  beside the app's other data; the caller is the one that knows where that is. */
+export function defaultEmbedder(cacheDir: string | null = null): Embedder {
+  embeddingPromise ??= loadTransformers(cacheDir).catch(() => noEmbedder);
   return (text: string) => embeddingPromise!.then((embed) => embed(text));
 }
 

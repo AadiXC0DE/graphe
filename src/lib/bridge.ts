@@ -1549,9 +1549,6 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done({ tools, file: '/work/this-project/.pi/mcp.json', trouble: null, skipped: [] }));
     },
 
-    copyConversation(path: string): Promise<Result<string>> {
-      return Promise.resolve(done(`${path}-copy`));
-    },
 
     awayEverywhere(): Promise<Result<readonly AwayNotice[]>> {
       return Promise.resolve(done([{ project: '/work/this-project', away: atWork }]));
@@ -2015,7 +2012,6 @@ function connect(): Bridge {
     changesDrop: (patch, where) => api.changesDrop(patch, where),
     takeBackQueue: (where) => api.takeBackQueue(where),
     away: (where) => api.away(where),
-    copyConversation: (path, where) => api.copyConversation(path, where),
     awayEverywhere: () => api.awayEverywhere(),
     keepGoing: (text, untilDone, where) => api.keepGoing(text, untilDone, where),
     stopAway: (id, where) => api.stopAway(id, where),

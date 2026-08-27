@@ -55,7 +55,7 @@ vi.mock('electron', () => {
     isEmpty: () => empty,
     toPNG: () => Buffer.from('png'),
     getSize: () => ({ width: 0, height: 0 }),
-    getBitmap: () => Buffer.alloc(0),
+    toBitmap: () => Buffer.alloc(0),
   });
 
   class Stand {

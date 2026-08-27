@@ -103,7 +103,15 @@ describe('the tools an app opened from the dock has to find', () => {
     // in — a second or more, spent before the window has been asked for. It was
     // spawnSync here, so every launch paid it up front.
     expect(WIDEN).not.toContain('spawnSync');
-    expect(WIDEN).toContain('asking = execFileAsync');
+    expect(WIDEN).toContain('asking = ask(');
+  });
+
+  it('waits on the cheap question and lets the dear one land late', () => {
+    // -lc reads .zprofile in about a sixth of a second; -lic also reads .zshrc
+    // and takes a second and a half. Waiting on the second one makes every
+    // press of the first second of the app pay for it.
+    expect(WIDEN).toContain("asking = ask(['-lc'])");
+    expect(WIDEN).toContain("void ask(['-lic'])");
   });
 
   it('makes whoever starts a program by name wait for the answer instead', () => {

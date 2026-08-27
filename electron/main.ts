@@ -40,7 +40,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -210,7 +210,6 @@ import { lookAtEveryWidth } from '../src/diff/capture';
 import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
 import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceOfWork } from '../src/history/attempts';
-import { COPY_WORDS, copyFileName, copyOfConversation } from '../src/agent/pi/fork';
 import { checkServer, inProject, mcpFile, readMcpConfig, savingFrom, writeMcpConfig } from '../src/agent/pi/mcp';
 import { holdsBack } from '../src/projects/heldback';
 import { keepsLogins } from '../src/projects/logins';
@@ -342,18 +341,24 @@ function widenPath(): void {
   add(known);
 
   const shell = process.env['SHELL'] ?? '/bin/zsh';
-  asking = execFileAsync(shell, ['-lic', 'printf %s "$PATH"'], {
-    encoding: 'utf8',
-    timeout: 10_000,
-  })
-    .then(({ stdout }) => {
-      const found = stdout.trim();
-      if (found === '' || !found.includes('/')) return;
-      add(found.split(':'));
-    })
-    .catch(() => {
-      // The list above is the part that had to work, and it already has.
-    });
+  const ask = (how: readonly string[]): Promise<void> =>
+    execFileAsync(shell, [...how, 'printf %s "$PATH"'], { encoding: 'utf8', timeout: 10_000 })
+      .then(({ stdout }) => {
+        const found = stdout.trim();
+        if (found === '' || !found.includes('/')) return;
+        add(found.split(':'));
+      })
+      .catch(() => {
+        // The list above is the part that had to work, and it already has.
+      });
+
+  // Two questions rather than one, because they cost wildly different amounts.
+  // A login shell reads .zprofile and answers in about a sixth of a second. An
+  // interactive one also reads .zshrc — where nvm, mise and the prompt live —
+  // and takes a second and a half. Whoever is waiting waits for the first; the
+  // second widens PATH again whenever it gets round to it.
+  asking = ask(['-lc']);
+  void ask(['-lic']);
 }
 
 /** The shell's answer, once it comes. */
@@ -6343,34 +6348,6 @@ function register(): void {
    * in. This is the other answer: everything up to now happened in both, and
    * from here they are two conversations.
    */
-  handle<string>(CHANNEL.copyConversation, async (_event, args) => {
-    const [path] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    if (typeof path !== 'string' || path.trim() === '') return fail(plainTrouble(COPY_WORDS.cannot));
-
-    // The same rule copying as throwing away: only files this app wrote.
-    const target = resolve(path);
-    const root = resolve(sessionsFolder());
-    if (target !== root && !target.startsWith(`${root}${sep}`)) {
-      return fail(plainTrouble(COPY_WORDS.cannot));
-    }
-
-    const raw = await readFile(target, 'utf8').catch(() => null);
-    if (raw === null) return fail(plainTrouble(COPY_WORDS.cannot));
-    const at = new Date();
-    const copied = copyOfConversation(raw.split('\n'), randomUUID(), at);
-    if (copied === null) return fail(plainTrouble(COPY_WORDS.cannot));
-
-    const where = join(root, copyFileName(copied.id, at));
-    try {
-      await writeFile(where, `${copied.lines.join('\n')}\n`, 'utf8');
-    } catch {
-      return fail(plainTrouble(COPY_WORDS.cannot));
-    }
-    return done(where);
-  });
-
   /** Throw a conversation away. Closing only puts the view down; this removes
    *  the file so a long-lived install does not fill the disk with old ones. */
   handle<readonly Conversation[]>(CHANNEL.deleteConversation, async (_event, args) => {

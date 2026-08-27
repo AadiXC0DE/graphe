@@ -1772,7 +1772,6 @@ export default function Gallery() {
                 onOpenConversation={noop}
                 onNewConversation={noop}
                 onDeleteConversation={noop}
-                onCopyConversation={noop}
                 open
                 onToggle={noop}
               />

@@ -10,6 +10,10 @@
 // Three builds rather than one, because the files load in different worlds and
 // the module format is not a style choice in either case:
 //
+//   boot    → ESM (.mjs). What Electron starts. Turns V8's compile cache on
+//             and then reaches the shell, which is the whole reason it is a
+//             separate file — see electron/boot.ts.
+//
 //   main    → ESM (.mjs). Pi is an ESM-only package and the adapter reaches it
 //             through a dynamic import. Emitting CommonJS turns that import into
 //             a require, and a require of an ESM package throws at runtime — an
@@ -59,6 +63,12 @@ const shared = {
 const builds = [
   {
     ...shared,
+    entryPoints: [`${root}electron/boot.ts`],
+    outfile: `${root}dist-electron/boot.mjs`,
+    format: 'esm',
+  },
+  {
+    ...shared,
     entryPoints: [`${root}electron/main.ts`],
     outfile: `${root}dist-electron/main.mjs`,
     format: 'esm',
@@ -106,6 +116,6 @@ if (watch) {
 } else {
   await Promise.all(builds.map((options) => build(options)));
   console.log(
-    'built dist-electron/main.mjs, dist-electron/preload.cjs, dist-electron/pagepreload.cjs and dist-electron/subagent-runner.mjs',
+    'built dist-electron/boot.mjs, dist-electron/main.mjs, dist-electron/preload.cjs, dist-electron/pagepreload.cjs and dist-electron/subagent-runner.mjs',
   );
 }

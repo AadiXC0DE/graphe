@@ -6,7 +6,7 @@
   "license": "MIT",
   "author": "Graphe contributors",
   "type": "module",
-  "main": "dist-electron/main.mjs",
+  "main": "dist-electron/boot.mjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -39,7 +39,7 @@
     "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.2.4",
-    "electron": "^33.4.11",
+    "electron": "^43.4.1",
     "electron-builder": "^25.1.8",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^5.2.0",

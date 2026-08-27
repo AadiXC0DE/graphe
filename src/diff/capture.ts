@@ -88,7 +88,7 @@ export type Difference = {
 
 function bitmapOf(image: NativeImage): Bitmap {
   const size = image.getSize();
-  return { width: size.width, height: size.height, data: image.getBitmap() };
+  return { width: size.width, height: size.height, data: image.toBitmap() };
 }
 
 /** Small, and cheap enough to send with every strip. JPEG rather than PNG: a

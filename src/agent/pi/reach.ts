@@ -111,7 +111,13 @@ export const REACHABLE: readonly Reach[] = [
     id: 'figma',
     name: 'Figma',
     what: 'Lets me open the Figma files you point me at and build from the real thing: the actual spacing, colours and words, rather than my reading of a picture of them.',
-    needs: 'Keep Figma open on this computer while I work.',
+    // Figma's other way in, the one that needs no switch, only answers to
+    // clients on a list it keeps: https://www.figma.com/mcp-catalog/. Until we
+    // are on it, this is the one that works, and saying what it costs is the
+    // least we can do — "keep Figma open" sent people looking at an app they
+    // already had open.
+    needs:
+      'Open a design file in Figma, press Shift-D for Dev Mode, and turn on the connection it offers you there. It needs a Dev or Full seat.',
     start: { how: 'address', address: 'http://127.0.0.1:3845/mcp' },
     curated: true,
     added: false,

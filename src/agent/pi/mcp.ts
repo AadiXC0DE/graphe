@@ -98,6 +98,27 @@ type Session = {
   tools: readonly { name: string; description?: string }[];
 };
 
+import { BrowserSignIn, type Keeps, type OpensPages } from './mcpauth';
+
+/** What it takes to sign in to a server: somewhere to keep what comes back, and
+ *  a way to put a page in front of somebody. Both belong to the shell. */
+export type SignsIn = { keeps: Keeps; opens: OpensPages } | null;
+
+/** Set once by the shell, because the two things it takes — the keychain and a
+ *  way to open a browser — both belong to a running app, and everything between
+ *  here and there would otherwise have to carry them. Unset outside one, which
+ *  is what makes a server that wants a sign-in say so rather than half-try. */
+let howToSignIn: SignsIn = null;
+
+export function signInThrough(how: SignsIn): void {
+  howToSignIn = how;
+}
+
+/** Whether signing in is possible at all here — the panel asks before offering. */
+export function canSignIn(): boolean {
+  return howToSignIn !== null && howToSignIn.keeps.canKeep();
+}
+
 const MAX_RESULT_CHARACTERS = 20_000;
 
 function toolResultText(text: string): { content: [{ type: 'text'; text: string }]; details: Record<string, never> } {
@@ -145,16 +166,37 @@ function addressOrTrouble(address: string): URL {
  * later, at connect — which is why an address ending `/sse` is taken at its
  * word instead.
  */
-async function alreadyRunning(address: string): Promise<Transport> {
+async function alreadyRunning(address: string, signIn: BrowserSignIn | null): Promise<Transport> {
   const where = addressOrTrouble(address);
+  // Handed to both transports. Without one, a server behind a sign-in answers
+  // 401 and the SDK gives up with "fetch failed", which tells nobody anything.
+  const options = signIn === null ? undefined : { authProvider: signIn };
   if (/\/sse\/?$/.test(where.pathname)) {
     const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
-    return new SSEClientTransport(where);
+    return new SSEClientTransport(where, options);
   }
   const { StreamableHTTPClientTransport } = await import(
     '@modelcontextprotocol/sdk/client/streamableHttp.js'
   );
-  return new StreamableHTTPClientTransport(where);
+  return new StreamableHTTPClientTransport(where, options);
+}
+
+/** A transport that can finish a sign-in. Both of ours can; the type the SDK
+ *  hands back through `Client['connect']` does not say so. */
+type CanFinish = Transport & { finishAuth(code: string): Promise<void> };
+
+/** The client, as a type. It arrives through a dynamic import, so the class
+ *  itself is only a value here. */
+type McpClient = InstanceType<
+  typeof import('@modelcontextprotocol/sdk/client/index.js').Client
+>;
+
+/** Whether the server said "not without signing in". The SDK throws its own
+ *  class for this; it is reached by name so this module keeps its one dynamic
+ *  import per SDK module. */
+async function isASignInProblem(cause: unknown): Promise<boolean> {
+  const { UnauthorizedError } = await import('@modelcontextprotocol/sdk/client/auth.js');
+  return cause instanceof UnauthorizedError;
 }
 
 type Transport = Parameters<
@@ -167,7 +209,13 @@ export class McpRegistry {
   private readonly sessions = new Map<string, Session>();
   private closed = false;
 
-  constructor(readonly config: McpConfig) {}
+  /** How to sign in to a server that asks. Null in a test, in the benchmark
+   *  floor, and anywhere the keychain is not reachable — a server that wants a
+   *  sign-in then says so plainly rather than half-trying. */
+  constructor(
+    readonly config: McpConfig,
+    private readonly signsIn: SignsIn = howToSignIn,
+  ) {}
 
   async list(): Promise<string> {
     const trouble = this.config.trouble ?? null;
@@ -191,12 +239,38 @@ export class McpRegistry {
     // Two kinds of server, told apart by what the entry carries: one we start,
     // and one already listening. A design tool with its own port is the second
     // kind, and treating it as the first meant it could not be reached at all.
-    const transport =
-      config.address === undefined || config.address.trim() === ''
-        ? await startedHere(config)
-        : await alreadyRunning(config.address.trim());
-    const client = new Client({ name: 'graphe', version: '0.1.0' });
-    await client.connect(transport);
+    const address = config.address === undefined ? '' : config.address.trim();
+    const here = address === '';
+    // A server we start ourselves is already running as the person who started
+    // it, so it is never asked to sign in to itself.
+    const signIn =
+      here || this.signsIn === null
+        ? null
+        : await BrowserSignIn.start(address, this.signsIn.keeps, this.signsIn.opens);
+
+    const clientNow = (): McpClient => new Client({ name: 'graphe', version: '0.1.0' });
+    const transportNow = async (): Promise<Transport> =>
+      here ? await startedHere(config) : await alreadyRunning(address, signIn);
+
+    let transport = await transportNow();
+    let client = clientNow();
+    try {
+      await client.connect(transport);
+    } catch (cause) {
+      // The SDK has already sent somebody to their browser by this point. All
+      // that is left is to wait for them to come back, hand over what they
+      // brought, and try once more with what that bought.
+      if (signIn === null || !(await isASignInProblem(cause))) {
+        signIn?.done();
+        throw cause;
+      }
+      const code = await signIn.waitForCode().finally(() => signIn.done());
+      await (transport as CanFinish).finishAuth(code);
+      transport = await transportNow();
+      client = clientNow();
+      await client.connect(transport);
+    }
+    signIn?.done();
 
     let listed: readonly { name: string; description?: string }[] = [];
     try {
@@ -499,6 +573,15 @@ export async function writeMcpConfig(
     ...(one.cwd === undefined ? {} : { cwd: one.cwd }),
   }));
   await writeFile(mcpFile(projectRoot), `${JSON.stringify({ servers: tidy }, null, 2)}\n`, 'utf8');
+}
+
+/** What this machine holds for a server, gone. Called when somebody takes a
+ *  server off the list: leaving a sign-in behind for a server nobody has any
+ *  more is keeping a key to a door that was removed. */
+export async function forgetSignIn(address: string | undefined): Promise<void> {
+  const where = address?.trim() ?? '';
+  if (where === '' || howToSignIn === null) return;
+  await BrowserSignIn.forget(where, howToSignIn.keeps).catch(() => undefined);
 }
 
 /**

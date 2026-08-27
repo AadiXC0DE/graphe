@@ -30,6 +30,7 @@ import {
   dialog,
   ipcMain,
   Notification,
+  safeStorage,
   session,
   shell,
   WebContentsView,
@@ -210,7 +211,17 @@ import { lookAtEveryWidth } from '../src/diff/capture';
 import { readsWell, sizesFor, type Look } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
 import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceOfWork } from '../src/history/attempts';
-import { checkServer, inProject, mcpFile, readMcpConfig, savingFrom, writeMcpConfig } from '../src/agent/pi/mcp';
+import {
+  checkServer,
+  forgetSignIn,
+  inProject,
+  mcpFile,
+  readMcpConfig,
+  savingFrom,
+  signInThrough,
+  writeMcpConfig,
+} from '../src/agent/pi/mcp';
+import { SecretFile } from '../src/projects/secrets';
 import { holdsBack } from '../src/projects/heldback';
 import { keepsLogins } from '../src/projects/logins';
 import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
@@ -1653,6 +1664,32 @@ function addressOf(session: GrapheSession): string {
  *  shelf, so the sentence about one being put down names a thing, not an id. */
 function keepConversation(held: Held, address: string, session: GrapheSession): void {
   held.sessions.adopt({ path: address, name: session.name ?? address, held: session });
+}
+
+/**
+ * The sign-ins this computer holds for tool servers that ask for one.
+ *
+ * One file beside the app's other data, locked with the login keychain and
+ * never written in the clear — `SecretFile` refuses rather than fall back, and
+ * that refusal is the right one for somebody's account. When the lock is not
+ * available the panel simply does not offer to sign in.
+ *
+ * The browser is opened by the shell because only the shell can. Everything
+ * else about the flow is in src/agent/pi/mcpauth.ts, where it can be read
+ * without a running app.
+ */
+async function openTheSignIns(): Promise<void> {
+  try {
+    const keeps = await SecretFile.open(join(app.getPath('userData'), 'signins.json'), {
+      available: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (plain) => safeStorage.encryptString(plain),
+      decrypt: (sealed) => safeStorage.decryptString(sealed),
+    });
+    signInThrough({ keeps, opens: (url) => void shell.openExternal(url.href) });
+  } catch {
+    // No store, no signing in. A server that wants one says so when it is
+    // pressed, which is better than an app that will not start.
+  }
 }
 
 /**
@@ -5831,6 +5868,13 @@ function register(): void {
       const saving = savingFrom(wanted, current);
       if (!saving.ok) return fail(saving.refused);
       await writeMcpConfig(open.path, saving.servers);
+      // A server nobody has any more is a sign-in nobody needs. Keeping one is
+      // keeping a key to a door that has been taken off the list.
+      const kept = new Set(saving.servers.map((one) => one.address?.trim() ?? ''));
+      for (const gone of current.servers) {
+        const address = gone.address?.trim() ?? '';
+        if (address !== '' && !kept.has(address)) await forgetSignIn(address);
+      }
     } catch (cause) {
       return fail(plainTrouble(cause instanceof Error ? cause.message : 'The list could not be saved.'));
     }
@@ -7780,6 +7824,10 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(async () => {
     // The skills the app brought with it. A checkout has them beside the source;
     // a packaged app has them beside the licences.
+    // Signing in to a tool that lives on somebody else's computer. The keychain
+    // and the browser both belong here, so this is where they are handed over —
+    // see src/agent/pi/mcpauth.ts for what is done with them.
+    await openTheSignIns();
     skillsShippedWith(
       app.isPackaged ? join(process.resourcesPath, 'skills') : join(app.getAppPath(), 'skills'),
     );

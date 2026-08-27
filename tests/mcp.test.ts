@@ -834,3 +834,46 @@ describe('the tool the agent actually calls', () => {
     expect(named(grapheTools('/tmp/agent'))).not.toContain('connect_tool');
   });
 });
+
+/* A tool connected while a conversation is open is the ordinary case, not the
+   odd one — somebody connects it *because* they are in the middle of asking for
+   something. The list used to be whatever it was when the conversation started,
+   so the answer was "start a new conversation", which is not an answer. */
+describe('a tool connected while a conversation is open', () => {
+  it('is there the next time the model asks, without starting again', async () => {
+    const folder = await newFolder();
+    await writeMcpConfig(folder, []);
+    const registry = new McpRegistry(
+      inProject(await readMcpConfig(folder), folder),
+      null,
+      async () => inProject(await readMcpConfig(folder), folder),
+    );
+    expect(await registry.list()).toMatch(/no other tools are connected/i);
+
+    // Somebody presses Connect in the panel. The file changes underneath.
+    await writeMcpConfig(folder, [
+      { name: 'figma', command: 'npx', args: ['-y', '@figwright/mcp@0.4.0'] },
+    ]);
+
+    const said = await registry.list();
+    expect(said).toContain('figma');
+    expect(said).not.toMatch(/no other tools are connected/i);
+    await registry.close();
+  });
+
+  it('is reached by name too, not only listed', async () => {
+    const folder = await newFolder();
+    await writeMcpConfig(folder, []);
+    const registry = new McpRegistry(
+      inProject(await readMcpConfig(folder), folder),
+      null,
+      async () => inProject(await readMcpConfig(folder), folder),
+    );
+    await writeMcpConfig(folder, [{ name: 'late', command: 'true', args: [] }]);
+    // It is found now — whether it starts is a different question, and the
+    // sentence for "no such tool" is the one this must not give.
+    const said = await registry.call('late', 'anything', {});
+    expect(said).not.toMatch(/no connected tool named/i);
+    await registry.close();
+  });
+});

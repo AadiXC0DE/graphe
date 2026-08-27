@@ -208,22 +208,47 @@ type Transport = Parameters<
 export class McpRegistry {
   private readonly sessions = new Map<string, Session>();
   private closed = false;
+  #config: McpConfig;
 
   /** How to sign in to a server that asks. Null in a test, in the benchmark
    *  floor, and anywhere the keychain is not reachable — a server that wants a
    *  sign-in then says so plainly rather than half-trying. */
   constructor(
-    readonly config: McpConfig,
+    config: McpConfig,
     private readonly signsIn: SignsIn = howToSignIn,
-  ) {}
+    /** How to read the list again. Without it the list is whatever it was when
+     *  the conversation started, which is wrong the moment somebody connects a
+     *  tool while one is open — and that is exactly when they connect one. */
+    private readonly readAgain?: () => Promise<McpConfig>,
+  ) {
+    this.#config = config;
+  }
+
+  get config(): McpConfig {
+    return this.#config;
+  }
+
+  /** The list as it is now. Cheap: a few hundred bytes of JSON, read only when
+   *  the model asks what is connected or reaches for something by name. */
+  private async fresh(): Promise<McpConfig> {
+    if (this.readAgain === undefined) return this.#config;
+    try {
+      this.#config = await this.readAgain();
+    } catch {
+      // Keep what we had. A file that has just been made unreadable is not a
+      // reason to forget the tools that were working a moment ago.
+    }
+    return this.#config;
+  }
 
   async list(): Promise<string> {
-    const trouble = this.config.trouble ?? null;
+    const now = await this.fresh();
+    const trouble = now.trouble ?? null;
     if (trouble !== null) return MCP_WORDS.fileTrouble(trouble);
-    if (this.config.servers.length === 0) {
+    if (now.servers.length === 0) {
       return 'No other tools are connected yet. Add one to the project\'s .pi/mcp.json, under "servers", and I can reach its tools.';
     }
-    const lines = this.config.servers.map((server) => {
+    const lines = now.servers.map((server) => {
       const how = server.address !== undefined && server.address !== '' ? server.address : server.command;
       return `- ${server.name} (${how})`;
     });
@@ -288,7 +313,7 @@ export class McpRegistry {
 
   /** What one server offers, starting it if it is not already going. */
   async toolsOf(serverName: string): Promise<readonly string[]> {
-    const config = this.config.servers.find((server) => server.name === serverName);
+    const config = (await this.fresh()).servers.find((server) => server.name === serverName);
     if (config === undefined) throw new Error(`There is no connected tool named "${serverName}".`);
     const session = await this.connect(config);
     return session.tools.map((tool) => tool.name);
@@ -296,7 +321,7 @@ export class McpRegistry {
 
   /** Call one tool on one server. The server starts on first use. */
   async call(serverName: string, toolName: string, arguments_: Record<string, unknown>): Promise<string> {
-    const config = this.config.servers.find((server) => server.name === serverName);
+    const config = (await this.fresh()).servers.find((server) => server.name === serverName);
     if (config === undefined) {
       return `There is no connected tool named "${serverName}". ${await this.list()}`;
     }

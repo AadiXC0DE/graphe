@@ -1713,6 +1713,25 @@ function Conversation() {
     [troubleHere],
   );
 
+  /** Let Figma in, from wherever somebody asked: save the tool if it is not
+   *  already saved, then fetch the piece Figma has to be pointed at. Answers
+   *  with where that ended up, which is the only part of it worth showing. */
+  const letFigmaIn = useCallback(async (): Promise<string | null> => {
+    const already = (connected?.tools ?? []).some((one) => one.name === 'figma');
+    if (!already) {
+      const figma = REACHABLE.find((one) => one.id === 'figma');
+      if (figma !== undefined) {
+        const saved = await bridge.connectedSave([...(connected?.tools ?? []), asServer(figma)]);
+        if (saved.ok) setConnected(saved.value);
+        else troubleHere(saved.trouble);
+      }
+    }
+    const put = await bridge.getHelper('figma');
+    if (put.ok) return put.value;
+    troubleHere(put.trouble);
+    return null;
+  }, [connected, troubleHere]);
+
   const browse = useCallback(async () => {
     const picked = await bridge.chooseFolder();
     if (!picked.ok) {
@@ -4772,6 +4791,8 @@ function Conversation() {
               onSend={hand}
               onQueue={hand}
               onStop={halt}
+              figmaLinked={(connected?.tools ?? []).some((one) => one.name === 'figma')}
+              onLinkFigma={letFigmaIn}
               autoFocus
               // Busy is this conversation's own live stream, not a background
               // turn in another tab — a tab working beside you must not turn

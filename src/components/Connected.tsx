@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Connected as Tool, ConnectedHealth, ConnectedState } from '../lib/ipc';
 import { fromConnectLine } from '../lib/attachments';
+import LinkFigma from './LinkFigma';
 import { asServer, notYetConnected, vouchedUnder, type Reach } from '../agent/pi/reach';
 import './Sheet.css';
 import './Connected.css';
@@ -24,13 +25,6 @@ export const SAYS = {
   offersNote: 'One press each, and nothing else to fill in.',
   hasSome: 'Connected to this project',
   connect: 'Connect',
-  /* Precise on purpose. This is the one step Figma keeps for itself, and a
-     sentence like "point Figma at it from its own menu" leaves somebody hunting
-     through four menus for a word we would not say. The panel that draws the
-     curated shelf keeps the plainer wording; this is the moment somebody is
-     actually doing it. */
-  fetched: 'Ready — the folder is open at the file Figma wants. In Figma: Plugins → Development → Import plugin from manifest…, and choose it. Then Plugins → Development → Figwright to run it in whichever file you want me working in. Once only; it stays after that.',
-  fetchedWhere: 'The file is at',
   connecting: 'Connecting…',
   add: 'Connect something else',
   check: 'Check it',
@@ -235,11 +229,7 @@ export default function Connected({ open, state, onClose, onCheck, onSave, onGet
                           <p className="wired__needs">{ours.needs}</p>
                         )}
                         {fetched[tool.name] === undefined ? null : (
-                          <p className="wired__fetched">
-                            {SAYS.fetched}
-                            <br />
-                            {SAYS.fetchedWhere} <code>{fetched[tool.name]}</code>
-                          </p>
+                          <LinkFigma manifest={fetched[tool.name] ?? null} />
                         )}
                         <code className="wired__command">{asLine(tool)}</code>
                         {said.state === 'working' ? (

@@ -6,7 +6,7 @@ file *is* the client id: a server that supports it fetches this document instead
 of handing out a fresh registration, so there is one Graphe rather than one per
 machine, and a server operator has something stable to recognise.
 
-It has to stay reachable at exactly `https://graphe.xyz/oauth/client.json`, over
+It has to stay reachable at exactly `https://usegraphe.com/oauth/client.json`, over
 https, and it has to keep saying that id. Moving it breaks every sign-in already
 held on somebody's machine.
 

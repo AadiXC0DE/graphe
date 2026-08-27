@@ -43,15 +43,20 @@ export type OpensPages = (url: URL) => void | Promise<void>;
 
 /** Where the hosted document saying who Graphe is would be found.
  *
- *  Undefined, and deliberately, until graphe.xyz actually serves it: a server
- *  that supports this fetches the URL and uses it as the client id, so pointing
- *  at a name that does not answer is worse than not offering one at all. The
- *  document is written and sitting in site/oauth/client.json; the moment the
- *  domain serves it, this becomes that address and the registration round trip
- *  below stops happening.
+ *  Undefined until the document beside it is actually being served. A server
+ *  that supports this fetches the URL and uses it as the client id, so naming
+ *  one that answers 404 is worse than offering no name at all — and the file
+ *  and this line ship together, so there is a moment where one is live and the
+ *  other is not.
  *
- *  Until then every server registers us itself, which is what the three we
- *  tried against do anyway. */
+ *  It is written and sitting in site/oauth/client.json. Once
+ *  https://usegraphe.com/oauth/client.json answers, this becomes that address
+ *  and the registration round trip below stops happening — which is also what
+ *  gives Graphe one identity a server operator could recognise, rather than a
+ *  stranger asking to be let in from every laptop.
+ *
+ *  Until then every server registers us itself, which is what the three tried
+ *  against all do. */
 const WHO_WE_ARE: string | undefined = undefined;
 
 /** How long somebody has to finish signing in before the door closes. Long
@@ -243,7 +248,7 @@ export class BrowserSignIn {
   get clientMetadata(): OAuthClientMetadata {
     return {
       client_name: 'Graphe',
-      client_uri: 'https://graphe.xyz',
+      client_uri: 'https://usegraphe.com',
       // No port, deliberately, and the same pair the hosted document names. The
       // operating system gives us a different one every launch; RFC 8252 §7.3
       // has the server accept whichever the request carries.

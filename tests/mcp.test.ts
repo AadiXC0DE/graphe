@@ -346,12 +346,22 @@ describe('a tool somebody picked off the shelf', () => {
     expect(read.servers[0]?.args).toEqual(['-y', '@playwright/mcp@latest']);
   });
 
+  /* Made up rather than taken off the shelf: what is on the shelf changes with
+     what the tools themselves offer, and this is about the two shapes a start
+     line can have, not about which tool happens to have which today. */
   it('turns a listening tool into an address, not a command', () => {
-    const figma = REACHABLE.find((one) => one.id === 'figma');
-    if (figma === undefined) return;
-    const line = asServer(figma);
+    const line = asServer({
+      id: 'listening',
+      name: 'Listening',
+      what: 'Lets me reach something already running.',
+      needs: null,
+      start: { how: 'address', address: 'http://127.0.0.1:4242/mcp' },
+      curated: true,
+      added: false,
+    });
     expect(line.command).toBe('');
-    expect(line.address).toMatch(/^http/);
+    expect(line.address).toBe('http://127.0.0.1:4242/mcp');
+    expect(line.args).toEqual([]);
   });
 
   /* The shelf has to say which are already on, or it offers to connect
@@ -369,12 +379,20 @@ describe('a tool somebody picked off the shelf', () => {
 describe('a listening tool, end to end', () => {
   it('survives being saved and read again', async () => {
     const folder = await newFolder();
-    const figma = REACHABLE.find((one) => one.id === 'figma');
-    if (figma === undefined) return;
-    await writeMcpConfig(folder, [asServer(figma)]);
+    await writeMcpConfig(folder, [
+      asServer({
+        id: 'listening',
+        name: 'Listening',
+        what: 'Lets me reach something already running.',
+        needs: null,
+        start: { how: 'address', address: 'http://127.0.0.1:4242/mcp' },
+        curated: true,
+        added: false,
+      }),
+    ]);
     const read = await readMcpConfig(folder);
     expect(read.servers).toHaveLength(1);
-    expect(read.servers[0]?.address).toMatch(/^http/);
+    expect(read.servers[0]?.address).toBe('http://127.0.0.1:4242/mcp');
     expect(read.servers[0]?.command).toBe('');
     expect(read.trouble).toBeNull();
     expect(read.skipped).toEqual([]);

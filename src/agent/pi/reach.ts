@@ -108,17 +108,26 @@ export const SAID = {
  */
 export const REACHABLE: readonly Reach[] = [
   {
+    // Figma's own two ways in are both shut to us. The one on the network only
+    // answers clients on a list it keeps (figma.com/mcp-catalog), and the one
+    // running on this computer needs Dev Mode, which the free plan does not
+    // have. This is the third way, and it is the one that works for everybody:
+    // Figma's plugin surface, which is not rate limited, reads the local
+    // variables the network one charges an enterprise plan for, and is the only
+    // way anything can be drawn rather than only read.
     id: 'figma',
     name: 'Figma',
-    what: 'Lets me open the Figma files you point me at and build from the real thing: the actual spacing, colours and words, rather than my reading of a picture of them.',
-    // Figma's other way in, the one that needs no switch, only answers to
-    // clients on a list it keeps: https://www.figma.com/mcp-catalog/. Until we
-    // are on it, this is the one that works, and saying what it costs is the
-    // least we can do — "keep Figma open" sent people looking at an app they
-    // already had open.
+    what: 'Lets me open the Figma file you have in front of you and work in it — read the real spacing, colours and words, and draw into it as well.',
     needs:
-      'Open a design file in Figma, press Shift-D for Dev Mode, and turn on the connection it offers you there. It needs a Dev or Full seat.',
-    start: { how: 'address', address: 'http://127.0.0.1:3845/mcp' },
+      'Install the Figwright helper into Figma once — it is free and open, from github.com/awdr74100/figwright. Then open it in whichever file you want me working in.',
+    start: {
+      how: 'program',
+      command: 'npx',
+      // Pinned. This runs on somebody's machine with their designs in front of
+      // it, and "latest" is a decision made by a stranger after we shipped.
+      args: ['-y', '@figwright/mcp@0.4.0'],
+      values: {},
+    },
     curated: true,
     added: false,
   },

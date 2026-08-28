@@ -379,6 +379,13 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.prWorktreePrepare, prNumber, named(where)) as Promise<Result<string>>;
   },
 
+  openPrReview(prNumber: number, where?: Where): Promise<Result<{ folder: string; opened: OpenedProject }>> {
+    if (typeof prNumber !== 'number' || !Number.isFinite(prNumber) || prNumber <= 0) {
+      return Promise.resolve(refuse<{ folder: string; opened: OpenedProject }>('I could not tell which pull request you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.prReviewOpen, prNumber, named(where)) as Promise<Result<{ folder: string; opened: OpenedProject }>>;
+  },
+
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>> {
     return ipcRenderer.invoke(CHANNEL.buildStart, source, named(where)) as Promise<Result<BuildPlan>>;
   },

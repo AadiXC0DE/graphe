@@ -3133,39 +3133,90 @@ function Conversation() {
       const repoName = reviewsRepoNow.current;
       const request = navigation.current + 1;
       toChat();
-      void swapConversation(null).then(async () => {
-        // A newer project/tab choice may have won while the fresh review
-        // conversation was opening. Never send a repository prompt there.
-        if (
-          project === null ||
-          navigation.current !== request ||
-          currentDesk(desksNow.current)?.path !== project
-        ) return;
-        let extra = '';
+      void (async () => {
+        if (project === null) return;
+        // Root the review in the PR's own checkout: the agent's projectRoot becomes
+        // .graphe/worktrees/pr-N so whereToRead is honest and no extra fetch instruction is needed.
+        const where = {
+          ...(project === null ? {} : { project }),
+          ...(repoName === null ? {} : { repo: repoName }),
+        };
+        let prFolder: string | null = null;
+        let opened: import("./lib/ipc").OpenedProject | null = null;
         try {
-          const prep = await bridge.preparePrWorktree(item.number, {
-            ...(project === null ? {} : { project }),
-            ...(repoName === null ? {} : { repo: repoName }),
-          });
-          if (prep.ok) {
-            extra = `\n\nThe PR's code has been checked out at ${prep.value} — read files from there (for example ${prep.value}/src/App.tsx) and treat that folder as the PR root. Do not read from the open project folder for PR files.`;
-          } else {
-            troubleAt(project === null ? {} : { project }, prep.trouble);
+          const result = await bridge.openPrReview(item.number, where);
+          if (!result.ok) {
+            troubleAt({ project }, result.trouble);
             return;
           }
+          prFolder = result.value.folder;
+          opened = result.value.opened;
         } catch (cause) {
-          troubleAt(project === null ? {} : { project }, {
-            what: 'I could not prepare the pull request checkout.',
-            because: cause instanceof Error ? cause.message : 'Something went wrong fetching it.',
-            actionLabel: 'Got it',
-          });
+          // Fallback to old prepare path if new IPC is unavailable (preview)
+          try {
+            const prep = await bridge.preparePrWorktree(item.number, where);
+            if (!prep.ok) {
+              troubleAt({ project }, prep.trouble);
+              return;
+            }
+            prFolder = prep.value;
+            // Create a fresh conversation in the parent and rely on extra instruction
+            await swapConversation(null);
+            if (navigation.current !== request || currentDesk(desksNow.current)?.path !== project) return;
+            const base = reviewPrompt(item, repository, repo?.here ?? null);
+            const extra = `\n\nThe PR's code has been checked out at ${prFolder} — read files from there (for example ${prFolder}/src/App.tsx) and treat that folder as the PR root. Do not read from the open project folder for PR files.`;
+            void send(`${base}${extra}`);
+            return;
+          } catch (cause2) {
+            troubleAt({ project }, {
+              what: 'I could not prepare the pull request checkout.',
+              because: cause2 instanceof Error ? cause2.message : 'Something went wrong fetching it.',
+              actionLabel: 'Got it',
+            });
+            return;
+          }
+        }
+        if (navigation.current !== request || currentDesk(desksNow.current)?.path !== project || opened === null || prFolder === null) return;
+        // Put the new PR-rooted conversation on screen, like swapConversation does.
+        const turns = opened.history.reduce((sofar: readonly import("./lib/thread").Turn[], event) => applyEvent(sofar, event), [] as readonly import("./lib/thread").Turn[]);
+        if (opened.history.length > 0 && turns.length === 0) {
+          troubleHere(swapWords.unreadable);
           return;
         }
+        setInConversation(opened.conversation);
+        setOwnCopyHere(opened.ownCopy === true);
+        setDesks((current) =>
+          changeDesk(current, opened.path, (one) => {
+            const incoming = opened.address == null ? undefined : one.parked[opened.address];
+            const withoutIncoming = opened.address == null ? one.parked : Object.fromEntries(Object.entries(one.parked).filter(([a]) => a !== opened.address));
+            const parked = one.address === null || one.address === opened.address ? withoutIncoming : { ...withoutIncoming, [one.address]: { turns: one.turns, doing: one.doing, counted: one.counted } };
+            return {
+              ...one,
+              turns,
+              doing: incoming?.doing ?? null,
+              counted: incoming?.counted ?? 0,
+              address: opened.address ?? null,
+              parked,
+              order: opened.address == null || one.order.includes(opened.address) ? one.order : [...one.order, opened.address],
+            };
+          }),
+        );
+        refreshRoom({ project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) });
+        refreshRunning({ project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) });
+        setHowFarHere(opened.howFar ?? 'asking');
+        void bridge.conversations({ project: opened.path }).then((answer) => {
+          if (answer.ok && desksNow.current.current === opened.path) setConversations(answer.value);
+        });
         const base = reviewPrompt(item, repository, repo?.here ?? null);
-        void send(`${base}${extra}`);
-      });
+        // Add the prompt to the new conversation's desk and send it through the PR-rooted session.
+        setDesks((current) => changeDesk(current, opened.path, (one) => ({ ...one, turns: [...one.turns, said("you", base)] })));
+        const promptWhere = { project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) };
+        void bridge.prompt(base, undefined, undefined, promptWhere).then((answer) => {
+          if (!answer.ok) troubleAt(promptWhere, answer.trouble);
+        });
+      })();
     },
-    [repo, toChat, swapConversation, send],
+    [repo, toChat, swapConversation, send, troubleAt, troubleHere, refreshRoom, refreshRunning],
   );
 
   /* A tab names a conversation inside a project, so going to one is at most two

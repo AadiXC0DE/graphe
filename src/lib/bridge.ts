@@ -1061,6 +1061,10 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(previewFail<string>());
     },
 
+    openPrReview(): Promise<Result<{ folder: string; opened: OpenedProject }>> {
+      return Promise.resolve(previewFail<{ folder: string; opened: OpenedProject }>());
+    },
+
     buildStart(): Promise<Result<BuildPlan>> {
       return Promise.resolve(previewFail<BuildPlan>());
     },
@@ -1986,6 +1990,7 @@ function connect(): Bridge {
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),
     preparePrWorktree: (prNumber, where) => api.preparePrWorktree(prNumber, where),
+    openPrReview: (prNumber, where) => api.openPrReview(prNumber, where),
     buildStart: (source, where) => api.buildStart(source, where),
     buildPlan: (where) => api.buildPlan(where),
     buildAdvance: (op, where) => api.buildAdvance(op, where),

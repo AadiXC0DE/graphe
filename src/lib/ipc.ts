@@ -1214,11 +1214,16 @@ export const CHANNEL = {
   worktreeLand: 'graphe:worktree-land',
   worktreeDrop: 'graphe:worktree-drop',
   prWorktreePrepare: 'graphe:pr-worktree-prepare',
+  prReviewOpen: 'graphe:pr-review-open',
   buildStart: 'graphe:build-start',
   buildPlan: 'graphe:build-plan',
   buildAdvance: 'graphe:build-advance',
   buildSave: 'graphe:build-save',
   buildCancel: 'graphe:build-cancel',
+  goalLoad: 'graphe:goal-load',
+  goalSave: 'graphe:goal-save',
+  goalClear: 'graphe:goal-clear',
+  goalVerify: 'graphe:goal-verify',
   chooseDocument: 'graphe:choose-document',
   designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
@@ -1445,6 +1450,8 @@ export type GrapheApi = {
   worktreeDrop(where?: Where): Promise<Result<null>>;
   /** Prepare an isolated worktree for a pull request, so the review reads the right files. */
   preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>>;
+  /** Open a new conversation rooted at the PR worktree, so the review reads the PR's own files. */
+  openPrReview(prNumber: number, where?: Where): Promise<Result<{ folder: string; opened: OpenedProject }>>;
   /** Full text for a library row. `id` is checked against that library first. */
   skillText(id: string, where?: Where): Promise<Result<string>>;
   /** Stop checking before things that would otherwise be asked about, or start

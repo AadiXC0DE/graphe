@@ -474,11 +474,13 @@ function Conversation() {
     }
     if (next === null) {
       void bridge.goalClear({ project }).catch(() => undefined);
-      try { localStorage.removeItem(goalStorageKey(project)); } catch {}
+      // Absent is the goal state we wanted; a missing key is not an error.
+      try { localStorage.removeItem(goalStorageKey(project)); } catch { /* already gone */ }
       void bridge.goalClear({ project }).catch(() => undefined);
     } else {
       void bridge.goalSave(next, { project }).catch(() => undefined);
-      try { localStorage.setItem(goalStorageKey(project), JSON.stringify(next)); } catch {}
+      // Fallback only; disk via the shell is the store that matters.
+      try { localStorage.setItem(goalStorageKey(project), JSON.stringify(next)); } catch { /* quota or private mode */ }
     }
   }, []);
 
@@ -488,26 +490,25 @@ function Conversation() {
     persistGoal(next, project);
   }, [persistGoal]);
 
-  // Load goal when project opens or reloads
+  // Load goal when project opens or reloads. Always resolves to *this*
+  // project's goal: a project with none must clear the previous one's,
+  // or a goal leaks across projects on the switch.
   useEffect(() => {
     const project = desks.current;
     if (project === null) return;
     void bridge.goalLoad({ project }).then((answer) => {
+      let loaded: Goal | null = null;
       if (answer.ok && answer.value !== null) {
-        const loaded = readStoredGoal(answer.value);
-        if (loaded !== null) {
-          setGoal(withElapsed(loaded));
-          return;
-        }
+        loaded = readStoredGoal(answer.value);
       }
-      try {
-        const raw = localStorage.getItem(goalStorageKey(project));
-        if (raw !== null) {
-          const parsed = JSON.parse(raw) as unknown;
-          const loaded = readStoredGoal(parsed);
-          if (loaded !== null) setGoal(withElapsed(loaded));
-        }
-      } catch {}
+      if (loaded === null) {
+        try {
+          const raw = localStorage.getItem(goalStorageKey(project));
+          if (raw !== null) loaded = readStoredGoal(JSON.parse(raw) as unknown);
+        } catch { /* unreadable fallback: disk store is the truth */ }
+      }
+      // Null for a project with no goal — never keep the last project's.
+      setGoal(loaded === null ? null : withElapsed(loaded));
     });
   }, [desks.current]);
   /** What was asked for while a plan is being made, so approving it can send
@@ -2103,10 +2104,15 @@ function Conversation() {
                     }
                     return;
                   }
+                  if (!checked.ok || !checked.value.passed) {
+                    // Verification itself failed to run — not evidence of done.
+                    say(`Goal not yet met — checks did not run: ${checked.ok ? checked.value.reason : 'the shell did not answer'}. Say /goal clear when you are satisfied it is done.`);
+                    goalRuns.current.delete(goalOwner);
+                    return;
+                  }
                   const finishedGoal: Goal = { ...withElapsed(still), iterations: still.iterations + 1, status: 'done' };
                   setGoalPersist(finishedGoal);
-                  const extra = checked.ok && checked.value.passed ? ' Checks passed.' : '';
-                  say(`Iteration ${String(finishedGoal.iterations)} · Goal met, task finished — ${verdict.reason}${extra}`);
+                  say(`Iteration ${String(finishedGoal.iterations)} · Goal met, task finished — ${verdict.reason} Checks passed.`);
                   goalRuns.current.delete(goalOwner);
                   goalRuns.current.delete(`${where}\u0000`);
                 });
@@ -3151,7 +3157,7 @@ function Conversation() {
           }
           prFolder = result.value.folder;
           opened = result.value.opened;
-        } catch (cause) {
+        } catch {
           // Fallback to old prepare path if new IPC is unavailable (preview)
           try {
             const prep = await bridge.preparePrWorktree(item.number, where);

@@ -6994,6 +6994,75 @@ function register(): void {
     }
   });
 
+  // Root a PR review in its own checkout: the session's project is the PR
+  // worktree, so the model reads the right code by construction rather than
+  // by instruction (#12). Events still flow to the open project's desk, and
+  // the conversation registers as an own-copy so landing/put-away behave.
+  handle<{ folder: string; opened: OpenedProject }>(CHANNEL.prReviewOpen, async (_event, args) => {
+    const [prRaw] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const prNumber = typeof prRaw === 'number' ? prRaw : Number(prRaw);
+    if (!Number.isFinite(prNumber) || prNumber <= 0) {
+      return fail({ what: 'I could not tell which pull request you meant.', because: 'The number was missing or not a number.', actionLabel: 'Got it' });
+    }
+    const project = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
+    let folder: string;
+    try {
+      folder = (await preparePrWorktree(project, prNumber)).folder;
+    } catch (cause) {
+      const details = detailsOf(cause);
+      return fail({
+        what: 'I could not prepare the pull request checkout.',
+        because: cause instanceof Error ? cause.message : 'Something went wrong fetching it.',
+        actionLabel: 'Got it',
+        ...(details === undefined ? {} : { details }),
+      });
+    }
+    const prefs = (await preferences()).all();
+    const from: Speaking = { address: null };
+    let session: GrapheSession;
+    try {
+      session = await createSession({
+        projectRoot: folder,
+        mainFolder: open.path,
+        onEvent: forwardTo(open.path, open.held, from),
+        timeline: await Timeline.open(folder),
+        model: prefs.model,
+        thinking: thinkingFor(prefs),
+        trusts: await trustsIn(open.path),
+        running: open.held.running,
+        noteServers,
+        figmaToken: figmaCredential(),
+        sessionDir: sessionsFolder(),
+        fresh: true,
+      });
+    } catch (cause) {
+      const chain = detailsOf(cause);
+      return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
+    }
+    const address = addressOf(session);
+    from.address = address;
+    open.held.checkouts.set(address, { folder, branch: `graphe/pr-${String(prNumber)}` });
+    await saveCheckouts(open.path, open.held).catch(() => undefined);
+    keepConversation(open.held, address, session);
+    return done({
+      folder,
+      opened: {
+        path: open.path,
+        name: open.name,
+        history: session.history,
+        conversation: session.conversation,
+        address,
+        howFar: session.howFar,
+        // Derived, not fixed: this conversation works in the PR checkout, so
+        // it is an own-copy exactly when that checkout is registered.
+        ownCopy: open.held.checkouts.has(address),
+      },
+    });
+  });
+
   /* -------------------------------------------------- document to build */
   /* The document that started a build, kept so a resumed session knows what it
      was building, and the plan that turns it into tasks. Stored outside the
@@ -7299,13 +7368,15 @@ function register(): void {
   handle<{ passed: boolean; reason: string }>(CHANNEL.goalVerify, async (_event, args) => {
     const where = whereIn(args);
     const open = projectAt(where);
-    if (open === null) return done({ passed: true, reason: 'No project.' });
+    // A check that did not run is not a check that passed: a goal must never
+    // be marked met on the strength of verification that never happened.
+    if (open === null) return done({ passed: false, reason: 'No project open to check.' });
     const folder = folderFor(open, where);
     const entries = await readdir(folder).catch(() => [] as string[]);
     const hasTs = entries.includes('tsconfig.json') || entries.includes('tsconfig.base.json');
-    if (!hasTs) return done({ passed: true, reason: 'No typecheck.' });
+    if (!hasTs) return done({ passed: false, reason: 'No typecheck config in this project, so the check did not run.' });
     const ran = await runHelper('npx', ['--no-install', 'tsc', '--noEmit'], { folder, patience: 90_000 });
-    if (notHere(ran)) return done({ passed: true, reason: 'tsc not installed.' });
+    if (notHere(ran)) return done({ passed: false, reason: 'TypeScript is not installed here, so the check did not run.' });
     if (ran.code === 0) return done({ passed: true, reason: 'typecheck passed.' });
     const reason = ran.said.trim().slice(0, 2000) || 'typecheck failed';
     return done({ passed: false, reason });

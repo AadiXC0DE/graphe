@@ -1106,19 +1106,20 @@ let previewHowFar: HowFar = 'asking';
     goalSave(goal: import('../work/goal').Goal): Promise<Result<null>> {
       try {
         if (openPath !== null) localStorage.setItem(`graphe:goal:${openPath}`, JSON.stringify(goal));
-      } catch {}
+      } catch { /* quota or private mode: disk store is the real one */ }
       return Promise.resolve(done(null));
     },
 
     goalClear(): Promise<Result<null>> {
       try {
         if (openPath !== null) localStorage.removeItem(`graphe:goal:${openPath}`);
-      } catch {}
+      } catch { /* already gone */ }
       return Promise.resolve(done(null));
     },
 
     goalVerify(): Promise<Result<{ passed: boolean; reason: string }>> {
-      return Promise.resolve(done({ passed: true, reason: 'No checks in preview.' }));
+      // Preview has no shell to run checks, so verification did not run.
+      return Promise.resolve(done({ passed: false, reason: 'No checks available in preview.' }));
     },
 
     /** Two, so the band has something to draw: one somebody has said yes to

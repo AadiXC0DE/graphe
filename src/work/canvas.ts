@@ -20,10 +20,10 @@ export type BlockModel = { providerId: string; modelId: string } | null;
 let counter = 0;
 
 export type BlockKind =
-  | 'look'
-  | 'work'
+  | 'custom'
+  | 'plan'
   | 'research'
-  | 'helpers'
+  | 'subagents'
   | 'browser'
   | 'checks'
   | 'review'
@@ -45,6 +45,10 @@ export type Block = {
   lookFirst?: boolean;
   /** Pictures this block is sent with, the way a message is sent with them. */
   pictures?: readonly BlockPicture[];
+  /** Where somebody put it. Absent until they move it, and then it stays put:
+   *  a canvas that tidies your arrangement away the moment you add a block is
+   *  a diagram, not a canvas. */
+  at?: { x: number; y: number };
 };
 
 /** One picture on a block. Held whole rather than as a path: a flow is drawn
@@ -132,21 +136,25 @@ export const canvasWords = {
   loops: 'Ready-made',
   what: 'What it does',
   runBy: 'Run by',
+  everyModel: 'Models',
   howFar: 'How far it may go',
   /** The one the whole flow runs at, where a block does not say otherwise. */
   sameAsFlow: 'Same as the canvas',
+  /** Two, not four. The ladder in the composer has rungs for a person deciding
+   *  message by message; a canvas is set once, and the only question it is
+   *  really asking is whether it should stop and check. */
   rungs: {
-    looking: 'Just looking',
     asking: 'Asks first',
-    changing: 'Changes files',
-    doing: 'Gets on with it',
-  } as Readonly<Record<HowFar, string>>,
+    doing: 'Full access',
+  } as Readonly<Record<'asking' | 'doing', string>>,
   whichever: 'Whatever is answering',
   waitsFor: 'Waits for',
   nothing: 'Nothing — it goes first',
   shows: 'Shows it',
   addPicture: 'Add a picture',
   tooMany: (n: number): string => `A block carries up to ${String(n)} pictures.`,
+  tidyUp: 'Tidy up',
+  tidyNote: 'Put every block back in line',
   remove: 'Remove',
   connect: 'Drag from a block’s dot to the one that should follow it',
   /** Under the title. */
@@ -195,43 +203,43 @@ export type BlockSpec = {
  */
 export const BLOCKS: readonly BlockSpec[] = [
   {
-    kind: 'work',
-    name: 'Work on it',
-    note: 'Make the change.',
+    kind: 'custom',
+    name: 'Custom',
+    note: 'Whatever you type, sent as it is.',
     needsWords: true,
     says: '',
   },
   {
-    kind: 'look',
-    name: 'Look around',
-    note: 'Read the project and say what it would do. Changes nothing.',
+    kind: 'plan',
+    name: 'Plan',
+    note: 'Read the project and propose. Changes nothing.',
     needsWords: false,
     says: 'Look around the project and say what you would do. Change nothing.',
   },
   {
     kind: 'research',
-    name: 'Look it up',
-    note: 'Read around the problem before deciding, and say what it found.',
+    name: 'Research',
+    note: 'Read around the problem before deciding.',
     needsWords: true,
     says: '',
   },
   {
-    kind: 'helpers',
-    name: 'Send in helpers',
-    note: 'Split it between several working at once.',
+    kind: 'subagents',
+    name: 'Subagents',
+    note: 'Fan the work out and bring it back together.',
     needsWords: true,
     says: '',
   },
   {
     kind: 'browser',
-    name: 'Try it in the browser',
+    name: 'Browser',
     note: 'Open the page and check the change works.',
     needsWords: false,
     says: 'Open the page in the browser and check the change works. Say what you saw, and take a picture of it.',
   },
   {
     kind: 'checks',
-    name: 'Run the checks',
+    name: 'Checks',
     note: 'Run the project’s checks and fix what fails.',
     needsWords: false,
     says: 'Run this project’s checks. Fix anything that fails, then run them again until they pass.',
@@ -239,7 +247,7 @@ export const BLOCKS: readonly BlockSpec[] = [
   {
     kind: 'review',
     name: 'Review',
-    note: 'Read the change and give a verdict.',
+    note: 'Read the diff and give a verdict.',
     needsWords: false,
     says: 'Review what has changed and give your verdict, with the findings that matter first.',
   },
@@ -256,10 +264,10 @@ export function specOf(kind: BlockKind): BlockSpec {
   return BLOCKS.find((one) => one.kind === kind) ?? BLOCKS[0]!;
 }
 
-/** What a helpers block is asked, once somebody has said what about. Written
- *  here rather than in the view so the sentence can be read back in a test. */
+/** What a subagents block is asked. Written here rather than in the view so the
+ *  sentence can be read back in a test. */
 export function helperWords(about: string): string {
-  return `Split this between several helpers working at once, then bring what they found together: ${about.trim()}`;
+  return `Split this between subagents working in parallel, then bring what they found back together: ${about.trim()}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -278,10 +286,10 @@ export type Loop = {
 export const LOOPS: readonly Loop[] = [
   {
     id: 'ship-it',
-    name: 'Work, try it, check it, hand it over',
+    name: 'Build, verify, ship',
     note: 'Make the change, open it in the browser, run the checks, then a pull request.',
     blocks: [
-      { kind: 'work', after: null },
+      { kind: 'custom', after: null },
       { kind: 'browser', after: 0 },
       { kind: 'checks', after: 1 },
       { kind: 'pull-request', after: 2 },
@@ -289,21 +297,21 @@ export const LOOPS: readonly Loop[] = [
   },
   {
     id: 'look-first',
-    name: 'Look around, work on it, review it',
-    note: 'Read the project before touching it, make the change, then read the change back.',
+    name: 'Plan, build, review',
+    note: 'Read the project before touching it, make the change, then read the diff back.',
     blocks: [
-      { kind: 'look', after: null },
-      { kind: 'work', after: 0 },
+      { kind: 'plan', after: null },
+      { kind: 'custom', after: 0 },
       { kind: 'review', after: 1 },
     ],
   },
   {
     id: 'many-hands',
-    name: 'Look around, several helpers, review',
-    note: 'One pass to see the shape, several working at once, then one verdict over the lot.',
+    name: 'Plan, fan out, review',
+    note: 'One pass to see the shape, subagents in parallel, then one verdict over the lot.',
     blocks: [
-      { kind: 'look', after: null },
-      { kind: 'helpers', after: 0 },
+      { kind: 'plan', after: null },
+      { kind: 'subagents', after: 0 },
       { kind: 'review', after: 1 },
     ],
   },
@@ -473,7 +481,7 @@ export function lookedUpWords(about: string): string {
 /** What one block is asked, ready to send. */
 export function asksOf(block: Block): string {
   const said = block.says.trim();
-  if (block.kind === 'helpers') return helperWords(said);
+  if (block.kind === 'subagents') return helperWords(said);
   if (block.kind === 'research') return lookedUpWords(said);
   return said === '' ? specOf(block.kind).says : said;
 }
@@ -488,24 +496,28 @@ export function reset(flow: Flow): Flow {
 /* Laying it out                                                               */
 /* -------------------------------------------------------------------------- */
 
-export type Placed = Block & { column: number; row: number; state: BlockState };
-export type Drawn = { blocks: readonly Placed[]; columns: number; rows: number };
+export type Placed = Block & { x: number; y: number; state: BlockState };
+export type Drawn = { blocks: readonly Placed[]; width: number; height: number };
+
+/** The card, and the room around it. Here rather than in the view because
+ *  where a block goes when nobody has moved it is arithmetic, not drawing. */
+export const CARD = { width: 216, height: 112, gapX: 80, gapY: 24 } as const;
 
 /**
- * Left to right, one column per step along the chain.
+ * Where everything sits.
  *
- * A block keeps its parent's row where that row is free, so a chain reads as
- * one straight line and only a fork moves anything down.
+ * A block somebody moved is where they put it. Everything else is laid out left
+ * to right, one column per step along the chain, keeping its parent's row where
+ * that row is free — so a flow drawn by pressing reads as a straight line, and
+ * a flow arranged by hand stays arranged.
  */
-export function layOut(flow: Flow): Drawn {
-  if (flow.blocks.length === 0) return { blocks: [], columns: 0, rows: 0 };
+export function tidy(flow: Flow): Readonly<Record<string, { x: number; y: number }>> {
   const at = columns(flow);
-  const ordered = runOrder(flow);
   const taken = new Map<number, Set<number>>();
   const rowOf = new Map<string, number>();
-  const blocks: Placed[] = [];
+  const where: Record<string, { x: number; y: number }> = {};
 
-  for (const block of ordered) {
+  for (const block of runOrder(flow)) {
     const column = at.get(block.id) ?? 0;
     const used = taken.get(column) ?? new Set<number>();
     let row = block.after === null ? 0 : (rowOf.get(block.after) ?? 0);
@@ -513,14 +525,41 @@ export function layOut(flow: Flow): Drawn {
     used.add(row);
     taken.set(column, used);
     rowOf.set(block.id, row);
-    blocks.push({ ...block, column, row, state: stateOf(block, flow) });
+    where[block.id] = {
+      x: column * (CARD.width + CARD.gapX),
+      y: row * (CARD.height + CARD.gapY),
+    };
   }
+  return where;
+}
 
+export function layOut(flow: Flow): Drawn {
+  if (flow.blocks.length === 0) return { blocks: [], width: 0, height: 0 };
+  const auto = tidy(flow);
+  const blocks: Placed[] = flow.blocks.map((one) => {
+    const spot = one.at ?? auto[one.id] ?? { x: 0, y: 0 };
+    return { ...one, x: spot.x, y: spot.y, state: stateOf(one, flow) };
+  });
   return {
     blocks,
-    columns: Math.max(...blocks.map((one) => one.column)) + 1,
-    rows: Math.max(...blocks.map((one) => one.row)) + 1,
+    width: Math.max(...blocks.map((one) => one.x)) + CARD.width,
+    height: Math.max(...blocks.map((one) => one.y)) + CARD.height,
   };
+}
+
+/** Put everything back where the arithmetic would have it. */
+export function tidied(flow: Flow): Flow {
+  const where = tidy(flow);
+  return { ...flow, blocks: flow.blocks.map((one) => ({ ...one, at: where[one.id] })) };
+}
+
+/** True once somebody has moved something, so Tidy is worth offering. */
+export function isArranged(flow: Flow): boolean {
+  const where = tidy(flow);
+  return flow.blocks.some((one) => {
+    const auto = where[one.id];
+    return one.at !== undefined && (auto === undefined || one.at.x !== auto.x || one.at.y !== auto.y);
+  });
 }
 
 /** Everything waiting directly on this one. */
@@ -533,6 +572,16 @@ export function waitingOn(flow: Flow, id: string): readonly Block[] {
 /* -------------------------------------------------------------------------- */
 
 const KINDS = new Set<string>(BLOCKS.map((one) => one.kind));
+
+function readAt(value: unknown): { x: number; y: number } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  const x = raw['x'];
+  const y = raw['y'];
+  if (typeof x !== 'number' || !Number.isFinite(x)) return null;
+  if (typeof y !== 'number' || !Number.isFinite(y)) return null;
+  return { x, y };
+}
 
 function readPictures(value: unknown): readonly BlockPicture[] {
   if (!Array.isArray(value)) return [];
@@ -591,6 +640,7 @@ export function readFlow(raw: unknown): Flow | null {
       ...(readPictures(block['pictures']).length === 0
         ? {}
         : { pictures: readPictures(block['pictures']) }),
+      ...(readAt(block['at']) === null ? {} : { at: readAt(block['at']) as { x: number; y: number } }),
     });
   }
 
@@ -623,10 +673,14 @@ export function readFlow(raw: unknown): Flow | null {
   };
 }
 
-export const RUNGS: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing'];
+/** What a canvas may be set to. The Guard knows two more, and a person setting
+ *  a whole flow once has never wanted them. */
+export const RUNGS: readonly ('asking' | 'doing')[] = ['asking', 'doing'];
+
+const EVERY_RUNG: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing'];
 
 function isHowFar(value: unknown): value is HowFar {
-  return typeof value === 'string' && (RUNGS as readonly string[]).includes(value);
+  return typeof value === 'string' && (EVERY_RUNG as readonly string[]).includes(value);
 }
 
 /** Every flow a file held, in the order it held them. Anything unreadable is

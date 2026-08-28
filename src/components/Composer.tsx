@@ -93,10 +93,6 @@ type Props = {
    *  it. Chosen from inside the model chip, not beside it. */
   advisor?: ModelChoice | null;
   onAdvisor?: (choice: ModelChoice | null) => void;
-  /** Whether the addition that does the advising is already here. */
-  advisorInstalled?: boolean;
-  /** Open the shelf, so it can be added. */
-  onAddMore?: () => void;
   onConnect?: () => void;
   /** How long the chosen model should take before answering. */
   onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
@@ -202,8 +198,6 @@ export default function Composer({
   onSelectModel,
   advisor,
   onAdvisor,
-  advisorInstalled,
-  onAddMore,
   onConnect,
   onThinking,
   anywhere = true,
@@ -844,8 +838,6 @@ export default function Composer({
             onOpenChange={onComposerPopoverOpenChange}
             advisor={advisor ?? null}
             {...(onAdvisor === undefined ? {} : { onAdvisor })}
-            {...(advisorInstalled === undefined ? {} : { advisorInstalled })}
-            {...(onAddMore === undefined ? {} : { onAddMore })}
           />
         )}
 

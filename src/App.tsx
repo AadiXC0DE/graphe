@@ -462,6 +462,8 @@ function Conversation() {
   /** The screen where more can be added to Graphe, and what it is showing. */
   const [addMore, setAddMore] = useState(false);
   const [packs, setPacks] = useState<readonly Pack[]>([]);
+  const packsNow = useRef<readonly Pack[]>([]);
+  packsNow.current = packs;
   /** What the open project brought with it, and which of those are loaded. Read
    *  when the screen opens: it changes only when a session is built. */
   const [carried, setCarried] = useState<readonly CarriedExtension[]>([]);
@@ -1310,13 +1312,29 @@ function Conversation() {
     [resumeWaiting, troubleHere],
   );
 
-  /** Who advises, or nobody. Takes effect on the conversations already open. */
+  /**
+   * Who advises, or nobody.
+   *
+   * The second opinion is Pi's own addition rather than ours, and it has a
+   * permanent place in the model menu — so choosing somebody to advise is what
+   * puts it on this computer. Sending people to a package shelf to make a
+   * control they just used start working is not a choice, it is an errand.
+   */
   const selectAdvisor = useCallback(
     (choice: ModelChoice | null) => {
-      void bridge.selectAdvisor(choice).then((answer) => {
+      void (async () => {
+        if (choice !== null && !packsNow.current.some((one) => one.id === ADVISOR_PACKAGE)) {
+          const added = await bridge.addPackage(ADVISOR_PACKAGE);
+          if (!added.ok) {
+            troubleHere(added.trouble);
+            return;
+          }
+          setPacks(added.value);
+        }
+        const answer = await bridge.selectAdvisor(choice);
         if (answer.ok) setPreferences(answer.value);
         else troubleHere(answer.trouble);
-      });
+      })();
     },
     [troubleHere],
   );
@@ -5591,8 +5609,6 @@ function Conversation() {
               onSelectModel={selectModel}
               advisor={preferences.advisor}
               onAdvisor={selectAdvisor}
-              advisorInstalled={packs.some((one) => one.id === ADVISOR_PACKAGE)}
-              onAddMore={openAddMore}
               onConnect={openConnect}
               onThinking={changeThinking}
               skills={skills}

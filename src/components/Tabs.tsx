@@ -237,7 +237,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onNewCanvas }: 
           </button>
 
           {listing ? (
-            <div className="tabs__list" role="menu" aria-label={SAYS.more}>
+            <div className="tabs__list scroll--auto" role="menu" aria-label={SAYS.more}>
               {tabs.map((tab) => (
                 <button
                   key={tab.id}

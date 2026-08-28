@@ -2,50 +2,47 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as Pressed } from 'react';
 import {
   BLOCKS,
+  CARD,
   canvasWords,
-  MOST_PICTURES,
-  RUNGS,
   canWaitFor,
   change,
+  isArranged,
   isRunning,
   join,
   layOut,
   LOOPS,
+  MOST_PICTURES,
   notReady,
   place,
   placeLoop,
   remove,
+  RUNGS,
   specOf,
+  tidied,
   waitingOn,
   type Block,
-  type BlockPicture,
   type BlockKind,
-  type BlockModel,
+  type BlockPicture,
   type Flow,
+  type Placed,
 } from '../work/canvas';
-import type { HowFar } from '../agent/guard/policy';
-import type { ConnectionState, ModelChoice } from '../lib/ipc';
+import type { ConnectionState } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
-import './Sheet.css';
 import './CanvasView.css';
 
-/** The card, and the room around it. One size, so a chain reads as a rhythm. */
-const CARD = { width: 216, height: 112, gapX: 80, gapY: 24 } as const;
-const ZOOM = { least: 0.5, most: 1.4, step: 0.15 } as const;
+const ZOOM = { least: 0.4, most: 1.6, step: 0.15 } as const;
 /** How far out Fit is willing to go. Past this the words on a card stop being
- *  words, and a picture of four unreadable boxes is worth less than three
- *  readable ones with the fourth a pan away. */
-const READABLE = 0.8;
-/** Further than this and the hand meant to draw a line, not to press. */
+ *  words, and a picture of six unreadable boxes is worth less than four
+ *  readable ones with the rest a pan away. */
+const READABLE = 0.75;
+/** Further than this and the hand meant to move something, not to press it. */
 const MOVED = 4;
 
 type Props = {
   flow: Flow;
   /** The shape changed. Nothing runs; the shell keeps it. */
   onFlow: (flow: Flow) => void;
-  /** Put every block on the board, in order. */
   onStart: () => void;
-  /** Take what has not finished off it again. */
   onStop: () => void;
   /** Who could run a block, or null while the first answer is on its way. */
   connection: ConnectionState | null;
@@ -54,6 +51,28 @@ type Props = {
   onFull: (full: boolean) => void;
 };
 
+/** Where a line leaves one card and where it arrives at the next. */
+function leaves(block: { x: number; y: number }) {
+  return { x: block.x + CARD.width, y: block.y + CARD.height / 2 };
+}
+function arrives(block: { x: number; y: number }) {
+  return { x: block.x - 9, y: block.y + CARD.height / 2 };
+}
+
+/**
+ * One line between two cards.
+ *
+ * Out of the right of one and into the left of the next, however they are
+ * arranged. The bend grows with the gap so a long run is a gentle curve and a
+ * short one is nearly straight; a card dragged behind the one it follows gets a
+ * loop rather than a line through its own middle.
+ */
+function line(from: { x: number; y: number }, to: { x: number; y: number }): string {
+  const across = to.x - from.x;
+  const bend = across > 0 ? Math.max(30, across * 0.45) : Math.max(60, Math.abs(across) * 0.5 + 40);
+  return `M ${String(from.x)} ${String(from.y)} C ${String(from.x + bend)} ${String(from.y)}, ${String(to.x - bend)} ${String(to.y)}, ${String(to.x)} ${String(to.y)}`;
+}
+
 /* -------------------------------------------------------------------- marks */
 
 /** One mark per kind. A row of identical cards is a list; the mark is what
@@ -61,14 +80,21 @@ type Props = {
 function Mark({ kind }: { kind: BlockKind }) {
   const line = { stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   switch (kind) {
-    case 'look':
+    case 'plan':
       return (
         <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
           <circle cx="7" cy="7" r="4.25" {...line} />
           <path d="M10.2 10.2 13.5 13.5" {...line} />
         </svg>
       );
-    case 'helpers':
+    case 'research':
+      return (
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.75" {...line} />
+          <path d="M2.4 8h11.2M8 2.25c1.5 1.7 2.3 3.6 2.3 5.75S9.5 12.05 8 13.75c-1.5-1.7-2.3-3.6-2.3-5.75S6.5 3.95 8 2.25Z" {...line} />
+        </svg>
+      );
+    case 'subagents':
       return (
         <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
           <circle cx="4" cy="4.5" r="2" {...line} />
@@ -118,35 +144,43 @@ function Mark({ kind }: { kind: BlockKind }) {
 }
 
 /**
- * A flow: blocks you place, join up, and then start.
+ * A flow: blocks you place, arrange, join up, and then start.
  *
  * Three bands, which is the shape of every tool that composes rather than
  * reports: what you can place, what you have placed, and what the one you are
- * looking at is set to. Nothing here runs anything on its own — the board does
- * that, and only once Start has been pressed.
+ * looking at is set to. Nothing here runs anything on its own — a block is an
+ * ordinary turn in this canvas's own conversation, and only once Start has
+ * been pressed.
  */
 export default function CanvasView({ flow, onFlow, onStart, onStop, connection, full, onFull }: Props) {
   const surface = useRef<HTMLDivElement>(null);
 
   const [picked, setPicked] = useState<string | null>(null);
   const [at, setAt] = useState({ x: 0, y: 0, scale: 1 });
-  const [joining, setJoining] = useState<{ from: string; x: number; y: number; fromX: number; fromY: number } | null>(null);
+  const [joining, setJoining] = useState<{ from: string; x: number; y: number } | null>(null);
+  /** A card under the hand, drawn where the hand is rather than where it was
+   *  last saved: a block that only moves when you let go does not feel moved. */
+  const [moving, setMoving] = useState<{ id: string; x: number; y: number } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
 
   const panning = useRef<{ x: number; y: number; fromX: number; fromY: number } | null>(null);
+  const held = useRef<{ id: string; x: number; y: number; fromX: number; fromY: number } | null>(null);
   const dragged = useRef(false);
+  const touched = useRef(false);
 
-  const drawn = useMemo(() => layOut(flow), [flow]);
+  const laid = useMemo(() => layOut(flow), [flow]);
+  const drawn: readonly Placed[] = useMemo(
+    () => (moving === null ? laid.blocks : laid.blocks.map((one) => (one.id === moving.id ? { ...one, x: moving.x, y: moving.y } : one))),
+    [laid.blocks, moving],
+  );
   const going = isRunning(flow);
   const chosen = flow.blocks.find((one) => one.id === picked) ?? null;
   const missing = notReady(flow);
-
-  const done = drawn.blocks.filter((one) => one.state === 'done').length;
-  const busy = drawn.blocks.filter((one) => one.state === 'running').length;
+  const done = drawn.filter((one) => one.state === 'done').length;
+  const busy = drawn.filter((one) => one.state === 'running').length;
 
   /* Escape peels one layer: the panel first, then the way it is filling the
-     window. It never closes the canvas — that is the tab's own x, the same as
-     every other tab. */
+     window. It never closes the canvas — that is the tab's own x. */
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -170,46 +204,44 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
     return () => clearTimeout(timer);
   }, [refused]);
 
-  const where = useCallback(
-    (column: number, row: number) => ({
-      x: column * (CARD.width + CARD.gapX),
-      y: row * (CARD.height + CARD.gapY),
-    }),
-    [],
-  );
-
-  const size = useMemo(
-    () => ({
-      width: Math.max(1, drawn.columns) * (CARD.width + CARD.gapX) - CARD.gapX,
-      height: Math.max(1, drawn.rows) * (CARD.height + CARD.gapY) - CARD.gapY,
-    }),
-    [drawn.columns, drawn.rows],
+  /** Where a point on the screen is on the sheet underneath it. */
+  const onSheet = useCallback(
+    (clientX: number, clientY: number) => {
+      const box = surface.current?.getBoundingClientRect();
+      if (box === undefined) return { x: 0, y: 0 };
+      return { x: (clientX - box.left - at.x) / at.scale, y: (clientY - box.top - at.y) / at.scale };
+    },
+    [at.x, at.y, at.scale],
   );
 
   const fit = useCallback(() => {
     const box = surface.current?.getBoundingClientRect();
-    if (box === undefined) return;
-    const scale = Math.min(1, (box.width - 96) / size.width, (box.height - 96) / size.height);
+    if (box === undefined || laid.width === 0) return;
+    const scale = Math.min(1, (box.width - 96) / laid.width, (box.height - 120) / laid.height);
     const kept = Math.max(READABLE, Math.min(ZOOM.most, scale));
     setAt({
-      x: Math.max(48, (box.width - size.width * kept) / 2),
-      y: Math.max(48, (box.height - size.height * kept) / 2),
+      x: Math.max(40, (box.width - laid.width * kept) / 2),
+      y: Math.max(40, (box.height - laid.height * kept) / 2),
       scale: kept,
     });
-  }, [size.width, size.height]);
+  }, [laid.width, laid.height]);
 
-  /* Framed until somebody moves it, and theirs from then on. The bands either
-     side open and close under it, so a flow that never re-framed would be left
-     stranded off the edge by a panel it did not ask for. */
-  const touched = useRef(false);
+  /* Framed once there is something to frame, and theirs from then on. Tied to
+     a flag rather than to `fit`'s identity: `fit` changes whenever the drawing
+     grows, so dragging a card past the bottom edge re-centred the whole canvas
+     under the hand that was moving it. */
+  const framed = useRef(false);
   useEffect(() => {
-    if (touched.current || drawn.blocks.length === 0) return;
+    if (framed.current || touched.current || laid.blocks.length === 0) return;
+    framed.current = true;
     fit();
-  }, [fit, drawn.blocks.length]);
+  }, [fit, laid.blocks.length]);
 
   useEffect(() => {
     const node = surface.current;
     if (node === null) return;
+    // The bands either side open and close under it; a flow that never
+    // re-framed would be stranded off the edge by a panel it did not ask for.
     const watch = new ResizeObserver(() => {
       if (!touched.current) fit();
     });
@@ -218,10 +250,10 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
   }, [fit]);
 
   const zoom = useCallback((by: number, about?: { x: number; y: number }) => {
+    touched.current = true;
     setAt((was) => {
       const next = Math.max(ZOOM.least, Math.min(ZOOM.most, was.scale + by));
       if (next === was.scale) return was;
-      touched.current = true;
       const point = about ?? { x: 0, y: 0 };
       const ratio = next / was.scale;
       return { scale: next, x: point.x - (point.x - was.x) * ratio, y: point.y - (point.y - was.y) * ratio };
@@ -237,25 +269,22 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         const box = node.getBoundingClientRect();
-        zoom(event.deltaY > 0 ? -ZOOM.step : ZOOM.step, {
-          x: event.clientX - box.left,
-          y: event.clientY - box.top,
-        });
+        zoom(event.deltaY > 0 ? -ZOOM.step : ZOOM.step, { x: event.clientX - box.left, y: event.clientY - box.top });
         return;
       }
+      touched.current = true;
       setAt((was) => ({ ...was, x: was.x - event.deltaX, y: was.y - event.deltaY }));
     };
     node.addEventListener('wheel', wheeled, { passive: false });
     return () => node.removeEventListener('wheel', wheeled);
   }, [zoom]);
 
+  /* ------------------------------------------------------------- pointers */
+
   const startPan = useCallback(
     (event: Pressed) => {
       if (event.button !== 0) return;
-      // Capturing the pointer keeps a pan going past the window's edge, and it
-      // also retargets the release — so anything pressable inside the surface
-      // never sees its own click unless the pan declines to start.
-      if ((event.target as Element).closest('button, input, textarea, a, .canvas__card') !== null) return;
+      if ((event.target as Element).closest('button, input, textarea, select, a, .canvas__card') !== null) return;
       setPicked(null);
       touched.current = true;
       panning.current = { x: event.clientX, y: event.clientY, fromX: at.x, fromY: at.y };
@@ -264,37 +293,66 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
     [at.x, at.y],
   );
 
-  const movePan = useCallback(
+  const moved = useCallback(
     (event: Pressed) => {
       const box = surface.current?.getBoundingClientRect();
+
       if (joining !== null && box !== undefined) {
-        const x = event.clientX - box.left;
-        const y = event.clientY - box.top;
-        if (Math.abs(x - joining.fromX) > MOVED || Math.abs(y - joining.fromY) > MOVED) dragged.current = true;
-        setJoining({ ...joining, x, y });
+        dragged.current = true;
+        setJoining({ ...joining, x: event.clientX - box.left, y: event.clientY - box.top });
         return;
       }
-      const held = panning.current;
-      if (held === null) return;
-      setAt((was) => ({ ...was, x: held.fromX + (event.clientX - held.x), y: held.fromY + (event.clientY - held.y) }));
+
+      const card = held.current;
+      if (card !== null) {
+        const far = Math.abs(event.clientX - card.x) + Math.abs(event.clientY - card.y);
+        if (far > MOVED) {
+          dragged.current = true;
+          // Arranging is a decision about where things go, so the view stops
+          // being the canvas's to re-frame.
+          touched.current = true;
+        }
+        if (dragged.current) {
+          setMoving({
+            id: card.id,
+            x: Math.round(card.fromX + (event.clientX - card.x) / at.scale),
+            y: Math.round(card.fromY + (event.clientY - card.y) / at.scale),
+          });
+        }
+        return;
+      }
+
+      const pan = panning.current;
+      if (pan === null) return;
+      setAt((was) => ({ ...was, x: pan.fromX + (event.clientX - pan.x), y: pan.fromY + (event.clientY - pan.y) }));
     },
-    [joining],
+    [joining, at.scale],
   );
 
-  const lostIt = useCallback(() => {
-    panning.current = null;
-    setJoining(null);
-  }, []);
-
-  /** Let a line go. Over a block it becomes a wait; anywhere else it is dropped. */
-  const endJoin = useCallback(
+  const letGo = useCallback(
     (event: Pressed) => {
-      const from = joining?.from ?? null;
       panning.current = null;
+
+      // A card set down where it was left.
+      const card = held.current;
+      held.current = null;
+      if (card !== null) {
+        const spot = moving;
+        setMoving(null);
+        if (dragged.current && spot !== null) {
+          onFlow(change(flow, card.id, { at: { x: spot.x, y: spot.y } }));
+        } else {
+          setPicked((was) => (was === card.id ? null : card.id));
+        }
+        return;
+      }
+
+      // A line let go: over a card it becomes a wait, anywhere else it is dropped.
+      const from = joining?.from ?? null;
       setJoining(null);
       if (from === null) return;
-      const card = document.elementFromPoint(event.clientX, event.clientY)?.closest('.canvas__card');
-      const onto = card?.getAttribute('data-block') ?? null;
+      const over = document.elementFromPoint(event.clientX, event.clientY)?.closest('.canvas__card');
+      const onto = over?.getAttribute('data-block') ?? null;
       if (onto === null || onto === from) return;
       const said = canWaitFor(flow, onto, from);
       if (!said.ok) {
@@ -303,35 +361,44 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
       }
       onFlow(join(flow, onto, from));
     },
-    [joining, flow, onFlow],
+    [joining, moving, flow, onFlow],
   );
 
-  /** Place one, behind whatever is selected so a chain builds by pressing. */
+  const lost = useCallback(() => {
+    panning.current = null;
+    held.current = null;
+    setMoving(null);
+    setJoining(null);
+  }, []);
+
+  /* --------------------------------------------------------------- adding */
+
   const add = useCallback(
     (kind: BlockKind) => {
-      if (going) {
-        setRefused(canvasWords.running);
-        return;
-      }
       const next = place(flow, kind, picked);
-      onFlow(next);
-      setPicked(next.blocks[next.blocks.length - 1]?.id ?? null);
+      const made = next.blocks[next.blocks.length - 1];
+      if (made === undefined) return;
+      // Beside whatever it follows rather than on top of it, so a block added
+      // to an arranged canvas lands somewhere it can be seen.
+      const parent = picked === null ? null : (laid.blocks.find((one) => one.id === picked) ?? null);
+      const spot =
+        parent === null
+          ? null
+          : { x: parent.x + CARD.width + CARD.gapX, y: parent.y + waitingOn(flow, parent.id).length * (CARD.height + CARD.gapY) };
+      onFlow(spot === null ? next : change(next, made.id, { at: spot }));
+      setPicked(made.id);
     },
-    [flow, going, onFlow, picked],
+    [flow, laid.blocks, onFlow, picked],
   );
 
   const takeLoop = useCallback(
     (id: string) => {
-      if (going) {
-        setRefused(canvasWords.running);
-        return;
-      }
       const loop = LOOPS.find((one) => one.id === id);
       if (loop === undefined) return;
       if (flow.blocks.length === 0) touched.current = false;
       onFlow(placeLoop(flow, loop));
     },
-    [flow, going, onFlow],
+    [flow, onFlow],
   );
 
   return (
@@ -348,13 +415,19 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
         />
         <span className="canvas__count">{canvasWords.counted(flow.blocks.length, done, busy)}</span>
 
+        {isArranged(flow) ? (
+          <button type="button" className="canvas__tidy" onClick={() => onFlow(tidied(flow))} title={canvasWords.tidyNote}>
+            {canvasWords.tidyUp}
+          </button>
+        ) : null}
+
         <label className="canvas__far">
           <span className="canvas__farname">{canvasWords.howFar}</span>
           <select
             className="canvas__farpick"
-            value={flow.howFar}
+            value={flow.howFar === 'doing' ? 'doing' : 'asking'}
             disabled={going}
-            onChange={(event) => onFlow({ ...flow, howFar: event.target.value as HowFar })}
+            onChange={(event) => onFlow({ ...flow, howFar: event.target.value === 'doing' ? 'doing' : 'asking' })}
           >
             {RUNGS.map((rung) => (
               <option key={rung} value={rung}>
@@ -403,7 +476,6 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
 
       <div className={`canvas__bands ${chosen === null ? '' : 'canvas__bands--open'}`}>
         <Palette
-          going={going}
           onAdd={add}
           onLoop={takeLoop}
           folded={chosen !== null}
@@ -414,51 +486,38 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
           className="canvas__surface"
           ref={surface}
           onPointerDown={startPan}
-          onPointerMove={movePan}
-          onPointerUp={endJoin}
-          onPointerCancel={lostIt}
-          onLostPointerCapture={lostIt}
-          style={{ '--canvas-x': `${String(at.x)}px`, '--canvas-y': `${String(at.y)}px`, '--canvas-dot': `${String(20 * at.scale)}px` } as CSSProperties}
+          onPointerMove={moved}
+          onPointerUp={letGo}
+          onPointerCancel={lost}
+          onLostPointerCapture={lost}
+          style={{
+            '--canvas-x': `${String(at.x)}px`,
+            '--canvas-y': `${String(at.y)}px`,
+            '--canvas-dot': `${String(Math.round(20 * at.scale))}px`,
+          } as CSSProperties}
         >
-          {drawn.blocks.length === 0 ? (
+          {laid.blocks.length === 0 ? (
             <Nothing onLoop={takeLoop} />
           ) : (
             <div
               className="canvas__sheet"
-              style={{
-                width: size.width,
-                height: size.height,
-                transform: `translate(${String(at.x)}px, ${String(at.y)}px) scale(${String(at.scale)})`,
-              }}
+              style={{ transform: `translate(${String(at.x)}px, ${String(at.y)}px) scale(${String(at.scale)})` }}
             >
-              <svg
-                className="canvas__lines"
-                width={size.width}
-                height={size.height}
-                viewBox={`0 0 ${String(size.width)} ${String(size.height)}`}
-                aria-hidden="true"
-              >
+              <svg className="canvas__lines" aria-hidden="true" overflow="visible">
                 <defs>
-                  <marker id="canvas-tip" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+                  <marker id="canvas-tip" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto">
                     <path d="M1.5 1.5 5.5 4 1.5 6.5" fill="none" stroke="context-stroke" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                   </marker>
                 </defs>
-                {drawn.blocks.map((block) => {
-                  const parent = drawn.blocks.find((one) => one.id === block.after);
+                {drawn.map((block) => {
+                  const parent = drawn.find((one) => one.id === block.after);
                   if (parent === undefined) return null;
-                  const from = where(parent.column, parent.row);
-                  const to = where(block.column, block.row);
-                  const x1 = from.x + CARD.width;
-                  const y1 = from.y + CARD.height / 2;
-                  const x2 = to.x - 8;
-                  const y2 = to.y + CARD.height / 2;
-                  const bend = Math.max(30, (x2 - x1) / 2);
                   const live = block.state === 'running';
                   return (
                     <path
                       key={`${parent.id}-${block.id}`}
                       className={`canvas__line ${live ? 'canvas__line--live' : ''}`}
-                      d={`M ${String(x1)} ${String(y1)} C ${String(x1 + bend)} ${String(y1)}, ${String(x2 - bend)} ${String(y2)}, ${String(x2)} ${String(y2)}`}
+                      d={line(leaves(parent), arrives(block))}
                       fill="none"
                       markerEnd="url(#canvas-tip)"
                     />
@@ -466,40 +525,52 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
                 })}
               </svg>
 
-              {drawn.blocks.map((block) => (
+              {drawn.map((block) => (
                 <Card
                   key={block.id}
                   block={block}
-                  at={where(block.column, block.row)}
                   behind={waitingOn(flow, block.id).length}
                   picked={picked === block.id}
                   target={joining !== null && joining.from !== block.id}
-                  onPick={() => setPicked((was) => (was === block.id ? null : block.id))}
+                  held={moving?.id === block.id}
+                  onTake={(event) => {
+                    dragged.current = false;
+                    held.current = { id: block.id, x: event.clientX, y: event.clientY, fromX: block.x, fromY: block.y };
+                  }}
                   onJoinFrom={(event) => {
+                    const spot = onSheet(event.clientX, event.clientY);
+                    void spot;
                     const box = surface.current?.getBoundingClientRect();
                     if (box === undefined) return;
-                    const x = event.clientX - box.left;
-                    const y = event.clientY - box.top;
                     dragged.current = false;
-                    setJoining({ from: block.id, x, y, fromX: x, fromY: y });
+                    setJoining({ from: block.id, x: event.clientX - box.left, y: event.clientY - box.top });
                   }}
                 />
               ))}
             </div>
           )}
 
-          {joining === null ? null : <Trailing from={joining} where={where} drawn={drawn} at={at} />}
+          {joining === null ? null : <Trailing from={joining} blocks={drawn} at={at} />}
 
           <div className="canvas__foot">
             {refused === null ? (
-              <span className="canvas__hint">{drawn.blocks.length === 0 ? '' : canvasWords.connect}</span>
+              <span className="canvas__hint">{laid.blocks.length === 0 ? '' : canvasWords.connect}</span>
             ) : (
               <span className="canvas__refused" role="status">{refused}</span>
             )}
-            {drawn.blocks.length === 0 ? null : (
+            {laid.blocks.length === 0 ? null : (
               <div className="canvas__zoom">
                 <button type="button" className="canvas__zoombtn" onClick={() => zoom(-ZOOM.step)} aria-label="Further out">−</button>
-                <button type="button" className="canvas__fit" onClick={fit}>Fit</button>
+                <button
+                  type="button"
+                  className="canvas__fit"
+                  onClick={() => {
+                    touched.current = false;
+                    fit();
+                  }}
+                >
+                  Fit
+                </button>
                 <button type="button" className="canvas__zoombtn" onClick={() => zoom(ZOOM.step)} aria-label="Closer">+</button>
               </div>
             )}
@@ -528,13 +599,11 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
 /* ---------------------------------------------------------------- palette */
 
 function Palette({
-  going,
   folded,
   quiet,
   onAdd,
   onLoop,
 }: {
-  going: boolean;
   folded: boolean;
   /** The first screen is already offering the loops, whole and readable. Two
    *  lists of the same three is one too many. */
@@ -543,21 +612,12 @@ function Palette({
   onLoop: (id: string) => void;
 }) {
   return (
-    <aside
-      className={`canvas__palette ${folded ? 'canvas__palette--folded' : ''}`}
-      aria-label={canvasWords.blocks}
-    >
+    <aside className={`canvas__palette ${folded ? 'canvas__palette--folded' : ''}`} aria-label={canvasWords.blocks}>
       <h2 className="canvas__band">{canvasWords.blocks}</h2>
       <ul className="canvas__list">
         {BLOCKS.map((spec) => (
           <li key={spec.kind}>
-            <button
-              type="button"
-              className="canvas__pick"
-              onClick={() => onAdd(spec.kind)}
-              disabled={going}
-              title={spec.note}
-            >
+            <button type="button" className="canvas__pick" onClick={() => onAdd(spec.kind)} title={spec.note}>
               <span className="canvas__pickmark" aria-hidden="true">
                 <Mark kind={spec.kind} />
               </span>
@@ -574,13 +634,7 @@ function Palette({
       <ul className="canvas__list">
         {(folded || quiet === true ? [] : LOOPS).map((loop) => (
           <li key={loop.id}>
-            <button
-              type="button"
-              className="canvas__pick canvas__pick--loop"
-              onClick={() => onLoop(loop.id)}
-              disabled={going}
-              title={loop.note}
-            >
+            <button type="button" className="canvas__pick canvas__pick--loop" onClick={() => onLoop(loop.id)} title={loop.note}>
               <span className="canvas__picktext">
                 <span className="canvas__pickname">{loop.name}</span>
                 <span className="canvas__shape" aria-hidden="true">
@@ -603,32 +657,42 @@ function Palette({
 
 function Card({
   block,
-  at,
   behind,
   picked,
   target,
-  onPick,
+  held,
+  onTake,
   onJoinFrom,
 }: {
-  block: Block & { column: number; row: number; state: import('../work/canvas').BlockState };
-  at: { x: number; y: number };
+  block: Placed;
   behind: number;
   picked: boolean;
   target: boolean;
-  onPick: () => void;
+  held: boolean;
+  onTake: (event: Pressed) => void;
   onJoinFrom: (event: Pressed) => void;
 }) {
   const spec = specOf(block.kind);
   const says = block.says.trim();
   return (
     <div
-      className={`canvas__card canvas__card--${block.state}${picked ? ' canvas__card--picked' : ''}${target ? ' canvas__card--target' : ''}`}
+      className={`canvas__card canvas__card--${block.state}${picked ? ' canvas__card--picked' : ''}${target ? ' canvas__card--target' : ''}${held ? ' canvas__card--held' : ''}`}
       data-block={block.id}
-      style={{ left: at.x, top: at.y, width: CARD.width, height: CARD.height, '--canvas-card': `${String(CARD.height)}px` } as CSSProperties}
+      style={{ left: block.x, top: block.y, width: CARD.width, height: CARD.height, '--canvas-card': `${String(CARD.height)}px` } as CSSProperties}
     >
       {block.state === 'running' ? <span className="canvas__sweep" aria-hidden="true" /> : null}
 
-      <button type="button" className="canvas__face" onClick={onPick} aria-pressed={picked}>
+      <button
+        type="button"
+        className="canvas__face"
+        aria-pressed={picked}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          onTake(event);
+        }}
+      >
         <span className="canvas__head">
           <span className="canvas__mark" aria-hidden="true">
             <Mark kind={block.kind} />
@@ -636,10 +700,15 @@ function Card({
           <span className="canvas__kind">{spec.name}</span>
           <span className="canvas__state">{canvasWords.states[block.state]}</span>
         </span>
-        <span className="canvas__says">{says === '' ? spec.needsWords ? canvasWords.saySomething : spec.note : says}</span>
-        {block.model === null && behind === 0 ? null : (
+        <span className="canvas__says">
+          {says === '' ? (spec.needsWords ? canvasWords.saySomething : spec.note) : says}
+        </span>
+        {block.model === null && behind === 0 && (block.pictures ?? []).length === 0 ? null : (
           <span className="canvas__foots">
             {block.model === null ? null : <span className="canvas__model">{block.model.modelId}</span>}
+            {(block.pictures ?? []).length === 0 ? null : (
+              <span className="canvas__shots">{String((block.pictures ?? []).length)} shown</span>
+            )}
             {behind === 0 ? null : <span className="canvas__behind">{String(behind)} after</span>}
           </span>
         )}
@@ -649,6 +718,7 @@ function Card({
         type="button"
         className="canvas__handle"
         onPointerDown={(event) => {
+          if (event.button !== 0) return;
           event.stopPropagation();
           event.currentTarget.setPointerCapture(event.pointerId);
           onJoinFrom(event);
@@ -665,25 +735,20 @@ function Card({
 /** The line while it is still in somebody's hand. */
 function Trailing({
   from,
-  where,
-  drawn,
+  blocks,
   at,
 }: {
   from: { from: string; x: number; y: number };
-  where: (column: number, row: number) => { x: number; y: number };
-  drawn: ReturnType<typeof layOut>;
+  blocks: readonly Placed[];
   at: { x: number; y: number; scale: number };
 }) {
-  const parent = drawn.blocks.find((one) => one.id === from.from);
+  const parent = blocks.find((one) => one.id === from.from);
   if (parent === undefined) return null;
-  const spot = where(parent.column, parent.row);
-  const x1 = at.x + (spot.x + CARD.width) * at.scale;
-  const y1 = at.y + (spot.y + CARD.height / 2) * at.scale;
-  const bend = Math.max(30, Math.abs(from.x - x1) / 2);
+  const start = leaves(parent);
   return (
     <svg className="canvas__trailing" aria-hidden="true">
       <path
-        d={`M ${String(x1)} ${String(y1)} C ${String(x1 + bend)} ${String(y1)}, ${String(from.x - bend)} ${String(from.y)}, ${String(from.x)} ${String(from.y)}`}
+        d={line({ x: at.x + start.x * at.scale, y: at.y + start.y * at.scale }, { x: from.x, y: from.y })}
         fill="none"
       />
     </svg>
@@ -755,16 +820,17 @@ function Inspector({
     return all;
   }, [connection]);
 
+  /* Grouped and folded away. An account with four providers connected offers
+     forty models, and forty rows in a panel is a list you scroll past rather
+     than a choice you make. */
   const bands = useMemo(() => {
     const tiered = byTier(offers);
-    if (tiered === null) return [{ name: '', models: offers }];
+    if (tiered === null) return [{ name: canvasWords.everyModel, models: offers }];
     return tiered.map(([tier, models]) => ({ name: tierNames[tier].name, models }));
   }, [offers]);
 
-  const sameAs = (one: { providerId: string; modelId: string }, other: BlockModel) =>
-    other !== null && other.providerId === one.providerId && other.modelId === one.modelId;
-
   const waits = flow.blocks.find((one) => one.id === block.after) ?? null;
+  const shown = block.pictures ?? [];
 
   return (
     <aside className="canvas__inspector" aria-label={spec.name}>
@@ -786,16 +852,61 @@ function Inspector({
           id="canvas-says"
           ref={box}
           className="canvas__isays"
-          rows={5}
+          rows={6}
           value={block.says}
           disabled={going}
           placeholder={spec.needsWords ? 'Tighten the nav on mobile' : spec.says}
           onChange={(event) => onChange({ says: event.target.value })}
         />
 
-        <h3 className="canvas__iband">{canvasWords.shows}</h3>
+        <label className="canvas__ilabel" htmlFor="canvas-model">{canvasWords.runBy}</label>
+        <select
+          id="canvas-model"
+          className="canvas__ipick"
+          disabled={going}
+          value={block.model === null ? '' : `${block.model.providerId}/${block.model.modelId}`}
+          onChange={(event) => {
+            const [providerId, ...rest] = event.target.value.split('/');
+            onChange({
+              model: event.target.value === '' || providerId === undefined
+                ? null
+                : { providerId, modelId: rest.join('/') },
+            });
+          }}
+        >
+          <option value="">{canvasWords.whichever}</option>
+          {bands.map((band) => (
+            <optgroup key={band.name} label={band.name}>
+              {band.models.map((one) => (
+                <option key={`${one.providerId}/${one.modelId}`} value={`${one.providerId}/${one.modelId}`}>
+                  {one.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+
+        <label className="canvas__ilabel" htmlFor="canvas-far">{canvasWords.howFar}</label>
+        <select
+          id="canvas-far"
+          className="canvas__ipick"
+          disabled={going}
+          value={block.howFar ?? ''}
+          onChange={(event) =>
+            onChange({ howFar: event.target.value === '' ? undefined : (event.target.value as 'asking' | 'doing') })
+          }
+        >
+          <option value="">{canvasWords.sameAsFlow}</option>
+          {RUNGS.map((rung) => (
+            <option key={rung} value={rung}>
+              {canvasWords.rungs[rung]}
+            </option>
+          ))}
+        </select>
+
+        <span className="canvas__ilabel">{canvasWords.shows}</span>
         <div className="canvas__ishots">
-          {(block.pictures ?? []).map((picture, at) => (
+          {shown.map((picture, at) => (
             <span className="canvas__ishot" key={`${picture.name}-${String(at)}`}>
               <img src={`data:${picture.mimeType};base64,${picture.bytes}`} alt={picture.name} />
               <button
@@ -803,9 +914,7 @@ function Inspector({
                 className="canvas__ishotoff"
                 disabled={going}
                 aria-label={`Take ${picture.name} off this block`}
-                onClick={() =>
-                  onChange({ pictures: (block.pictures ?? []).filter((_, index) => index !== at) })
-                }
+                onClick={() => onChange({ pictures: shown.filter((_, index) => index !== at) })}
               >
                 <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
                   <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -813,25 +922,22 @@ function Inspector({
               </button>
             </span>
           ))}
-          {(block.pictures ?? []).length >= MOST_PICTURES ? null : (
+          {shown.length >= MOST_PICTURES ? null : (
             <label className={`canvas__iadd ${going ? 'canvas__iadd--off' : ''}`}>
               <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden="true">
                 <path d="M7 2.5v9M2.5 7h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
               </svg>
-              <span className="canvas__iaddsays">{canvasWords.addPicture}</span>
               <input
                 type="file"
                 accept="image/*"
                 multiple
                 disabled={going}
                 onChange={(event) => {
-                  const chosen = [...(event.target.files ?? [])];
+                  const files = [...(event.target.files ?? [])];
                   event.target.value = '';
-                  void takePictures(chosen).then((taken) => {
+                  void takePictures(files).then((taken) => {
                     if (taken.length === 0) return;
-                    onChange({
-                      pictures: [...(block.pictures ?? []), ...taken].slice(0, MOST_PICTURES),
-                    });
+                    onChange({ pictures: [...shown, ...taken].slice(0, MOST_PICTURES) });
                   });
                 }}
               />
@@ -839,67 +945,7 @@ function Inspector({
           )}
         </div>
 
-        <h3 className="canvas__iband">{canvasWords.runBy}</h3>
-        <div className="canvas__imodels" role="radiogroup" aria-label={canvasWords.runBy}>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={block.model === null}
-            className={`canvas__imodel ${block.model === null ? 'canvas__imodel--on' : ''}`}
-            disabled={going}
-            onClick={() => onChange({ model: null })}
-          >
-            {canvasWords.whichever}
-          </button>
-          {bands.map((band) => (
-            <div key={band.name || 'all'} className="canvas__itier">
-              {band.name === '' ? null : <span className="canvas__itiername">{band.name}</span>}
-              {band.models.map((one) => (
-                <button
-                  key={`${one.providerId}/${one.modelId}`}
-                  type="button"
-                  role="radio"
-                  aria-checked={sameAs(one, block.model)}
-                  className={`canvas__imodel ${sameAs(one, block.model) ? 'canvas__imodel--on' : ''}`}
-                  disabled={going}
-                  title={`${one.providerName} · ${one.modelId}`}
-                  onClick={() => onChange({ model: { providerId: one.providerId, modelId: one.modelId } })}
-                >
-                  {one.label}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-
-        <h3 className="canvas__iband">{canvasWords.howFar}</h3>
-        <div className="canvas__imodels" role="radiogroup" aria-label={canvasWords.howFar}>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={block.howFar === undefined}
-            className={`canvas__imodel ${block.howFar === undefined ? 'canvas__imodel--on' : ''}`}
-            disabled={going}
-            onClick={() => onChange({ howFar: undefined })}
-          >
-            {canvasWords.sameAsFlow}
-          </button>
-          {RUNGS.map((rung) => (
-            <button
-              key={rung}
-              type="button"
-              role="radio"
-              aria-checked={block.howFar === rung}
-              className={`canvas__imodel ${block.howFar === rung ? 'canvas__imodel--on' : ''}`}
-              disabled={going}
-              onClick={() => onChange({ howFar: rung })}
-            >
-              {canvasWords.rungs[rung]}
-            </button>
-          ))}
-        </div>
-
-        <h3 className="canvas__iband">{canvasWords.waitsFor}</h3>
+        <span className="canvas__ilabel">{canvasWords.waitsFor}</span>
         <p className="canvas__iwaits">{waits === null ? canvasWords.nothing : specOf(waits.kind).name}</p>
 
         <button type="button" className="canvas__iremove" onClick={onRemove} disabled={going}>
@@ -937,5 +983,3 @@ function Nothing({ onLoop }: { onLoop: (id: string) => void }) {
     </div>
   );
 }
-
-export type { ModelChoice };

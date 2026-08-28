@@ -588,6 +588,27 @@ export default function Sidebar({
               @
             </button>
           )}
+          {onCanvas === undefined ? null : (
+            <button
+              type="button"
+              className="shelf__act"
+              onClick={onCanvas}
+              aria-label="Open the canvas"
+              data-tip="Canvas"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="1.5" y="5.5" width="4.5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+                <rect x="10" y="1.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+                <rect x="10" y="9.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+                <path
+                  d="M6 8h2a1.5 1.5 0 0 0 1.5-1.5V6.25M6 8h2a1.5 1.5 0 0 1 1.5 1.5v0.25"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
           {onHistory === undefined ? null : (
             <button
               type="button"

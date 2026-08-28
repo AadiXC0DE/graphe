@@ -20,11 +20,6 @@ type Props = {
    *  it. Without `onAdvisor` no second opinion is offered at all. */
   advisor?: ModelChoice | null;
   onAdvisor?: (choice: ModelChoice | null) => void;
-  /** Whether the addition that does the advising is here. False still shows the
-   *  section and says so, rather than offering a choice that would do nothing. */
-  advisorInstalled?: boolean;
-  /** Open the shelf, where the addition is. */
-  onAddMore?: () => void;
   /** Lets a native page step aside while this renderer popover is open. */
   onOpenChange?: (open: boolean) => void;
   /** Quieter, for the strip along the top where it sits beside the project's
@@ -94,8 +89,6 @@ export default function ThinkingWith({
   bare,
   advisor = null,
   onAdvisor,
-  advisorInstalled,
-  onAddMore,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -174,8 +167,10 @@ export default function ThinkingWith({
 
   /* Without the addition nothing is advising, whatever was chosen before it was
      removed. */
-  const advisorWorks = advisorInstalled !== false;
-  const advisingNow = advisorWorks && advising !== null;
+  /* The list is always offered. The addition it needs is Pi's, and a control
+     that lives permanently in this menu cannot send somebody off to a package
+     shelf to make it work — choosing a model is what adds it. */
+  const advisingNow = advising !== null;
 
   /* A single band of models is a choice between equals, so the section stays out
      of the way until the account has a step up in it. */
@@ -405,7 +400,7 @@ export default function ThinkingWith({
 
               <p className="thinking__said">{advisorWords.note}</p>
 
-              {advisorWorks ? (
+
                 <>
                   {/* Who does the work was chosen in the view behind this one, so
                       it is said here rather than offered again. */}
@@ -476,26 +471,6 @@ export default function ThinkingWith({
 
                   <p className="thinking__said thinking__said--foot">{advisorWords.advisesNote}</p>
                 </>
-              ) : (
-                /* Said before anything is offered: a list of models that would
-                   quietly do nothing is worse than no list. */
-                <>
-                  <p className="thinking__said thinking__said--warn">{advisorWords.missing}</p>
-                  {onAddMore === undefined ? null : (
-                    <button
-                      type="button"
-                      className="thinking__more"
-                      onClick={() => {
-                        setOpen(false);
-                        onAddMore();
-                      }}
-                    >
-                      {advisorWords.missingAdd}
-                      <span aria-hidden="true"> ›</span>
-                    </button>
-                  )}
-                </>
-              )}
             </>
           ) : chosen !== null && current !== null ? (
             <>

@@ -8,7 +8,9 @@
   bottom: 0;
   left: var(--shelf-take, 0px);
   right: var(--overview-take, 0px);
-  z-index: 4;
+  /* Under the strip along the top and everything that hangs off it — the
+     project's own menu drops through this space and must not land behind. */
+  z-index: 1;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -73,6 +75,18 @@
   align-items: center;
   gap: var(--space-2);
   margin-left: auto;
+}
+
+/* Only once somebody has moved something. Offering to tidy a canvas nobody
+   arranged is offering to undo nothing. */
+.canvas__tidy {
+  flex: none;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  transition: color var(--dur-micro) var(--ease-hover);
 }
 
 .canvas__farname {
@@ -158,7 +172,7 @@
   overflow-y: auto;
   border-right: 1px solid var(--border);
   scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-color: var(--border-control) transparent;
 }
 
 .canvas__band {
@@ -306,6 +320,10 @@
   position: absolute;
   top: 0;
   left: 0;
+  /* No size of its own: a card can be dragged anywhere, so the lines behind
+     them are drawn without clipping and the sheet is only an origin. */
+  width: 0;
+  height: 0;
   transform-origin: 0 0;
 }
 
@@ -317,6 +335,8 @@
   position: absolute;
   top: 0;
   left: 0;
+  width: 1px;
+  height: 1px;
   overflow: visible;
   pointer-events: none;
 }
@@ -387,9 +407,24 @@
   flex-direction: column;
   gap: var(--space-1);
   width: 100%;
+  height: 100%;
   padding: var(--space-3);
   text-align: left;
   border-radius: var(--radius-lg);
+  cursor: grab;
+  touch-action: none;
+}
+
+.canvas__face:active {
+  cursor: grabbing;
+}
+
+/* Off the sheet while it is in the hand, so it passes over its neighbours
+   rather than through them. */
+.canvas__card--held {
+  z-index: 4;
+  box-shadow: var(--shadow-md);
+  cursor: grabbing;
 }
 
 .canvas__head {
@@ -469,6 +504,10 @@
 
 .canvas__behind {
   margin-left: auto;
+  flex: none;
+}
+
+.canvas__shots {
   flex: none;
 }
 
@@ -729,7 +768,7 @@
   gap: var(--space-2);
   padding: var(--space-4);
   scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-color: var(--border-control) transparent;
 }
 
 .canvas__ilabel,
@@ -742,6 +781,11 @@
   color: var(--text-faint);
 }
 
+.canvas__ilabel + .canvas__isays,
+.canvas__ilabel + .canvas__ipick {
+  margin-top: calc(var(--space-2) * -1 + 2px);
+}
+
 .canvas__iband {
   margin-top: var(--space-3);
 }
@@ -749,7 +793,9 @@
 /* Room to write a sentence in, because what a block is asked *is* the block —
    a one-line field says the instruction is an afterthought. */
 .canvas__isays {
+  flex: none;
   width: 100%;
+  min-height: 108px;
   padding: var(--space-2);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
@@ -886,6 +932,25 @@
 .canvas__imodel:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* One row each, folded away. Forty models is a list you scroll past rather
+   than a choice you make. */
+.canvas__ipick {
+  flex: none;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.canvas__ipick:disabled {
+  opacity: 0.6;
 }
 
 .canvas__iwaits {
@@ -1057,6 +1122,10 @@
   .canvas__iadd:not(.canvas__iadd--off):hover {
     border-color: var(--accent);
     color: var(--accent);
+  }
+
+  .canvas__tidy:hover {
+    color: var(--text);
   }
 
   .canvas__ishut:hover,

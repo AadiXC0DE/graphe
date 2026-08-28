@@ -14,9 +14,11 @@ import {
   canStart,
   canvasWords,
   canWaitFor,
+  CARD,
   change,
   newFlow,
   helperWords,
+  isArranged,
   isRunning,
   join,
   layOut,
@@ -32,6 +34,7 @@ import {
   reset,
   runOrder,
   specOf,
+  tidied,
   waitingOn,
   withFlow,
   withoutFlow,
@@ -73,7 +76,7 @@ describe('placing blocks', () => {
   });
 
   it('gives every block an id nobody else has', () => {
-    const flow = drawn('work', 'work', 'work');
+    const flow = drawn('custom', 'custom', 'custom');
     expect(new Set(idsOf(flow)).size).toBe(3);
   });
 
@@ -83,18 +86,18 @@ describe('placing blocks', () => {
   });
 
   it('leaves the blocks that need saying what about empty on purpose', () => {
-    const flow = drawn('work');
+    const flow = drawn('custom');
     expect(flow.blocks[0]?.says).toBe('');
-    expect(notReady(flow).map((one) => one.kind)).toEqual(['work']);
+    expect(notReady(flow).map((one) => one.kind)).toEqual(['custom']);
   });
 
   it('refuses to place one behind a block nobody has', () => {
-    const flow = place(newFlow(), 'work', 'nowhere');
+    const flow = place(newFlow(), 'custom', 'nowhere');
     expect(flow.blocks[0]?.after).toBeNull();
   });
 
   it('changes only the block it was asked about', () => {
-    const flow = drawn('work', 'review');
+    const flow = drawn('custom', 'review');
     const first = flow.blocks[0]!.id;
     const next = change(flow, first, { says: 'Tighten the nav' });
     expect(next.blocks[0]?.says).toBe('Tighten the nav');
@@ -104,7 +107,7 @@ describe('placing blocks', () => {
 
 describe('taking one out', () => {
   it('hands what was waiting on it to what it was waiting for', () => {
-    const flow = chained('look', 'work', 'review');
+    const flow = chained('plan', 'custom', 'review');
     const [look, work, review] = idsOf(flow);
     const next = remove(flow, work!);
     expect(idsOf(next)).toEqual([look, review]);
@@ -112,13 +115,13 @@ describe('taking one out', () => {
   });
 
   it('frees the head of a chain rather than stranding the rest', () => {
-    const flow = chained('look', 'work');
+    const flow = chained('plan', 'custom');
     const next = remove(flow, idsOf(flow)[0]!);
     expect(next.blocks[0]?.after).toBeNull();
   });
 
   it('does nothing for a block nobody has', () => {
-    const flow = drawn('work');
+    const flow = drawn('custom');
     expect(remove(flow, 'nowhere')).toEqual(flow);
   });
 });
@@ -129,21 +132,21 @@ describe('taking one out', () => {
 
 describe('whether one block may wait for another', () => {
   it('allows an ordinary wait, and allows waiting for nothing', () => {
-    const flow = drawn('work', 'review');
+    const flow = drawn('custom', 'review');
     const [work, review] = idsOf(flow);
     expect(canWaitFor(flow, review!, work!)).toEqual({ ok: true });
     expect(canWaitFor(flow, review!, null)).toEqual({ ok: true });
   });
 
   it('refuses a block waiting for itself', () => {
-    const flow = drawn('work');
+    const flow = drawn('custom');
     const said = canWaitFor(flow, idsOf(flow)[0]!, idsOf(flow)[0]!);
     expect(said.ok).toBe(false);
     expect(said.ok === false && said.because).toBe(canvasWords.itself);
   });
 
   it('refuses a loop, however long the way round', () => {
-    const flow = chained('look', 'work', 'review');
+    const flow = chained('plan', 'custom', 'review');
     const [look, , review] = idsOf(flow);
     const said = canWaitFor(flow, look!, review!);
     expect(said.ok).toBe(false);
@@ -151,12 +154,12 @@ describe('whether one block may wait for another', () => {
   });
 
   it('refuses a block nobody has', () => {
-    const flow = drawn('work');
+    const flow = drawn('custom');
     expect(canWaitFor(flow, idsOf(flow)[0]!, 'nowhere').ok).toBe(false);
   });
 
   it('leaves the flow alone when the join was refused', () => {
-    const flow = chained('look', 'work');
+    const flow = chained('plan', 'custom');
     const [look, work] = idsOf(flow);
     expect(join(flow, look!, work!)).toEqual(flow);
     expect(join(flow, work!, work!)).toEqual(flow);
@@ -222,24 +225,24 @@ describe('whether it can start', () => {
   });
 
   it('will not start while a block has not been said what about', () => {
-    const flow = drawn('work');
+    const flow = drawn('custom');
     expect(canStart(flow)).toBe(false);
     expect(canStart(change(flow, flow.blocks[0]!.id, { says: 'Tighten the nav' }))).toBe(true);
   });
 
   it('starts happily on blocks that came with their own words', () => {
-    expect(canStart(chained('look', 'checks', 'review'))).toBe(true);
+    expect(canStart(chained('plan', 'checks', 'review'))).toBe(true);
   });
 
   it('will not start twice over', () => {
-    const flow = chained('look', 'review');
+    const flow = chained('plan', 'review');
     const going = { ...flow, running: flow.blocks[0]!.id };
     expect(isRunning(going)).toBe(true);
     expect(canStart(going)).toBe(false);
   });
 
   it('is a draft again once it has been reset', () => {
-    const drew = chained('look', 'review');
+    const drew = chained('plan', 'review');
     const going: Flow = { ...drew, startedAt: 1, running: drew.blocks[1]!.id, done: [drew.blocks[0]!.id] };
     const back = reset(going);
     expect(isRunning(back)).toBe(false);
@@ -253,32 +256,32 @@ describe('whether it can start', () => {
 
 describe('what comes next', () => {
   it('starts with the one that waits for nothing', () => {
-    const flow = chained('look', 'work', 'review');
+    const flow = chained('plan', 'custom', 'review');
     expect(nextUp(flow)?.id).toBe(flow.blocks[0]!.id);
   });
 
   it('moves on once the one before it has finished', () => {
-    const flow = chained('look', 'work', 'review');
+    const flow = chained('plan', 'custom', 'review');
     const [look, work] = flow.blocks.map((one) => one.id);
     expect(nextUp({ ...flow, done: [look!] })?.id).toBe(work);
   });
 
   it('never sends what follows a block that did not happen', () => {
-    const flow = chained('look', 'work', 'review');
+    const flow = chained('plan', 'custom', 'review');
     // Only the second is done, which cannot happen — but if it did, the third
     // must not go: it would be working against a change nobody made.
     expect(nextUp({ ...flow, done: [flow.blocks[1]!.id] })?.id).toBe(flow.blocks[0]!.id);
   });
 
   it('has nothing left to send once everything has finished', () => {
-    const flow = chained('look', 'review');
+    const flow = chained('plan', 'review');
     expect(nextUp({ ...flow, done: flow.blocks.map((one) => one.id) })).toBeNull();
   });
 });
 
 describe('the order it goes on the board in', () => {
   it('never puts a block before the one it waits for', () => {
-    const flow = chained('look', 'work', 'checks', 'review');
+    const flow = chained('plan', 'custom', 'checks', 'review');
     const order = runOrder(flow).map((one) => one.id);
     for (const block of flow.blocks) {
       if (block.after === null) continue;
@@ -287,9 +290,9 @@ describe('the order it goes on the board in', () => {
   });
 
   it('holds for a fork as well as a chain', () => {
-    let flow = place(newFlow(), 'look');
+    let flow = place(newFlow(), 'plan');
     const head = flow.blocks[0]!.id;
-    flow = place(flow, 'work', head);
+    flow = place(flow, 'custom', head);
     flow = place(flow, 'checks', head);
     const order = runOrder(flow).map((one) => one.id);
     expect(order[0]).toBe(head);
@@ -299,7 +302,7 @@ describe('the order it goes on the board in', () => {
 
 describe('what each block is asked', () => {
   it('sends what somebody typed, as they typed it', () => {
-    const flow = drawn('work');
+    const flow = drawn('custom');
     const said = change(flow, flow.blocks[0]!.id, { says: '  Tighten the nav  ' });
     expect(asksOf(said.blocks[0]!)).toBe('Tighten the nav');
   });
@@ -311,7 +314,7 @@ describe('what each block is asked', () => {
   });
 
   it('asks the helpers block to split the work and bring it back together', () => {
-    const drew = drawn('helpers');
+    const drew = drawn('subagents');
     const flow = change(drew, drew.blocks[0]!.id, { says: 'every page' });
     expect(asksOf(flow.blocks[0]!)).toBe(helperWords('every page'));
     expect(asksOf(flow.blocks[0]!)).toContain('every page');
@@ -339,40 +342,57 @@ describe('what each block is asked', () => {
 
 describe('laying it out', () => {
   it('has nothing to draw for an empty flow', () => {
-    expect(layOut(newFlow())).toEqual({ blocks: [], columns: 0, rows: 0 });
+    expect(layOut(newFlow())).toEqual({ blocks: [], width: 0, height: 0 });
   });
 
-  it('puts a chain on one row, one column each', () => {
-    const flow = chained('look', 'work', 'review');
+  it('puts a chain on one line, left to right', () => {
+    const flow = chained('plan', 'custom', 'review');
     const out = layOut(flow);
-    expect(out.columns).toBe(3);
-    expect(out.rows).toBe(1);
-    expect(out.blocks.map((one) => one.column)).toEqual([0, 1, 2]);
+    expect(new Set(out.blocks.map((one) => one.y)).size).toBe(1);
+    const xs = out.blocks.map((one) => one.x).sort((a, b) => a - b);
+    expect(xs).toEqual([0, CARD.width + CARD.gapX, (CARD.width + CARD.gapX) * 2]);
   });
 
-  it('puts blocks that wait for nothing side by side', () => {
-    const out = layOut(drawn('look', 'work', 'review'));
-    expect(out.columns).toBe(1);
-    expect(out.rows).toBe(3);
+  it('puts blocks that wait for nothing one under another', () => {
+    const out = layOut(drawn('plan', 'custom', 'review'));
+    expect(new Set(out.blocks.map((one) => one.x)).size).toBe(1);
+    expect(new Set(out.blocks.map((one) => one.y)).size).toBe(3);
   });
 
-  it('keeps the first of a fork on its parent’s row and moves the rest down', () => {
-    let flow = place(newFlow(), 'look');
+  it('keeps the first of a fork on its parent’s line and moves the rest down', () => {
+    let flow = place(newFlow(), 'plan');
     const head = flow.blocks[0]!.id;
-    flow = place(flow, 'work', head);
+    flow = place(flow, 'custom', head);
     flow = place(flow, 'checks', head);
-    const rows = new Map(layOut(flow).blocks.map((one) => [one.id, one.row]));
-    expect(rows.get(head)).toBe(0);
-    expect(new Set([...rows.values()]).size).toBe(2);
+    const ys = new Map(layOut(flow).blocks.map((one) => [one.id, one.y]));
+    expect(ys.get(head)).toBe(0);
+    expect(new Set([...ys.values()]).size).toBe(2);
+  });
+
+  it('leaves a block where somebody put it', () => {
+    const flow = chained('plan', 'custom');
+    const moved = change(flow, flow.blocks[1]!.id, { at: { x: 40, y: 300 } });
+    const out = layOut(moved);
+    expect(out.blocks.find((one) => one.id === flow.blocks[1]!.id)).toMatchObject({ x: 40, y: 300 });
+    // And the one nobody moved is still where the arithmetic put it.
+    expect(out.blocks.find((one) => one.id === flow.blocks[0]!.id)).toMatchObject({ x: 0, y: 0 });
+  });
+
+  it('knows when it has been arranged by hand, and puts it back when asked', () => {
+    const flow = chained('plan', 'custom');
+    expect(isArranged(flow)).toBe(false);
+    const moved = change(flow, flow.blocks[1]!.id, { at: { x: 999, y: 999 } });
+    expect(isArranged(moved)).toBe(true);
+    expect(isArranged(tidied(moved))).toBe(false);
   });
 
   it('draws everything as a draft until it is started', () => {
-    const out = layOut(chained('look', 'review'));
+    const out = layOut(chained('plan', 'review'));
     expect(out.blocks.every((one) => one.state === 'draft')).toBe(true);
   });
 
   it('says which one is going, which is done, and which is still to come', () => {
-    const flow = chained('look', 'work', 'review');
+    const flow = chained('plan', 'custom', 'review');
     const [look, work] = flow.blocks.map((one) => one.id);
     const going = { ...flow, startedAt: 1, done: [look!], running: work! };
     const states = new Map(layOut(going).blocks.map((one) => [one.id, one.state]));
@@ -384,9 +404,9 @@ describe('laying it out', () => {
 
 describe('what waits on what', () => {
   it('finds everything waiting directly on one block', () => {
-    let flow = place(newFlow(), 'look');
+    let flow = place(newFlow(), 'plan');
     const head = flow.blocks[0]!.id;
-    flow = place(flow, 'work', head);
+    flow = place(flow, 'custom', head);
     flow = place(flow, 'checks', head);
     expect(waitingOn(flow, head)).toHaveLength(2);
     expect(waitingOn(flow, flow.blocks[1]!.id)).toEqual([]);
@@ -423,16 +443,16 @@ describe('reading a flow off the disk', () => {
   });
 
   it('drops a second block claiming an id already taken', () => {
-    const flow = readFlow({ id: 'f', blocks: [{ id: 'a', kind: 'work' }, { id: 'a', kind: 'review' }] });
+    const flow = readFlow({ id: 'f', blocks: [{ id: 'a', kind: 'custom' }, { id: 'a', kind: 'review' }] });
     expect(flow?.blocks).toHaveLength(1);
-    expect(flow?.blocks[0]?.kind).toBe('work');
+    expect(flow?.blocks[0]?.kind).toBe('custom');
   });
 
   it('frees a wait pointing at a block that did not survive the read', () => {
     const flow = readFlow({
       id: 'f',
       blocks: [
-        { id: 'a', kind: 'work', after: 'gone' },
+        { id: 'a', kind: 'custom', after: 'gone' },
         { id: 'b', kind: 'review', after: 'a' },
       ],
     });
@@ -444,9 +464,9 @@ describe('reading a flow off the disk', () => {
     const flow = readFlow({
       id: 'f',
       blocks: [
-        { id: 'a', kind: 'work', model: { providerId: 'anthropic', modelId: 'claude' } },
-        { id: 'b', kind: 'work', model: { providerId: 'anthropic' } },
-        { id: 'c', kind: 'work', model: 'the good one' },
+        { id: 'a', kind: 'custom', model: { providerId: 'anthropic', modelId: 'claude' } },
+        { id: 'b', kind: 'custom', model: { providerId: 'anthropic' } },
+        { id: 'c', kind: 'custom', model: 'the good one' },
       ],
     });
     expect(flow?.blocks[0]?.model).toEqual({ providerId: 'anthropic', modelId: 'claude' });
@@ -459,9 +479,9 @@ describe('reading a flow off the disk', () => {
     const flow = readFlow({
       id: 'f',
       blocks: [
-        { id: 'a', kind: 'work', pictures: [one, { name: 'b.png' }, { ...one, bytes: '' }] },
-        { id: 'b', kind: 'work', pictures: Array.from({ length: 9 }, () => one) },
-        { id: 'c', kind: 'work', pictures: 'a photo' },
+        { id: 'a', kind: 'custom', pictures: [one, { name: 'b.png' }, { ...one, bytes: '' }] },
+        { id: 'b', kind: 'custom', pictures: Array.from({ length: 9 }, () => one) },
+        { id: 'c', kind: 'custom', pictures: 'a photo' },
       ],
     });
     expect(flow?.blocks[0]?.pictures).toEqual([one]);
@@ -473,8 +493,8 @@ describe('reading a flow off the disk', () => {
     const flow = readFlow({
       id: 'f',
       blocks: [
-        { id: 'a', kind: 'work', howFar: 'doing' },
-        { id: 'b', kind: 'work', howFar: 'sideways' },
+        { id: 'a', kind: 'custom', howFar: 'doing' },
+        { id: 'b', kind: 'custom', howFar: 'sideways' },
       ],
     });
     expect(flow?.blocks[0]?.howFar).toBe('doing');

@@ -362,20 +362,37 @@ export default function ThinkingWith({
                   question as the first, and a row here is found by the hand
                   that is already on it. */}
               {offerAdvisor ? (
-                <button
-                  type="button"
-                  className="thinking__tune thinking__tune--words"
-                  onClick={() => setView('advisor')}
-                  aria-label={`${advisorWords.name}: ${advisingNow ? advising.label : advisorWords.none}`}
-                >
-                  <span>{advisorWords.name}</span>
-                  <span>
-                    <span className="thinking__tunevalue">
-                      {advisingNow ? advising.label : advisorWords.none}
+                <div className="thinking__tunerow">
+                  <button
+                    type="button"
+                    className="thinking__tune thinking__tune--words"
+                    onClick={() => setView('advisor')}
+                    aria-label={`${advisorWords.name}: ${advisingNow ? advising.label : advisorWords.none}`}
+                  >
+                    <span>{advisorWords.name}</span>
+                    <span>
+                      <span className="thinking__tunevalue">
+                        {advisingNow ? advising.label : advisorWords.none}
+                      </span>
+                      <span aria-hidden="true">›</span>
                     </span>
-                    <span aria-hidden="true">›</span>
-                  </span>
-                </button>
+                  </button>
+                  {/* Beside the name of the model advising, because that is
+                      where somebody looks to stop it. The list behind the row
+                      still has the same press at the top of it. */}
+                  {advisingNow && onAdvisor !== undefined ? (
+                    <button
+                      type="button"
+                      className="thinking__off"
+                      onClick={() => {
+                        onAdvisor(null);
+                        setOpen(false);
+                      }}
+                    >
+                      {advisorWords.turnOff}
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
 
               <button

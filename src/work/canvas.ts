@@ -160,12 +160,14 @@ export const canvasWords = {
   blocks: 'Blocks',
   loops: 'Ready-made',
   what: 'What it does',
-  runBy: 'Run by',
+  model: 'Model',
   everyModel: 'Models',
   howFar: 'How far it may go',
   whichever: 'Whatever is answering',
-  waitsFor: 'Waits for',
-  nothing: 'Nothing — it goes first',
+  waitsFor: 'Runs after',
+  nothing: 'Nothing — it starts the flow',
+  /** In the picker, above the blocks it could be made to wait for. */
+  afterWhich: 'Runs after',
   shows: 'Shows it',
   pictures: 'Pictures',
   addPicture: 'Add a picture',
@@ -196,9 +198,13 @@ export const canvasWords = {
   /** On a goal block while it is going round again. */
   round: (n: number, of: number): string => `Round ${String(n)} of ${String(of)}`,
   ranOut: 'The rounds ran out before the checks passed.',
-  /** On the block a flow begins at, and the one nothing follows. */
+  /** On the block a flow begins at, and the one nothing follows. Both are read
+   *  off the joins rather than chosen: an open dot on the left is a block
+   *  nothing runs before, an open dot on the right is where the flow stops. */
   startsHere: 'Starts here',
+  waitsHere: 'Waits for the block before it',
   ends: 'Ends here',
+  endsNote: 'Nothing follows this yet — drag from here to add what does',
   /** Over what a block came to. */
   came: 'What it came to',
   /** The band along the foot once a run is over. */
@@ -216,6 +222,8 @@ export const canvasWords = {
   findModel: 'Find a model',
   noModel: 'No model by that name.',
   turnsTook: (n: number): string => (n === 1 ? '1 turn' : `${String(n)} turns`),
+  /** How many blocks are waiting on this one. */
+  after: (n: number): string => (n === 1 ? '1 follows' : `${String(n)} follow`),
   nothingYet: 'Nothing yet.',
   /** Refusals, said where the line was drawn. */
   itself: 'A block cannot wait for itself.',
@@ -575,7 +583,7 @@ export type Drawn = { blocks: readonly Placed[]; width: number; height: number }
 
 /** The card, and the room around it. Here rather than in the view because
  *  where a block goes when nobody has moved it is arithmetic, not drawing. */
-export const CARD = { width: 216, height: 112, gapX: 80, gapY: 24 } as const;
+export const CARD = { width: 232, height: 124, gapX: 88, gapY: 28 } as const;
 
 /**
  * Where everything sits.

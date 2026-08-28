@@ -46,7 +46,6 @@ export const goalWords = {
   cleared: 'Goal cleared',
   met: 'Goal met',
   notMet: 'Goal not yet met',
-  howFarNote: 'Full access — doesn’t stop to ask.',
   show: 'Current goal',
   set: 'Set a goal',
   pause: 'Pause goal',

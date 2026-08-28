@@ -562,14 +562,14 @@ function listedItems(text: string): number {
  * most need a list, and they were the ones getting none.
  */
 export function shouldLookFirst(options: {
-  plans: 'auto' | 'always' | 'never' | 'research' | 'plan' | 'goal' | 'executive';
+  plans: 'auto' | 'research' | 'plan' | 'goal';
   /** This message is the answer to a look-around we just did. */
   answering: boolean;
   text: string;
 }): boolean {
   const { plans, answering, text } = options;
-  if (plans === 'never' || plans === 'research' || plans === 'goal' || plans === 'executive') return false;
-  if (plans === 'always' || plans === 'plan') return true;
+  if (plans === 'research' || plans === 'goal') return false;
+  if (plans === 'plan') return true;
   return !answering && worthPlanning(text);
 }
 

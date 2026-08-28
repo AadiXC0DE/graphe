@@ -82,7 +82,6 @@ import {
   stepsNotOnTheList,
 } from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
-import { asExecutive } from "./agent/executive";
 import {
   createGoal,
   elapsedWords,
@@ -110,6 +109,7 @@ import {
   type BlockSaid,
   type Flow,
 } from "./work/canvas";
+import type { Plans } from "./components/HowToWork";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
 import { bridge } from "./lib/bridge";
@@ -477,7 +477,7 @@ function Conversation() {
   /** Whether a message gets a looking-around pass before anything is touched.
    *  `auto` decides from the sentence, which is what almost everybody wants;
    *  the other two are for somebody who has an opinion about this one. */
-  const [plans, setPlans] = useState<'auto' | 'always' | 'never' | 'research' | 'plan' | 'goal' | 'executive'>('auto');
+  const [plans, setPlans] = useState<Plans>('auto');
   /* Read inside callbacks that were built before the last change to it. */
   const plansNow = useRef(plans);
   plansNow.current = plans;
@@ -1231,7 +1231,7 @@ function Conversation() {
     if (path !== null && plansNow.current === 'plan') holdWrites(true, path);
   }, [desks.current, holdWrites]);
 
-  const handlePlans = useCallback((next: 'auto' | 'always' | 'never' | 'research' | 'plan' | 'goal' | 'executive') => {
+  const handlePlans = useCallback((next: Plans) => {
     if (next === 'goal' && plans === 'plan') {
       say('Plan mode is on — finish or exit plan before starting a goal.');
       return;
@@ -3109,14 +3109,6 @@ function Conversation() {
         await deliver(asResearch(text, chosenDepth()), priced.task, { lookFirst: false });
         return;
       }
-      // Executive is also one-shot: one coherent take, then back to auto.
-      if (plans === 'executive') {
-        setPlans('auto');
-        justLookedFirst.current = true;
-        await deliver(asExecutive(text), priced.task, { lookFirst: false });
-        return;
-      }
-
       // A big-sounding request looks around before it touches anything, unless
       // somebody has said otherwise for this message. It is not a mode people
       // switch on: the failure designers fear most is forty files changed
@@ -3224,12 +3216,6 @@ function Conversation() {
           // What comes back is a report to answer, not a request to look around.
           justLookedFirst.current = true;
           void deliver(asResearch(text, chosenDepth()), sizeUp(text), { lookFirst: false, queue: 'followUp' });
-          return;
-        }
-        if (plans === 'executive') {
-          setPlans('auto');
-          justLookedFirst.current = true;
-          void deliver(asExecutive(text), sizeUp(text), { lookFirst: false, queue: 'followUp' });
           return;
         }
         if (plans === 'goal') {
@@ -5157,7 +5143,6 @@ function Conversation() {
                 setCanvasAt(null);
                 void swapConversation(null);
               }}
-              onNewCanvas={newCanvas}
             />
           ) : null}
 

@@ -328,6 +328,9 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
     const node = surface.current;
     if (node === null) return;
     const wheeled = (event: WheelEvent) => {
+      // The panel scrolls itself. Left to bubble, reading down a model list
+      // dragged the whole board along under it.
+      if ((event.target as Element | null)?.closest('.canvas__panel') != null) return;
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         const box = node.getBoundingClientRect();
@@ -346,7 +349,9 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
   const startPan = useCallback(
     (event: Pressed) => {
       if (event.button !== 0) return;
-      if ((event.target as Element).closest('button, input, textarea, select, a, .canvas__card') !== null) return;
+      // The panel is on the surface but is not part of it: a press anywhere
+      // inside it belongs to whatever it landed on.
+      if ((event.target as Element).closest('button, input, textarea, select, a, .canvas__card, .canvas__panel') !== null) return;
       setPicked(null);
       touched.current = true;
       panning.current = { x: event.clientX, y: event.clientY, fromX: at.x, fromY: at.y };
@@ -524,13 +529,8 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
         </div>
       </header>
 
-      <div className={`canvas__bands ${chosen === null ? '' : 'canvas__bands--open'}`}>
-        <Palette
-          onAdd={add}
-          onLoop={takeLoop}
-          folded={chosen !== null}
-          {...(flow.blocks.length === 0 ? { quiet: true } : {})}
-        />
+      <div className="canvas__bands">
+        <Palette onAdd={add} onLoop={takeLoop} {...(flow.blocks.length === 0 ? { quiet: true } : {})} />
 
         <div
           className="canvas__surface"
@@ -666,25 +666,51 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
 /* ---------------------------------------------------------------- palette */
 
 function Palette({
-  folded,
   quiet,
   onAdd,
   onLoop,
 }: {
-  folded: boolean;
   /** The first screen is already offering the loops, whole and readable. Two
    *  lists of the same three is one too many. */
   quiet?: boolean;
   onAdd: (kind: BlockKind) => void;
   onLoop: (id: string) => void;
 }) {
+  /* Folded, the marks travel without their words, so the word rides beside the
+     one under the pointer. Drawn outside the rail rather than off the button: a
+     list that scrolls clips anything hanging out of it. */
+  const [tip, setTip] = useState<{ name: string; y: number } | null>(null);
+  const rail = useRef<HTMLDivElement>(null);
+
+  const show = (name: string) => (event: { currentTarget: HTMLElement }) => {
+    const box = rail.current?.getBoundingClientRect();
+    if (box === undefined || box.width > 100) return;
+    const at = event.currentTarget.getBoundingClientRect();
+    setTip({ name, y: at.top - box.top + at.height / 2 });
+  };
+
   return (
-    <aside className={`canvas__palette scroll--auto ${folded ? 'canvas__palette--folded' : ''}`} aria-label={canvasWords.blocks}>
+    <div className="canvas__rail" ref={rail}>
+      {tip === null ? null : (
+        <span className="canvas__tip" style={{ top: tip.y } as CSSProperties} aria-hidden="true">
+          {tip.name}
+        </span>
+      )}
+      <aside className="canvas__palette scroll--auto" aria-label={canvasWords.blocks}>
       <h2 className="canvas__band">{canvasWords.blocks}</h2>
       <ul className="canvas__list">
         {BLOCKS.map((spec) => (
           <li key={spec.kind}>
-            <button type="button" className="canvas__pick" onClick={() => onAdd(spec.kind)} title={spec.note}>
+            <button
+              type="button"
+              className="canvas__pick"
+              onClick={() => onAdd(spec.kind)}
+              title={spec.note}
+              onMouseEnter={show(spec.name)}
+              onFocus={show(spec.name)}
+              onMouseLeave={() => setTip(null)}
+              onBlur={() => setTip(null)}
+            >
               <span className="canvas__pickmark" aria-hidden="true">
                 <Mark kind={spec.kind} />
               </span>
@@ -697,26 +723,33 @@ function Palette({
         ))}
       </ul>
 
-      {folded || quiet === true ? null : <h2 className="canvas__band">{canvasWords.loops}</h2>}
-      <ul className="canvas__list">
-        {(folded || quiet === true ? [] : LOOPS).map((loop) => (
-          <li key={loop.id}>
-            <button type="button" className="canvas__pick canvas__pick--loop" onClick={() => onLoop(loop.id)} title={loop.note}>
-              <span className="canvas__picktext">
-                <span className="canvas__pickname">{loop.name}</span>
-                <span className="canvas__shape" aria-hidden="true">
-                  {loop.blocks.map((one, index) => (
-                    <span key={`${one.kind}-${String(index)}`} className="canvas__shapemark">
-                      <Mark kind={one.kind} />
+      {/* Folded, a loop is three marks nobody can tell apart from a block.
+          It keeps its words or it does not appear. */}
+      {quiet === true ? null : (
+        <div className="canvas__loopband">
+          <h2 className="canvas__band">{canvasWords.loops}</h2>
+          <ul className="canvas__list">
+            {LOOPS.map((loop) => (
+              <li key={loop.id}>
+                <button type="button" className="canvas__pick canvas__pick--loop" onClick={() => onLoop(loop.id)} title={loop.note}>
+                  <span className="canvas__picktext">
+                    <span className="canvas__pickname">{loop.name}</span>
+                    <span className="canvas__shape" aria-hidden="true">
+                      {loop.blocks.map((one, index) => (
+                        <span key={`${one.kind}-${String(index)}`} className="canvas__shapemark">
+                          <Mark kind={one.kind} />
+                        </span>
+                      ))}
                     </span>
-                  ))}
-                </span>
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </aside>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      </aside>
+    </div>
   );
 }
 
@@ -841,7 +874,7 @@ function Card({
         }}
       >
         <span className="canvas__head">
-          <span className="canvas__mark" aria-hidden="true">
+          <span className="canvas__mark canvas__markbox" aria-hidden="true">
             <Mark kind={block.kind} />
           </span>
           <span className="canvas__kind">{spec.name}</span>
@@ -856,23 +889,29 @@ function Card({
         ) : null}
         {came === undefined ? null : <span className="canvas__came">{came.text}</span>}
 
+        {/* Where it sits in the flow on the left, what it is set to on the
+            right, so a row of cards reads down either column. */}
         <span className="canvas__foots">
-          {first ? <span className="canvas__first">{canvasWords.startsHere}</span> : null}
-          {last ? <span className="canvas__first canvas__first--end">{canvasWords.ends}</span> : null}
-          {model === null ? null : <span className="canvas__model">{model}</span>}
-          {(block.pictures ?? []).length === 0 ? null : (
-            <span className="canvas__shots" title={canvasWords.shows}>
-              <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
-                <rect x="1.5" y="2.5" width="9" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
-                <path d="M1.5 7.5 4 5.5l2.5 2 1.5-1 2.5 2" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-              </svg>
-              {String((block.pictures ?? []).length)}
-            </span>
-          )}
-          {came === undefined ? null : (
-            <span className="canvas__turns">{canvasWords.turnsTook(came.turns)}</span>
-          )}
-          {behind === 0 ? null : <span className="canvas__behind">{String(behind)} after</span>}
+          <span className="canvas__foothalf">
+            {first ? <span className="canvas__first">{canvasWords.startsHere}</span> : null}
+            {last ? <span className="canvas__first canvas__first--end">{canvasWords.ends}</span> : null}
+            {behind === 0 ? null : <span className="canvas__behind">{canvasWords.after(behind)}</span>}
+          </span>
+          <span className="canvas__foothalf canvas__foothalf--end">
+            {(block.pictures ?? []).length === 0 ? null : (
+              <span className="canvas__shots" title={canvasWords.shows}>
+                <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
+                  <rect x="1.5" y="2.5" width="9" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+                  <path d="M1.5 7.5 4 5.5l2.5 2 1.5-1 2.5 2" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                </svg>
+                {String((block.pictures ?? []).length)}
+              </span>
+            )}
+            {came === undefined ? null : (
+              <span className="canvas__turns">{canvasWords.turnsTook(came.turns)}</span>
+            )}
+            {model === null ? null : <span className="canvas__model">{model}</span>}
+          </span>
         </span>
       </button>
 
@@ -882,9 +921,20 @@ function Card({
         </button>
       ) : null}
 
+      {/* Both ends, so what a card is waiting for and what waits for it are the
+          same shape. A dot with nothing in it is an open end: the left one open
+          means it starts the flow, the right one means it finishes it. */}
+      <span
+        className={`canvas__socket ${first ? 'canvas__socket--open' : ''}`}
+        title={first ? canvasWords.startsHere : canvasWords.waitsHere}
+        aria-hidden="true"
+      >
+        <span className="canvas__dot" />
+      </span>
+
       <button
         type="button"
-        className="canvas__handle"
+        className={`canvas__handle ${last ? 'canvas__handle--open' : ''}`}
         onPointerDown={(event) => {
           if (event.button !== 0) return;
           event.stopPropagation();
@@ -892,7 +942,7 @@ function Card({
           onJoinFrom(event);
         }}
         aria-label={canvasWords.connect}
-        title={canvasWords.connect}
+        title={last ? canvasWords.endsNote : canvasWords.connect}
       >
         <span className="canvas__dot" />
       </button>
@@ -976,7 +1026,7 @@ function Inspector({
 }) {
   const spec = specOf(block.kind);
   const box = useRef<HTMLTextAreaElement>(null);
-  const [view, setView] = useState<'block' | 'model'>('block');
+  const [view, setView] = useState<'block' | 'model' | 'after'>('block');
   const [term, setTerm] = useState('');
 
   useEffect(() => {
@@ -1017,6 +1067,10 @@ function Inspector({
   }, [found]);
 
   const waits = flow.blocks.find((one) => one.id === block.after) ?? null;
+  /* Everything this block could be made to wait for — itself and anything that
+     would close a ring are not offered, so the picker cannot draw a shape the
+     board would refuse. */
+  const could = flow.blocks.filter((one) => one.id !== block.id && canWaitFor(flow, block.id, one.id).ok);
   const shown = block.pictures ?? [];
   const came = flow.said[block.id];
 
@@ -1027,11 +1081,12 @@ function Inspector({
       style={{ left: spot.x, top: spot.y, width: PANEL.width } as CSSProperties}
     >
       <header className="canvas__ihead">
-        {view === 'model' ? (
+        {view === 'block' ? null : (
           <button type="button" className="canvas__iback" onClick={() => setView('block')}>
             <span aria-hidden="true">‹</span> {spec.name}
           </button>
-        ) : (
+        )}
+        {view !== 'block' ? null : (
           <>
             <span className="canvas__imark" aria-hidden="true">
               <Mark kind={block.kind} />
@@ -1046,7 +1101,41 @@ function Inspector({
         </button>
       </header>
 
-      {view === 'model' ? (
+      {view === 'after' ? (
+        <div className="canvas__ibody scroll--auto">
+          <span className="canvas__ilabel">{canvasWords.afterWhich}</span>
+          <div className="canvas__imodels" role="listbox" aria-label={canvasWords.afterWhich}>
+            <button
+              type="button"
+              role="option"
+              aria-selected={block.after === null}
+              className={`canvas__imodel ${block.after === null ? 'canvas__imodel--on' : ''}`}
+              onClick={() => {
+                onChange({ after: null });
+                setView('block');
+              }}
+            >
+              {canvasWords.nothing}
+            </button>
+            {could.map((one) => (
+              <button
+                key={one.id}
+                type="button"
+                role="option"
+                aria-selected={one.id === block.after}
+                className={`canvas__imodel ${one.id === block.after ? 'canvas__imodel--on' : ''}`}
+                onClick={() => {
+                  onChange({ after: one.id });
+                  setView('block');
+                }}
+              >
+                {specOf(one.kind).name}
+                <span className="canvas__isays2">{one.says.trim() === '' ? specOf(one.kind).note : one.says.trim()}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : view === 'model' ? (
         <div className="canvas__ibody scroll--auto">
           <input
             className="canvas__isearch"
@@ -1056,7 +1145,7 @@ function Inspector({
             aria-label={canvasWords.findModel}
             onChange={(event) => setTerm(event.target.value)}
           />
-          <div className="canvas__imodels" role="listbox" aria-label={canvasWords.runBy}>
+          <div className="canvas__imodels" role="listbox" aria-label={canvasWords.model}>
             <button
               type="button"
               role="option"
@@ -1123,7 +1212,7 @@ function Inspector({
           />
 
           <button type="button" className="canvas__irow" onClick={() => setView('model')} disabled={going}>
-            <span className="canvas__irowname">{canvasWords.runBy}</span>
+            <span className="canvas__irowname">{canvasWords.model}</span>
             <span className="canvas__irowvalue">{current?.label ?? canvasWords.whichever}</span>
             <span className="canvas__irowmore" aria-hidden="true">›</span>
           </button>
@@ -1174,11 +1263,18 @@ function Inspector({
 
       {/* Outside the body, which scrolls: Remove is the one press in here that
           cannot be found by scrolling for it. */}
-      {view === 'model' ? null : (
+      {view !== 'block' ? null : (
         <footer className="canvas__ifoot">
-          <span className="canvas__iwaits">
+          <button
+            type="button"
+            className="canvas__iwaits"
+            onClick={() => setView('after')}
+            disabled={going}
+            title={canvasWords.afterWhich}
+          >
             {waits === null ? canvasWords.startsHere : `${canvasWords.waitsFor} ${specOf(waits.kind).name}`}
-          </span>
+            <span className="canvas__irowmore" aria-hidden="true">›</span>
+          </button>
           <button type="button" className="canvas__iremove" onClick={onRemove} disabled={going}>
             {canvasWords.remove}
           </button>

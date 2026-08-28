@@ -1334,7 +1334,7 @@ export default function Gallery() {
             title="What you have open"
             note="A tab is a conversation or a canvas — that is the unit of work people switch between, and it is the only shape in which “two agents in one codebase” can be said at all. Two lines each: the conversation, and under it the project in quieter type. The 2px underline groups by codebase without nesting anything."
           >
-            <Tabs tabs={OPEN} at="t2" onOpen={noop} onClose={noop} onNew={noop} onNewCanvas={noop} />
+            <Tabs tabs={OPEN} at="t2" onOpen={noop} onClose={noop} onNew={noop} />
             <p className="gallery__caption">
               The state mark is the point. Switching away from something still working and having
               the tab tell you when it needs you is the whole reason tabs exist here — and the

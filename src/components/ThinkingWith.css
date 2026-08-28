@@ -539,3 +539,45 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Advisor, and the press that stops it.
+
+   Turning it off used to mean opening the list behind this row and reading past
+   the model names to find it. Off belongs beside the name of the model that is
+   on, sharing the row's one hairline so the band still reads as a single row. */
+.thinking__tunerow {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+}
+
+.thinking__tunerow .thinking__tune {
+  flex: 1;
+  min-width: 0;
+  border-top: none;
+}
+
+.thinking__off {
+  flex: none;
+  padding: 0 var(--space-3);
+  border-left: 1px solid var(--border);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.thinking__off:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .thinking__off:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}

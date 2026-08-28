@@ -72,16 +72,17 @@ export function lastSaid(text: string): string | undefined {
   return last.length > SAYING_LIMIT ? `${last.slice(0, SAYING_LIMIT - 1)}…` : last;
 }
 
-/** The opening of what something said, as much of it as a feed line holds.
+/** What something said, from the top, whole.
  *
  * The other end of the text from `lastSaid`, and the difference is the shape of
  * the thing talking: a helper reports as it goes, so the newest line is the live
- * one, while the advisor answers once and leads with the answer.
+ * one, while the advisor answers once and leads with the answer. Uncut, because
+ * the answer is why the line is there — the row decides how much of it to show.
  */
 export function opening(text: string): string | undefined {
-  const line = text.replace(/\s+/g, ' ').trim();
-  if (line === '') return undefined;
-  return line.length > SAYING_LIMIT ? `${line.slice(0, SAYING_LIMIT - 1)}…` : line;
+  // Blank lines go: three lines of a feed row are three lines of the answer.
+  const said = text.replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+  return said === '' ? undefined : said;
 }
 
 /** Long enough for a sentence of what a step is doing, short enough that the
@@ -300,6 +301,46 @@ export const ADVISOR_ANSWERED = 'The advisor answered';
 /** Whether a step is the advisor's, either half of it. */
 export function isAdvisor(label: string): boolean {
   return label === ADVISOR_LABEL || label === ADVISOR_ANSWERED;
+}
+
+/** More than a feed line holds, so the row offers the rest. */
+const ADVICE_AT_A_GLANCE = 180;
+
+export type Advice = {
+  /** Which model answered, as its own account spells it, or null when the
+   *  reply did not say. */
+  model: string | null;
+  answer: string;
+  /** Whether there is more of it than the row shows at rest. */
+  long: boolean;
+};
+
+/**
+ * The advisor's answer, for a row that means to show it rather than hint at it.
+ *
+ * The reply leads with `Advisor (provider/model)`, which is who spoke and
+ * belongs beside the answer rather than inside its first sentence. Emphasis
+ * marks go with it: the feed is a feed, not a Markdown surface.
+ */
+export function advice(label: string, said: string | undefined): Advice | null {
+  if (label !== ADVISOR_ANSWERED || said === undefined) return null;
+  const [first = '', ...rest] = said.split('\n');
+  const who = /^Advisor \(([^)]+)\)$/.exec(first.trim());
+  const answer = unmarked((who === null ? said : rest.join('\n')).trim());
+  if (answer === '') return null;
+  return {
+    model: who?.[1] ?? null,
+    answer,
+    long: answer.length > ADVICE_AT_A_GLANCE || answer.includes('\n'),
+  };
+}
+
+/** Markdown's own punctuation, which reads as noise anywhere it is not drawn. */
+function unmarked(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(^|[\s(])[*_]([^*_\n]+)[*_](?=[\s).,;:!?]|$)/g, '$1$2')
+    .replace(/`([^`\n]+)`/g, '$1');
 }
 
 /** Above the card that holds the questions. */

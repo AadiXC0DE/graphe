@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AgentEvent, ToolCall } from '../src/agent/types';
 import { applyEvent, type Turn } from '../src/lib/thread';
-import { ADVISOR_ANSWERED, ADVISOR_LABEL, describeCall, isAdvisor } from '../src/lib/describe';
+import { ADVISOR_ANSWERED, ADVISOR_LABEL, advice, describeCall, isAdvisor, opening } from '../src/lib/describe';
 import { rows } from '../src/lib/steps';
 import { translatePiEvent } from '../src/agent/pi/events';
 
@@ -148,5 +148,60 @@ describe('the answer reaching the window at all', () => {
 
   it("leaves every other tool's result to the model, as before", () => {
     expect(translatePiEvent(said('read'))).toEqual({ type: 'tool-end', id: 'call-1', ok: true });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('the answer, read', () => {
+  const REPLY = [
+    'Advisor (xai/grok-4.6)',
+    '',
+    '**Verdict:** the queue is right.',
+    '',
+    'A worker loses jobs on restart, and the retry path is the one place that cannot.',
+  ].join('\n');
+
+  it('names the model that answered, apart from what it answered', () => {
+    const said = advice(ADVISOR_ANSWERED, REPLY);
+    expect(said?.model).toBe('xai/grok-4.6');
+    expect(said?.answer.startsWith('Verdict:')).toBe(true);
+  });
+
+  it('drops the marks Markdown draws with, because the feed draws none of them', () => {
+    expect(advice(ADVISOR_ANSWERED, 'Advisor (x/y)\n\n**Do** the `queue`.')?.answer).toBe(
+      'Do the queue.',
+    );
+  });
+
+  /** It used to arrive cut at 120 characters, which is the length of a hint
+   *  and not of a second opinion. */
+  it('keeps the whole answer, and says when there is more of it than a row shows', () => {
+    const long = `Advisor (x/y)\n\n${'a'.repeat(400)}`;
+    const said = advice(ADVISOR_ANSWERED, long);
+    expect(said?.answer.length).toBe(400);
+    expect(said?.long).toBe(true);
+    expect(advice(ADVISOR_ANSWERED, 'Advisor (x/y)\n\nA queue.')?.long).toBe(false);
+  });
+
+  it('reads nothing into the line while the question is still out', () => {
+    expect(advice(ADVISOR_LABEL, 'Worker or queue?')).toBeNull();
+    expect(advice(ADVISOR_ANSWERED, undefined)).toBeNull();
+    expect(advice('Reading tokens.css', 'Advisor (x/y)\n\nA queue.')).toBeNull();
+  });
+
+  it('survives a reply that never named who gave it', () => {
+    expect(advice(ADVISOR_ANSWERED, 'A queue.')).toEqual({
+      model: null,
+      answer: 'A queue.',
+      long: false,
+    });
+  });
+
+  /** The row decides how much to draw; the step no longer arrives pre-cut. It
+   *  used to arrive flattened to one line as well, which is the same loss. */
+  it('hands the row every line of it, and no blank ones', () => {
+    expect(opening(REPLY)).toBe(REPLY.split('\n').filter((line) => line !== '').join('\n'));
+    expect(opening('   ')).toBeUndefined();
   });
 });

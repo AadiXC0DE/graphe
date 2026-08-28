@@ -8,11 +8,10 @@ import {
   researchWords,
   type Depth,
 } from '../agent/research';
-import { executiveWords } from '../agent/executive';
 import { goalWords } from '../work/goal';
 import './HowToWork.css';
 
-export type Plans = 'auto' | 'always' | 'never' | 'research' | 'plan' | 'goal' | 'executive';
+export type Plans = 'auto' | 'research' | 'goal' | 'plan';
 
 type Props = {
   plans: Plans;
@@ -23,9 +22,10 @@ type Props = {
  * Whether to look before touching anything.
  *
  * It sits in the composer's own row next to the model, because it is the other
- * thing that changes what happens when you press send. The default decides for
- * itself and is the one almost nobody needs to think about; the other two are
- * for the person who has an opinion about this particular message.
+ * thing that changes what happens when you press send. Four, and no more: the
+ * list had grown until nobody could find the one they wanted in it. What is
+ * left is the default, the two that change what a whole message becomes, and
+ * the one that holds the writes back.
  */
 const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[] = [
   {
@@ -33,18 +33,6 @@ const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[
     chip: 'Plans big jobs',
     name: 'Plan the big ones',
     note: 'Looks around first when a request sounds like a lot, and gets straight on with the small ones.',
-  },
-  {
-    id: 'always',
-    chip: 'Plans first',
-    name: 'Always plan first',
-    note: 'Tells you what it would do every time, and waits.',
-  },
-  {
-    id: 'never',
-    chip: 'Straight in',
-    name: 'Never plan',
-    note: 'Gets on with it. You can still put anything back afterwards.',
   },
   {
     id: 'research',
@@ -56,19 +44,13 @@ const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[
     id: 'goal',
     chip: goalWords.chip,
     name: goalWords.name,
-    note: `${goalWords.note} ${goalWords.howFarNote}`,
+    note: goalWords.note,
   },
   {
     id: 'plan',
     chip: 'Plan',
     name: 'Plan only',
     note: 'Reads and proposes. Nothing is changed and nothing is run until you say go ahead.',
-  },
-  {
-    id: 'executive',
-    chip: executiveWords.chip,
-    name: executiveWords.name,
-    note: executiveWords.note,
   },
 ];
 

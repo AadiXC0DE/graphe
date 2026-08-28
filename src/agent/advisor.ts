@@ -23,9 +23,12 @@ export const advisorWords = {
   name: 'Advisor',
   none: 'Off',
   note: 'One model does the work; a stronger one is asked about the hard parts, instead of paying for the stronger one all day.',
-  /** The row that turns it off, which is where the list starts. */
-  off: 'One model, all of it',
-  offNote: 'Whatever is answering now does the work and decides for itself.',
+  /** The row that turns it off, which is where the list starts, and the press
+   *  beside the row that says it is on. Named for what it does, because "off"
+   *  is the word somebody looking for it already has. */
+  off: 'Off',
+  offNote: 'One model does all of it and decides for itself.',
+  turnOff: 'Turn off',
   /** The two roles the section is built from. */
   does: 'Does the work',
   advises: 'Advises',
@@ -75,12 +78,31 @@ export function worthHaving(models: readonly Priced[]): boolean {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * What the advisor is given, if the file has no answer of its own.
+ *
+ * The package walks the conversation newest first and stops at the first entry
+ * too big for the window, so one 47KB file read left the advisor with an
+ * omission marker and nothing else — it answered, on nothing. Capping each
+ * result and widening the window keeps the walk going past a large one.
+ *
+ * Secrets are redacted here rather than by the Guard: the context is built
+ * inside the package, out of the conversation and the working tree, so the
+ * Guard's own check on the call never sees it.
+ */
+const WHEN_UNSAID: Readonly<Record<string, unknown>> = {
+  advisorRedactSecrets: true,
+  contextMaxChars: 48_000,
+  advisorToolResultMaxLines: 60,
+  advisorToolResultMaxBytes: 3_000,
+};
+
+/**
  * The settings file, with our choice in it and everything else left alone.
  *
- * Only three keys are ours. The rest — how much of the working tree travels,
- * which gates fire, how many calls a sitting may make — belong to whoever
- * opened this file, and rewriting them would be us overruling a decision
- * somebody made deliberately.
+ * Two keys are always ours; the rest of `WHEN_UNSAID` is written once and never
+ * again. Which gates fire, how much of the working tree travels, how many calls
+ * a sitting may make — those belong to whoever opened this file, and rewriting
+ * them would be us overruling a decision somebody made deliberately.
  */
 export function advisorSettings(
   existing: unknown,
@@ -99,10 +121,10 @@ export function advisorSettings(
     alwaysOn: true,
   };
   if (choice.does !== null) next['executor'] = modelRef(choice.does);
-  // The context the advisor is sent is built by the package out of the
-  // conversation and the working tree, so the Guard's own check on the call
-  // never sees it. On the first write only: after that it is somebody's answer.
-  if (!('advisorRedactSecrets' in kept)) next['advisorRedactSecrets'] = true;
+  // Per key, because a value already in the file is somebody's answer.
+  for (const [key, value] of Object.entries(WHEN_UNSAID)) {
+    if (!(key in kept)) next[key] = value;
+  }
   return next;
 }
 

@@ -33,15 +33,11 @@ type Props = {
   onClose: (id: string) => void;
   /** Start another conversation in the project in front. */
   onNew: () => void;
-  /** Draw another flow in it. */
-  onNewCanvas: () => void;
 };
 
 export const SAYS = {
   label: 'What you have open',
-  add: 'Something new',
-  newChat: 'New conversation',
-  newCanvas: 'New canvas',
+  add: 'New conversation',
   close: (title: string) => `Close ${title}`,
   more: 'Everything open',
   states: {
@@ -62,28 +58,9 @@ export const SAYS = {
  * working and having the tab tell you when it needs you is the whole reason
  * tabs exist here, and it is what a side panel of background agents gets wrong.
  */
-export default function Tabs({ tabs, at, onOpen, onClose, onNew, onNewCanvas }: Props) {
+export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
   const [listing, setListing] = useState(false);
-  const [adding, setAdding] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!adding) return;
-    const away = (event: MouseEvent) => {
-      if (root.current !== null && !root.current.contains(event.target as Node)) setAdding(false);
-    };
-    const key = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      setAdding(false);
-    };
-    document.addEventListener('mousedown', away);
-    document.addEventListener('keydown', key);
-    return () => {
-      document.removeEventListener('mousedown', away);
-      document.removeEventListener('keydown', key);
-    };
-  }, [adding]);
 
   useEffect(() => {
     if (!listing) return;
@@ -110,7 +87,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onNewCanvas }: 
           <svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true">
             <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
-          <span>{SAYS.newChat}</span>
+          <span>{SAYS.add}</span>
         </button>
       </div>
     );
@@ -168,50 +145,19 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onNewCanvas }: 
         ))}
       </div>
 
-      <div className="tabs__new">
-        <button
-          type="button"
-          className="tabs__add"
-          onClick={() => setAdding((was) => !was)}
-          aria-haspopup="menu"
-          aria-expanded={adding}
-          aria-label={SAYS.add}
-          title={SAYS.add}
-        >
-          <svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true">
-            <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
-        </button>
-
-        {adding ? (
-          <div className="tabs__menu" role="menu" aria-label={SAYS.add}>
-            <button
-              type="button"
-              role="menuitem"
-              className="tabs__pick"
-              onClick={() => {
-                setAdding(false);
-                onNew();
-              }}
-            >
-              <Kind kind="chat" slot />
-              {SAYS.newChat}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="tabs__pick"
-              onClick={() => {
-                setAdding(false);
-                onNewCanvas();
-              }}
-            >
-              <Kind kind="canvas" slot />
-              {SAYS.newCanvas}
-            </button>
-          </div>
-        ) : null}
-      </div>
+      {/* One press, one thing. A canvas is opened from the shelf, where the
+          rest of the project's rooms are. */}
+      <button
+        type="button"
+        className="tabs__add"
+        onClick={onNew}
+        aria-label={SAYS.add}
+        title={SAYS.add}
+      >
+        <svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true">
+          <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </button>
 
       {/* The strip scrolls; this lists everything, marks and all, for the ones
           that have scrolled out of sight. */}
@@ -268,10 +214,9 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onNewCanvas }: 
 /** Which kind of tab it is. A conversation draws nothing — it is the ordinary
  *  one, and a row where every tab wears a mark is a row where none of them
  *  mean anything. */
-function Kind({ kind, slot }: { kind: TabKind; slot?: boolean }) {
-  // In a menu the mark keeps its place whether or not there is one to draw, so
-  // the words line up. In the strip an empty box is 14px a tab cannot spare.
-  if (kind === 'chat') return slot === true ? <span className="tabs__kind" aria-hidden="true" /> : null;
+function Kind({ kind }: { kind: TabKind }) {
+  // A conversation draws nothing: an empty box is 14px a tab cannot spare.
+  if (kind === 'chat') return null;
   return (
     <span className="tabs__kind" aria-hidden="true">
       <svg viewBox="0 0 16 16" width="11" height="11" fill="none">

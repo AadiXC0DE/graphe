@@ -6,8 +6,9 @@
  *     named `tools` array as the whole list, so a name missing from it is a
  *     tool somebody installed and can never call — which is exactly how the
  *     advisor failed to load before.
- *  2. **The settings file belongs to whoever opened it.** Three keys are ours;
- *     everything else in it survives being written through.
+ *  2. **The settings file belongs to whoever opened it.** We write the choice
+ *     and, once, the defaults the advisor is useless without; everything else
+ *     in it survives being written through.
  *  3. **A no-op never writes.** A preference saved on every launch is a file
  *     rewritten for nothing, and `change` is the one place that can tell.
  */
@@ -48,6 +49,14 @@ describe('the words', () => {
     for (const jargon of ['tool', 'extension', 'token', 'api', 'package', 'ask_advisor']) {
       expect(everything, `says "${jargon}"`).not.toContain(jargon);
     }
+  });
+
+  /** Off was called "One model, all of it", which is true and is not the word
+   *  anybody scans for when they want it to stop. */
+  it('says off in the word somebody is looking for', () => {
+    expect(advisorWords.off).toBe('Off');
+    expect(advisorWords.turnOff.toLowerCase()).toContain('off');
+    expect(advisorWords.offNote).not.toBe('');
   });
 
   /** The press used to say "Add the advisor" and land on a screen called
@@ -131,25 +140,41 @@ describe('the tools an extension registered', () => {
 
 describe('the settings the addition reads', () => {
   it('writes the choice and leaves everything else exactly as it was', () => {
-    const theirs = { advisorGitContext: 'full', advisorMaxCallsPerSession: 3, advisorRedactSecrets: false };
-    const next = advisorSettings(theirs, { advises: OPUS, does: HAIKU });
-    expect(next).toEqual({
+    const theirs = {
       advisorGitContext: 'full',
       advisorMaxCallsPerSession: 3,
-      // Theirs, not ours: a false somebody wrote is an answer, not an absence.
+      // Theirs, not ours: a value somebody wrote is an answer, not an absence.
       advisorRedactSecrets: false,
+      contextMaxChars: 8000,
+      advisorToolResultMaxLines: 4000,
+      advisorToolResultMaxBytes: 900_000,
+    };
+    const next = advisorSettings(theirs, { advises: OPUS, does: HAIKU });
+    expect(next).toEqual({
+      ...theirs,
       advisor: 'anthropic/claude-opus-4-5',
       executor: 'anthropic/claude-haiku-4-5',
       alwaysOn: true,
     });
   });
 
-  it('holds secrets back on the first write, because nothing has been said yet', () => {
-    expect(advisorSettings(null, { advises: OPUS, does: null })).toEqual({
+  /** The advisor's first answer was written on nothing at all: the package
+   *  walks the conversation newest first and stops at the first entry too big
+   *  for the window, and a single large file read is bigger than the window it
+   *  ships with. It answered anyway, on an omission marker. */
+  it('gives the advisor a window, and a cap no single step can fill', () => {
+    const first = advisorSettings(null, { advises: OPUS, does: null });
+    expect(first).toEqual({
       advisor: 'anthropic/claude-opus-4-5',
       alwaysOn: true,
       advisorRedactSecrets: true,
+      contextMaxChars: 48_000,
+      advisorToolResultMaxLines: 60,
+      advisorToolResultMaxBytes: 3_000,
     });
+    expect(Number(first['advisorToolResultMaxBytes'])).toBeLessThan(
+      Number(first['contextMaxChars']) / 4,
+    );
   });
 
   it('turns it off without forgetting who was asked', () => {

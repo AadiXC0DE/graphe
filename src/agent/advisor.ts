@@ -1,6 +1,6 @@
 /** One model does the work; a stronger one is asked when it matters.
  *
- * The second opinion itself is Pi's `pi-advisor-flow` package, not ours. It
+ * The advisor itself is Pi's `pi-advisor-flow` package, not ours. It
  * registers the tool, holds the second conversation, and gives that
  * conversation no tools at all — it answers and nothing else. What lives here
  * is the words, the choice somebody makes, and the small amount of translation
@@ -20,7 +20,7 @@ export const ADVISOR_SETTINGS_FILE = 'advisor.json';
 export const advisorWords = {
   /** The row inside the model menu that leads here, and what that row says
    *  while nobody is advising. */
-  name: 'Second opinion',
+  name: 'Advisor',
   none: 'Off',
   note: 'One model does the work; a stronger one is asked about the hard parts, instead of paying for the stronger one all day.',
   /** The row that turns it off, which is where the list starts. */
@@ -32,7 +32,7 @@ export const advisorWords = {
   advisesNote: 'Asked before a plan, after repeated failures, and before it calls something done. It never touches your project.',
   /** Said before anything is offered, because until the addition is here a
    *  choice made here would quietly do nothing. */
-  missing: 'A second opinion comes from an addition somebody else wrote, and nothing here works until that addition is on this computer.',
+  missing: 'The advisor comes from an addition somebody else wrote, and nothing here works until that addition is on this computer.',
   /** Named after where it lands, so the press is not a surprise. */
   missingAdd: 'Add more to Graphe',
 } as const;
@@ -62,8 +62,8 @@ export function sameAdvisor(one: ModelChoice | null, other: ModelChoice | null):
 /**
  * Whether there is anything here to choose between.
  *
- * A second opinion from the same band as the first is the same opinion twice at
- * twice the price, so the control stays out of the way until the account
+ * An advisor from the same band as the model doing the work is the same opinion
+ * twice at twice the price, so the control stays out of the way until the account
  * actually offers a step up.
  */
 export function worthHaving(models: readonly Priced[]): boolean {

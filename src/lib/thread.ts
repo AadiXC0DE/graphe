@@ -15,7 +15,7 @@ import type { AgentEvent, ImageCard, ReviewVerdict } from '../agent/types';
 import type { Answers, Question } from '../agent/asking';
 import type { Prompt } from '../cost/phrasing';
 import { PLAN_WORDS } from '../agent/plan';
-import { describeCall } from './describe';
+import { ADVISOR_ANSWERED, ADVISOR_LABEL, describeCall } from './describe';
 import { realWords } from './showme';
 import type { Decision, Trouble } from './ipc';
 
@@ -223,10 +223,17 @@ function closeActivity(
     if (turn === undefined) continue;
     if (turn.kind !== 'did' || turn.callId !== callId || turn.state !== 'running') continue;
     const next = [...turns];
+    // The advisor's reply is what it said, not what it was asked, so it goes
+    // where a helper's findings go and the question stays on the turn beside
+    // it. The line then says the second model answered rather than only that
+    // it was asked, which is the half somebody would otherwise never see.
+    const answered = state === 'done' && detail !== undefined && turn.label === ADVISOR_LABEL;
     next[index] = {
       ...turn,
       state,
-      detail: detail ?? turn.detail,
+      ...(answered
+        ? { label: ADVISOR_ANSWERED, progress: detail }
+        : { detail: detail ?? turn.detail }),
       ...(shown === undefined ? {} : { shown }),
     };
     return shown === undefined ? next : onlyTheNewestPictures(next);

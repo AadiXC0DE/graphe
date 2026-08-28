@@ -14,6 +14,7 @@ import {
   BLOCKS,
   canStart,
   canvasWords,
+  endedAs,
   canWaitFor,
   CARD,
   change,
@@ -37,6 +38,7 @@ import {
   ROUNDS,
   runOrder,
   specOf,
+  startsAt,
   stateOf,
   tidied,
   waitingOn,
@@ -540,16 +542,27 @@ describe('reading a flow off the disk', () => {
     expect(flow?.blocks[2]?.pictures).toBeUndefined();
   });
 
-  it('keeps a rung a block was given, and drops one nobody has', () => {
+  it('keeps what a block came to, and only for blocks it still has', () => {
     const flow = readFlow({
       id: 'f',
-      blocks: [
-        { id: 'a', kind: 'custom', howFar: 'doing' },
-        { id: 'b', kind: 'custom', howFar: 'sideways' },
-      ],
+      blocks: [{ id: 'a', kind: 'checks' }],
+      said: {
+        a: { text: 'All green.', turns: 3, at: 5 },
+        gone: { text: 'From a block nobody has.', turns: 1, at: 5 },
+        b: { turns: 2 },
+      },
     });
-    expect(flow?.blocks[0]?.howFar).toBe('doing');
-    expect(flow?.blocks[1]?.howFar).toBeUndefined();
+    expect(flow?.said['a']).toEqual({ text: 'All green.', turns: 3, at: 5 });
+    expect(flow?.said['gone']).toBeUndefined();
+    expect(flow?.said['b']).toBeUndefined();
+  });
+
+  it('says where a flow begins', () => {
+    let flow = place(newFlow(), 'plan');
+    const head = flow.blocks[0]!.id;
+    flow = place(flow, 'checks', head);
+    flow = place(flow, 'review');
+    expect(startsAt(flow).map((one) => one.id).sort()).toEqual([head, flow.blocks[2]!.id].sort());
   });
 
   it('comes back at the rung the canvas was set to, and asks first when it is nonsense', () => {
@@ -628,5 +641,43 @@ describe('what the canvas says', () => {
     expect(canvasWords.counted(1, 0, 0)).toBe('1 block · not started');
     expect(canvasWords.counted(4, 2, 0)).toBe('4 blocks · 2 done');
     expect(canvasWords.counted(4, 1, 2)).toBe('4 blocks · 1 done, 2 going');
+  });
+});
+
+describe('how a run ended', () => {
+  it('says nothing before it is started, or while it is going', () => {
+    let flow = place(newFlow(), 'checks');
+    expect(endedAs(flow)).toBeNull();
+    flow = { ...flow, startedAt: 1, running: flow.blocks[0]!.id };
+    expect(endedAs(flow)).toBeNull();
+    expect(endedAs({ ...flow, running: null })).toBeNull();
+  });
+
+  it('counts what ran, the turns it took, and the last thing said', () => {
+    let flow = place(newFlow(), 'plan');
+    const one = flow.blocks[0]!.id;
+    flow = place(flow, 'checks', one);
+    const two = flow.blocks[1]!.id;
+    flow = place(flow, 'pull-request', two);
+    const ended = endedAs({
+      ...flow,
+      startedAt: 1,
+      done: [one, two],
+      said: { [one]: { text: 'Read it.', turns: 4, at: 10 }, [two]: { text: 'All green.', turns: 3, at: 20 } },
+    });
+    expect(ended?.whole).toBe(false);
+    expect(ended?.ran).toBe(2);
+    expect(ended?.turns).toBe(7);
+    expect(ended?.left.map((block) => block.id)).toEqual([flow.blocks[2]!.id]);
+    expect(ended?.last?.said.text).toBe('All green.');
+  });
+
+  it('is whole once every block has had its turn', () => {
+    let flow = place(newFlow(), 'plan');
+    flow = place(flow, 'checks', flow.blocks[0]!.id);
+    const ended = endedAs({ ...flow, startedAt: 1, done: flow.blocks.map((one) => one.id) });
+    expect(ended?.whole).toBe(true);
+    expect(ended?.turns).toBe(0);
+    expect(ended?.last).toBeNull();
   });
 });

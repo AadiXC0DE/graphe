@@ -6,6 +6,7 @@ import {
   canvasWords,
   canWaitFor,
   change,
+  endedAs,
   isArranged,
   isRunning,
   join,
@@ -17,18 +18,20 @@ import {
   placeLoop,
   remove,
   ROUNDS,
-  RUNGS,
   specOf,
   tidied,
   waitingOn,
   type Block,
   type BlockKind,
+  type BlockSaid,
   type BlockPicture,
+  type Ending,
   type Flow,
   type Placed,
 } from '../work/canvas';
 import type { ConnectionState } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
+import Asking from './Asking';
 import './CanvasView.css';
 
 const ZOOM = { least: 0.4, most: 1.6, step: 0.15 } as const;
@@ -36,6 +39,9 @@ const ZOOM = { least: 0.4, most: 1.6, step: 0.15 } as const;
  *  words, and a picture of six unreadable boxes is worth less than four
  *  readable ones with the rest a pan away. */
 const READABLE = 0.75;
+/** The panel that opens beside a card. Named here because where it goes is
+ *  arithmetic against the card, not a decision the stylesheet can make. */
+const PANEL = { width: 292, height: 420 } as const;
 /** Further than this and the hand meant to move something, not to press it. */
 const MOVED = 4;
 
@@ -52,7 +58,21 @@ type Props = {
   /** Covering the whole window rather than sitting in its own column. */
   full: boolean;
   onFull: (full: boolean) => void;
+  /** Bring the conversation this canvas ran in to the front, where every turn
+   *  it took can be read. Absent until it has run once and has one. */
+  onOpenThread?: (() => void) | undefined;
 };
+
+/** A model's own name, rather than the id it is addressed by. */
+function modelName(block: Block, connection: ConnectionState | null): string | null {
+  if (block.model === null) return null;
+  for (const provider of connection?.providers ?? []) {
+    for (const model of provider.models) {
+      if (provider.providerId === block.model.providerId && model.id === block.model.modelId) return model.label;
+    }
+  }
+  return block.model.modelId;
+}
 
 /** Where a line leaves one card and where it arrives at the next. */
 function leaves(block: { x: number; y: number }) {
@@ -169,7 +189,7 @@ function Mark({ kind }: { kind: BlockKind }) {
  * ordinary turn in this canvas's own conversation, and only once Start has
  * been pressed.
  */
-export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, full, onFull }: Props) {
+export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, full, onFull, onOpenThread }: Props) {
   const surface = useRef<HTMLDivElement>(null);
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -179,19 +199,44 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
    *  last saved: a block that only moves when you let go does not feel moved. */
   const [moving, setMoving] = useState<{ id: string; x: number; y: number } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
+  /** The ending band, put away by hand. Held by which run it was, so a second
+   *  run says how that one went rather than staying hidden. */
+  const [hidEnding, setHidEnding] = useState<number | null>(null);
 
   const panning = useRef<{ x: number; y: number; fromX: number; fromY: number } | null>(null);
   const held = useRef<{ id: string; x: number; y: number; fromX: number; fromY: number } | null>(null);
   const dragged = useRef(false);
   const touched = useRef(false);
 
+  /** Where the panel for one card goes: beside it, and never off the surface. */
+  const beside = useCallback(
+    (block: { x: number; y: number }) => {
+      const box = surface.current?.getBoundingClientRect();
+      const room = { across: box?.width ?? 1200, down: box?.height ?? 800 };
+      const right = at.x + (block.x + CARD.width + 14) * at.scale;
+      const left = at.x + (block.x - PANEL.width - 14) * at.scale;
+      // Beside it on the right where there is room, on its left where there is
+      // not, and never past the edge either way.
+      const x = right + PANEL.width + 16 <= room.across ? right : Math.max(16, left);
+      const y = at.y + block.y * at.scale;
+      return {
+        x: Math.max(16, Math.min(x, room.across - PANEL.width - 16)),
+        y: Math.max(16, Math.min(y, Math.max(16, room.down - PANEL.height - 16))),
+        side: (x === right ? 'right' : 'left') as 'left' | 'right',
+      };
+    },
+    [at.x, at.y, at.scale],
+  );
+
   const laid = useMemo(() => layOut(flow), [flow]);
+  const ending = useMemo(() => endedAs(flow), [flow]);
   const drawn: readonly Placed[] = useMemo(
     () => (moving === null ? laid.blocks : laid.blocks.map((one) => (one.id === moving.id ? { ...one, x: moving.x, y: moving.y } : one))),
     [laid.blocks, moving],
   );
   const going = isRunning(flow);
   const chosen = flow.blocks.find((one) => one.id === picked) ?? null;
+  const chosenAt = drawn.find((one) => one.id === picked) ?? null;
   const missing = notReady(flow);
   const done = drawn.filter((one) => one.state === 'done').length;
   const busy = drawn.filter((one) => one.state === 'running').length;
@@ -438,21 +483,9 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
           </button>
         ) : null}
 
-        <label className="canvas__far">
-          <span className="canvas__farname">{canvasWords.howFar}</span>
-          <select
-            className="canvas__farpick"
-            value={flow.howFar === 'doing' ? 'doing' : 'asking'}
-            disabled={going}
-            onChange={(event) => onFlow({ ...flow, howFar: event.target.value === 'doing' ? 'doing' : 'asking' })}
-          >
-            {RUNGS.map((rung) => (
-              <option key={rung} value={rung}>
-                {canvasWords.rungs[rung]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="canvas__far">
+          <Asking howFar={flow.howFar} onHowFar={(rung) => onFlow({ ...flow, howFar: rung })} />
+        </div>
 
         <div className="canvas__run">
           {going ? (
@@ -548,6 +581,10 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
                   block={block}
                   behind={waitingOn(flow, block.id).length}
                   rounds={flow.running === block.id ? flow.rounds : 0}
+                  first={block.after === null && flow.blocks.length > 1}
+                  last={waitingOn(flow, block.id).length === 0 && flow.blocks.length > 1 && block.after !== null}
+                  model={modelName(block, connection)}
+                  came={flow.said[block.id]}
                   onCarryOn={onCarryOn}
                   picked={picked === block.id}
                   target={joining !== null && joining.from !== block.id}
@@ -569,7 +606,32 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
             </div>
           )}
 
+          {chosen === null || chosenAt === null ? null : (
+            <Inspector
+              key={chosen.id}
+              block={chosen}
+              flow={flow}
+              connection={connection}
+              going={going}
+              spot={beside(chosenAt)}
+              onChange={(over) => onFlow(change(flow, chosen.id, over))}
+              onRemove={() => {
+                onFlow(remove(flow, chosen.id));
+                setPicked(null);
+              }}
+              onClose={() => setPicked(null)}
+            />
+          )}
+
           {joining === null ? null : <Trailing from={joining} blocks={drawn} at={at} />}
+
+          {ending === null || hidEnding === flow.startedAt ? null : (
+            <Ended
+              ending={ending}
+              {...(onOpenThread === undefined || flow.conversation === null ? {} : { onOpenThread })}
+              onHide={() => setHidEnding(flow.startedAt)}
+            />
+          )}
 
           <div className="canvas__foot">
             {refused === null ? (
@@ -596,20 +658,6 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
           </div>
         </div>
 
-        {chosen === null ? null : (
-          <Inspector
-            block={chosen}
-            flow={flow}
-            connection={connection}
-            going={going}
-            onChange={(over) => onFlow(change(flow, chosen.id, over))}
-            onRemove={() => {
-              onFlow(remove(flow, chosen.id));
-              setPicked(null);
-            }}
-            onClose={() => setPicked(null)}
-          />
-        )}
       </div>
     </section>
   );
@@ -631,7 +679,7 @@ function Palette({
   onLoop: (id: string) => void;
 }) {
   return (
-    <aside className={`canvas__palette ${folded ? 'canvas__palette--folded' : ''}`} aria-label={canvasWords.blocks}>
+    <aside className={`canvas__palette scroll--auto ${folded ? 'canvas__palette--folded' : ''}`} aria-label={canvasWords.blocks}>
       <h2 className="canvas__band">{canvasWords.blocks}</h2>
       <ul className="canvas__list">
         {BLOCKS.map((spec) => (
@@ -672,12 +720,79 @@ function Palette({
   );
 }
 
+/* ---------------------------------------------------------------- the end */
+
+/**
+ * How the run went, along the foot.
+ *
+ * A flow that just stops leaves you looking at cards to work out what it did.
+ * This says it in one line — whole or cut short, how much of it ran, what the
+ * last thing said was — and puts the whole conversation one press away.
+ */
+function Ended({
+  ending,
+  onOpenThread,
+  onHide,
+}: {
+  ending: Ending;
+  onOpenThread?: () => void;
+  onHide: () => void;
+}) {
+  const words = canvasWords.ending;
+  return (
+    <aside className={`canvas__ended ${ending.whole ? 'canvas__ended--whole' : ''}`} role="status">
+      <span className="canvas__endmark" aria-hidden="true">
+        {ending.whole ? (
+          <svg viewBox="0 0 14 14" width="12" height="12" fill="none">
+            <path d="m3 7.4 2.8 2.8L11 4.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 14 14" width="12" height="12" fill="none">
+            <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+        )}
+      </span>
+
+      <span className="canvas__endtext">
+        <span className="canvas__endhead">
+          <strong className="canvas__endword">{ending.whole ? words.finished : words.stopped}</strong>
+          <span className="canvas__endcount">{words.ranTo(ending.ran, ending.turns)}</span>
+          {ending.left.length === 0 ? null : (
+            <span className="canvas__endleft">{words.left(ending.left.length)}</span>
+          )}
+        </span>
+        {ending.last === null || ending.last.said.text.trim() === '' ? null : (
+          <span className="canvas__endsaid">
+            <span className="canvas__endfrom">{specOf(ending.last.block.kind).name}</span>
+            {ending.last.said.text}
+          </span>
+        )}
+      </span>
+
+      {onOpenThread === undefined ? null : (
+        <button type="button" className="canvas__endopen" onClick={onOpenThread} title={words.threadNote}>
+          {words.openThread}
+        </button>
+      )}
+      <button type="button" className="canvas__endhide" onClick={onHide} aria-label={words.hide} title={words.hide}>
+        <svg viewBox="0 0 12 12" width="10" height="10" fill="none" aria-hidden="true">
+          <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </button>
+    </aside>
+  );
+}
+
 /* ------------------------------------------------------------------- card */
 
 function Card({
   block,
   behind,
   rounds,
+  first,
+  last,
+  model,
+  came,
   picked,
   target,
   held,
@@ -688,6 +803,15 @@ function Card({
   block: Placed;
   behind: number;
   rounds: number;
+  /** True where the flow begins here — several is not a mistake, they start
+   *  together, but a block left unattached by accident would otherwise start
+   *  on its own with nothing to say it would. */
+  first: boolean;
+  /** True where nothing follows it — the far end of the flow. */
+  last: boolean;
+  /** The model's own name, or null for whatever is answering. */
+  model: string | null;
+  came: BlockSaid | undefined;
   picked: boolean;
   target: boolean;
   held: boolean;
@@ -699,7 +823,7 @@ function Card({
   const says = block.says.trim();
   return (
     <div
-      className={`canvas__card canvas__card--${block.state}${picked ? ' canvas__card--picked' : ''}${target ? ' canvas__card--target' : ''}${held ? ' canvas__card--held' : ''}`}
+      className={`canvas__card canvas__card--${block.state}${came === undefined ? '' : ' canvas__card--came'}${picked ? ' canvas__card--picked' : ''}${target ? ' canvas__card--target' : ''}${held ? ' canvas__card--held' : ''}`}
       data-block={block.id}
       style={{ left: block.x, top: block.y, width: CARD.width, height: CARD.height, '--canvas-card': `${String(CARD.height)}px` } as CSSProperties}
     >
@@ -730,15 +854,26 @@ function Card({
         {block.state === 'running' && rounds > 1 ? (
           <span className="canvas__round">{canvasWords.round(rounds, ROUNDS)}</span>
         ) : null}
-        {block.model === null && behind === 0 && (block.pictures ?? []).length === 0 ? null : (
-          <span className="canvas__foots">
-            {block.model === null ? null : <span className="canvas__model">{block.model.modelId}</span>}
-            {(block.pictures ?? []).length === 0 ? null : (
-              <span className="canvas__shots">{String((block.pictures ?? []).length)} shown</span>
-            )}
-            {behind === 0 ? null : <span className="canvas__behind">{String(behind)} after</span>}
-          </span>
-        )}
+        {came === undefined ? null : <span className="canvas__came">{came.text}</span>}
+
+        <span className="canvas__foots">
+          {first ? <span className="canvas__first">{canvasWords.startsHere}</span> : null}
+          {last ? <span className="canvas__first canvas__first--end">{canvasWords.ends}</span> : null}
+          {model === null ? null : <span className="canvas__model">{model}</span>}
+          {(block.pictures ?? []).length === 0 ? null : (
+            <span className="canvas__shots" title={canvasWords.shows}>
+              <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
+                <rect x="1.5" y="2.5" width="9" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+                <path d="M1.5 7.5 4 5.5l2.5 2 1.5-1 2.5 2" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+              </svg>
+              {String((block.pictures ?? []).length)}
+            </span>
+          )}
+          {came === undefined ? null : (
+            <span className="canvas__turns">{canvasWords.turnsTook(came.turns)}</span>
+          )}
+          {behind === 0 ? null : <span className="canvas__behind">{String(behind)} after</span>}
+        </span>
       </button>
 
       {block.state === 'needs-you' ? (
@@ -809,13 +944,23 @@ async function takePictures(files: readonly File[]): Promise<readonly BlockPictu
   return taken;
 }
 
-/* -------------------------------------------------------------- inspector */
+/* ------------------------------------------------------------------ panel */
 
+/**
+ * What the block you pressed is set to, beside the block you pressed.
+ *
+ * A panel down the side of the window made you look away from the thing you
+ * were editing and cost the canvas 300px it needed. This opens where the card
+ * is, and grows out of it — two views rather than a scroll, the same way the
+ * model chip in the composer does it, because a list of forty models and a
+ * paragraph of instruction cannot share one small box.
+ */
 function Inspector({
   block,
   flow,
   connection,
   going,
+  spot,
   onChange,
   onRemove,
   onClose,
@@ -824,12 +969,15 @@ function Inspector({
   flow: Flow;
   connection: ConnectionState | null;
   going: boolean;
+  spot: { x: number; y: number; side: 'left' | 'right' };
   onChange: (over: Partial<Omit<Block, 'id'>>) => void;
   onRemove: () => void;
   onClose: () => void;
 }) {
   const spec = specOf(block.kind);
   const box = useRef<HTMLTextAreaElement>(null);
+  const [view, setView] = useState<'block' | 'model'>('block');
+  const [term, setTerm] = useState('');
 
   useEffect(() => {
     if (spec.needsWords && block.says.trim() === '') box.current?.focus();
@@ -853,25 +1001,44 @@ function Inspector({
     return all;
   }, [connection]);
 
-  /* Grouped and folded away. An account with four providers connected offers
-     forty models, and forty rows in a panel is a list you scroll past rather
-     than a choice you make. */
+  const current = offers.find(
+    (one) => block.model !== null && one.providerId === block.model.providerId && one.modelId === block.model.modelId,
+  );
+
+  const looked = term.trim().toLowerCase();
+  const found = looked === '' ? offers : offers.filter(
+    (one) => one.label.toLowerCase().includes(looked) || one.modelId.toLowerCase().includes(looked) || one.providerName.toLowerCase().includes(looked),
+  );
+
   const bands = useMemo(() => {
-    const tiered = byTier(offers);
-    if (tiered === null) return [{ name: canvasWords.everyModel, models: offers }];
+    const tiered = byTier(found);
+    if (tiered === null) return [{ name: '', models: found }];
     return tiered.map(([tier, models]) => ({ name: tierNames[tier].name, models }));
-  }, [offers]);
+  }, [found]);
 
   const waits = flow.blocks.find((one) => one.id === block.after) ?? null;
   const shown = block.pictures ?? [];
+  const came = flow.said[block.id];
 
   return (
-    <aside className="canvas__inspector" aria-label={spec.name}>
+    <aside
+      className={`canvas__panel canvas__panel--${spot.side}`}
+      aria-label={spec.name}
+      style={{ left: spot.x, top: spot.y, width: PANEL.width } as CSSProperties}
+    >
       <header className="canvas__ihead">
-        <span className="canvas__imark" aria-hidden="true">
-          <Mark kind={block.kind} />
-        </span>
-        <h2 className="canvas__iname">{spec.name}</h2>
+        {view === 'model' ? (
+          <button type="button" className="canvas__iback" onClick={() => setView('block')}>
+            <span aria-hidden="true">‹</span> {spec.name}
+          </button>
+        ) : (
+          <>
+            <span className="canvas__imark" aria-hidden="true">
+              <Mark kind={block.kind} />
+            </span>
+            <h2 className="canvas__iname">{spec.name}</h2>
+          </>
+        )}
         <button type="button" className="canvas__ishut" onClick={onClose} aria-label={canvasWords.shut}>
           <svg viewBox="0 0 14 14" width="11" height="11" fill="none" aria-hidden="true">
             <path d="M4.2 4.2l5.6 5.6M9.8 4.2l-5.6 5.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -879,112 +1046,144 @@ function Inspector({
         </button>
       </header>
 
-      <div className="canvas__ibody">
-        <label className="canvas__ilabel" htmlFor="canvas-says">{canvasWords.what}</label>
-        <textarea
-          id="canvas-says"
-          ref={box}
-          className="canvas__isays"
-          rows={6}
-          value={block.says}
-          disabled={going}
-          placeholder={spec.needsWords ? 'Tighten the nav on mobile' : spec.says}
-          onChange={(event) => onChange({ says: event.target.value })}
-        />
-
-        <label className="canvas__ilabel" htmlFor="canvas-model">{canvasWords.runBy}</label>
-        <select
-          id="canvas-model"
-          className="canvas__ipick"
-          disabled={going}
-          value={block.model === null ? '' : `${block.model.providerId}/${block.model.modelId}`}
-          onChange={(event) => {
-            const [providerId, ...rest] = event.target.value.split('/');
-            onChange({
-              model: event.target.value === '' || providerId === undefined
-                ? null
-                : { providerId, modelId: rest.join('/') },
-            });
-          }}
-        >
-          <option value="">{canvasWords.whichever}</option>
-          {bands.map((band) => (
-            <optgroup key={band.name} label={band.name}>
-              {band.models.map((one) => (
-                <option key={`${one.providerId}/${one.modelId}`} value={`${one.providerId}/${one.modelId}`}>
-                  {one.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-
-        <label className="canvas__ilabel" htmlFor="canvas-far">{canvasWords.howFar}</label>
-        <select
-          id="canvas-far"
-          className="canvas__ipick"
-          disabled={going}
-          value={block.howFar ?? ''}
-          onChange={(event) =>
-            onChange({ howFar: event.target.value === '' ? undefined : (event.target.value as 'asking' | 'doing') })
-          }
-        >
-          <option value="">{canvasWords.sameAsFlow}</option>
-          {RUNGS.map((rung) => (
-            <option key={rung} value={rung}>
-              {canvasWords.rungs[rung]}
-            </option>
-          ))}
-        </select>
-
-        <span className="canvas__ilabel">{canvasWords.shows}</span>
-        <div className="canvas__ishots">
-          {shown.map((picture, at) => (
-            <span className="canvas__ishot" key={`${picture.name}-${String(at)}`}>
-              <img src={`data:${picture.mimeType};base64,${picture.bytes}`} alt={picture.name} />
-              <button
-                type="button"
-                className="canvas__ishotoff"
-                disabled={going}
-                aria-label={`Take ${picture.name} off this block`}
-                onClick={() => onChange({ pictures: shown.filter((_, index) => index !== at) })}
-              >
-                <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
-                  <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </button>
-            </span>
-          ))}
-          {shown.length >= MOST_PICTURES ? null : (
-            <label className={`canvas__iadd ${going ? 'canvas__iadd--off' : ''}`}>
-              <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden="true">
-                <path d="M7 2.5v9M2.5 7h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={going}
-                onChange={(event) => {
-                  const files = [...(event.target.files ?? [])];
-                  event.target.value = '';
-                  void takePictures(files).then((taken) => {
-                    if (taken.length === 0) return;
-                    onChange({ pictures: [...shown, ...taken].slice(0, MOST_PICTURES) });
-                  });
-                }}
-              />
-            </label>
-          )}
+      {view === 'model' ? (
+        <div className="canvas__ibody scroll--auto">
+          <input
+            className="canvas__isearch"
+            value={term}
+            autoFocus
+            placeholder={canvasWords.findModel}
+            aria-label={canvasWords.findModel}
+            onChange={(event) => setTerm(event.target.value)}
+          />
+          <div className="canvas__imodels" role="listbox" aria-label={canvasWords.runBy}>
+            <button
+              type="button"
+              role="option"
+              aria-selected={block.model === null}
+              className={`canvas__imodel ${block.model === null ? 'canvas__imodel--on' : ''}`}
+              onClick={() => {
+                onChange({ model: null });
+                setView('block');
+              }}
+            >
+              {canvasWords.whichever}
+            </button>
+            {bands.map((band) => (
+              <div key={band.name || 'all'} className="canvas__itier">
+                {band.name === '' ? null : <span className="canvas__itiername">{band.name}</span>}
+                {band.models.map((one) => {
+                  const on = block.model !== null && block.model.providerId === one.providerId && block.model.modelId === one.modelId;
+                  return (
+                    <button
+                      key={`${one.providerId}/${one.modelId}`}
+                      type="button"
+                      role="option"
+                      aria-selected={on}
+                      className={`canvas__imodel ${on ? 'canvas__imodel--on' : ''}`}
+                      title={`${one.providerName} · ${one.modelId}`}
+                      onClick={() => {
+                        onChange({ model: { providerId: one.providerId, modelId: one.modelId } });
+                        setView('block');
+                      }}
+                    >
+                      {one.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            {found.length === 0 ? <p className="canvas__inone">{canvasWords.noModel}</p> : null}
+          </div>
         </div>
+      ) : (
+        <div className="canvas__ibody scroll--auto">
+          {/* First once it has run: somebody opening a finished block came to
+              read what it came to, not what it was asked. */}
+          {came === undefined ? null : (
+            <>
+              <span className="canvas__ilabel">
+                {canvasWords.came}
+                <span className="canvas__iturns">{canvasWords.turnsTook(came.turns)}</span>
+              </span>
+              <p className="canvas__icame">{came.text === '' ? canvasWords.nothingYet : came.text}</p>
+            </>
+          )}
 
-        <span className="canvas__ilabel">{canvasWords.waitsFor}</span>
-        <p className="canvas__iwaits">{waits === null ? canvasWords.nothing : specOf(waits.kind).name}</p>
+          <label className="canvas__ilabel" htmlFor="canvas-says">{canvasWords.what}</label>
+          <textarea
+            id="canvas-says"
+            ref={box}
+            className="canvas__isays"
+            rows={5}
+            value={block.says}
+            disabled={going}
+            placeholder={spec.needsWords ? 'Tighten the nav on mobile' : spec.says}
+            onChange={(event) => onChange({ says: event.target.value })}
+          />
 
-        <button type="button" className="canvas__iremove" onClick={onRemove} disabled={going}>
-          {canvasWords.remove}
-        </button>
-      </div>
+          <button type="button" className="canvas__irow" onClick={() => setView('model')} disabled={going}>
+            <span className="canvas__irowname">{canvasWords.runBy}</span>
+            <span className="canvas__irowvalue">{current?.label ?? canvasWords.whichever}</span>
+            <span className="canvas__irowmore" aria-hidden="true">›</span>
+          </button>
+
+          <span className="canvas__ilabel">{canvasWords.pictures}</span>
+          <div className="canvas__ishots">
+            {shown.map((picture, at) => (
+              <span className="canvas__ishot" key={`${picture.name}-${String(at)}`}>
+                <img src={`data:${picture.mimeType};base64,${picture.bytes}`} alt={picture.name} />
+                <button
+                  type="button"
+                  className="canvas__ishotoff"
+                  disabled={going}
+                  aria-label={`Take ${picture.name} off this block`}
+                  onClick={() => onChange({ pictures: shown.filter((_, index) => index !== at) })}
+                >
+                  <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
+                    <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </span>
+            ))}
+            {shown.length >= MOST_PICTURES ? null : (
+              <label className={`canvas__iadd ${going ? 'canvas__iadd--off' : ''}`} title={canvasWords.addPicture}>
+                <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden="true">
+                  <path d="M7 2.5v9M2.5 7h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  disabled={going}
+                  onChange={(event) => {
+                    const files = [...(event.target.files ?? [])];
+                    event.target.value = '';
+                    void takePictures(files).then((taken) => {
+                      if (taken.length === 0) return;
+                      onChange({ pictures: [...shown, ...taken].slice(0, MOST_PICTURES) });
+                    });
+                  }}
+                />
+              </label>
+            )}
+          </div>
+
+        </div>
+      )}
+
+      {/* Outside the body, which scrolls: Remove is the one press in here that
+          cannot be found by scrolling for it. */}
+      {view === 'model' ? null : (
+        <footer className="canvas__ifoot">
+          <span className="canvas__iwaits">
+            {waits === null ? canvasWords.startsHere : `${canvasWords.waitsFor} ${specOf(waits.kind).name}`}
+          </span>
+          <button type="button" className="canvas__iremove" onClick={onRemove} disabled={going}>
+            {canvasWords.remove}
+          </button>
+        </footer>
+      )}
     </aside>
   );
 }

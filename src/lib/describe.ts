@@ -72,6 +72,18 @@ export function lastSaid(text: string): string | undefined {
   return last.length > SAYING_LIMIT ? `${last.slice(0, SAYING_LIMIT - 1)}…` : last;
 }
 
+/** The opening of what something said, as much of it as a feed line holds.
+ *
+ * The other end of the text from `lastSaid`, and the difference is the shape of
+ * the thing talking: a helper reports as it goes, so the newest line is the live
+ * one, while the advisor answers once and leads with the answer.
+ */
+export function opening(text: string): string | undefined {
+  const line = text.replace(/\s+/g, ' ').trim();
+  if (line === '') return undefined;
+  return line.length > SAYING_LIMIT ? `${line.slice(0, SAYING_LIMIT - 1)}…` : line;
+}
+
 /** Long enough for a sentence of what a step is doing, short enough that the
  *  feed does not become a second conversation. */
 const SAYING_LIMIT = 120;
@@ -265,7 +277,7 @@ export function describeCall(call: ToolCall): Described {
     case 'ask_advisor':
       return { label: ADVISOR_LABEL, detail: short(textField(input, ['question'])) };
     case 'record_advisor_outcome':
-      return { label: 'Noting how that advice turned out' };
+      return { label: 'Noting how the advice turned out' };
 
     default:
       return { label: 'Working on your project' };
@@ -280,9 +292,15 @@ export const WEB_SEARCH_LABEL = 'Searching the web';
 /** The words a delegated piece of work wears in the thread. */
 export const TASK_LABEL = 'Sending a piece of work to a helper';
 
-/** The words a second opinion wears in the thread. Said out loud rather than
- *  slipped past: it is not asked about, so it has to be visible. */
-export const ADVISOR_LABEL = 'Asking a second opinion';
+/** The advisor, asked and answered. Said out loud rather than slipped past:
+ *  nobody presses a button for it, so the line is the only evidence it ran. */
+export const ADVISOR_LABEL = 'Asking the advisor';
+export const ADVISOR_ANSWERED = 'The advisor answered';
+
+/** Whether a step is the advisor's, either half of it. */
+export function isAdvisor(label: string): boolean {
+  return label === ADVISOR_LABEL || label === ADVISOR_ANSWERED;
+}
 
 /** Above the card that holds the questions. */
 export const ASKING_LABEL = 'Asking you first';

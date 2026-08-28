@@ -12,16 +12,12 @@ type Props = {
 
 export const SAYS = {
   /** The chip, one rung each, in the fewest words that are still true. */
-  /** On the one rung that hands over the whole computer. Short enough to sit
-   *  beside its name rather than under it. */
-  fullAccess: 'Full access',
-
   rungs: {
     looking: { name: 'Just looking', note: 'I read and tell you what I find. I change nothing.' },
     asking: { name: 'Asks first', note: 'I stop and check with you before anything that could cost you something.' },
     changing: { name: 'Changes files', note: 'I edit without asking, and still stop before running anything.' },
     doing: {
-      name: 'Gets on with it',
+      name: 'Full access',
       note: 'Full computer access for this sitting, using the accounts and tools you already use in your terminal.',
     },
   },
@@ -219,7 +215,8 @@ export default function Asking({ howFar, onHowFar, onOpenChange }: Props) {
                   {/* The one rung that hands over the whole computer, marked as
                       such. Four names in a list read alike until you have read
                       all four descriptions, and the one worth noticing was the
-                      one you could only find by reading to the end. */}
+                      one you could only find by reading to the end. The name now
+                      says it, so the mark is the mark and nothing more. */}
                   {WORTH_A_WARNING.includes(rung) ? (
                     <span className="asking__badge">
                       <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -232,7 +229,6 @@ export default function Asking({ howFar, onHowFar, onOpenChange }: Props) {
                         <path d="M6 5v2.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
                         <circle cx="6" cy="8.9" r="0.6" fill="currentColor" />
                       </svg>
-                      {SAYS.fullAccess}
                     </span>
                   ) : null}
                 </span>

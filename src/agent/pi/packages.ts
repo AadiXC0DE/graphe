@@ -71,7 +71,7 @@ export const CURATED: readonly { id: string; why: string }[] = [
   },
   {
     id: 'pi-advisor-flow',
-    why: 'Lets me get a second opinion from a stronger mind before a plan, when I keep getting something wrong, and before I tell you a thing is finished.',
+    why: 'The advisor: a stronger model asked before a plan, when I keep getting something wrong, and before I tell you a thing is finished.',
   },
 ];
 

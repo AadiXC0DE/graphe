@@ -8,10 +8,6 @@
 }
 
 .message__who {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -22,14 +18,31 @@
   margin-bottom: var(--space-2);
 }
 
-/* Quieter than the one on a code block, which is always visible: there is one
-   of these per turn, and fifty of them showing at once would be the loudest
-   thing on the page. Still in the DOM and still focusable, because a control
-   that only exists for a mouse does not exist for the keyboard. */
-.message__copy {
+/* The control's own room, held open whether or not the control is in it, so a
+   turn never changes height as the cursor crosses it or as the reply finishes.
+   12px here plus the thread's own 16px is the 28px the control drops into. */
+.message__foot {
   position: relative;
-  min-height: 28px;
+  height: var(--space-3);
+}
+
+/* Under the words it copies and hard against them — 4px, a quarter of the gap
+   to the next turn, so it reads as the foot of this message rather than as
+   something floating between two. Quieter than the one on a code block, which
+   is always visible: there is one of these per turn. Still in the DOM and still
+   focusable, because a control that only exists for a mouse does not exist for
+   the keyboard. */
+.message__copy {
+  position: absolute;
+  top: var(--space-1);
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
   padding: 0 var(--space-2);
+  /* The label lines up with the first letter above it; the padding is only
+     there to be pressed. */
+  margin-left: calc(var(--space-2) * -1);
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   font-weight: 400;
@@ -51,19 +64,20 @@
   }
 }
 
-/* 44px of hit area around a 12px label. */
+/* Hit area, taken downwards into the gap below rather than upwards: reaching up
+   would put it over the last line of the message, where people are dragging to
+   select. */
 .message__copy::after {
   content: '';
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 56px;
-  height: 44px;
-  transform: translate(-50%, -50%);
+  inset: -4px -6px -12px;
 }
 
+/* Held out while it says Copied, because the press is usually the last thing
+   that happens before the cursor moves away. */
 .message:hover .message__copy,
-.message:focus-within .message__copy {
+.message:focus-within .message__copy,
+.message__copy.message__copy--held {
   opacity: 1;
 }
 

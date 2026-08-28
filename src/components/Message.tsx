@@ -87,14 +87,7 @@ export default function Message({ from, children, streaming, aside, isLast, pict
 
   return (
     <article className={`message message--${from}`} aria-label={mine ? 'You' : 'Graphe'}>
-      <div className="message__who">
-        <span>{mine ? 'You' : 'Graphe'}</span>
-        {copy === undefined || copy === '' ? null : (
-          <button type="button" className="message__copy" onClick={() => copying.copy(copy)}>
-            {copying.label}
-          </button>
-        )}
-      </div>
+      <div className="message__who">{mine ? 'You' : 'Graphe'}</div>
       {pictures === undefined || pictures.length === 0 ? null : (
         <div className="message__pictures">
           {pictures.map((picture, at) => (
@@ -120,6 +113,23 @@ export default function Message({ from, children, streaming, aside, isLast, pict
         )}
       </div>
       {aside ? <p className="message__aside">{aside}</p> : null}
+      {/* The room is kept from the first token so the turn does not hop when
+          the reply finishes; the control itself waits until there is a whole
+          answer to take. It stays out while it is copying, so the confirmation
+          survives the cursor leaving. */}
+      {copy === undefined || copy === '' ? null : (
+        <div className="message__foot">
+          {streaming ? null : (
+            <button
+              type="button"
+              className={`message__copy ${copying.copied || copying.failed ? 'message__copy--held' : ''}`}
+              onClick={() => copying.copy(copy)}
+            >
+              {copying.label}
+            </button>
+          )}
+        </div>
+      )}
     </article>
   );
 }

@@ -41,8 +41,6 @@ export type Block = {
   model: BlockModel;
   /** The block this one waits for, or null when it waits for nothing. */
   after: string | null;
-  /** How far this one may go on its own. Left out, the canvas's own answer. */
-  howFar?: HowFar;
   /** Look around and propose before touching anything. */
   lookFirst?: boolean;
   /** Pictures this block is sent with, the way a message is sent with them. */
@@ -67,6 +65,16 @@ export type BlockPicture = {
  *  album. */
 export const MOST_PICTURES = 4;
 
+/** What one block came to. */
+export type BlockSaid = {
+  /** The last thing it said, whole. */
+  text: string;
+  /** How many turns it took. */
+  turns: number;
+  /** Epoch ms, when it finished. */
+  at: number;
+};
+
 export type Flow = {
   /** Ours, and stable for as long as the flow exists. A canvas is a tab like a
    *  conversation is a tab, so it needs a name of its own to be one. */
@@ -87,6 +95,10 @@ export type Flow = {
   rounds: number;
   /** What has finished, in the order it finished. */
   done: readonly string[];
+  /** What each finished block came to, by block. The point of running one is
+   *  what it said, and a flow that ends with nothing on screen has told nobody
+   *  anything. */
+  said: Readonly<Record<string, BlockSaid>>;
   /** When it was last started, or null while it is still being drawn. */
   startedAt: number | null;
 };
@@ -105,6 +117,7 @@ export function newFlow(name = canvasWords.untitled): Flow {
     running: null,
     rounds: 0,
     done: [],
+    said: {},
     startedAt: null,
   };
 }
@@ -150,19 +163,11 @@ export const canvasWords = {
   runBy: 'Run by',
   everyModel: 'Models',
   howFar: 'How far it may go',
-  /** The one the whole flow runs at, where a block does not say otherwise. */
-  sameAsFlow: 'Same as the canvas',
-  /** Two, not four. The ladder in the composer has rungs for a person deciding
-   *  message by message; a canvas is set once, and the only question it is
-   *  really asking is whether it should stop and check. */
-  rungs: {
-    asking: 'Asks first',
-    doing: 'Full access',
-  } as Readonly<Record<'asking' | 'doing', string>>,
   whichever: 'Whatever is answering',
   waitsFor: 'Waits for',
   nothing: 'Nothing — it goes first',
   shows: 'Shows it',
+  pictures: 'Pictures',
   addPicture: 'Add a picture',
   tooMany: (n: number): string => `A block carries up to ${String(n)} pictures.`,
   tidyUp: 'Tidy up',
@@ -191,6 +196,27 @@ export const canvasWords = {
   /** On a goal block while it is going round again. */
   round: (n: number, of: number): string => `Round ${String(n)} of ${String(of)}`,
   ranOut: 'The rounds ran out before the checks passed.',
+  /** On the block a flow begins at, and the one nothing follows. */
+  startsHere: 'Starts here',
+  ends: 'Ends here',
+  /** Over what a block came to. */
+  came: 'What it came to',
+  /** The band along the foot once a run is over. */
+  ending: {
+    finished: 'Finished',
+    stopped: 'Stopped',
+    ranTo: (blocks: number, turns: number): string =>
+      `${String(blocks)} ${blocks === 1 ? 'block' : 'blocks'} · ${canvasWords.turnsTook(turns)}`,
+    left: (n: number): string => `${String(n)} never ran`,
+    lastly: 'Last thing it said',
+    openThread: 'Open the conversation',
+    threadNote: 'Read every turn this canvas took',
+    hide: 'Hide this',
+  },
+  findModel: 'Find a model',
+  noModel: 'No model by that name.',
+  turnsTook: (n: number): string => (n === 1 ? '1 turn' : `${String(n)} turns`),
+  nothingYet: 'Nothing yet.',
   /** Refusals, said where the line was drawn. */
   itself: 'A block cannot wait for itself.',
   loop: 'These would wait for each other, so neither could start.',
@@ -537,7 +563,7 @@ export function asksOf(block: Block): string {
 /** Back to a draft: the shape kept, what it got to forgotten. The conversation
  *  stays — what it said is worth keeping and is the record of the run. */
 export function reset(flow: Flow): Flow {
-  return { ...flow, startedAt: null, running: null, rounds: 0, done: [] };
+  return { ...flow, startedAt: null, running: null, rounds: 0, done: [], said: {} };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -610,6 +636,45 @@ export function isArranged(flow: Flow): boolean {
   });
 }
 
+/** The blocks a flow begins at: the ones waiting for nothing. Several is not a
+ *  mistake — they start together — but which they are is worth saying, because
+ *  a block accidentally left unattached would otherwise start on its own. */
+export function startsAt(flow: Flow): readonly Block[] {
+  return flow.blocks.filter((one) => one.after === null);
+}
+
+/**
+ * How a run ended, once nothing of it is going.
+ *
+ * Null while it is still going or before it was ever started, so the view can
+ * ask this one question rather than assembling the answer out of four fields.
+ */
+export type Ending = {
+  /** True where every block had its turn. */
+  whole: boolean;
+  ran: number;
+  turns: number;
+  left: readonly Block[];
+  /** The last block to say anything, and what it said. */
+  last: { block: Block; said: BlockSaid } | null;
+};
+
+export function endedAs(flow: Flow): Ending | null {
+  if (flow.startedAt === null || flow.running !== null) return null;
+  const done = new Set(flow.done);
+  if (done.size === 0) return null;
+  const left = flow.blocks.filter((one) => !done.has(one.id));
+  let last: { block: Block; said: BlockSaid } | null = null;
+  let turns = 0;
+  for (const block of flow.blocks) {
+    const said = flow.said[block.id];
+    if (said === undefined) continue;
+    turns += said.turns;
+    if (last === null || said.at >= last.said.at) last = { block, said };
+  }
+  return { whole: left.length === 0, ran: done.size, turns, left, last };
+}
+
 /** Everything waiting directly on this one. */
 export function waitingOn(flow: Flow, id: string): readonly Block[] {
   return flow.blocks.filter((one) => one.after === id);
@@ -620,6 +685,22 @@ export function waitingOn(flow: Flow, id: string): readonly Block[] {
 /* -------------------------------------------------------------------------- */
 
 const KINDS = new Set<string>(BLOCKS.map((one) => one.kind));
+
+function readSaid(value: unknown, have: ReadonlySet<string>): Readonly<Record<string, BlockSaid>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const kept: Record<string, BlockSaid> = {};
+  for (const [id, one] of Object.entries(value as Record<string, unknown>)) {
+    if (!have.has(id) || typeof one !== 'object' || one === null) continue;
+    const raw = one as Record<string, unknown>;
+    if (typeof raw['text'] !== 'string') continue;
+    kept[id] = {
+      text: raw['text'],
+      turns: typeof raw['turns'] === 'number' && raw['turns'] > 0 ? Math.floor(raw['turns']) : 1,
+      at: typeof raw['at'] === 'number' && raw['at'] > 0 ? raw['at'] : 0,
+    };
+  }
+  return kept;
+}
 
 function readAt(value: unknown): { x: number; y: number } | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -683,7 +764,6 @@ export function readFlow(raw: unknown): Flow | null {
       says: typeof block['says'] === 'string' ? block['says'] : '',
       model: readModel(block['model']),
       after: typeof block['after'] === 'string' ? block['after'] : null,
-      ...(isHowFar(block['howFar']) ? { howFar: block['howFar'] } : {}),
       ...(block['lookFirst'] === true ? { lookFirst: true } : {}),
       ...(readPictures(block['pictures']).length === 0
         ? {}
@@ -713,6 +793,7 @@ export function readFlow(raw: unknown): Flow | null {
     // it is gone, and claiming otherwise would draw a block that never moves.
     running: typeof running === 'string' && have2.has(running) ? null : null,
     rounds: 0,
+    said: readSaid(held['said'], have2),
     done: Array.isArray(doneList)
       ? (doneList as readonly unknown[]).filter(
           (one): one is string => typeof one === 'string' && have2.has(one),
@@ -724,8 +805,6 @@ export function readFlow(raw: unknown): Flow | null {
 
 /** What a canvas may be set to. The Guard knows two more, and a person setting
  *  a whole flow once has never wanted them. */
-export const RUNGS: readonly ('asking' | 'doing')[] = ['asking', 'doing'];
-
 const EVERY_RUNG: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing'];
 
 function isHowFar(value: unknown): value is HowFar {

@@ -107,12 +107,13 @@ import {
   withFlow,
   withoutFlow,
   type Block,
+  type BlockSaid,
   type Flow,
 } from "./work/canvas";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
 import { bridge } from "./lib/bridge";
-import { lastSaid } from "./lib/describe";
+import { isAdvisor, lastSaid, opening } from "./lib/describe";
 import { quote, smallerFirst } from "./lib/estimating";
 import { rows } from "./lib/steps";
 import { durationInWords } from "./lib/when";
@@ -2174,7 +2175,16 @@ function Conversation() {
                     if (still === undefined || still.running !== block.id) return;
                     const passed = checked.ok && checked.value.passed;
                     if (passed) {
-                      goOnNow.current({ ...still, done: [...still.done, block.id], running: null }, still);
+                      const came = cameToNow.current(where, notice.conversation as string, 0);
+                      goOnNow.current(
+                        {
+                          ...still,
+                          done: [...still.done, block.id],
+                          running: null,
+                          said: { ...still.said, [block.id]: came },
+                        },
+                        still,
+                      );
                       return;
                     }
                     const why = checked.ok ? checked.value.reason : 'the checks did not answer.';
@@ -2184,7 +2194,16 @@ function Conversation() {
                   })
                   .catch(() => undefined);
               } else {
-                goOnNow.current({ ...going, done: [...going.done, block.id], running: null }, going);
+                const came = cameToNow.current(where, notice.conversation, 0);
+                goOnNow.current(
+                  {
+                    ...going,
+                    done: [...going.done, block.id],
+                    running: null,
+                    said: { ...going.said, [block.id]: came },
+                  },
+                  going,
+                );
               }
             }
           }
@@ -4363,6 +4382,9 @@ function Conversation() {
 
   const changeFlowNow = useRef<(next: Flow) => void>(() => {});
   const goOnNow = useRef<(flow: Flow, from: Flow) => void>(() => {});
+  const cameToNow = useRef<(project: string, conversation: string, since: number) => BlockSaid>(
+    () => ({ text: '', turns: 1, at: 0 }),
+  );
   const sendBlockNow = useRef<(flow: Flow, block: Block) => Promise<void>>(async () => {});
 
   /* On screen at once, on disk a moment later. Typing what a block should do is
@@ -4423,8 +4445,7 @@ function Conversation() {
       const path = desksNow.current.current;
       if (path === null || flow.conversation === null) return;
       const where: Where = { project: path, conversation: flow.conversation };
-      const rung = block.howFar ?? flow.howFar;
-      await bridge.goAsFarAs(rung, where);
+      await bridge.goAsFarAs(flow.howFar, where);
       const shown = (block.pictures ?? []).map((one) => ({
         kind: 'image' as const,
         name: one.name,
@@ -4463,6 +4484,27 @@ function Conversation() {
     },
     [troubleHere],
   );
+
+  /** The last thing said in a conversation, and how many turns it took. Read
+   *  off the thread rather than reconstructed: it is what is on the screen. */
+  const cameTo = useCallback((project: string, conversation: string, since: number): BlockSaid => {
+    const desk = desksNow.current.byPath[project];
+    const turns =
+      desk === undefined
+        ? []
+        : conversation === desk.address
+          ? desk.turns
+          : (desk.parked[conversation]?.turns ?? []);
+    const words = turns.filter((one) => one.kind === 'said' && one.from === 'graphe');
+    const last = words[words.length - 1];
+    return {
+      text: last !== undefined && last.kind === 'said' ? last.text.trim() : '',
+      turns: Math.max(1, words.length - since),
+      at: Date.now(),
+    };
+  }, []);
+
+  cameToNow.current = cameTo;
 
   /** Take the flow to the next block, sending it unless it is a gate. */
   const goOn = useCallback(
@@ -5480,10 +5522,13 @@ function Conversation() {
             <div className="thread">
             {(() => {
               // A step that took a picture stays on its own line: a picture
-              // folded into a collapsed run is a picture nobody sees.
+              // folded into a collapsed run is a picture nobody sees. So does
+              // the advisor — nobody asked for a second model, so the line is
+              // the only evidence it happened, and a fold hides it.
               const showing = new Set(pictures.under.keys());
               for (const turn of desk.turns) {
-                if (turn.kind === 'did' && turn.shown !== undefined) showing.add(turn.id);
+                if (turn.kind !== 'did') continue;
+                if (turn.shown !== undefined || isAdvisor(turn.label)) showing.add(turn.id);
               }
               const all = rows(desk.turns, showing);
               const lastGrapheIdx = [...all].reverse().findIndex((r) => r.kind !== 'steps' && r.turn.kind === 'said' && r.turn.from === 'graphe');
@@ -5863,6 +5908,9 @@ function Conversation() {
           connection={connection}
           full={canvasFull}
           onFull={setCanvasFull}
+          {...(canvasHere.conversation === null || desk === null
+            ? {}
+            : { onOpenThread: () => void goToTab(`${desk.path}\u0000${canvasHere.conversation ?? ''}`) })}
         />
       )}
 
@@ -6087,6 +6135,14 @@ function CopyThread({ turns }: { turns: readonly Turn[] }) {
 /* One turn, drawn                                                             */
 /* -------------------------------------------------------------------------- */
 
+/** A step's own words on one feed line: what it was asked until it has said
+ *  something, and then what it said. Read from whichever end of the text means
+ *  something — see `opening`. */
+function saying(turn: Extract<Turn, { kind: "did" }>): string | undefined {
+  if (turn.progress === undefined) return turn.detail;
+  return isAdvisor(turn.label) ? opening(turn.progress) : lastSaid(turn.progress);
+}
+
 function Turnstile({
   turn,
   onRespond,
@@ -6141,9 +6197,7 @@ function Turnstile({
           <ActivityLine
             state={turn.state}
             label={turn.label}
-            detail={
-              turn.progress === undefined ? turn.detail : lastSaid(turn.progress)
-            }
+            detail={saying(turn)}
             real={showMe ? turn.real : undefined}
           />
           {turn.shown === undefined ? null : (

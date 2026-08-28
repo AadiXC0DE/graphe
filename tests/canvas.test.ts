@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   asksOf,
+  carryOnWords,
   BLOCKS,
   canStart,
   canvasWords,
@@ -19,6 +20,7 @@ import {
   newFlow,
   helperWords,
   isArranged,
+  isGate,
   isRunning,
   join,
   layOut,
@@ -32,8 +34,10 @@ import {
   readFlows,
   remove,
   reset,
+  ROUNDS,
   runOrder,
   specOf,
+  stateOf,
   tidied,
   waitingOn,
   withFlow,
@@ -169,6 +173,52 @@ describe('whether one block may wait for another', () => {
 /* ========================================================================== */
 /* Ready-made loops                                                           */
 /* ========================================================================== */
+
+describe('a gate, and a goal', () => {
+  it('knows which block sends nothing', () => {
+    const gate = place(newFlow(), 'wait').blocks[0]!;
+    const ordinary = place(newFlow(), 'checks').blocks[0]!;
+    expect(isGate(gate)).toBe(true);
+    expect(isGate(ordinary)).toBe(false);
+  });
+
+  it('says a gate needs somebody rather than that it is going', () => {
+    const flow = place(newFlow(), 'wait');
+    const gate = flow.blocks[0]!;
+    expect(stateOf(gate, { ...flow, running: gate.id })).toBe('needs-you');
+  });
+
+  it('says an ordinary block that is running is going', () => {
+    const flow = place(newFlow(), 'checks');
+    const one = flow.blocks[0]!;
+    expect(stateOf(one, { ...flow, running: one.id })).toBe('running');
+  });
+
+  it('asks a goal to work toward the objective and check itself', () => {
+    const flow = place(newFlow(), 'goal');
+    const said = change(flow, flow.blocks[0]!.id, { says: 'every type error gone' });
+    const asked = asksOf(said.blocks[0]!);
+    expect(asked).toContain('every type error gone');
+    expect(asked).toContain('checks');
+  });
+
+  it('carries the objective into the round that follows', () => {
+    const again = carryOnWords('every type error gone', 'three still fail.');
+    expect(again).toContain('every type error gone');
+    expect(again).toContain('three still fail.');
+  });
+
+  it('bounds how long a goal may go round', () => {
+    expect(Number.isInteger(ROUNDS)).toBe(true);
+    expect(ROUNDS).toBeGreaterThan(1);
+  });
+
+  it('starts a fresh flow with nothing running and no rounds spent', () => {
+    const flow = newFlow();
+    expect(flow.rounds).toBe(0);
+    expect(reset({ ...flow, rounds: 7, running: 'x' }).rounds).toBe(0);
+  });
+});
 
 describe('the loops somebody can put down whole', () => {
   it('offers a small number of them', () => {
@@ -320,17 +370,18 @@ describe('what each block is asked', () => {
     expect(asksOf(flow.blocks[0]!)).toContain('every page');
   });
 
-  it('gives every kind a name, a note and something to ask', () => {
+  it('gives every kind a name and a note, and something to ask where it sends', () => {
     for (const spec of BLOCKS) {
       expect(spec.name).not.toBe('');
       expect(spec.note).not.toBe('');
-      if (!spec.needsWords) expect(spec.says.trim()).not.toBe('');
+      // A gate sends nothing at all, which is the whole of what it is.
+      if (!spec.needsWords && spec.kind !== 'wait') expect(spec.says.trim(), spec.kind).not.toBe('');
     }
   });
 
   it('reads as a whole sentence wherever the kind brought its own', () => {
     for (const spec of BLOCKS) {
-      if (spec.needsWords) continue;
+      if (spec.needsWords || spec.says === '') continue;
       expect(spec.says, spec.kind).toMatch(/^[A-Z].*\.$/s);
     }
   });

@@ -99,6 +99,9 @@ import { ADVISOR_PACKAGE } from "./agent/advisor";
 import {
   asksOf,
   canStart,
+  carryOnWords,
+  isGate,
+  ROUNDS as CANVAS_ROUNDS,
   newFlow,
   nextUp,
   withFlow,
@@ -2158,16 +2161,31 @@ function Conversation() {
             const going = flowsNow.current.find(
               (one) => one.conversation === notice.conversation && one.running !== null,
             );
-            if (going !== undefined) {
-              const finished: Flow = {
-                ...going,
-                done: [...going.done, going.running as string],
-                running: null,
-              };
-              const next = nextUp(finished);
-              const moved: Flow = next === null ? finished : { ...finished, running: next.id };
-              changeFlowNow.current(moved);
-              if (next !== null) void sendBlockNow.current(moved, next);
+            const block = going?.blocks.find((one) => one.id === going.running) ?? null;
+            if (going !== undefined && block !== null) {
+              // A goal block asks the project whether it is there yet, and goes
+              // round again while it is not — that is the whole of what makes it
+              // a goal rather than one more turn.
+              if (block.kind === 'goal' && going.rounds < CANVAS_ROUNDS) {
+                void bridge
+                  .goalVerify({ project: where })
+                  .then((checked) => {
+                    const still = flowsNow.current.find((one) => one.id === going.id);
+                    if (still === undefined || still.running !== block.id) return;
+                    const passed = checked.ok && checked.value.passed;
+                    if (passed) {
+                      goOnNow.current({ ...still, done: [...still.done, block.id], running: null }, still);
+                      return;
+                    }
+                    const why = checked.ok ? checked.value.reason : 'the checks did not answer.';
+                    const again: Flow = { ...still, rounds: still.rounds + 1 };
+                    changeFlowNow.current(again);
+                    void sendBlockNow.current(again, { ...block, says: carryOnWords(block.says, why) });
+                  })
+                  .catch(() => undefined);
+              } else {
+                goOnNow.current({ ...going, done: [...going.done, block.id], running: null }, going);
+              }
             }
           }
 
@@ -4344,6 +4362,7 @@ function Conversation() {
   }, [desks.current]);
 
   const changeFlowNow = useRef<(next: Flow) => void>(() => {});
+  const goOnNow = useRef<(flow: Flow, from: Flow) => void>(() => {});
   const sendBlockNow = useRef<(flow: Flow, block: Block) => Promise<void>>(async () => {});
 
   /* On screen at once, on disk a moment later. Typing what a block should do is
@@ -4445,28 +4464,45 @@ function Conversation() {
     [troubleHere],
   );
 
+  /** Take the flow to the next block, sending it unless it is a gate. */
+  const goOn = useCallback(
+    (flow: Flow, from: Flow) => {
+      void from;
+      const next = nextUp(flow);
+      const moved: Flow = next === null ? flow : { ...flow, running: next.id, rounds: 1 };
+      changeFlowNow.current(moved);
+      // A gate sends nothing. It stops here and waits to be opened.
+      if (next !== null && !isGate(next)) void sendBlockNow.current(moved, next);
+    },
+    [],
+  );
+
+  goOnNow.current = goOn;
+
   const startFlow = useCallback(() => {
     const flow = flowsNow.current.find((one) => one.id === canvasNow.current);
     if (flow === undefined || !canStart(flow)) return;
     void (async () => {
       const conversation = await conversationForFlow(flow);
       if (conversation === null) return;
-      const first = nextUp({ ...flow, running: null, done: [] });
+      const clean: Flow = { ...flow, conversation, startedAt: Date.now(), running: null, rounds: 0, done: [] };
+      const first = nextUp(clean);
       if (first === null) return;
-      const going: Flow = {
-        ...flow,
-        conversation,
-        startedAt: Date.now(),
-        running: first.id,
-        done: [],
-      };
+      const going: Flow = { ...clean, running: first.id, rounds: 1 };
       changeFlow(going);
-      await sendBlock(going, first);
+      if (!isGate(first)) await sendBlock(going, first);
     })();
   }, [changeFlow, conversationForFlow, sendBlock]);
 
   changeFlowNow.current = changeFlow;
   sendBlockNow.current = sendBlock;
+
+  /** Open a gate: mark it done and carry on to whatever follows. */
+  const openGate = useCallback(() => {
+    const flow = flowsNow.current.find((one) => one.id === canvasNow.current);
+    if (flow === undefined || flow.running === null) return;
+    goOn({ ...flow, done: [...flow.done, flow.running], running: null }, flow);
+  }, [goOn]);
 
   const stopFlow = useCallback(() => {
     const path = desksNow.current.current;
@@ -5061,7 +5097,7 @@ function Conversation() {
 
   return (
     <main
-      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""}`}
+      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${canvasAt === null ? "" : "app--canvas"}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -5823,6 +5859,7 @@ function Conversation() {
           onFlow={changeFlow}
           onStart={startFlow}
           onStop={stopFlow}
+          onCarryOn={openGate}
           connection={connection}
           full={canvasFull}
           onFull={setCanvasFull}

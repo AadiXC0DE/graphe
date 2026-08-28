@@ -115,6 +115,13 @@
   right: var(--rail-width);
 }
 
+/* A tab shows one thing. With a canvas in front the conversation is not behind
+   it, it is simply not drawn — otherwise the composer and the strip of what is
+   running sit over the canvas and take the presses meant for it. */
+.app--canvas .app__column {
+  display: none;
+}
+
 .app__column {
   width: 100%;
   max-width: var(--thread-width);

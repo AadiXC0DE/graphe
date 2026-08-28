@@ -16,6 +16,7 @@ import {
   place,
   placeLoop,
   remove,
+  ROUNDS,
   RUNGS,
   specOf,
   tidied,
@@ -44,6 +45,8 @@ type Props = {
   onFlow: (flow: Flow) => void;
   onStart: () => void;
   onStop: () => void;
+  /** Open the gate the flow is stopped at. */
+  onCarryOn: () => void;
   /** Who could run a block, or null while the first answer is on its way. */
   connection: ConnectionState | null;
   /** Covering the whole window rather than sitting in its own column. */
@@ -92,6 +95,20 @@ function Mark({ kind }: { kind: BlockKind }) {
         <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
           <circle cx="8" cy="8" r="5.75" {...line} />
           <path d="M2.4 8h11.2M8 2.25c1.5 1.7 2.3 3.6 2.3 5.75S9.5 12.05 8 13.75c-1.5-1.7-2.3-3.6-2.3-5.75S6.5 3.95 8 2.25Z" {...line} />
+        </svg>
+      );
+    case 'goal':
+      return (
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.75" {...line} />
+          <circle cx="8" cy="8" r="2.5" {...line} />
+        </svg>
+      );
+    case 'wait':
+      return (
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.75" {...line} />
+          <path d="M8 4.6V8l2.4 1.6" {...line} />
         </svg>
       );
     case 'subagents':
@@ -152,7 +169,7 @@ function Mark({ kind }: { kind: BlockKind }) {
  * ordinary turn in this canvas's own conversation, and only once Start has
  * been pressed.
  */
-export default function CanvasView({ flow, onFlow, onStart, onStop, connection, full, onFull }: Props) {
+export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, full, onFull }: Props) {
   const surface = useRef<HTMLDivElement>(null);
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -530,6 +547,8 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, connection, 
                   key={block.id}
                   block={block}
                   behind={waitingOn(flow, block.id).length}
+                  rounds={flow.running === block.id ? flow.rounds : 0}
+                  onCarryOn={onCarryOn}
                   picked={picked === block.id}
                   target={joining !== null && joining.from !== block.id}
                   held={moving?.id === block.id}
@@ -658,19 +677,23 @@ function Palette({
 function Card({
   block,
   behind,
+  rounds,
   picked,
   target,
   held,
   onTake,
   onJoinFrom,
+  onCarryOn,
 }: {
   block: Placed;
   behind: number;
+  rounds: number;
   picked: boolean;
   target: boolean;
   held: boolean;
   onTake: (event: Pressed) => void;
   onJoinFrom: (event: Pressed) => void;
+  onCarryOn: () => void;
 }) {
   const spec = specOf(block.kind);
   const says = block.says.trim();
@@ -703,6 +726,10 @@ function Card({
         <span className="canvas__says">
           {says === '' ? (spec.needsWords ? canvasWords.saySomething : spec.note) : says}
         </span>
+        {block.state === 'needs-you' ? <span className="canvas__gate">{canvasWords.gateWaits}</span> : null}
+        {block.state === 'running' && rounds > 1 ? (
+          <span className="canvas__round">{canvasWords.round(rounds, ROUNDS)}</span>
+        ) : null}
         {block.model === null && behind === 0 && (block.pictures ?? []).length === 0 ? null : (
           <span className="canvas__foots">
             {block.model === null ? null : <span className="canvas__model">{block.model.modelId}</span>}
@@ -713,6 +740,12 @@ function Card({
           </span>
         )}
       </button>
+
+      {block.state === 'needs-you' ? (
+        <button type="button" className="canvas__carryon" onClick={onCarryOn}>
+          {canvasWords.carryOn}
+        </button>
+      ) : null}
 
       <button
         type="button"

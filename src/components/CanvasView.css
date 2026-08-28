@@ -6,7 +6,9 @@
   position: fixed;
   top: var(--topbar-height);
   bottom: 0;
-  left: var(--shelf-take, 0px);
+  /* Three units, not two: the project's files are a column of their own, and a
+     canvas that only counted the shelf sat underneath them. */
+  left: calc(var(--shelf-take, 0px) + var(--files-take, 0px));
   right: var(--overview-take, 0px);
   /* Under the strip along the top and everything that hangs off it — the
      project's own menu drops through this space and must not land behind. */
@@ -392,6 +394,47 @@
 
 .canvas__card--needs-you {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), var(--shadow-sm);
+}
+
+/* The one card in a flow that cannot move on by itself, so it says so and
+   carries the press that opens it. */
+.canvas__gate {
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  color: var(--accent-ink);
+}
+
+.canvas__round {
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bottom left, clear of the dot: the dot carries 44px of invisible hit area for
+   the hand that drags a line, and it was taking this press. */
+.canvas__carryon {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-2);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__carryon:active {
+  transform: scale(0.97);
 }
 
 .canvas__card--failed {
@@ -1124,6 +1167,10 @@
     color: var(--accent);
   }
 
+  .canvas__carryon:hover {
+    background: var(--accent-ink);
+  }
+
   .canvas__tidy:hover {
     color: var(--text);
   }
@@ -1178,7 +1225,8 @@
   .canvas__pick:active,
   .canvas__loop:active,
   .canvas__start:active,
-  .canvas__stop:active {
+  .canvas__stop:active,
+  .canvas__carryon:active {
     transform: none;
   }
 

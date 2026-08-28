@@ -26,7 +26,9 @@ export type BlockKind =
   | 'subagents'
   | 'browser'
   | 'checks'
+  | 'goal'
   | 'review'
+  | 'wait'
   | 'pull-request';
 
 /** One block on the canvas. */
@@ -80,6 +82,9 @@ export type Flow = {
   howFar: HowFar;
   /** The block being run right now, or null. */
   running: string | null;
+  /** How many times the block that is running has been sent. One for anything
+   *  ordinary; a goal block counts up until it is done or the rounds run out. */
+  rounds: number;
   /** What has finished, in the order it finished. */
   done: readonly string[];
   /** When it was last started, or null while it is still being drawn. */
@@ -98,13 +103,20 @@ export function newFlow(name = canvasWords.untitled): Flow {
     // asked less, and the row in its own bar is where that is changed.
     howFar: 'asking',
     running: null,
+    rounds: 0,
     done: [],
     startedAt: null,
   };
 }
 
-/** Where a block has got to. */
-export type BlockState = 'draft' | 'waiting' | 'running' | 'done' | 'failed';
+/** Where a block has got to. `needs-you` is the one that cannot move on by
+ *  itself: a gate somebody has to open. */
+export type BlockState = 'draft' | 'waiting' | 'running' | 'needs-you' | 'done' | 'failed';
+
+/** True for a block that sends nothing and simply stops the flow. */
+export function isGate(block: Block): boolean {
+  return block.kind === 'wait';
+}
 
 /* -------------------------------------------------------------------------- */
 /* What the canvas says                                                        */
@@ -169,9 +181,16 @@ export const canvasWords = {
     draft: 'Ready',
     waiting: 'Waiting',
     running: 'Going',
+    'needs-you': 'Needs you',
     done: 'Done',
     failed: 'Stopped',
   } as Readonly<Record<BlockState, string>>,
+  /** On the gate, and the press that opens it. */
+  carryOn: 'Carry on',
+  gateWaits: 'Stopped here until you say carry on.',
+  /** On a goal block while it is going round again. */
+  round: (n: number, of: number): string => `Round ${String(n)} of ${String(of)}`,
+  ranOut: 'The rounds ran out before the checks passed.',
   /** Refusals, said where the line was drawn. */
   itself: 'A block cannot wait for itself.',
   loop: 'These would wait for each other, so neither could start.',
@@ -245,11 +264,25 @@ export const BLOCKS: readonly BlockSpec[] = [
     says: 'Run this project’s checks. Fix anything that fails, then run them again until they pass.',
   },
   {
+    kind: 'goal',
+    name: 'Goal',
+    note: 'Keep going until the checks pass, or the rounds run out.',
+    needsWords: true,
+    says: '',
+  },
+  {
     kind: 'review',
     name: 'Review',
     note: 'Read the diff and give a verdict.',
     needsWords: false,
     says: 'Review what has changed and give your verdict, with the findings that matter first.',
+  },
+  {
+    kind: 'wait',
+    name: 'Wait for me',
+    note: 'Stop here until you say carry on. Nothing is sent.',
+    needsWords: false,
+    says: '',
   },
   {
     kind: 'pull-request',
@@ -262,6 +295,20 @@ export const BLOCKS: readonly BlockSpec[] = [
 
 export function specOf(kind: BlockKind): BlockSpec {
   return BLOCKS.find((one) => one.kind === kind) ?? BLOCKS[0]!;
+}
+
+/** How many rounds one goal block runs before it stops and says so. Not a cost
+ *  ceiling — the rung is that — but the thing that keeps "until it is done"
+ *  from meaning "for ever". */
+export const ROUNDS = 12;
+
+/** What a goal block is asked the first time, and every round after. */
+export function goalWords(about: string): string {
+  return `Work toward this until it is done, then stop: ${about.trim()}. Run this project's checks when you think you are there.`;
+}
+
+export function carryOnWords(about: string, why: string): string {
+  return `Not there yet — ${why} Carry on toward: ${about.trim()}`;
 }
 
 /** What a subagents block is asked. Written here rather than in the view so the
@@ -439,7 +486,7 @@ export function nextUp(flow: Flow): Block | null {
 /** How far along a block is. */
 export function stateOf(block: Block, flow: Flow): BlockState {
   if (flow.done.includes(block.id)) return 'done';
-  if (flow.running === block.id) return 'running';
+  if (flow.running === block.id) return isGate(block) ? 'needs-you' : 'running';
   if (flow.running === null && flow.startedAt === null) return 'draft';
   // Going, and this one has not had its turn: either its wait is still out or
   // it is simply behind something else.
@@ -483,13 +530,14 @@ export function asksOf(block: Block): string {
   const said = block.says.trim();
   if (block.kind === 'subagents') return helperWords(said);
   if (block.kind === 'research') return lookedUpWords(said);
+  if (block.kind === 'goal') return goalWords(said);
   return said === '' ? specOf(block.kind).says : said;
 }
 
 /** Back to a draft: the shape kept, what it got to forgotten. The conversation
  *  stays — what it said is worth keeping and is the record of the run. */
 export function reset(flow: Flow): Flow {
-  return { ...flow, startedAt: null, running: null, done: [] };
+  return { ...flow, startedAt: null, running: null, rounds: 0, done: [] };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -664,6 +712,7 @@ export function readFlow(raw: unknown): Flow | null {
     // Nothing is running the moment this is read: the window that was running
     // it is gone, and claiming otherwise would draw a block that never moves.
     running: typeof running === 'string' && have2.has(running) ? null : null,
+    rounds: 0,
     done: Array.isArray(doneList)
       ? (doneList as readonly unknown[]).filter(
           (one): one is string => typeof one === 'string' && have2.has(one),

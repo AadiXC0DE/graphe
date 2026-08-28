@@ -130,6 +130,21 @@ describe('what a rename will not touch', () => {
     expect(said).not.toContain('No file I rewrite still holds');
   });
 
+  /* A word-boundary match finds `name` inside `"name"` as readily as inside a
+     variable, and a rewritten manifest is a project that no longer builds. */
+  it('never rewrites what says what the project is', async () => {
+    write('package.json', '{ "name": "paper-street", "version": "1.0.0" }\n');
+    write('tsconfig.json', '{ "compilerOptions": { "outDir": "dist" }, "name": "x" }\n');
+    write('src/thing.ts', 'export const name = 1;\nexport const other = name + 1;\n');
+
+    const said = await run(rename(), { symbol: 'name', newName: 'label' });
+
+    expect(read('package.json')).toContain('"name"');
+    expect(read('tsconfig.json')).toContain('"name"');
+    expect(read('src/thing.ts')).toContain('label');
+    expect(said).not.toContain('No file I rewrite still holds');
+  });
+
   it('refuses a symbol too short to mean anything', async () => {
     write('src/format.ts', 'const id = 1;\nconst idx = id + 1;\n');
     const said = await run(rename(), { symbol: 'id', newName: 'key' });

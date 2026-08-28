@@ -2720,6 +2720,9 @@ async function checkItFirst(
       model: (await preferences()).all().model,
       advisor: (await preferences()).all().advisor,
       thinking: thinkingFor((await preferences()).all()),
+      // This is the message somebody just sent, run in a copy because they
+      // asked to see it first. Plan gates that message wherever it runs.
+      planMode: held.planMode,
       sessionDir: sessionsFolder(),
     });
     held.checking = inside;
@@ -3942,6 +3945,13 @@ const tickedThisTurn = new Set<string>();
 
 const awayDesks = new Map<string, AwayDesk>();
 
+/** Whether the folder this board belongs to is being held read-only. A board
+ *  outlives the window that opened it, and a folder nobody has open is a folder
+ *  nobody has put in Plan. */
+function planHeldOn(path: string): boolean {
+  return projectAt({ project: path })?.held.planMode === true;
+}
+
 function deskFor(path: string, name: string): AwayDesk {
   const already = awayDesks.get(path);
   if (already !== undefined) return already;
@@ -4359,6 +4369,9 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       model: (await preferences()).all().model,
       advisor: (await preferences()).all().advisor,
       thinking: thinkingFor((await preferences()).all()),
+      // The board is held before a piece gets this far, so this only catches
+      // Plan arriving while the copy was being made.
+      planMode: planHeldOn(desk.path),
       noteServers,
       // Background work gets the same way into Figma as the conversation does:
       // "match this to the design" is exactly the kind of thing left running.
@@ -4477,6 +4490,11 @@ async function runWhatCan(desk: AwayDesk): Promise<void> {
   // What is waiting stays waiting: a limit is not a reason to throw away what
   // somebody asked for.
   if (!fleet.allowsNewWork) return;
+  // Nor while the folder is in Plan. A piece is exactly the work the model is
+  // refused for asking about — its own copy, its own money, its changes there
+  // to be taken afterwards — so who put it on the board cannot be what decides
+  // it. What is already going finishes; stopping it part way would lose it.
+  if (planHeldOn(desk.path)) return;
   desk.starting = true;
   let began: readonly PieceOfWork[];
   try {
@@ -5546,6 +5564,12 @@ function register(): void {
     if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
     open.held.planMode = on;
     for (const one of open.held.sessions.open) one.held.setPlanMode(on);
+    // What the board was holding is only waiting, so leaving Plan is what lets
+    // it go — without this the queue waits for a turn that never comes.
+    if (!on) {
+      const desk = awayDesks.get(open.path);
+      if (desk !== undefined) void runWhatCan(desk);
+    }
     return Promise.resolve(done(on));
   });
 
@@ -7070,6 +7094,7 @@ function register(): void {
         running: open.held.running,
         noteServers,
         figmaToken: figmaCredential(),
+        planMode: open.held.planMode,
         sessionDir: sessionsFolder(),
         fresh: true,
       });

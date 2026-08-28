@@ -79,6 +79,12 @@ const SOURCE_EXTENSIONS = new Set([
 const GENERATED =
   /(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|composer\.lock)$|\.min\.(?:js|css)$/i;
 
+/** What says what the project is. A word-boundary match finds `name` inside
+ *  `"name"` as readily as inside a variable, and renaming a symbol has never
+ *  needed one of these — while rewriting one stops the project building. */
+const MANIFEST =
+  /(?:^|\/)(?:package\.json|jsr\.json|deno\.jsonc?|tsconfig(?:\.[\w-]+)?\.json|jsconfig\.json|composer\.json|Cargo\.toml|pyproject\.toml|go\.mod|Gemfile|build\.gradle(?:\.kts)?|pom\.xml)$/i;
+
 /** A quick skip before opening anything, so a walk does not read a film into
  *  memory to find out it is a film. The content check below is the one that
  *  decides. */
@@ -97,7 +103,7 @@ function extensionOf(relative: string): string {
 
 /** Source we are prepared to rewrite. */
 function isRenameable(relative: string): boolean {
-  if (GENERATED.test(relative)) return false;
+  if (GENERATED.test(relative) || MANIFEST.test(relative)) return false;
   return SOURCE_EXTENSIONS.has(extensionOf(relative));
 }
 

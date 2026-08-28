@@ -28,6 +28,8 @@ export type Goal = {
   howFar: HowFar;
   /** Epoch ms, for elapsed. */
   startedAt: number;
+  /** Max task n of the build plan at creation — only tasks with larger n belong to this goal. */
+  planBaselineN: number;
 };
 
 export const goalWords = {
@@ -54,7 +56,7 @@ function nextId(): string {
 }
 
 /** One goal from a sentence, active and counting from now. */
-export function createGoal(objective: string, howFar: HowFar = 'doing'): Goal {
+export function createGoal(objective: string, howFar: HowFar = 'doing', planBaselineN = 0): Goal {
   const said = objective.trim();
   return {
     id: nextId(),
@@ -64,6 +66,7 @@ export function createGoal(objective: string, howFar: HowFar = 'doing'): Goal {
     elapsed: 0,
     howFar,
     startedAt: Date.now(),
+    planBaselineN,
   };
 }
 
@@ -111,37 +114,37 @@ export function parseGoalCommand(text: string): ParsedGoal | null {
 
 /** Is the objective met?
  *
- * Hard rule: a build plan must be present and fully done to auto-complete.
- * Without a plan, no heuristic string match counts as done — that is how
- * "I've finished looking" would otherwise end a 20-round full-access run early
- * or let a goal linger. Real verification would run the project's checks
- * (tsc, tests); here we require explicit plan completion or user clearing.
+ * Hard rule: only tasks created for this goal count — leftover plans from
+ * earlier work are ignored via planBaselineN. Without a plan belonging to this
+ * goal, no heuristic string match counts as done.
  */
 export function verifyGoal(
   plan: BuildPlan | null,
   turns: readonly Turn[],
   objective: string,
+  planBaselineN = 0,
 ): { met: boolean; reason: string } {
   const said = objective.trim();
   if (said === '') return { met: true, reason: 'No objective.' };
 
   if (plan !== null) {
-    const total = plan.total;
-    const done = plan.done;
-    if (total === 0) return { met: false, reason: 'Build plan has no tasks yet.' };
+    // Only tasks with n > baseline belong to this goal
+    const owned = plan.tasks.filter((t) => t.n > planBaselineN);
+    if (owned.length === 0) {
+      return { met: false, reason: 'No checklist for this goal yet — add tasks to the build plan or say /goal clear when done.' };
+    }
+    const total = owned.length;
+    const done = owned.filter((t) => t.status === 'done').length;
     if (done < total) {
-      const next = plan.tasks.find((t) => t.status !== 'done');
+      const next = owned.find((t) => t.status !== 'done');
       const hint = next !== undefined ? `Next: ${next.title}.` : '';
       return { met: false, reason: `${String(done)}/${String(total)} tasks done. ${hint}`.trim() };
     }
-    return { met: true, reason: `All ${String(total)} tasks done.` };
+    return { met: true, reason: `All ${String(total)} tasks for this goal done.` };
   }
 
-  // No plan — never auto-complete on prose. The model saying "done" is not
-  // evidence; changed files and passing checks are. Until a plan exists or the
-  // person says /goal clear, the goal is not met.
   void turns;
-  return { met: false, reason: 'No checklist to tick — still working toward the goal (add a build plan or say /goal clear when done).' };
+  return { met: false, reason: 'No checklist for this goal — add tasks to the build plan or say /goal clear when done.' };
 }
 
 /** Update elapsed in place, for display. */

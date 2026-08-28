@@ -1995,22 +1995,13 @@ function Conversation() {
                 notice.conversation != null && notice.conversation !== settledInForGoal?.address
                   ? settledInForGoal?.parked[notice.conversation]?.turns ?? []
                   : settledInForGoal?.turns ?? [];
-              const verdict = verifyGoal(planForVerify, turnsForVerify, activeGoal.objective);
-              // Leftover complete plan from before this goal should not satisfy it
-              const isLeftoverComplete =
-                planForVerify !== null &&
-                planForVerify.total > 0 &&
-                planForVerify.done === planForVerify.total &&
-                activeGoal.iterations === 0;
-              if (isLeftoverComplete) {
-                say(`Goal has a leftover complete plan — add new tasks for this goal or say /goal clear. Not auto-continuing.`);
-                goalRuns.current.delete(goalOwner);
-              } else if (!verdict.met) {
-                // No checklist means no signal to auto-verify — don't loop 20 times in doing
-                if (planForVerify === null || planForVerify.total === 0) {
+              const verdict = verifyGoal(planForVerify, turnsForVerify, activeGoal.objective, activeGoal.planBaselineN);
+              if (!verdict.met) {
+                // No checklist for this goal → no signal to auto-verify (covers
+                // no plan and leftover plan with no owned tasks). Don't loop 20.
+                if (verdict.reason.includes('No checklist for this goal')) {
                   say(`Goal not met — ${verdict.reason}. Add tasks to the build plan for auto-checking, or say /goal clear when done. Not auto-continuing.`);
                   goalRuns.current.delete(goalOwner);
-                  // Keep goal active but not looping; user can add plan or resume
                 } else if (activeGoal.iterations < 20) {
                   const nextGoal: Goal = { ...withElapsed(activeGoal), iterations: activeGoal.iterations + 1 };
                   setGoal(nextGoal);
@@ -2694,7 +2685,12 @@ function Conversation() {
             say('Say what done looks like after /goal — one sentence, checkable.');
             return;
           }
-          const created = createGoal(objective, 'doing');
+          const baseline = (() => {
+            const p = buildPlanNow.current?.plan;
+            if (p === undefined || p === null) return 0;
+            return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
+          })();
+          const created = createGoal(objective, 'doing', baseline);
           setGoal(withElapsed(created));
           setPlans('goal');
           if (owner !== null) goalRuns.current.add(owner);
@@ -2775,7 +2771,12 @@ function Conversation() {
       // becomes the objective itself.
       if (plans === 'goal' && goalNow.current === null && text.trim() !== '' && !text.trim().startsWith('/')) {
         const objective = text.trim();
-        const created = createGoal(objective, 'doing');
+        const baseline = (() => {
+          const p = buildPlanNow.current?.plan;
+          if (p === undefined || p === null) return 0;
+          return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
+        })();
+        const created = createGoal(objective, 'doing', baseline);
         setGoal(withElapsed(created));
         const ownerDesk = currentDesk(desksNow.current);
         const owner = ownerDesk === null ? null : `${ownerDesk.path}\u0000${ownerDesk.address ?? ''}`;
@@ -2941,7 +2942,12 @@ function Conversation() {
         if (plans === 'goal') {
           const owner = `${desk.path}\u0000${desk.address ?? ''}`;
           if (goalNow.current === null && text.trim() !== '' && !text.trim().startsWith('/')) {
-            const created = createGoal(text.trim(), 'doing');
+            const baseline = (() => {
+              const p = buildPlanNow.current?.plan;
+              if (p === undefined || p === null) return 0;
+              return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
+            })();
+            const created = createGoal(text.trim(), 'doing', baseline);
             setGoal(withElapsed(created));
             goalRuns.current.add(owner);
             void deliver(text, sizeUp(text), { lookFirst: false, queue: 'followUp' });

@@ -28,12 +28,12 @@ async function isGitRoot(dir: string): Promise<boolean> {
   }
 }
 
-export async function findGitRoot(project: string): Promise<string> {
+export async function findGitRoot(project: string): Promise<string | null> {
   let cur = resolve(project);
   while (true) {
     if (await isGitRoot(cur)) return cur;
     const parent = dirname(cur);
-    if (parent === cur) return cur;
+    if (parent === cur) return null;
     cur = parent;
   }
 }
@@ -48,7 +48,7 @@ export async function collectAgentsMd(project: string): Promise<readonly string[
 
   const gitRoot = await findGitRoot(project);
 
-  // Walk project upward to git root inclusive
+  // Walk project upward to git root inclusive; for non-git folders only check project itself
   let cur = resolve(project);
   const seen: string[] = [];
   let depth = 0;
@@ -56,6 +56,7 @@ export async function collectAgentsMd(project: string): Promise<readonly string[
     const candidate = join(cur, 'AGENTS.md');
     const text = await tryRead(candidate);
     if (text !== null) seen.push(text);
+    if (gitRoot === null) break;
     if (cur === gitRoot) break;
     const parent = dirname(cur);
     if (parent === cur) break;

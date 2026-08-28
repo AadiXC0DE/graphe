@@ -8,9 +8,11 @@ import {
   researchWords,
   type Depth,
 } from '../agent/research';
+import { executiveWords } from '../agent/executive';
+import { goalWords } from '../work/goal';
 import './HowToWork.css';
 
-export type Plans = 'auto' | 'always' | 'never' | 'research';
+export type Plans = 'auto' | 'always' | 'never' | 'research' | 'plan' | 'goal' | 'executive';
 
 type Props = {
   plans: Plans;
@@ -50,6 +52,24 @@ const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[
     name: researchWords.name,
     note: researchWords.note,
   },
+  {
+    id: 'goal',
+    chip: goalWords.chip,
+    name: goalWords.name,
+    note: `${goalWords.note} ${goalWords.howFarNote}`,
+  },
+  {
+    id: 'plan',
+    chip: 'Plan',
+    name: 'Plan only',
+    note: 'Reads and proposes a plan, no edits or commands until you approve it. Write tools are held.',
+  },
+  {
+    id: 'executive',
+    chip: executiveWords.chip,
+    name: executiveWords.name,
+    note: executiveWords.note,
+  },
 ];
 
 export default function HowToWork({ plans, onPlans }: Props) {
@@ -62,7 +82,11 @@ export default function HowToWork({ plans, onPlans }: Props) {
   /* The chip keeps its own words at the setting nobody had to choose, and wears
      the setting itself once somebody has. */
   const label =
-    plans === 'research' && howFar !== DEFAULT_DEPTH ? howDeep(howFar).name : chosen.chip;
+    plans === 'research' && howFar !== DEFAULT_DEPTH
+      ? howDeep(howFar).name
+      : plans === 'goal'
+        ? `${chosen.chip} · full access`
+        : chosen.chip;
 
   /* Click away and escape both close it — people reach for both. */
   useEffect(() => {

@@ -30,10 +30,36 @@
   min-width: 0;
   overflow: hidden;
   scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.tabs__strip:hover,
+.tabs__strip:focus-within,
+.tabs__strip.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .tabs__strip::-webkit-scrollbar {
-  display: none;
+  width: 0;
+  height: 0;
+}
+
+.tabs__strip:hover::-webkit-scrollbar,
+.tabs__strip:focus-within::-webkit-scrollbar,
+.tabs__strip.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.tabs__strip::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.tabs__strip::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .tabs__tab {
@@ -194,6 +220,37 @@
   border-radius: var(--radius-md);
   background: var(--bg-raised);
   box-shadow: var(--shadow-md);
+  scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.tabs__list:hover,
+.tabs__list:focus-within,
+.tabs__list.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.tabs__list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.tabs__list:hover::-webkit-scrollbar,
+.tabs__list:focus-within::-webkit-scrollbar,
+.tabs__list.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.tabs__list::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.tabs__list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .tabs__row {

@@ -241,7 +241,7 @@ export default function Files({
         </p>
       ) : (
         <div
-          className="files__tree"
+          className="files__tree scroll--auto"
           role="tree"
           aria-label="Files and folders"
           ref={treeRef}

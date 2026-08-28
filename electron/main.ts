@@ -186,6 +186,7 @@ import {
   type RunGit,
   type Rescue,
 } from '../src/history/worktree';
+import { preparePrWorktree } from './prWorktree';
 import {
   addTasks,
   finishTask,
@@ -1555,7 +1556,9 @@ type Held = {
    *  on the project folder. The branch is the durable half: the folder is put
    *  away when nobody is in it and spread out again from the branch. */
   checkouts: Map<string, Checkout>;
-  /** Work being checked before it reaches the files, or null when none is. */
+  /** Work being checked before it reaches the files, or null when none is.
+   *  Single slot for now; per-child (Map<repo, HeldWork>) is the follow-up
+   *  once worktreeLand/Drop prove stable in polyrepo. */
   waiting: HeldWork | null;
   /**
    * The session running that check, while it runs.
@@ -2635,18 +2638,23 @@ async function photographWaiting(project: string, work: HeldWork): Promise<HeldP
  */
 async function checkItFirst(
   open: { path: string; name: string; held: Held },
+  where: Where,
   from: Speaking,
   text: string,
   cards: readonly ImageCard[] | undefined,
   lookFirst: boolean,
 ): Promise<Result<null>> {
   const held = open.held;
-  const history = new ProjectHistory(open.path);
+  // Per-child when a repo is named — use the child's folder and timeline.
+  // Held.waiting remains a single slot for now; per-child waiting (Map)
+  // is a follow-up once this proves stable. Keep changes minimal.
+  const folder = folderFor(open as Workspace<Held>, where);
+  const timeline = await timelineFor(open as Workspace<Held>, where);
+  const history = new ProjectHistory(folder);
   held.pictures = null;
-  // Checking work first runs it in a copy of one project's history. A folder
-  // holding several projects has none to copy, so this is said plainly rather
-  // than half-working.
-  if (held.timeline === null) return fail(SEVERAL_PROJECTS);
+  // A folder holding several projects has no folder-level history to copy.
+  // When where.repo names a child, its own timeline is used instead.
+  if (timeline === null) return fail(SEVERAL_PROJECTS);
 
   // Work starts from a version. Anything unfinished becomes one first, silently
   // and without a question, exactly as going back does.
@@ -2656,12 +2664,12 @@ async function checkItFirst(
   // letting the result back in later would write over it. Swallowing this was
   // the quiet way to lose an afternoon's edits.
   try {
-    await held.timeline.snapshot({ boundary: 'turn-ended' });
+    await timeline.snapshot({ boundary: 'turn-ended' });
   } catch (cause) {
     return fail(historyTrouble(cause));
   }
 
-  const keptIn = await keepCopyFor(open.path);
+  const keptIn = await keepCopyFor(folder);
   let waiting: HeldWork;
   try {
     waiting = await HeldWork.start({
@@ -2680,7 +2688,7 @@ async function checkItFirst(
 
   // A copy with no pieces in it fails on the first test command, which reads as
   // the work being wrong rather than the copy being empty.
-  const fresh = await getReady(open.path, waiting.folder);
+  const fresh = await getReady(folder, waiting.folder);
   if (!fresh.ready) {
     return fail({
       what: 'I could not get the copy ready.',
@@ -2715,7 +2723,7 @@ async function checkItFirst(
   // Before settling, because settling deletes the copy and the copy is the only
   // place what the work made exists. A picture that could not be taken is a
   // thinner decision, never a failed one.
-  held.pictures = await photographWaiting(open.path, waiting).catch(() => null);
+  held.pictures = await photographWaiting(folder, waiting).catch(() => null);
 
   try {
     await waiting.settle(saysHeldWork(text));
@@ -6875,25 +6883,53 @@ function register(): void {
   }
 
   handle<null>(CHANNEL.worktreeLand, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     // This conversation's own checkout. It used to be whichever one git listed
     // first, so with a second conversation open — or background work in flight —
     // this landed somebody else's branch.
-    const entry = checkoutEntryFor(open, whereIn(args));
+    const entry = checkoutEntryFor(open, where);
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
-    // Landing folds the copy back into the folder's own history; several
-    // projects have none to fold into.
-    const history = open.held.timeline;
+    // Per-child when a repo is named: folder and timeline come from there.
+    // A folder holding several projects has no folder-level history to land into
+    // — unless where.repo names one child, then that child's timeline is used.
+    // Must not use folderFor() or timelineFor() here: both prefer the checkout's
+    // own folder (entry.folder), which would make bringBack(worktree, worktree)
+    // and snapshot the worktree then delete it — landed files would sit
+    // uncommitted with no restore point. Use the real project (or named child).
+    const child = childRepoFor(open as unknown as Workspace<Held>, where);
+    const repo = child?.path ?? open.path;
+    let history: Timeline | null = null;
+    if (child !== null) {
+      const existing = open.held.childTimelines.get(child.path);
+      if (existing !== undefined) {
+        try {
+          history = await existing;
+        } catch {
+          history = null;
+        }
+      } else {
+        try {
+          const created = Timeline.open(child.path);
+          open.held.childTimelines.set(child.path, created);
+          history = await created;
+        } catch {
+          history = null;
+        }
+      }
+    } else {
+      history = open.held.timeline;
+    }
     if (history === null) return fail(SEVERAL_PROJECTS);
     await putDownCopyConversation(open, entry.address);
-    if ((await reopenCheckout(open.path, entry)) === null) {
+    if ((await reopenCheckout(repo, entry)) === null) {
       return fail(worktreeTrouble(worktreeWords.gone));
     }
     // Copy work is usually uncommitted. Apply its actual files first and await
     // that result; merging only the branch can omit those edits, while racing
     // the settle-time Apply can remove the folder out from underneath it.
-    const carried = await bringBack(gitRunHereFor(), open.path, entry.folder);
+    const carried = await bringBack(gitRunHereFor(), repo, entry.folder);
     if (!carried.ok) return fail(worktreeTrouble(carried.because));
     if (carried.value.conflicted.length > 0) {
       return fail(worktreeTrouble(bringBackWords.heldBack(carried.value.conflicted)));
@@ -6905,7 +6941,7 @@ function register(): void {
         worktreeTrouble(cause instanceof Error ? cause.message : 'The project could not be saved.'),
       );
     }
-    const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
+    const dropped = await dropWorktree(gitRunHereFor(), repo, entry.folder);
     if (dropped.ok) {
       open.held.checkouts.delete(entry.address);
       await saveCheckouts(open.path, open.held).catch(() => undefined);
@@ -6914,19 +6950,45 @@ function register(): void {
   });
 
   handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     // The same rule as landing, and it matters more here: this one deletes.
-    const entry = checkoutEntryFor(open, whereIn(args));
+    const entry = checkoutEntryFor(open, where);
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    const repo = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
     await putDownCopyConversation(open, entry.address);
-    await reopenCheckout(open.path, entry);
-    const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
+    await reopenCheckout(repo, entry);
+    const dropped = await dropWorktree(gitRunHereFor(), repo, entry.folder);
     if (dropped.ok) {
       open.held.checkouts.delete(entry.address);
       await saveCheckouts(open.path, open.held).catch(() => undefined);
     }
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
+  });
+
+  handle<string>(CHANNEL.prWorktreePrepare, async (_event, args) => {
+    const [prRaw] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const prNumber = typeof prRaw === 'number' ? prRaw : Number(prRaw);
+    if (!Number.isFinite(prNumber) || prNumber <= 0) {
+      return fail({ what: 'I could not tell which pull request you meant.', because: 'The number was missing or not a number.', actionLabel: 'Got it' });
+    }
+    const project = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
+    try {
+      const { folder } = await preparePrWorktree(project, prNumber);
+      return done(folder);
+    } catch (cause) {
+      const details = detailsOf(cause);
+      return fail({
+        what: 'I could not prepare the pull request checkout.',
+        because: cause instanceof Error ? cause.message : 'Something went wrong fetching it.',
+        actionLabel: 'Got it',
+        ...(details === undefined ? {} : { details }),
+      });
+    }
   });
 
   /* -------------------------------------------------- document to build */
@@ -7293,9 +7355,12 @@ function register(): void {
         holdsBack((await preferences()).all().heldBack, open.path) &&
         open.held.waiting === null
       ) {
-        if (await worthACopy(open.path)) {
+        const askFolder = folderFor(open, where);
+        const askTimeline = await timelineFor(open, where);
+        if (await worthACopy(askFolder)) {
           return await checkItFirst(
             open,
+            where,
             { address: conversation.path },
             text,
             imageCards(attachments),
@@ -7304,7 +7369,8 @@ function register(): void {
         }
         // Nothing to show, so the work happens here and one press puts it back.
         // The save point is the whole difference between that and losing it.
-        await open.held.timeline
+        // Per-child when a repo is named; otherwise the project's own.
+        await askTimeline
           ?.snapshot({ boundary: 'before-risky-change' })
           .catch(() => null);
       }

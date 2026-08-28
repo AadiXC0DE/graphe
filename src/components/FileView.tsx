@@ -146,7 +146,7 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
       ) : (
         <>
           {html === null ? (
-            <div className="fileview__code">
+            <div className="fileview__code scroll--auto">
               <pre tabIndex={0}>
                 <code>
                   {shown.map((line, index) => (
@@ -162,7 +162,7 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
             </div>
           ) : (
             <div
-              className="fileview__code"
+              className="fileview__code scroll--auto"
               // Shiki's own markup, built from the file as text. See
               // src/lib/highlight.ts.
               dangerouslySetInnerHTML={{ __html: html }}

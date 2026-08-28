@@ -99,6 +99,36 @@
   padding-top: var(--space-1);
   overflow-x: auto;
   scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.sheet__chips:hover,
+.sheet__chips:focus-within,
+.sheet__chips.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.sheet__chips::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.sheet__chips:hover::-webkit-scrollbar,
+.sheet__chips:focus-within::-webkit-scrollbar,
+.sheet__chips.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.sheet__chips::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.sheet__chips::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .sheet__chip {
@@ -268,8 +298,37 @@
   /* What the bands inside measure themselves against — the surface, not the
      window, so the gallery draws the same thing a narrow window does. */
   container-type: inline-size;
+  scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.sheet__body:hover,
+.sheet__body:focus-within,
+.sheet__body.is-scrolling {
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
+}
+
+.sheet__body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.sheet__body:hover::-webkit-scrollbar,
+.sheet__body:focus-within::-webkit-scrollbar,
+.sheet__body.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.sheet__body::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.sheet__body::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .sheet__grid {

@@ -372,6 +372,13 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.worktreeDrop, named(where)) as Promise<Result<null>>;
   },
 
+  preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>> {
+    if (typeof prNumber !== 'number' || !Number.isFinite(prNumber) || prNumber <= 0) {
+      return Promise.resolve(refuse<string>('I could not tell which pull request you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.prWorktreePrepare, prNumber, named(where)) as Promise<Result<string>>;
+  },
+
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>> {
     return ipcRenderer.invoke(CHANNEL.buildStart, source, named(where)) as Promise<Result<BuildPlan>>;
   },

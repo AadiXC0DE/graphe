@@ -1057,6 +1057,10 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(previewFail<null>());
     },
 
+    preparePrWorktree(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
     buildStart(): Promise<Result<BuildPlan>> {
       return Promise.resolve(previewFail<BuildPlan>());
     },
@@ -1949,6 +1953,7 @@ function connect(): Bridge {
     branchCreate: (name, where) => api.branchCreate(name, where),
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),
+    preparePrWorktree: (prNumber, where) => api.preparePrWorktree(prNumber, where),
     buildStart: (source, where) => api.buildStart(source, where),
     buildPlan: (where) => api.buildPlan(where),
     buildAdvance: (op, where) => api.buildAdvance(op, where),

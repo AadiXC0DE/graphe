@@ -1213,6 +1213,7 @@ export const CHANNEL = {
   branchCreate: 'graphe:branch-create',
   worktreeLand: 'graphe:worktree-land',
   worktreeDrop: 'graphe:worktree-drop',
+  prWorktreePrepare: 'graphe:pr-worktree-prepare',
   buildStart: 'graphe:build-start',
   buildPlan: 'graphe:build-plan',
   buildAdvance: 'graphe:build-advance',
@@ -1436,6 +1437,8 @@ export type GrapheApi = {
   worktreeLand(where?: Where): Promise<Result<null>>;
   /** Throw the front conversation's own checkout away, branch and all. */
   worktreeDrop(where?: Where): Promise<Result<null>>;
+  /** Prepare an isolated worktree for a pull request, so the review reads the right files. */
+  preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>>;
   /** Full text for a library row. `id` is checked against that library first. */
   skillText(id: string, where?: Where): Promise<Result<string>>;
   /** Stop checking before things that would otherwise be asked about, or start

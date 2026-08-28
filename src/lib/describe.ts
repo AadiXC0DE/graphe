@@ -119,9 +119,17 @@ export function describeCall(call: ToolCall): Described {
 
     case 'lsp':
       return {
-        label: 'Looking through code intelligence',
-        detail: short(textField(input, ['operation', 'symbol', 'query', 'path'])),
+        label: 'Looking through your code',
+        detail: short(textField(input, ['symbol', 'operation', 'query', 'path'])),
       };
+
+    case 'lsp_rename': {
+      const symbol = textField(input, ['symbol', 'word', 'name']);
+      return {
+        label: symbol === null ? 'Renaming across your project' : `Renaming ${symbol} across your project`,
+        detail: short(textField(input, ['newName', 'to'])),
+      };
+    }
 
     case 'bash':
     case 'shell':
@@ -254,6 +262,11 @@ export function describeCall(call: ToolCall): Described {
     case 'forget':
       return { label: 'Forgetting a note' };
 
+    case 'ask_advisor':
+      return { label: ADVISOR_LABEL, detail: short(textField(input, ['question'])) };
+    case 'record_advisor_outcome':
+      return { label: 'Noting how that advice turned out' };
+
     default:
       return { label: 'Working on your project' };
   }
@@ -266,6 +279,10 @@ export const WEB_SEARCH_LABEL = 'Searching the web';
 
 /** The words a delegated piece of work wears in the thread. */
 export const TASK_LABEL = 'Sending a piece of work to a helper';
+
+/** The words a second opinion wears in the thread. Said out loud rather than
+ *  slipped past: it is not asked about, so it has to be visible. */
+export const ADVISOR_LABEL = 'Asking a second opinion';
 
 /** Above the card that holds the questions. */
 export const ASKING_LABEL = 'Asking you first';

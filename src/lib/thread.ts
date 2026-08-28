@@ -19,6 +19,9 @@ import { describeCall } from './describe';
 import { realWords } from './showme';
 import type { Decision, Trouble } from './ipc';
 
+/** A picture somebody put in the box, as the conversation shows it back. */
+export type SentPicture = { name: string; src: string };
+
 /**
  * One thing in the conversation, whoever caused it.
  *
@@ -29,7 +32,19 @@ import type { Decision, Trouble } from './ipc';
  * reason the feed reads as one conversation instead of a log next to a chat.
  */
 export type Turn =
-  | { kind: 'said'; id: string; from: MessageAuthor; text: string; streaming: boolean }
+  | {
+      kind: 'said';
+      id: string;
+      from: MessageAuthor;
+      text: string;
+      streaming: boolean;
+      /** Pictures attached to this message, held as the object URLs the
+       *  composer already made. An object URL keeps the file it points at alive
+       *  until it is revoked, and this one must not be — the turn is what shows
+       *  it. No ceiling like `MOST_PICTURES` because it is the same URL the
+       *  panel's own reference list is already holding: nothing new is kept. */
+      pictures?: readonly SentPicture[];
+    }
   | {
       kind: 'did';
       id: string;
@@ -156,8 +171,15 @@ export function newId(): string {
   return `turn-${counter}`;
 }
 
-export function said(from: MessageAuthor, text: string): Turn {
-  return { kind: 'said', id: newId(), from, text, streaming: false };
+export function said(from: MessageAuthor, text: string, pictures?: readonly SentPicture[]): Turn {
+  return {
+    kind: 'said',
+    id: newId(),
+    from,
+    text,
+    streaming: false,
+    ...(pictures === undefined || pictures.length === 0 ? {} : { pictures }),
+  };
 }
 
 export function estimated(text: string, prompt: Prompt): Turn {

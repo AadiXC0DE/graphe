@@ -55,7 +55,7 @@ import {
   type When,
 } from '../../work/always';
 import type { HowFar } from '../guard/policy';
-import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
+import { PLAN_WORDS, parseProposal, withheldWhilePlanning } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
@@ -99,11 +99,18 @@ import {
 } from './importers';
 
 import { readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 
+import {
+  ADVISOR_SETTINGS_FILE,
+  advisorSettings,
+  advisorToolNames,
+  extensionToolNames,
+  type LoadedExtension,
+} from '../advisor';
 import { idFor } from '../../projects/carried';
-import type { ThinkingLevel } from '../../lib/ipc';
+import type { ModelChoice, ThinkingLevel } from '../../lib/ipc';
 
 /** Yes or no, from a person. There is deliberately no third answer: no "always",
  *  no "for this session", no "don't ask again". Confirmation fatigue is what
@@ -309,6 +316,9 @@ export type InterceptorOptions = {
    *  the project is refused with a sentence telling the model to propose it
    *  instead, which is the whole of planning before doing. */
   planning?: () => boolean;
+  /** True while Plan is on. Unlike `planning`, which lasts one look-around
+   *  pass, this stays until somebody exits it. */
+  planMode?: () => boolean;
   /** The project's own rules, as they were read. They can only ever make an
    *  answer harder, so a project that carries none changes nothing here. */
   rules?: () => Rules;
@@ -343,7 +353,7 @@ function whyItMatters(verdict: Verdict): string {
 export function createGuardInterceptor(
   options: InterceptorOptions,
 ): (call: ToolCall) => Promise<Interception> {
-  const { facts, relay, confirmations, timeline, planning, rules, world, filesMayHaveMoved, workBegan } =
+  const { facts, relay, confirmations, timeline, planning, planMode, rules, world, filesMayHaveMoved, workBegan } =
     options;
 
   /* Fails closed. A host with no history wired cannot run destructive work at all:
@@ -396,6 +406,14 @@ export function createGuardInterceptor(
       await options.paused.gate();
       relay.waitingForYou(false);
     }
+    // Plan is read-only until somebody leaves it, and it outranks the autonomy
+    // ladder: "go as far as you like" is standing permission, Plan is a
+    // decision made on this message, and the later decision wins.
+    if (planMode?.() === true && withheldWhilePlanning(call)) {
+      relay.blocked(call, PLAN_WORDS.withheld);
+      return { block: true, reason: PLAN_WORDS.withheld };
+    }
+
     // The explicit top autonomy rung is full access for this sitting. Keep this
     // before planning too: otherwise a leftover plan-only state silently turns
     // "Get on with it" back into a restricted mode. `evaluate` mirrors this
@@ -438,7 +456,7 @@ export function createGuardInterceptor(
 
     // Looking only. Withheld rather than refused-as-an-error: the model is told
     // to put it in the plan, which is the answer we actually want back.
-    if (planning?.() === true && readOnlyTools([call.name]).length === 0) {
+    if (planning?.() === true && withheldWhilePlanning(call)) {
       return { block: true, reason: PLAN_WORDS.withheld };
     }
 
@@ -617,6 +635,13 @@ export type CreateSessionOptions = {
    *  and git belongs inside each one, say. Facts only; never instructions
    *  somebody did not choose. */
   contextNotes?: readonly string[];
+  /** Open in Plan: nothing that could change the project runs until somebody
+   *  leaves it. A new conversation starts wherever the project last was. */
+  planMode?: boolean;
+  /** The model asked about the hard parts, or null for one model doing all of
+   *  it. Only means anything with the advisor addition installed — without it
+   *  there is no tool to turn on, and the choice sits waiting. */
+  advisor?: ModelChoice | null;
 };
 
 /**
@@ -686,6 +711,10 @@ export type GrapheSession = {
    *  when the choice does not resolve to a model this computer can use; the
    *  session then carries on with what it had rather than picking for you. */
   useModel(choice: { providerId: string; modelId: string } | null): Promise<boolean>;
+  /** Ask a stronger model about the hard parts from now on, or null to have
+   *  one model do all of it. Silent where the advisor addition is not
+   *  installed: there is no tool to turn on, and the choice waits for it. */
+  useAdvisor(choice: ModelChoice | null): Promise<void>;
   /** Which model is answering, or null for "whatever the account offers". */
   readonly model: { providerId: string; modelId: string } | null;
   /** How much time this model is taking before it answers. */
@@ -755,6 +784,8 @@ export type GrapheSession = {
   /** How far it may go on its own, for as long as this session lives. A
    *  ceiling on questions, never on what is refused. */
   goAsFarAs(howFar: HowFar): void;
+  /** Plan Mode — persistent read-only until explicit Exit / Do it. */
+  setPlanMode(on: boolean): void;
   /** Where the ladder is set right now. */
   readonly howFar: HowFar;
   /** What this session has kept running — servers, watchers, anything started
@@ -1130,6 +1161,36 @@ function theirsAndTrusted(
   };
 }
 
+/**
+ * Write the chosen advisor where the addition will look for it.
+ *
+ * The file is Pi's, not ours, and somebody may well be keeping their own
+ * settings in it — so it is read, three keys are changed, and the rest is put
+ * back exactly as it was. Never throws: an advisor that does not survive the
+ * quit is not worth refusing to open a project over.
+ */
+async function keepAdvisorSettings(
+  agentDir: string,
+  advises: ModelChoice | null,
+  does: ModelChoice | null,
+): Promise<void> {
+  const file = join(agentDir, ADVISOR_SETTINGS_FILE);
+  let existing: unknown = null;
+  try {
+    existing = JSON.parse(await readFile(file, 'utf8'));
+  } catch {
+    // No file yet, or one nobody can parse. Either way there is nothing to keep.
+  }
+  const next = advisorSettings(existing, { advises, does });
+  if (JSON.stringify(existing) === JSON.stringify(next)) return;
+  try {
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  } catch {
+    // The choice applies to this sitting anyway; only the memory of it is lost.
+  }
+}
+
 /** Every conversation this folder has had. Never throws: a folder with no
  *  transcripts is an empty list, not a failure. */
 export async function listConversations(
@@ -1457,6 +1518,8 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
   /** True only for the length of a looking-around pass. */
   let planning = false;
+  /** True while Plan is on. Unlike `planning`, it lasts until somebody leaves it. */
+  let planMode = options.planMode === true;
   /** Nothing reaches the window while this is on, except what was spent. Used
    *  for the one turn nobody asked for — see `settleUp`. */
   let unwatched = false;
@@ -1792,6 +1855,7 @@ const MOST_AFTER_SAYINGS = 3;
     paused,
     timeline: options.timeline,
     planning: () => planning,
+    planMode: () => planMode,
     rules: () => house,
     world: desk.world,
     filesMayHaveMoved: forgetChecks,
@@ -1839,6 +1903,21 @@ const MOST_AFTER_SAYINGS = 3;
   await loader.reload({
     resolveProjectTrust: async () => (options.trustProject ?? (() => false))(),
   });
+
+  // Extensions register their tools while the loader runs. Naming `tools` at
+  // all makes Pi read that array as the whole allowlist, so anything an
+  // extension added has to be in it or the person installed a tool nothing can
+  // ever call. The Guard still sees every one of these calls, and a name it has
+  // no row for still stops to ask.
+  const loadedExtensions = loader.getExtensions().extensions as readonly LoadedExtension[];
+  const extensionTools = extensionToolNames(loadedExtensions);
+  /** The advisor's own tools, kept apart because a chip turns them on and off
+   *  without rebuilding the conversation. */
+  const advisorTools = advisorToolNames(loadedExtensions);
+  const advises = options.advisor ?? null;
+  if (advisorTools.length > 0) {
+    await keepAdvisorSettings(agentDir, advises, options.model ?? null);
+  }
 
   // Graphe's own tools — the web search and the task helper — travel as Pi's
   // `customTools`, which keeps them out of the extension machinery entirely:
@@ -2112,7 +2191,7 @@ const MOST_AFTER_SAYINGS = 3;
         // Naming `tools` at all switches Pi from "the four defaults plus every
         // custom tool" to "exactly this list", so ours have to be in it or they
         // vanish. Taken off the tools themselves rather than written twice.
-        tools: [...WORKING_TOOLS, ...customTools.map((tool) => tool.name)],
+        tools: [...WORKING_TOOLS, ...customTools.map((tool) => tool.name), ...extensionTools],
         // Cast because Pi's own bash definition is narrower in its schema than
         // the list it goes into; Pi assigns it the same way internally.
         customTools: [...customTools, boundShell as (typeof customTools)[number]],
@@ -2139,6 +2218,24 @@ const MOST_AFTER_SAYINGS = 3;
     await session.steer(text);
   };
   alreadyBilled = rawBill() ?? 0;
+
+  /** On and off without rebuilding the conversation. The names stay in the
+   *  allowlist either way; only whether they are active changes, so turning the
+   *  advisor off is one press and takes effect on the next step. */
+  const advisorActive = (on: boolean): void => {
+    if (advisorTools.length === 0) return;
+    try {
+      const active = new Set(session.getActiveToolNames());
+      for (const name of advisorTools) {
+        if (on) active.add(name);
+        else active.delete(name);
+      }
+      session.setActiveToolsByName([...active]);
+    } catch {
+      // An older Pi without the call leaves the allowlist as it was.
+    }
+  };
+  advisorActive(advises !== null);
 
   const unsubscribe = session.subscribe((event) => {
     relay.fromPi(event);
@@ -2408,6 +2505,12 @@ const MOST_AFTER_SAYINGS = 3;
       }
     },
 
+    async useAdvisor(next): Promise<void> {
+      if (closed) return;
+      advisorActive(next !== null);
+      if (advisorTools.length > 0) await keepAdvisorSettings(agentDir, next, inUse);
+    },
+
     async useModel(next): Promise<boolean> {
       if (closed) return false;
       // Pi has no "no model" to set, so clearing only affects the next session.
@@ -2585,6 +2688,10 @@ const MOST_AFTER_SAYINGS = 3;
 
     goAsFarAs(howFar: HowFar): void {
       facts.howFar = howFar;
+    },
+
+    setPlanMode(on: boolean): void {
+      planMode = on;
     },
 
     get howFar(): HowFar {

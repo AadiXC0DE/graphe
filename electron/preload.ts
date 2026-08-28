@@ -467,6 +467,11 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.goAsFarAs, howFar, named(where)) as Promise<Result<HowFar>>;
   },
 
+  setPlanMode(on: boolean, where?: Where): Promise<Result<boolean>> {
+    if (typeof on !== 'boolean') return Promise.resolve(refuse<boolean>('That is not a yes or a no.'));
+    return ipcRenderer.invoke(CHANNEL.setPlanMode, on, named(where)) as Promise<Result<boolean>>;
+  },
+
   running(where?: Where): Promise<Result<readonly RunningPiece[]>> {
     return ipcRenderer.invoke(CHANNEL.running, named(where)) as Promise<Result<readonly RunningPiece[]>>;
   },
@@ -693,6 +698,27 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.selectModel, choice.providerId, choice.modelId, named(where)) as Promise<
       Result<Preferences>
     >;
+  },
+
+  selectAdvisor(choice: ModelChoice | null, where?: Where): Promise<Result<Preferences>> {
+    if (choice === null) {
+      return ipcRenderer.invoke(CHANNEL.selectAdvisor, null, null, named(where)) as Promise<
+        Result<Preferences>
+      >;
+    }
+    if (
+      typeof choice !== 'object' ||
+      typeof choice.providerId !== 'string' ||
+      typeof choice.modelId !== 'string'
+    ) {
+      return Promise.resolve(refuse<Preferences>('I could not tell which model you meant.'));
+    }
+    return ipcRenderer.invoke(
+      CHANNEL.selectAdvisor,
+      choice.providerId,
+      choice.modelId,
+      named(where),
+    ) as Promise<Result<Preferences>>;
   },
 
   setThinking(

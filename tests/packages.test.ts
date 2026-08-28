@@ -235,10 +235,13 @@ describe('the order additions are offered in', () => {
       { package: { name: 'pi-mcp-adapter' }, downloads: { monthly: 1 } },
       { package: { name: 'pi-lens' }, downloads: { monthly: 2 } },
       { package: { name: 'pi-web-access' } },
+      { package: { name: 'pi-advisor' }, downloads: { monthly: 9 } },
+      { package: { name: 'pi-advisor-flow' }, downloads: { monthly: 4 } },
     ]);
     expect(packs.map((pack) => pack.id)).toEqual([
       ...CURATED.map((one) => one.id),
       'pi-famous',
+      'pi-advisor',
     ]);
   });
 
@@ -350,6 +353,7 @@ describe('CURATED', () => {
       'pi-web-access',
       'pi-lens',
       'pi-subagents',
+      'pi-advisor-flow',
     ]);
   });
 

@@ -223,11 +223,12 @@ describe('what Graphe adds to Pi', () => {
 
     expect(modes.map((one) => one.name)).toContain('task');
     expect(modes.map((one) => one.name)).toContain('figma_read');
-    // The exception, and the only one: a browser and a screen are each one
-    // shared thing, and two presses landing on one page at the same time is not
-    // a fan-out, it is a race. Everything else in the list stays parallel so a
-    // reply that sends six helpers still sends six helpers.
-    const drives = /^(browser|desktop)_/;
+    // The exceptions, and the only ones: a browser, a screen and the project's
+    // own files are each one shared thing, and two presses landing on one page
+    // — or two renames landing on one file — at the same time is not a fan-out,
+    // it is a race. Everything else in the list stays parallel so a reply that
+    // sends six helpers still sends six helpers.
+    const drives = /^(browser|desktop)_|^lsp_rename$/;
     for (const one of modes) {
       if (drives.test(one.name)) continue;
       expect(one.executionMode).not.toBe('sequential');

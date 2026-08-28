@@ -18,7 +18,7 @@ Every change is versioned the moment it happens, with a before-and-after picture
 Colours, sizes and type, read before a single file is touched, so the work lands inside the design system, not on top of it.
 
 **04 · Plan mode**
-Big requests get a numbered plan and wait for "Do it" before anything changes.
+Big requests get a numbered plan and wait for "Do it" before anything changes. Turn Plan on and it is a gate rather than a promise: reads go through, everything that would change or run anything is held back until you say go ahead — and it outranks "get on with it", because it is the later decision.
 
 **05 · Subagents in parallel**
 Send three helpers in one reply and they all work at once, separate processes, read-only, each with its own role (reviewer, researcher, helper), under a ceiling that budgets the sitting.
@@ -119,6 +119,15 @@ The prompt templates a project keeps have always been commands. Now typing `/` o
 **37 · Show me the real commands**
 The commands, paths and git operations under every plain sentence, for the developer who wants the wheel.
 
+**38 · The canvas**
+Work as the graph it already is: every step left to right, what waits for what, and the line into whatever is going right now. Put a loop down whole — work on it, try it in the browser, run the checks, open a pull request — or place one step and drag from it. A step on the canvas is a piece on the same board, so nothing here runs behind the ceiling's back.
+
+**39 · Two models: one thinks, one does**
+Whatever is answering does the work; a stronger one is asked before a plan, after the same thing has failed twice, and before it calls something done. It reads and answers and never touches your project. The split shows on the same line as the money, and turning it off is one press.
+
+**40 · Rename across the project**
+`formatBytes` becomes `formatFileSize` everywhere it is used, in every file that uses it, in one step — with a preview first, credentials and binaries left alone, and a restore point before a single file is written.
+
 ---
 
 ## Under the hood
@@ -129,4 +138,4 @@ The commands, paths and git operations under every plain sentence, for the devel
 - **Debugger:** a small client for the standard Debug Adapter Protocol, lldb-dap, dlv dap and debugpy speak it natively.
 - **Connected tools:** the official MCP SDK, stdio servers, started lazily, killed with the session.
 - **Safety:** a pure, synchronous policy engine, no disk, no clock, the same call always gives the same answer, which is what makes it testable against adversarial input.
-- **Quality:** typecheck, lint, the full test suite (on macOS, where the sandbox tests live) and both bundles run on every pull request. Over three thousand tests.
+- **Quality:** typecheck, lint, the full test suite (on macOS, where the sandbox tests live) and both bundles run on every pull request. Over four thousand tests.

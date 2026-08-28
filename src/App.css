@@ -198,6 +198,20 @@
   color: var(--text-faint);
 }
 
+/* It wears the note's own clothes — same band, same size, same quiet — and
+   adds only the press. */
+.threadcopy {
+  align-self: flex-start;
+  padding: var(--space-1) 0;
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .threadcopy:hover {
+    color: var(--text-muted);
+  }
+}
+
 /* ---------------------------------------------------------------------------
    The workspace header
    The project as a page title, on the same band as the panel's first heading.

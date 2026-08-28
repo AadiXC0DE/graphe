@@ -156,6 +156,7 @@ describe('D1 — the real name of what just happened', () => {
       expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
         version: 1,
         preferences: {
+          advisor: null,
           showMe: true,
           model: null,
           thinking: {},

@@ -84,6 +84,7 @@ export default function CostMeter({
       ? forProject(history.main, project)
       : null;
   const retryShare = split?.retryShare ?? projectTotal?.retryShare ?? null;
+  const betweenModels = meter.split(usage?.byModel ?? []);
 
   return (
     <aside
@@ -133,6 +134,10 @@ export default function CostMeter({
       {usage?.mostUsed !== null && usage?.mostUsed !== undefined ? (
         <p className="cost-meter__retry">{meter.mostUsed(usage.mostUsed)}</p>
       ) : null}
+
+      {/* Only once a second model has actually answered, which is the whole
+          question somebody asks after turning the advisor on. */}
+      {betweenModels === null ? null : <p className="cost-meter__retry">{betweenModels}</p>}
 
       {retryShare !== null && retryShare > 0 ? (
         <p className="cost-meter__retry">

@@ -60,6 +60,10 @@ describe('every tool Graphe registers', () => {
       'debug_eval',
       'debug_detach',
       'read_diff',
+      // Not ours — an addition registers these, and they reach the model
+      // through the same allowlist everything else does.
+      'ask_advisor',
+      'record_advisor_outcome',
     ];
     const unknown = named.filter((name) => {
       const verdict = evaluate({ id: 'x', name, input: SOMETHING }, { projectRoot: ROOT });
@@ -92,6 +96,8 @@ describe('every tool Graphe registers', () => {
       'forget',
       'set_going',
       'try_ways',
+      'ask_advisor',
+      'record_advisor_outcome',
     ];
     const bland = [...new Set(common)].filter(
       (name) => describeCall({ id: 'x', name, input: SOMETHING }).label === 'Working on your project',

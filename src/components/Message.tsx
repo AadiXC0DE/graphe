@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import type { SentPicture } from '../lib/thread';
+import { useCopying } from '../lib/copying';
 import Clipped, { howMuch } from './Clipped';
 import Markdown from './Markdown';
 import './Message.css';
@@ -17,7 +19,33 @@ type Props = {
   /** True when this is the last turn in the thread — it starts unclipped, and
    *  the reader can fold it once they are done with it. */
   isLast?: boolean;
+  /** Pictures that went with this message, drawn above the words. */
+  pictures?: readonly SentPicture[];
+  /** The turn's own words, for the copy control. Nothing is drawn without it. */
+  copy?: string;
 };
+
+/** One picture as it was sent: small, and full size when asked for.
+ *
+ * A picture that will not draw leaves nothing behind — a broken-image icon says
+ * less than the message beside it already does. */
+function Sent({ picture }: { picture: SentPicture }) {
+  const [broken, setBroken] = useState(false);
+  const [open, setOpen] = useState(false);
+  if (broken) return null;
+  return (
+    <button
+      type="button"
+      className={`message__shot ${open ? 'message__shot--open' : ''}`}
+      onClick={() => setOpen((was) => !was)}
+      aria-expanded={open}
+      aria-label={open ? `Shrink ${picture.name}` : `Show ${picture.name} full size`}
+      title={picture.name}
+    >
+      <img src={picture.src} alt={picture.name} onError={() => setBroken(true)} />
+    </button>
+  );
+}
 
 /** One turn in the conversation.
  *
@@ -38,8 +66,9 @@ type Props = {
  * composer people stop trusting with anything technical. What you typed is what
  * is shown.
  */
-export default function Message({ from, children, streaming, aside, isLast }: Props) {
+export default function Message({ from, children, streaming, aside, isLast, pictures, copy }: Props) {
   const mine = from === 'you';
+  const copying = useCopying();
   const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
   const formatted = !mine && typeof children === 'string';
 
@@ -58,7 +87,21 @@ export default function Message({ from, children, streaming, aside, isLast }: Pr
 
   return (
     <article className={`message message--${from}`} aria-label={mine ? 'You' : 'Graphe'}>
-      <div className="message__who">{mine ? 'You' : 'Graphe'}</div>
+      <div className="message__who">
+        <span>{mine ? 'You' : 'Graphe'}</span>
+        {copy === undefined || copy === '' ? null : (
+          <button type="button" className="message__copy" onClick={() => copying.copy(copy)}>
+            {copying.label}
+          </button>
+        )}
+      </div>
+      {pictures === undefined || pictures.length === 0 ? null : (
+        <div className="message__pictures">
+          {pictures.map((picture, at) => (
+            <Sent key={`${picture.src}-${String(at)}`} picture={picture} />
+          ))}
+        </div>
+      )}
       <div
         className={`message__body ${formatted ? 'message__body--rich' : ''}`}
         aria-live={!mine && streaming ? 'polite' : undefined}

@@ -438,6 +438,10 @@ export type Preferences = {
   showMe: boolean;
   /** The model chosen to work with, or null for "whatever is available". */
   model: ModelChoice | null;
+  /** The model asked about the hard parts, or null for one model doing all of
+   *  it. Global like `model`: it is a reading of what somebody will spend on a
+   *  second opinion, and they are the same person in every folder. */
+  advisor: ModelChoice | null;
   /** How much time each chosen model should take before answering. Kept per
    *  provider/model pair because the names and available choices differ. */
   thinking: Readonly<Record<string, ThinkingLevel>>;
@@ -1200,6 +1204,7 @@ export const CHANNEL = {
   repoComment: 'graphe:repo-comment',
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
+  setPlanMode: 'graphe:set-plan-mode',
   running: 'graphe:running',
   stopRunning: 'graphe:stop-running',
   tidyNow: 'graphe:tidy-now',
@@ -1248,6 +1253,7 @@ export const CHANNEL = {
   cancelConnect: 'graphe:cancel-connect',
   disconnect: 'graphe:disconnect',
   selectModel: 'graphe:select-model',
+  selectAdvisor: 'graphe:select-advisor',
   setThinking: 'graphe:set-thinking',
   spendSplit: 'graphe:spend-split',
   tokenUsage: 'graphe:token-usage',
@@ -1460,6 +1466,8 @@ export type GrapheApi = {
   /** Set how far it may go before it stops and asks. Answers with the rung it
    *  is actually on afterwards. */
   goAsFarAs(howFar: HowFar, where?: Where): Promise<Result<HowFar>>;
+  /** Stay read-only until an explicit Do it / Exit plan. */
+  setPlanMode(on: boolean, where?: Where): Promise<Result<boolean>>;
   /** What is being kept running in this conversation — servers, watchers. */
   running(where?: Where): Promise<Result<readonly RunningPiece[]>>;
   /** Stop one of them. Answers with what is left. */
@@ -1570,6 +1578,10 @@ export type GrapheApi = {
   disconnect(providerId: string): Promise<Result<null>>;
   /** Choose which model to work with. Returns the whole set of preferences. */
   selectModel(choice: ModelChoice, where?: Where): Promise<Result<Preferences>>;
+  /** Choose the model asked about the hard parts, or null so one model does all
+   *  of it. Takes effect on the conversation in front of somebody, not only the
+   *  next one. */
+  selectAdvisor(choice: ModelChoice | null, where?: Where): Promise<Result<Preferences>>;
   /** Let this exact model take more or less time before it answers. */
   setThinking(choice: ModelChoice, level: ThinkingLevel, where?: Where): Promise<Result<Preferences>>;
   /** Where the money went in this project, asked for rather than waited for.

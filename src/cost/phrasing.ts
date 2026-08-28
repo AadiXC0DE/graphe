@@ -125,6 +125,15 @@ export const meter = {
   mostUsed(name: string): string {
     return `Mostly ${name}`;
   },
+  /** How the bill fell between two models, once a second one is answering.
+   *  Nothing where one model did all of it: a split of one is not a split. */
+  split(models: readonly { name: string; share: number }[]): string | null {
+    const [first, second] = models;
+    if (first === undefined || second === undefined) return null;
+    const pct = (share: number) => Math.round(Math.min(1, Math.max(0, share)) * 100);
+    if (pct(second.share) < 1) return null;
+    return `${pct(first.share)}% ${first.name}, ${pct(second.share)}% ${second.name}`;
+  },
 };
 
 /* -------------------------------------------------------- before a bigger job */
@@ -467,6 +476,7 @@ export function auditableStrings(voice: Voice = {}): string[] {
   push(meter.detailsLink);
   push(meter.onAPlan);
   push(meter.reused(0.72));
+  push(meter.split([{ name: 'the one doing the work', share: 0.8 }, { name: 'the one advising', share: 0.2 }]));
   push(nothingSpentYet);
   push(meter.today(inr(12_000), voice));
   push(meter.screenReaderLabel(inr(12_000), voice));

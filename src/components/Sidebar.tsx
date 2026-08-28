@@ -37,6 +37,8 @@ type Props = {
    *  left out of the strip when it has nowhere to go. */
   onAsk?: () => void;
   onDesign?: () => void;
+  /** Work in flight, as the graph it already is. */
+  onCanvas?: () => void;
   onHistory?: () => void;
   /** The github pull requests and issues of the project in front. */
   onReviews?: () => void;
@@ -85,6 +87,7 @@ export default function Sidebar({
   onToggle,
   onAsk,
   onDesign,
+  onCanvas,
   onHistory,
   onReviews,
   onSkills,
@@ -330,7 +333,7 @@ export default function Sidebar({
 
           {/* The last row and never a band: it sits under the work rather than
               beside it, and stays put while the conversations scroll. */}
-          {onAsk === undefined && onDesign === undefined && onHistory === undefined &&
+          {onAsk === undefined && onDesign === undefined && onCanvas === undefined && onHistory === undefined &&
             onReviews === undefined && onAddMore === undefined && onSkills === undefined && onSettings === undefined ? null : (
             <div className="shelf__foot">
               {onAsk === undefined ? null : (
@@ -367,6 +370,29 @@ export default function Sidebar({
                     </svg>
                   </span>
                   <span className="shelf__rowname">Design</span>
+                </button>
+              )}
+              {onCanvas === undefined ? null : (
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__more"
+                  onClick={onCanvas}
+                  title="Every step, and what waits for what"
+                >
+                  <span className="shelf__moremark" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <rect x="1.5" y="5.5" width="4.5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+                      <rect x="10" y="1.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+                      <rect x="10" y="9.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+                      <path
+                        d="M6 8h2a1.5 1.5 0 0 0 1.5-1.5V6.25M6 8h2a1.5 1.5 0 0 1 1.5 1.5v0.25"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">Canvas</span>
                 </button>
               )}
               {onHistory === undefined ? null : (

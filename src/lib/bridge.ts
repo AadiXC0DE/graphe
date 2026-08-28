@@ -550,6 +550,21 @@ function previewAway(): Away {
       question: null,
       oneOf: { of: 2, at: 2, named: 'the hero' },
     },
+    {
+      id: 'away-4',
+      doing: 'Run the checks once the spacing is in',
+      state: 'waiting',
+      at: started - MINUTE / 2,
+      picture: null,
+      says: null,
+      trouble: null,
+      question: null,
+      after: {
+        id: 'away-3',
+        doing: 'Match the case study page to the new spacing',
+        says: 'After “Match the case study page to the new spacing”',
+      },
+    },
   ];
   const repeats: readonly Repeating[] = [
     {
@@ -617,6 +632,7 @@ let previewLines: { name: string; current: boolean; upstream: string | null; ahe
 ];
 
 let previewHowFar: HowFar = 'asking';
+let previewPlanMode = false;
   let previewCeiling: SpendLimit | null = null;
   let previewMade = 0;
   let previewCarried: readonly CarriedExtension[] = [
@@ -642,6 +658,7 @@ let previewHowFar: HowFar = 'asking';
   let preferred: Preferences = {
     showMe: false,
     model: null,
+    advisor: null,
     thinking: {},
     kept: {},
     showFiles: true,
@@ -1145,6 +1162,11 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(previewHowFar));
     },
 
+    setPlanMode(on: boolean): Promise<Result<boolean>> {
+      previewPlanMode = on;
+      return Promise.resolve(done(previewPlanMode));
+    },
+
     running(): Promise<Result<readonly RunningPiece[]>> {
       return Promise.resolve(done(previewRunning));
     },
@@ -1415,6 +1437,11 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done({ ...preferred }));
     },
 
+    selectAdvisor(choice: ModelChoice | null): Promise<Result<Preferences>> {
+      preferred = { ...preferred, advisor: choice };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
     setThinking(choice: ModelChoice, level: ThinkingLevel): Promise<Result<Preferences>> {
       preferred = { ...preferred, thinking: { ...preferred.thinking, [modelKey(choice)]: level } };
       return Promise.resolve(done({ ...preferred }));
@@ -1603,7 +1630,7 @@ let previewHowFar: HowFar = 'asking';
       const waited = atWork.pieces.find((one) => one.id === after);
       return this.keepGoing(text).then((answer) => {
         if (!answer.ok || waited === undefined) return answer;
-        const last = answer.value.pieces[answer.value.pieces.length - 1];
+        const last = answer.value.pieces[0];
         if (last === undefined) return answer;
         atWork = {
           ...atWork,
@@ -2004,6 +2031,7 @@ function connect(): Bridge {
     goalVerify: (whereArg) => (api.goalVerify as unknown as (where?: Where) => Promise<Result<{ passed: boolean; reason: string }>>)?.(whereArg) ?? Promise.resolve(done({ passed: true, reason: 'No checks.' })),
     stopAsking: (on, where) => api.stopAsking(on, where),
     goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
+    setPlanMode: (on, where) => (api.setPlanMode as unknown as (on: boolean, where?: Where) => Promise<Result<boolean>>)?.(on, where) ?? Promise.resolve(done(on)),
     running: (where) => api.running(where),
     stopRunning: (id, where) => api.stopRunning(id, where),
     carried: (where) => api.carried(where),
@@ -2035,6 +2063,7 @@ function connect(): Bridge {
     cancelConnect: () => api.cancelConnect(),
     disconnect: (providerId) => api.disconnect(providerId),
     selectModel: (choice, where) => api.selectModel(choice, where),
+    selectAdvisor: (choice, where) => api.selectAdvisor(choice, where),
     setThinking: (choice, level, where) => api.setThinking(choice, level, where),
     closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
     startAfter: (text, after, where) => api.startAfter(text, after, where),

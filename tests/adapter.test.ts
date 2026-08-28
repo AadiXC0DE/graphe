@@ -18,7 +18,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   Confirmations,
@@ -31,6 +31,7 @@ import {
 } from '../src/agent/pi/adapter';
 import { EventRelay, translatePiEvent } from '../src/agent/pi/events';
 import type { GuardFacts } from '../src/agent/guard/policy';
+import { PLAN_WORDS } from '../src/agent/plan';
 import type { AgentEvent, ToolCall } from '../src/agent/types';
 
 const ROOT = '/Users/mira/Projects/portfolio';
@@ -49,6 +50,7 @@ function harness(options: {
   failSnapshot?: boolean;
   withTimeline?: boolean;
   guardFacts?: GuardFacts;
+  planMode?: boolean;
 } = {}) {
   const order: string[] = [];
   const events: AgentEvent[] = [];
@@ -71,6 +73,7 @@ function harness(options: {
     relay,
     confirmations,
     timeline: options.withTimeline === false ? undefined : timeline,
+    ...(options.planMode === undefined ? {} : { planMode: () => options.planMode === true }),
   });
 
   /** Stands in for Pi's agent loop: it only reaches the tool when the
@@ -972,5 +975,75 @@ describe('taking the line back out of the agent\'s hands', () => {
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
     expect(refused.because.trim()).not.toBe('');
+  });
+});
+
+
+/* ========================================================================== */
+/* Plan: read-only until somebody leaves it                                    */
+/* ========================================================================== */
+
+describe('Plan holds every write back', () => {
+  it('withholds an edit instead of running it', async () => {
+    const { order, runThroughPi } = harness({ planMode: true });
+    const outcome = await runThroughPi(call('edit', { path: `${ROOT}/index.html`, old_string: 'a', new_string: 'b' }));
+    expect(outcome?.block).toBe(true);
+    expect(outcome?.reason).toBe(PLAN_WORDS.withheld);
+    expect(order).not.toContain('executed');
+  });
+
+  it('withholds a command as well as a change', async () => {
+    const { order, runThroughPi } = harness({ planMode: true });
+    expect((await runThroughPi(bash('rm -rf build')))?.block).toBe(true);
+    expect((await runThroughPi(call('write', { path: `${ROOT}/new.txt`, content: 'x' })))?.block).toBe(true);
+    expect(order).not.toContain('executed');
+  });
+
+  it('lets reading through, which is the whole point of it', async () => {
+    const { order, runThroughPi } = harness({ planMode: true });
+    expect(await runThroughPi(call('read', { path: `${ROOT}/index.html` }))).toBeUndefined();
+    expect(order).toContain('executed');
+  });
+
+  it('outranks full access, because Plan is the later decision', async () => {
+    const { order, runThroughPi } = harness({
+      planMode: true,
+      guardFacts: { projectRoot: ROOT, howFar: 'doing' },
+    });
+    const outcome = await runThroughPi(bash('npm publish'));
+    expect(outcome?.block).toBe(true);
+    expect(outcome?.reason).toBe(PLAN_WORDS.withheld);
+    expect(order).not.toContain('executed');
+  });
+
+  /* Each of these changes nothing in the folder in front of you and everything
+     in a copy of it, which is why the Guard calls them read-only and why Plan
+     cannot lean on that answer alone. */
+  it('withholds work that would run in a copy of the project', async () => {
+    const { order, runThroughPi } = harness({ planMode: true });
+    expect((await runThroughPi(call('set_going', { pieces: [{ doing: 'rewrite the app' }] })))?.block).toBe(true);
+    expect((await runThroughPi(call('try_ways', { ways: ['one', 'two'] })))?.block).toBe(true);
+    expect((await runThroughPi(call('task', { task: 'redo the nav', role: 'builder' })))?.block).toBe(true);
+    expect(order).not.toContain('executed');
+  });
+
+  it('still lets a helper that only reads go and look', async () => {
+    const { confirmations, order, runThroughPi } = harness({ planMode: true });
+    const going = runThroughPi(call('task', { task: 'find every place the nav is styled' }));
+    // Past the gate and on to the Guard's own question, which is where a helper
+    // has always stopped.
+    await vi.waitFor(() => expect(confirmations.pending).toEqual(['call-1']));
+    confirmations.answer('call-1', 'yes');
+    expect(await going).toBeUndefined();
+    expect(order).toContain('executed');
+  });
+
+  it('holds nothing back once it is off', async () => {
+    const { order, runThroughPi } = harness({
+      planMode: false,
+      guardFacts: { projectRoot: ROOT, howFar: 'doing' },
+    });
+    expect(await runThroughPi(call('edit', { path: `${ROOT}/index.html`, old_string: 'a', new_string: 'b' }))).toBeUndefined();
+    expect(order).toContain('executed');
   });
 });

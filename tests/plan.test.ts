@@ -20,6 +20,7 @@ import {
   readOnlyTools,
   worthPlanning,
 } from '../src/agent/plan';
+import { grapheTools } from '../src/agent/pi/tools';
 
 describe('readOnlyTools', () => {
   it('keeps the reads and drops everything that can change a project', () => {
@@ -62,6 +63,30 @@ describe('readOnlyTools', () => {
 
   it('has nothing to say about an empty list', () => {
     expect(readOnlyTools([])).toEqual([]);
+  });
+
+  it('keeps looking through code and drops the rename that writes it', () => {
+    expect(readOnlyTools(['lsp', 'lsp_rename'])).toEqual(['lsp']);
+  });
+
+  /**
+   * The regression this whole set exists to catch, swept rather than listed.
+   *
+   * A tool that renamed a symbol across every file was classed as a read, so
+   * the looking-around pass rewrote the project it was only supposed to look
+   * at. The evidence is each tool's own words to the model, never the Guard's
+   * own lists — a check made of the same set it is checking agrees with itself
+   * however wrong both are.
+   */
+  it('leaves out anything that tells the model it writes', () => {
+    const registered = grapheTools('/tmp/agent', 'a-figma-token', null, undefined, '/work/site');
+    const reads = new Set(readOnlyTools(registered.map((one) => one.name)));
+    const writing = registered.filter((one) => {
+      if (!reads.has(one.name)) return false;
+      const words = [one.description, one.promptSnippet ?? '', ...(one.promptGuidelines ?? [])].join(' ');
+      return /\bwrites?\b|\brewrit/i.test(words);
+    });
+    expect(writing.map((one) => one.name), 'writes, and the Guard calls it a read').toEqual([]);
   });
 });
 

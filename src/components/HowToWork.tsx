@@ -62,7 +62,7 @@ const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[
     id: 'plan',
     chip: 'Plan',
     name: 'Plan only',
-    note: 'Reads and proposes a plan, no edits or commands until you approve it. Write tools are held.',
+    note: 'Reads and proposes. Nothing is changed and nothing is run until you say go ahead.',
   },
   {
     id: 'executive',

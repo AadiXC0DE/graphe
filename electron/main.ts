@@ -109,6 +109,7 @@ import {
   type Hatches,
   type InStep,
   type Landing,
+  type ModelChoice,
   type OpenedProject,
   type WentOnline,
   type Overview,
@@ -503,6 +504,14 @@ function couldNotUseModel(named: string, many: number): Trouble {
     actionLabel: 'Got it',
   };
 }
+
+/** A switch handed something that is neither on nor off. Nothing has gone wrong
+ *  with the folder, so it must not read as though it has. */
+const NOT_A_YES_OR_NO: Trouble = {
+  what: 'That switch was not given a yes or a no.',
+  because: 'Try it again — nothing was changed.',
+  actionLabel: 'Got it',
+};
 
 const NOTHING_OPEN: Trouble = {
   what: 'I do not have a folder to work in yet.',
@@ -1579,6 +1588,8 @@ type Held = {
   /** True while something is being sent off this computer, so a second press
    *  cannot start a second one. */
   sending: boolean;
+  /** True while Plan Mode is on — writes withheld until explicit Do it / Exit. */
+  planMode: boolean;
 };
 
 /** Every conversation in one project, with the one that has waited longest put
@@ -2707,6 +2718,7 @@ async function checkItFirst(
       onEvent: forwardHeld(open.path, held, from),
       timeline: await Timeline.open(waiting.folder),
       model: (await preferences()).all().model,
+      advisor: (await preferences()).all().advisor,
       thinking: thinkingFor((await preferences()).all()),
       sessionDir: sessionsFolder(),
     });
@@ -3454,6 +3466,7 @@ async function startConversationUnlocked(
             (held.timeline ?? undefined)
           : await Timeline.open(checkout.folder),
       model: prefs.model,
+      advisor: prefs.advisor,
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
       running: held.running,
@@ -3481,6 +3494,7 @@ async function startConversationUnlocked(
       // are kept.
       cancelBuild: () => cancelThePlan(open.path),
       keepsBrowserLogins: () => keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path),
+      planMode: held.planMode,
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -3581,6 +3595,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     checking: null,
     pictures: null,
     sending: false,
+    planMode: false,
   };
 
   // A folder opened with nothing chosen is the first-run case, and Pi will not
@@ -4342,6 +4357,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       onEvent: hear,
       timeline: await Timeline.open(folder),
       model: (await preferences()).all().model,
+      advisor: (await preferences()).all().advisor,
       thinking: thinkingFor((await preferences()).all()),
       noteServers,
       // Background work gets the same way into Figma as the conversation does:
@@ -5518,6 +5534,19 @@ function register(): void {
     const session = sessionAt(open, where);
     session?.goAsFarAs(rung);
     return Promise.resolve(done(session?.howFar ?? 'asking'));
+  });
+
+  /** Plan is held on the project rather than on one conversation: it seeds every
+   *  conversation started while it is on, so the two would otherwise disagree
+   *  about a folder that is meant to be read-only. */
+  handle<boolean>(CHANNEL.setPlanMode, (_event, args) => {
+    const [on] = args;
+    if (typeof on !== 'boolean') return Promise.resolve(fail<boolean>(NOT_A_YES_OR_NO));
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
+    open.held.planMode = on;
+    for (const one of open.held.sessions.open) one.held.setPlanMode(on);
+    return Promise.resolve(done(on));
   });
 
   /** What the open project brought with it. Read off the session that is
@@ -7035,6 +7064,7 @@ function register(): void {
         onEvent: forwardTo(open.path, open.held, from),
         timeline: await Timeline.open(folder),
         model: prefs.model,
+        advisor: prefs.advisor,
         thinking: thinkingFor(prefs),
         trusts: await trustsIn(open.path),
         running: open.held.running,
@@ -7797,6 +7827,34 @@ function register(): void {
     if (refused.length > 0) {
       return fail(couldNotUseModel(model?.label ?? modelId, refused.length));
     }
+    return done(saved);
+  });
+
+  handle<Preferences>(CHANNEL.selectAdvisor, async (_event, args) => {
+    const [providerId, modelId] = args;
+    const prefs = await preferences();
+    const off = providerId === null || modelId === null;
+    if (!off && (typeof providerId !== 'string' || typeof modelId !== 'string')) {
+      return done(prefs.all());
+    }
+    // A model the window drew from a stale list is not a preference. Turning it
+    // off needs no such check — nobody has to exist for nobody to be asked.
+    let choice: ModelChoice | null = null;
+    if (!off) {
+      const providers = await readConnection(await defaultAgentDir());
+      const known = providers.some(
+        (provider) =>
+          provider.providerId === providerId &&
+          provider.models.some((model) => model.id === modelId),
+      );
+      if (!known) return done(prefs.all());
+      choice = { providerId: providerId as string, modelId: modelId as string };
+    }
+    const saved = await prefs.change({ advisor: choice });
+    // On the conversations already open, not only the next one: one press is
+    // the whole promise of the control.
+    const open = projectAt(whereIn(args));
+    for (const one of open?.held.sessions.open ?? []) await one.held.useAdvisor(choice);
     return done(saved);
   });
 

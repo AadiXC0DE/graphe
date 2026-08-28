@@ -16,6 +16,7 @@ import type { HowFar } from '../agent/guard/policy';
 import HowToWork, { type Plans } from './HowToWork';
 import Room from './Room';
 import type { Turn } from '../lib/thread';
+import Advisor from './Advisor';
 import ThinkingWith from './ThinkingWith';
 import type { ConnectionState, ModelChoice, Room as RoomState, Skill, ThinkingLevel, Workflow } from '../lib/ipc';
 import {
@@ -89,6 +90,13 @@ type Props = {
   plans?: Plans;
   onPlans?: (plans: Plans) => void;
   onSelectModel?: (choice: ModelChoice) => void;
+  /** The model asked about the hard parts, or null for one model doing all of it. */
+  advisor?: ModelChoice | null;
+  onAdvisor?: (choice: ModelChoice | null) => void;
+  /** Whether the addition that does the advising is already here. */
+  advisorInstalled?: boolean;
+  /** Open the shelf, so it can be added. */
+  onAddMore?: () => void;
   onConnect?: () => void;
   /** How long the chosen model should take before answering. */
   onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
@@ -192,6 +200,10 @@ export default function Composer({
   plans,
   onPlans,
   onSelectModel,
+  advisor,
+  onAdvisor,
+  advisorInstalled,
+  onAddMore,
   onConnect,
   onThinking,
   anywhere = true,
@@ -829,6 +841,17 @@ export default function Composer({
             onSelect={onSelectModel}
             onConnect={onConnect}
             onThinking={onThinking}
+            onOpenChange={onComposerPopoverOpenChange}
+          />
+        )}
+
+        {onAdvisor === undefined ? null : (
+          <Advisor
+            state={connection ?? null}
+            advisor={advisor ?? null}
+            onAdvisor={onAdvisor}
+            {...(advisorInstalled === undefined ? {} : { installed: advisorInstalled })}
+            {...(onAddMore === undefined ? {} : { onAdd: onAddMore })}
             onOpenChange={onComposerPopoverOpenChange}
           />
         )}

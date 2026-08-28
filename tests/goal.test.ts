@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createGoal, verifyGoal } from '../src/work/goal';
+import { createGoal, readStoredGoal, ROUNDS, verifyGoal, withElapsed } from '../src/work/goal';
 import type { BuildPlan } from '../src/lib/ipc';
 
 function planWith(n: number, done: number): BuildPlan {
@@ -85,5 +85,58 @@ describe('verifyGoal baseline binding', () => {
     const verdict = verifyGoal(newPlan, [], goal.objective, goal.planBaselineN);
     expect(verdict.met).toBe(false);
     expect(verdict.reason).toContain('1/2 tasks done');
+  });
+});
+
+
+/* ========================================================================== */
+/* Reading one back off the disk                                              */
+/* ========================================================================== */
+
+describe('reading a stored goal', () => {
+  const stored = {
+    id: 'goal-1',
+    objective: 'Fix every compile error',
+    status: 'paused',
+    iterations: 4,
+    elapsed: 90,
+    howFar: 'asking',
+    startedAt: 1_700_000_000_000,
+    planBaselineN: 2,
+  };
+
+  it('keeps the rung it was written down with', () => {
+    expect(readStoredGoal(stored)?.howFar).toBe('asking');
+  });
+
+  it('falls back to full access when the rung is nonsense', () => {
+    expect(readStoredGoal({ ...stored, howFar: 'sideways' })?.howFar).toBe('doing');
+    expect(readStoredGoal({ ...stored, howFar: undefined })?.howFar).toBe('doing');
+  });
+
+  it('round-trips a goal it made itself', () => {
+    const made = withElapsed(createGoal('Ship the pricing page', 'doing', 3));
+    const back = readStoredGoal(JSON.parse(JSON.stringify(made)) as unknown);
+    expect(back?.objective).toBe(made.objective);
+    expect(back?.status).toBe('active');
+    expect(back?.planBaselineN).toBe(3);
+  });
+
+  it('answers null for anything that is not a goal', () => {
+    expect(readStoredGoal(null)).toBeNull();
+    expect(readStoredGoal('a goal')).toBeNull();
+    expect(readStoredGoal({ ...stored, status: 'finished' })).toBeNull();
+    expect(readStoredGoal({ ...stored, iterations: 'four' })).toBeNull();
+  });
+
+  it('never brings back a negative round count', () => {
+    expect(readStoredGoal({ ...stored, iterations: -3 })?.iterations).toBe(0);
+  });
+});
+
+describe('the round budget', () => {
+  it('is a number the window can count against', () => {
+    expect(Number.isInteger(ROUNDS)).toBe(true);
+    expect(ROUNDS).toBeGreaterThan(0);
   });
 });

@@ -13,6 +13,11 @@ import type { Turn } from '../lib/thread';
 
 export type GoalStatus = 'active' | 'paused' | 'done';
 
+/** How many rounds a goal runs unattended before it stops and says so. Not a
+ *  cost ceiling — goal mode deliberately runs at full access — but the thing
+ *  that keeps "carries on by itself" from meaning "for ever". */
+export const ROUNDS = 20;
+
 /** One objective the session is working toward. */
 export type Goal = {
   /** Stable for the sitting. */
@@ -152,6 +157,12 @@ export function withElapsed(goal: Goal): Goal {
   return { ...goal, elapsed: goalElapsed(goal) };
 }
 
+const RUNGS: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing'];
+
+function isHowFar(value: unknown): value is HowFar {
+  return typeof value === 'string' && (RUNGS as readonly string[]).includes(value);
+}
+
 /** Read a Goal back from storage, defensively. Null when not a goal. */
 export function readStoredGoal(raw: unknown): Goal | null {
   if (typeof raw !== 'object' || raw === null) return null;
@@ -166,7 +177,7 @@ export function readStoredGoal(raw: unknown): Goal | null {
     status: g['status'] as GoalStatus,
     iterations: Math.max(0, Math.floor(g['iterations'] as number)),
     elapsed: typeof g['elapsed'] === 'number' ? Math.max(0, g['elapsed'] as number) : 0,
-    howFar: g['howFar'] === 'doing' ? 'doing' : 'doing',
+    howFar: isHowFar(g['howFar']) ? g['howFar'] : 'doing',
     startedAt: g['startedAt'] as number,
     planBaselineN: Math.max(0, Math.floor(g['planBaselineN'] as number)),
   };

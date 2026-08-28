@@ -21,6 +21,7 @@ import type { Money } from '../agent/types';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
+import { asAdvisor, sameAdvisor } from '../agent/advisor';
 import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
 import type { Theme } from '../lib/theme';
 import { themeFrom } from '../lib/theme';
@@ -48,6 +49,15 @@ export type Preferences = {
    * full list so a choice is never more than one click away.
    */
   model: ModelChoice | null;
+  /**
+   * The model asked about the hard parts, or null for one model doing all of
+   * it.
+   *
+   * Global like `model`, and for the same reason: this is a reading of what
+   * somebody is willing to spend on a second opinion, and they are the same
+   * person in every folder.
+   */
+  advisor: ModelChoice | null;
   /** How much time each model should take before it answers. The map is keyed
    * by its provider and model id because different models support different
    * choices. */
@@ -128,6 +138,7 @@ export type Preferences = {
 export const defaultPreferences: Preferences = {
   showMe: false,
   model: null,
+  advisor: null,
   thinking: {},
   kept: {},
   trusted: {},
@@ -170,6 +181,7 @@ function asPreferences(value: unknown): Preferences {
             modelId: (model as Record<string, unknown>)['modelId'] as string,
           }
         : null,
+    advisor: asAdvisor(record['advisor']),
     thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
@@ -263,6 +275,7 @@ export class PreferenceFile {
       sameHeldBack(next.keptLogins, this.#preferences.keptLogins) &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
+      sameAdvisor(next.advisor, this.#preferences.advisor) &&
       sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted) &&

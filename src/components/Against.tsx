@@ -170,7 +170,7 @@ export default function Against({ open, sides, onClose, onKeep, onOpenInBrowser,
         </button>
       </header>
 
-      <div className="sheet__body">
+      <div className="sheet__body scroll--auto">
         <div
           className="against__inner"
           style={{ '--against-columns': sides.length } as CSSProperties}

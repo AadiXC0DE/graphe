@@ -1,0 +1,45 @@
+/* Zed-like auto-hide scrollbars — invisible by default, visible on hover, scroll and focus.
+   Apply with className="scroll--auto" or extend via CSS. The gutter stays stable
+   so content does not jump when the bar appears. */
+
+.scroll--auto {
+  scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.scroll--auto:hover,
+.scroll--auto:focus-within,
+.scroll--auto.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.scroll--auto::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.scroll--auto:hover::-webkit-scrollbar,
+.scroll--auto:focus-within::-webkit-scrollbar,
+.scroll--auto.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scroll--auto::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.scroll--auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll--auto::-webkit-scrollbar-thumb:hover {
+  background: var(--border-control);
+}
+
+.scroll--auto::-webkit-scrollbar-corner {
+  background: transparent;
+}

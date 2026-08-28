@@ -49,13 +49,25 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  /* Thin, dark, modern — like the landing and the rest of the app shell.
-     The native thick bar dominated the file list; this keeps it quiet. */
+  scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.files__tree:hover,
+.files__tree:focus-within,
+.files__tree.is-scrolling {
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }
 
 .files__tree::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.files__tree:hover::-webkit-scrollbar,
+.files__tree:focus-within::-webkit-scrollbar,
+.files__tree.is-scrolling::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }

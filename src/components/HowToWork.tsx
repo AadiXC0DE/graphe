@@ -8,9 +8,10 @@ import {
   researchWords,
   type Depth,
 } from '../agent/research';
+import { goalWords } from '../work/goal';
 import './HowToWork.css';
 
-export type Plans = 'auto' | 'always' | 'never' | 'research';
+export type Plans = 'auto' | 'always' | 'never' | 'research' | 'goal';
 
 type Props = {
   plans: Plans;
@@ -50,6 +51,12 @@ const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[
     name: researchWords.name,
     note: researchWords.note,
   },
+  {
+    id: 'goal',
+    chip: goalWords.chip,
+    name: goalWords.name,
+    note: `${goalWords.note} ${goalWords.howFarNote}`,
+  },
 ];
 
 export default function HowToWork({ plans, onPlans }: Props) {
@@ -62,7 +69,11 @@ export default function HowToWork({ plans, onPlans }: Props) {
   /* The chip keeps its own words at the setting nobody had to choose, and wears
      the setting itself once somebody has. */
   const label =
-    plans === 'research' && howFar !== DEFAULT_DEPTH ? howDeep(howFar).name : chosen.chip;
+    plans === 'research' && howFar !== DEFAULT_DEPTH
+      ? howDeep(howFar).name
+      : plans === 'goal'
+        ? `${chosen.chip} · full access`
+        : chosen.chip;
 
   /* Click away and escape both close it — people reach for both. */
   useEffect(() => {

@@ -361,7 +361,7 @@ export default function Overview({
   const changedCount = git === null ? 0 : git.unstaged + git.staged + git.untracked;
 
   return (
-    <aside className="overview" aria-label="What is going on">
+    <aside className="overview scroll--auto" aria-label="What is going on">
       <div className="overview__tabs" role="tablist" aria-label="What to look at">
         {TABS.map((one) => (
           <button

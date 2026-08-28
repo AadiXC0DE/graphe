@@ -78,6 +78,37 @@
   font-size: var(--text-sm);
   line-height: 1.6;
   tab-size: 2;
+  scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.codeblock__code pre:hover,
+.codeblock__code pre:focus-within,
+.codeblock__code pre.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.codeblock__code pre::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.codeblock__code pre:hover::-webkit-scrollbar,
+.codeblock__code pre:focus-within::-webkit-scrollbar,
+.codeblock__code pre.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.codeblock__code pre::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.codeblock__code pre::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .codeblock .codeblock__code code {

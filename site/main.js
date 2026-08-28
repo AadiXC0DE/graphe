@@ -23,9 +23,9 @@ for (const item of document.querySelectorAll('[data-reveal]')) arriving.observe(
 /** What the caption says under each screen, so the picture is never unlabelled. */
 const CAPTIONS = {
   work: ['graphe', 'the files, the work, and what is running'],
-  design: ['graphe — design', 'your own tokens, read as a spec'],
-  history: ['graphe — history', '87 moments saved, drawn as lines'],
-  skills: ['graphe — skills', 'craft you installed, ready to use'],
+  design: ['graphe: design', 'your own tokens, read as a spec'],
+  history: ['graphe: history', '87 moments saved, drawn as lines'],
+  skills: ['graphe: skills', 'craft you installed, ready to use'],
 };
 
 const tabs = [...document.querySelectorAll('.tab')];

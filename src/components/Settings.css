@@ -10,6 +10,37 @@
   padding: var(--space-7) var(--space-6);
   background: var(--bg);
   overflow: auto;
+  scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.settings:hover,
+.settings:focus-within,
+.settings.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.settings::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.settings:hover::-webkit-scrollbar,
+.settings:focus-within::-webkit-scrollbar,
+.settings.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.settings::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.settings::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .settings__top {

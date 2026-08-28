@@ -268,11 +268,37 @@
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
 
+.shelf__band--scroll:hover,
+.shelf__band--scroll:focus-within,
+.shelf__band--scroll.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
 .shelf__band--scroll::-webkit-scrollbar {
-  display: none;
+  width: 0;
+  height: 0;
+}
+
+.shelf__band--scroll:hover::-webkit-scrollbar,
+.shelf__band--scroll:focus-within::-webkit-scrollbar,
+.shelf__band--scroll.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.shelf__band--scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.shelf__band--scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .shelf__band .shelf__caption {

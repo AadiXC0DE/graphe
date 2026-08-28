@@ -67,6 +67,7 @@ import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
 import { browserFolder, closeBrowser } from './computer';
 import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type CancelBuild, type HelperModel, type HelperPace } from './tools';
+import { lspTool } from './lsp';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
@@ -2014,6 +2015,13 @@ const MOST_AFTER_SAYINGS = 3;
   // say why. With nothing connected it answers that nothing is, which is a
   // sentence the model can act on.
   if (!benchmarkToolFloor) customTools.push(mcpTool(mcpRegistry));
+
+  // Minimal LSP stub: always available via grep fallback, no external server needed.
+  // grapheTools already adds lspTool when not benchmark; this keeps the session
+  // covered even if that path is bypassed.
+  if (!benchmarkToolFloor && !customTools.some((tool) => tool.name === 'lsp')) {
+    customTools.push(lspTool(options.projectRoot));
+  }
 
   // The shell is Pi's tool, not ours, and it is the one that can change
   // anything on this disk. Pi builds it from `createBashToolDefinition`, whose

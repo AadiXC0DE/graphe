@@ -117,6 +117,12 @@ export function describeCall(call: ToolCall): Described {
         detail: short(textField(input, ['pattern', 'query', 'regex'])),
       };
 
+    case 'lsp':
+      return {
+        label: 'Looking through code intelligence',
+        detail: short(textField(input, ['operation', 'symbol', 'query', 'path'])),
+      };
+
     case 'bash':
     case 'shell':
     case 'run':

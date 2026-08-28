@@ -117,6 +117,37 @@ h3.md__heading {
 .md__tablewrap {
   margin: 0 0 var(--space-3);
   overflow-x: auto;
+  scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.md__tablewrap:hover,
+.md__tablewrap:focus-within,
+.md__tablewrap.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.md__tablewrap::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.md__tablewrap:hover::-webkit-scrollbar,
+.md__tablewrap:focus-within::-webkit-scrollbar,
+.md__tablewrap.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.md__tablewrap::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.md__tablewrap::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .md__table {

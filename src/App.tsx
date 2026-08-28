@@ -96,7 +96,16 @@ import {
   type Goal,
 } from "./work/goal";
 import { ADVISOR_PACKAGE } from "./agent/advisor";
-import { EMPTY as EMPTY_FLOW, type Flow } from "./work/canvas";
+import {
+  asksOf,
+  canStart,
+  newFlow,
+  nextUp,
+  withFlow,
+  withoutFlow,
+  type Block,
+  type Flow,
+} from "./work/canvas";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
 import { bridge } from "./lib/bridge";
@@ -2125,6 +2134,25 @@ function Conversation() {
               movePane('split');
             }
           }
+          // A canvas moves on when its turn settles. The whole of what makes a
+          // flow a flow: one block, then the next, in the same conversation.
+          if (notice.conversation != null) {
+            const going = flowsNow.current.find(
+              (one) => one.conversation === notice.conversation && one.running !== null,
+            );
+            if (going !== undefined) {
+              const finished: Flow = {
+                ...going,
+                done: [...going.done, going.running as string],
+                running: null,
+              };
+              const next = nextUp(finished);
+              const moved: Flow = next === null ? finished : { ...finished, running: next.id };
+              changeFlowNow.current(moved);
+              if (next !== null) void sendBlockNow.current(moved, next);
+            }
+          }
+
           // Goal Mode: after every round with real work, verify whether the objective is met.
           if (goalNow.current !== null && goalNow.current.status === 'active') {
             const activeGoal = goalNow.current;
@@ -3337,12 +3365,25 @@ function Conversation() {
 
   /* A tab names a conversation inside a project, so going to one is at most two
      moves: bring the project to the front, then bring its conversation. */
+  /** The canvas an id names, or null when it names a conversation. One row
+   *  holds both, so the id has to say which it is. */
+  const canvasIn = (id: string): string | null => {
+    const [, address] = id.split('\u0000');
+    return address !== undefined && address.startsWith('canvas:') ? address.slice(7) : null;
+  };
+
   const goToTab = useCallback(
     async (id: string) => {
       const [project, address] = id.split('\u0000');
       if (project === undefined || address === undefined) return;
       const here = desksNow.current;
       if (here.current !== project) await open(project);
+      const canvas = canvasIn(id);
+      if (canvas !== null) {
+        setCanvasAt(canvas);
+        return;
+      }
+      setCanvasAt(null);
       const desk = desksNow.current.byPath[project];
       if (desk === undefined || desk.address === address) return;
       // Ask the shell to resume it as well as swapping the renderer's words.
@@ -3357,6 +3398,11 @@ function Conversation() {
    *  Opening it again picks up where it was left. */
   const closeTab = useCallback(
     async (id: string) => {
+      const canvas = canvasIn(id);
+      if (canvas !== null) {
+        forgetCanvas(canvas);
+        return;
+      }
       const [project, address] = id.split('\u0000');
       if (project === undefined || address === undefined) return;
       const desk = desksNow.current.byPath[project];
@@ -4251,59 +4297,164 @@ function Conversation() {
     [desks.current, afterAway],
   );
 
-  /* The canvas, as it was left. Drawing one changes nothing until Start. */
-  const [flow, setFlow] = useState<Flow>(EMPTY_FLOW);
-  const flowNow = useRef(flow);
-  flowNow.current = flow;
+  /* The canvases this project has. Drawing one changes nothing until Start. */
+  const [flows, setFlows] = useState<readonly Flow[]>([]);
+  const flowsNow = useRef(flows);
+  flowsNow.current = flows;
+  /* Which canvas is in front, or null when a conversation is. A canvas is a tab
+     like a conversation is a tab, and only one thing is in front at a time. */
+  const [canvasAt, setCanvasAt] = useState<string | null>(null);
+  const canvasNow = useRef<string | null>(null);
+  canvasNow.current = canvasAt;
+  /* Whether the one in front is filling the window. */
+  const [canvasFull, setCanvasFull] = useState(false);
 
   /* Read on the way into a folder, and never under one somebody has switched
      away from while the answer was in the air. */
   useEffect(() => {
     const project = desks.current;
+    setCanvasAt(null);
+    setCanvasFull(false);
     if (project === null) {
-      setFlow(EMPTY_FLOW);
+      setFlows([]);
       return;
     }
     void bridge.flowLoad({ project }).then((answer) => {
       if (desksNow.current.current !== project) return;
-      setFlow(answer.ok && answer.value !== null ? answer.value : EMPTY_FLOW);
+      setFlows(answer.ok ? answer.value : []);
     });
   }, [desks.current]);
 
-  const changeFlow = useCallback(
-    (next: Flow) => {
-      setFlow(next);
-      const path = desksNow.current.current;
-      if (path !== null) void bridge.flowSave(next, { project: path });
+  const changeFlowNow = useRef<(next: Flow) => void>(() => {});
+  const sendBlockNow = useRef<(flow: Flow, block: Block) => Promise<void>>(async () => {});
+
+  /* On screen at once, on disk a moment later. Typing what a block should do is
+     a keystroke at a time, and a file written per keystroke is a file written
+     for nothing. */
+  const savingFlow = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (savingFlow.current !== null) clearTimeout(savingFlow.current);
     },
     [],
   );
 
-  const startFlow = useCallback(() => {
+  const changeFlow = useCallback((next: Flow) => {
+    setFlows((held) => withFlow(held, next));
     const path = desksNow.current.current;
     if (path === null) return;
-    void bridge.flowStart(flowNow.current, { project: path }).then((answer) => {
+    if (savingFlow.current !== null) clearTimeout(savingFlow.current);
+    savingFlow.current = setTimeout(() => {
+      void bridge.flowSave(next, { project: path });
+    }, 400);
+  }, []);
+
+  /** A canvas of its own, in front. */
+  const newCanvas = useCallback(() => {
+    const made = newFlow();
+    changeFlow(made);
+    setCanvasAt(made.id);
+  }, [changeFlow]);
+
+  /** The one somebody last drew on, or a new one. What the shelf's row does. */
+  const openCanvas = useCallback(() => {
+    const held = flowsNow.current;
+    if (held.length === 0) {
+      newCanvas();
+      return;
+    }
+    setCanvasAt(held[held.length - 1]!.id);
+  }, [newCanvas]);
+
+  const forgetCanvas = useCallback((id: string) => {
+    setFlows((held) => withoutFlow(held, id));
+    setCanvasAt((was) => (was === id ? null : was));
+    const path = desksNow.current.current;
+    if (path !== null) void bridge.flowForget(id, { project: path });
+  }, []);
+
+  /**
+   * Send one block, as an ordinary turn.
+   *
+   * A block is not a second kind of agent and not background work: it is a
+   * message in this canvas's own conversation, with the same tools, the same
+   * Guard and the same rung a person typing there would get. What makes it a
+   * flow is only that the next one is sent when this one settles.
+   */
+  const sendBlock = useCallback(
+    async (flow: Flow, block: Block): Promise<void> => {
+      const path = desksNow.current.current;
+      if (path === null || flow.conversation === null) return;
+      const where: Where = { project: path, conversation: flow.conversation };
+      const rung = block.howFar ?? flow.howFar;
+      await bridge.goAsFarAs(rung, where);
+      const answer = await bridge.prompt(
+        asksOf(block),
+        undefined,
+        block.lookFirst === true ? { lookFirst: true } : undefined,
+        where,
+      );
       if (!answer.ok) {
-        troubleHere(answer.trouble);
-        return;
+        troubleAt(where, answer.trouble);
+        changeFlow({ ...flow, running: null });
       }
-      setFlow(answer.value);
-      void refreshAway(path);
-    });
-  }, [troubleHere, refreshAway]);
+    },
+    [troubleAt, changeFlow],
+  );
+
+  /** Open the conversation this canvas drives, making one the first time. */
+  const conversationForFlow = useCallback(
+    async (flow: Flow): Promise<string | null> => {
+      if (flow.conversation !== null) return flow.conversation;
+      const path = desksNow.current.current;
+      if (path === null) return null;
+      // Its own conversation, opened but not switched to: the canvas stays in
+      // front, and what the flow says is readable afterwards like anything else
+      // said in this project.
+      const opened = await bridge.openConversation(null, { project: path });
+      if (!opened.ok) {
+        troubleHere(opened.trouble);
+        return null;
+      }
+      return opened.value.address ?? null;
+    },
+    [troubleHere],
+  );
+
+  const startFlow = useCallback(() => {
+    const flow = flowsNow.current.find((one) => one.id === canvasNow.current);
+    if (flow === undefined || !canStart(flow)) return;
+    void (async () => {
+      const conversation = await conversationForFlow(flow);
+      if (conversation === null) return;
+      const first = nextUp({ ...flow, running: null, done: [] });
+      if (first === null) return;
+      const going: Flow = {
+        ...flow,
+        conversation,
+        startedAt: Date.now(),
+        running: first.id,
+        done: [],
+      };
+      changeFlow(going);
+      await sendBlock(going, first);
+    })();
+  }, [changeFlow, conversationForFlow, sendBlock]);
+
+  changeFlowNow.current = changeFlow;
+  sendBlockNow.current = sendBlock;
 
   const stopFlow = useCallback(() => {
     const path = desksNow.current.current;
-    if (path === null) return;
-    void bridge.flowStop({ project: path }).then((answer) => {
-      if (!answer.ok) {
-        troubleHere(answer.trouble);
-        return;
-      }
-      setFlow(answer.value);
-      void refreshAway(path);
-    });
-  }, [troubleHere, refreshAway]);
+    const flow = flowsNow.current.find((one) => one.id === canvasNow.current);
+    if (flow === undefined) return;
+    // The turn in flight is stopped the way any turn is; what has finished
+    // stays finished, because it happened.
+    if (path !== null && flow.conversation !== null) {
+      void bridge.stop({ project: path, conversation: flow.conversation });
+    }
+    changeFlow({ ...flow, running: null });
+  }, [changeFlow]);
 
   /**
    * Serve every go in the comparison and put them in the pane.
@@ -4794,7 +4945,16 @@ function Conversation() {
      switched in the sidebar, where the whole project list stays in one stable
      place. `threadsIn` preserves opening order, so selecting a tab never
      shuffles the row beneath the pointer. */
-  const tabs: readonly Tab[] = desk === null ? [] : threadsIn(desk).map(({ address, here }) => {
+  const canvasTabs: readonly Tab[] = desk === null ? [] : flows.map((one) => ({
+    id: `${desk.path}\u0000canvas:${one.id}`,
+    title: one.name,
+    project: desk.name,
+    projectPath: desk.path,
+    kind: 'canvas' as const,
+    state: one.running === null ? ('idle' as const) : ('working' as const),
+  }));
+
+  const threadTabs: readonly Tab[] = desk === null ? [] : threadsIn(desk).map(({ address, here }) => {
       const turns = here ? desk.turns : (desk.parked[address]?.turns ?? []);
       // `busy` belongs to the window, not a conversation. Applying it to
       // `here` made the spinner jump to whichever tab was clicked while another
@@ -4810,6 +4970,7 @@ function Conversation() {
         title: titleOf(turns),
         project: desk.name,
         projectPath: desk.path,
+        kind: 'chat' as const,
         state: running || (sendsInTheAir[`${desk.path}\u0000${address}`] ?? 0) > 0
           ? ('working' as const)
           : askingYou(turns) ? ('asking' as const)
@@ -4817,11 +4978,16 @@ function Conversation() {
       };
     });
 
-  openNow.current = tabs.map((one) => one.id);
+  const tabs: readonly Tab[] = [...threadTabs, ...canvasTabs];
+  const canvasHere = canvasAt === null ? null : (flows.find((one) => one.id === canvasAt) ?? null);
+
+  openNow.current = threadTabs.map((one) => one.id);
   atNow.current =
     desks.current === null || desk === null
       ? null
-      : `${desks.current}\u0000${desk.address ?? ''}`;
+      : canvasAt !== null
+        ? `${desk.path}\u0000canvas:${canvasAt}`
+        : `${desks.current}\u0000${desk.address ?? ''}`;
   wantsYouNow.current = tabs.find((one) => one.state === 'asking')?.id;
 
   /* An account paid for by its own plan is not billed per use, so the meter
@@ -4885,7 +5051,11 @@ function Conversation() {
               at={atNow.current}
               onOpen={(id) => void goToTab(id)}
               onClose={(id) => void closeTab(id)}
-              onNew={() => void swapConversation(null)}
+              onNew={() => {
+                setCanvasAt(null);
+                void swapConversation(null);
+              }}
+              onNewCanvas={newCanvas}
             />
           ) : null}
 
@@ -5006,10 +5176,7 @@ function Conversation() {
             goToScreen("design");
             setDesignAt("styles");
           }}
-          onCanvas={() => {
-            goToScreen("canvas");
-            setCanvasOpen(true);
-          }}
+          onCanvas={openCanvas}
           onHistory={() => {
             goToScreen("graph");
             setGraphOpen(true);
@@ -5625,19 +5792,20 @@ function Conversation() {
         />
       ) : null}
 
-      {canvasOpen && desk !== null ? (
+      {/* The canvas in front, drawn where a conversation would be. It is a tab,
+          so the row of tabs stays above it and switching back is one press on
+          something you can see. */}
+      {canvasHere === null ? null : (
         <CanvasView
-          flow={flow}
+          flow={canvasHere}
           onFlow={changeFlow}
           onStart={startFlow}
           onStop={stopFlow}
-          states={Object.fromEntries(
-            (away[desk.path]?.pieces ?? []).map((one) => [one.id, one.state]),
-          )}
           connection={connection}
-          onClose={() => setCanvasOpen(false)}
+          full={canvasFull}
+          onFull={setCanvasFull}
         />
-      ) : null}
+      )}
 
       {reviewsOpen && desk !== null ? (
         <ReviewsView

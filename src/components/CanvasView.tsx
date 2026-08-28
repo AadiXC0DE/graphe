@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as Pressed } from 'react';
 import {
   BLOCKS,
   canvasWords,
+  RUNGS,
   canWaitFor,
   change,
   isRunning,
@@ -20,9 +21,9 @@ import {
   type BlockModel,
   type Flow,
 } from '../work/canvas';
+import type { HowFar } from '../agent/guard/policy';
 import type { ConnectionState, ModelChoice } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
-import type { WorkState } from '../work/board';
 import './Sheet.css';
 import './CanvasView.css';
 
@@ -44,14 +45,12 @@ type Props = {
   onStart: () => void;
   /** Take what has not finished off it again. */
   onStop: () => void;
-  /** Where each started block has got to, by the piece it became. */
-  states: Readonly<Record<string, WorkState>>;
   /** Who could run a block, or null while the first answer is on its way. */
   connection: ConnectionState | null;
-  onClose: () => void;
+  /** Covering the whole window rather than sitting in its own column. */
+  full: boolean;
+  onFull: (full: boolean) => void;
 };
-
-const SAYS = { close: 'Close' } as const;
 
 /* -------------------------------------------------------------------- marks */
 
@@ -124,8 +123,7 @@ function Mark({ kind }: { kind: BlockKind }) {
  * looking at is set to. Nothing here runs anything on its own — the board does
  * that, and only once Start has been pressed.
  */
-export default function CanvasView({ flow, onFlow, onStart, onStop, states, connection, onClose }: Props) {
-  const shut = useRef<HTMLButtonElement>(null);
+export default function CanvasView({ flow, onFlow, onStart, onStop, connection, full, onFull }: Props) {
   const surface = useRef<HTMLDivElement>(null);
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -136,31 +134,33 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, states, conn
   const panning = useRef<{ x: number; y: number; fromX: number; fromY: number } | null>(null);
   const dragged = useRef(false);
 
-  const drawn = useMemo(() => layOut(flow, states), [flow, states]);
+  const drawn = useMemo(() => layOut(flow), [flow]);
   const going = isRunning(flow);
   const chosen = flow.blocks.find((one) => one.id === picked) ?? null;
   const missing = notReady(flow);
 
   const done = drawn.blocks.filter((one) => one.state === 'done').length;
-  const busy = drawn.blocks.filter((one) => one.state === 'running' || one.state === 'needs-you').length;
+  const busy = drawn.blocks.filter((one) => one.state === 'running').length;
 
-  useEffect(() => {
-    shut.current?.focus();
-  }, []);
-
+  /* Escape peels one layer: the panel first, then the way it is filling the
+     window. It never closes the canvas — that is the tab's own x, the same as
+     every other tab. */
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      event.stopPropagation();
       if (picked !== null) {
+        event.stopPropagation();
         setPicked(null);
         return;
       }
-      onClose();
+      if (full) {
+        event.stopPropagation();
+        onFull(false);
+      }
     };
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
-  }, [picked, onClose]);
+  }, [picked, full, onFull]);
 
   useEffect(() => {
     if (refused === null) return;
@@ -333,14 +333,34 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, states, conn
   );
 
   return (
-    <section className="sheet canvas" aria-label={canvasWords.name}>
-      <header className="sheet__top">
-        <div className="sheet__titles">
-          <h1 className="sheet__title">{canvasWords.name}</h1>
-          <p className="sheet__from">{canvasWords.counted(flow.blocks.length, done, busy)}</p>
-        </div>
+    <section className={`canvas ${full ? 'canvas--full' : ''}`} aria-label={flow.name}>
+      <header className="canvas__bar">
+        <input
+          className="canvas__title"
+          value={flow.name}
+          aria-label={canvasWords.rename}
+          onChange={(event) => onFlow({ ...flow, name: event.target.value })}
+          onBlur={() => {
+            if (flow.name.trim() === '') onFlow({ ...flow, name: canvasWords.named(flow.blocks) });
+          }}
+        />
+        <span className="canvas__count">{canvasWords.counted(flow.blocks.length, done, busy)}</span>
 
-        <div className="sheet__chips" />
+        <label className="canvas__far">
+          <span className="canvas__farname">{canvasWords.howFar}</span>
+          <select
+            className="canvas__farpick"
+            value={flow.howFar}
+            disabled={going}
+            onChange={(event) => onFlow({ ...flow, howFar: event.target.value as HowFar })}
+          >
+            {RUNGS.map((rung) => (
+              <option key={rung} value={rung}>
+                {canvasWords.rungs[rung]}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="canvas__run">
           {going ? (
@@ -358,12 +378,25 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, states, conn
               {flow.startedAt === null ? canvasWords.start : canvasWords.again}
             </button>
           )}
+          <button
+            type="button"
+            className="canvas__full"
+            onClick={() => onFull(!full)}
+            aria-pressed={full}
+            title={full ? canvasWords.smaller : canvasWords.bigger}
+            aria-label={full ? canvasWords.smaller : canvasWords.bigger}
+          >
+            {full ? (
+              <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden="true">
+                <path d="M5.6 1.8v3.8H1.8M8.4 12.2V8.4h3.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden="true">
+                <path d="M1.8 5.2V1.8h3.4M12.2 8.8v3.4H8.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </button>
         </div>
-
-        <button ref={shut} type="button" className="sheet__close" onClick={onClose}>
-          {SAYS.close}
-          <kbd className="sheet__key">Esc</kbd>
-        </button>
       </header>
 
       <div className={`canvas__bands ${chosen === null ? '' : 'canvas__bands--open'}`}>
@@ -418,7 +451,7 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, states, conn
                   const x2 = to.x - 8;
                   const y2 = to.y + CARD.height / 2;
                   const bend = Math.max(30, (x2 - x1) / 2);
-                  const live = block.state === 'running' || block.state === 'needs-you';
+                  const live = block.state === 'running';
                   return (
                     <path
                       key={`${parent.id}-${block.id}`}
@@ -717,7 +750,7 @@ function Inspector({
           <Mark kind={block.kind} />
         </span>
         <h2 className="canvas__iname">{spec.name}</h2>
-        <button type="button" className="canvas__ishut" onClick={onClose} aria-label={SAYS.close}>
+        <button type="button" className="canvas__ishut" onClick={onClose} aria-label={canvasWords.shut}>
           <svg viewBox="0 0 14 14" width="11" height="11" fill="none" aria-hidden="true">
             <path d="M4.2 4.2l5.6 5.6M9.8 4.2l-5.6 5.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
@@ -767,6 +800,33 @@ function Inspector({
                 </button>
               ))}
             </div>
+          ))}
+        </div>
+
+        <h3 className="canvas__iband">{canvasWords.howFar}</h3>
+        <div className="canvas__imodels" role="radiogroup" aria-label={canvasWords.howFar}>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={block.howFar === undefined}
+            className={`canvas__imodel ${block.howFar === undefined ? 'canvas__imodel--on' : ''}`}
+            disabled={going}
+            onClick={() => onChange({ howFar: undefined })}
+          >
+            {canvasWords.sameAsFlow}
+          </button>
+          {RUNGS.map((rung) => (
+            <button
+              key={rung}
+              type="button"
+              role="radio"
+              aria-checked={block.howFar === rung}
+              className={`canvas__imodel ${block.howFar === rung ? 'canvas__imodel--on' : ''}`}
+              disabled={going}
+              onClick={() => onChange({ howFar: rung })}
+            >
+              {canvasWords.rungs[rung]}
+            </button>
           ))}
         </div>
 

@@ -203,14 +203,7 @@ import {
 } from '../src/work/buildplan';
 import { GoalFile } from '../src/projects/goals';
 import { FlowFile } from '../src/projects/flows';
-import {
-  asksOf,
-  EMPTY as EMPTY_FLOW,
-  readFlow,
-  reset as resetFlow,
-  runOrder,
-  type Flow,
-} from '../src/work/canvas';
+import { readFlow, withFlow, withoutFlow, type Flow } from '../src/work/canvas';
 import { notHere, runHelper } from '../src/share/run';
 import type { Goal } from '../src/work/goal';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
@@ -7414,87 +7407,31 @@ function register(): void {
     });
   });
 
-  handle<Flow | null>(CHANNEL.flowLoad, async (_event, args) => {
+  handle<readonly Flow[]>(CHANNEL.flowLoad, async (_event, args) => {
     const open = projectAt(whereIn(args));
-    if (open === null) return done(null);
+    if (open === null) return done([]);
     return done(await FlowFile.read(open.path, app.getPath('userData')));
   });
 
   handle<null>(CHANNEL.flowSave, async (_event, args) => {
     const [raw] = args;
     const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    await FlowFile.write(open.path, app.getPath('userData'), readFlow(raw));
+    const flow = readFlow(raw);
+    if (open === null || flow === null) return fail(NOTHING_OPEN);
+    const held = await FlowFile.read(open.path, app.getPath('userData'));
+    await FlowFile.write(open.path, app.getPath('userData'), withFlow(held, flow));
     return done(null);
   });
 
-  /**
-   * Put a drawn flow on the board, in order.
-   *
-   * Each block is asked to wait for the piece the block before it was actually
-   * given, so nothing is ever chained onto a guess. A block the board refuses
-   * stops the rest: what follows it would otherwise wait for nothing and start
-   * at once, against a change that was never made.
-   */
-  handle<Flow>(CHANNEL.flowStart, async (_event, args) => {
-    const [raw] = args;
+  /** Throw one away. Closing its tab does not come through here — a drawing
+   *  somebody put down is not a drawing they meant to lose. */
+  handle<null>(CHANNEL.flowForget, async (_event, args) => {
+    const [id] = args;
     const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const drawn = readFlow(raw);
-    if (drawn.blocks.length === 0) return done(drawn);
-
-    const pieces = new Map<string, string>();
-    for (const block of runOrder(drawn)) {
-      const after = block.after === null ? null : (pieces.get(block.after) ?? null);
-      if (block.after !== null && after === null) break;
-      const went = await keepGoing(
-        open.path,
-        basename(open.path),
-        asksOf(block),
-        after,
-        false,
-        null,
-        block.model,
-      );
-      if (!went.ok) break;
-      pieces.set(block.id, went.id);
-    }
-
-    const started: Flow = {
-      startedAt: pieces.size === 0 ? null : Date.now(),
-      blocks: drawn.blocks.map((one) => ({ ...one, piece: pieces.get(one.id) ?? null })),
-    };
-    await FlowFile.write(open.path, app.getPath('userData'), started);
-    return done(started);
-  });
-
-  /** Take off the board what has not finished, and hand the shape back as a
-   *  draft. What did finish stays there to be looked at and kept. */
-  handle<Flow>(CHANNEL.flowStop, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const held = (await FlowFile.read(open.path, app.getPath('userData'))) ?? EMPTY_FLOW;
-    const desk = awayDesks.get(open.path);
-    if (desk !== undefined) {
-      for (const block of held.blocks) {
-        if (block.piece === null) continue;
-        const piece = desk.bench.pieces.find((one) => one.id === block.piece);
-        if (piece === undefined || piece.state === 'done' || piece.state === 'failed') continue;
-        const run = desk.runs.get(block.piece);
-        run?.held.stop();
-        void run?.session?.stop();
-        run?.session?.dispose();
-        desk.runs.delete(block.piece);
-        desk.chain.take(block.piece);
-        await desk.bench.drop(block.piece);
-        forgetNote(desk, block.piece);
-      }
-      noteEveryone(desk);
-      pushAway(open.path);
-    }
-    const stopped = resetFlow(held);
-    await FlowFile.write(open.path, app.getPath('userData'), stopped);
-    return done(stopped);
+    if (open === null || typeof id !== 'string') return fail(NOTHING_OPEN);
+    const held = await FlowFile.read(open.path, app.getPath('userData'));
+    await FlowFile.write(open.path, app.getPath('userData'), withoutFlow(held, id));
+    return done(null);
   });
 
   handle<Goal | null>(CHANNEL.goalLoad, async (_event, args) => {

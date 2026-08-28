@@ -216,10 +216,10 @@ const HELPING: readonly Helper[] = [
 /** Four conversations across three codebases, at the four states a tab can be
  *  in. Two of them share a project, which is the case the underline exists for. */
 const OPEN: readonly Tab[] = [
-  { id: 't1', title: 'the hero, tighter', project: 'paper-street', projectPath: '/a', state: 'idle' },
-  { id: 't2', title: 'pricing page at phone width', project: 'paper-street', projectPath: '/a', state: 'working' },
-  { id: 't3', title: 'the sign-in flow', project: 'atlas-studio', projectPath: '/b', state: 'asking' },
-  { id: 't4', title: 'docs site', project: 'field-notes', projectPath: '/c', state: 'finished' },
+  { id: 't1', title: 'the hero, tighter', project: 'paper-street', projectPath: '/a', kind: 'chat', state: 'idle' },
+  { id: 't2', title: 'pricing page at phone width', project: 'paper-street', projectPath: '/a', kind: 'chat', state: 'working' },
+  { id: 't3', title: 'the sign-in flow', project: 'atlas-studio', projectPath: '/b', kind: 'chat', state: 'asking' },
+  { id: 't4', title: 'docs site', project: 'field-notes', projectPath: '/c', kind: 'chat', state: 'finished' },
 ];
 
 /** A walkthrough of the states nobody screenshots, including one that could not
@@ -1332,9 +1332,9 @@ export default function Gallery() {
 
           <Section
             title="What you have open"
-            note="A tab is a conversation, not a project — that is the unit of work people switch between, and it is the only shape in which “two agents in one codebase” can be said at all. Two lines each: the conversation, and under it the project in quieter type. The 2px underline groups by codebase without nesting anything."
+            note="A tab is a conversation or a canvas — that is the unit of work people switch between, and it is the only shape in which “two agents in one codebase” can be said at all. Two lines each: the conversation, and under it the project in quieter type. The 2px underline groups by codebase without nesting anything."
           >
-            <Tabs tabs={OPEN} at="t2" onOpen={noop} onClose={noop} onNew={noop} />
+            <Tabs tabs={OPEN} at="t2" onOpen={noop} onClose={noop} onNew={noop} onNewCanvas={noop} />
             <p className="gallery__caption">
               The state mark is the point. Switching away from something still working and having
               the tab tell you when it needs you is the whole reason tabs exist here — and the

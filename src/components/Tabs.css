@@ -275,6 +275,88 @@
   }
 }
 
+/* ------------------------------------------------------- something new */
+
+/* The + is two things now, so it asks which. Same furniture as the overflow
+   list beside it: one popover shape in this row, not two. */
+.tabs__new {
+  position: relative;
+  display: flex;
+}
+
+.tabs__menu {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 190px;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  transform-origin: top left;
+  animation: tabs-menu-arrives var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes tabs-menu-arrives {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.tabs__pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: left;
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* Which kind of thing a tab is. A conversation draws nothing — the ordinary
+   one needs no badge. */
+.tabs__kind {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+}
+
+.tabs__tab--here .tabs__kind {
+  color: var(--text-muted);
+}
+
+@media (hover: hover) {
+  .tabs__pick:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tabs__menu {
+    animation: none;
+  }
+}
+
 /* --------------------------------------------------------------- the marks */
 
 .tabs__mark {

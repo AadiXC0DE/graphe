@@ -1,8 +1,111 @@
-/* A workbench needs the width. The other sheets leave the overview panel
-   showing because they are things you read; this is a thing you build in, and
-   three bands inside what is left of 1500px is not a canvas. */
+/* A canvas is a tab, so it sits under the row of tabs rather than over it —
+   switching back to a conversation has to be one press on something you can
+   see. It takes the room a conversation would, and the press in its own bar
+   fills the window when the shape has outgrown that. */
 .canvas {
+  position: fixed;
+  top: var(--topbar-height);
+  bottom: 0;
+  left: var(--shelf-take, 0px);
+  right: var(--overview-take, 0px);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.canvas--full {
+  top: 0;
+  left: 0;
   right: 0;
+  z-index: 6;
+}
+
+/* -------------------------------------------------------------------- bar */
+
+.canvas__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The name is the tab's words, so it is edited where it is read rather than in
+   a box somewhere else. A field that looks like a field all the time would be
+   a form; this one looks like a heading until it is reached for. */
+.canvas__title {
+  min-width: 0;
+  max-width: 280px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__title:focus {
+  border-color: var(--border-control);
+  background: var(--bg-sunken);
+  outline: none;
+}
+
+.canvas__count {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The third thing that changes what Start does, said beside it. */
+.canvas__far {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.canvas__farname {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.canvas__farpick {
+  min-height: 26px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text);
+}
+
+.canvas__farpick:disabled {
+  opacity: 0.55;
+}
+
+.canvas__full {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
 }
 
 /* A flow: what you can place, what you have placed, and what the one you are
@@ -511,8 +614,9 @@
 
 .canvas__run {
   flex: none;
-  margin-top: var(--space-1);
-  margin-left: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .canvas__start,
@@ -871,6 +975,11 @@
 
   .canvas__stop:hover {
     border-color: var(--border-strong);
+  }
+
+  .canvas__full:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
   }
 
   .canvas__ishut:hover,

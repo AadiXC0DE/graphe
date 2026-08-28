@@ -11,15 +11,18 @@
  * and the shell runs it.
  */
 
-import type { WorkState } from './board';
+import type { HowFar } from '../agent/guard/policy';
 
 /** Which model a block is run by, or null for whatever is answering. The same
  *  shape the rest of the app names a model with. */
 export type BlockModel = { providerId: string; modelId: string } | null;
 
+let counter = 0;
+
 export type BlockKind =
   | 'look'
   | 'work'
+  | 'research'
   | 'helpers'
   | 'browser'
   | 'checks'
@@ -36,20 +39,52 @@ export type Block = {
   model: BlockModel;
   /** The block this one waits for, or null when it waits for nothing. */
   after: string | null;
-  /** The piece on the board this became, once the flow was started. */
-  piece: string | null;
+  /** How far this one may go on its own. Left out, the canvas's own answer. */
+  howFar?: HowFar;
+  /** Look around and propose before touching anything. */
+  lookFirst?: boolean;
 };
 
 export type Flow = {
+  /** Ours, and stable for as long as the flow exists. A canvas is a tab like a
+   *  conversation is a tab, so it needs a name of its own to be one. */
+  id: string;
+  name: string;
   blocks: readonly Block[];
+  /** The conversation this canvas drives. A block is an ordinary turn in it —
+   *  same tools, same Guard, same everything a person typing would get — so a
+   *  canvas is a way of sending, not a second kind of agent. Null until it has
+   *  been started once. */
+  conversation: string | null;
+  /** How far the whole flow may go on its own, where a block does not say. */
+  howFar: HowFar;
+  /** The block being run right now, or null. */
+  running: string | null;
+  /** What has finished, in the order it finished. */
+  done: readonly string[];
   /** When it was last started, or null while it is still being drawn. */
   startedAt: number | null;
 };
 
-export const EMPTY: Flow = { blocks: [], startedAt: null };
+/** A canvas nobody has drawn on yet. */
+export function newFlow(name = canvasWords.untitled): Flow {
+  counter += 1;
+  return {
+    id: `flow-${Date.now().toString(36)}-${String(counter)}`,
+    name,
+    blocks: [],
+    conversation: null,
+    // The same rung a conversation opens on. A canvas is not a reason to be
+    // asked less, and the row in its own bar is where that is changed.
+    howFar: 'asking',
+    running: null,
+    done: [],
+    startedAt: null,
+  };
+}
 
-/** Draft until it has been started; after that it wears the board's own word. */
-export type BlockState = 'draft' | WorkState;
+/** Where a block has got to. */
+export type BlockState = 'draft' | 'waiting' | 'running' | 'done' | 'failed';
 
 /* -------------------------------------------------------------------------- */
 /* What the canvas says                                                        */
@@ -57,9 +92,22 @@ export type BlockState = 'draft' | WorkState;
 
 export const canvasWords = {
   name: 'Canvas',
+  /** What a canvas is called before anybody has said. */
+  untitled: 'Canvas',
+  /** A canvas takes its name from the first thing it was asked to do. */
+  named: (blocks: readonly Block[]): string => {
+    const first = blocks.find((one) => one.says.trim() !== '');
+    if (first === undefined) return canvasWords.untitled;
+    const said = first.says.trim().replace(/\s+/g, ' ');
+    return said.length <= 28 ? said : `${said.slice(0, 27)}…`;
+  },
   note: 'Place the steps, join them up, then start.',
   empty: 'Build a flow',
   emptyNote: 'Take a loop somebody already worked out, or place a block and build out from it.',
+  rename: 'What this canvas is called',
+  shut: 'Close this panel',
+  bigger: 'Fill the window',
+  smaller: 'Back to the column',
   start: 'Start',
   stop: 'Stop',
   again: 'Start again',
@@ -68,6 +116,15 @@ export const canvasWords = {
   loops: 'Ready-made',
   what: 'What it does',
   runBy: 'Run by',
+  howFar: 'How far it may go',
+  /** The one the whole flow runs at, where a block does not say otherwise. */
+  sameAsFlow: 'Same as the canvas',
+  rungs: {
+    looking: 'Just looking',
+    asking: 'Asks first',
+    changing: 'Changes files',
+    doing: 'Gets on with it',
+  } as Readonly<Record<HowFar, string>>,
   whichever: 'Whatever is answering',
   waitsFor: 'Waits for',
   nothing: 'Nothing — it goes first',
@@ -85,7 +142,6 @@ export const canvasWords = {
     draft: 'Ready',
     waiting: 'Waiting',
     running: 'Going',
-    'needs-you': 'Needs you',
     done: 'Done',
     failed: 'Stopped',
   } as Readonly<Record<BlockState, string>>,
@@ -132,6 +188,13 @@ export const BLOCKS: readonly BlockSpec[] = [
     note: 'Read the project and say what it would do. Changes nothing.',
     needsWords: false,
     says: 'Look around the project and say what you would do. Change nothing.',
+  },
+  {
+    kind: 'research',
+    name: 'Look it up',
+    note: 'Read around the problem before deciding, and say what it found.',
+    needsWords: true,
+    says: '',
   },
   {
     kind: 'helpers',
@@ -231,8 +294,6 @@ export const LOOPS: readonly Loop[] = [
 /* Editing a flow                                                              */
 /* -------------------------------------------------------------------------- */
 
-let counter = 0;
-
 /** Unique for the life of the window. A flow read back off disk brings its own
  *  ids, and nothing here can hand out one of those twice. */
 export function blockId(): string {
@@ -248,7 +309,6 @@ export function place(flow: Flow, kind: BlockKind, after: string | null = null):
     says: spec.says,
     model: null,
     after: flow.blocks.some((one) => one.id === after) ? after : null,
-    piece: null,
   };
   return { ...flow, blocks: [...flow.blocks, block] };
 }
@@ -323,19 +383,40 @@ export function notReady(flow: Flow): readonly Block[] {
   return flow.blocks.filter((one) => specOf(one.kind).needsWords && one.says.trim() === '');
 }
 
-/** True while any block still has a piece on the board. */
+/** True while a block is being run. */
 export function isRunning(flow: Flow): boolean {
-  return flow.blocks.some((one) => one.piece !== null);
+  return flow.running !== null;
 }
 
 export function canStart(flow: Flow): boolean {
   return flow.blocks.length > 0 && notReady(flow).length === 0 && !isRunning(flow);
 }
 
-/** How far along a block is: a draft until it has a piece, and the board's own
- *  word for it after that. */
-export function stateOf(block: Block, states: Readonly<Record<string, WorkState>>): BlockState {
-  return block.piece === null ? 'draft' : (states[block.piece] ?? 'waiting');
+/**
+ * The next block to send, or null when there is nothing left to send.
+ *
+ * The first one in order that has not finished and whose wait has. A block
+ * whose wait never finished is never sent — what follows a step that did not
+ * happen would be working against a change nobody made.
+ */
+export function nextUp(flow: Flow): Block | null {
+  const done = new Set(flow.done);
+  for (const block of runOrder(flow)) {
+    if (done.has(block.id)) continue;
+    if (block.after !== null && !done.has(block.after)) continue;
+    return block;
+  }
+  return null;
+}
+
+/** How far along a block is. */
+export function stateOf(block: Block, flow: Flow): BlockState {
+  if (flow.done.includes(block.id)) return 'done';
+  if (flow.running === block.id) return 'running';
+  if (flow.running === null && flow.startedAt === null) return 'draft';
+  // Going, and this one has not had its turn: either its wait is still out or
+  // it is simply behind something else.
+  return 'waiting';
 }
 
 /** How far along each block sits, counted from whatever it waits for. */
@@ -365,16 +446,23 @@ export function runOrder(flow: Flow): readonly Block[] {
   return [...flow.blocks].sort((one, other) => (at.get(one.id) ?? 0) - (at.get(other.id) ?? 0));
 }
 
+/** What a looking-up block is asked. */
+export function lookedUpWords(about: string): string {
+  return `Look this up properly before deciding anything: ${about.trim()}. Read what is already here, search the web where it helps, and say what you found and what you would do about it. Change nothing.`;
+}
+
 /** What one block is asked, ready to send. */
 export function asksOf(block: Block): string {
   const said = block.says.trim();
   if (block.kind === 'helpers') return helperWords(said);
+  if (block.kind === 'research') return lookedUpWords(said);
   return said === '' ? specOf(block.kind).says : said;
 }
 
-/** Back to a draft: the shape kept, the board forgotten. */
+/** Back to a draft: the shape kept, what it got to forgotten. The conversation
+ *  stays — what it said is worth keeping and is the record of the run. */
 export function reset(flow: Flow): Flow {
-  return { startedAt: null, blocks: flow.blocks.map((one) => ({ ...one, piece: null })) };
+  return { ...flow, startedAt: null, running: null, done: [] };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -390,7 +478,7 @@ export type Drawn = { blocks: readonly Placed[]; columns: number; rows: number }
  * A block keeps its parent's row where that row is free, so a chain reads as
  * one straight line and only a fork moves anything down.
  */
-export function layOut(flow: Flow, states: Readonly<Record<string, WorkState>> = {}): Drawn {
+export function layOut(flow: Flow): Drawn {
   if (flow.blocks.length === 0) return { blocks: [], columns: 0, rows: 0 };
   const at = columns(flow);
   const ordered = runOrder(flow);
@@ -406,7 +494,7 @@ export function layOut(flow: Flow, states: Readonly<Record<string, WorkState>> =
     used.add(row);
     taken.set(column, used);
     rowOf.set(block.id, row);
-    blocks.push({ ...block, column, row, state: stateOf(block, states) });
+    blocks.push({ ...block, column, row, state: stateOf(block, flow) });
   }
 
   return {
@@ -439,11 +527,12 @@ function readModel(value: unknown): BlockModel {
 
 /** A flow out of whatever a file held. Anything unreadable is no flow at all,
  *  which is an empty canvas rather than an error. */
-export function readFlow(raw: unknown): Flow {
-  if (typeof raw !== 'object' || raw === null) return EMPTY;
+export function readFlow(raw: unknown): Flow | null {
+  if (typeof raw !== 'object' || raw === null) return null;
   const held = raw as Record<string, unknown>;
+  const id = held['id'];
   const list = held['blocks'];
-  if (!Array.isArray(list)) return EMPTY;
+  if (typeof id !== 'string' || id === '' || !Array.isArray(list)) return null;
 
   const blocks: Block[] = [];
   const seen = new Set<string>();
@@ -461,7 +550,8 @@ export function readFlow(raw: unknown): Flow {
       says: typeof block['says'] === 'string' ? block['says'] : '',
       model: readModel(block['model']),
       after: typeof block['after'] === 'string' ? block['after'] : null,
-      piece: typeof block['piece'] === 'string' ? block['piece'] : null,
+      ...(isHowFar(block['howFar']) ? { howFar: block['howFar'] } : {}),
+      ...(block['lookFirst'] === true ? { lookFirst: true } : {}),
     });
   }
 
@@ -471,8 +561,57 @@ export function readFlow(raw: unknown): Flow {
     one.after !== null && !have.has(one.after) ? { ...one, after: null } : one,
   );
   const startedAt = held['startedAt'];
+  const name = held['name'];
+  const conversation = held['conversation'];
+  const running = held['running'];
+  const doneList = held['done'];
+  const have2 = new Set(kept.map((one) => one.id));
   return {
+    id,
+    name: typeof name === 'string' && name.trim() !== '' ? name : canvasWords.untitled,
     blocks: kept,
+    conversation: typeof conversation === 'string' && conversation !== '' ? conversation : null,
+    howFar: isHowFar(held['howFar']) ? held['howFar'] : 'asking',
+    // Nothing is running the moment this is read: the window that was running
+    // it is gone, and claiming otherwise would draw a block that never moves.
+    running: typeof running === 'string' && have2.has(running) ? null : null,
+    done: Array.isArray(doneList)
+      ? (doneList as readonly unknown[]).filter(
+          (one): one is string => typeof one === 'string' && have2.has(one),
+        )
+      : [],
     startedAt: typeof startedAt === 'number' && startedAt > 0 ? startedAt : null,
   };
+}
+
+export const RUNGS: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing'];
+
+function isHowFar(value: unknown): value is HowFar {
+  return typeof value === 'string' && (RUNGS as readonly string[]).includes(value);
+}
+
+/** Every flow a file held, in the order it held them. Anything unreadable is
+ *  one canvas lost rather than a project that will not open. */
+export function readFlows(raw: unknown): readonly Flow[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const flows: Flow[] = [];
+  for (const one of raw as readonly unknown[]) {
+    const flow = readFlow(one);
+    if (flow === null || seen.has(flow.id)) continue;
+    seen.add(flow.id);
+    flows.push(flow);
+  }
+  return flows;
+}
+
+/** The list with this one in it, in place if it was already there. */
+export function withFlow(flows: readonly Flow[], flow: Flow): readonly Flow[] {
+  return flows.some((one) => one.id === flow.id)
+    ? flows.map((one) => (one.id === flow.id ? flow : one))
+    : [...flows, flow];
+}
+
+export function withoutFlow(flows: readonly Flow[], id: string): readonly Flow[] {
+  return flows.filter((one) => one.id !== id);
 }

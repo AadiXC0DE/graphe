@@ -93,6 +93,8 @@ type Props = {
    *  it. Chosen from inside the model chip, not beside it. */
   advisor?: ModelChoice | null;
   onAdvisor?: (choice: ModelChoice | null) => void;
+  advisorThinking?: ThinkingLevel | null;
+  onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
   onConnect?: () => void;
   /** How long the chosen model should take before answering. */
   onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
@@ -198,6 +200,8 @@ export default function Composer({
   onSelectModel,
   advisor,
   onAdvisor,
+  advisorThinking,
+  onAdvisorThinking,
   onConnect,
   onThinking,
   anywhere = true,
@@ -838,6 +842,8 @@ export default function Composer({
             onOpenChange={onComposerPopoverOpenChange}
             advisor={advisor ?? null}
             {...(onAdvisor === undefined ? {} : { onAdvisor })}
+            {...(advisorThinking == null ? {} : { advisorThinking })}
+            {...(onAdvisorThinking === undefined ? {} : { onAdvisorThinking })}
           />
         )}
 

@@ -7,8 +7,9 @@
  * between that choice and the settings file the package reads.
  */
 
-import type { ModelChoice } from '../lib/ipc';
+import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { byTier, type Priced } from '../lib/modeltiers';
+import { THINKING_LEVELS } from '../lib/thinking';
 
 /** The addition that does the thinking. Also on the shelf in `pi/packages.ts`. */
 export const ADVISOR_PACKAGE = 'pi-advisor-flow';
@@ -29,6 +30,12 @@ export const advisorWords = {
   off: 'Off',
   offNote: 'One model does all of it and decides for itself.',
   turnOff: 'Turn off',
+  /** How long the advisor thinks. The same row, and the same word, as the one
+   *  the model doing the work already has. */
+  thinking: 'Thinking time',
+  /** Shown until somebody has answered the question: the advising model's own
+   *  setting stands, and saying a level it may not be using would be a lie. */
+  thinkingUnset: 'default',
   /** The two roles the section is built from. */
   does: 'Does the work',
   advises: 'Advises',
@@ -55,6 +62,12 @@ export function asAdvisor(value: unknown): ModelChoice | null {
   if (typeof providerId !== 'string' || providerId.trim() === '') return null;
   if (typeof modelId !== 'string' || modelId.trim() === '') return null;
   return { providerId, modelId };
+}
+
+/** How long the advisor thinks, out of whatever a file held. Anything the
+ *  ladder does not name is nobody's answer, which is the model's own default. */
+export function asAdvisorThinking(value: unknown): ThinkingLevel | null {
+  return THINKING_LEVELS.find((level) => level === value) ?? null;
 }
 
 export function sameAdvisor(one: ModelChoice | null, other: ModelChoice | null): boolean {
@@ -99,14 +112,23 @@ const WHEN_UNSAID: Readonly<Record<string, unknown>> = {
 /**
  * The settings file, with our choice in it and everything else left alone.
  *
- * Two keys are always ours; the rest of `WHEN_UNSAID` is written once and never
- * again. Which gates fire, how much of the working tree travels, how many calls
- * a sitting may make — those belong to whoever opened this file, and rewriting
- * them would be us overruling a decision somebody made deliberately.
+ * The keys behind a control are always ours — somebody pressing the row is
+ * answering the question again — and the rest of `WHEN_UNSAID` is written once
+ * and never again. Which gates fire, how much of the working tree travels, how
+ * many calls a sitting may make — those belong to whoever opened this file, and
+ * rewriting them would be us overruling a decision somebody made deliberately.
+ *
+ * `advisorEffort` is the package's own name for how hard the advisor thinks,
+ * and it takes the same ladder of levels the rest of the app uses. Left unsaid,
+ * whatever is in the file stands.
  */
 export function advisorSettings(
   existing: unknown,
-  choice: { advises: ModelChoice | null; does: ModelChoice | null },
+  choice: {
+    advises: ModelChoice | null;
+    does: ModelChoice | null;
+    advisorThinks?: ThinkingLevel | undefined;
+  },
 ): Record<string, unknown> {
   const kept =
     typeof existing === 'object' && existing !== null && !Array.isArray(existing)
@@ -121,6 +143,7 @@ export function advisorSettings(
     alwaysOn: true,
   };
   if (choice.does !== null) next['executor'] = modelRef(choice.does);
+  if (choice.advisorThinks !== undefined) next['advisorEffort'] = choice.advisorThinks;
   // Per key, because a value already in the file is somebody's answer.
   for (const [key, value] of Object.entries(WHEN_UNSAID)) {
     if (!(key in kept)) next[key] = value;

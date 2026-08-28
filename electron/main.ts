@@ -2721,6 +2721,7 @@ async function checkItFirst(
       timeline: await Timeline.open(waiting.folder),
       model: (await preferences()).all().model,
       advisor: (await preferences()).all().advisor,
+      advisorThinking: (await preferences()).all().advisorThinking,
       thinking: thinkingFor((await preferences()).all()),
       // This is the message somebody just sent, run in a copy because they
       // asked to see it first. Plan gates that message wherever it runs.
@@ -3472,6 +3473,7 @@ async function startConversationUnlocked(
           : await Timeline.open(checkout.folder),
       model: prefs.model,
       advisor: prefs.advisor,
+      advisorThinking: prefs.advisorThinking,
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
       running: held.running,
@@ -4370,6 +4372,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       timeline: await Timeline.open(folder),
       model: (await preferences()).all().model,
       advisor: (await preferences()).all().advisor,
+      advisorThinking: (await preferences()).all().advisorThinking,
       thinking: thinkingFor((await preferences()).all()),
       // The board is held before a piece gets this far, so this only catches
       // Plan arriving while the copy was being made.
@@ -7097,6 +7100,7 @@ function register(): void {
         timeline: await Timeline.open(folder),
         model: prefs.model,
         advisor: prefs.advisor,
+      advisorThinking: prefs.advisorThinking,
         thinking: thinkingFor(prefs),
         trusts: await trustsIn(open.path),
         running: open.held.running,
@@ -7914,7 +7918,25 @@ function register(): void {
     // On the conversations already open, not only the next one: one press is
     // the whole promise of the control.
     const open = projectAt(whereIn(args));
-    for (const one of open?.held.sessions.open ?? []) await one.held.useAdvisor(choice);
+    for (const one of open?.held.sessions.open ?? []) {
+      await one.held.useAdvisor(choice, saved.advisorThinking ?? undefined);
+    }
+    return done(saved);
+  });
+
+  /* Not keyed by model like `setThinking`: the same model can be doing the work
+     in one place and advising in another, and the two are different answers. */
+  handle<Preferences>(CHANNEL.setAdvisorThinking, async (_event, args) => {
+    const [level] = args;
+    const prefs = await preferences();
+    if (!['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(level as string)) {
+      return done(prefs.all());
+    }
+    const saved = await prefs.change({ advisorThinking: level as ThinkingLevel });
+    const open = projectAt(whereIn(args));
+    for (const one of open?.held.sessions.open ?? []) {
+      await one.held.useAdvisor(saved.advisor, level as ThinkingLevel);
+    }
     return done(saved);
   });
 

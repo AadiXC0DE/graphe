@@ -43,27 +43,35 @@ export type Block = {
   after: string | null;
   /** Look around and propose before touching anything. */
   lookFirst?: boolean;
-  /** Pictures this block is sent with, the way a message is sent with them. */
-  pictures?: readonly BlockPicture[];
+  /** Files this block carries. Pictures go with the ask the way they do from
+   *  the composer; text goes into it. */
+  files?: readonly BlockFile[];
   /** Where somebody put it. Absent until they move it, and then it stays put:
    *  a canvas that tidies your arrangement away the moment you add a block is
    *  a diagram, not a canvas. */
   at?: { x: number; y: number };
 };
 
-/** One picture on a block. Held whole rather than as a path: a flow is drawn
- *  once and run later, and a file that moved between the two would be a block
- *  that quietly stopped being about anything. */
-export type BlockPicture = {
+/** One file on a block. Held whole rather than as a path: a flow is drawn once
+ *  and run later, and a file that moved between the two would be a block that
+ *  quietly stopped being about anything. */
+export type BlockFile = {
   name: string;
   mimeType: string;
-  /** Base64, without the data: prefix — the same shape the shell carries. */
+  /** A picture goes to the model as a picture; anything else goes into the ask
+   *  as text, because that is the only other thing a turn can carry. */
+  kind: 'image' | 'text';
+  /** Base64 without the data: prefix for a picture, the file's own text for
+   *  the rest. */
   bytes: string;
 };
 
-/** Enough to show it something; not so many that a flow file becomes a photo
- *  album. */
-export const MOST_PICTURES = 4;
+/** Enough to give a block something to work from; not so many that a flow file
+ *  becomes an archive. */
+export const MOST_FILES = 6;
+
+/** Past this one file is not context, it is the whole conversation. */
+export const MOST_TEXT = 20_000;
 
 /** What one block came to. */
 export type BlockSaid = {
@@ -163,19 +171,35 @@ export const canvasWords = {
   model: 'Model',
   everyModel: 'Models',
   howFar: 'How far it may go',
-  whichever: 'Whatever is answering',
+  /** A block left on no model of its own. Named for the setting, with the
+   *  model it lands on said underneath. */
+  whichever: 'Default',
+  whicheverNote: (model: string | null): string =>
+    model === null
+      ? 'Whatever this canvas’s conversation is set to.'
+      : `Whatever this canvas’s conversation is set to — ${model} right now.`,
   waitsFor: 'Runs after',
   nothing: 'Nothing — it starts the flow',
   /** In the picker, above the blocks it could be made to wait for. */
   afterWhich: 'Runs after',
   shows: 'Shows it',
-  pictures: 'Pictures',
-  addPicture: 'Add a picture',
-  tooMany: (n: number): string => `A block carries up to ${String(n)} pictures.`,
+  files: 'Attachments',
+  filesCount: (n: number): string => (n === 1 ? '1 file' : `${String(n)} files`),
+  attach: 'Attach',
+  takeOff: (name: string): string => `Take ${name} off this block`,
+  tooMany: (n: number): string => `A block carries up to ${String(n)} files.`,
+  thinking: 'Thinking',
+  thinkingNote: 'How long this model takes before it answers',
+  lookFirst: 'Plan first',
+  lookFirstNote: 'Propose before touching anything',
+  nothingBefore: 'Nothing',
   tidyUp: 'Tidy up',
   tidyNote: 'Put every block back in line',
   remove: 'Remove',
   connect: 'Drag from a block’s dot to the one that should follow it',
+  fit: 'Fit',
+  further: 'Further out',
+  closer: 'Closer',
   /** Under the title. */
   counted: (blocks: number, done: number, going: number): string => {
     if (blocks === 0) return 'Nothing placed yet.';
@@ -559,13 +583,28 @@ export function lookedUpWords(about: string): string {
   return `Look this up properly before deciding anything: ${about.trim()}. Read what is already here, search the web where it helps, and say what you found and what you would do about it. Change nothing.`;
 }
 
-/** What one block is asked, ready to send. */
+/** What one block is asked, ready to send. Text it carries goes in with it,
+ *  each file named and fenced so the model can tell one from the next. */
 export function asksOf(block: Block): string {
   const said = block.says.trim();
-  if (block.kind === 'subagents') return helperWords(said);
-  if (block.kind === 'research') return lookedUpWords(said);
-  if (block.kind === 'goal') return goalWords(said);
-  return said === '' ? specOf(block.kind).says : said;
+  const asked =
+    block.kind === 'subagents'
+      ? helperWords(said)
+      : block.kind === 'research'
+        ? lookedUpWords(said)
+        : block.kind === 'goal'
+          ? goalWords(said)
+          : said === ''
+            ? specOf(block.kind).says
+            : said;
+  const text = (block.files ?? []).filter((one) => one.kind === 'text');
+  if (text.length === 0) return asked;
+  const carried = text.map((one) => {
+    const cut = one.bytes.length > MOST_TEXT;
+    const body = cut ? one.bytes.slice(0, MOST_TEXT) : one.bytes;
+    return `--- ${one.name} ---\n${body}${cut ? `\n--- cut here; ${one.name} is longer than this ---` : ''}`;
+  });
+  return `${asked}\n\n${carried.join('\n\n')}`;
 }
 
 /** Back to a draft: the shape kept, what it got to forgotten. The conversation
@@ -720,9 +759,9 @@ function readAt(value: unknown): { x: number; y: number } | null {
   return { x, y };
 }
 
-function readPictures(value: unknown): readonly BlockPicture[] {
+function readFiles(value: unknown): readonly BlockFile[] {
   if (!Array.isArray(value)) return [];
-  const kept: BlockPicture[] = [];
+  const kept: BlockFile[] = [];
   for (const one of value as readonly unknown[]) {
     if (typeof one !== 'object' || one === null) continue;
     const raw = one as Record<string, unknown>;
@@ -731,8 +770,11 @@ function readPictures(value: unknown): readonly BlockPicture[] {
     const bytes = raw['bytes'];
     if (typeof name !== 'string' || typeof mimeType !== 'string' || typeof bytes !== 'string') continue;
     if (mimeType.trim() === '' || bytes === '') continue;
-    kept.push({ name, mimeType, bytes });
-    if (kept.length === MOST_PICTURES) break;
+    // Flows written before a block could carry anything but a picture have no
+    // kind at all, and everything they hold is a picture.
+    const kind = raw['kind'] === 'text' ? 'text' : 'image';
+    kept.push({ name, mimeType, kind, bytes });
+    if (kept.length === MOST_FILES) break;
   }
   return kept;
 }
@@ -773,18 +815,36 @@ export function readFlow(raw: unknown): Flow | null {
       model: readModel(block['model']),
       after: typeof block['after'] === 'string' ? block['after'] : null,
       ...(block['lookFirst'] === true ? { lookFirst: true } : {}),
-      ...(readPictures(block['pictures']).length === 0
+      ...(readFiles(block['files'] ?? block['pictures']).length === 0
         ? {}
-        : { pictures: readPictures(block['pictures']) }),
+        : { files: readFiles(block['files'] ?? block['pictures']) }),
       ...(readAt(block['at']) === null ? {} : { at: readAt(block['at']) as { x: number; y: number } }),
     });
   }
 
-  // A wait pointing at a block that did not survive the read would strand it.
+  // A wait pointing at a block that did not survive the read would strand it,
+  // and a ring of them would be a flow that draws but never starts. Both become
+  // a block that waits for nothing, which is a flow somebody can still run.
   const have = new Set(blocks.map((one) => one.id));
-  const kept = blocks.map((one) =>
+  const standing = blocks.map((one) =>
     one.after !== null && !have.has(one.after) ? { ...one, after: null } : one,
   );
+  const after = new Map(standing.map((one) => [one.id, one.after]));
+  for (const one of standing) {
+    const seen = new Set([one.id]);
+    let walk = after.get(one.id) ?? null;
+    while (walk !== null) {
+      if (seen.has(walk)) {
+        // One edge per ring, so a shape that was nearly right stays nearly
+        // right rather than falling apart into loose blocks.
+        after.set(one.id, null);
+        break;
+      }
+      seen.add(walk);
+      walk = after.get(walk) ?? null;
+    }
+  }
+  const kept = standing.map((one) => ({ ...one, after: after.get(one.id) ?? null }));
   const startedAt = held['startedAt'];
   const name = held['name'];
   const conversation = held['conversation'];

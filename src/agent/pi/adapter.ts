@@ -642,6 +642,9 @@ export type CreateSessionOptions = {
    *  it. Only means anything with the advisor addition installed — without it
    *  there is no tool to turn on, and the choice sits waiting. */
   advisor?: ModelChoice | null;
+  /** How long the advisor takes before answering. Left out, whatever is in the
+   *  package's settings file stands. */
+  advisorThinking?: ThinkingLevel | null;
 };
 
 /**
@@ -714,7 +717,7 @@ export type GrapheSession = {
   /** Ask a stronger model about the hard parts from now on, or null to have
    *  one model do all of it. Silent where the advisor addition is not
    *  installed: there is no tool to turn on, and the choice waits for it. */
-  useAdvisor(choice: ModelChoice | null): Promise<void>;
+  useAdvisor(choice: ModelChoice | null, thinks?: ThinkingLevel): Promise<void>;
   /** Which model is answering, or null for "whatever the account offers". */
   readonly model: { providerId: string; modelId: string } | null;
   /** How much time this model is taking before it answers. */
@@ -1173,6 +1176,7 @@ async function keepAdvisorSettings(
   agentDir: string,
   advises: ModelChoice | null,
   does: ModelChoice | null,
+  advisorThinks?: ThinkingLevel | undefined,
 ): Promise<void> {
   const file = join(agentDir, ADVISOR_SETTINGS_FILE);
   let existing: unknown = null;
@@ -1181,7 +1185,7 @@ async function keepAdvisorSettings(
   } catch {
     // No file yet, or one nobody can parse. Either way there is nothing to keep.
   }
-  const next = advisorSettings(existing, { advises, does });
+  const next = advisorSettings(existing, { advises, does, advisorThinks });
   if (JSON.stringify(existing) === JSON.stringify(next)) return;
   try {
     await mkdir(agentDir, { recursive: true });
@@ -1916,7 +1920,7 @@ const MOST_AFTER_SAYINGS = 3;
   const advisorTools = advisorToolNames(loadedExtensions);
   const advises = options.advisor ?? null;
   if (advisorTools.length > 0) {
-    await keepAdvisorSettings(agentDir, advises, options.model ?? null);
+    await keepAdvisorSettings(agentDir, advises, options.model ?? null, options.advisorThinking ?? undefined);
   }
 
   // Graphe's own tools — the web search and the task helper — travel as Pi's
@@ -2505,10 +2509,10 @@ const MOST_AFTER_SAYINGS = 3;
       }
     },
 
-    async useAdvisor(next): Promise<void> {
+    async useAdvisor(next, thinks): Promise<void> {
       if (closed) return;
       advisorActive(next !== null);
-      if (advisorTools.length > 0) await keepAdvisorSettings(agentDir, next, inUse);
+      if (advisorTools.length > 0) await keepAdvisorSettings(agentDir, next, inUse, thinks);
     },
 
     async useModel(next): Promise<boolean> {

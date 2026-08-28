@@ -442,6 +442,10 @@ export type Preferences = {
    *  it. Global like `model`: it is a reading of what somebody will spend on a
    *  second opinion, and they are the same person in every folder. */
   advisor: ModelChoice | null;
+  /** How long the advisor takes before it answers, or null to leave it to the
+   *  model. Not in `thinking`: that is keyed by model, and the same model can
+   *  be doing the work in one place and advising in another. */
+  advisorThinking: ThinkingLevel | null;
   /** How much time each chosen model should take before answering. Kept per
    *  provider/model pair because the names and available choices differ. */
   thinking: Readonly<Record<string, ThinkingLevel>>;
@@ -1257,6 +1261,7 @@ export const CHANNEL = {
   disconnect: 'graphe:disconnect',
   selectModel: 'graphe:select-model',
   selectAdvisor: 'graphe:select-advisor',
+  setAdvisorThinking: 'graphe:set-advisor-thinking',
   setThinking: 'graphe:set-thinking',
   spendSplit: 'graphe:spend-split',
   tokenUsage: 'graphe:token-usage',
@@ -1591,6 +1596,7 @@ export type GrapheApi = {
    *  of it. Takes effect on the conversation in front of somebody, not only the
    *  next one. */
   selectAdvisor(choice: ModelChoice | null, where?: Where): Promise<Result<Preferences>>;
+  setAdvisorThinking(level: ThinkingLevel, where?: Where): Promise<Result<Preferences>>;
   /** Let this exact model take more or less time before it answers. */
   setThinking(choice: ModelChoice, level: ThinkingLevel, where?: Where): Promise<Result<Preferences>>;
   /** Where the money went in this project, asked for rather than waited for.

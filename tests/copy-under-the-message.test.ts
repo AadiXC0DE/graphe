@@ -62,7 +62,9 @@ describe('where the copy control sits', () => {
   it('reads as the foot of this message rather than the space before the next', () => {
     // 4px under the words against the thread's own 16px between turns.
     expect(CSS).toContain('top: var(--space-1);');
-    expect(CSS).toMatch(/\.message__foot \{[^}]*height: var\(--space-3\);/);
+    // And the room is the 4px drop plus the control, so the turn ends where the
+    // control does rather than hanging over what comes after it.
+    expect(CSS).toMatch(/\.message__foot \{[^}]*height: var\(--space-5\);/);
   });
 
   it('is not there while the reply is still arriving', () => {
@@ -108,5 +110,75 @@ describe('how it appears', () => {
   it('presses, and stops pressing when motion is turned down', () => {
     expect(CSS).toContain('transform: scale(0.97)');
     expect(CSS).toMatch(/prefers-reduced-motion: reduce[\s\S]*\.message__copy:active \{\s*transform: none;/);
+  });
+});
+
+/* It used to be the word "Copy", stacked directly above the thread's own "Copy
+   the conversation" — two labels reading as a pair of buttons doing one job. */
+describe('an icon rather than the word', () => {
+  const control = (): HTMLElement => {
+    const host = draw({ from: 'graphe', children: 'A queue.', copy: 'A queue.' });
+    const copy = host.querySelector('.message__copy');
+    if (copy === null) throw new Error('the turn drew no copy control');
+    return copy as HTMLElement;
+  };
+
+  it('draws a mark and no label', () => {
+    const copy = control();
+    expect(copy.querySelector('svg')).not.toBeNull();
+    expect(copy.textContent).toBe('');
+  });
+
+  it('still says what it is, to a screen reader and under the cursor', () => {
+    const copy = control();
+    expect(copy.getAttribute('aria-label')).toBe('Copy this message');
+    expect(copy.getAttribute('title')).toBe('Copy this message');
+  });
+
+  /** Distinct from "Copy the conversation" underneath it: two controls that
+   *  both read "Copy" is the thing being fixed. */
+  it('names this message, not the whole thread', () => {
+    expect(control().getAttribute('aria-label')).not.toMatch(/conversation/i);
+  });
+
+  it('keeps one square whatever it is saying', () => {
+    expect(CSS).toMatch(/\.message__copy \{[^}]*width: 20px;/);
+    expect(CSS).toMatch(/\.message__copy \{[^}]*height: 20px;/);
+  });
+
+  /** The confirmation rides beside the icon out of flow, so landing a copy
+   *  cannot widen the control or shove the turn under it. */
+  it('says Copied without taking any room', () => {
+    expect(CSS).toMatch(/\.message__copysaid \{[^}]*position: absolute;/);
+    expect(CSS).toMatch(/\.message__copysaid \{[^}]*left: 100%;/);
+  });
+});
+
+describe('once it lands', () => {
+  const wrote: string[] = [];
+  beforeAll(() => {
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          wrote.push(text);
+          return Promise.resolve();
+        },
+      },
+    });
+  });
+
+  it('swaps the mark, says Copied beside it, and holds itself out', async () => {
+    const host = draw({ from: 'graphe', children: 'A queue.', copy: 'A queue.' });
+    const copy = host.querySelector('.message__copy') as HTMLElement;
+
+    await act(async () => {
+      copy.click();
+    });
+
+    expect(wrote).toEqual(['A queue.']);
+    expect(copy.className).toContain('message__copy--held');
+    expect(copy.getAttribute('aria-label')).toBe('Copied');
+    expect(host.querySelector('.message__copysaid')?.textContent).toBe('Copied');
   });
 });

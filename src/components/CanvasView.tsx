@@ -12,7 +12,7 @@ import {
   join,
   layOut,
   LOOPS,
-  MOST_PICTURES,
+  MOST_FILES,
   notReady,
   place,
   placeLoop,
@@ -24,12 +24,13 @@ import {
   type Block,
   type BlockKind,
   type BlockSaid,
-  type BlockPicture,
+  type BlockFile,
   type Ending,
   type Flow,
   type Placed,
 } from '../work/canvas';
-import type { ConnectionState } from '../lib/ipc';
+import type { ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
+import { thinkingLevels } from '../lib/thinking';
 import { byTier, tierNames } from '../lib/modeltiers';
 import Asking from './Asking';
 import './CanvasView.css';
@@ -41,7 +42,7 @@ const ZOOM = { least: 0.4, most: 1.6, step: 0.15 } as const;
 const READABLE = 0.75;
 /** The panel that opens beside a card. Named here because where it goes is
  *  arithmetic against the card, not a decision the stylesheet can make. */
-const PANEL = { width: 292, height: 420 } as const;
+const PANEL = { width: 300, height: 500 } as const;
 /** Further than this and the hand meant to move something, not to press it. */
 const MOVED = 4;
 
@@ -55,6 +56,11 @@ type Props = {
   onCarryOn: () => void;
   /** Who could run a block, or null while the first answer is on its way. */
   connection: ConnectionState | null;
+  /** How long each model takes before answering, by provider/model. Set here
+   *  for the model a block runs on, which is the same setting the composer's
+   *  picker writes — it belongs to the model, not to the turn. */
+  thinking?: Readonly<Record<string, ThinkingLevel>>;
+  onThinking?: ((choice: ModelChoice, level: ThinkingLevel) => void) | undefined;
   /** Covering the whole window rather than sitting in its own column. */
   full: boolean;
   onFull: (full: boolean) => void;
@@ -189,7 +195,7 @@ function Mark({ kind }: { kind: BlockKind }) {
  * ordinary turn in this canvas's own conversation, and only once Start has
  * been pressed.
  */
-export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, full, onFull, onOpenThread }: Props) {
+export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, thinking, onThinking, full, onFull, onOpenThread }: Props) {
   const surface = useRef<HTMLDivElement>(null);
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -230,6 +236,9 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
 
   const laid = useMemo(() => layOut(flow), [flow]);
   const ending = useMemo(() => endedAs(flow), [flow]);
+  /** More than one block and nothing joined yet: the one moment saying how to
+   *  join them is worth the room. */
+  const unjoined = flow.blocks.length > 1 && flow.blocks.every((one) => one.after === null);
   const drawn: readonly Placed[] = useMemo(
     () => (moving === null ? laid.blocks : laid.blocks.map((one) => (one.id === moving.id ? { ...one, x: moving.x, y: moving.y } : one))),
     [laid.blocks, moving],
@@ -334,7 +343,11 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         const box = node.getBoundingClientRect();
-        zoom(event.deltaY > 0 ? -ZOOM.step : ZOOM.step, { x: event.clientX - box.left, y: event.clientY - box.top });
+        // A trackpad pinch arrives as dozens of small events, so a fixed step
+        // per event flew straight to the stops. Follow the gesture instead, and
+        // never move more in one event than a press on the buttons would.
+        const by = Math.max(-ZOOM.step, Math.min(ZOOM.step, -event.deltaY * 0.006));
+        zoom(by, { x: event.clientX - box.left, y: event.clientY - box.top });
         return;
       }
       touched.current = true;
@@ -489,7 +502,7 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
         ) : null}
 
         <div className="canvas__far">
-          <Asking howFar={flow.howFar} onHowFar={(rung) => onFlow({ ...flow, howFar: rung })} />
+          <Asking howFar={flow.howFar} onHowFar={(rung) => onFlow({ ...flow, howFar: rung })} opens="down-right" />
         </div>
 
         <div className="canvas__run">
@@ -579,7 +592,6 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
                 <Card
                   key={block.id}
                   block={block}
-                  behind={waitingOn(flow, block.id).length}
                   rounds={flow.running === block.id ? flow.rounds : 0}
                   first={block.after === null && flow.blocks.length > 1}
                   last={waitingOn(flow, block.id).length === 0 && flow.blocks.length > 1 && block.after !== null}
@@ -612,6 +624,8 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
               block={chosen}
               flow={flow}
               connection={connection}
+              thinking={thinking ?? {}}
+              {...(onThinking === undefined ? {} : { onThinking })}
               going={going}
               spot={beside(chosenAt)}
               onChange={(over) => onFlow(change(flow, chosen.id, over))}
@@ -633,15 +647,12 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
             />
           )}
 
+          {/* The zoom sits under the block list it lines up with; what is said
+              about joining is only worth saying while nothing is joined. */}
           <div className="canvas__foot">
-            {refused === null ? (
-              <span className="canvas__hint">{laid.blocks.length === 0 ? '' : canvasWords.connect}</span>
-            ) : (
-              <span className="canvas__refused" role="status">{refused}</span>
-            )}
             {laid.blocks.length === 0 ? null : (
               <div className="canvas__zoom">
-                <button type="button" className="canvas__zoombtn" onClick={() => zoom(-ZOOM.step)} aria-label="Further out">−</button>
+                <button type="button" className="canvas__zoombtn" onClick={() => zoom(-ZOOM.step)} aria-label={canvasWords.further}>−</button>
                 <button
                   type="button"
                   className="canvas__fit"
@@ -650,11 +661,16 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
                     fit();
                   }}
                 >
-                  Fit
+                  {canvasWords.fit}
                 </button>
-                <button type="button" className="canvas__zoombtn" onClick={() => zoom(ZOOM.step)} aria-label="Closer">+</button>
+                <button type="button" className="canvas__zoombtn" onClick={() => zoom(ZOOM.step)} aria-label={canvasWords.closer}>+</button>
               </div>
             )}
+            {refused !== null ? (
+              <span className="canvas__refused" role="status">{refused}</span>
+            ) : unjoined ? (
+              <span className="canvas__hint">{canvasWords.connect}</span>
+            ) : null}
           </div>
         </div>
 
@@ -820,7 +836,6 @@ function Ended({
 
 function Card({
   block,
-  behind,
   rounds,
   first,
   last,
@@ -834,7 +849,6 @@ function Card({
   onCarryOn,
 }: {
   block: Placed;
-  behind: number;
   rounds: number;
   /** True where the flow begins here — several is not a mistake, they start
    *  together, but a block left unattached by accident would otherwise start
@@ -890,29 +904,37 @@ function Card({
         {came === undefined ? null : <span className="canvas__came">{came.text}</span>}
 
         {/* Where it sits in the flow on the left, what it is set to on the
-            right, so a row of cards reads down either column. */}
+            right, so a row of cards reads down either column. What follows it
+            is not said here: the lines out of the card already say that. With
+            nothing to put in it the row does not draw, rather than leaving a
+            rule under nothing. */}
+        {!first && !last && came === undefined && model === null && (block.files ?? []).length === 0 ? null : (
         <span className="canvas__foots">
           <span className="canvas__foothalf">
             {first ? <span className="canvas__first">{canvasWords.startsHere}</span> : null}
-            {last ? <span className="canvas__first canvas__first--end">{canvasWords.ends}</span> : null}
-            {behind === 0 ? null : <span className="canvas__behind">{canvasWords.after(behind)}</span>}
+            {last ? <span className="canvas__first">{canvasWords.ends}</span> : null}
           </span>
           <span className="canvas__foothalf canvas__foothalf--end">
-            {(block.pictures ?? []).length === 0 ? null : (
-              <span className="canvas__shots" title={canvasWords.shows}>
+            {(block.files ?? []).length === 0 ? null : (
+              <span className="canvas__shots" title={canvasWords.files}>
                 <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
-                  <rect x="1.5" y="2.5" width="9" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
-                  <path d="M1.5 7.5 4 5.5l2.5 2 1.5-1 2.5 2" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                  <path d="M3 1.75h3.25L9 4.25v6H3z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+                  <path d="M6.25 1.75v2.5H9" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
                 </svg>
-                {String((block.pictures ?? []).length)}
+                {String((block.files ?? []).length)}
               </span>
             )}
             {came === undefined ? null : (
               <span className="canvas__turns">{canvasWords.turnsTook(came.turns)}</span>
             )}
-            {model === null ? null : <span className="canvas__model">{model}</span>}
+            {model === null ? null : (
+              <span className="canvas__model" title={model}>
+                {model}
+              </span>
+            )}
           </span>
         </span>
+        )}
       </button>
 
       {block.state === 'needs-you' ? (
@@ -975,23 +997,55 @@ function Trailing({
 
 /** A picture read the way the shell wants it: base64, no data: prefix. Anything
  *  that will not read is one picture missing rather than a thrown error. */
-async function takePictures(files: readonly File[]): Promise<readonly BlockPicture[]> {
-  const taken: BlockPicture[] = [];
-  for (const file of files.slice(0, MOST_PICTURES)) {
-    const bytes = await new Promise<string | null>((settle) => {
+/** Which files a block can be given. Pictures the model looks at; text goes
+ *  into the ask. Anything else has no way to reach a turn. */
+const TEXT_KINDS = new Set([
+  'md', 'markdown', 'txt', 'text', 'json', 'jsonl', 'csv', 'tsv', 'yml', 'yaml', 'toml', 'ini',
+  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'h',
+  'cpp', 'cs', 'php', 'sh', 'bash', 'zsh', 'sql', 'css', 'scss', 'html', 'xml', 'svg', 'log', 'env',
+  'diff', 'patch', 'lock', 'gitignore', 'dockerfile', 'makefile',
+]);
+
+export const BLOCK_TAKES = 'image/*,text/*,.md,.markdown,.txt,.json,.jsonl,.csv,.tsv,.yml,.yaml,.toml,.ts,.tsx,.js,.jsx,.py,.rb,.go,.rs,.java,.sh,.sql,.css,.html,.xml,.log,.diff,.patch';
+
+function kindOf(file: File): 'image' | 'text' | null {
+  if (file.type.startsWith('image/')) return 'image';
+  if (file.type.startsWith('text/') || file.type === 'application/json') return 'text';
+  const dot = file.name.lastIndexOf('.');
+  const extension = dot === -1 ? file.name.toLowerCase() : file.name.slice(dot + 1).toLowerCase();
+  return TEXT_KINDS.has(extension) ? 'text' : null;
+}
+
+async function takeFiles(files: readonly File[]): Promise<readonly BlockFile[]> {
+  const taken: BlockFile[] = [];
+  for (const file of files.slice(0, MOST_FILES)) {
+    const kind = kindOf(file);
+    if (kind === null) continue;
+    const read = await new Promise<string | null>((settle) => {
       const reader = new FileReader();
-      reader.onload = () => {
-        const read = typeof reader.result === 'string' ? reader.result : '';
-        const comma = read.indexOf(',');
-        settle(comma === -1 ? null : read.slice(comma + 1));
-      };
+      reader.onload = () => settle(typeof reader.result === 'string' ? reader.result : null);
       reader.onerror = () => settle(null);
-      reader.readAsDataURL(file);
+      if (kind === 'image') reader.readAsDataURL(file);
+      else reader.readAsText(file);
     });
-    if (bytes === null || bytes === '') continue;
-    taken.push({ name: file.name, mimeType: file.type || 'image/png', bytes });
+    if (read === null || read === '') continue;
+    if (kind === 'image') {
+      const comma = read.indexOf(',');
+      if (comma === -1) continue;
+      taken.push({ name: file.name, mimeType: file.type || 'image/png', kind, bytes: read.slice(comma + 1) });
+    } else {
+      taken.push({ name: file.name, mimeType: file.type || 'text/plain', kind, bytes: read });
+    }
   }
   return taken;
+}
+
+/** Bytes, said the way a person says them. */
+function sizeOf(file: BlockFile): string {
+  const bytes = file.kind === 'image' ? Math.round(file.bytes.length * 0.75) : file.bytes.length;
+  if (bytes < 1024) return `${String(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${String(Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /* ------------------------------------------------------------------ panel */
@@ -1009,6 +1063,8 @@ function Inspector({
   block,
   flow,
   connection,
+  thinking,
+  onThinking,
   going,
   spot,
   onChange,
@@ -1018,6 +1074,8 @@ function Inspector({
   block: Block;
   flow: Flow;
   connection: ConnectionState | null;
+  thinking: Readonly<Record<string, ThinkingLevel>>;
+  onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
   going: boolean;
   spot: { x: number; y: number; side: 'left' | 'right' };
   onChange: (over: Partial<Omit<Block, 'id'>>) => void;
@@ -1026,7 +1084,7 @@ function Inspector({
 }) {
   const spec = specOf(block.kind);
   const box = useRef<HTMLTextAreaElement>(null);
-  const [view, setView] = useState<'block' | 'model' | 'after'>('block');
+  const [view, setView] = useState<'block' | 'model' | 'after' | 'thinking'>('block');
   const [term, setTerm] = useState('');
 
   useEffect(() => {
@@ -1034,7 +1092,14 @@ function Inspector({
   }, [block.id, block.says, spec.needsWords]);
 
   const offers = useMemo(() => {
-    const all: { providerId: string; providerName: string; modelId: string; label: string; rates: { input: number; output: number } | null }[] = [];
+    const all: {
+      providerId: string;
+      providerName: string;
+      modelId: string;
+      label: string;
+      rates: { input: number; output: number } | null;
+      thinking: readonly ThinkingLevel[];
+    }[] = [];
     for (const provider of connection?.providers ?? []) {
       if (!provider.connected) continue;
       for (const model of provider.models) {
@@ -1045,6 +1110,7 @@ function Inspector({
           modelId: model.id,
           label: model.label,
           rates: model.rates,
+          thinking: model.thinking ?? [],
         });
       }
     }
@@ -1054,6 +1120,14 @@ function Inspector({
   const current = offers.find(
     (one) => block.model !== null && one.providerId === block.model.providerId && one.modelId === block.model.modelId,
   );
+  /** What a block with no model of its own would actually run on. */
+  const onNow =
+    offers.find(
+      (one) =>
+        connection?.chosen != null &&
+        one.providerId === connection.chosen.providerId &&
+        one.modelId === connection.chosen.modelId,
+    )?.label ?? null;
 
   const looked = term.trim().toLowerCase();
   const found = looked === '' ? offers : offers.filter(
@@ -1071,7 +1145,15 @@ function Inspector({
      would close a ring are not offered, so the picker cannot draw a shape the
      board would refuse. */
   const could = flow.blocks.filter((one) => one.id !== block.id && canWaitFor(flow, block.id, one.id).ok);
-  const shown = block.pictures ?? [];
+  const held = block.files ?? [];
+  const first = block.after === null;
+
+  /* The depths this exact model takes, and where it is set. Absent for a block
+     left on whatever is answering: that is the composer's own setting, and the
+     composer's own row already changes it. */
+  const depths = current?.thinking ?? [];
+  const depth: ThinkingLevel =
+    (block.model === null ? undefined : thinking[`${block.model.providerId}/${block.model.modelId}`]) ?? 'off';
   const came = flow.said[block.id];
 
   return (
@@ -1101,7 +1183,29 @@ function Inspector({
         </button>
       </header>
 
-      {view === 'after' ? (
+      {view === 'thinking' ? (
+        <div className="canvas__ibody scroll--auto">
+          <span className="canvas__ilabel">{canvasWords.thinkingNote}</span>
+          <div className="canvas__imodels" role="listbox" aria-label={canvasWords.thinking}>
+            {depths.map((level) => (
+              <button
+                key={level}
+                type="button"
+                role="option"
+                aria-selected={level === depth}
+                className={`canvas__imodel ${level === depth ? 'canvas__imodel--on' : ''}`}
+                onClick={() => {
+                  if (block.model !== null) onThinking?.(block.model, level);
+                  setView('block');
+                }}
+              >
+                {thinkingLevels[level].name}
+                <span className="canvas__isays2">{thinkingLevels[level].note}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : view === 'after' ? (
         <div className="canvas__ibody scroll--auto">
           <span className="canvas__ilabel">{canvasWords.afterWhich}</span>
           <div className="canvas__imodels" role="listbox" aria-label={canvasWords.afterWhich}>
@@ -1157,6 +1261,7 @@ function Inspector({
               }}
             >
               {canvasWords.whichever}
+              <span className="canvas__isays2">{canvasWords.whicheverNote(onNow)}</span>
             </button>
             {bands.map((band) => (
               <div key={band.name || 'all'} className="canvas__itier">
@@ -1204,30 +1309,79 @@ function Inspector({
             id="canvas-says"
             ref={box}
             className="canvas__isays"
-            rows={5}
+            rows={3}
             value={block.says}
             disabled={going}
             placeholder={spec.needsWords ? 'Tighten the nav on mobile' : spec.says}
             onChange={(event) => onChange({ says: event.target.value })}
           />
 
-          <button type="button" className="canvas__irow" onClick={() => setView('model')} disabled={going}>
-            <span className="canvas__irowname">{canvasWords.model}</span>
-            <span className="canvas__irowvalue">{current?.label ?? canvasWords.whichever}</span>
-            <span className="canvas__irowmore" aria-hidden="true">›</span>
-          </button>
+          {/* One band of rows, all the same shape, so what a block is set to
+              reads as a list rather than as four different controls. */}
+          <div className="canvas__irows">
+            <button type="button" className="canvas__irow" onClick={() => setView('model')} disabled={going}>
+              <span className="canvas__irowname">{canvasWords.model}</span>
+              <span className="canvas__irowvalue">{current?.label ?? canvasWords.whichever}</span>
+              <span className="canvas__irowmore" aria-hidden="true">›</span>
+            </button>
 
-          <span className="canvas__ilabel">{canvasWords.pictures}</span>
-          <div className="canvas__ishots">
-            {shown.map((picture, at) => (
-              <span className="canvas__ishot" key={`${picture.name}-${String(at)}`}>
-                <img src={`data:${picture.mimeType};base64,${picture.bytes}`} alt={picture.name} />
+            {depths.length > 1 && onThinking !== undefined && current !== undefined ? (
+              <button type="button" className="canvas__irow" onClick={() => setView('thinking')} disabled={going}>
+                <span className="canvas__irowname">{canvasWords.thinking}</span>
+                <span className="canvas__irowvalue">{thinkingLevels[depth].name}</span>
+                <span className="canvas__irowmore" aria-hidden="true">›</span>
+              </button>
+            ) : null}
+
+            <button type="button" className="canvas__irow" onClick={() => setView('after')} disabled={going}>
+              <span className="canvas__irowname">{canvasWords.waitsFor}</span>
+              <span className="canvas__irowvalue">
+                {waits === null ? canvasWords.nothingBefore : specOf(waits.kind).name}
+              </span>
+              <span className="canvas__irowmore" aria-hidden="true">›</span>
+            </button>
+
+            <label className="canvas__irow canvas__irow--switch">
+              <span className="canvas__irowname">{canvasWords.lookFirst}</span>
+              <span className="canvas__irownote">{canvasWords.lookFirstNote}</span>
+              <input
+                type="checkbox"
+                className="canvas__iswitch"
+                checked={block.lookFirst === true}
+                disabled={going}
+                onChange={(event) => onChange({ lookFirst: event.target.checked })}
+              />
+              <span className="canvas__itrack" aria-hidden="true" />
+            </label>
+          </div>
+          <span className="canvas__ilabel">
+            {canvasWords.files}
+            {held.length === 0 ? null : <span className="canvas__iturns">{canvasWords.filesCount(held.length)}</span>}
+          </span>
+
+          <div className="canvas__ifiles">
+            {held.map((file, at) => (
+              <span className={`canvas__ifile canvas__ifile--${file.kind}`} key={`${file.name}-${String(at)}`}>
+                {file.kind === 'image' ? (
+                  <img className="canvas__ithumb" src={`data:${file.mimeType};base64,${file.bytes}`} alt="" />
+                ) : (
+                  <span className="canvas__ithumb canvas__ithumb--text" aria-hidden="true">
+                    <svg viewBox="0 0 14 14" width="12" height="12" fill="none">
+                      <path d="M3.5 1.75h4.25L11 5v7.25H3.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                      <path d="M7.75 1.75V5H11M5.25 7.5h4M5.25 9.75h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                )}
+                <span className="canvas__ifiletext">
+                  <span className="canvas__ifilename">{file.name}</span>
+                  <span className="canvas__ifilesize">{sizeOf(file)}</span>
+                </span>
                 <button
                   type="button"
-                  className="canvas__ishotoff"
+                  className="canvas__ifileoff"
                   disabled={going}
-                  aria-label={`Take ${picture.name} off this block`}
-                  onClick={() => onChange({ pictures: shown.filter((_, index) => index !== at) })}
+                  aria-label={canvasWords.takeOff(file.name)}
+                  onClick={() => onChange({ files: held.filter((_, index) => index !== at) })}
                 >
                   <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
                     <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -1235,22 +1389,23 @@ function Inspector({
                 </button>
               </span>
             ))}
-            {shown.length >= MOST_PICTURES ? null : (
-              <label className={`canvas__iadd ${going ? 'canvas__iadd--off' : ''}`} title={canvasWords.addPicture}>
+            {held.length >= MOST_FILES ? null : (
+              <label className={`canvas__iattach ${going ? 'canvas__iattach--off' : ''}`}>
                 <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden="true">
                   <path d="M7 2.5v9M2.5 7h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 </svg>
+                {canvasWords.attach}
                 <input
                   type="file"
-                  accept="image/*"
+                  accept={BLOCK_TAKES}
                   multiple
                   disabled={going}
                   onChange={(event) => {
-                    const files = [...(event.target.files ?? [])];
+                    const picked = [...(event.target.files ?? [])];
                     event.target.value = '';
-                    void takePictures(files).then((taken) => {
+                    void takeFiles(picked).then((taken) => {
                       if (taken.length === 0) return;
-                      onChange({ pictures: [...shown, ...taken].slice(0, MOST_PICTURES) });
+                      onChange({ files: [...held, ...taken].slice(0, MOST_FILES) });
                     });
                   }}
                 />
@@ -1265,16 +1420,7 @@ function Inspector({
           cannot be found by scrolling for it. */}
       {view !== 'block' ? null : (
         <footer className="canvas__ifoot">
-          <button
-            type="button"
-            className="canvas__iwaits"
-            onClick={() => setView('after')}
-            disabled={going}
-            title={canvasWords.afterWhich}
-          >
-            {waits === null ? canvasWords.startsHere : `${canvasWords.waitsFor} ${specOf(waits.kind).name}`}
-            <span className="canvas__irowmore" aria-hidden="true">›</span>
-          </button>
+          <span className="canvas__iwaits">{first ? canvasWords.startsHere : ''}</span>
           <button type="button" className="canvas__iremove" onClick={onRemove} disabled={going}>
             {canvasWords.remove}
           </button>

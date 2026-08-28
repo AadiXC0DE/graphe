@@ -25,6 +25,34 @@ type Props = {
   copy?: string;
 };
 
+/** A clipboard until it lands, then a tick — one 12px box either way, so the
+ *  confirmation never resizes the control. */
+function CopyMark({ done }: { done: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      {done ? (
+        <path
+          d="M1.6 6.3 4.5 9.2l5.9-6.4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : (
+        <>
+          <rect x="3.9" y="3.9" width="6.7" height="6.7" rx="1.6" stroke="currentColor" strokeWidth="1.2" />
+          <path
+            d="M8.3 1.4H3c-.88 0-1.6.72-1.6 1.6v5.3"
+            stroke="currentColor"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+          />
+        </>
+      )}
+    </svg>
+  );
+}
+
 /** One picture as it was sent: small, and full size when asked for.
  *
  * A picture that will not draw leaves nothing behind — a broken-image icon says
@@ -68,7 +96,8 @@ function Sent({ picture }: { picture: SentPicture }) {
  */
 export default function Message({ from, children, streaming, aside, isLast, pictures, copy }: Props) {
   const mine = from === 'you';
-  const copying = useCopying();
+  // Named apart from the thread's own "Copy the conversation" underneath it.
+  const copying = useCopying({ idle: 'Copy this message' });
   const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
   const formatted = !mine && typeof children === 'string';
 
@@ -124,8 +153,17 @@ export default function Message({ from, children, streaming, aside, isLast, pict
               type="button"
               className={`message__copy ${copying.copied || copying.failed ? 'message__copy--held' : ''}`}
               onClick={() => copying.copy(copy)}
+              aria-label={copying.label}
+              title={copying.label}
             >
-              {copying.label}
+              <CopyMark done={copying.copied} />
+              {/* Beside the icon and out of flow, so saying it landed cannot
+                  widen the control or push what is under it. */}
+              {copying.copied || copying.failed ? (
+                <span className="message__copysaid" aria-hidden="true">
+                  {copying.label}
+                </span>
+              ) : null}
             </button>
           )}
         </div>

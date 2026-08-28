@@ -681,6 +681,7 @@ let previewPlanMode = false;
     showMe: false,
     model: null,
     advisor: null,
+    advisorThinking: null,
     thinking: {},
     kept: {},
     showFiles: true,
@@ -1478,6 +1479,11 @@ let previewPlanMode = false;
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setAdvisorThinking(level: ThinkingLevel): Promise<Result<Preferences>> {
+      preferred = { ...preferred, advisorThinking: level };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
     setThinking(choice: ModelChoice, level: ThinkingLevel): Promise<Result<Preferences>> {
       preferred = { ...preferred, thinking: { ...preferred.thinking, [modelKey(choice)]: level } };
       return Promise.resolve(done({ ...preferred }));
@@ -2103,6 +2109,7 @@ function connect(): Bridge {
     disconnect: (providerId) => api.disconnect(providerId),
     selectModel: (choice, where) => api.selectModel(choice, where),
     selectAdvisor: (choice, where) => api.selectAdvisor(choice, where),
+    setAdvisorThinking: (level, where) => api.setAdvisorThinking(level, where),
     setThinking: (choice, level, where) => api.setThinking(choice, level, where),
     closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
     startAfter: (text, after, where) => api.startAfter(text, after, where),

@@ -26,11 +26,13 @@ import {
   advisorToolNames,
   advisorWords,
   asAdvisor,
+  asAdvisorThinking,
   extensionToolNames,
   modelRef,
   sameAdvisor,
   worthHaving,
 } from '../src/agent/advisor';
+import { THINKING_LEVELS } from '../src/lib/thinking';
 import { PreferenceFile, defaultPreferences } from '../src/projects/preferences';
 
 const OPUS = { providerId: 'anthropic', modelId: 'claude-opus-4-5' };
@@ -180,6 +182,51 @@ describe('the settings the addition reads', () => {
   it('turns it off without forgetting who was asked', () => {
     const on = advisorSettings(null, { advises: OPUS, does: HAIKU });
     expect(advisorSettings(on, { advises: null, does: HAIKU })).toEqual({ ...on, alwaysOn: false });
+  });
+});
+
+/* The package reads how hard the advisor thinks from `advisorEffort`, a string
+   on the same ladder the rest of the app already uses. */
+describe('how long the advisor thinks', () => {
+  it('writes the level the control was set to', () => {
+    expect(advisorSettings(null, { advises: OPUS, does: HAIKU, advisorThinks: 'high' })).toMatchObject(
+      { advisorEffort: 'high' },
+    );
+  });
+
+  it('leaves the file alone when nobody has said', () => {
+    expect(advisorSettings(null, { advises: OPUS, does: HAIKU })).not.toHaveProperty('advisorEffort');
+    expect(
+      advisorSettings({ advisorEffort: 'max' }, { advises: OPUS, does: HAIKU }),
+    ).toMatchObject({ advisorEffort: 'max' });
+  });
+
+  /** Unlike the defaults, this one is behind a control: pressing the row is
+   *  somebody answering the question again, so their new answer wins. */
+  it('overwrites a value already in the file, because the control is the answer', () => {
+    expect(
+      advisorSettings({ advisorEffort: 'low' }, { advises: OPUS, does: HAIKU, advisorThinks: 'xhigh' }),
+    ).toMatchObject({ advisorEffort: 'xhigh' });
+  });
+
+  it('says nothing about it while the advisor is off', () => {
+    const off = advisorSettings({ advisorEffort: 'low' }, { advises: null, does: HAIKU, advisorThinks: 'max' });
+    expect(off).toEqual({ advisorEffort: 'low', alwaysOn: false });
+  });
+
+  it('reads a level back out of a file, and nothing else', () => {
+    expect(asAdvisorThinking('medium')).toBe('medium');
+    expect(asAdvisorThinking('off')).toBe('off');
+    expect(asAdvisorThinking('Default (Model Default)')).toBeNull();
+    expect(asAdvisorThinking(undefined)).toBeNull();
+    expect(asAdvisorThinking(3)).toBeNull();
+  });
+
+  /** Ours and the package's ladders have to be the same words, or a level
+   *  chosen here is a level it quietly ignores. */
+  it('offers only levels the addition itself accepts', () => {
+    expect([...THINKING_LEVELS]).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+    for (const level of THINKING_LEVELS) expect(asAdvisorThinking(level)).toBe(level);
   });
 });
 

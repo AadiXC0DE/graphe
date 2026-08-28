@@ -554,7 +554,19 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex: none;
   min-width: 0;
+  /* Guaranteed, not hoped for: children that refuse to shrink used to paint
+     straight over the other half of the row. */
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* The right half is what gives way, and inside it the model's name is the one
+   thing long enough to need to. */
+.canvas__foothalf--end {
+  flex: 0 1 auto;
+  justify-content: flex-end;
 }
 
 /* One line rather than scattered words: the gap alone read as a mistake. */
@@ -562,13 +574,6 @@
   content: '·';
   margin-right: var(--space-2);
   color: var(--border-strong);
-}
-
-/* The right half gives up its width first: which model ran is the one thing
-   here that can be a long name. */
-.canvas__foothalf--end {
-  flex: 0 1 auto;
-  justify-content: flex-end;
 }
 
 /* Where the flow begins and where it stops, read off the joins. The open dot on
@@ -611,16 +616,13 @@
 }
 
 .canvas__model {
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: 4em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.canvas__behind {
-  margin-left: auto;
-  flex: none;
-}
 
 .canvas__shots {
   flex: none;
@@ -758,7 +760,6 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
   padding: 2px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -840,7 +841,7 @@
   z-index: 6;
   display: flex;
   flex-direction: column;
-  max-height: 420px;
+  max-height: 500px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-raised);
@@ -942,16 +943,19 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  min-height: 32px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
   background: var(--bg);
   font-size: var(--text-sm);
   color: var(--text-muted);
-  transition:
-    border-color var(--dur-micro) var(--ease-hover),
-    background-color var(--dur-micro) var(--ease-hover);
+  text-align: left;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__irow:not(:disabled):hover {
+    background: var(--bg-sunken);
+  }
 }
 
 .canvas__irow:disabled {
@@ -962,15 +966,14 @@
 .canvas__irowname {
   flex: none;
   font-size: var(--text-2xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 
 .canvas__irowvalue {
   flex: 1 1 auto;
   min-width: 0;
   text-align: right;
+  font-size: var(--text-2xs);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1079,74 +1082,200 @@
 
 /* What this block is shown. Small, because the words are the block and these
    are what the words are about. */
-.canvas__ishots {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.canvas__ishot {
-  position: relative;
-  display: block;
-  width: 52px;
-  height: 52px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
-  overflow: hidden;
-}
-
-.canvas__ishot img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.canvas__ishotoff {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 999px;
-  background: var(--bg-raised);
-  color: var(--text-muted);
-}
-
-.canvas__iadd {
+/* Attachments, one row each: a picture and a spec file are the same kind of
+   thing to a block, and a grid of thumbnails could not say which file a
+   markdown chip was. */
+.canvas__ifiles {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
   gap: 2px;
-  width: 52px;
-  height: 52px;
-  border: 1px dashed var(--border-strong);
+}
+
+.canvas__ifile {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.canvas__ithumb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--bg);
+  object-fit: cover;
+  overflow: hidden;
+  color: var(--text-faint);
+}
+
+.canvas__ithumb--text {
+  border: 1px solid var(--border);
+}
+
+.canvas__ifiletext {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.canvas__ifilename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--text);
+}
+
+.canvas__ifilesize {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-faint);
+}
+
+.canvas__ifileoff {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
   border-radius: var(--radius-sm);
   color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__iattach {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
   cursor: pointer;
-  text-align: center;
   transition:
     color var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover);
 }
 
-.canvas__iadd--off {
+.canvas__iattach--off {
   opacity: 0.5;
   cursor: default;
 }
 
-.canvas__iaddsays {
-  font-size: 9px;
-  line-height: 1.1;
-  padding: 0 2px;
+.canvas__iattach input {
+  display: none;
 }
 
-.canvas__iadd input {
-  display: none;
+/* What the block is set to: one band, one row shape, so four settings read as
+   a list rather than as four different controls. */
+.canvas__irows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.canvas__irows > * + * {
+  border-top: 1px solid var(--border);
+}
+
+/* One row that is a switch rather than a way through. The note sits under the
+   name, so a long one never squeezes the switch off the end. */
+.canvas__irow--switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  cursor: pointer;
+}
+
+.canvas__irow--switch .canvas__irowname {
+  grid-column: 1;
+}
+
+.canvas__irownote {
+  grid-column: 1;
+  font-size: 9px;
+  line-height: 1.3;
+  color: var(--text-faint);
+}
+
+.canvas__iswitch {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.canvas__itrack {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--border-control);
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__itrack::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__iswitch:checked + .canvas__itrack {
+  background: var(--accent);
+}
+
+.canvas__iswitch:checked + .canvas__itrack::after {
+  transform: translateX(12px);
+}
+
+.canvas__iswitch:focus-visible + .canvas__itrack {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__ifileoff:hover {
+    background: var(--bg-raised);
+    color: var(--text);
+  }
+
+  .canvas__iattach:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .canvas__irow--switch:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas__itrack::after {
+    transition: none;
+  }
 }
 
 .canvas__imodels {
@@ -1578,7 +1707,7 @@
   position: absolute;
   left: var(--space-4);
   right: var(--space-4);
-  bottom: calc(var(--space-4) + 34px);
+  bottom: calc(var(--space-4) + 40px);
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);

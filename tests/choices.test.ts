@@ -157,6 +157,7 @@ describe('D1 — the real name of what just happened', () => {
         version: 1,
         preferences: {
           advisor: null,
+          advisorThinking: null,
           showMe: true,
           model: null,
           thinking: {},

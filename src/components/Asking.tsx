@@ -8,6 +8,10 @@ type Props = {
   onHowFar: (howFar: HowFar) => void;
   /** Lets a native page step aside while this renderer popover is open. */
   onOpenChange?: (open: boolean) => void;
+  /** Which way the menu opens, and which edge it lines up with. The composer's
+   *  chip sits at the foot of the window; a bar along the top needs the other
+   *  one, or the menu opens off the screen. */
+  opens?: 'up' | 'down-right';
 };
 
 export const SAYS = {
@@ -65,7 +69,7 @@ function screenFor(rung: HowFar): (typeof SAYS.screens)['doing'] | null {
   return null;
 }
 
-export default function Asking({ howFar, onHowFar, onOpenChange }: Props) {
+export default function Asking({ howFar, onHowFar, onOpenChange, opens = 'up' }: Props) {
   const [open, setOpen] = useState(false);
   /** Which rung is being asked about, or null when the menu is the menu. */
   const [warning, setWarning] = useState<HowFar | null>(null);
@@ -111,7 +115,7 @@ export default function Asking({ howFar, onHowFar, onOpenChange }: Props) {
   const loose = howFar === 'changing' || howFar === 'doing';
 
   return (
-    <div className={`asking ${loose ? 'asking--quiet' : ''}`} ref={root}>
+    <div className={`asking ${loose ? 'asking--quiet' : ''} ${opens === 'down-right' ? 'asking--down' : ''}`} ref={root}>
       <button
         type="button"
         className="asking__chip"

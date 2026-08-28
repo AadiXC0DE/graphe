@@ -585,6 +585,7 @@ function Conversation() {
     showMe: false,
     model: null,
     advisor: null,
+    advisorThinking: null,
     thinking: {},
     kept: {},
     showFiles: false,
@@ -785,6 +786,17 @@ function Conversation() {
   /** "Take more time": how long the chosen model thinks before it answers,
    *  remembered per model and applied to the conversation in front of us now,
    *  not only to the next one. */
+  /* A block's model is not always the one the composer is on, so writing its
+     depth must not claim the chosen model's did. */
+  const setBlockThinking = useCallback(
+    (choice: ModelChoice, level: ThinkingLevel) => {
+      void bridge.setThinking(choice, level).then((answer) => {
+        if (answer.ok) setPreferences(answer.value);
+      });
+    },
+    [],
+  );
+
   const changeThinking = useCallback(
     (choice: ModelChoice, level: ThinkingLevel) => {
       void bridge.setThinking(choice, level).then((answer) => {
@@ -1324,6 +1336,15 @@ function Conversation() {
    * puts it on this computer. Sending people to a package shelf to make a
    * control they just used start working is not a choice, it is an errand.
    */
+  /* How long the advisor takes. Not keyed by model like the working model's
+     depth: the same model can be doing the work in one place and advising in
+     another, and those are different answers. */
+  const setAdvisorThinking = useCallback((_choice: ModelChoice, level: ThinkingLevel) => {
+    void bridge.setAdvisorThinking(level).then((answer) => {
+      if (answer.ok) setPreferences(answer.value);
+    });
+  }, []);
+
   const selectAdvisor = useCallback(
     (choice: ModelChoice | null) => {
       void (async () => {
@@ -4432,12 +4453,16 @@ function Conversation() {
       if (path === null || flow.conversation === null) return;
       const where: Where = { project: path, conversation: flow.conversation };
       await bridge.goAsFarAs(flow.howFar, where);
-      const shown = (block.pictures ?? []).map((one) => ({
-        kind: 'image' as const,
-        name: one.name,
-        mimeType: one.mimeType,
-        bytes: one.bytes,
-      }));
+      // Pictures go the way a message's do; text a block carries is already in
+      // what it is asked, put there by asksOf.
+      const shown = (block.files ?? [])
+        .filter((one) => one.kind === 'image')
+        .map((one) => ({
+          kind: 'image' as const,
+          name: one.name,
+          mimeType: one.mimeType,
+          bytes: one.bytes,
+        }));
       const answer = await bridge.prompt(
         asksOf(block),
         shown.length === 0 ? undefined : shown,
@@ -5675,6 +5700,8 @@ function Conversation() {
               onSelectModel={selectModel}
               advisor={preferences.advisor}
               onAdvisor={selectAdvisor}
+              advisorThinking={preferences.advisorThinking}
+              onAdvisorThinking={setAdvisorThinking}
               onConnect={openConnect}
               onThinking={changeThinking}
               skills={skills}
@@ -5891,6 +5918,8 @@ function Conversation() {
           onStop={stopFlow}
           onCarryOn={openGate}
           connection={connection}
+          thinking={preferences?.thinking ?? {}}
+          onThinking={setBlockThinking}
           full={canvasFull}
           onFull={setCanvasFull}
           {...(canvasHere.conversation === null || desk === null

@@ -26,7 +26,8 @@ import {
   join,
   layOut,
   LOOPS,
-  MOST_PICTURES,
+  MOST_FILES,
+  MOST_TEXT,
   nextUp,
   notReady,
   place,
@@ -527,19 +528,53 @@ describe('reading a flow off the disk', () => {
     expect(flow?.blocks[2]?.model).toBeNull();
   });
 
-  it('keeps a picture only when it is whole, and never more than it will carry', () => {
-    const one = { name: 'a.png', mimeType: 'image/png', bytes: 'AAA' };
+  it('keeps a file only when it is whole, and never more than it will carry', () => {
+    const one = { name: 'a.png', mimeType: 'image/png', kind: 'image', bytes: 'AAA' };
     const flow = readFlow({
       id: 'f',
       blocks: [
-        { id: 'a', kind: 'custom', pictures: [one, { name: 'b.png' }, { ...one, bytes: '' }] },
-        { id: 'b', kind: 'custom', pictures: Array.from({ length: 9 }, () => one) },
-        { id: 'c', kind: 'custom', pictures: 'a photo' },
+        { id: 'a', kind: 'custom', files: [one, { name: 'b.png' }, { ...one, bytes: '' }] },
+        { id: 'b', kind: 'custom', files: Array.from({ length: 9 }, () => one) },
+        { id: 'c', kind: 'custom', files: 'a photo' },
       ],
     });
-    expect(flow?.blocks[0]?.pictures).toEqual([one]);
-    expect(flow?.blocks[1]?.pictures).toHaveLength(MOST_PICTURES);
-    expect(flow?.blocks[2]?.pictures).toBeUndefined();
+    expect(flow?.blocks[0]?.files).toEqual([one]);
+    expect(flow?.blocks[1]?.files).toHaveLength(MOST_FILES);
+    expect(flow?.blocks[2]?.files).toBeUndefined();
+  });
+
+  it('reads a flow written before a block could carry anything but a picture', () => {
+    const flow = readFlow({
+      id: 'f',
+      blocks: [{ id: 'a', kind: 'custom', pictures: [{ name: 'a.png', mimeType: 'image/png', bytes: 'AAA' }] }],
+    });
+    expect(flow?.blocks[0]?.files).toEqual([
+      { name: 'a.png', mimeType: 'image/png', kind: 'image', bytes: 'AAA' },
+    ]);
+  });
+
+  it('puts the text a block carries into what it is asked, and says where it cut', () => {
+    const block = {
+      id: 'a',
+      kind: 'custom' as const,
+      says: 'Follow this spec.',
+      model: null,
+      after: null,
+      files: [
+        { name: 'spec.md', mimeType: 'text/markdown', kind: 'text' as const, bytes: '# Spec\nDo the thing.' },
+        { name: 'shot.png', mimeType: 'image/png', kind: 'image' as const, bytes: 'AAA' },
+      ],
+    };
+    const asked = asksOf(block);
+    expect(asked).toContain('Follow this spec.');
+    expect(asked).toContain('--- spec.md ---');
+    expect(asked).toContain('Do the thing.');
+    // A picture is not text and never lands in the words.
+    expect(asked).not.toContain('shot.png');
+
+    const long = asksOf({ ...block, files: [{ ...block.files[0]!, bytes: 'x'.repeat(MOST_TEXT + 50) }] });
+    expect(long).toContain('cut here');
+    expect(long.length).toBeLessThan(MOST_TEXT + 400);
   });
 
   it('keeps what a block came to, and only for blocks it still has', () => {
@@ -679,5 +714,86 @@ describe('how a run ended', () => {
     expect(ended?.whole).toBe(true);
     expect(ended?.turns).toBe(0);
     expect(ended?.last).toBeNull();
+  });
+});
+
+describe('branches, and the shapes people actually draw', () => {
+  /** A → B, A → C, B → D. Two ends, one start. */
+  function branched() {
+    let flow = place(newFlow(), 'plan');
+    const a = flow.blocks[0]!.id;
+    flow = place(flow, 'custom', a);
+    const b = flow.blocks[1]!.id;
+    flow = place(flow, 'subagents', a);
+    const c = flow.blocks[2]!.id;
+    flow = place(flow, 'review', b);
+    return { flow, a, b, c, d: flow.blocks[3]!.id };
+  }
+
+  it('one start, two ends', () => {
+    const { flow, c, d } = branched();
+    expect(startsAt(flow)).toHaveLength(1);
+    const ends = flow.blocks.filter((one) => waitingOn(flow, one.id).length === 0);
+    expect(ends.map((one) => one.id).sort()).toEqual([c, d].sort());
+  });
+
+  it('runs both branches, each only after what it waits for', () => {
+    const { flow, a, b, c, d } = branched();
+    let going: Flow = { ...flow, startedAt: 1 };
+    const order: string[] = [];
+    for (let round = 0; round < 10; round += 1) {
+      const next = nextUp(going);
+      if (next === null) break;
+      order.push(next.id);
+      going = { ...going, done: [...going.done, next.id] };
+    }
+    expect(order[0]).toBe(a);
+    expect(order).toHaveLength(4);
+    expect(order.indexOf(d)).toBeGreaterThan(order.indexOf(b));
+    expect(order).toContain(c);
+    expect(endedAs(going)?.whole).toBe(true);
+  });
+
+  it('a branch that never finished takes only its own side down', () => {
+    const { flow, a, b, c } = branched();
+    // A ran, then B was stopped. C still has everything it waits for.
+    const stuck: Flow = { ...flow, startedAt: 1, done: [a] };
+    expect(nextUp(stuck)?.id === b || nextUp(stuck)?.id === c).toBe(true);
+    const past: Flow = { ...stuck, done: [a, c] };
+    // What waits on B is never offered while B has not finished.
+    expect(nextUp(past)?.id).toBe(b);
+  });
+
+  it('lays branches out in their own rows, not on top of each other', () => {
+    const { flow } = branched();
+    const drawn = layOut(flow);
+    const seen = new Set(drawn.blocks.map((one) => `${String(one.x)},${String(one.y)}`));
+    expect(seen.size).toBe(drawn.blocks.length);
+  });
+
+  it('several starts is a shape, not a mistake', () => {
+    let flow = place(newFlow(), 'plan');
+    flow = place(flow, 'checks');
+    expect(startsAt(flow)).toHaveLength(2);
+    expect(canStart({ ...flow, blocks: flow.blocks.map((one) => ({ ...one, says: 'go' })) })).toBe(true);
+  });
+
+  it('breaks a ring a file arrived with, so the flow can still run', () => {
+    const flow = readFlow({
+      id: 'f',
+      blocks: [
+        { id: 'a', kind: 'checks', after: 'b' },
+        { id: 'b', kind: 'checks', after: 'a' },
+      ],
+    });
+    expect(flow?.blocks.filter((one) => one.after === null)).toHaveLength(1);
+    expect(nextUp({ ...flow!, startedAt: 1 })).not.toBeNull();
+  });
+
+  it('removing the middle of a branch hands its children back up the chain', () => {
+    const { flow, a, b, d } = branched();
+    const without = remove(flow, b);
+    expect(without.blocks.find((one) => one.id === d)?.after).toBe(a);
+    expect(without.blocks).toHaveLength(3);
   });
 });

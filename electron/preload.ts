@@ -734,6 +734,15 @@ const api: GrapheApi = {
     ) as Promise<Result<Preferences>>;
   },
 
+  setAdvisorThinking(level: ThinkingLevel, where?: Where): Promise<Result<Preferences>> {
+    if (typeof level !== 'string') {
+      return Promise.resolve(refuse<Preferences>('I could not tell how long you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setAdvisorThinking, level, named(where)) as Promise<
+      Result<Preferences>
+    >;
+  },
+
   setThinking(
     choice: ModelChoice,
     level: ThinkingLevel,

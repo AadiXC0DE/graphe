@@ -21,7 +21,7 @@ import type { Money } from '../agent/types';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import { asAdvisor, sameAdvisor } from '../agent/advisor';
+import { asAdvisor, asAdvisorThinking, sameAdvisor } from '../agent/advisor';
 import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
 import type { Theme } from '../lib/theme';
 import { themeFrom } from '../lib/theme';
@@ -58,6 +58,7 @@ export type Preferences = {
    * person in every folder.
    */
   advisor: ModelChoice | null;
+  advisorThinking: ThinkingLevel | null;
   /** How much time each model should take before it answers. The map is keyed
    * by its provider and model id because different models support different
    * choices. */
@@ -139,6 +140,7 @@ export const defaultPreferences: Preferences = {
   showMe: false,
   model: null,
   advisor: null,
+  advisorThinking: null,
   thinking: {},
   kept: {},
   trusted: {},
@@ -182,6 +184,7 @@ function asPreferences(value: unknown): Preferences {
           }
         : null,
     advisor: asAdvisor(record['advisor']),
+    advisorThinking: asAdvisorThinking(record['advisorThinking']),
     thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
@@ -276,6 +279,7 @@ export class PreferenceFile {
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
       sameAdvisor(next.advisor, this.#preferences.advisor) &&
+      next.advisorThinking === this.#preferences.advisorThinking &&
       sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted) &&

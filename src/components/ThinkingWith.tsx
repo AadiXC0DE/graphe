@@ -20,6 +20,10 @@ type Props = {
    *  it. Without `onAdvisor` no second opinion is offered at all. */
   advisor?: ModelChoice | null;
   onAdvisor?: (choice: ModelChoice | null) => void;
+  /** How long the advisor thinks before it answers. Undefined is nobody's
+   *  answer yet, which leaves that model's own setting standing. */
+  advisorThinking?: ThinkingLevel | undefined;
+  onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
   /** Lets a native page step aside while this renderer popover is open. */
   onOpenChange?: (open: boolean) => void;
   /** Quieter, for the strip along the top where it sits beside the project's
@@ -89,10 +93,12 @@ export default function ThinkingWith({
   bare,
   advisor = null,
   onAdvisor,
+  advisorThinking,
+  onAdvisorThinking,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<'models' | 'thinking' | 'advisor'>('models');
+  const [view, setView] = useState<'models' | 'thinking' | 'advisor' | 'advisorthinking'>('models');
   const root = useRef<HTMLDivElement>(null);
 
   /* Flat, because the provider is a heading in the list rather than a level to
@@ -171,6 +177,11 @@ export default function ThinkingWith({
      that lives permanently in this menu cannot send somebody off to a package
      shelf to make it work — choosing a model is what adds it. */
   const advisingNow = advising !== null;
+
+  /* Nobody advising is nobody to set a pace for, and a model with one speed has
+     nothing to choose between. */
+  const offerAdvisorPace =
+    advising !== null && onAdvisorThinking !== undefined && advising.thinking.length > 1;
 
   /* A single band of models is a choice between equals, so the section stays out
      of the way until the account has a step up in it. */
@@ -486,8 +497,54 @@ export default function ThinkingWith({
                     ))}
                   </div>
 
+                  {/* The same row the model doing the work has, asked of the
+                      one advising. Out of the way while nobody is advising —
+                      there would be nothing for it to set. */}
+                  {offerAdvisorPace ? (
+                    <button
+                      type="button"
+                      className="thinking__tune"
+                      onClick={() => setView('advisorthinking')}
+                      aria-label={`${advisorWords.thinking} for ${advising.label}`}
+                    >
+                      <span>{advisorWords.thinking}</span>
+                      <span>
+                        {advisorThinking === undefined
+                          ? advisorWords.thinkingUnset
+                          : thinkingLevels[advisorThinking].name}
+                        <span aria-hidden="true">›</span>
+                      </span>
+                    </button>
+                  ) : null}
+
                   <p className="thinking__said thinking__said--foot">{advisorWords.advisesNote}</p>
                 </>
+            </>
+          ) : view === 'advisorthinking' && advising !== null && onAdvisorThinking !== undefined ? (
+            <>
+              <header className="thinking__menuhead thinking__menuhead--back">
+                <button type="button" className="thinking__back" onClick={() => setView('advisor')}>
+                  <span aria-hidden="true">‹</span> {advisorWords.name}
+                </button>
+                <span className="thinking__menutitle">{advisorWords.thinking}</span>
+              </header>
+              <p
+                className="thinking__selectedmodel"
+                title={`${advising.providerId}/${advising.modelId}`}
+              >
+                {advising.label}
+              </p>
+              <Pace
+                levels={advising.thinking}
+                chosen={advisorThinking ?? null}
+                onPick={(level) => {
+                  onAdvisorThinking(
+                    { providerId: advising.providerId, modelId: advising.modelId },
+                    level,
+                  );
+                  setOpen(false);
+                }}
+              />
             </>
           ) : chosen !== null && current !== null ? (
             <>
@@ -572,7 +629,9 @@ function Pace({
   onPick,
 }: {
   levels: readonly ThinkingLevel[];
-  chosen: ThinkingLevel;
+  /** Null where nobody has answered yet: nothing is ticked, rather than a rung
+   *  being claimed that the model may not be on. */
+  chosen: ThinkingLevel | null;
   onPick: (level: ThinkingLevel) => void;
 }) {
   if (onPick === undefined) return null;

@@ -21,17 +21,38 @@ describe('settings can be scrolled to the end', () => {
 
   it('scrolls the panel rather than squeezing what is in it', () => {
     // `.settings` is a column of flex items over the whole window. A flex item
-    // shrinks before its parent scrolls, and the list hides its own overflow —
-    // so the rows past the fold were not off-screen, they were gone.
-    expect(block('.settings')).toContain('overflow: auto');
-    expect(block('.settings__list')).toContain('flex: none');
+    // shrinks before its parent scrolls, and a group hides its own overflow —
+    // so the rows past the fold were not off-screen, they were gone. The head
+    // keeps its height; the band under it is the one that scrolls.
     expect(block('.settings__top')).toContain('flex: none');
+    expect(block('.settings__body')).toContain('overflow: auto');
+    expect(block('.settings__body')).toContain('min-height: 0');
   });
 
   it('still clips its own corners, which is why this was ever a problem', () => {
     // The rounded border and the 1px rules between rows are drawn by clipping.
     // Taking that away would fix the reach and lose the shape.
-    expect(block('.settings__list')).toContain('overflow: hidden');
+    expect(block('.settings__group')).toContain('overflow: hidden');
+  });
+
+  it('lays the bands out against the sheet, not the window', () => {
+    // The sheet sits between the shelf and the overview panel, so a window
+    // media query would give it columns it has no room for.
+    expect(block('.settings__body')).toContain('container-type: inline-size');
+    expect(css).not.toContain('@media (min-width');
+    expect(css).toContain('@container (min-width: 780px)');
+  });
+
+  it('never strands a lone tile on a row of its own', () => {
+    // Four screens to go to, so every column count it can take divides four.
+    const counts = css
+      .split('.settings__places {')
+      .slice(1)
+      .map((after) => /grid-template-columns: ([^;]+);/.exec(after.slice(0, after.indexOf('}')))?.[1]);
+    expect(counts.length).toBeGreaterThan(1);
+    for (const one of counts) {
+      expect(one).toMatch(/^(minmax\(0, 1fr\)|repeat\((2|4), minmax\(0, 1fr\)\))$/);
+    }
   });
 });
 

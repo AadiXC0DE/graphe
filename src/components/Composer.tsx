@@ -838,11 +838,7 @@ export default function Composer({
             once and nobody needs on screen forever. The room the conversation
             has left is worth that space; nothing is. */}
         <span className={`composer__hint ${listening ? 'composer__hint--loud' : ''}`}>
-          {listening
-            ? SAYING.listening
-            : attachments.length > 0
-              ? 'I can see this. Say what you want changed.'
-              : ''}
+          {listening ? SAYING.listening : ''}
         </span>
 
         {/* How full the conversation is, and the one thing to do about it. On

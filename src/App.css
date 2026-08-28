@@ -70,42 +70,13 @@
      use-stick-to-bottom watches, and it identifies the scroller it is being
      asked about by reading the computed `overflow` shorthand. */
   overflow: auto;
-  /* Auto-hide: invisible until hover, focus or scrolling. Keeps the gutter
-     stable so the column does not jump when the bar appears. */
+  /* No bar down the side of the window: this one would run the full height of
+     the glass, beside the work rather than in it. Wheel, trackpad and keyboard
+     still scroll it. */
   scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
-  scrollbar-gutter: stable;
   /* The browser's own scroll anchoring and a stick-to-bottom hook are two
      things trying to hold the same rope. Ours wins. */
   overflow-anchor: none;
-}
-
-.app:hover,
-.app:focus-within,
-.app.is-scrolling {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.app::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.app:hover::-webkit-scrollbar,
-.app:focus-within::-webkit-scrollbar,
-.app.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.app::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.app::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 /* The same short ramp the composer has, the other way up.
@@ -831,12 +802,13 @@
 
    With *Show scroll bars: Always* — the default whenever a mouse is connected —
    macOS has no overlay bar to fall back on: anything that genuinely overflows
-   gets a classic bar taking real width. Every scroller in the app now wears
-   one thin bar, inherited from body (styles/global.css); nothing opts in here
-   any more. The one exception is above: this scroller hides the bar entirely,
-   because macOS apps do not put one down the side of their main content.
+   gets a classic bar taking real width. Every scroller in the app wears one
+   thin bar, inherited from body (styles/global.css); the fade that keeps it
+   quiet until somebody wants it is in styles/scrollbar.css. The scroller above
+   opts out entirely, as do the panels fixed to the glass, because macOS apps
+   do not put a bar down the side of their main content.
    Standard properties only — ::-webkit-scrollbar pseudo-elements were measured
-   here once and are ignored whenever scrollbar-width is set, so they stayed
+   here once and are ignored whenever a standard one is set, so they stayed
    out. */
 
 /* Headings set two or three words long look broken when the last word drops to

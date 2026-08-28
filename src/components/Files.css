@@ -48,41 +48,9 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The tree grows a row at a time; the gutter is reserved so the names do not
+     step sideways the moment it outgrows the box. */
   scrollbar-gutter: stable;
-  scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.files__tree:hover,
-.files__tree:focus-within,
-.files__tree.is-scrolling {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.files__tree::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.files__tree:hover::-webkit-scrollbar,
-.files__tree:focus-within::-webkit-scrollbar,
-.files__tree.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.files__tree::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.files__tree::-webkit-scrollbar-thumb:hover {
-  background: var(--border-control);
-}
-
-.files__tree::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .files__row {

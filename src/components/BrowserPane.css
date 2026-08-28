@@ -88,36 +88,9 @@
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-sunken);
+  /* No bar: this is a 22px pill, and any bar along its foot is thicker than the
+     room inside it. The buttons scroll under the pointer instead. */
   scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
-  scrollbar-gutter: stable;
-}
-
-.pane__variations:hover,
-.pane__variations:focus-within,
-.pane__variations.is-scrolling {
-  scrollbar-width: thin;
-}
-
-.pane__variations::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.pane__variations:hover::-webkit-scrollbar,
-.pane__variations:focus-within::-webkit-scrollbar,
-.pane__variations.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.pane__variations::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.pane__variations::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .pane__variation {
@@ -193,37 +166,9 @@
   place-items: center;
   overflow: auto;
   background: var(--bg-sunken);
-  scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
+  /* The page inside is whatever width was picked, so the gutter is reserved
+     rather than let the centred screen jump when a tall one starts to scroll. */
   scrollbar-gutter: stable;
-}
-
-.pane__stage:hover,
-.pane__stage:focus-within,
-.pane__stage.is-scrolling {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.pane__stage::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.pane__stage:hover::-webkit-scrollbar,
-.pane__stage:focus-within::-webkit-scrollbar,
-.pane__stage.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.pane__stage::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.pane__stage::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 /* The box the native page view is glued to. `auto` fills the room; a fixed

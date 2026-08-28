@@ -29,39 +29,11 @@
   overscroll-behavior: contain;
   background: var(--bg);
   border-left: 1px solid var(--border);
+  /* Fixed to the right edge like the panel that mounts it, and panels on the
+     glass carry no bar. */
   scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
-  scrollbar-gutter: stable;
 
   animation: rail-arrives var(--dur-ui) var(--ease-out-quart) both;
-}
-
-.rail:hover,
-.rail:focus-within,
-.rail.is-scrolling {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.rail::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.rail:hover::-webkit-scrollbar,
-.rail:focus-within::-webkit-scrollbar,
-.rail.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.rail::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.rail::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 /* Room for the traffic lights, which sit over the whole window. */

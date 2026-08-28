@@ -445,7 +445,7 @@ export default function Changes({ open, diff, busy = false, onClose, onKeep }: P
                         <span className="changes__tally">{SAYS.tally(hunk.added, hunk.removed)}</span>
                       </button>
 
-                      <div className="changes__lines">
+                      <div className="changes__lines scroll--auto">
                         {linesOf(hunk).map((line, index) => (
                           <div
                             key={`${hunk.id}:${String(index)}`}

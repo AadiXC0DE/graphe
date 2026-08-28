@@ -31,38 +31,9 @@
   gap: var(--space-2);
   overflow-x: auto;
   scroll-snap-type: x proximity;
-  scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
-  scrollbar-gutter: stable;
+  /* No reserved gutter: sideways, it would be a band of empty under a row of
+     three shots that already fit. */
   animation: widths-arrives var(--dur-large) var(--ease-out-quart) both;
-}
-
-.widths__shots:hover,
-.widths__shots:focus-within,
-.widths__shots.is-scrolling {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.widths__shots::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.widths__shots:hover::-webkit-scrollbar,
-.widths__shots:focus-within::-webkit-scrollbar,
-.widths__shots.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.widths__shots::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.widths__shots::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 @keyframes widths-arrives {

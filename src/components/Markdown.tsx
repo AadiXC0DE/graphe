@@ -182,7 +182,7 @@ function renderBlock(token: Token, key: string, tail?: ReactNode): ReactNode {
       const table = token as Tokens.Table;
       const align: readonly (string | null)[] = table.align ?? [];
       return (
-        <div className="md__tablewrap" key={key}>
+        <div className="md__tablewrap scroll--auto" key={key}>
           <table className="md__table">
             <thead>
               <tr>

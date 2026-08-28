@@ -19,40 +19,12 @@
   background: var(--bg);
   border-left: 1px solid var(--border);
   overflow-y: auto;
-  /* Auto-hide: invisible until hover, focus or scrolling. Keeps the gutter
-     stable so the column does not jump. */
+  /* Fixed to the glass, so no bar: it would run the full height of the window
+     beside the work rather than in it, and the reveal shoved every line in the
+     panel sideways under the pointer. Wheel, trackpad and keyboard still
+     scroll it. */
   scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
-  scrollbar-gutter: stable;
   overscroll-behavior: contain;
-}
-
-.overview:hover,
-.overview:focus-within,
-.overview.is-scrolling {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.overview::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.overview:hover::-webkit-scrollbar,
-.overview:focus-within::-webkit-scrollbar,
-.overview.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.overview::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.overview::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 /* Nothing sits above this panel — no strip, and no traffic lights on this side

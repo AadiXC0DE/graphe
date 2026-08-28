@@ -106,37 +106,7 @@
   min-height: 0;
   overflow: auto;
   background: var(--bg-sunken);
-  scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
   scrollbar-gutter: stable;
-}
-
-.fileview__code:hover,
-.fileview__code:focus-within,
-.fileview__code.is-scrolling {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.fileview__code::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.fileview__code:hover::-webkit-scrollbar,
-.fileview__code:focus-within::-webkit-scrollbar,
-.fileview__code.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.fileview__code::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.fileview__code::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .fileview__code pre {

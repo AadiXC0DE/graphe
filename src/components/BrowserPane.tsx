@@ -313,7 +313,7 @@ export default function BrowserPane({
           native view is glued to, so choosing a size redraws the page at it;
           the stage around it just centres the box and shows its own nothing
           until something is being served. */}
-      <div className="pane__stage" ref={stage}>
+      <div className="pane__stage scroll--auto" ref={stage}>
         <div className={`pane__screen pane__screen--${size}`} ref={screen}>
           {/* The agent's own browser, drawn here rather than painted over by
               the shell — it is a picture, not a page, and it takes the room

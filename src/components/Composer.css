@@ -37,41 +37,9 @@
   padding: var(--space-1) var(--space-2);
   max-height: 220px;
   overflow-y: auto;
-  scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
+  /* The box grows to the ceiling and then scrolls; the gutter is reserved so
+     the line being typed does not reflow at the moment it starts. */
   scrollbar-gutter: stable;
-}
-
-.composer__input:hover,
-.composer__input:focus-within,
-.composer__input.is-scrolling {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.composer__input::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.composer__input:hover::-webkit-scrollbar,
-.composer__input:focus-within::-webkit-scrollbar,
-.composer__input.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.composer__input::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.composer__input::-webkit-scrollbar-thumb:hover {
-  background: var(--border-control);
-}
-
-.composer__input::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .composer__input::placeholder {

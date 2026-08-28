@@ -419,38 +419,9 @@
   font-size: var(--text-sm);
   line-height: 1.55;
   tab-size: 2;
-  scrollbar-width: none;
-  scrollbar-color: var(--border-strong) transparent;
-  scrollbar-gutter: stable;
+  /* No reserved gutter: sideways, it would be a band of empty under every piece
+     whose lines already fit. */
   transition: opacity var(--dur-micro) var(--ease-hover);
-}
-
-.changes__lines:hover,
-.changes__lines:focus-within,
-.changes__lines.is-scrolling {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.changes__lines::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.changes__lines:hover::-webkit-scrollbar,
-.changes__lines:focus-within::-webkit-scrollbar,
-.changes__lines.is-scrolling::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.changes__lines::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.changes__lines::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 /* Dimmed, not removed. The dropped piece keeps its place in the reading order

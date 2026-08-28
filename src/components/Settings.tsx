@@ -163,7 +163,7 @@ export default function Settings({
   const onScreenName = onScreen === 'dark' ? THEME_WORDS.graphe : THEME_WORDS[onScreen];
 
   return (
-    <section className="settings" aria-label="Settings" role="dialog" aria-modal="true">
+    <section className="settings scroll--auto" aria-label="Settings" role="dialog" aria-modal="true">
       <header className="settings__top">
         <div>
           <p className="settings__eyebrow">Graphe</p>

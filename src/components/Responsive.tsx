@@ -38,7 +38,7 @@ export default function Responsive({
         <>
           <h2 className="widths__heading">{responsive.heading}</h2>
 
-          <ul className="widths__shots">
+          <ul className="widths__shots scroll--auto">
             {shown.map((look) => {
               const flag = flagOf(look);
               const here = workingAt !== null && workingAt === look.id;

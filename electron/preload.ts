@@ -416,6 +416,22 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.buildCancel, named(where)) as Promise<Result<null>>;
   },
 
+  goalLoad(where?: Where): Promise<Result<import('../src/work/goal').Goal | null>> {
+    return ipcRenderer.invoke(CHANNEL.goalLoad, named(where)) as Promise<Result<import('../src/work/goal').Goal | null>>;
+  },
+
+  goalSave(goal: import('../src/work/goal').Goal, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.goalSave, goal, named(where)) as Promise<Result<null>>;
+  },
+
+  goalClear(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.goalClear, named(where)) as Promise<Result<null>>;
+  },
+
+  goalVerify(where?: Where): Promise<Result<{ passed: boolean; reason: string }>> {
+    return ipcRenderer.invoke(CHANNEL.goalVerify, named(where)) as Promise<Result<{ passed: boolean; reason: string }>>;
+  },
+
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {
     return ipcRenderer.invoke(CHANNEL.carried, named(where)) as Promise<Result<readonly CarriedExtension[]>>;
   },

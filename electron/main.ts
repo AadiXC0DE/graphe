@@ -200,6 +200,9 @@ import {
   startTask,
   type Task,
 } from '../src/work/buildplan';
+import { GoalFile } from '../src/projects/goals';
+import { notHere, runHelper } from '../src/share/run';
+import type { Goal } from '../src/work/goal';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -7265,6 +7268,47 @@ function register(): void {
       pushBuildPlan(open.path, null);
       return done(null);
     });
+  });
+
+  handle<Goal | null>(CHANNEL.goalLoad, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done(null);
+    return done(await GoalFile.read(open.path, app.getPath('userData')));
+  });
+
+  handle<null>(CHANNEL.goalSave, async (_event, args) => {
+    const [raw] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null || typeof raw !== 'object' || raw === null) return fail(NOTHING_OPEN);
+    const goal = raw as Goal;
+    if (typeof goal.id !== 'string' || typeof goal.objective !== 'string') return fail(NOTHING_OPEN);
+    await GoalFile.write(open.path, app.getPath('userData'), goal);
+    return done(null);
+  });
+
+  handle<null>(CHANNEL.goalClear, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done(null);
+    await GoalFile.clear(open.path, app.getPath('userData'));
+    return done(null);
+  });
+
+  handle<{ passed: boolean; reason: string }>(CHANNEL.goalVerify, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done({ passed: true, reason: 'No project.' });
+    const folder = folderFor(open, where);
+    const entries = await readdir(folder).catch(() => [] as string[]);
+    const hasTs = entries.includes('tsconfig.json') || entries.includes('tsconfig.base.json');
+    if (!hasTs) return done({ passed: true, reason: 'No typecheck.' });
+    const ran = await runHelper('npx', ['--no-install', 'tsc', '--noEmit'], { folder, patience: 90_000 });
+    if (notHere(ran)) return done({ passed: true, reason: 'tsc not installed.' });
+    if (ran.code === 0) return done({ passed: true, reason: 'typecheck passed.' });
+    const reason = ran.said.trim().slice(0, 2000) || 'typecheck failed';
+    return done({ passed: false, reason });
   });
 
   handle<string>(CHANNEL.skillText, async (_event, args) => {

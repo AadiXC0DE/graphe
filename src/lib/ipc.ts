@@ -1425,7 +1425,13 @@ export type GrapheApi = {
    *  resumed session has the real task list. */
   buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>>;
   /** Cancel the current build checklist and clear it from the screen. */
-  buildCancel(where?: Where): Promise<Result<null>>;
+     buildCancel(where?: Where): Promise<Result<null>>;
+  /** A goal per project, kept on disk. Null when none. */
+  goalLoad(where?: Where): Promise<Result<import('../work/goal').Goal | null>>;
+  goalSave(goal: import('../work/goal').Goal, where?: Where): Promise<Result<null>>;
+  goalClear(where?: Where): Promise<Result<null>>;
+  /** Run real checks (tsc etc.) in the project. */
+  goalVerify(where?: Where): Promise<Result<{ passed: boolean; reason: string }>>;
   /** Pick a requirements document on disk and read its text, or null if closed. */
   chooseDocument(where?: Where): Promise<Result<{ name: string; text: string } | null>>;
   /** Move the project onto another of its lines of work. Refuses while the

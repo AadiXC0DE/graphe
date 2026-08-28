@@ -464,6 +464,50 @@ function Conversation() {
   const goalNow = useRef(goal);
   goalNow.current = goal;
   const goalRuns = useRef(new Set<string>());
+
+  /** Persist a goal per project — disk via bridge plus localStorage fallback. */
+  const persistGoal = useCallback((next: Goal | null, project: string | null) => {
+    if (project === null || project === '') {
+      return;
+    }
+    if (next === null) {
+      void bridge.goalClear({ project }).catch(() => undefined);
+      try { localStorage.removeItem(goalStorageKey(project)); } catch {}
+      void bridge.goalClear({ project }).catch(() => undefined);
+    } else {
+      void bridge.goalSave(next, { project }).catch(() => undefined);
+      try { localStorage.setItem(goalStorageKey(project), JSON.stringify(next)); } catch {}
+    }
+  }, []);
+
+  const setGoalPersist = useCallback((next: Goal | null) => {
+    const project = desksNow.current.current;
+    setGoal(next);
+    persistGoal(next, project);
+  }, [persistGoal]);
+
+  // Load goal when project opens or reloads
+  useEffect(() => {
+    const project = desks.current;
+    if (project === null) return;
+    void bridge.goalLoad({ project }).then((answer) => {
+      if (answer.ok && answer.value !== null) {
+        const loaded = readStoredGoal(answer.value);
+        if (loaded !== null) {
+          setGoal(withElapsed(loaded));
+          return;
+        }
+      }
+      try {
+        const raw = localStorage.getItem(goalStorageKey(project));
+        if (raw !== null) {
+          const parsed = JSON.parse(raw) as unknown;
+          const loaded = readStoredGoal(parsed);
+          if (loaded !== null) setGoal(withElapsed(loaded));
+        }
+      } catch {}
+    });
+  }, [desks.current]);
   /** What was asked for while a plan is being made, so approving it can send
    *  the same sentence rather than a reconstruction of it. */
   const asked = useRef<string>("");
@@ -1096,6 +1140,14 @@ function Conversation() {
       })),
     );
   }, []);
+
+  const handlePlans = useCallback((next: 'auto' | 'always' | 'never' | 'research' | 'plan' | 'goal' | 'executive') => {
+    if (next === 'goal' && plans === 'plan') {
+      say('Plan mode is on — finish or exit plan before starting a goal.');
+      return;
+    }
+    setPlans(next);
+  }, [plans, say]);
 
   const troubleHere = useCallback((trouble: Trouble) => {
     // A failed connect is not a desk problem — the connect screen is the place
@@ -2008,7 +2060,7 @@ function Conversation() {
                   goalRuns.current.delete(goalOwner);
                 } else if (activeGoal.iterations < 20) {
                   const nextGoal: Goal = { ...withElapsed(activeGoal), iterations: activeGoal.iterations + 1 };
-                  setGoal(nextGoal);
+                  setGoalPersist(nextGoal);
                   goalRuns.current.add(goalOwner);
                   say(`Iteration ${String(nextGoal.iterations)} · Goal not met, task continues — ${verdict.reason}`);
                   void bridge.prompt(
@@ -2019,15 +2071,43 @@ function Conversation() {
                   );
                 } else {
                   say(`Goal paused after ${String(activeGoal.iterations)} iterations (budget reached). /goal resume to carry on.`);
-                  setGoal({ ...withElapsed(activeGoal), status: 'paused' });
+                  const pausedLim: Goal = { ...withElapsed(activeGoal), status: 'paused' };
+                  setGoalPersist(pausedLim);
                   goalRuns.current.delete(goalOwner);
                 }
               } else {
-                const finishedGoal: Goal = { ...withElapsed(activeGoal), iterations: activeGoal.iterations + 1, status: 'done' };
-                setGoal(finishedGoal);
-                say(`Iteration ${String(finishedGoal.iterations)} · Goal met, task finished — ${verdict.reason}`);
-                goalRuns.current.delete(goalOwner);
-                goalRuns.current.delete(`${where}\u0000`);
+                // All owned tasks done — run real checks (typecheck) before declaring met
+                void bridge.goalVerify({ project: where }).then((checked) => {
+                  const still = goalNow.current;
+                  if (still === null || still.id !== activeGoal.id || still.status !== 'active') return;
+                  if (checked.ok && !checked.value.passed) {
+                    const reason = checked.value.reason;
+                    if (still.iterations < 20) {
+                      const nextGoal: Goal = { ...withElapsed(still), iterations: still.iterations + 1 };
+                      setGoalPersist(nextGoal);
+                      goalRuns.current.add(goalOwner);
+                      say(`Iteration ${String(nextGoal.iterations)} · Goal not yet met — checks failed: ${reason}`);
+                      void bridge.prompt(
+                        `Continue toward the goal: ${still.objective}. Checks failed: ${reason}`,
+                        [],
+                        { queue: 'followUp' },
+                        { project: where, ...(notice.conversation == null ? {} : { conversation: notice.conversation }) },
+                      );
+                    } else {
+                      say(`Goal paused after ${String(still.iterations)} iterations (budget reached, checks still failing). /goal resume to carry on.`);
+                      const paused: Goal = { ...withElapsed(still), status: 'paused' };
+                      setGoalPersist(paused);
+                      goalRuns.current.delete(goalOwner);
+                    }
+                    return;
+                  }
+                  const finishedGoal: Goal = { ...withElapsed(still), iterations: still.iterations + 1, status: 'done' };
+                  setGoalPersist(finishedGoal);
+                  const extra = checked.ok && checked.value.passed ? ' Checks passed.' : '';
+                  say(`Iteration ${String(finishedGoal.iterations)} · Goal met, task finished — ${verdict.reason}${extra}`);
+                  goalRuns.current.delete(goalOwner);
+                  goalRuns.current.delete(`${where}\u0000`);
+                });
               }
             }
           }
@@ -2110,6 +2190,8 @@ function Conversation() {
       settledWell,
       movePane,
       say,
+      setGoalPersist,
+      persistGoal,
     ],
   );
 
@@ -2240,7 +2322,8 @@ function Conversation() {
     // Stopping a running goal also pauses it so it doesn't quietly keep running.
     if (goalNow.current !== null && goalNow.current.status === 'active') {
       const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
-      setGoal((current) => (current === null ? current : { ...withElapsed(current), status: 'paused' }));
+      const pausedHalt: Goal = goalNow.current === null ? (null as unknown as Goal) : { ...withElapsed(goalNow.current), status: 'paused' };
+      if (pausedHalt !== null) { setGoal(pausedHalt); if (desk !== null) persistGoal(pausedHalt, desk.path); }
       if (owner !== null) goalRuns.current.delete(owner);
       say('Goal paused — Esc stopped the run. /goal resume to carry on.');
     }
@@ -2248,7 +2331,7 @@ function Conversation() {
       ...(desk === null ? {} : { project: desk.path }),
       ...(desk?.address == null ? {} : { conversation: desk.address }),
     });
-  }, [say]);
+  }, [say, persistGoal]);
 
 
   /** Shorten the conversation now rather than waiting for it to fill up. The
@@ -2671,6 +2754,10 @@ function Conversation() {
 
       // Goal commands are handled here, not sent to the model.
       const parsedGoal = parseGoalCommand(text);
+      if (plans === 'plan' && parsedGoal !== null && parsedGoal.kind !== 'show') {
+        say('Plan mode is on — finish or exit plan before starting a goal.');
+        return;
+      }
       if (parsedGoal !== null) {
         const ownerDesk = currentDesk(desksNow.current);
         const owner = ownerDesk === null ? null : `${ownerDesk.path}\u0000${ownerDesk.address ?? ''}`;
@@ -2695,7 +2782,9 @@ function Conversation() {
             return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
           })();
           const created = createGoal(objective, 'doing', baseline);
-          setGoal(withElapsed(created));
+          const withTime = withElapsed(created);
+          setGoal(withTime);
+          persistGoal(withTime, ownerDesk?.path ?? desksNow.current.current ?? null);
           setPlans('goal');
           if (owner !== null) goalRuns.current.add(owner);
           if (howFar !== 'doing') {
@@ -2712,7 +2801,9 @@ function Conversation() {
         }
         if (parsedGoal.kind === 'pause') {
           if (goalNow.current !== null && goalNow.current.status === 'active') {
-            setGoal({ ...withElapsed(goalNow.current), status: 'paused' });
+            const paused: Goal = { ...withElapsed(goalNow.current), status: 'paused' };
+            setGoal(paused);
+            persistGoal(paused, ownerDesk?.path ?? null);
             if (owner !== null) goalRuns.current.delete(owner);
             say('Goal paused — rounds kept, files kept. /goal resume to carry on.');
           } else {
@@ -2724,6 +2815,7 @@ function Conversation() {
           if (goalNow.current !== null && goalNow.current.status === 'paused') {
             const resumed: Goal = { ...withElapsed(goalNow.current), status: 'active' };
             setGoal(resumed);
+            persistGoal(resumed, ownerDesk?.path ?? null);
             setPlans('goal');
             if (owner !== null) goalRuns.current.add(owner);
             if (howFar !== 'doing') {
@@ -2745,6 +2837,7 @@ function Conversation() {
           if (goalNow.current !== null) {
             const was = goalNow.current.objective;
             setGoal(null);
+            persistGoal(null, ownerDesk?.path ?? null);
             setPlans('auto');
             if (owner !== null) goalRuns.current.delete(owner);
             say(`Goal cleared — was: ${was}`);
@@ -2781,7 +2874,9 @@ function Conversation() {
           return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
         })();
         const created = createGoal(objective, 'doing', baseline);
-        setGoal(withElapsed(created));
+        const withTime2 = withElapsed(created);
+        setGoal(withTime2);
+        persistGoal(withTime2, currentDesk(desksNow.current)?.path ?? null);
         const ownerDesk = currentDesk(desksNow.current);
         const owner = ownerDesk === null ? null : `${ownerDesk.path}\u0000${ownerDesk.address ?? ''}`;
         if (owner !== null) goalRuns.current.add(owner);
@@ -2847,7 +2942,7 @@ function Conversation() {
       }
       await deliver(text, priced.task, { lookFirst });
     },
-    [deliver, desks, howFar, open, plans, say],
+    [deliver, desks, howFar, open, plans, say, persistGoal],
   );
 
   /* ------------------------------------------------------------ in line */
@@ -2952,7 +3047,9 @@ function Conversation() {
               return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
             })();
             const created = createGoal(text.trim(), 'doing', baseline);
-            setGoal(withElapsed(created));
+            const withTimeH = withElapsed(created);
+            setGoal(withTimeH);
+            persistGoal(withTimeH, desk.path);
             goalRuns.current.add(owner);
             void deliver(text, sizeUp(text), { lookFirst: false, queue: 'followUp' });
             return;
@@ -2979,7 +3076,7 @@ function Conversation() {
       // once is the point, not a turn that waits for the other's to finish.
       void send(text);
     },
-    [deliver, desks, send, plans, howFar, emptyTheBox],
+    [deliver, desks, send, plans, howFar, emptyTheBox, persistGoal, say],
   );
 
   /* A note written on the page joins the line when a turn of mine is going, and
@@ -5067,7 +5164,7 @@ function Conversation() {
               onHowFar={setHowFar}
               onComposerPopoverOpenChange={setComposerPopoverOpen}
               plans={plans}
-              onPlans={setPlans}
+              onPlans={handlePlans}
               onSelectModel={selectModel}
               onConnect={openConnect}
               onThinking={changeThinking}

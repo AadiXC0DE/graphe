@@ -151,3 +151,28 @@ export function verifyGoal(
 export function withElapsed(goal: Goal): Goal {
   return { ...goal, elapsed: goalElapsed(goal) };
 }
+
+/** Read a Goal back from storage, defensively. Null when not a goal. */
+export function readStoredGoal(raw: unknown): Goal | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const g = raw as Record<string, unknown>;
+  if (typeof g['id'] !== 'string' || typeof g['objective'] !== 'string') return null;
+  if (g['status'] !== 'active' && g['status'] !== 'paused' && g['status'] !== 'done') return null;
+  if (typeof g['iterations'] !== 'number' || typeof g['startedAt'] !== 'number') return null;
+  if (typeof g['planBaselineN'] !== 'number') return null;
+  return {
+    id: g['id'] as string,
+    objective: g['objective'] as string,
+    status: g['status'] as GoalStatus,
+    iterations: Math.max(0, Math.floor(g['iterations'] as number)),
+    elapsed: typeof g['elapsed'] === 'number' ? Math.max(0, g['elapsed'] as number) : 0,
+    howFar: g['howFar'] === 'doing' ? 'doing' : 'doing',
+    startedAt: g['startedAt'] as number,
+    planBaselineN: Math.max(0, Math.floor(g['planBaselineN'] as number)),
+  };
+}
+
+/** Key for localStorage per project. */
+export function goalStorageKey(project: string): string {
+  return `graphe:goal:${project}`;
+}

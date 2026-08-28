@@ -1085,6 +1085,38 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(null));
     },
 
+    goalLoad(): Promise<Result<import('../work/goal').Goal | null>> {
+      try {
+        const raw = localStorage.getItem(`graphe:goal:${openPath ?? ''}`);
+        if (raw === null) return Promise.resolve(done(null));
+        const parsed = JSON.parse(raw) as unknown;
+        if (typeof parsed !== 'object' || parsed === null) return Promise.resolve(done(null));
+        const g = parsed as Record<string, unknown>;
+        if (typeof g['id'] !== 'string' || typeof g['objective'] !== 'string') return Promise.resolve(done(null));
+        return Promise.resolve(done(g as unknown as import('../work/goal').Goal));
+      } catch {
+        return Promise.resolve(done(null));
+      }
+    },
+
+    goalSave(goal: import('../work/goal').Goal): Promise<Result<null>> {
+      try {
+        if (openPath !== null) localStorage.setItem(`graphe:goal:${openPath}`, JSON.stringify(goal));
+      } catch {}
+      return Promise.resolve(done(null));
+    },
+
+    goalClear(): Promise<Result<null>> {
+      try {
+        if (openPath !== null) localStorage.removeItem(`graphe:goal:${openPath}`);
+      } catch {}
+      return Promise.resolve(done(null));
+    },
+
+    goalVerify(): Promise<Result<{ passed: boolean; reason: string }>> {
+      return Promise.resolve(done({ passed: true, reason: 'No checks in preview.' }));
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -1960,6 +1992,10 @@ function connect(): Bridge {
     chooseDocument: (where) => api.chooseDocument(where),
     buildSave: (tasks, where) => api.buildSave(tasks, where),
     buildCancel: (where) => api.buildCancel(where),
+    goalLoad: (where) => (api.goalLoad as unknown as (where?: typeof where) => Promise<Result<import('../work/goal').Goal | null>>)?.(where) ?? Promise.resolve(done(null)),
+    goalSave: (goal, where) => (api.goalSave as unknown as (goal: import('../work/goal').Goal, where?: typeof where) => Promise<Result<null>>)?.(goal, where) ?? Promise.resolve(done(null)),
+    goalClear: (where) => (api.goalClear as unknown as (where?: typeof where) => Promise<Result<null>>)?.(where) ?? Promise.resolve(done(null)),
+    goalVerify: (where) => (api.goalVerify as unknown as (where?: typeof where) => Promise<Result<{ passed: boolean; reason: string }>>)?.(where) ?? Promise.resolve(done({ passed: true, reason: 'No checks.' })),
     stopAsking: (on, where) => api.stopAsking(on, where),
     goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
     running: (where) => api.running(where),

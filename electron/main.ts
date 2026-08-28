@@ -6889,11 +6889,16 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    // This conversation's own checkout. It used to be whichever one git listed
-    // first, so with a second conversation open — or background work in flight —
-    // this landed somebody else's branch.
     const entry = checkoutEntryFor(open, where);
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    // Reviews run in a pr worktree — they are read-only and must not be landed.
+    if (entry.branch.startsWith('graphe/pr-')) {
+      return fail({
+        what: 'This is a pull request review checkout.',
+        because: 'Reviews are read-only — close the tab when you are done. It will be dropped, not landed into the project.',
+        actionLabel: 'Got it',
+      });
+    }
     // Per-child when a repo is named: folder and timeline come from there.
     // A folder holding several projects has no folder-level history to land into
     // — unless where.repo names one child, then that child's timeline is used.

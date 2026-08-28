@@ -2083,7 +2083,8 @@ function Conversation() {
                 void bridge.goalVerify({ project: where }).then((checked) => {
                   const still = goalNow.current;
                   if (still === null || still.id !== activeGoal.id || still.status !== 'active') return;
-                  if (checked.ok && !checked.value.passed) {
+                  const skipped = checked.ok && checked.value.reason.includes('did not run');
+                  if (checked.ok && !checked.value.passed && !skipped) {
                     const reason = checked.value.reason;
                     if (still.iterations < 20) {
                       const nextGoal: Goal = { ...withElapsed(still), iterations: still.iterations + 1 };
@@ -2104,9 +2105,10 @@ function Conversation() {
                     }
                     return;
                   }
-                  if (!checked.ok || !checked.value.passed) {
-                    // Verification itself failed to run — not evidence of done.
-                    say(`Goal not yet met — checks did not run: ${checked.ok ? checked.value.reason : 'the shell did not answer'}. Say /goal clear when you are satisfied it is done.`);
+                  if (!checked.ok || !checked.value.passed || skipped) {
+                    // Verification did not run or was skipped (no tsconfig, tsc missing) — not evidence of done, and not a failing test to loop on.
+                    const why = checked.ok ? checked.value.reason : 'the shell did not answer';
+                    say(`Goal not yet met — checks did not run: ${why}. Say /goal clear when you are satisfied it is done.`);
                     goalRuns.current.delete(goalOwner);
                     return;
                   }

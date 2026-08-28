@@ -81,6 +81,7 @@ import {
   stepsNotOnTheList,
 } from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
+import { asExecutive } from "./agent/executive";
 import {
   createGoal,
   elapsedWords,
@@ -452,7 +453,7 @@ function Conversation() {
   /** Whether a message gets a looking-around pass before anything is touched.
    *  `auto` decides from the sentence, which is what almost everybody wants;
    *  the other two are for somebody who has an opinion about this one. */
-  const [plans, setPlans] = useState<'auto' | 'always' | 'never' | 'research' | 'goal'>('auto');
+  const [plans, setPlans] = useState<'auto' | 'always' | 'never' | 'research' | 'plan' | 'goal' | 'executive'>('auto');
   /** Research is a one-message choice. While that one run is live, its model
    *  output is kept by conversation so an explicit IMPLEMENTATION PLAN section
    *  can become the build checklist. No word matching decides the next action. */
@@ -2800,6 +2801,13 @@ function Conversation() {
         await deliver(asResearch(text, chosenDepth()), priced.task, { lookFirst: false });
         return;
       }
+      // Executive is also one-shot: one coherent take, then back to auto.
+      if (plans === 'executive') {
+        setPlans('auto');
+        justLookedFirst.current = true;
+        await deliver(asExecutive(text), priced.task, { lookFirst: false });
+        return;
+      }
 
       // A big-sounding request looks around before it touches anything, unless
       // somebody has said otherwise for this message. It is not a mode people
@@ -2910,6 +2918,12 @@ function Conversation() {
           void deliver(asResearch(text, chosenDepth()), sizeUp(text), { lookFirst: false, queue: 'followUp' });
           return;
         }
+        if (plans === 'executive') {
+          setPlans('auto');
+          justLookedFirst.current = true;
+          void deliver(asExecutive(text), sizeUp(text), { lookFirst: false, queue: 'followUp' });
+          return;
+        }
         if (plans === 'goal') {
           const owner = `${desk.path}\u0000${desk.address ?? ''}`;
           if (goalNow.current === null && text.trim() !== '' && !text.trim().startsWith('/')) {
@@ -3010,8 +3024,20 @@ function Conversation() {
             ...(project === null ? {} : { project }),
             ...(repoName === null ? {} : { repo: repoName }),
           });
-          if (prep.ok) extra = `\n\nThe PR's code has been checked out at ${prep.value} — read files from there`;
-        } catch {}
+          if (prep.ok) {
+            extra = `\n\nThe PR's code has been checked out at ${prep.value} — read files from there (for example ${prep.value}/src/App.tsx) and treat that folder as the PR root. Do not read from the open project folder for PR files.`;
+          } else {
+            troubleAt(project === null ? {} : { project }, prep.trouble);
+            return;
+          }
+        } catch (cause) {
+          troubleAt(project === null ? {} : { project }, {
+            what: 'I could not prepare the pull request checkout.',
+            because: cause instanceof Error ? cause.message : 'Something went wrong fetching it.',
+            actionLabel: 'Got it',
+          });
+          return;
+        }
         const base = reviewPrompt(item, repository, repo?.here ?? null);
         void send(`${base}${extra}`);
       });

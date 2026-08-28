@@ -41,7 +41,9 @@ describe('the parent never becomes a repository', () => {
     const notes = MAIN.slice(MAIN.indexOf('async function childRepoNotes'), at);
     expect(notes).toContain('not a repository');
     expect(notes).toContain('git -C backend status');
-    expect(ADAPTER).toContain('appendSystemPrompt: [...options.contextNotes]');
+    expect(ADAPTER).toContain('appendSystemPrompt');
+    expect(ADAPTER).toContain('options.contextNotes');
+    expect(ADAPTER).toContain('agentsMdNote');
   });
 });
 

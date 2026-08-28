@@ -109,12 +109,13 @@ export function parseGoalCommand(text: string): ParsedGoal | null {
   return { kind: 'set', objective: rest };
 }
 
-/** Simple heuristic: is the objective met?
+/** Is the objective met?
  *
- * Real verification would run `tsc --noEmit` or the project's own checks.
- * Here: a build plan that is not yet fully done is not yet done; a finished
- * plan is met; with no plan, look for the objective's words having been
- * addressed in the last assistant turn. Kept intentionally small.
+ * Hard rule: a build plan must be present and fully done to auto-complete.
+ * Without a plan, no heuristic string match counts as done — that is how
+ * "I've finished looking" would otherwise end a 20-round full-access run early
+ * or let a goal linger. Real verification would run the project's checks
+ * (tsc, tests); here we require explicit plan completion or user clearing.
  */
 export function verifyGoal(
   plan: BuildPlan | null,
@@ -136,19 +137,11 @@ export function verifyGoal(
     return { met: true, reason: `All ${String(total)} tasks done.` };
   }
 
-  // No plan — look for a conclusive last assistant message.
-  // If the last graphe turn mentions the objective or says a done word, call it met.
-  for (let i = turns.length - 1; i >= 0; i -= 1) {
-    const turn = turns[i];
-    if (turn === undefined || turn.kind !== 'said' || turn.from !== 'graphe') continue;
-    const words = turn.text.toLowerCase();
-    // Heuristic words that read as done — deliberately narrow.
-    if (/\b(done|complete|finished|all .* passing|tests? pass|tsc.*pass|no errors)\b/.test(words)) {
-      return { met: true, reason: 'Last reply reads as done.' };
-    }
-    break;
-  }
-  return { met: false, reason: 'No checklist to tick — still working toward the goal.' };
+  // No plan — never auto-complete on prose. The model saying "done" is not
+  // evidence; changed files and passing checks are. Until a plan exists or the
+  // person says /goal clear, the goal is not met.
+  void turns;
+  return { met: false, reason: 'No checklist to tick — still working toward the goal (add a build plan or say /goal clear when done).' };
 }
 
 /** Update elapsed in place, for display. */

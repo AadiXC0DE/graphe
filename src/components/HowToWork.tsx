@@ -8,10 +8,11 @@ import {
   researchWords,
   type Depth,
 } from '../agent/research';
+import { executiveWords } from '../agent/executive';
 import { goalWords } from '../work/goal';
 import './HowToWork.css';
 
-export type Plans = 'auto' | 'always' | 'never' | 'research' | 'goal';
+export type Plans = 'auto' | 'always' | 'never' | 'research' | 'plan' | 'goal' | 'executive';
 
 type Props = {
   plans: Plans;
@@ -56,6 +57,18 @@ const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[
     chip: goalWords.chip,
     name: goalWords.name,
     note: `${goalWords.note} ${goalWords.howFarNote}`,
+  },
+  {
+    id: 'plan',
+    chip: 'Plan',
+    name: 'Plan only',
+    note: 'Reads and proposes a plan, no edits or commands until you approve it. Write tools are held.',
+  },
+  {
+    id: 'executive',
+    chip: executiveWords.chip,
+    name: executiveWords.name,
+    note: executiveWords.note,
   },
 ];
 

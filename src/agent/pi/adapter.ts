@@ -45,6 +45,7 @@ import {
 } from '../guard/policy';
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
+import { readAgentsMd } from '../../lib/agentsMd';
 import {
   ALWAYS_WORDS,
   alwaysFile,
@@ -1548,6 +1549,16 @@ const MOST_AFTER_SAYINGS = 3;
   const always = alwaysFrom(
     await readFile(alwaysFile(options.projectRoot ?? ''), 'utf8').catch(() => null),
   );
+  // AGENTS.md hierarchy — Codex-compatible, closest wins, 32 KiB cap.
+  // Read once at sitting start, no writes. Prepended to system prompt after memory.
+  let agentsMdNote: string | null = null;
+  if (options.projectRoot !== undefined && options.projectRoot !== '') {
+    try {
+      agentsMdNote = await readAgentsMd(options.projectRoot);
+    } catch {
+      agentsMdNote = null;
+    }
+  }
 
   /**
    * Run the things this project always does, at one of the three moments.
@@ -1790,14 +1801,14 @@ const MOST_AFTER_SAYINGS = 3;
   const runtime = await runtimeFor(agentDir);
   /** Filled while the loader runs, which is before anything below can read it. */
   let carried: readonly Carried[] = [];
+  const agentsPrompt = agentsMdNote === null ? [] : [`<agents_md>\n${agentsMdNote}\n</agents_md>`];
+  const allNotes = [...(options.contextNotes ?? []), ...agentsPrompt];
   const loader = new pi.DefaultResourceLoader({
     cwd: options.projectRoot,
     agentDir,
     // A few sentences about the folder itself, when there is something a folder
     // listing cannot say. Empty is the ordinary case and passes nothing through.
-    ...(options.contextNotes === undefined || options.contextNotes.length === 0
-      ? {}
-      : { appendSystemPrompt: [...options.contextNotes] }),
+    ...(allNotes.length === 0 ? {} : { appendSystemPrompt: allNotes }),
     // Extensions are on, but only the ones the person chose for themselves.
     // `extensionsOverride` runs after discovery and before anything is
     // installed into the session, so it is the one place a rule like that can

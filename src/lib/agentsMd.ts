@@ -4,7 +4,7 @@
  * 32 KiB cap farthest truncated first. No writes, just reads.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -19,11 +19,19 @@ async function tryRead(path: string): Promise<string | null> {
   }
 }
 
-export function findGitRoot(project: string): string {
-  // Walk up until we hit a .git or filesystem root — synchronously via resolve,
-  // but actually we just walk paths; read handles missing.
+async function isGitRoot(dir: string): Promise<boolean> {
+  try {
+    const st = await stat(join(dir, '.git'));
+    return st.isDirectory() || st.isFile();
+  } catch {
+    return false;
+  }
+}
+
+export async function findGitRoot(project: string): Promise<string> {
   let cur = resolve(project);
   while (true) {
+    if (await isGitRoot(cur)) return cur;
     const parent = dirname(cur);
     if (parent === cur) return cur;
     cur = parent;
@@ -38,19 +46,21 @@ export async function collectAgentsMd(project: string): Promise<readonly string[
   const globalText = await tryRead(global);
   if (globalText !== null) files.push(globalText);
 
-  // Walk project upward
+  const gitRoot = await findGitRoot(project);
+
+  // Walk project upward to git root inclusive
   let cur = resolve(project);
   const seen: string[] = [];
+  let depth = 0;
   while (true) {
     const candidate = join(cur, 'AGENTS.md');
     const text = await tryRead(candidate);
     if (text !== null) seen.push(text);
+    if (cur === gitRoot) break;
     const parent = dirname(cur);
     if (parent === cur) break;
-    // Stop at git root hint — if parent has .git, we still include it, then stop after
-    // To keep simple, walk to filesystem root but budget will truncate.
-    // Real git root check would need fs stat; we just walk up 5 levels max for practicality
-    if (seen.length > 10) break;
+    depth += 1;
+    if (depth > 10) break;
     cur = parent;
   }
   // Closest wins — so reverse seen so closest last, then concat closest-last

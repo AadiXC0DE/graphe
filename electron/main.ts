@@ -6894,8 +6894,12 @@ function register(): void {
     // Per-child when a repo is named: folder and timeline come from there.
     // A folder holding several projects has no folder-level history to land into
     // — unless where.repo names one child, then that child's timeline is used.
-    const repo = folderFor(open, where);
-    const history = await timelineFor(open, where);
+    // Must not use folderFor() here: it prefers the checkout's own folder
+    // (entry.folder), which would make bringBack(worktree, worktree) and drop
+    // the worktree against itself — committed work would look already applied and
+    // then be deleted. Use the real project (or named child) as repo.
+    const repo = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
+    const history = await timelineFor(open as unknown as Workspace<Held>, where);
     if (history === null) return fail(SEVERAL_PROJECTS);
     await putDownCopyConversation(open, entry.address);
     if ((await reopenCheckout(repo, entry)) === null) {
@@ -6931,7 +6935,7 @@ function register(): void {
     // The same rule as landing, and it matters more here: this one deletes.
     const entry = checkoutEntryFor(open, where);
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
-    const repo = folderFor(open, where);
+    const repo = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
     await putDownCopyConversation(open, entry.address);
     await reopenCheckout(repo, entry);
     const dropped = await dropWorktree(gitRunHereFor(), repo, entry.folder);
@@ -6951,7 +6955,7 @@ function register(): void {
     if (!Number.isFinite(prNumber) || prNumber <= 0) {
       return fail({ what: 'I could not tell which pull request you meant.', because: 'The number was missing or not a number.', actionLabel: 'Got it' });
     }
-    const project = folderFor(open, where);
+    const project = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
     try {
       const { folder } = await preparePrWorktree(project, prNumber);
       return done(folder);

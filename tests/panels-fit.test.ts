@@ -35,6 +35,32 @@ describe('settings can be scrolled to the end', () => {
   });
 });
 
+describe('the money at the foot of the rail keeps its height', () => {
+  const css = read('CostMeter.css');
+  const block = (selector: string): string => {
+    const at = css.indexOf(`${selector} {`);
+    expect(at).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf('}', at));
+  };
+
+  it('gives a long line an ellipsis rather than a second line', () => {
+    // The meter is sticky at the foot of a 328px rail and its figures change on
+    // every reading. Left to reflow, "91% a-long-model-name, 9% another" takes
+    // two lines at one reading and one at the next, and the whole panel above
+    // it moves each time.
+    for (const selector of ['.cost-meter__retry', '.cost-meter__model']) {
+      expect(block(selector)).toContain('white-space: nowrap');
+      expect(block(selector)).toContain('text-overflow: ellipsis');
+      expect(block(selector)).toContain('overflow: hidden');
+      expect(block(selector)).toContain('min-width: 0');
+    }
+  });
+
+  it('holds every model on the one row', () => {
+    expect(block('.cost-meter__models')).toContain('display: flex');
+  });
+});
+
 describe('a conversation in the shelf offers one thing, not two', () => {
   it('can be thrown away, and cannot be copied', () => {
     const shelf = read('Sidebar.tsx');

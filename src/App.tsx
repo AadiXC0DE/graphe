@@ -96,6 +96,7 @@ import {
   type Goal,
 } from "./work/goal";
 import { ADVISOR_PACKAGE } from "./agent/advisor";
+import { EMPTY as EMPTY_FLOW, type Flow } from "./work/canvas";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
 import { bridge } from "./lib/bridge";
@@ -4250,51 +4251,59 @@ function Conversation() {
     [desks.current, afterAway],
   );
 
-  /* The board as the last placement left it. Two steps asked the same thing
-     are told apart by what was already there, and the mirror of the state has
-     not caught up yet while a loop is going down. */
-  const justPlaced = useRef<{ path: string; ids: ReadonlySet<string> } | null>(null);
+  /* The canvas, as it was left. Drawing one changes nothing until Start. */
+  const [flow, setFlow] = useState<Flow>(EMPTY_FLOW);
+  const flowNow = useRef(flow);
+  flowNow.current = flow;
 
-  /** Put one step on the board and answer with the id it was given, so a loop
-   *  can be chained as it goes down rather than guessed at. */
-  const placeStep = useCallback(
-    async (asks: string, after: string | null): Promise<string | null> => {
-      const path = desks.current;
-      if (path === null || asks.trim() === '') return null;
-      // What was there a moment ago, taken from the last answer rather than
-      // from the mirror of the state: putting a loop down is a run of these
-      // back to back, and the mirror is a render behind each time.
-      const held = justPlaced.current;
-      const before =
-        held !== null && held.path === path
-          ? held.ids
-          : new Set((awayNow.current[path]?.pieces ?? []).map((one) => one.id));
-      const answer =
-        after === null
-          ? await bridge.keepGoing(asks, false, { project: path })
-          : await bridge.startAfter(asks, after, { project: path });
-      afterAway(path)(answer);
+  /* Read on the way into a folder, and never under one somebody has switched
+     away from while the answer was in the air. */
+  useEffect(() => {
+    const project = desks.current;
+    if (project === null) {
+      setFlow(EMPTY_FLOW);
+      return;
+    }
+    void bridge.flowLoad({ project }).then((answer) => {
+      if (desksNow.current.current !== project) return;
+      setFlow(answer.ok && answer.value !== null ? answer.value : EMPTY_FLOW);
+    });
+  }, [desks.current]);
+
+  const changeFlow = useCallback(
+    (next: Flow) => {
+      setFlow(next);
+      const path = desksNow.current.current;
+      if (path !== null) void bridge.flowSave(next, { project: path });
+    },
+    [],
+  );
+
+  const startFlow = useCallback(() => {
+    const path = desksNow.current.current;
+    if (path === null) return;
+    void bridge.flowStart(flowNow.current, { project: path }).then((answer) => {
       if (!answer.ok) {
-        justPlaced.current = null;
-        return null;
+        troubleHere(answer.trouble);
+        return;
       }
-      justPlaced.current = { path, ids: new Set(answer.value.pieces.map((one) => one.id)) };
-      const fresh = answer.value.pieces.filter((one) => !before.has(one.id));
-      return (fresh.find((one) => one.doing === asks) ?? fresh[fresh.length - 1])?.id ?? null;
-    },
-    [desks.current, afterAway],
-  );
+      setFlow(answer.value);
+      void refreshAway(path);
+    });
+  }, [troubleHere, refreshAway]);
 
-  /** Change what one step waits for, or let it off the wait altogether. The
-   *  shell refuses a line that could never run and says why. */
-  const connectAfter = useCallback(
-    (id: string, after: string | null) => {
-      const path = desks.current;
-      if (path === null) return;
-      void bridge.putAfter(id, after, { project: path }).then(afterAway(path));
-    },
-    [desks.current, afterAway],
-  );
+  const stopFlow = useCallback(() => {
+    const path = desksNow.current.current;
+    if (path === null) return;
+    void bridge.flowStop({ project: path }).then((answer) => {
+      if (!answer.ok) {
+        troubleHere(answer.trouble);
+        return;
+      }
+      setFlow(answer.value);
+      void refreshAway(path);
+    });
+  }, [troubleHere, refreshAway]);
 
   /**
    * Serve every go in the comparison and put them in the pane.
@@ -5618,18 +5627,15 @@ function Conversation() {
 
       {canvasOpen && desk !== null ? (
         <CanvasView
-          pieces={away[desk.path]?.pieces ?? []}
-          now={now}
+          flow={flow}
+          onFlow={changeFlow}
+          onStart={startFlow}
+          onStop={stopFlow}
+          states={Object.fromEntries(
+            (away[desk.path]?.pieces ?? []).map((one) => [one.id, one.state]),
+          )}
+          connection={connection}
           onClose={() => setCanvasOpen(false)}
-          onAdd={placeStep}
-          onConnect={connectAfter}
-          onDrop={(id) => dropAway(id)}
-          onAnswer={(callId, say) => {
-            const piece = (away[desk.path]?.pieces ?? []).find(
-              (one) => one.question?.callId === callId,
-            );
-            if (piece !== undefined) answerAway(piece.id, callId, say);
-          }}
         />
       ) : null}
 

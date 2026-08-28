@@ -49,6 +49,13 @@ describe('the words', () => {
       expect(everything, `says "${jargon}"`).not.toContain(jargon);
     }
   });
+
+  /** The press used to say "Add the advisor" and land on a screen called
+   *  something else entirely, which reads as a dead end rather than a step. */
+  it('says the addition is missing before offering anything, and names where the press lands', () => {
+    expect(advisorWords.missing).toMatch(/addition/i);
+    expect(advisorWords.missingAdd).toBe('Add more to Graphe');
+  });
 });
 
 describe('a model choice out of a file', () => {

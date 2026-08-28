@@ -423,6 +423,22 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.buildCancel, named(where)) as Promise<Result<null>>;
   },
 
+  flowLoad(where?: Where): Promise<Result<import('../src/work/canvas').Flow | null>> {
+    return ipcRenderer.invoke(CHANNEL.flowLoad, named(where)) as Promise<Result<import('../src/work/canvas').Flow | null>>;
+  },
+
+  flowSave(flow: import('../src/work/canvas').Flow, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.flowSave, flow, named(where)) as Promise<Result<null>>;
+  },
+
+  flowStart(flow: import('../src/work/canvas').Flow, where?: Where): Promise<Result<import('../src/work/canvas').Flow>> {
+    return ipcRenderer.invoke(CHANNEL.flowStart, flow, named(where)) as Promise<Result<import('../src/work/canvas').Flow>>;
+  },
+
+  flowStop(where?: Where): Promise<Result<import('../src/work/canvas').Flow>> {
+    return ipcRenderer.invoke(CHANNEL.flowStop, named(where)) as Promise<Result<import('../src/work/canvas').Flow>>;
+  },
+
   goalLoad(where?: Where): Promise<Result<import('../src/work/goal').Goal | null>> {
     return ipcRenderer.invoke(CHANNEL.goalLoad, named(where)) as Promise<Result<import('../src/work/goal').Goal | null>>;
   },

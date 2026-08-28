@@ -18,21 +18,23 @@ export const ADVISOR_PACKAGE = 'pi-advisor-flow';
 export const ADVISOR_SETTINGS_FILE = 'advisor.json';
 
 export const advisorWords = {
-  /** On the chip, with nobody advising and with somebody. */
-  chip: 'One model',
-  chipOn: 'Advises',
-  name: 'Who thinks, who does',
+  /** The row inside the model menu that leads here, and what that row says
+   *  while nobody is advising. */
+  name: 'Second opinion',
+  none: 'Off',
   note: 'One model does the work; a stronger one is asked about the hard parts, instead of paying for the stronger one all day.',
   /** The row that turns it off, which is where the list starts. */
   off: 'One model, all of it',
   offNote: 'Whatever is answering now does the work and decides for itself.',
-  /** The two headings the list is built from. */
+  /** The two roles the section is built from. */
   does: 'Does the work',
   advises: 'Advises',
-  advisesNote: 'Asked before a plan, after repeated failures, and before it calls something done. It reads and answers — it never touches your project.',
-  /** When the addition is not here yet, so choosing would do nothing. */
-  missing: 'Add the advisor',
-  missingNote: 'The second opinion comes from an addition somebody else wrote. Add it once and this works everywhere.',
+  advisesNote: 'Asked before a plan, after repeated failures, and before it calls something done. It never touches your project.',
+  /** Said before anything is offered, because until the addition is here a
+   *  choice made here would quietly do nothing. */
+  missing: 'A second opinion comes from an addition somebody else wrote, and nothing here works until that addition is on this computer.',
+  /** Named after where it lands, so the press is not a surprise. */
+  missingAdd: 'Add more to Graphe',
 } as const;
 
 /** How Pi's own settings name a model: the provider, then the model. */
@@ -137,7 +139,7 @@ function fromPackage(where: string, id: string): boolean {
   return where.split(/[\\/]/).includes(id);
 }
 
-/** The advisor package's own tools — the ones the chip turns on and off. */
+/** The advisor package's own tools — the ones this choice turns on and off. */
 export function advisorToolNames(extensions: readonly LoadedExtension[]): readonly string[] {
   return extensionToolNames(
     extensions.filter((one) => fromPackage(one.resolvedPath ?? one.path ?? '', ADVISOR_PACKAGE)),

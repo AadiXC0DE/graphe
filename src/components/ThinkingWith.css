@@ -44,6 +44,14 @@
   background: var(--text-faint);
 }
 
+/* Two dots, two models. Small enough to be noticed rather than read, because
+   the label already has one job. */
+.thinking__dot--second {
+  margin-left: -2px;
+  background: var(--accent-ink);
+  opacity: 0.75;
+}
+
 .thinking__chip--none {
   color: var(--accent-ink);
 }
@@ -327,6 +335,64 @@
   color: var(--text-faint);
 }
 
+/* A sentence in a menu of rows, so it is set apart from anything pressable. */
+.thinking__said {
+  flex-shrink: 0;
+  margin: 0;
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.thinking__said--foot {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+/* The one thing to read before pressing anything: without the addition, a
+   choice made here would do nothing at all. It sits in the same band as the
+   press it explains, so the two are read as one step. */
+.thinking__said--warn {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.thinking__said--warn + .thinking__more {
+  border-top: none;
+  padding-top: 0;
+}
+
+/* Said, not offered — who does the work was chosen in the view behind this. */
+.thinking__doing {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.thinking__doingname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+/* Wraps, because it is a sentence rather than a name. */
+.thinking__optionnote {
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
 /* The reasoning chooser is its own view of the same popover, so it can offer
    every capability without making the model list taller. */
 .thinking__pace {
@@ -440,6 +506,20 @@
   color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
+}
+
+/* A model has a name, not a setting's short word: it is read, so it is set in
+   the reading face and cut rather than wrapped. */
+.thinking__tune--words > span:last-child {
+  min-width: 0;
+  font-family: inherit;
+}
+
+.thinking__tunevalue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (hover: hover) and (pointer: fine) {

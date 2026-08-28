@@ -150,11 +150,32 @@
   background: var(--accent);
 }
 
+/* Every note is one line and stays one line. Docked to the foot of the rail,
+   a note that rewraps when a figure gains a digit moves the whole panel above
+   it — and the figures here change on every reading. */
 .cost-meter__retry {
   order: 1;
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: var(--text-2xs);
   color: var(--text-faint);
+}
+
+/* One cell per model, each giving up its own name before the row gives up a
+   percentage. Two long names cost an ellipsis, never a second line. */
+.cost-meter__models {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.cost-meter__model {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .cost-meter--panel .cost-meter__row {

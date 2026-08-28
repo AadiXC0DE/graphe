@@ -118,6 +118,73 @@ describe('C-01 — the language audit', () => {
   });
 });
 
+/* ------------------------------------------------------------------ the meter */
+
+describe('the meter reports without changing size', () => {
+  const answered = (...pairs: [string, number][]): { name: string; share: number }[] =>
+    pairs.map(([name, share]) => ({ name, share }));
+
+  it('is one row whether one model answered or two', () => {
+    expect(phrasing.meter.models([])).toHaveLength(0);
+    expect(phrasing.meter.models(answered(['the one doing the work', 1]))).toHaveLength(1);
+    expect(
+      phrasing.meter.models(
+        answered(['the one doing the work', 0.8], ['the one advising', 0.2]),
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('keeps the second model once it has answered, however small its share', () => {
+    // The meter is docked to the foot of the rail, so a row that comes and goes
+    // as the shares move drags everything above it up and down with it.
+    const cells = phrasing.meter.models(
+      answered(['the one doing the work', 0.996], ['the one advising', 0.004]),
+    );
+    expect(cells).toHaveLength(2);
+    expect(cells[1]).toContain('<1%');
+    expect(cells[0]).not.toContain('100%');
+  });
+
+  /** A sitting as the readings actually land: nothing priced, one model, a
+   *  second joining, its share falling away again. */
+  const sitting = [
+    { reusedShare: 0, byModel: answered(['the one doing the work', 1]) },
+    { reusedShare: 0.62, byModel: answered(['the one doing the work', 1]) },
+    {
+      reusedShare: 0.71,
+      byModel: answered(['the one doing the work', 0.95], ['the one advising', 0.05]),
+    },
+    {
+      reusedShare: 0.84,
+      byModel: answered(['the one doing the work', 0.5], ['the one advising', 0.5]),
+    },
+    {
+      reusedShare: 0.97,
+      byModel: answered(['the one doing the work', 0.998], ['the one advising', 0.002]),
+    },
+  ];
+
+  it('draws the same rows from the first reading to the last', () => {
+    // Two: what was reused, and where it went. However many models answered,
+    // they share one row — CostMeter.css gives each cell the ellipsis rather
+    // than the row a second line.
+    const rows = sitting.map(
+      (reading) =>
+        (phrasing.meter.models(reading.byModel).length === 0 ? 0 : 1) +
+        (reading.reusedShare === null ? 0 : 1),
+    );
+    expect(new Set(rows)).toEqual(new Set([2]));
+  });
+
+  it('always says what share each model took', () => {
+    for (const reading of sitting) {
+      for (const cell of phrasing.meter.models(reading.byModel)) {
+        expect(cell).toMatch(/^(Mostly |(<1%|\d{1,3}%) )/);
+      }
+    }
+  });
+});
+
 /* ------------------------------------------------------------------ money */
 
 describe('money is exact', () => {

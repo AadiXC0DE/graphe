@@ -112,7 +112,6 @@
 .composer__row .ways__chip,
 .composer__row .asking__chip,
 .composer__row .thinking__chip,
-.composer__row .advises__chip,
 .composer__row .room__tidy {
   min-height: 26px;
 }
@@ -123,8 +122,7 @@
    dot — which is exactly how three chips on one row ended up on two baselines. */
 .composer__row .ways,
 .composer__row .asking,
-.composer__row .thinking,
-.composer__row .advises {
+.composer__row .thinking {
   display: flex;
   align-items: center;
   min-width: 0;

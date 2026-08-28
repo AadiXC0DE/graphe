@@ -16,7 +16,6 @@ import type { HowFar } from '../agent/guard/policy';
 import HowToWork, { type Plans } from './HowToWork';
 import Room from './Room';
 import type { Turn } from '../lib/thread';
-import Advisor from './Advisor';
 import ThinkingWith from './ThinkingWith';
 import type { ConnectionState, ModelChoice, Room as RoomState, Skill, ThinkingLevel, Workflow } from '../lib/ipc';
 import {
@@ -90,7 +89,8 @@ type Props = {
   plans?: Plans;
   onPlans?: (plans: Plans) => void;
   onSelectModel?: (choice: ModelChoice) => void;
-  /** The model asked about the hard parts, or null for one model doing all of it. */
+  /** The model asked about the hard parts, or null for one model doing all of
+   *  it. Chosen from inside the model chip, not beside it. */
   advisor?: ModelChoice | null;
   onAdvisor?: (choice: ModelChoice | null) => void;
   /** Whether the addition that does the advising is already here. */
@@ -842,17 +842,10 @@ export default function Composer({
             onConnect={onConnect}
             onThinking={onThinking}
             onOpenChange={onComposerPopoverOpenChange}
-          />
-        )}
-
-        {onAdvisor === undefined ? null : (
-          <Advisor
-            state={connection ?? null}
             advisor={advisor ?? null}
-            onAdvisor={onAdvisor}
-            {...(advisorInstalled === undefined ? {} : { installed: advisorInstalled })}
-            {...(onAddMore === undefined ? {} : { onAdd: onAddMore })}
-            onOpenChange={onComposerPopoverOpenChange}
+            {...(onAdvisor === undefined ? {} : { onAdvisor })}
+            {...(advisorInstalled === undefined ? {} : { advisorInstalled })}
+            {...(onAddMore === undefined ? {} : { onAddMore })}
           />
         )}
 

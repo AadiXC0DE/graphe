@@ -32,6 +32,7 @@ import { howMuchBy } from '../design/gate';
 import { themeFrom } from './theme';
 import { pagesIn, type Page } from '../preview/pages';
 import { holdsBack } from '../projects/heldback';
+import { asksOf, readFlow, reset, runOrder } from '../work/canvas';
 import { keepsLogins } from '../projects/logins';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
@@ -1106,6 +1107,72 @@ let previewPlanMode = false;
       return Promise.resolve(done(null));
     },
 
+    flowLoad(): Promise<Result<import('../work/canvas').Flow | null>> {
+      try {
+        const raw = localStorage.getItem(`graphe:flow:${openPath ?? ''}`);
+        return Promise.resolve(done(raw === null ? null : readFlow(JSON.parse(raw) as unknown)));
+      } catch {
+        return Promise.resolve(done(null));
+      }
+    },
+
+    flowSave(flow: import('../work/canvas').Flow): Promise<Result<null>> {
+      try {
+        if (openPath !== null) localStorage.setItem(`graphe:flow:${openPath}`, JSON.stringify(flow));
+      } catch { /* quota or private mode: the shell's own store is the real one */ }
+      return Promise.resolve(done(null));
+    },
+
+    /* The tab has no shell to run anything, so starting one puts the blocks on
+       the preview's own board and lets them sit there — enough to see the shape
+       change and the states arrive. */
+    flowStart(flow: import('../work/canvas').Flow): Promise<Result<import('../work/canvas').Flow>> {
+      const made = new Map<string, string>();
+      const pieces: AwayPiece[] = [];
+      for (const block of runOrder(flow)) {
+        const id = `flow-${block.id}`;
+        made.set(block.id, id);
+        const waits = block.after === null ? null : (made.get(block.after) ?? null);
+        pieces.push({
+          id,
+          doing: asksOf(block),
+          state: waits === null ? 'running' : 'waiting',
+          at: Date.now(),
+          picture: null,
+          says: null,
+          trouble: null,
+          question: null,
+          ...(waits === null
+            ? {}
+            : { after: { id: waits, doing: '', says: '' } }),
+        });
+      }
+      atWork = { ...atWork, pieces: [...pieces, ...atWork.pieces] };
+      const started = {
+        startedAt: Date.now(),
+        blocks: flow.blocks.map((one) => ({ ...one, piece: made.get(one.id) ?? null })),
+      };
+      this.flowSave?.(started);
+      return Promise.resolve(done(started));
+    },
+
+    flowStop(): Promise<Result<import('../work/canvas').Flow>> {
+      const raw = (() => {
+        try {
+          const held = localStorage.getItem(`graphe:flow:${openPath ?? ''}`);
+          return held === null ? null : readFlow(JSON.parse(held) as unknown);
+        } catch {
+          return null;
+        }
+      })();
+      const flow = raw ?? { blocks: [], startedAt: null };
+      const theirs = new Set(flow.blocks.map((one) => one.piece).filter((one) => one !== null));
+      atWork = { ...atWork, pieces: atWork.pieces.filter((one) => !theirs.has(one.id)) };
+      const stopped = reset(flow);
+      this.flowSave?.(stopped);
+      return Promise.resolve(done(stopped));
+    },
+
     goalLoad(): Promise<Result<import('../work/goal').Goal | null>> {
       try {
         const raw = localStorage.getItem(`graphe:goal:${openPath ?? ''}`);
@@ -2025,6 +2092,10 @@ function connect(): Bridge {
     chooseDocument: (where) => api.chooseDocument(where),
     buildSave: (tasks, where) => api.buildSave(tasks, where),
     buildCancel: (where) => api.buildCancel(where),
+    flowLoad: (whereArg) => (api.flowLoad as unknown as (where?: Where) => Promise<Result<import('../work/canvas').Flow | null>>)?.(whereArg) ?? Promise.resolve(done(null)),
+    flowSave: (flow, whereArg) => (api.flowSave as unknown as (flow: import('../work/canvas').Flow, where?: Where) => Promise<Result<null>>)?.(flow, whereArg) ?? Promise.resolve(done(null)),
+    flowStart: (flow, whereArg) => (api.flowStart as unknown as (flow: import('../work/canvas').Flow, where?: Where) => Promise<Result<import('../work/canvas').Flow>>)?.(flow, whereArg) ?? Promise.resolve(done(flow)),
+    flowStop: (whereArg) => (api.flowStop as unknown as (where?: Where) => Promise<Result<import('../work/canvas').Flow>>)?.(whereArg) ?? Promise.resolve(done({ blocks: [], startedAt: null })),
     goalLoad: (whereArg) => (api.goalLoad as unknown as (where?: Where) => Promise<Result<import('../work/goal').Goal | null>>)?.(whereArg) ?? Promise.resolve(done(null)),
     goalSave: (goal, whereArg) => (api.goalSave as unknown as (goal: import('../work/goal').Goal, where?: Where) => Promise<Result<null>>)?.(goal, whereArg) ?? Promise.resolve(done(null)),
     goalClear: (whereArg) => (api.goalClear as unknown as (where?: Where) => Promise<Result<null>>)?.(whereArg) ?? Promise.resolve(done(null)),

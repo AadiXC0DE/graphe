@@ -84,7 +84,7 @@ export default function CostMeter({
       ? forProject(history.main, project)
       : null;
   const retryShare = split?.retryShare ?? projectTotal?.retryShare ?? null;
-  const betweenModels = meter.split(usage?.byModel ?? []);
+  const byModel = meter.models(usage?.byModel ?? []);
 
   return (
     <aside
@@ -131,18 +131,21 @@ export default function CostMeter({
         <p className="cost-meter__retry">{meter.reused(usage.reusedShare)}</p>
       ) : null}
 
-      {usage?.mostUsed !== null && usage?.mostUsed !== undefined ? (
-        <p className="cost-meter__retry">{meter.mostUsed(usage.mostUsed)}</p>
-      ) : null}
-
-      {/* Only once a second model has actually answered, which is the whole
-          question somebody asks after turning the advisor on. */}
-      {betweenModels === null ? null : <p className="cost-meter__retry">{betweenModels}</p>}
+      {/* One row whether one model answered or two. The meter is docked to the
+          foot of the rail, so a line that rewraps as the shares move shifts
+          everything above it — each name gives way to an ellipsis instead. */}
+      {byModel.length === 0 ? null : (
+        <p className="cost-meter__retry cost-meter__models">
+          {byModel.map((one) => (
+            <span key={one} className="cost-meter__model" title={one}>
+              {one}
+            </span>
+          ))}
+        </p>
+      )}
 
       {retryShare !== null && retryShare > 0 ? (
-        <p className="cost-meter__retry">
-          {Math.round(retryShare * 100)}% on retries
-        </p>
+        <p className="cost-meter__retry">{meter.retries(retryShare)}</p>
       ) : null}
 
       <div className="cost-meter__row cost-meter__row--doing">

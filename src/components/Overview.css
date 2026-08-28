@@ -384,24 +384,10 @@
 
 /* The panel is a flex column that ends with the meter, which docks into its
    foot: the versions list scrolls above it and the meter sits on the bottom
-   edge whether the list above it is one row or forty. */
+   edge whether the list above it is one row or forty. The panel gives up its
+   bottom padding so the meter lands flush on the glass; everything the meter
+   needs to stay there is in CostMeter.css, under .cost-meter--panel. */
 .overview { padding-bottom: 0; }
-
-/* The meter, docked. The panel's own foot — flush to the glass, one hairline
-   between it and the timeline above it. */
-.overview .cost-meter--corner {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  width: auto;
-  border: none;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  box-shadow: none;
-  background: var(--bg);
-  padding: var(--space-2) var(--space-4);
-  margin: 0;
-}
 
 @media (max-width: 1100px) {
   .overview {
@@ -491,8 +477,11 @@
   }
 }
 
-/* The panel's own foot, above the meter. */
+/* The panel's own foot, above the meter. It takes the slack, which is what
+   keeps the money on the glass however short the panel's contents are — the
+   meter is the one thing in here that should never need looking for. */
 .overview__foot {
+  margin-top: auto;
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--border);
 }
@@ -500,20 +489,6 @@
 .overview__foot .overview__do {
   margin-top: 0;
   width: 100%;
-}
-
-/* The money stays on the glass however long the panel gets — it is the one
-   thing in here that should never need looking for. Everything else, the way to
-   hand the work on included, scrolls with the rest. */
-.overview .cost-meter--corner {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  background: var(--bg);
-}
-
-.overview__foot {
-  margin-top: auto;
 }
 
 /* ---------------------------------------------------------------------------

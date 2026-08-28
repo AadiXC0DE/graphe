@@ -1225,6 +1225,10 @@ export const CHANNEL = {
   buildAdvance: 'graphe:build-advance',
   buildSave: 'graphe:build-save',
   buildCancel: 'graphe:build-cancel',
+  flowLoad: 'graphe:flow-load',
+  flowSave: 'graphe:flow-save',
+  flowStart: 'graphe:flow-start',
+  flowStop: 'graphe:flow-stop',
   goalLoad: 'graphe:goal-load',
   goalSave: 'graphe:goal-save',
   goalClear: 'graphe:goal-clear',
@@ -1438,6 +1442,15 @@ export type GrapheApi = {
   /** Cancel the current build checklist and clear it from the screen. */
      buildCancel(where?: Where): Promise<Result<null>>;
   /** A goal per project, kept on disk. Null when none. */
+  /** The canvas as it was left. Null for a project that has never had one. */
+  flowLoad(where?: Where): Promise<Result<import('../work/canvas').Flow | null>>;
+  /** Keep the shape. Nothing is run by saving one. */
+  flowSave(flow: import('../work/canvas').Flow, where?: Where): Promise<Result<null>>;
+  /** Put every block on the board, in order, each waiting for the one it
+   *  follows. Answers with the flow carrying the pieces it was given. */
+  flowStart(flow: import('../work/canvas').Flow, where?: Where): Promise<Result<import('../work/canvas').Flow>>;
+  /** Take what has not finished off the board and hand the flow back as a draft. */
+  flowStop(where?: Where): Promise<Result<import('../work/canvas').Flow>>;
   goalLoad(where?: Where): Promise<Result<import('../work/goal').Goal | null>>;
   goalSave(goal: import('../work/goal').Goal, where?: Where): Promise<Result<null>>;
   goalClear(where?: Where): Promise<Result<null>>;

@@ -1,24 +1,196 @@
-/* The board as a graph.
+/* A workbench needs the width. The other sheets leave the overview panel
+   showing because they are things you read; this is a thing you build in, and
+   three bands inside what is left of 1500px is not a canvas. */
+.canvas {
+  right: 0;
+}
+
+/* A flow: what you can place, what you have placed, and what the one you are
+   looking at is set to.
  *
- * No grid, no glass, no second palette. A canvas that arrives wearing another
- * product's clothes reads as a bolted-on feature, and this is the same work the
- * sheet of cards is already showing — so it is drawn on the same recessed
- * surface a piece of work already sits on, in the same hairlines, with the one
- * accent spent on exactly one thing: the step that is going right now.
- *
- * Cards are all one size on purpose. The sheet next to the conversation leads
- * with the picture, because there the result is the subject; here the shape is,
- * and a row of boxes that are all different heights has no shape. */
+ * Three bands, because this surface composes rather than reports and that is
+ * the shape of every tool that does. The middle one is the only part that pans,
+ * and it is the only part with a ground of its own: a grid says "this is a
+ * space you move around in" where the flat surface it replaced said nothing at
+ * all. Everything else is the app's own paper, hairlines and one accent — the
+ * accent spent, as always, on exactly one thing at a time. */
+
+.canvas__bands {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr) auto;
+}
+
+/* With a block open the palette folds to its marks. Two bands either side were
+   taking the canvas between them, and nobody picks a new block while writing
+   what the one they picked should do. */
+.canvas__bands--open {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+}
+
+.canvas__palette--folded {
+  padding: var(--space-3) var(--space-2);
+  align-items: center;
+}
+
+.canvas__palette--folded .canvas__band,
+.canvas__palette--folded .canvas__picktext {
+  display: none;
+}
+
+.canvas__palette--folded .canvas__pick {
+  justify-content: center;
+  padding: var(--space-1);
+}
+
+/* ---------------------------------------------------------------- palette */
+
+.canvas__palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-4) var(--space-3);
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.canvas__band {
+  margin: 0;
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.canvas__band + .canvas__list {
+  margin-bottom: var(--space-3);
+}
+
+.canvas__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas__pick {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__pick:active {
+  transform: scale(0.98);
+}
+
+.canvas__pick:disabled {
+  opacity: 0.4;
+  cursor: default;
+  transform: none;
+}
+
+.canvas__pickmark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+.canvas__picktext {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.canvas__pickname {
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.canvas__pick--loop .canvas__pickname {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.canvas__picknote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+/* A loop drawn as its own marks, so what you are about to place can be read
+   before you place it. */
+.canvas__shape {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: 3px;
+  color: var(--text-faint);
+}
+
+.canvas__shapemark {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+}
+
+.canvas__shapemark + .canvas__shapemark::before {
+  content: '';
+  position: absolute;
+  width: 5px;
+  height: 1px;
+  margin-left: -9px;
+  background: var(--border-strong);
+}
+
+.canvas__pick--loop .canvas__shapemark {
+  position: relative;
+}
+
+/* ---------------------------------------------------------------- surface */
 
 .canvas__surface {
   position: relative;
-  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg-sunken);
+  background-color: var(--bg-sunken);
+  /* The ground moves with what is on it, so a pan reads as moving rather than
+     as the cards sliding over a fixed page. */
+  background-image: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0);
+  background-size: var(--canvas-dot, 20px) var(--canvas-dot, 20px);
+  background-position: var(--canvas-x, 0) var(--canvas-y, 0);
   cursor: grab;
-  /* The pan is direct manipulation — the pointer and the sheet are one object,
-     so nothing here is allowed to lag behind the finger. */
   touch-action: none;
   overscroll-behavior: contain;
 }
@@ -37,7 +209,7 @@
 /* ------------------------------------------------------------------ lines */
 
 /* Behind the cards, because a line runs from one to another and belongs to
-   neither. */
+   neither. The head is what says which way round it is. */
 .canvas__lines {
   position: absolute;
   top: 0;
@@ -56,8 +228,7 @@
   stroke-width: 2;
 }
 
-/* The line while it is still in somebody's hand. Dashed, because it is a
-   proposal — nothing has been asked for until it is let go. */
+/* A proposal, until it is let go. */
 .canvas__trailing {
   position: absolute;
   inset: 0;
@@ -76,27 +247,24 @@
 .canvas__card {
   position: absolute;
   display: flex;
-  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-raised);
   box-shadow: var(--shadow-sm);
-  /* A card that is open floats over its neighbours rather than pushing them
-     about: reading one step must not move every other step on the sheet. */
   transition:
     border-color var(--dur-micro) var(--ease-hover),
     box-shadow var(--dur-ui) var(--ease-out-quart);
 }
 
-.canvas__card--open {
+.canvas__card--picked {
   z-index: 3;
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow-md);
 }
 
 .canvas__card--done {
-  border-color: var(--border-strong);
   background: var(--bg);
+  border-color: var(--border-strong);
 }
 
 .canvas__card--needs-you {
@@ -107,8 +275,6 @@
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
 }
 
-/* Everywhere a line can land while one is being dragged. Which one it would
-   land on is said on hover, below — without that a drag is aimed at nothing. */
 .canvas__card--target {
   cursor: copy;
 }
@@ -123,11 +289,42 @@
   border-radius: var(--radius-lg);
 }
 
-.canvas__state {
+.canvas__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.canvas__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+}
+
+.canvas__card--running .canvas__mark,
+.canvas__card--needs-you .canvas__mark {
+  color: var(--accent);
+}
+
+.canvas__kind {
   font-size: var(--text-2xs);
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The state is a word, never only a colour. Quiet until it is worth reading. */
+.canvas__state {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--text-2xs);
   color: var(--text-faint);
 }
 
@@ -140,11 +337,7 @@
   color: var(--danger);
 }
 
-.canvas__card--done .canvas__state {
-  color: var(--text-muted);
-}
-
-.canvas__doing {
+.canvas__says {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -155,19 +348,32 @@
   color: var(--text);
 }
 
-.canvas__when {
+.canvas__foots {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin-top: auto;
   font-size: var(--text-2xs);
   color: var(--text-faint);
 }
 
-/* One hairline along the top of a step that is going. The same line, at the
-   same pace, the board draws — two views of one piece of work should not
-   breathe at different speeds.
+.canvas__model {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-   Its own element rather than a pseudo on the card: the light travels a whole
-   card's width either side of itself, and the card cannot clip it without also
-   clipping the handle that hangs off its edge. */
+.canvas__behind {
+  margin-left: auto;
+  flex: none;
+}
+
+/* One hairline along the top of a block that is going. The same line, at the
+   same pace, the board draws — two views of one piece of work should not
+   breathe at different speeds. Its own element rather than a pseudo: the light
+   travels a card's width either side of itself, and the card cannot clip it
+   without also clipping the dot that hangs off its edge. */
 .canvas__sweep {
   position: absolute;
   top: 0;
@@ -201,119 +407,32 @@
   }
 }
 
-/* --------------------------------------------------------------- the more */
-
-.canvas__more {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: 0 var(--space-3) var(--space-3);
-}
-
-.canvas__said {
-  margin: 0;
-  font-size: var(--text-2xs);
-  line-height: 1.5;
-  color: var(--text-muted);
-}
-
-.canvas__card--failed .canvas__said {
-  color: var(--danger);
-}
-
-.canvas__asking {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-}
-
-.canvas__question {
-  margin: 0;
-  font-size: var(--text-2xs);
-  line-height: 1.5;
-  color: var(--text);
-}
-
-.canvas__answers {
-  display: flex;
-  gap: var(--space-1);
-}
-
-.canvas__acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-.canvas__yes,
-.canvas__no,
-.canvas__act,
-.canvas__place {
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  font-size: var(--text-2xs);
-  color: var(--text-muted);
-  white-space: nowrap;
-  transition:
-    color var(--dur-micro) var(--ease-hover),
-    border-color var(--dur-micro) var(--ease-hover),
-    transform var(--dur-micro) var(--ease-out-quart);
-}
-
-.canvas__yes,
-.canvas__place {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--accent-text);
-}
-
-
-.canvas__yes:active,
-.canvas__no:active,
-.canvas__act:active,
-.canvas__place:active {
-  transform: scale(0.97);
-}
-
-.canvas__place:disabled {
-  opacity: 0.5;
-  cursor: default;
-  transform: none;
-}
-
-/* ----------------------------------------------------------- the handle */
-
-/* Where the next step goes, and where a line is dragged from. Always there
-   rather than on hover: it is the one control that teaches what this surface
-   does, and a control nobody can find is a feature nobody has. */
+/* Where a line is drawn from. Always there rather than on hover: it is the one
+   control that teaches what this surface does. */
 .canvas__handle {
   position: absolute;
-  right: -11px;
-  top: calc(var(--canvas-card, 104px) / 2 - 11px);
+  right: -7px;
+  top: calc(var(--canvas-card, 96px) / 2 - 11px);
   display: grid;
   place-items: center;
   width: 22px;
   height: 22px;
-  border: 1px solid var(--border);
+  cursor: crosshair;
+}
+
+.canvas__dot {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
   background: var(--bg-raised);
-  color: var(--text-faint);
-  cursor: crosshair;
   transition:
-    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
     border-color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
-/* 44px of hit area around a 22px dot. */
+/* 44px of hit area around a 9px dot. */
 .canvas__handle::after {
   content: '';
   position: absolute;
@@ -324,26 +443,18 @@
   transform: translate(-50%, -50%);
 }
 
-.canvas__handle:active {
-  transform: scale(0.94);
-}
-
-.canvas__handle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
+.canvas__handle:focus-visible .canvas__dot,
 .canvas__face:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
 /* --------------------------------------------------------------- the foot */
 
 .canvas__foot {
   position: absolute;
-  left: var(--space-5);
-  right: var(--space-5);
+  left: var(--space-4);
+  right: var(--space-4);
   bottom: var(--space-4);
   display: flex;
   align-items: center;
@@ -396,105 +507,234 @@
     background-color var(--dur-micro) var(--ease-hover);
 }
 
-/* ------------------------------------------------------------- placing */
+/* ------------------------------------------------------------ start, stop */
 
-.canvas__adder {
-  position: absolute;
-  z-index: 6;
-  width: 264px;
-  max-width: calc(100% - var(--space-5) * 2);
-  /* Kept inside the surface whichever step it was opened from, and scrolling
-     rather than spilling if a longer list ever lands here. */
-  max-height: 400px;
-  overflow-y: auto;
-  padding: var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-md);
-  transform-origin: top left;
-  animation: canvas-arrives var(--dur-ui) var(--ease-out-quart) both;
+.canvas__run {
+  flex: none;
+  margin-top: var(--space-1);
+  margin-left: var(--space-4);
 }
 
-/* No dot to hang off: the first step of all is placed from the middle. */
-.canvas__adder--middle {
-  left: 50%;
-  top: 50%;
-  translate: -50% -50%;
-  transform-origin: center;
-}
-
-@keyframes canvas-arrives {
-  from {
-    opacity: 0;
-    transform: scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.canvas__kinds {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.canvas__kind {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  width: 100%;
-  padding: var(--space-2);
+.canvas__start,
+.canvas__stop {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  text-align: left;
-  transition: background-color var(--dur-micro) var(--ease-hover);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
 }
 
-.canvas__kindname {
-  font-size: var(--text-sm);
+.canvas__start {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.canvas__stop {
+  border-color: var(--border);
+  background: var(--bg-raised);
   color: var(--text);
 }
 
-.canvas__kindnote {
-  font-size: var(--text-2xs);
-  line-height: 1.45;
-  color: var(--text-faint);
+.canvas__start:active,
+.canvas__stop:active {
+  transform: scale(0.97);
 }
 
-.canvas__what {
+.canvas__start:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+/* -------------------------------------------------------------- inspector */
+
+.canvas__inspector {
+  display: flex;
+  flex-direction: column;
+  width: 296px;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  animation: canvas-opens var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes canvas-opens {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.canvas__ihead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.canvas__imark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+.canvas__iname {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.canvas__ishut {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__ibody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-2);
+  padding: var(--space-4);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
-.canvas__label {
+.canvas__ilabel,
+.canvas__iband {
+  margin: 0;
   font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-faint);
 }
 
-.canvas__box {
+.canvas__iband {
+  margin-top: var(--space-3);
+}
+
+/* Room to write a sentence in, because what a block is asked *is* the block —
+   a one-line field says the instruction is an afterthought. */
+.canvas__isays {
   width: 100%;
-  min-height: 30px;
-  padding: 0 var(--space-2);
+  padding: var(--space-2);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
   background: var(--bg-sunken);
   font-family: var(--font-ui);
   font-size: var(--text-sm);
+  line-height: 1.5;
   color: var(--text);
+  resize: vertical;
 }
 
-.canvas__box:focus-visible {
+.canvas__isays:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 
-/* -------------------------------------------------------------- nothing */
+.canvas__isays:disabled {
+  opacity: 0.6;
+}
+
+.canvas__imodels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.canvas__itier {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: var(--space-1);
+}
+
+.canvas__itiername {
+  padding: var(--space-1) var(--space-2) 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.canvas__imodel {
+  display: block;
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__imodel--on {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.canvas__imodel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.canvas__iwaits {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.canvas__iremove {
+  margin-top: var(--space-4);
+  align-self: flex-start;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__iremove:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* -------------------------------------------------------------- the first */
 
 .canvas__nothing {
   position: absolute;
@@ -503,38 +743,38 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   padding: var(--space-5);
   text-align: center;
 }
 
 .canvas__nothingtitle {
   margin: 0;
-  font-size: var(--text-lg);
+  font-size: var(--text-xl);
   font-weight: 500;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   color: var(--text);
 }
 
 .canvas__nothingnote {
-  margin: 0;
+  margin: 0 0 var(--space-3);
   font-size: var(--text-sm);
   color: var(--text-faint);
 }
 
-.canvas__starters {
+.canvas__loops {
   display: grid;
   width: 100%;
-  max-width: 660px;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  max-width: 820px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   justify-content: center;
   gap: var(--space-3);
-  margin: var(--space-2) 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.canvas__starter {
+.canvas__loop {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -550,60 +790,63 @@
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
-.canvas__starter:active {
+.canvas__loop:active {
   transform: scale(0.99);
 }
 
-.canvas__startername {
+/* The loop's own shape, before it is put down. This is the whole reason the
+   first screen is worth having: you can read what you are about to place. */
+.canvas__loopshape {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+}
+
+.canvas__loopmark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.canvas__loopmark + .canvas__loopmark::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--space-3) * -1 - 1px);
+  width: var(--space-3);
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.canvas__loopname {
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text);
 }
 
-.canvas__starternote {
+.canvas__loopnote {
   font-size: var(--text-2xs);
   line-height: 1.5;
   color: var(--text-faint);
 }
 
-/* The loop's own shape, before it is put down. This is the whole reason the
-   empty screen is worth having: you can read what you are about to place. */
-.canvas__starterline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1);
-  margin-top: var(--space-1);
-}
-
-.canvas__starterstep {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: var(--text-2xs);
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.canvas__starterarrow {
-  color: var(--text-faint);
-  font-size: var(--text-2xs);
-}
-
-.canvas__blank {
-  min-height: 28px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  transition: color var(--dur-micro) var(--ease-hover);
-}
-
 /* ---------------------------------------------------------------- hover */
 
 @media (hover: hover) and (pointer: fine) {
+  .canvas__pick:hover:not(:disabled),
+  .canvas__zoombtn:hover,
+  .canvas__fit:hover,
+  .canvas__imodel:hover:not(:disabled) {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+
   .canvas__card:hover {
     border-color: var(--border-strong);
   }
@@ -612,63 +855,79 @@
     border-color: var(--accent);
   }
 
-  .canvas__act--away:hover {
+  .canvas__handle:hover .canvas__dot {
+    border-color: var(--accent);
+    background: var(--accent);
+    transform: scale(1.15);
+  }
+
+  .canvas__loop:hover {
+    border-color: var(--border-strong);
+  }
+
+  .canvas__start:hover:not(:disabled) {
+    background: var(--accent-ink);
+  }
+
+  .canvas__stop:hover {
+    border-color: var(--border-strong);
+  }
+
+  .canvas__ishut:hover,
+  .canvas__iremove:hover:not(:disabled) {
+    color: var(--text);
+  }
+
+  .canvas__iremove:hover:not(:disabled) {
     color: var(--danger);
   }
+}
 
-  .canvas__handle:hover {
-    border-color: var(--accent);
-    color: var(--accent);
+/* ------------------------------------------------------------- narrow */
+
+/* Under about 1100px the three bands do not all fit. The palette folds to its
+   marks; the inspector keeps its width, because it is the one you opened. */
+@media (max-width: 1180px) {
+  .canvas__bands {
+    grid-template-columns: 60px minmax(0, 1fr) auto;
   }
 
-  .canvas__kind:hover,
-  .canvas__zoombtn:hover,
-  .canvas__fit:hover {
-    background: var(--bg-sunken);
-    color: var(--text);
+  .canvas__palette {
+    padding: var(--space-3) var(--space-2);
+    align-items: center;
   }
 
-  .canvas__starter:hover {
-    border-color: var(--border-strong);
+  .canvas__band,
+  .canvas__picktext {
+    display: none;
   }
 
-  .canvas__yes:hover,
-  .canvas__no:hover,
-  .canvas__act:hover,
-  .canvas__place:hover {
-    color: var(--text);
-    border-color: var(--border-strong);
-  }
-
-  .canvas__yes:hover,
-  .canvas__place:hover {
-    color: var(--accent-text);
-    border-color: transparent;
-  }
-
-  .canvas__blank:hover {
-    color: var(--text);
+  .canvas__pick {
+    justify-content: center;
+    padding: var(--space-1);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* Still there, because it is the only thing separating a step that is going
+  /* Still there, because it is the only thing separating a block that is going
      from one that is waiting. Simply at rest. */
   .canvas__sweep::after {
     animation: none;
     background: color-mix(in srgb, var(--accent) 55%, transparent);
   }
 
-  .canvas__adder {
+  .canvas__inspector {
     animation: none;
   }
 
-  .canvas__handle:active,
-  .canvas__starter:active,
-  .canvas__yes:active,
-  .canvas__no:active,
-  .canvas__act:active,
-  .canvas__place:active {
+  .canvas__pick:active,
+  .canvas__loop:active,
+  .canvas__start:active,
+  .canvas__stop:active {
+    transform: none;
+  }
+
+  .canvas__handle:hover .canvas__dot {
     transform: none;
   }
 }

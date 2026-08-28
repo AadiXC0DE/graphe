@@ -242,7 +242,7 @@ export default function Palette({ open, commands, onClose, onMac }: Props) {
           />
         </div>
 
-        <div ref={list} id={LIST} className="palette__list" role="listbox" aria-label={SAYS.list}>
+        <div ref={list} id={LIST} className="palette__list scroll--auto" role="listbox" aria-label={SAYS.list}>
           {bands.map((band) => (
             <div key={band.where} className="palette__band" role="group" aria-label={band.where}>
               <div className="palette__bandhead" aria-hidden="true">

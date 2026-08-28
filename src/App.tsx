@@ -81,6 +81,16 @@ import {
   stepsNotOnTheList,
 } from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
+import { asExecutive } from "./agent/executive";
+import {
+  createGoal,
+  elapsedWords,
+  goalElapsed,
+  parseGoalCommand,
+  verifyGoal,
+  withElapsed,
+  type Goal,
+} from "./work/goal";
 import { readDesign } from "./design/reading";
 import { writeToken } from "./design/tokens";
 import { bridge } from "./lib/bridge";
@@ -443,12 +453,29 @@ function Conversation() {
   /** Whether a message gets a looking-around pass before anything is touched.
    *  `auto` decides from the sentence, which is what almost everybody wants;
    *  the other two are for somebody who has an opinion about this one. */
-  const [plans, setPlans] = useState<'auto' | 'always' | 'never' | 'research'>('auto');
+  const [plans, setPlans] = useState<'auto' | 'always' | 'never' | 'research' | 'plan' | 'goal' | 'executive'>('auto');
+  // Keep the persistent read-only gate in the adapter in step with the
+  // chip. While Plan Mode is on, every mutating tool is withheld, not just
+  // the one-shot look-around pass. Cleared only by an explicit Do it or
+  // leaving plan mode.
+  useEffect(() => {
+    const desk = currentDesk(desksNow.current);
+    const where: Where | undefined =
+      desk === null
+        ? undefined
+        : { project: desk.path, ...(desk.address == null ? {} : { conversation: desk.address }) };
+    void bridge.setPlanMode(plans === 'plan', where);
+  }, [plans]);
   /** Research is a one-message choice. While that one run is live, its model
    *  output is kept by conversation so an explicit IMPLEMENTATION PLAN section
    *  can become the build checklist. No word matching decides the next action. */
   const researchRuns = useRef(new Set<string>());
   const researchReports = useRef<Record<string, string>>({});
+  /** Goal Mode — one sentence that keeps verifying after every round. */
+  const [goal, setGoal] = useState<Goal | null>(null);
+  const goalNow = useRef(goal);
+  goalNow.current = goal;
+  const goalRuns = useRef(new Set<string>());
   /** What was asked for while a plan is being made, so approving it can send
    *  the same sentence rather than a reconstruction of it. */
   const asked = useRef<string>("");
@@ -1081,6 +1108,21 @@ function Conversation() {
       })),
     );
   }, []);
+
+  // Toggling Plan Mode from the chip — clicking Plan while already in Plan
+  // exits back to Auto, and Goal is blocked while the persistent read-only
+  // gate is on. This is the UI side; the gate itself lives in the adapter.
+  const handlePlans = useCallback((next: typeof plans) => {
+    if (next === 'plan' && plans === 'plan') {
+      setPlans('auto');
+      return;
+    }
+    if (next === 'goal' && plans === 'plan') {
+      say('Plan mode is on — read-only until you approve the plan. Type /exit-plan or click Plan again to leave.');
+      return;
+    }
+    setPlans(next);
+  }, [plans, say]);
 
   const troubleHere = useCallback((trouble: Trouble) => {
     // A failed connect is not a desk problem — the connect screen is the place
@@ -1968,6 +2010,54 @@ function Conversation() {
               movePane('split');
             }
           }
+          // Goal Mode: after every round with real work, verify whether the objective is met.
+          if (goalNow.current !== null && goalNow.current.status === 'active') {
+            const activeGoal = goalNow.current;
+            const goalOwner = `${where}\u0000${notice.conversation ?? ''}`;
+            const isGoalRun = goalRuns.current.size === 0 || goalRuns.current.has(goalOwner) || goalRuns.current.has(`${where}\u0000`);
+            if (isGoalRun && didWork) {
+              const planForVerify = buildPlanNow.current?.path === where ? buildPlanNow.current.plan : null;
+              const settledInForGoal = desksNow.current.byPath[where];
+              const turnsForVerify =
+                notice.conversation != null && notice.conversation !== settledInForGoal?.address
+                  ? settledInForGoal?.parked[notice.conversation]?.turns ?? []
+                  : settledInForGoal?.turns ?? [];
+              const verdict = verifyGoal(planForVerify, turnsForVerify, activeGoal.objective, activeGoal.planBaselineN);
+              if (!verdict.met) {
+                // No owned tasks for this goal → no signal to auto-verify.
+                // Use the plan shape, not a string match on the reason.
+                const ownedCount =
+                  planForVerify === null
+                    ? 0
+                    : planForVerify.tasks.filter((t) => t.n > activeGoal.planBaselineN).length;
+                if (ownedCount === 0) {
+                  say(`Goal not met — ${verdict.reason}. Add tasks to the build plan for auto-checking, or say /goal clear when done. Not auto-continuing.`);
+                  goalRuns.current.delete(goalOwner);
+                } else if (activeGoal.iterations < 20) {
+                  const nextGoal: Goal = { ...withElapsed(activeGoal), iterations: activeGoal.iterations + 1 };
+                  setGoal(nextGoal);
+                  goalRuns.current.add(goalOwner);
+                  say(`Iteration ${String(nextGoal.iterations)} · Goal not met, task continues — ${verdict.reason}`);
+                  void bridge.prompt(
+                    `Continue toward the goal: ${activeGoal.objective}. ${verdict.reason}`,
+                    [],
+                    { queue: 'followUp' },
+                    { project: where, ...(notice.conversation == null ? {} : { conversation: notice.conversation }) },
+                  );
+                } else {
+                  say(`Goal paused after ${String(activeGoal.iterations)} iterations (budget reached). /goal resume to carry on.`);
+                  setGoal({ ...withElapsed(activeGoal), status: 'paused' });
+                  goalRuns.current.delete(goalOwner);
+                }
+              } else {
+                const finishedGoal: Goal = { ...withElapsed(activeGoal), iterations: activeGoal.iterations + 1, status: 'done' };
+                setGoal(finishedGoal);
+                say(`Iteration ${String(finishedGoal.iterations)} · Goal met, task finished — ${verdict.reason}`);
+                goalRuns.current.delete(goalOwner);
+                goalRuns.current.delete(`${where}\u0000`);
+              }
+            }
+          }
         }
         // Pi tidies on its own as well as when asked, and the ring says the
         // same thing either way — from where somebody is sitting it is one
@@ -2046,6 +2136,7 @@ function Conversation() {
       refreshBuildPlan,
       settledWell,
       movePane,
+      say,
     ],
   );
 
@@ -2173,11 +2264,18 @@ function Conversation() {
       const owner = `${desk.path}\u0000${desk.address ?? ''}`;
       setHolding((current) => ({ ...current, [owner]: false }));
     }
+    // Stopping a running goal also pauses it so it doesn't quietly keep running.
+    if (goalNow.current !== null && goalNow.current.status === 'active') {
+      const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
+      setGoal((current) => (current === null ? current : { ...withElapsed(current), status: 'paused' }));
+      if (owner !== null) goalRuns.current.delete(owner);
+      say('Goal paused — Esc stopped the run. /goal resume to carry on.');
+    }
     void bridge.stop({
       ...(desk === null ? {} : { project: desk.path }),
       ...(desk?.address == null ? {} : { conversation: desk.address }),
     });
-  }, []);
+  }, [say]);
 
 
   /** Shorten the conversation now rather than waiting for it to fill up. The
@@ -2598,14 +2696,153 @@ function Conversation() {
         );
       }
 
+      // Exit plan mode by command — the typed way out besides Do it or
+      // clicking the chip again. Must be before goal handling so /exit-plan
+      // is not mistaken for a goal.
+      const trimmedLower = text.trim().toLowerCase();
+      if (trimmedLower === '/exit-plan' || trimmedLower === '/exit_plan' || trimmedLower === '/plan-exit') {
+        if (plans === 'plan') {
+          setPlans('auto');
+          const deskForExit = currentDesk(desksNow.current);
+          const whereExit: Where | undefined =
+            deskForExit === null
+              ? undefined
+              : { project: deskForExit.path, ...(deskForExit.address == null ? {} : { conversation: deskForExit.address }) };
+          void bridge.setPlanMode(false, whereExit);
+          say('Plan mode off — edits and commands will run again.');
+        } else {
+          say('Not in plan mode.');
+        }
+        return;
+      }
+
+      // Goal commands are handled here, not sent to the model.
+      const parsedGoal = parseGoalCommand(text);
+      // Plan blocks Goal — read-only gate stays until explicitly left.
+      if (plans === 'plan' && parsedGoal !== null && parsedGoal.kind !== 'show') {
+        say('Plan mode is on — read-only until you approve the plan. Type /exit-plan or click Plan again to leave.');
+        return;
+      }
+      if (parsedGoal !== null) {
+        const ownerDesk = currentDesk(desksNow.current);
+        const owner = ownerDesk === null ? null : `${ownerDesk.path}\u0000${ownerDesk.address ?? ''}`;
+        if (parsedGoal.kind === 'show') {
+          const showing = goalNow.current;
+          say(
+            showing === null
+              ? 'No goal set. Use /goal <one sentence> to set one.'
+              : `Goal: ${showing.objective} — ${showing.status}, ${String(showing.iterations)} iterations, ${elapsedWords(goalElapsed(showing))} elapsed.`,
+          );
+          return;
+        }
+        if (parsedGoal.kind === 'set' || parsedGoal.kind === 'replace') {
+          const objective = parsedGoal.objective.trim() === '' ? text.slice(5).trim() : parsedGoal.objective;
+          if (objective === '') {
+            say('Say what done looks like after /goal — one sentence, checkable.');
+            return;
+          }
+          const baseline = (() => {
+            const p = buildPlanNow.current?.plan;
+            if (p === undefined || p === null) return 0;
+            return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
+          })();
+          const created = createGoal(objective, 'doing', baseline);
+          setGoal(withElapsed(created));
+          setPlans('goal');
+          if (owner !== null) goalRuns.current.add(owner);
+          if (howFar !== 'doing') {
+            setHowFarHere('doing');
+            const where: Where = {
+              ...(ownerDesk === null ? {} : { project: ownerDesk.path }),
+              ...(ownerDesk?.address == null ? {} : { conversation: ownerDesk.address }),
+            };
+            void bridge.goAsFarAs('doing', where);
+          }
+          const pricedGoal = quote(ownerDesk?.jobs ?? [], ownerDesk?.spent?.total ?? null, objective);
+          await deliver(objective, pricedGoal.task, { lookFirst: false });
+          return;
+        }
+        if (parsedGoal.kind === 'pause') {
+          if (goalNow.current !== null && goalNow.current.status === 'active') {
+            setGoal({ ...withElapsed(goalNow.current), status: 'paused' });
+            if (owner !== null) goalRuns.current.delete(owner);
+            say('Goal paused — rounds kept, files kept. /goal resume to carry on.');
+          } else {
+            say('No active goal to pause.');
+          }
+          return;
+        }
+        if (parsedGoal.kind === 'resume') {
+          if (goalNow.current !== null && goalNow.current.status === 'paused') {
+            const resumed: Goal = { ...withElapsed(goalNow.current), status: 'active' };
+            setGoal(resumed);
+            setPlans('goal');
+            if (owner !== null) goalRuns.current.add(owner);
+            if (howFar !== 'doing') {
+              setHowFarHere('doing');
+              const where: Where = {
+                ...(ownerDesk === null ? {} : { project: ownerDesk.path }),
+                ...(ownerDesk?.address == null ? {} : { conversation: ownerDesk.address }),
+              };
+              void bridge.goAsFarAs('doing', where);
+            }
+            const pricedResume = quote(ownerDesk?.jobs ?? [], ownerDesk?.spent?.total ?? null, resumed.objective);
+            await deliver(`Carry on toward the goal: ${resumed.objective}`, pricedResume.task, { lookFirst: false });
+          } else {
+            say('No paused goal to resume.');
+          }
+          return;
+        }
+        if (parsedGoal.kind === 'clear') {
+          if (goalNow.current !== null) {
+            const was = goalNow.current.objective;
+            setGoal(null);
+            setPlans('auto');
+            if (owner !== null) goalRuns.current.delete(owner);
+            say(`Goal cleared — was: ${was}`);
+          } else {
+            say('No goal to clear.');
+          }
+          return;
+        }
+        return;
+      }
+
       // Priced against what this project has actually cost so far, which on a
       // first visit is nothing — and the estimate then says so in its own words
       // rather than quoting a precision it does not have.
       const desk = currentDesk(desks);
       const priced = quote(desk?.jobs ?? [], desk?.spent?.total ?? null, text);
+      // Goal Mode has full access — no money or ask pause.
+      const effectiveHowFar: HowFar = plans === 'goal' ? 'doing' : howFar;
+      if (plans === 'goal' && howFar !== 'doing') {
+        setHowFarHere('doing');
+        const where: Where = {
+          ...(desk === null ? {} : { project: desk.path }),
+          ...(desk?.address == null ? {} : { conversation: desk.address }),
+        };
+        void bridge.goAsFarAs('doing', where);
+      }
+      // When Goal Mode is on and no goal exists yet, the sentence just typed
+      // becomes the objective itself.
+      if (plans === 'goal' && goalNow.current === null && text.trim() !== '' && !text.trim().startsWith('/')) {
+        const objective = text.trim();
+        const baseline = (() => {
+          const p = buildPlanNow.current?.plan;
+          if (p === undefined || p === null) return 0;
+          return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
+        })();
+        const created = createGoal(objective, 'doing', baseline);
+        setGoal(withElapsed(created));
+        const ownerDesk = currentDesk(desksNow.current);
+        const owner = ownerDesk === null ? null : `${ownerDesk.path}\u0000${ownerDesk.address ?? ''}`;
+        if (owner !== null) goalRuns.current.add(owner);
+        await deliver(objective, priced.task, { lookFirst: false });
+        return;
+      }
       // Full access is an explicit instruction to proceed. It still records the
       // work, but does not put either kind of large-job pause in its way.
-      const asking = howFar === 'doing' ? null : priced.prompt;
+      const asking = effectiveHowFar === 'doing' ? null : priced.prompt;
       if (asking !== null) {
         setDesks((current) =>
           changeCurrent(current, (one) => ({
@@ -2633,6 +2870,13 @@ function Conversation() {
         // What comes back is a report to answer, not a request to look around.
         justLookedFirst.current = true;
         await deliver(asResearch(text, chosenDepth()), priced.task, { lookFirst: false });
+        return;
+      }
+      // Executive is also one-shot: one coherent take, then back to auto.
+      if (plans === 'executive') {
+        setPlans('auto');
+        justLookedFirst.current = true;
+        await deliver(asExecutive(text), priced.task, { lookFirst: false });
         return;
       }
 
@@ -2677,6 +2921,21 @@ function Conversation() {
       if (desk === null) {
         void send(text);
         return;
+      }
+      // Goal commands are instant — even a queued one should pause/clear now.
+      const parsedHandGoal = parseGoalCommand(text);
+      if (parsedHandGoal !== null) {
+        void send(text);
+        return;
+      }
+      // Goal Mode has full access without asking.
+      if (plans === 'goal' && howFar !== 'doing') {
+        setHowFarHere('doing');
+        const where: Where = {
+          project: desk.path,
+          ...(desk.address == null ? {} : { conversation: desk.address }),
+        };
+        void bridge.goAsFarAs('doing', where);
       }
       // The two quiet choices beside the box, taken at face value: interrupt
       // the live turn with this message, or queue it behind the run. The
@@ -2728,6 +2987,33 @@ function Conversation() {
           // What comes back is a report to answer, not a request to look around.
           justLookedFirst.current = true;
           void deliver(asResearch(text, chosenDepth()), sizeUp(text), { lookFirst: false, queue: 'followUp' });
+          return;
+        }
+        if (plans === 'executive') {
+          setPlans('auto');
+          justLookedFirst.current = true;
+          void deliver(asExecutive(text), sizeUp(text), { lookFirst: false, queue: 'followUp' });
+          return;
+        }
+        if (plans === 'goal') {
+          const owner = `${desk.path}\u0000${desk.address ?? ''}`;
+          if (goalNow.current === null && text.trim() !== '' && !text.trim().startsWith('/')) {
+            const baseline = (() => {
+              const p = buildPlanNow.current?.plan;
+              if (p === undefined || p === null) return 0;
+              return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
+            })();
+            const created = createGoal(text.trim(), 'doing', baseline);
+            setGoal(withElapsed(created));
+            goalRuns.current.add(owner);
+            void deliver(text, sizeUp(text), { lookFirst: false, queue: 'followUp' });
+            return;
+          }
+          // Already have a goal — queue a nudge toward it with full access.
+          if (goalNow.current !== null) {
+            goalRuns.current.add(owner);
+          }
+          void deliver(text, sizeUp(text), { lookFirst: false, queue: 'followUp' });
           return;
         }
         const answering = justLookedFirst.current;
@@ -2797,20 +3083,93 @@ function Conversation() {
       if (repo === null) return;
       const project = currentDesk(desksNow.current)?.path ?? null;
       const repository = repo.full;
+      const repoName = reviewsRepoNow.current;
       const request = navigation.current + 1;
       toChat();
-      void swapConversation(null).then(() => {
-        // A newer project/tab choice may have won while the fresh review
-        // conversation was opening. Never send a repository prompt there.
-        if (
-          project === null ||
-          navigation.current !== request ||
-          currentDesk(desksNow.current)?.path !== project
-        ) return;
-        void send(reviewPrompt(item, repository, repo?.here ?? null));
-      });
+      void (async () => {
+        if (project === null) return;
+        // Root the review in the PR's own checkout: the agent's projectRoot becomes
+        // .graphe/worktrees/pr-N so whereToRead is honest and no extra fetch instruction is needed.
+        const where = {
+          ...(project === null ? {} : { project }),
+          ...(repoName === null ? {} : { repo: repoName }),
+        };
+        let prFolder: string | null = null;
+        let opened: import("./lib/ipc").OpenedProject | null = null;
+        try {
+          const result = await bridge.openPrReview(item.number, where);
+          if (!result.ok) {
+            troubleAt({ project }, result.trouble);
+            return;
+          }
+          prFolder = result.value.folder;
+          opened = result.value.opened;
+        } catch (cause) {
+          // Fallback to old prepare path if new IPC is unavailable (preview)
+          try {
+            const prep = await bridge.preparePrWorktree(item.number, where);
+            if (!prep.ok) {
+              troubleAt({ project }, prep.trouble);
+              return;
+            }
+            prFolder = prep.value;
+            // Create a fresh conversation in the parent and rely on extra instruction
+            await swapConversation(null);
+            if (navigation.current !== request || currentDesk(desksNow.current)?.path !== project) return;
+            const base = reviewPrompt(item, repository, repo?.here ?? null, null);
+            const extra = `\n\nThe PR's code has been checked out at ${prFolder} — read files from there (for example ${prFolder}/src/App.tsx) and treat that folder as the PR root. Do not read from the open project folder for PR files.`;
+            void send(`${base}${extra}`);
+            return;
+          } catch (cause2) {
+            troubleAt({ project }, {
+              what: 'I could not prepare the pull request checkout.',
+              because: cause2 instanceof Error ? cause2.message : 'Something went wrong fetching it.',
+              actionLabel: 'Got it',
+            });
+            return;
+          }
+        }
+        if (navigation.current !== request || currentDesk(desksNow.current)?.path !== project || opened === null || prFolder === null) return;
+        // Put the new PR-rooted conversation on screen, like swapConversation does.
+        const turns = opened.history.reduce((sofar: readonly import("./lib/thread").Turn[], event) => applyEvent(sofar, event), [] as readonly import("./lib/thread").Turn[]);
+        if (opened.history.length > 0 && turns.length === 0) {
+          troubleHere(swapWords.unreadable);
+          return;
+        }
+        setInConversation(opened.conversation);
+        setOwnCopyHere(opened.ownCopy === true);
+        setDesks((current) =>
+          changeDesk(current, opened.path, (one) => {
+            const incoming = opened.address == null ? undefined : one.parked[opened.address];
+            const withoutIncoming = opened.address == null ? one.parked : Object.fromEntries(Object.entries(one.parked).filter(([a]) => a !== opened.address));
+            const parked = one.address === null || one.address === opened.address ? withoutIncoming : { ...withoutIncoming, [one.address]: { turns: one.turns, doing: one.doing, counted: one.counted } };
+            return {
+              ...one,
+              turns,
+              doing: incoming?.doing ?? null,
+              counted: incoming?.counted ?? 0,
+              address: opened.address ?? null,
+              parked,
+              order: opened.address == null || one.order.includes(opened.address) ? one.order : [...one.order, opened.address],
+            };
+          }),
+        );
+        refreshRoom({ project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) });
+        refreshRunning({ project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) });
+        setHowFarHere(opened.howFar ?? 'asking');
+        void bridge.conversations({ project: opened.path }).then((answer) => {
+          if (answer.ok && desksNow.current.current === opened.path) setConversations(answer.value);
+        });
+        const base = reviewPrompt(item, repository, repo?.here ?? null, prFolder);
+        // Add the prompt to the new conversation's desk and send it through the PR-rooted session.
+        setDesks((current) => changeDesk(current, opened.path, (one) => ({ ...one, turns: [...one.turns, said("you", base)] })));
+        const promptWhere = { project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) };
+        void bridge.prompt(base, undefined, undefined, promptWhere).then((answer) => {
+          if (!answer.ok) troubleAt(promptWhere, answer.trouble);
+        });
+      })();
     },
-    [repo, toChat, swapConversation, send],
+    [repo, toChat, swapConversation, send, troubleAt, troubleHere, refreshRoom, refreshRunning],
   );
 
   /* A tab names a conversation inside a project, so going to one is at most two
@@ -2983,6 +3342,18 @@ function Conversation() {
       // so every message straight after an accepted plan got none.
       justLookedFirst.current = false;
       if (go) {
+        // Plan Mode is a persistent gate — Do it is the explicit way out.
+        // Clear the gate before delivering the execution prompt so writes
+        // are not still withheld while the chosen steps run.
+        if (plans === 'plan') {
+          setPlans('auto');
+          const deskForPlan = currentDesk(desksNow.current);
+          const wherePlan: Where | undefined =
+            deskForPlan === null
+              ? undefined
+              : { project: deskForPlan.path, ...(deskForPlan.address == null ? {} : { conversation: deskForPlan.address }) };
+          void bridge.setPlanMode(false, wherePlan);
+        }
         // A build plan keeps the real task list the agent proposed, so a
         // resumed session knows each step and where it got to.
         // Only what was agreed to. The build plan tracks the same list, so a
@@ -3015,7 +3386,7 @@ function Conversation() {
         void deliver(say, sizeUp(say), { lookFirst: false });
       } else setDraft(text);
     },
-    [deliver, desk, desks, refreshBuildPlan],
+    [deliver, desk, desks, refreshBuildPlan, plans],
   );
 
   /**
@@ -3065,6 +3436,8 @@ function Conversation() {
      so a big document can be kicked off and left alone.*/
   useEffect(() => {
     if (desk === null) return;
+    // Plan Mode never auto-approves — stays read-only until an explicit Do it.
+    if (plans === 'plan') return;
     // "Until it's done" is itself the answer, whatever the project's hold-back
     // says: somebody who picked it has already said not to stop and ask.
     if (howFar !== 'doing' && holdsBack(preferences.heldBack, desk.path)) return;
@@ -3074,7 +3447,7 @@ function Conversation() {
     // questions and then answering them yourself is worse than never asking.
     if (waiting.questions.length > 0) return;
     answerPlan(waiting.id, true);
-  }, [desk, preferences.heldBack, answerPlan, howFar]);
+  }, [desk, preferences.heldBack, answerPlan, howFar, plans]);
 
   const respond = useCallback(
     (turnId: string, callId: string, decision: Decision) => {
@@ -4275,7 +4648,7 @@ function Conversation() {
 
   return (
     <main
-      className={`app ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""}`}
+      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -4811,7 +5184,7 @@ function Conversation() {
               onHowFar={setHowFar}
               onComposerPopoverOpenChange={setComposerPopoverOpen}
               plans={plans}
-              onPlans={setPlans}
+              onPlans={handlePlans}
               onSelectModel={selectModel}
               onConnect={openConnect}
               onThinking={changeThinking}

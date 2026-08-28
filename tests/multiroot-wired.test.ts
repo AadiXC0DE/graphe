@@ -41,7 +41,9 @@ describe('the parent never becomes a repository', () => {
     const notes = MAIN.slice(MAIN.indexOf('async function childRepoNotes'), at);
     expect(notes).toContain('not a repository');
     expect(notes).toContain('git -C backend status');
-    expect(ADAPTER).toContain('appendSystemPrompt: [...options.contextNotes]');
+    expect(ADAPTER).toContain('appendSystemPrompt');
+    expect(ADAPTER).toContain('options.contextNotes');
+    expect(ADAPTER).toContain('agentsMdNote');
   });
 });
 
@@ -140,7 +142,7 @@ describe('what reads and what refuses', () => {
     for (const channel of refusals) {
       const at = channel === 'CHANNEL.show' ? MAIN.indexOf('handle<ShowOutcome>(CHANNEL.show') : MAIN.indexOf(channel);
       expect(at, channel).toBeGreaterThan(-1);
-      const window = MAIN.slice(at, at + 1500);
+      const window = MAIN.slice(at, at + 2500);
       expect(window, `${channel} never answers for several projects unasked`).toContain(
         'return fail(SEVERAL_PROJECTS)',
       );

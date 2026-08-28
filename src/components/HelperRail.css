@@ -12,6 +12,36 @@
   margin-bottom: var(--space-2);
   overflow-x: auto;
   scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+
+.helperrail:hover,
+.helperrail:focus-within,
+.helperrail.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.helperrail::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.helperrail:hover::-webkit-scrollbar,
+.helperrail:focus-within::-webkit-scrollbar,
+.helperrail.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.helperrail::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.helperrail::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .helperrail__chip {

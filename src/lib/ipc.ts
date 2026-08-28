@@ -1200,6 +1200,7 @@ export const CHANNEL = {
   repoComment: 'graphe:repo-comment',
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
+  setPlanMode: 'graphe:set-plan-mode',
   running: 'graphe:running',
   stopRunning: 'graphe:stop-running',
   tidyNow: 'graphe:tidy-now',
@@ -1213,6 +1214,8 @@ export const CHANNEL = {
   branchCreate: 'graphe:branch-create',
   worktreeLand: 'graphe:worktree-land',
   worktreeDrop: 'graphe:worktree-drop',
+  prWorktreePrepare: 'graphe:pr-worktree-prepare',
+  prReviewOpen: 'graphe:pr-review-open',
   buildStart: 'graphe:build-start',
   buildPlan: 'graphe:build-plan',
   buildAdvance: 'graphe:build-advance',
@@ -1436,6 +1439,10 @@ export type GrapheApi = {
   worktreeLand(where?: Where): Promise<Result<null>>;
   /** Throw the front conversation's own checkout away, branch and all. */
   worktreeDrop(where?: Where): Promise<Result<null>>;
+  /** Prepare an isolated worktree for a pull request, so the review reads the right files. */
+  preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>>;
+  /** Open a new conversation rooted at the PR worktree, so the review reads the PR's own files. */
+  openPrReview(prNumber: number, where?: Where): Promise<Result<{ folder: string; opened: OpenedProject }>>;
   /** Full text for a library row. `id` is checked against that library first. */
   skillText(id: string, where?: Where): Promise<Result<string>>;
   /** Stop checking before things that would otherwise be asked about, or start
@@ -1444,6 +1451,9 @@ export type GrapheApi = {
   /** Set how far it may go before it stops and asks. Answers with the rung it
    *  is actually on afterwards. */
   goAsFarAs(howFar: HowFar, where?: Where): Promise<Result<HowFar>>;
+  /** Turn Plan Mode's persistent read-only gate on or off. While on, mutating
+   *  tools are withheld for every turn until explicitly cleared. */
+  setPlanMode(on: boolean, where?: Where): Promise<Result<boolean>>;
   /** What is being kept running in this conversation — servers, watchers. */
   running(where?: Where): Promise<Result<readonly RunningPiece[]>>;
   /** Stop one of them. Answers with what is left. */

@@ -45,6 +45,7 @@ import {
 } from '../guard/policy';
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
+import { readAgentsMd } from '../../lib/agentsMd';
 import {
   ALWAYS_WORDS,
   alwaysFile,
@@ -67,6 +68,7 @@ import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
 import { browserFolder, closeBrowser } from './computer';
 import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type CancelBuild, type HelperModel, type HelperPace } from './tools';
+import { lspTool } from './lsp';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
@@ -1547,6 +1549,16 @@ const MOST_AFTER_SAYINGS = 3;
   const always = alwaysFrom(
     await readFile(alwaysFile(options.projectRoot ?? ''), 'utf8').catch(() => null),
   );
+  // AGENTS.md hierarchy — Codex-compatible, closest wins, 32 KiB cap.
+  // Read once at sitting start, no writes. Prepended to system prompt after memory.
+  let agentsMdNote: string | null = null;
+  if (options.projectRoot !== undefined && options.projectRoot !== '') {
+    try {
+      agentsMdNote = await readAgentsMd(options.projectRoot);
+    } catch {
+      agentsMdNote = null;
+    }
+  }
 
   /**
    * Run the things this project always does, at one of the three moments.
@@ -1789,14 +1801,14 @@ const MOST_AFTER_SAYINGS = 3;
   const runtime = await runtimeFor(agentDir);
   /** Filled while the loader runs, which is before anything below can read it. */
   let carried: readonly Carried[] = [];
+  const agentsPrompt = agentsMdNote === null ? [] : [`<agents_md>\n${agentsMdNote}\n</agents_md>`];
+  const allNotes = [...(options.contextNotes ?? []), ...agentsPrompt];
   const loader = new pi.DefaultResourceLoader({
     cwd: options.projectRoot,
     agentDir,
     // A few sentences about the folder itself, when there is something a folder
     // listing cannot say. Empty is the ordinary case and passes nothing through.
-    ...(options.contextNotes === undefined || options.contextNotes.length === 0
-      ? {}
-      : { appendSystemPrompt: [...options.contextNotes] }),
+    ...(allNotes.length === 0 ? {} : { appendSystemPrompt: allNotes }),
     // Extensions are on, but only the ones the person chose for themselves.
     // `extensionsOverride` runs after discovery and before anything is
     // installed into the session, so it is the one place a rule like that can
@@ -2014,6 +2026,13 @@ const MOST_AFTER_SAYINGS = 3;
   // say why. With nothing connected it answers that nothing is, which is a
   // sentence the model can act on.
   if (!benchmarkToolFloor) customTools.push(mcpTool(mcpRegistry));
+
+  // Minimal LSP stub: always available via grep fallback, no external server needed.
+  // grapheTools already adds lspTool when not benchmark; this keeps the session
+  // covered even if that path is bypassed.
+  if (!benchmarkToolFloor && !customTools.some((tool) => tool.name === 'lsp')) {
+    customTools.push(lspTool(options.projectRoot));
+  }
 
   // The shell is Pi's tool, not ours, and it is the one that can change
   // anything on this disk. Pi builds it from `createBashToolDefinition`, whose

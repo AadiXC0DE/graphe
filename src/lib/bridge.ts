@@ -617,6 +617,7 @@ let previewLines: { name: string; current: boolean; upstream: string | null; ahe
 ];
 
 let previewHowFar: HowFar = 'asking';
+let previewPlanMode = false;
   let previewCeiling: SpendLimit | null = null;
   let previewMade = 0;
   let previewCarried: readonly CarriedExtension[] = [
@@ -1057,6 +1058,14 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(previewFail<null>());
     },
 
+    preparePrWorktree(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
+    openPrReview(): Promise<Result<{ folder: string; opened: OpenedProject }>> {
+      return Promise.resolve(previewFail<{ folder: string; opened: OpenedProject }>());
+    },
+
     buildStart(): Promise<Result<BuildPlan>> {
       return Promise.resolve(previewFail<BuildPlan>());
     },
@@ -1102,6 +1111,11 @@ let previewHowFar: HowFar = 'asking';
     goAsFarAs(howFar: HowFar): Promise<Result<HowFar>> {
       previewHowFar = howFar;
       return Promise.resolve(done(previewHowFar));
+    },
+
+    setPlanMode(on: boolean): Promise<Result<boolean>> {
+      previewPlanMode = on;
+      return Promise.resolve(done(previewPlanMode));
     },
 
     running(): Promise<Result<readonly RunningPiece[]>> {
@@ -1949,6 +1963,8 @@ function connect(): Bridge {
     branchCreate: (name, where) => api.branchCreate(name, where),
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),
+    preparePrWorktree: (prNumber, where) => api.preparePrWorktree(prNumber, where),
+    openPrReview: (prNumber, where) => api.openPrReview(prNumber, where),
     buildStart: (source, where) => api.buildStart(source, where),
     buildPlan: (where) => api.buildPlan(where),
     buildAdvance: (op, where) => api.buildAdvance(op, where),
@@ -1957,6 +1973,7 @@ function connect(): Bridge {
     buildCancel: (where) => api.buildCancel(where),
     stopAsking: (on, where) => api.stopAsking(on, where),
     goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
+    setPlanMode: (on, where) => api.setPlanMode(on, where),
     running: (where) => api.running(where),
     stopRunning: (id, where) => api.stopRunning(id, where),
     carried: (where) => api.carried(where),

@@ -172,7 +172,7 @@ export default function Connected({ open, state, onClose, onCheck, onSave, onGet
         </button>
       </header>
 
-      <div className="sheet__body">
+      <div className="sheet__body scroll--auto">
         <div className="wired">
           <p className="wired__what">{SAYS.what}</p>
           <p className="wired__how">{SAYS.how}</p>

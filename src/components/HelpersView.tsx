@@ -80,7 +80,7 @@ export default function HelpersView({ helpers, at, onClose }: Props) {
         </button>
       </header>
 
-      <div className="sheet__body helpersview">
+      <div className="sheet__body helpersview scroll--auto">
         {helpers.length === 0 ? (
           <p className="sheet__nothing helpersview__none">{SAYS.none}</p>
         ) : (

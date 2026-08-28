@@ -70,15 +70,42 @@
      use-stick-to-bottom watches, and it identifies the scroller it is being
      asked about by reading the computed `overflow` shorthand. */
   overflow: auto;
-  /* No bar on the window itself. macOS apps do not put one down the side of
-     their main content, and under *Show scroll bars: Always* Chromium would
-     draw a permanent classic one 328px from the words it belongs to, on top of
-     the rail. Hidden, not disabled: wheel, trackpad and keyboard all still
-     scroll, and the small boxes that scroll on purpose keep their own bar. */
+  /* Auto-hide: invisible until hover, focus or scrolling. Keeps the gutter
+     stable so the column does not jump when the bar appears. */
   scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
   /* The browser's own scroll anchoring and a stick-to-bottom hook are two
      things trying to hold the same rope. Ours wins. */
   overflow-anchor: none;
+}
+
+.app:hover,
+.app:focus-within,
+.app.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.app::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.app:hover::-webkit-scrollbar,
+.app:focus-within::-webkit-scrollbar,
+.app.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.app::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.app::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* The same short ramp the composer has, the other way up.

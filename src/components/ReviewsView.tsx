@@ -158,7 +158,7 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
             <kbd className="sheet__key">Esc</kbd>
           </button>
         </header>
-        <div className="sheet__body">
+        <div className="sheet__body scroll--auto">
           <div className="reviews reviews--empty">
             <h2 className="reviews__none">{SAYS.noRepo}</h2>
             <p className="reviews__detail">{SAYS.noRepoDetail}</p>
@@ -224,7 +224,7 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
         </button>
       </header>
 
-      <div className="sheet__body">
+      <div className="sheet__body scroll--auto">
         {chosen === null ? (
           <div className="reviews reviews--empty">
             <div className="reviews__blank">

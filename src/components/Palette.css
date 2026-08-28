@@ -91,9 +91,39 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  scrollbar-width: none;
+  scrollbar-color: var(--border-strong) transparent;
   /* A row scrolled to by the arrow keys lands with air under it rather than
      wedged against the foot. */
   scroll-padding-block: var(--space-2);
+}
+
+.palette__list:hover,
+.palette__list:focus-within,
+.palette__list.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.palette__list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.palette__list:hover::-webkit-scrollbar,
+.palette__list:focus-within::-webkit-scrollbar,
+.palette__list.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.palette__list::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.palette__list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .palette__band + .palette__band {

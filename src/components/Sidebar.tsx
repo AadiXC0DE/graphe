@@ -170,7 +170,7 @@ export default function Sidebar({
               about it. Only this band scrolls — the projects, the work to use
               and the foot stay put — so a long history never rides the whole
               shelf off the bottom of the window. */}
-          <section className="shelf__band shelf__band--scroll">
+          <section className="shelf__band shelf__band--scroll scroll--auto">
             <div className="shelf__bandtop">
               <h2 className="shelf__caption">Conversations</h2>
               <button

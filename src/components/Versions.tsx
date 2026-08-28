@@ -122,7 +122,7 @@ export default function Versions({
   }
 
   return (
-    <aside className="rail" aria-label="Versions of your project">
+    <aside className="rail scroll--auto" aria-label="Versions of your project">
       {bare === true ? null : <h2 className="rail__title">Commits</h2>}
 
       {putBack === null ? null : (

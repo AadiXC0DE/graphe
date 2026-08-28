@@ -19,18 +19,40 @@
   background: var(--bg);
   border-left: 1px solid var(--border);
   overflow-y: auto;
-  /* No bar down the window's right edge. This panel is fixed to the glass top
-     to bottom, so the thin one every scroller inherits runs the whole height of
-     the window — furniture beside the work, and hardest to explain in full
-     screen where there is no frame around it. The same reason the conversation
-     scroller has none. Hidden, not disabled: wheel, trackpad and keyboard all
-     still scroll it. */
+  /* Auto-hide: invisible until hover, focus or scrolling. Keeps the gutter
+     stable so the column does not jump. */
   scrollbar-width: none;
-  /* Inert while the bar is hidden, and kept for the day it is not: without it
-     the panel's contents jump sideways the moment one appears. */
+  scrollbar-color: var(--border-strong) transparent;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
+}
 
+.overview:hover,
+.overview:focus-within,
+.overview.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.overview::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.overview:hover::-webkit-scrollbar,
+.overview:focus-within::-webkit-scrollbar,
+.overview.is-scrolling::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.overview::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.overview::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* Nothing sits above this panel — no strip, and no traffic lights on this side

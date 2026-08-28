@@ -695,7 +695,7 @@ export default function Composer({
 
       <textarea
         ref={areaRef}
-        className="composer__input"
+        className="composer__input scroll--auto"
         value={value}
         rows={1}
         autoFocus={autoFocus}

@@ -126,9 +126,9 @@ describe('the answer to a look-around is built, not looked at again', () => {
   });
 
   it('turns the look-around off for the message that answers it', () => {
-    // Both send paths, and both ways into research.
+    // Both send paths, and both ways into research (plus executive one-shot).
     expect(app.match(/const answering = justLookedFirst\.current;/g)?.length).toBe(2);
-    expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(4);
+    expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(6);
     // The rule itself lives where it can be tested, and both paths call it.
     expect(app.match(/shouldLookFirst\(\{ plans, answering, text \}\)/g)?.length).toBe(2);
   });

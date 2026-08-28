@@ -1997,9 +1997,13 @@ function Conversation() {
                   : settledInForGoal?.turns ?? [];
               const verdict = verifyGoal(planForVerify, turnsForVerify, activeGoal.objective, activeGoal.planBaselineN);
               if (!verdict.met) {
-                // No checklist for this goal → no signal to auto-verify (covers
-                // no plan and leftover plan with no owned tasks). Don't loop 20.
-                if (verdict.reason.includes('No checklist for this goal')) {
+                // No owned tasks for this goal → no signal to auto-verify.
+                // Use the plan shape, not a string match on the reason.
+                const ownedCount =
+                  planForVerify === null
+                    ? 0
+                    : planForVerify.tasks.filter((t) => t.n > activeGoal.planBaselineN).length;
+                if (ownedCount === 0) {
                   say(`Goal not met — ${verdict.reason}. Add tasks to the build plan for auto-checking, or say /goal clear when done. Not auto-continuing.`);
                   goalRuns.current.delete(goalOwner);
                 } else if (activeGoal.iterations < 20) {

@@ -142,7 +142,7 @@ describe('what reads and what refuses', () => {
     for (const channel of refusals) {
       const at = channel === 'CHANNEL.show' ? MAIN.indexOf('handle<ShowOutcome>(CHANNEL.show') : MAIN.indexOf(channel);
       expect(at, channel).toBeGreaterThan(-1);
-      const window = MAIN.slice(at, at + 1500);
+      const window = MAIN.slice(at, at + 2500);
       expect(window, `${channel} never answers for several projects unasked`).toContain(
         'return fail(SEVERAL_PROJECTS)',
       );

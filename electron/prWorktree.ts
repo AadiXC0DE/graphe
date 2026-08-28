@@ -36,24 +36,21 @@ export async function preparePrWorktree(project: string, prNumber: number): Prom
   const run = gitRunHereFor();
   const fetched = await gitRun(project, ['fetch', 'origin', `pull/${normalized}/head`]);
   if (fetched.code !== 0) throw new Error('Could not fetch PR');
-  // Ensure the branch points at the freshly fetched PR head — reuse of graphe/pr-N
-  // without resetting would be stale on a second review of the same number.
-  await gitRun(project, ['branch', '-f', `graphe/pr-${normalized}`, 'FETCH_HEAD']);
-  // If a worktree already exists at folder, reset it to the new branch.
-  const existingWorktree = await run(['rev-parse', '--verify', `refs/heads/graphe/pr-${normalized}`], { cwd: project });
-  if (existingWorktree.code === 0) {
-    const check = await run(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: folder });
-    if (check.code === 0) {
-      // Folder is a worktree — reset it in place.
-      await gitRun(folder, ['reset', '--hard', `graphe/pr-${normalized}`]);
-      await gitRun(folder, ['clean', '-fd']);
-      return { folder };
-    }
-  }
-  const created = await createWorktree(run, project, `pr-${normalized}`, { ref: 'FETCH_HEAD' }, { folder });
+  // If a worktree already exists at folder, remove it first so the branch
+  // can be force-updated — git refuses `branch -f` while the branch is
+  // checked out in a worktree, which would leave reset --hard pointing at
+  // the old tip.
+  await run(['worktree', 'remove', '--force', folder], { cwd: project }).catch(() => undefined);
+  await run(['worktree', 'prune'], { cwd: project }).catch(() => undefined);
+  // Ensure the branch points at the freshly fetched PR head
+  const branched = await gitRun(project, ['branch', '-f', `graphe/pr-${normalized}`, 'FETCH_HEAD']);
+  if (branched.code !== 0) throw new Error('Could not update PR branch to FETCH_HEAD');
+  // Fresh worktree at FETCH_HEAD via the branch
+  const created = await createWorktree(run, project, `pr-${normalized}`, { ref: `graphe/pr-${normalized}` }, { folder });
   if (!created.ok) {
-    const existing = await run(['rev-parse', '--verify', `refs/heads/graphe/pr-${normalized}`], { cwd: project });
-    if (existing.code !== 0) throw new Error(created.because);
+    // Fallback: try direct worktree add if createWorktree's branch step raced
+    const direct = await run(['worktree', 'add', '--force', folder, `graphe/pr-${normalized}`], { cwd: project });
+    if (direct.code !== 0) throw new Error(created.because);
   }
   return { folder };
 }

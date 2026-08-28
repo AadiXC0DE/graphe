@@ -6894,12 +6894,33 @@ function register(): void {
     // Per-child when a repo is named: folder and timeline come from there.
     // A folder holding several projects has no folder-level history to land into
     // — unless where.repo names one child, then that child's timeline is used.
-    // Must not use folderFor() here: it prefers the checkout's own folder
-    // (entry.folder), which would make bringBack(worktree, worktree) and drop
-    // the worktree against itself — committed work would look already applied and
-    // then be deleted. Use the real project (or named child) as repo.
-    const repo = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
-    const history = await timelineFor(open as unknown as Workspace<Held>, where);
+    // Must not use folderFor() or timelineFor() here: both prefer the checkout's
+    // own folder (entry.folder), which would make bringBack(worktree, worktree)
+    // and snapshot the worktree then delete it — landed files would sit
+    // uncommitted with no restore point. Use the real project (or named child).
+    const child = childRepoFor(open as unknown as Workspace<Held>, where);
+    const repo = child?.path ?? open.path;
+    let history: Timeline | null = null;
+    if (child !== null) {
+      const existing = open.held.childTimelines.get(child.path);
+      if (existing !== undefined) {
+        try {
+          history = await existing;
+        } catch {
+          history = null;
+        }
+      } else {
+        try {
+          const created = Timeline.open(child.path);
+          open.held.childTimelines.set(child.path, created);
+          history = await created;
+        } catch {
+          history = null;
+        }
+      }
+    } else {
+      history = open.held.timeline;
+    }
     if (history === null) return fail(SEVERAL_PROJECTS);
     await putDownCopyConversation(open, entry.address);
     if ((await reopenCheckout(repo, entry)) === null) {

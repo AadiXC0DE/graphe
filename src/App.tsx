@@ -1996,8 +1996,22 @@ function Conversation() {
                   ? settledInForGoal?.parked[notice.conversation]?.turns ?? []
                   : settledInForGoal?.turns ?? [];
               const verdict = verifyGoal(planForVerify, turnsForVerify, activeGoal.objective);
-              if (!verdict.met) {
-                if (activeGoal.iterations < 20) {
+              // Leftover complete plan from before this goal should not satisfy it
+              const isLeftoverComplete =
+                planForVerify !== null &&
+                planForVerify.total > 0 &&
+                planForVerify.done === planForVerify.total &&
+                activeGoal.iterations === 0;
+              if (isLeftoverComplete) {
+                say(`Goal has a leftover complete plan — add new tasks for this goal or say /goal clear. Not auto-continuing.`);
+                goalRuns.current.delete(goalOwner);
+              } else if (!verdict.met) {
+                // No checklist means no signal to auto-verify — don't loop 20 times in doing
+                if (planForVerify === null || planForVerify.total === 0) {
+                  say(`Goal not met — ${verdict.reason}. Add tasks to the build plan for auto-checking, or say /goal clear when done. Not auto-continuing.`);
+                  goalRuns.current.delete(goalOwner);
+                  // Keep goal active but not looping; user can add plan or resume
+                } else if (activeGoal.iterations < 20) {
                   const nextGoal: Goal = { ...withElapsed(activeGoal), iterations: activeGoal.iterations + 1 };
                   setGoal(nextGoal);
                   goalRuns.current.add(goalOwner);

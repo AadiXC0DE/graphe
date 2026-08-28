@@ -770,6 +770,78 @@
   opacity: 0.6;
 }
 
+/* What this block is shown. Small, because the words are the block and these
+   are what the words are about. */
+.canvas__ishots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.canvas__ishot {
+  position: relative;
+  display: block;
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.canvas__ishot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.canvas__ishotoff {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+.canvas__iadd {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 52px;
+  height: 52px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__iadd--off {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.canvas__iaddsays {
+  font-size: 9px;
+  line-height: 1.1;
+  padding: 0 2px;
+}
+
+.canvas__iadd input {
+  display: none;
+}
+
 .canvas__imodels {
   display: flex;
   flex-direction: column;
@@ -980,6 +1052,11 @@
   .canvas__full:hover {
     background: var(--bg-sunken);
     color: var(--text);
+  }
+
+  .canvas__iadd:not(.canvas__iadd--off):hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .canvas__ishut:hover,

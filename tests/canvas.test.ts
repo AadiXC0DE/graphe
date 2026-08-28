@@ -21,6 +21,8 @@ import {
   join,
   layOut,
   LOOPS,
+  MOST_PICTURES,
+  nextUp,
   notReady,
   place,
   placeLoop,
@@ -249,6 +251,31 @@ describe('whether it can start', () => {
   });
 });
 
+describe('what comes next', () => {
+  it('starts with the one that waits for nothing', () => {
+    const flow = chained('look', 'work', 'review');
+    expect(nextUp(flow)?.id).toBe(flow.blocks[0]!.id);
+  });
+
+  it('moves on once the one before it has finished', () => {
+    const flow = chained('look', 'work', 'review');
+    const [look, work] = flow.blocks.map((one) => one.id);
+    expect(nextUp({ ...flow, done: [look!] })?.id).toBe(work);
+  });
+
+  it('never sends what follows a block that did not happen', () => {
+    const flow = chained('look', 'work', 'review');
+    // Only the second is done, which cannot happen — but if it did, the third
+    // must not go: it would be working against a change nobody made.
+    expect(nextUp({ ...flow, done: [flow.blocks[1]!.id] })?.id).toBe(flow.blocks[0]!.id);
+  });
+
+  it('has nothing left to send once everything has finished', () => {
+    const flow = chained('look', 'review');
+    expect(nextUp({ ...flow, done: flow.blocks.map((one) => one.id) })).toBeNull();
+  });
+});
+
 describe('the order it goes on the board in', () => {
   it('never puts a block before the one it waits for', () => {
     const flow = chained('look', 'work', 'checks', 'review');
@@ -425,6 +452,51 @@ describe('reading a flow off the disk', () => {
     expect(flow?.blocks[0]?.model).toEqual({ providerId: 'anthropic', modelId: 'claude' });
     expect(flow?.blocks[1]?.model).toBeNull();
     expect(flow?.blocks[2]?.model).toBeNull();
+  });
+
+  it('keeps a picture only when it is whole, and never more than it will carry', () => {
+    const one = { name: 'a.png', mimeType: 'image/png', bytes: 'AAA' };
+    const flow = readFlow({
+      id: 'f',
+      blocks: [
+        { id: 'a', kind: 'work', pictures: [one, { name: 'b.png' }, { ...one, bytes: '' }] },
+        { id: 'b', kind: 'work', pictures: Array.from({ length: 9 }, () => one) },
+        { id: 'c', kind: 'work', pictures: 'a photo' },
+      ],
+    });
+    expect(flow?.blocks[0]?.pictures).toEqual([one]);
+    expect(flow?.blocks[1]?.pictures).toHaveLength(MOST_PICTURES);
+    expect(flow?.blocks[2]?.pictures).toBeUndefined();
+  });
+
+  it('keeps a rung a block was given, and drops one nobody has', () => {
+    const flow = readFlow({
+      id: 'f',
+      blocks: [
+        { id: 'a', kind: 'work', howFar: 'doing' },
+        { id: 'b', kind: 'work', howFar: 'sideways' },
+      ],
+    });
+    expect(flow?.blocks[0]?.howFar).toBe('doing');
+    expect(flow?.blocks[1]?.howFar).toBeUndefined();
+  });
+
+  it('comes back at the rung the canvas was set to, and asks first when it is nonsense', () => {
+    expect(readFlow({ id: 'f', blocks: [], howFar: 'changing' })?.howFar).toBe('changing');
+    expect(readFlow({ id: 'f', blocks: [], howFar: 'whenever' })?.howFar).toBe('asking');
+  });
+
+  it('never comes back mid-run: the window that was running it is gone', () => {
+    const flow = readFlow({
+      id: 'f',
+      blocks: [{ id: 'a', kind: 'checks' }, { id: 'b', kind: 'review', after: 'a' }],
+      running: 'a',
+      done: ['a', 'nobody-has-this'],
+      startedAt: 5,
+    });
+    expect(flow?.running).toBeNull();
+    // What did finish is still finished, and a name nobody has is not.
+    expect(flow?.done).toEqual(['a']);
   });
 
   it('never comes back claiming to have started when it did not', () => {

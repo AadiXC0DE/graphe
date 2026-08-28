@@ -43,7 +43,23 @@ export type Block = {
   howFar?: HowFar;
   /** Look around and propose before touching anything. */
   lookFirst?: boolean;
+  /** Pictures this block is sent with, the way a message is sent with them. */
+  pictures?: readonly BlockPicture[];
 };
+
+/** One picture on a block. Held whole rather than as a path: a flow is drawn
+ *  once and run later, and a file that moved between the two would be a block
+ *  that quietly stopped being about anything. */
+export type BlockPicture = {
+  name: string;
+  mimeType: string;
+  /** Base64, without the data: prefix — the same shape the shell carries. */
+  bytes: string;
+};
+
+/** Enough to show it something; not so many that a flow file becomes a photo
+ *  album. */
+export const MOST_PICTURES = 4;
 
 export type Flow = {
   /** Ours, and stable for as long as the flow exists. A canvas is a tab like a
@@ -128,6 +144,9 @@ export const canvasWords = {
   whichever: 'Whatever is answering',
   waitsFor: 'Waits for',
   nothing: 'Nothing — it goes first',
+  shows: 'Shows it',
+  addPicture: 'Add a picture',
+  tooMany: (n: number): string => `A block carries up to ${String(n)} pictures.`,
   remove: 'Remove',
   connect: 'Drag from a block’s dot to the one that should follow it',
   /** Under the title. */
@@ -515,6 +534,23 @@ export function waitingOn(flow: Flow, id: string): readonly Block[] {
 
 const KINDS = new Set<string>(BLOCKS.map((one) => one.kind));
 
+function readPictures(value: unknown): readonly BlockPicture[] {
+  if (!Array.isArray(value)) return [];
+  const kept: BlockPicture[] = [];
+  for (const one of value as readonly unknown[]) {
+    if (typeof one !== 'object' || one === null) continue;
+    const raw = one as Record<string, unknown>;
+    const name = raw['name'];
+    const mimeType = raw['mimeType'];
+    const bytes = raw['bytes'];
+    if (typeof name !== 'string' || typeof mimeType !== 'string' || typeof bytes !== 'string') continue;
+    if (mimeType.trim() === '' || bytes === '') continue;
+    kept.push({ name, mimeType, bytes });
+    if (kept.length === MOST_PICTURES) break;
+  }
+  return kept;
+}
+
 function readModel(value: unknown): BlockModel {
   if (typeof value !== 'object' || value === null) return null;
   const raw = value as Record<string, unknown>;
@@ -552,6 +588,9 @@ export function readFlow(raw: unknown): Flow | null {
       after: typeof block['after'] === 'string' ? block['after'] : null,
       ...(isHowFar(block['howFar']) ? { howFar: block['howFar'] } : {}),
       ...(block['lookFirst'] === true ? { lookFirst: true } : {}),
+      ...(readPictures(block['pictures']).length === 0
+        ? {}
+        : { pictures: readPictures(block['pictures']) }),
     });
   }
 

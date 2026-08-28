@@ -4388,9 +4388,15 @@ function Conversation() {
       const where: Where = { project: path, conversation: flow.conversation };
       const rung = block.howFar ?? flow.howFar;
       await bridge.goAsFarAs(rung, where);
+      const shown = (block.pictures ?? []).map((one) => ({
+        kind: 'image' as const,
+        name: one.name,
+        mimeType: one.mimeType,
+        bytes: one.bytes,
+      }));
       const answer = await bridge.prompt(
         asksOf(block),
-        undefined,
+        shown.length === 0 ? undefined : shown,
         block.lookFirst === true ? { lookFirst: true } : undefined,
         where,
       );

@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as Pressed } from 'react';
 import {
   BLOCKS,
   canvasWords,
+  MOST_PICTURES,
   RUNGS,
   canWaitFor,
   change,
@@ -17,6 +18,7 @@ import {
   specOf,
   waitingOn,
   type Block,
+  type BlockPicture,
   type BlockKind,
   type BlockModel,
   type Flow,
@@ -688,6 +690,27 @@ function Trailing({
   );
 }
 
+/** A picture read the way the shell wants it: base64, no data: prefix. Anything
+ *  that will not read is one picture missing rather than a thrown error. */
+async function takePictures(files: readonly File[]): Promise<readonly BlockPicture[]> {
+  const taken: BlockPicture[] = [];
+  for (const file of files.slice(0, MOST_PICTURES)) {
+    const bytes = await new Promise<string | null>((settle) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const read = typeof reader.result === 'string' ? reader.result : '';
+        const comma = read.indexOf(',');
+        settle(comma === -1 ? null : read.slice(comma + 1));
+      };
+      reader.onerror = () => settle(null);
+      reader.readAsDataURL(file);
+    });
+    if (bytes === null || bytes === '') continue;
+    taken.push({ name: file.name, mimeType: file.type || 'image/png', bytes });
+  }
+  return taken;
+}
+
 /* -------------------------------------------------------------- inspector */
 
 function Inspector({
@@ -769,6 +792,52 @@ function Inspector({
           placeholder={spec.needsWords ? 'Tighten the nav on mobile' : spec.says}
           onChange={(event) => onChange({ says: event.target.value })}
         />
+
+        <h3 className="canvas__iband">{canvasWords.shows}</h3>
+        <div className="canvas__ishots">
+          {(block.pictures ?? []).map((picture, at) => (
+            <span className="canvas__ishot" key={`${picture.name}-${String(at)}`}>
+              <img src={`data:${picture.mimeType};base64,${picture.bytes}`} alt={picture.name} />
+              <button
+                type="button"
+                className="canvas__ishotoff"
+                disabled={going}
+                aria-label={`Take ${picture.name} off this block`}
+                onClick={() =>
+                  onChange({ pictures: (block.pictures ?? []).filter((_, index) => index !== at) })
+                }
+              >
+                <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
+                  <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </span>
+          ))}
+          {(block.pictures ?? []).length >= MOST_PICTURES ? null : (
+            <label className={`canvas__iadd ${going ? 'canvas__iadd--off' : ''}`}>
+              <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden="true">
+                <path d="M7 2.5v9M2.5 7h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
+              <span className="canvas__iaddsays">{canvasWords.addPicture}</span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={going}
+                onChange={(event) => {
+                  const chosen = [...(event.target.files ?? [])];
+                  event.target.value = '';
+                  void takePictures(chosen).then((taken) => {
+                    if (taken.length === 0) return;
+                    onChange({
+                      pictures: [...(block.pictures ?? []), ...taken].slice(0, MOST_PICTURES),
+                    });
+                  });
+                }}
+              />
+            </label>
+          )}
+        </div>
 
         <h3 className="canvas__iband">{canvasWords.runBy}</h3>
         <div className="canvas__imodels" role="radiogroup" aria-label={canvasWords.runBy}>

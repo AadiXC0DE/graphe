@@ -128,6 +128,9 @@ Whatever is answering does the work; a stronger one is asked before a plan, afte
 **40 · Rename across the project**
 `formatBytes` becomes `formatFileSize` everywhere it is used, in every file that uses it, in one step — with a preview first, credentials and binaries left alone, and a restore point before a single file is written.
 
+**41 · Goal mode**
+One sentence that says what done means, and it keeps going: full access while the goal stands, a check after every round for whether the objective has been met, and the next round started on its own if not. Twenty rounds and it stops and says so, so "carries on by itself" does not mean "for ever".
+
 ---
 
 ## Under the hood
@@ -138,4 +141,5 @@ Whatever is answering does the work; a stronger one is asked before a plan, afte
 - **Debugger:** a small client for the standard Debug Adapter Protocol, lldb-dap, dlv dap and debugpy speak it natively.
 - **Connected tools:** the official MCP SDK, stdio servers, started lazily, killed with the session.
 - **Safety:** a pure, synchronous policy engine, no disk, no clock, the same call always gives the same answer, which is what makes it testable against adversarial input.
-- **Quality:** typecheck, lint, the full test suite (on macOS, where the sandbox tests live) and both bundles run on every pull request. Over four thousand tests.
+- **Quality:** typecheck, lint, the full test suite (on macOS, where the sandbox tests live) and both bundles run on every pull request. Over five thousand tests.
+- **Platform:** macOS, Apple silicon and Intel — that is the whole of `electron-builder.js`, and the only build there is. Graphe is an Electron app and the source is open, so Windows and Linux can be built from it, but nothing is set up for that yet and neither has been tried.

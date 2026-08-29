@@ -1858,6 +1858,15 @@ a {
   font-size: 0.75rem;
 }
 
+/* Sits under the download, not adrift from it. */
+.cta__note {
+  margin: 10px auto 0;
+  max-width: 54ch;
+  color: var(--haze-dim);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
 .copy {
   margin-top: 28px;
   display: inline-flex;

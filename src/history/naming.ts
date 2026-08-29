@@ -77,6 +77,8 @@ export function isSafeBranchName(name: string): boolean {
   if (name === '' || name.length > 200) return false;
   if (name.startsWith('/') || name.endsWith('/') || name.includes('//')) return false;
   if (name.endsWith('.') || name.includes('..') || name.includes('@{')) return false;
+  // Control characters are exactly what git refuses, so the range is the point.
+  // eslint-disable-next-line no-control-regex
   if (/[\s~^:?*[\\\x00-\x1f\x7f]/.test(name)) return false;
   return name
     .split('/')

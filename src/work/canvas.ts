@@ -127,9 +127,10 @@ export function newFlow(name = canvasWords.untitled): Flow {
     blocks: [],
     conversation: null,
     repo: null,
-    // The same rung a conversation opens on. A canvas is not a reason to be
-    // asked less, and the row in its own bar is where that is changed.
-    howFar: 'asking',
+    // A flow is left to run: the whole point is walking away from it. Stopping
+    // to ask would stop it somewhere nobody is looking, so it starts at the
+    // rung that does not — and the row in its own bar is where that changes.
+    howFar: 'doing',
     running: null,
     rounds: 0,
     done: [],
@@ -189,6 +190,7 @@ export const canvasWords = {
   waitsFor: 'Runs after',
   /** Only where the project holds several. */
   which: 'Works in',
+  everyBlock: 'Every block runs on this unless it names its own',
   whichNote: 'Which project inside this folder the whole flow works in',
   nothing: 'Nothing — it starts the flow',
   /** In the picker, above the blocks it could be made to wait for. */
@@ -243,6 +245,18 @@ export const canvasWords = {
   endsNote: 'Nothing follows this yet — drag from here to add what does',
   /** Over what a block came to. */
   came: 'What it came to',
+  /** Along the foot while it is going. A block can run for twenty minutes, and
+   *  "Going" on a card is not enough to know it has not hung. */
+  working: 'Working…',
+  asksYou: 'It has stopped to ask you something',
+  watchIt: 'Watch it work',
+  answerIt: 'Answer it',
+  clear: 'Clear',
+  clearNote: 'Take every block off this canvas',
+  clearSure: (n: number): string =>
+    `Take all ${String(n)} blocks off? What the run said stays in the conversation.`,
+  clearYes: 'Clear it',
+  clearNo: 'Keep them',
   /** The band along the foot once a run is over. */
   ending: {
     finished: 'Finished',
@@ -943,7 +957,7 @@ export function readFlow(raw: unknown): Flow | null {
     blocks: standing,
     conversation: typeof conversation === 'string' && conversation !== '' ? conversation : null,
     repo: typeof held['repo'] === 'string' && held['repo'] !== '' ? held['repo'] : null,
-    howFar: isHowFar(held['howFar']) ? held['howFar'] : 'asking',
+    howFar: isHowFar(held['howFar']) ? held['howFar'] : 'doing',
     // Nothing is running the moment this is read: the window that was running
     // it is gone, and claiming otherwise would draw a block that never moves.
     running: typeof running === 'string' && have2.has(running) ? null : null,

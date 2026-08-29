@@ -607,9 +607,12 @@ describe('reading a flow off the disk', () => {
     expect(startsAt(flow).map((one) => one.id).sort()).toEqual([head, flow.blocks[2]!.id].sort());
   });
 
-  it('comes back at the rung the canvas was set to, and asks first when it is nonsense', () => {
+  it('comes back at the rung the canvas was set to, and runs on when it is nonsense', () => {
     expect(readFlow({ id: 'f', blocks: [], howFar: 'changing' })?.howFar).toBe('changing');
-    expect(readFlow({ id: 'f', blocks: [], howFar: 'whenever' })?.howFar).toBe('asking');
+    // A flow is left to run. Stopping to ask would stop it where nobody is
+    // looking, so the fallback is the rung that does not stop.
+    expect(readFlow({ id: 'f', blocks: [], howFar: 'whenever' })?.howFar).toBe('doing');
+    expect(newFlow().howFar).toBe('doing');
   });
 
   it('never comes back mid-run: the window that was running it is gone', () => {

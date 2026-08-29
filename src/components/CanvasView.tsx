@@ -73,6 +73,10 @@ type Props = {
   /** Bring the conversation this canvas ran in to the front, where every turn
    *  it took can be read. Absent until it has run once and has one. */
   onOpenThread?: (() => void) | undefined;
+  /** What the turn in flight is doing this second, and whether it has stopped
+   *  to ask. Without it a block that ran for twenty minutes said "Going" and
+   *  nothing else. */
+  doing?: { step: string | null; asking: boolean } | undefined;
 };
 
 /** A model's own name, rather than the id it is addressed by. */
@@ -201,7 +205,7 @@ function Mark({ kind }: { kind: BlockKind }) {
  * ordinary turn in this canvas's own conversation, and only once Start has
  * been pressed.
  */
-export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, thinking, onThinking, repos = [], full, onFull, onOpenThread }: Props) {
+export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, thinking, onThinking, repos = [], full, onFull, onOpenThread, doing }: Props) {
   const surface = useRef<HTMLDivElement>(null);
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -214,6 +218,11 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
    *  the hand lets go, which set the card down one step short of the drop. */
   const movingNow = useRef<{ id: string; x: number; y: number } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
+  /** Asked before every block goes. Taking a whole canvas off by accident is
+   *  the one thing here that cannot be undone by dragging something back. */
+  const [clearing, setClearing] = useState(false);
+  /** A line somebody pressed, so it can be taken off without a drag. */
+  const [chosenLine, setChosenLine] = useState<{ from: string; to: string } | null>(null);
   /** The ending band, put away by hand. Held by which run it was, so a second
    *  run says how that one went rather than staying hidden. */
   const [hidEnding, setHidEnding] = useState<number | null>(null);
@@ -242,6 +251,18 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
     },
     [at.x, at.y, at.scale],
   );
+
+  /** The model a block with no model of its own lands on. */
+  const onNow = useMemo(() => {
+    const chose = connection?.chosen;
+    if (chose == null) return null;
+    for (const provider of connection?.providers ?? []) {
+      for (const model of provider.models) {
+        if (provider.providerId === chose.providerId && model.id === chose.modelId) return model.label;
+      }
+    }
+    return chose.modelId;
+  }, [connection]);
 
   const laid = useMemo(() => layOut(flow), [flow]);
   const ending = useMemo(() => endedAs(flow), [flow]);
@@ -358,6 +379,34 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
     });
   }, []);
 
+  /* The keys a board is expected to answer. Only ever when the hand is not in
+     a field: Backspace in a textarea is a character, not a card. */
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      const on = event.target as Element | null;
+      if (on?.closest('input, textarea, select, [contenteditable]') != null) return;
+      if (event.key === 'Escape') {
+        if (joining !== null) { setJoining(null); return; }
+        if (picked !== null) { setPicked(null); event.stopPropagation(); }
+        return;
+      }
+      if (event.key !== 'Backspace' && event.key !== 'Delete') return;
+      if (going) return;
+      if (chosenLine !== null) {
+        event.preventDefault();
+        onFlow(unjoin(flow, chosenLine.to, chosenLine.from));
+        setChosenLine(null);
+        return;
+      }
+      if (picked === null) return;
+      event.preventDefault();
+      onFlow(remove(flow, picked));
+      setPicked(null);
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  });
+
   /* Natively, and not passively: pinching over a canvas means this canvas, and
      left alone the window itself zooms underneath it. */
   useEffect(() => {
@@ -393,6 +442,7 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
       // inside it belongs to whatever it landed on.
       if ((event.target as Element).closest('button, input, textarea, select, a, .canvas__card, .canvas__panel') !== null) return;
       setPicked(null);
+      setChosenLine(null);
       touched.current = true;
       panning.current = { x: event.clientX, y: event.clientY, fromX: at.x, fromY: at.y };
       (event.currentTarget as Element).setPointerCapture(event.pointerId);
@@ -539,7 +589,19 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
           </button>
         ) : null}
 
+        {flow.blocks.length === 0 || going ? null : (
+          <button type="button" className="canvas__tidy" onClick={() => setClearing(true)} title={canvasWords.clearNote}>
+            {canvasWords.clear}
+          </button>
+        )}
+
+        {/* What a block with no model of its own runs on, said where it is set
+            rather than only described inside a block's panel. */}
         <div className="canvas__far">
+          <span className="canvas__which" title={canvasWords.everyBlock}>
+            <span className="canvas__whichname">{canvasWords.model}</span>
+            <span className="canvas__whichvalue">{onNow ?? canvasWords.whichever}</span>
+          </span>
           {/* Only where the folder holds several. One flow works in one of
               them: a pull request has to be opened somewhere. */}
           {repos.length > 1 ? (
@@ -637,15 +699,32 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
                     if (parent === undefined) return null;
                     const doing = lineState(parent.state, block.state);
                     const path = line(leaves(parent), arrives(block));
+                    const on = chosenLine?.from === parent.id && chosenLine.to === block.id;
                     return (
                       <g key={`${parent.id}-${block.id}`}>
                         <path
-                          className={`canvas__line ${doing === 'passed' ? 'canvas__line--passed' : ''}`}
+                          className={`canvas__line ${doing === 'passed' ? 'canvas__line--passed' : ''} ${on ? 'canvas__line--chosen' : ''}`}
                           d={path}
                           fill="none"
                           markerEnd="url(#canvas-tip)"
                         />
+                        {/* Idle, a slow drift the length of the line: the board
+                            said which blocks were joined and nothing about
+                            which way the work would go. */}
+                        {doing === 'idle' ? <path className="canvas__drift" d={path} fill="none" /> : null}
                         {doing === 'live' ? <path className="canvas__flow" d={path} fill="none" /> : null}
+                        {/* A wide invisible copy, because a 1.5px line is not
+                            something a hand can hit. */}
+                        <path
+                          className="canvas__grab"
+                          d={path}
+                          fill="none"
+                          onPointerDown={(event) => {
+                            event.stopPropagation();
+                            setPicked(null);
+                            setChosenLine({ from: parent.id, to: block.id });
+                          }}
+                        />
                       </g>
                     );
                   }),
@@ -661,6 +740,7 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
                   last={waitingOn(flow, block.id).length === 0 && flow.blocks.length > 1 && block.after.length > 0}
                   model={modelName(block, connection)}
                   came={flow.said[block.id]}
+                  {...(flow.running === block.id && doing?.step != null ? { doing: doing.step } : {})}
                   onCarryOn={onCarryOn}
                   picked={picked === block.id}
                   target={joining !== null && joining.from !== block.id}
@@ -703,11 +783,48 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
 
           {joining === null ? null : <Trailing from={joining} blocks={drawn} at={at} />}
 
+          {!clearing ? null : (
+            <div className="canvas__sure" role="alertdialog" aria-label={canvasWords.clearNote}>
+              <p className="canvas__surequestion">{canvasWords.clearSure(flow.blocks.length)}</p>
+              <div className="canvas__surerow">
+                <button type="button" className="canvas__surekeep" onClick={() => setClearing(false)}>
+                  {canvasWords.clearNo}
+                </button>
+                <button
+                  type="button"
+                  className="canvas__suredo"
+                  onClick={() => {
+                    setClearing(false);
+                    setPicked(null);
+                    setChosenLine(null);
+                    onFlow({ ...flow, blocks: [], done: [], said: {}, running: null, startedAt: null });
+                  }}
+                >
+                  {canvasWords.clearYes}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* One row along the foot: the zoom under the block list it lines up
               with, and beside it whatever the canvas has to say. */}
           <div className="canvas__foot">
             {refused !== null ? (
               <span className="canvas__refused" role="status">{refused}</span>
+            ) : going ? (
+              <div className={`canvas__going ${doing?.asking === true ? 'canvas__going--asking' : ''}`} role="status">
+                <span className={`canvas__goingmark ${doing?.asking === true ? '' : 'canvas__goingmark--turning'}`} aria-hidden="true" />
+                <span className="canvas__goingsaid">
+                  {doing?.asking === true
+                    ? canvasWords.asksYou
+                    : (doing?.step ?? canvasWords.working)}
+                </span>
+                {onOpenThread === undefined || flow.conversation === null ? null : (
+                  <button type="button" className="canvas__endopen" onClick={onOpenThread}>
+                    {doing?.asking === true ? canvasWords.answerIt : canvasWords.watchIt}
+                  </button>
+                )}
+              </div>
             ) : ending !== null && hidEnding !== flow.startedAt ? (
               <Ended
                 ending={ending}
@@ -905,6 +1022,7 @@ function Card({
   last,
   model,
   came,
+  doing,
   picked,
   target,
   held,
@@ -923,6 +1041,8 @@ function Card({
   /** The model's own name, or null for whatever is answering. */
   model: string | null;
   came: BlockSaid | undefined;
+  /** What this block's turn is doing right now. Only ever on the running one. */
+  doing?: string;
   picked: boolean;
   target: boolean;
   held: boolean;
@@ -962,6 +1082,7 @@ function Card({
           {says === '' ? (spec.needsWords ? canvasWords.saySomething : spec.note) : says}
         </span>
         {block.state === 'needs-you' ? <span className="canvas__gate">{canvasWords.gateWaits}</span> : null}
+        {doing === undefined ? null : <span className="canvas__doing">{doing}</span>}
         {block.state === 'running' && rounds > 1 ? (
           <span className="canvas__round">{canvasWords.round(rounds, ROUNDS)}</span>
         ) : null}
@@ -1491,9 +1612,13 @@ function Inspector({
           cannot be found by scrolling for it. */}
       {view !== 'block' ? null : (
         <footer className="canvas__ifoot">
-          <span className="canvas__iwaits">{first ? canvasWords.startsHere : ''}</span>
+          {first ? <span className="canvas__iwaits">{canvasWords.startsHere}</span> : <span />}
           <button type="button" className="canvas__iremove" onClick={onRemove} disabled={going}>
+            <svg viewBox="0 0 14 14" width="11" height="11" fill="none" aria-hidden="true">
+              <path d="M2.6 4.2h8.8M5.6 4.2V2.9h2.8v1.3M3.9 4.2l.5 7h5.2l.5-7M6 6.3v3M8 6.3v3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
             {canvasWords.remove}
+            <kbd className="canvas__ikey">⌫</kbd>
           </button>
         </footer>
       )}

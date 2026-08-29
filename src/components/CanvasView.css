@@ -321,16 +321,53 @@
   pointer-events: none;
 }
 
+/* A 1.5px line is not something a hand can hit, so the press is on a wide
+   invisible copy of it. */
+.canvas__grab {
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
 .canvas__line {
   stroke: var(--border-strong);
   stroke-width: 1.5;
   transition: stroke var(--dur-ui) var(--ease-hover);
 }
 
+/* Pressed, and one key from being taken off. */
+.canvas__line--chosen {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
 /* The run has been through here. Colour is the only thing on the board that
    says how far it got at a glance, and a grid of grey lines said nothing. */
 .canvas__line--passed {
   stroke: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
+}
+
+/* At rest: a long, slow, barely-there drift the length of the line, so the
+   board says which way the work will go rather than only what is joined.
+   Nothing here is bright — it is the difference between a diagram and a thing
+   that is about to do something. */
+.canvas__drift {
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 26 300;
+  opacity: 0.7;
+  animation: canvas-drifting 5200ms linear infinite;
+}
+
+@keyframes canvas-drifting {
+  from {
+    stroke-dashoffset: 326;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 /* And this is now: a short bright dash running the length of the line feeding
@@ -361,6 +398,10 @@
     animation: none;
     stroke-dasharray: none;
     opacity: 0.6;
+  }
+
+  .canvas__drift {
+    display: none;
   }
 }
 
@@ -1441,19 +1482,71 @@
   color: var(--text-faint);
 }
 
+ /* A real button rather than a word: it is the one press in here that cannot
+   be taken back, so it should look like something you decided to press. */
 .canvas__iremove {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   flex: none;
-  min-height: 26px;
+  min-height: 28px;
   padding: 0 var(--space-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  background: var(--bg);
   font-size: var(--text-xs);
-  color: var(--text-faint);
-  transition: color var(--dur-micro) var(--ease-hover);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__iremove:active {
+  transform: scale(0.97);
+}
+
+.canvas__iremove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .canvas__iremove:disabled {
   opacity: 0.5;
   cursor: default;
+  transform: none;
+}
+
+/* The key that does the same thing, said where the press is. */
+.canvas__ikey {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--text-faint);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__iremove:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+    background: color-mix(in srgb, var(--danger) 8%, var(--bg));
+    color: var(--danger);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas__iremove:active {
+    transform: none;
+  }
+}
+
+/* The textarea keeps its own grip and its own bar, and both landed in the
+   corner as a stray line and a box. It grows with the panel instead. */
+.canvas__isays {
+  resize: none;
 }
 
 /* -------------------------------------------------------------- the first */
@@ -1941,4 +2034,179 @@
 .canvas__whichpick:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   While it is going, and what it wants
+   --------------------------------------------------------------------------- */
+
+.canvas__going {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 760px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  animation: canvas-ends var(--dur-ui) var(--ease-out-quart) both;
+}
+
+/* The one state that cannot move on without a person. */
+.canvas__going--asking {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.canvas__goingmark {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+}
+
+.canvas__goingmark--turning {
+  animation: canvas-turning 900ms linear infinite;
+}
+
+.canvas__going--asking .canvas__goingmark {
+  border: 0;
+  background: var(--accent);
+}
+
+@keyframes canvas-turning {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.canvas__goingsaid {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* On the card itself, under what it was asked. */
+.canvas__doing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  color: var(--accent-ink);
+}
+
+/* What every block runs on, beside how far it may go. */
+.canvas__whichvalue {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   Clearing it, asked first
+   --------------------------------------------------------------------------- */
+
+.canvas__sure {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(360px, calc(100% - var(--space-5)));
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  animation: canvas-opens var(--dur-ui) var(--ease-out-quart) both;
+}
+
+.canvas__surequestion {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.canvas__surerow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.canvas__surekeep,
+.canvas__suredo {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__surekeep {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.canvas__suredo {
+  border-color: transparent;
+  background: var(--danger);
+  color: var(--accent-text);
+}
+
+.canvas__surekeep:active,
+.canvas__suredo:active {
+  transform: scale(0.97);
+}
+
+.canvas__surekeep:focus-visible,
+.canvas__suredo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__surekeep:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-sunken);
+  }
+
+  .canvas__suredo:hover {
+    background: color-mix(in srgb, var(--danger) 85%, black);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas__sure,
+  .canvas__going {
+    animation: none;
+  }
+
+  .canvas__goingmark--turning {
+    animation: none;
+  }
+
+  .canvas__surekeep:active,
+  .canvas__suredo:active {
+    transform: none;
+  }
 }

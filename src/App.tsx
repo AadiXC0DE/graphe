@@ -961,7 +961,6 @@ function Conversation() {
    *  they cover the conversation, and the conversation belongs to this file. */
   const [designAt, setDesignAt] = useState<DesignPart | null>(null);
   const [graphOpen, setGraphOpen] = useState(false);
-  const [canvasOpen, setCanvasOpen] = useState(false);
   /** The github pull requests and issues of the project in front. */
   const [reviewsOpen, setReviewsOpen] = useState(false);
   /** The fetched reading of the open project's repository, and whether a fetch
@@ -1430,7 +1429,6 @@ function Conversation() {
   const toChat = useCallback(() => {
     setDesignAt(null);
     setGraphOpen(false);
-    setCanvasOpen(false);
     setReviewsOpen(false);
     setHelpersAt(null);
   }, []);
@@ -1456,7 +1454,6 @@ function Conversation() {
     ) => {
       if (screen !== 'chat') setDesignAt(null);
       if (screen !== 'graph') setGraphOpen(false);
-      if (screen !== 'canvas') setCanvasOpen(false);
       if (screen !== 'reviews') setReviewsOpen(false);
       if (screen !== 'skills') setSkillsOpen(false);
       if (screen !== 'settings') setSettingsOpen(false);
@@ -1768,7 +1765,13 @@ function Conversation() {
       // checking where they are, not asking for anything. A conversation
       // nothing has been said in yet is the same case: "new" from an empty
       // screen would swap it for another empty screen.
-      if (path !== null && path === inConversation) return;
+      //
+      // "Here" is what is on screen, not what the shell was last asked to open:
+      // a canvas opening its own conversation moves the second without moving
+      // the first, and a guard on the shell's idea then refused the swap that
+      // would have caught the two up.
+      const showing = desksNow.current.byPath[desksNow.current.current ?? '']?.address ?? null;
+      if (path !== null && path === inConversation && path === showing) return;
       if (path === null && (desk?.turns.length ?? 0) === 0) {
         // Already looking at an empty one. Still worth getting out of the way
         // of it, since that is what was pressed.
@@ -2636,7 +2639,6 @@ function Conversation() {
       addMore ||
       paletteOpen ||
       graphOpen ||
-      canvasOpen ||
       reviewsOpen ||
       changesOpen ||
       asking ||
@@ -2767,7 +2769,6 @@ function Conversation() {
     addMore,
     paletteOpen,
     graphOpen,
-    canvasOpen,
     reviewsOpen,
     changesOpen,
     asking,
@@ -3451,13 +3452,16 @@ function Conversation() {
         setCanvasAt(canvas);
         return;
       }
-      setCanvasAt(null);
       const desk = desksNow.current.byPath[project];
-      if (desk === undefined || desk.address === address) return;
+      if (desk === undefined) return;
       // Ask the shell to resume it as well as swapping the renderer's words.
       // An idle session may have left the soft live-session cache; a visual-only
       // switch would then show a tab that could no longer receive a prompt.
-      await swapConversation(address);
+      //
+      // The canvas comes off screen only once there is a conversation to put in
+      // its place: taken off first, a swap that bailed left neither.
+      if (desk.address !== address) await swapConversation(address);
+      setCanvasAt(null);
     },
     [open, swapConversation],
   );
@@ -4143,7 +4147,7 @@ function Conversation() {
       { id: 'history', name: 'Look through the history', where: 'Project',
         run: () => goToScreen('graph'), ready: here, whyNot: needsProject },
       { id: 'canvas', name: 'Open the canvas', where: 'Project',
-        run: () => { goToScreen('canvas'); setCanvasOpen(true); }, ready: here, whyNot: needsProject },
+        run: () => openCanvasNow.current(), ready: here, whyNot: needsProject },
       { id: 'copy', name: COPY_WORDS.whole, where: 'Conversation',
         run: () => { void copyText(asMarkdown(currentDesk(desksNow.current)?.turns ?? [])); },
         ready: here, whyNot: needsProject },
@@ -4393,6 +4397,10 @@ function Conversation() {
     });
   }, [desks.current]);
 
+  /* Held in refs because the palette's list is built before either exists. */
+  const goToScreenNow = useRef<(screen: 'canvas') => void>(() => {});
+  const openCanvasNow = useRef<() => void>(() => {});
+
   const changeFlowNow = useRef<(next: Flow) => void>(() => {});
   const goOnNow = useRef<(flow: Flow, from: Flow) => void>(() => {});
   const cameToNow = useRef<(project: string, conversation: string, since: number) => BlockSaid>(
@@ -4423,13 +4431,18 @@ function Conversation() {
 
   /** A canvas of its own, in front. */
   const newCanvas = useCallback(() => {
+    goToScreenNow.current('canvas');
     const made = newFlow();
     changeFlow(made);
     setCanvasAt(made.id);
   }, [changeFlow]);
 
   /** The one somebody last drew on, or a new one. What the shelf's row does. */
+  /* A canvas is a tab rather than a sheet, so opening one has to put away
+     whatever sheet is in front of it — history over the canvas was history
+     that could not be left. */
   const openCanvas = useCallback(() => {
+    goToScreenNow.current('canvas');
     const held = flowsNow.current;
     if (held.length === 0) {
       newCanvas();
@@ -4437,6 +4450,9 @@ function Conversation() {
     }
     setCanvasAt(held[held.length - 1]!.id);
   }, [newCanvas]);
+
+  goToScreenNow.current = goToScreen;
+  openCanvasNow.current = openCanvas;
 
   const forgetCanvas = useCallback((id: string) => {
     setFlows((held) => withoutFlow(held, id));
@@ -4777,7 +4793,6 @@ function Conversation() {
     watchAt !== null ||
     designAt !== null ||
     graphOpen ||
-    canvasOpen ||
     reviewsOpen ||
     helpersAt !== null ||
     connectOpen ||
@@ -5063,6 +5078,7 @@ function Conversation() {
   const angles = asLinesOfEnquiry(helpers);
   const intoIt = lookingInto(helpers);
   const doingNow = nowDoing(desk?.turns ?? []);
+
   // What it is looking into takes the band while any of it is still out: that
   // is the thing worth reading, and the step underneath it will come back.
   const nowThere = intoIt === null ? doingNow : { ...doingNow, step: intoIt };
@@ -5106,6 +5122,23 @@ function Conversation() {
 
   const tabs: readonly Tab[] = [...threadTabs, ...canvasTabs];
   const canvasHere = canvasAt === null ? null : (flows.find((one) => one.id === canvasAt) ?? null);
+
+  /* What the canvas's own turn is doing this second. Its conversation is
+     usually parked behind the canvas tab, so nothing about it reached the
+     screen — a block could run for twenty minutes saying only "Going". */
+  const canvasDoing = useMemo(() => {
+    if (canvasHere === null || canvasHere.running === null || canvasHere.conversation === null) return undefined;
+    const turns =
+      canvasHere.conversation === desk?.address
+        ? (desk?.turns ?? [])
+        : (desk?.parked[canvasHere.conversation]?.turns ?? []);
+    const step = nowDoing(turns).step;
+    return {
+      step: step === null ? null : step.detail == null ? step.label : `${step.label} — ${step.detail}`,
+      asking: turns.some((one) => one.kind === 'asked' && one.answered === null),
+    };
+  }, [canvasHere, desk?.address, desk?.turns, desk?.parked]);
+
 
   openNow.current = threadTabs.map((one) => one.id);
   atNow.current =
@@ -5931,6 +5964,7 @@ function Conversation() {
           thinking={preferences?.thinking ?? {}}
           onThinking={setBlockThinking}
           repos={desk?.overview?.repos ?? []}
+          doing={canvasDoing}
           full={canvasFull}
           onFull={setCanvasFull}
           {...(canvasHere.conversation === null || desk === null

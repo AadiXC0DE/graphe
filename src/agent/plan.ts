@@ -38,6 +38,37 @@ export function readOnlyTools(all: readonly string[]): readonly string[] {
   });
 }
 
+/**
+ * Work that starts somewhere else.
+ *
+ * Pieces on the board each get a copy of the project, so nothing they do
+ * reaches the folder in front of you and the Guard rightly calls them
+ * read-only. While only a plan is being made that is beside the point: they
+ * start real work, spend real money, and what they change can be taken in
+ * afterwards. "Nothing changes while I look" has to mean that.
+ */
+const STARTS_WORK: ReadonlySet<string> = new Set(['setgoing', 'tryways']);
+
+function plainName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Whether this call is held back while only a plan is being made.
+ *
+ * Stricter than `readOnlyTools`, and for one reason: a helper that builds and a
+ * piece put on the board both change nothing here and everything in a copy.
+ * A helper that only reads is still allowed — looking around with company is
+ * still looking around.
+ */
+export function withheldWhilePlanning(call: ToolCall): boolean {
+  const plain = plainName(call.name);
+  if (STARTS_WORK.has(plain)) return true;
+  const role = call.input['role'];
+  if (typeof role === 'string' && role.trim().toLowerCase() === 'builder') return true;
+  return readOnlyTools([call.name]).length === 0;
+}
+
 /* -------------------------------------------------------------------------- */
 /* What the person reads                                                       */
 /* -------------------------------------------------------------------------- */
@@ -531,14 +562,14 @@ function listedItems(text: string): number {
  * most need a list, and they were the ones getting none.
  */
 export function shouldLookFirst(options: {
-  plans: 'auto' | 'always' | 'never' | 'research';
+  plans: 'auto' | 'research' | 'plan' | 'goal';
   /** This message is the answer to a look-around we just did. */
   answering: boolean;
   text: string;
 }): boolean {
   const { plans, answering, text } = options;
-  if (plans === 'never' || plans === 'research') return false;
-  if (plans === 'always') return true;
+  if (plans === 'research' || plans === 'goal') return false;
+  if (plans === 'plan') return true;
   return !answering && worthPlanning(text);
 }
 

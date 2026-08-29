@@ -4,9 +4,9 @@
 
 **Send in a team, not a prompt.**
 
-An agentic coding platform for the desktop. Helpers in parallel, jobs that run for hours
-without you, and a design system it reads before it writes. Built on [pi](https://github.com/earendil-works/pi) —
-your keys, any model, the meter in plain sight.
+An agentic coding platform for the desktop. A canvas of blocks you join up, helpers in parallel,
+jobs that run for hours without you, and a design system it reads before it writes. Built on
+[pi](https://github.com/earendil-works/pi), your keys, any model, the meter in plain sight.
 
 <p align="center">
   <a href="https://github.com/AadiXC0DE/graphe/actions"><img src="https://img.shields.io/github/actions/workflow/status/AadiXC0DE/graphe/ci.yml?branch=main&label=CI" alt="CI"></a>
@@ -33,7 +33,7 @@ your keys, any model, the meter in plain sight.
 
 ## Install
 
-**macOS** — Apple silicon and Intel. Either route works:
+**macOS**, Apple silicon and Intel. Either route works:
 
 ```sh
 brew tap AadiXC0DE/tap
@@ -43,20 +43,24 @@ brew install --cask graphe
 or download the disk image from the [latest release](https://github.com/AadiXC0DE/graphe/releases).
 
 > Graphe is ad-hoc signed but not notarized yet, so on first launch macOS may ask you to allow
-> it — "Open Anyway" in System Settings → Privacy & Security, or right-click the app in Finder
+> it, "Open Anyway" in System Settings > Privacy & Security, or right-click the app in Finder
 > and choose Open. See [RELEASING.md](RELEASING.md) for how it is signed.
+
+macOS is the only build today. Graphe is an Electron app and the source is open, so Windows and
+Linux can be built from it — but `electron-builder.js` has no target for either, nothing has been
+tried there, and at least the "open in your editor" press is macOS-only.
 
 ---
 
 ## What it is
 
-A full coding agent with a real workspace around it — not a chat box with tools bolted on.
+A full coding agent with a real workspace around it, not a chat box with tools bolted on.
 
 [**pi**](https://github.com/earendil-works/pi) is a serious coding harness that deliberately ships
 without sub-agents or plan mode. Graphe is what it becomes with both, plus the window, the guard,
 the version history, the design panel, the memory, the money, and the handover.
 
-One request can become a **board of pieces** — each in its own copy of the project, four running
+One request can become a **board of pieces**, each in its own copy of the project, four running
 at once, the rest waiting, whether or not you're watching. Reviewer, researcher, and a builder
 that writes inside a copy of its own. Set a job going and close the window: it carries on, and you
 come back to a board of what finished, what's waiting, and what it cost.
@@ -69,24 +73,28 @@ come back to a board of what finished, what's waiting, and what it cost.
 |---|---|
 | **Works in parallel, and keeps working** | Helpers run side by side, each in its own context; jobs outlast your attention |
 | **One request, many pieces** | The plan puts the list on the board; each piece gets its own copy and its own agent |
+| **A run drawn as blocks** | The canvas: every step left to right, what waits for what, joined up and left to go |
+| **One goal, kept working toward** | A sentence that says what done means; it checks after every round and starts the next itself |
 | **A helper that builds** | A fourth kind that writes, in a copy of the project it can only reach inside |
-| **Try it two or three ways** | Goes at the same thing finish side by side, with what each cost — keep one, throw the rest away |
+| **Try it two or three ways** | Goes at the same thing finish side by side, with what each cost, keep one, throw the rest away |
 | **Reads your design system first** | Colours, spacing and type read as a spec before a file is touched; Figma frames come in as pictures |
-| **Every width, checked** | Phone, tablet, desktop and wide — photographed, so you never decide from one size |
-| **A review with a verdict** | Ships, needs work, or do not land — findings ranked, with file and line, and one press posts them to the pull request |
-| **The bill, before it lands** | An estimate before a big job, a running total, a ceiling that ends it — in your currency, not tokens |
+| **Every width, checked** | Phone, tablet, desktop and wide, photographed, so you never decide from one size |
+| **A review with a verdict** | A pull request is read in a copy of its own, so nothing you have open moves. Ships, needs work, or do not land, findings ranked with file and line, and one press posts them |
+| **The bill, before it lands** | An estimate before a big job, a running total, a ceiling that ends it, in your currency, not tokens |
 | **Memory between sittings** | Facts kept per project on your machine, ranked by meaning, loaded at the next start |
-| **A browser, beside the conversation** | The running project lives in the window next to the agent building it — servers that stay up, comments on the page like a design |
-| **A browser it can drive anywhere** | Any address, not just your own site: opens it, reads it, presses things, types into them — on from the first turn |
+| **A browser, beside the conversation** | The running project lives in the window next to the agent building it, servers that stay up, comments on the page like a design |
+| **A browser it can drive anywhere** | Any address, not just your own site: opens it, reads it, presses things, types into them, on from the first turn |
 | **Works the computer itself** | For the tools that are not websites: a picture of the screen, then presses, typing and drags on it |
 | **A folder of several projects** | `backend/` and `frontend/` beside each other: each with its own lines of work, versions and preview |
-| **Things a project always does** | Format what was written, run the tests — whatever this project expects every time, in one file kept with the project |
+| **Things a project always does** | Format what was written, run the tests, whatever this project expects every time, in one file kept with the project |
 | **A real debugger** | Attaches lldb, dlv or debugpy to a stuck program; reads frames, steps, evaluates |
 | **Skills off the shelf** | `@skill` brings in craft you installed; `/command` expands a prompt you wrote |
 | **Money, in your currency** | Every turn accounted for, and a split that separates your work from our own retries |
 | **How far a change reaches** | It names the files a change would touch, and what it would take, before it makes it |
+| **One name, changed everywhere** | `formatBytes` becomes `formatFileSize` in every file that uses it, previewed first, with a restore point |
+| **A second model for the hard parts** | Whatever is answering does the work; a stronger one is asked before a plan and before it calls something done |
 
-Every one of these is in the window the moment you open a folder — nothing to install, nothing
+Every one of these is in the window the moment you open a folder, nothing to install, nothing
 behind a tier.
 
 ---
@@ -98,7 +106,7 @@ common-tool coding from the desktop workspace controls Graphe adds around the mo
 
 All direct comparison cells used `opencode-go/deepseek-v4-flash` at `max` reasoning, a fresh
 workspace per cell, and counterbalanced serial order. They were run on 2026-08-24 against the
-specific Pi and OpenCode configurations described below — not against every extension, plugin, or
+specific Pi and OpenCode configurations described below, not against every extension, plugin, or
 hosted variant of either project.
 
 | Evidence | Graphe | Pi | OpenCode | What it measures |
@@ -125,8 +133,8 @@ hosted variant of either project.
   score, no Oh My Pi result, and no universal statement about the security of other tools. The
   comparisons are limited to the versions, configurations, tasks, and dates stated here.
 
-The landing page presents these as three direct product advantages — retained project memory,
-active guarded-workspace protection, and unattended file boundaries — plus common-tool coding
+The landing page presents these as three direct product advantages, retained project memory,
+active guarded-workspace protection, and unattended file boundaries, plus common-tool coding
 checks. Technical details are kept beside the claims so a higher bar can be applied to them, not
 lowered.
 
@@ -134,11 +142,11 @@ lowered.
 
 ## How a sitting goes
 
-1. **Point it at a project.** Open a folder and it is one — recent ones sit on a shelf with what each cost last time.
+1. **Point it at a project.** Open a folder and it is one, recent ones sit on a shelf with what each cost last time.
 2. **Say what you want, however you have it.** Type it, paste a screenshot, drop in a Figma frame. There is no syntax to learn.
 3. **Big jobs come back as a plan.** A numbered plan, an estimate, and a wait for "Go ahead". Small jobs just get done.
 4. **It works where you can see it.** The file tree marks what changed; the rail names what it's doing right now.
-5. **You look, then you decide.** Before and after, at phone, desktop and wide. Let it in, or set it aside — setting aside keeps the work reachable.
+5. **You look, then you decide.** Before and after, at phone, desktop and wide. Let it in, or set it aside, setting aside keeps the work reachable.
 6. **Hand it to your team.** A write-up with the pictures in it, a properly named line of work, and a request ready for whoever reviews.
 
 <div align="center">
@@ -152,14 +160,14 @@ lowered.
 
 ## Built on pi
 
-The agent runtime is [**pi**](https://github.com/earendil-works/pi) — an excellent, genuinely open
+The agent runtime is [**pi**](https://github.com/earendil-works/pi), an excellent, genuinely open
 agent harness. Graphe is the layer around it: sub-agents and plan mode, plus the window, the guard,
 the version history, the design panel, the memory, the money, and the handover. One module owns
 every pi import, so an upgrade breaks one file rather than fifty.
 
 **Graphe is not a fork.** It depends on pi as a published package, so pi's improvements arrive by
 upgrading rather than by merging. If you want the terminal-native, developer-facing version of this
-idea, use pi directly — it is very good.
+idea, use pi directly. It is very good.
 
 Licences and attribution: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Graphe is not
 affiliated with or endorsed by the pi project.
@@ -176,10 +184,12 @@ npm run dev          # the interface, at localhost:5273
 ```
 
 ```bash
-npm test             # 3,252 tests
+npm test             # 5,002 tests
 npm run typecheck
-npm run package      # build the release: dmg + zip, arm64 and x64 (see RELEASING.md)
+npm run package      # macOS release: dmg + zip, arm64 and x64 (see RELEASING.md)
 ```
+
+`npm run package` builds for macOS only — that is the whole of `electron-builder.js`.
 
 ---
 
@@ -188,7 +198,7 @@ npm run package      # build the release: dmg + zip, arm64 and x64 (see RELEASIN
 | | |
 |---|---|
 | **Local-first** | Runs on your machine. No account, no server, no telemetry. Your code never leaves your disk |
-| **Bring your own model** | Connect Claude, ChatGPT or Copilot. Nothing is metered by us, because there is no us in the middle |
+| **Bring your own model** | Anthropic, OpenAI, Google, OpenRouter and the rest, on your own key. Nothing is metered by us, because there is no us in the middle |
 | **Real git underneath** | Version history is ordinary commits with readable messages. The word "commit" never appears in the interface |
 | **Guarded execution** | Every action checked before it runs; nothing outside your project folder, ever |
 | **Design-aware work** | Screenshots, Figma links, annotations and visual review in the same conversation |

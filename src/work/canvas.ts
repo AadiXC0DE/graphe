@@ -1,0 +1,1007 @@
+/** A flow: blocks you place, join up, and then start.
+ *
+ * The board runs work the moment it is asked for, which is right for "send this
+ * off and tell me how it went" and wrong for composing. So a flow is drawn
+ * first and nothing happens: blocks are a draft on disk until somebody presses
+ * Start, and only then does each one become a piece on the board — the same
+ * board, the same queue, the same ceiling. Stop takes them off it again.
+ *
+ * Everything here is a function of its arguments. What a flow *is*, what may be
+ * joined to what, and what order it runs in are decided here; the view draws it
+ * and the shell runs it.
+ */
+
+import type { HowFar } from '../agent/guard/policy';
+
+/** Which model a block is run by, or null for whatever is answering. The same
+ *  shape the rest of the app names a model with. */
+export type BlockModel = { providerId: string; modelId: string } | null;
+
+let counter = 0;
+
+export type BlockKind =
+  | 'custom'
+  | 'plan'
+  | 'research'
+  | 'subagents'
+  | 'browser'
+  | 'checks'
+  | 'goal'
+  | 'review'
+  | 'wait'
+  | 'pull-request';
+
+/** One block on the canvas. */
+export type Block = {
+  /** Ours, and stable from the moment it is placed. */
+  id: string;
+  kind: BlockKind;
+  /** What this one is asked to do. The kind's own words until somebody edits. */
+  says: string;
+  model: BlockModel;
+  /** Every block this one waits for. Empty means it waits for nothing and the
+   *  flow can begin here. Several means it begins when the last of them has
+   *  finished — a review after both the change and the checks is the shape
+   *  people draw, and one parent could not say it. */
+  after: readonly string[];
+  /** Look around and propose before touching anything. */
+  lookFirst?: boolean;
+  /** Files this block carries. Pictures go with the ask the way they do from
+   *  the composer; text goes into it. */
+  files?: readonly BlockFile[];
+  /** Where somebody put it. Absent until they move it, and then it stays put:
+   *  a canvas that tidies your arrangement away the moment you add a block is
+   *  a diagram, not a canvas. */
+  at?: { x: number; y: number };
+};
+
+/** One file on a block. Held whole rather than as a path: a flow is drawn once
+ *  and run later, and a file that moved between the two would be a block that
+ *  quietly stopped being about anything. */
+export type BlockFile = {
+  name: string;
+  mimeType: string;
+  /** A picture goes to the model as a picture; anything else goes into the ask
+   *  as text, because that is the only other thing a turn can carry. */
+  kind: 'image' | 'text';
+  /** Base64 without the data: prefix for a picture, the file's own text for
+   *  the rest. */
+  bytes: string;
+};
+
+/** Enough to give a block something to work from; not so many that a flow file
+ *  becomes an archive. */
+export const MOST_FILES = 6;
+
+/** Past this one file is not context, it is the whole conversation. */
+export const MOST_TEXT = 20_000;
+
+/** What one block came to. */
+export type BlockSaid = {
+  /** The last thing it said, whole. */
+  text: string;
+  /** How many turns it took. */
+  turns: number;
+  /** Epoch ms, when it finished. */
+  at: number;
+};
+
+export type Flow = {
+  /** Ours, and stable for as long as the flow exists. A canvas is a tab like a
+   *  conversation is a tab, so it needs a name of its own to be one. */
+  id: string;
+  name: string;
+  blocks: readonly Block[];
+  /** The conversation this canvas drives. A block is an ordinary turn in it —
+   *  same tools, same Guard, same everything a person typing would get — so a
+   *  canvas is a way of sending, not a second kind of agent. Null until it has
+   *  been started once. */
+  conversation: string | null;
+  /** One project inside a folder that holds several, by its folder name. Null
+   *  where the project is one repo, which is every ordinary project. A whole
+   *  flow works in one of them: a pull request has to be opened somewhere. */
+  repo: string | null;
+  /** How far the whole flow may go on its own, where a block does not say. */
+  howFar: HowFar;
+  /** The block being run right now, or null. */
+  running: string | null;
+  /** How many times the block that is running has been sent. One for anything
+   *  ordinary; a goal block counts up until it is done or the rounds run out. */
+  rounds: number;
+  /** What has finished, in the order it finished. */
+  done: readonly string[];
+  /** What each finished block came to, by block. The point of running one is
+   *  what it said, and a flow that ends with nothing on screen has told nobody
+   *  anything. */
+  said: Readonly<Record<string, BlockSaid>>;
+  /** When it was last started, or null while it is still being drawn. */
+  startedAt: number | null;
+};
+
+/** A canvas nobody has drawn on yet. */
+export function newFlow(name = canvasWords.untitled): Flow {
+  counter += 1;
+  return {
+    id: `flow-${Date.now().toString(36)}-${String(counter)}`,
+    name,
+    blocks: [],
+    conversation: null,
+    repo: null,
+    // A flow is left to run: the whole point is walking away from it. Stopping
+    // to ask would stop it somewhere nobody is looking, so it starts at the
+    // rung that does not — and the row in its own bar is where that changes.
+    howFar: 'doing',
+    running: null,
+    rounds: 0,
+    done: [],
+    said: {},
+    startedAt: null,
+  };
+}
+
+/** Where a block has got to. `needs-you` is the one that cannot move on by
+ *  itself: a gate somebody has to open. */
+export type BlockState = 'draft' | 'waiting' | 'running' | 'needs-you' | 'done' | 'failed';
+
+/** True for a block that sends nothing and simply stops the flow. */
+export function isGate(block: Block): boolean {
+  return block.kind === 'wait';
+}
+
+/* -------------------------------------------------------------------------- */
+/* What the canvas says                                                        */
+/* -------------------------------------------------------------------------- */
+
+export const canvasWords = {
+  name: 'Canvas',
+  /** What a canvas is called before anybody has said. */
+  untitled: 'Canvas',
+  /** A canvas takes its name from the first thing it was asked to do. */
+  named: (blocks: readonly Block[]): string => {
+    const first = blocks.find((one) => one.says.trim() !== '');
+    if (first === undefined) return canvasWords.untitled;
+    const said = first.says.trim().replace(/\s+/g, ' ');
+    return said.length <= 28 ? said : `${said.slice(0, 27)}…`;
+  },
+  note: 'Place the steps, join them up, then start.',
+  empty: 'Build a flow',
+  emptyNote: 'Take a loop somebody already worked out, or place a block and build out from it.',
+  rename: 'What this canvas is called',
+  shut: 'Close this panel',
+  bigger: 'Fill the window',
+  smaller: 'Back to the column',
+  start: 'Start',
+  stop: 'Stop',
+  again: 'Start again',
+  add: 'Add a block',
+  blocks: 'Blocks',
+  loops: 'Ready-made',
+  what: 'What it does',
+  model: 'Model',
+  everyModel: 'Models',
+  howFar: 'How far it may go',
+  /** A block left on no model of its own. Named for the setting, with the
+   *  model it lands on said underneath. */
+  whichever: 'Default',
+  whicheverNote: (model: string | null): string =>
+    model === null
+      ? 'Whatever this canvas’s conversation is set to.'
+      : `Whatever this canvas’s conversation is set to — ${model} right now.`,
+  waitsFor: 'Runs after',
+  /** Only where the project holds several. */
+  which: 'Works in',
+  everyBlock: 'Every block runs on this unless it names its own',
+  whichNote: 'Which project inside this folder the whole flow works in',
+  nothing: 'Nothing — it starts the flow',
+  /** In the picker, above the blocks it could be made to wait for. */
+  afterWhich: 'Runs after all of these',
+  shows: 'Shows it',
+  files: 'Attachments',
+  filesCount: (n: number): string => (n === 1 ? '1 file' : `${String(n)} files`),
+  attach: 'Attach',
+  takeOff: (name: string): string => `Take ${name} off this block`,
+  tooMany: (n: number): string => `A block carries up to ${String(n)} files.`,
+  thinking: 'Thinking',
+  thinkingNote: 'How long this model takes before it answers',
+  lookFirst: 'Plan first',
+  lookFirstNote: 'Propose before touching anything',
+  nothingBefore: 'Nothing',
+  tidyUp: 'Tidy up',
+  tidyNote: 'Put every block back in line',
+  remove: 'Remove',
+  connect: 'Drag from a block’s dot to the one that should follow it',
+  unjoined: 'Took that one off. Drag again to put it back.',
+  fit: 'Fit',
+  further: 'Further out',
+  closer: 'Closer',
+  /** Under the title. */
+  counted: (blocks: number, done: number, going: number): string => {
+    if (blocks === 0) return 'Nothing placed yet.';
+    const many = `${String(blocks)} ${blocks === 1 ? 'block' : 'blocks'}`;
+    if (going > 0) return `${many} · ${String(done)} done, ${String(going)} going`;
+    if (done > 0) return `${many} · ${String(done)} done`;
+    return `${many} · not started`;
+  },
+  states: {
+    draft: 'Ready',
+    waiting: 'Waiting',
+    running: 'Going',
+    'needs-you': 'Needs you',
+    done: 'Done',
+    failed: 'Stopped',
+  } as Readonly<Record<BlockState, string>>,
+  /** On the gate, and the press that opens it. */
+  carryOn: 'Carry on',
+  gateWaits: 'Stopped here until you say carry on.',
+  /** On a goal block while it is going round again. */
+  round: (n: number, of: number): string => `Round ${String(n)} of ${String(of)}`,
+  ranOut: 'The rounds ran out before the checks passed.',
+  /** On the block a flow begins at, and the one nothing follows. Both are read
+   *  off the joins rather than chosen: an open dot on the left is a block
+   *  nothing runs before, an open dot on the right is where the flow stops. */
+  startsHere: 'Starts here',
+  waitsHere: 'Waits for the block before it',
+  ends: 'Ends here',
+  endsNote: 'Nothing follows this yet — drag from here to add what does',
+  /** Over what a block came to. */
+  came: 'What it came to',
+  /** Along the foot while it is going. A block can run for twenty minutes, and
+   *  "Going" on a card is not enough to know it has not hung. */
+  working: 'Working…',
+  asksYou: 'It has stopped to ask you something',
+  watchIt: 'Watch it work',
+  answerIt: 'Answer it',
+  clear: 'Clear',
+  clearNote: 'Take every block off this canvas',
+  clearSure: (n: number): string =>
+    `Take all ${String(n)} blocks off? What the run said stays in the conversation.`,
+  clearYes: 'Clear it',
+  clearNo: 'Keep them',
+  /** The band along the foot once a run is over. */
+  ending: {
+    finished: 'Finished',
+    stopped: 'Stopped',
+    ranTo: (blocks: number, turns: number): string =>
+      `${String(blocks)} ${blocks === 1 ? 'block' : 'blocks'} · ${canvasWords.turnsTook(turns)}`,
+    left: (n: number): string => `${String(n)} never ran`,
+    lastly: 'Last thing it said',
+    openThread: 'Open the conversation',
+    threadNote: 'Read every turn this canvas took',
+    hide: 'Hide this',
+  },
+  findModel: 'Find a model',
+  noModel: 'No model by that name.',
+  turnsTook: (n: number): string => (n === 1 ? '1 turn' : `${String(n)} turns`),
+  /** How many blocks are waiting on this one. */
+  after: (n: number): string => (n === 1 ? '1 follows' : `${String(n)} follow`),
+  nothingYet: 'Nothing yet.',
+  /** Refusals, said where the line was drawn. */
+  itself: 'A block cannot wait for itself.',
+  loop: 'These would wait for each other, so neither could start.',
+  missing: 'I could not find that block.',
+  running: 'This flow is going. Stop it before changing the shape.',
+  saySomething: 'Say what it should do before starting.',
+} as const;
+
+/* -------------------------------------------------------------------------- */
+/* The blocks somebody can place                                               */
+/* -------------------------------------------------------------------------- */
+
+export type BlockSpec = {
+  kind: BlockKind;
+  name: string;
+  note: string;
+  /** True where the block is worth nothing until somebody says what about. */
+  needsWords: boolean;
+  /** What it is asked, before anybody edits it. */
+  says: string;
+};
+
+/**
+ * Seven blocks, each one work the app already does.
+ *
+ * Named as the operation rather than the tool behind it, and each carries the
+ * whole instruction it will be run with — a block *is* what it is asked, so the
+ * words in the panel are the words that go out. Editing one is editing that.
+ */
+export const BLOCKS: readonly BlockSpec[] = [
+  {
+    kind: 'custom',
+    name: 'Custom',
+    note: 'Whatever you type, sent as it is.',
+    needsWords: true,
+    says: '',
+  },
+  {
+    kind: 'plan',
+    name: 'Plan',
+    note: 'Read the project and propose. Changes nothing.',
+    needsWords: false,
+    says: 'Look around the project and say what you would do. Change nothing.',
+  },
+  {
+    kind: 'research',
+    name: 'Research',
+    note: 'Read around the problem before deciding.',
+    needsWords: true,
+    says: '',
+  },
+  {
+    kind: 'subagents',
+    name: 'Subagents',
+    note: 'Fan the work out and bring it back together.',
+    needsWords: true,
+    says: '',
+  },
+  {
+    kind: 'browser',
+    name: 'Browser',
+    note: 'Open the page and check the change works.',
+    needsWords: false,
+    says: 'Open the page in the browser and check the change works. Say what you saw, and take a picture of it.',
+  },
+  {
+    kind: 'checks',
+    name: 'Checks',
+    note: 'Run the project’s checks and fix what fails.',
+    needsWords: false,
+    says: 'Run this project’s checks. Fix anything that fails, then run them again until they pass.',
+  },
+  {
+    kind: 'goal',
+    name: 'Goal',
+    note: 'Keep going until the checks pass, or the rounds run out.',
+    needsWords: true,
+    says: '',
+  },
+  {
+    kind: 'review',
+    name: 'Review',
+    note: 'Read the diff and give a verdict.',
+    needsWords: false,
+    says: 'Review what has changed and give your verdict, with the findings that matter first.',
+  },
+  {
+    kind: 'wait',
+    name: 'Wait for me',
+    note: 'Stop here until you say carry on. Nothing is sent.',
+    needsWords: false,
+    says: '',
+  },
+  {
+    kind: 'pull-request',
+    name: 'Pull request',
+    note: 'Open a pull request for the change.',
+    needsWords: false,
+    says: 'Open a pull request for what changed, with a title and a description of the change.',
+  },
+];
+
+export function specOf(kind: BlockKind): BlockSpec {
+  return BLOCKS.find((one) => one.kind === kind) ?? BLOCKS[0]!;
+}
+
+/** How many rounds one goal block runs before it stops and says so. Not a cost
+ *  ceiling — the rung is that — but the thing that keeps "until it is done"
+ *  from meaning "for ever". */
+export const ROUNDS = 12;
+
+/** What a goal block is asked the first time, and every round after. */
+export function goalWords(about: string): string {
+  return `Work toward this until it is done, then stop: ${about.trim()}. Run this project's checks when you think you are there.`;
+}
+
+export function carryOnWords(about: string, why: string): string {
+  return `Not there yet — ${why} Carry on toward: ${about.trim()}`;
+}
+
+/** What a subagents block is asked. Written here rather than in the view so the
+ *  sentence can be read back in a test. */
+export function helperWords(about: string): string {
+  return `Split this between subagents working in parallel, then bring what they found back together: ${about.trim()}`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Ready-made loops                                                            */
+/* -------------------------------------------------------------------------- */
+
+export type Loop = {
+  id: string;
+  name: string;
+  note: string;
+  /** `after` is indices into this same list, so a loop is a shape rather than
+   *  a set of ids nobody has yet. */
+  blocks: readonly { kind: BlockKind; after: readonly number[] }[];
+};
+
+export const LOOPS: readonly Loop[] = [
+  {
+    id: 'ship-it',
+    name: 'Build, verify, ship',
+    note: 'Make the change, open it in the browser, run the checks, then a pull request.',
+    blocks: [
+      { kind: 'custom', after: [] },
+      { kind: 'browser', after: [0] },
+      { kind: 'checks', after: [1] },
+      { kind: 'pull-request', after: [2] },
+    ],
+  },
+  {
+    id: 'look-first',
+    name: 'Plan, build, review',
+    note: 'Read the project before touching it, make the change, then read the diff back.',
+    blocks: [
+      { kind: 'plan', after: [] },
+      { kind: 'custom', after: [0] },
+      { kind: 'review', after: [1] },
+    ],
+  },
+  {
+    id: 'many-hands',
+    name: 'Plan, fan out, review',
+    note: 'One pass to see the shape, subagents in parallel, then one verdict over the lot.',
+    blocks: [
+      { kind: 'plan', after: [] },
+      { kind: 'subagents', after: [0] },
+      { kind: 'review', after: [1] },
+    ],
+  },
+];
+
+/* -------------------------------------------------------------------------- */
+/* Editing a flow                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** Unique for the life of the window. A flow read back off disk brings its own
+ *  ids, and nothing here can hand out one of those twice. */
+export function blockId(): string {
+  counter += 1;
+  return `block-${Date.now().toString(36)}-${String(counter)}`;
+}
+
+export function place(flow: Flow, kind: BlockKind, after: string | readonly string[] | null = null): Flow {
+  const spec = specOf(kind);
+  const asked = after === null ? [] : typeof after === 'string' ? [after] : after;
+  const block: Block = {
+    id: blockId(),
+    kind,
+    says: spec.says,
+    model: null,
+    after: [...new Set(asked.filter((one) => flow.blocks.some((block) => block.id === one)))],
+  };
+  return { ...flow, blocks: [...flow.blocks, block] };
+}
+
+/** Put a whole loop down, each block behind the one it was drawn behind. */
+export function placeLoop(flow: Flow, loop: Loop): Flow {
+  let next = flow;
+  const made: string[] = [];
+  for (const one of loop.blocks) {
+    const before = next.blocks.length;
+    next = place(next, one.kind, one.after.map((at) => made[at] ?? '').filter((id) => id !== ''));
+    made.push(next.blocks[before]?.id ?? '');
+  }
+  return next;
+}
+
+export function change(flow: Flow, id: string, over: Partial<Omit<Block, 'id'>>): Flow {
+  return {
+    ...flow,
+    blocks: flow.blocks.map((one) => (one.id === id ? { ...one, ...over } : one)),
+  };
+}
+
+/** Take one out, and hand whatever was waiting on it to what it was waiting for
+ *  — a block removed from the middle must not strand the rest of the line.
+ *
+ *  With several parents that is a splice rather than a swap: the removed
+ *  block's own waits take its place in each child's list, beside whatever else
+ *  that child was already waiting for. */
+export function remove(flow: Flow, id: string): Flow {
+  const gone = flow.blocks.find((one) => one.id === id);
+  if (gone === undefined) return flow;
+  return {
+    ...flow,
+    blocks: flow.blocks
+      .filter((one) => one.id !== id)
+      .map((one) =>
+        one.after.includes(id)
+          ? {
+              ...one,
+              after: [
+                ...new Set([...one.after.filter((was) => was !== id), ...gone.after]),
+              ].filter((was) => was !== one.id),
+            }
+          : one,
+      ),
+  };
+}
+
+/**
+ * Whether one block may be made to wait for another.
+ *
+ * Asked as the line is dragged, so a shape that could never run is refused
+ * where it is drawn rather than found later by nothing happening.
+ */
+export function canWaitFor(
+  flow: Flow,
+  id: string,
+  after: string | null,
+): { ok: true } | { ok: false; because: string } {
+  if (after === null) return { ok: true };
+  if (id === after) return { ok: false, because: canvasWords.itself };
+  const byId = new Map(flow.blocks.map((one) => [one.id, one]));
+  if (!byId.has(id) || !byId.has(after)) return { ok: false, because: canvasWords.missing };
+  // Everything the proposed parent already waits for, however many branches
+  // that is. A single walk up one chain missed a ring closed through the other.
+  const seen = new Set<string>();
+  const todo = [after];
+  while (todo.length > 0) {
+    const one = todo.pop() as string;
+    if (one === id) return { ok: false, because: canvasWords.loop };
+    if (seen.has(one)) continue;
+    seen.add(one);
+    todo.push(...(byId.get(one)?.after ?? []));
+  }
+  return { ok: true };
+}
+
+/** Add a wait. Already waiting for it, or unable to, and the flow is unchanged
+ *  — dropping a line twice is not two lines. */
+export function join(flow: Flow, id: string, after: string | null): Flow {
+  if (after === null) return change(flow, id, { after: [] });
+  const block = flow.blocks.find((one) => one.id === id);
+  if (block === undefined || block.after.includes(after)) return flow;
+  return canWaitFor(flow, id, after).ok
+    ? change(flow, id, { after: [...block.after, after] })
+    : flow;
+}
+
+/** Take one wait off. What is left may be nothing, and then the flow begins
+ *  here — which is how a line is removed as well as added. */
+export function unjoin(flow: Flow, id: string, after: string): Flow {
+  const block = flow.blocks.find((one) => one.id === id);
+  if (block === undefined || !block.after.includes(after)) return flow;
+  return change(flow, id, { after: block.after.filter((one) => one !== after) });
+}
+
+/** Whether a line already runs from one to the other, so a second drag over it
+ *  can take it off rather than refuse. */
+export function joined(flow: Flow, id: string, after: string): boolean {
+  return flow.blocks.find((one) => one.id === id)?.after.includes(after) === true;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Starting it                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Blocks that cannot go yet, because nobody has said what they are about. */
+export function notReady(flow: Flow): readonly Block[] {
+  return flow.blocks.filter((one) => specOf(one.kind).needsWords && one.says.trim() === '');
+}
+
+/** True while a block is being run. */
+export function isRunning(flow: Flow): boolean {
+  return flow.running !== null;
+}
+
+export function canStart(flow: Flow): boolean {
+  return flow.blocks.length > 0 && notReady(flow).length === 0 && !isRunning(flow);
+}
+
+/**
+ * The next block to send, or null when there is nothing left to send.
+ *
+ * The first one in order that has not finished and whose wait has. A block
+ * whose wait never finished is never sent — what follows a step that did not
+ * happen would be working against a change nobody made.
+ */
+export function nextUp(flow: Flow): Block | null {
+  const done = new Set(flow.done);
+  for (const block of runOrder(flow)) {
+    if (done.has(block.id)) continue;
+    // Every one of them, not the first: a block with two waits begins when the
+    // last of them has finished.
+    if (!block.after.every((one) => done.has(one))) continue;
+    return block;
+  }
+  return null;
+}
+
+/** How far along a block is. */
+export function stateOf(block: Block, flow: Flow): BlockState {
+  if (flow.done.includes(block.id)) return 'done';
+  if (flow.running === block.id) return isGate(block) ? 'needs-you' : 'running';
+  if (flow.running === null && flow.startedAt === null) return 'draft';
+  // Going, and this one has not had its turn: either its wait is still out or
+  // it is simply behind something else.
+  return 'waiting';
+}
+
+/** How far along each block sits, counted from whatever it waits for. */
+function columns(flow: Flow): Map<string, number> {
+  const byId = new Map(flow.blocks.map((one) => [one.id, one]));
+  const at = new Map<string, number>();
+  // One past the furthest thing it waits for, so a block waiting on two chains
+  // of different lengths sits after both of them rather than beside the short
+  // one. `walking` closes a ring a hand-edited file could still hold.
+  const walking = new Set<string>();
+  const far = (id: string): number => {
+    const held = at.get(id);
+    if (held !== undefined) return held;
+    if (walking.has(id)) return 0;
+    walking.add(id);
+    const parents = byId.get(id)?.after ?? [];
+    const deep = parents.reduce((most, one) => (byId.has(one) ? Math.max(most, far(one) + 1) : most), 0);
+    walking.delete(id);
+    at.set(id, deep);
+    return deep;
+  };
+  for (const block of flow.blocks) far(block.id);
+  return at;
+}
+
+/** The order blocks go on the board in, so each is asked to wait for one that
+ *  already has an id of its own. */
+export function runOrder(flow: Flow): readonly Block[] {
+  const at = columns(flow);
+  return [...flow.blocks].sort((one, other) => (at.get(one.id) ?? 0) - (at.get(other.id) ?? 0));
+}
+
+/** What a looking-up block is asked. */
+export function lookedUpWords(about: string): string {
+  return `Look this up properly before deciding anything: ${about.trim()}. Read what is already here, search the web where it helps, and say what you found and what you would do about it. Change nothing.`;
+}
+
+/** What one block is asked, ready to send. Text it carries goes in with it,
+ *  each file named and fenced so the model can tell one from the next. */
+export function asksOf(block: Block): string {
+  const said = block.says.trim();
+  const asked =
+    block.kind === 'subagents'
+      ? helperWords(said)
+      : block.kind === 'research'
+        ? lookedUpWords(said)
+        : block.kind === 'goal'
+          ? goalWords(said)
+          : said === ''
+            ? specOf(block.kind).says
+            : said;
+  const text = (block.files ?? []).filter((one) => one.kind === 'text');
+  if (text.length === 0) return asked;
+  const carried = text.map((one) => {
+    const cut = one.bytes.length > MOST_TEXT;
+    const body = cut ? one.bytes.slice(0, MOST_TEXT) : one.bytes;
+    return `--- ${one.name} ---\n${body}${cut ? `\n--- cut here; ${one.name} is longer than this ---` : ''}`;
+  });
+  return `${asked}\n\n${carried.join('\n\n')}`;
+}
+
+/** Back to a draft: the shape kept, what it got to forgotten. The conversation
+ *  stays — what it said is worth keeping and is the record of the run. */
+export function reset(flow: Flow): Flow {
+  return { ...flow, startedAt: null, running: null, rounds: 0, done: [], said: {} };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Laying it out                                                               */
+/* -------------------------------------------------------------------------- */
+
+export type Placed = Block & { x: number; y: number; state: BlockState };
+export type Drawn = { blocks: readonly Placed[]; width: number; height: number };
+
+/** The card, and the room around it. Here rather than in the view because
+ *  where a block goes when nobody has moved it is arithmetic, not drawing. */
+export const CARD = { width: 232, height: 124, gapX: 88, gapY: 28 } as const;
+
+/**
+ * Where everything sits.
+ *
+ * A block somebody moved is where they put it. Everything else is laid out left
+ * to right, one column per step along the chain, keeping its parent's row where
+ * that row is free — so a flow drawn by pressing reads as a straight line, and
+ * a flow arranged by hand stays arranged.
+ */
+export function tidy(flow: Flow): Readonly<Record<string, { x: number; y: number }>> {
+  const at = columns(flow);
+  const taken = new Map<number, Set<number>>();
+  const rowOf = new Map<string, number>();
+  const where: Record<string, { x: number; y: number }> = {};
+
+  for (const block of runOrder(flow)) {
+    const column = at.get(block.id) ?? 0;
+    const used = taken.get(column) ?? new Set<number>();
+    // Beside the first thing it waits for, or the top row when it waits for
+    // nothing; then down until the column is free.
+    let row = block.after.length === 0 ? 0 : Math.min(...block.after.map((one) => rowOf.get(one) ?? 0));
+    while (used.has(row)) row += 1;
+    used.add(row);
+    taken.set(column, used);
+    rowOf.set(block.id, row);
+    where[block.id] = {
+      x: column * (CARD.width + CARD.gapX),
+      y: row * (CARD.height + CARD.gapY),
+    };
+  }
+  return where;
+}
+
+export function layOut(flow: Flow): Drawn {
+  if (flow.blocks.length === 0) return { blocks: [], width: 0, height: 0 };
+  const auto = tidy(flow);
+  const blocks: Placed[] = flow.blocks.map((one) => {
+    const spot = one.at ?? auto[one.id] ?? { x: 0, y: 0 };
+    return { ...one, x: spot.x, y: spot.y, state: stateOf(one, flow) };
+  });
+  return {
+    blocks,
+    width: Math.max(...blocks.map((one) => one.x)) + CARD.width,
+    height: Math.max(...blocks.map((one) => one.y)) + CARD.height,
+  };
+}
+
+/** Put everything back where the arithmetic would have it. */
+export function tidied(flow: Flow): Flow {
+  const where = tidy(flow);
+  return { ...flow, blocks: flow.blocks.map((one) => ({ ...one, at: where[one.id] })) };
+}
+
+/** True once somebody has moved something, so Tidy is worth offering. */
+export function isArranged(flow: Flow): boolean {
+  const where = tidy(flow);
+  return flow.blocks.some((one) => {
+    const auto = where[one.id];
+    return one.at !== undefined && (auto === undefined || one.at.x !== auto.x || one.at.y !== auto.y);
+  });
+}
+
+/** The blocks a flow begins at: the ones waiting for nothing. Several is not a
+ *  mistake — they start together — but which they are is worth saying, because
+ *  a block accidentally left unattached would otherwise start on its own. */
+export function startsAt(flow: Flow): readonly Block[] {
+  return flow.blocks.filter((one) => one.after.length === 0);
+}
+
+/**
+ * How a run ended, once nothing of it is going.
+ *
+ * Null while it is still going or before it was ever started, so the view can
+ * ask this one question rather than assembling the answer out of four fields.
+ */
+export type Ending = {
+  /** True where every block had its turn. */
+  whole: boolean;
+  ran: number;
+  turns: number;
+  left: readonly Block[];
+  /** The last block to say anything, and what it said. */
+  last: { block: Block; said: BlockSaid } | null;
+};
+
+export function endedAs(flow: Flow): Ending | null {
+  if (flow.startedAt === null || flow.running !== null) return null;
+  const done = new Set(flow.done);
+  if (done.size === 0) return null;
+  const left = flow.blocks.filter((one) => !done.has(one.id));
+  let last: { block: Block; said: BlockSaid } | null = null;
+  let turns = 0;
+  for (const block of flow.blocks) {
+    const said = flow.said[block.id];
+    if (said === undefined) continue;
+    turns += said.turns;
+    if (last === null || said.at >= last.said.at) last = { block, said };
+  }
+  return { whole: left.length === 0, ran: done.size, turns, left, last };
+}
+
+/**
+ * What one line between two blocks is doing.
+ *
+ * Colour is progress and motion is only ever now: a line both ends of which
+ * have finished has been through, and the line feeding whatever is being worked
+ * on carries the wave. A board of grey lines said neither.
+ */
+export function lineState(parent: BlockState, block: BlockState): 'idle' | 'passed' | 'live' {
+  if (parent !== 'done') return 'idle';
+  if (block === 'running' || block === 'needs-you') return 'live';
+  return block === 'done' ? 'passed' : 'idle';
+}
+
+/** Everything waiting directly on this one. */
+export function waitingOn(flow: Flow, id: string): readonly Block[] {
+  return flow.blocks.filter((one) => one.after.includes(id));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reading one back                                                            */
+/* -------------------------------------------------------------------------- */
+
+const KINDS = new Set<string>(BLOCKS.map((one) => one.kind));
+
+function readSaid(value: unknown, have: ReadonlySet<string>): Readonly<Record<string, BlockSaid>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const kept: Record<string, BlockSaid> = {};
+  for (const [id, one] of Object.entries(value as Record<string, unknown>)) {
+    if (!have.has(id) || typeof one !== 'object' || one === null) continue;
+    const raw = one as Record<string, unknown>;
+    if (typeof raw['text'] !== 'string') continue;
+    kept[id] = {
+      text: raw['text'],
+      turns: typeof raw['turns'] === 'number' && raw['turns'] > 0 ? Math.floor(raw['turns']) : 1,
+      at: typeof raw['at'] === 'number' && raw['at'] > 0 ? raw['at'] : 0,
+    };
+  }
+  return kept;
+}
+
+/** Whatever the file held, as a list of ids. A string is a flow written when a
+ *  block could only wait for one thing. */
+function readAfter(value: unknown): readonly string[] {
+  if (typeof value === 'string') return value === '' ? [] : [value];
+  if (!Array.isArray(value)) return [];
+  return [...new Set((value as readonly unknown[]).filter((one): one is string => typeof one === 'string' && one !== ''))];
+}
+
+function readAt(value: unknown): { x: number; y: number } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  const x = raw['x'];
+  const y = raw['y'];
+  if (typeof x !== 'number' || !Number.isFinite(x)) return null;
+  if (typeof y !== 'number' || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function readFiles(value: unknown): readonly BlockFile[] {
+  if (!Array.isArray(value)) return [];
+  const kept: BlockFile[] = [];
+  for (const one of value as readonly unknown[]) {
+    if (typeof one !== 'object' || one === null) continue;
+    const raw = one as Record<string, unknown>;
+    const name = raw['name'];
+    const mimeType = raw['mimeType'];
+    const bytes = raw['bytes'];
+    if (typeof name !== 'string' || typeof mimeType !== 'string' || typeof bytes !== 'string') continue;
+    if (mimeType.trim() === '' || bytes === '') continue;
+    // Flows written before a block could carry anything but a picture have no
+    // kind at all, and everything they hold is a picture.
+    const kind = raw['kind'] === 'text' ? 'text' : 'image';
+    kept.push({ name, mimeType, kind, bytes });
+    if (kept.length === MOST_FILES) break;
+  }
+  return kept;
+}
+
+function readModel(value: unknown): BlockModel {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  const providerId = raw['providerId'];
+  const modelId = raw['modelId'];
+  if (typeof providerId !== 'string' || providerId.trim() === '') return null;
+  if (typeof modelId !== 'string' || modelId.trim() === '') return null;
+  return { providerId, modelId };
+}
+
+/** A flow out of whatever a file held. Anything unreadable is no flow at all,
+ *  which is an empty canvas rather than an error. */
+export function readFlow(raw: unknown): Flow | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const held = raw as Record<string, unknown>;
+  const id = held['id'];
+  const list = held['blocks'];
+  if (typeof id !== 'string' || id === '' || !Array.isArray(list)) return null;
+
+  const blocks: Block[] = [];
+  const seen = new Set<string>();
+  for (const one of list as readonly unknown[]) {
+    if (typeof one !== 'object' || one === null) continue;
+    const block = one as Record<string, unknown>;
+    const id = block['id'];
+    const kind = block['kind'];
+    if (typeof id !== 'string' || id === '' || seen.has(id)) continue;
+    if (typeof kind !== 'string' || !KINDS.has(kind)) continue;
+    seen.add(id);
+    blocks.push({
+      id,
+      kind: kind as BlockKind,
+      says: typeof block['says'] === 'string' ? block['says'] : '',
+      model: readModel(block['model']),
+      after: readAfter(block['after']),
+      ...(block['lookFirst'] === true ? { lookFirst: true } : {}),
+      ...(readFiles(block['files'] ?? block['pictures']).length === 0
+        ? {}
+        : { files: readFiles(block['files'] ?? block['pictures']) }),
+      ...(readAt(block['at']) === null ? {} : { at: readAt(block['at']) as { x: number; y: number } }),
+    });
+  }
+
+  // A wait pointing at a block that did not survive the read would strand it,
+  // and a ring of them would be a flow that draws but never starts. Both become
+  // one wait fewer, which is a flow somebody can still run.
+  const have = new Set(blocks.map((one) => one.id));
+  const after = new Map(
+    blocks.map((one) => [one.id, one.after.filter((was) => was !== one.id && have.has(was))]),
+  );
+  // Edges are added back one at a time and any that closes a ring is dropped,
+  // so a shape that was nearly right stays nearly right rather than falling
+  // apart into loose blocks.
+  const kept = new Map(blocks.map((one) => [one.id, [] as string[]]));
+  const reaches = (from: string, to: string): boolean => {
+    const seen = new Set<string>();
+    const todo = [from];
+    while (todo.length > 0) {
+      const one = todo.pop() as string;
+      if (one === to) return true;
+      if (seen.has(one)) continue;
+      seen.add(one);
+      todo.push(...(kept.get(one) ?? []));
+    }
+    return false;
+  };
+  for (const one of blocks) {
+    for (const parent of after.get(one.id) ?? []) {
+      if (reaches(parent, one.id)) continue;
+      kept.get(one.id)?.push(parent);
+    }
+  }
+  const startedAt = held['startedAt'];
+  const name = held['name'];
+  const conversation = held['conversation'];
+  const running = held['running'];
+  const doneList = held['done'];
+  const standing: Block[] = blocks.map((one) => ({ ...one, after: kept.get(one.id) ?? [] }));
+  const have2 = new Set(standing.map((one) => one.id));
+  return {
+    id,
+    name: typeof name === 'string' && name.trim() !== '' ? name : canvasWords.untitled,
+    blocks: standing,
+    conversation: typeof conversation === 'string' && conversation !== '' ? conversation : null,
+    repo: typeof held['repo'] === 'string' && held['repo'] !== '' ? held['repo'] : null,
+    howFar: isHowFar(held['howFar']) ? held['howFar'] : 'doing',
+    // Nothing is running the moment this is read: the window that was running
+    // it is gone, and claiming otherwise would draw a block that never moves.
+    running: typeof running === 'string' && have2.has(running) ? null : null,
+    rounds: 0,
+    said: readSaid(held['said'], have2),
+    done: Array.isArray(doneList)
+      ? (doneList as readonly unknown[]).filter(
+          (one): one is string => typeof one === 'string' && have2.has(one),
+        )
+      : [],
+    startedAt: typeof startedAt === 'number' && startedAt > 0 ? startedAt : null,
+  };
+}
+
+/** What a canvas may be set to. The Guard knows two more, and a person setting
+ *  a whole flow once has never wanted them. */
+const EVERY_RUNG: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing'];
+
+function isHowFar(value: unknown): value is HowFar {
+  return typeof value === 'string' && (EVERY_RUNG as readonly string[]).includes(value);
+}
+
+/** Every flow a file held, in the order it held them. Anything unreadable is
+ *  one canvas lost rather than a project that will not open. */
+export function readFlows(raw: unknown): readonly Flow[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const flows: Flow[] = [];
+  for (const one of raw as readonly unknown[]) {
+    const flow = readFlow(one);
+    if (flow === null || seen.has(flow.id)) continue;
+    seen.add(flow.id);
+    flows.push(flow);
+  }
+  return flows;
+}
+
+/** The list with this one in it, in place if it was already there. */
+export function withFlow(flows: readonly Flow[], flow: Flow): readonly Flow[] {
+  return flows.some((one) => one.id === flow.id)
+    ? flows.map((one) => (one.id === flow.id ? flow : one))
+    : [...flows, flow];
+}
+
+export function withoutFlow(flows: readonly Flow[], id: string): readonly Flow[] {
+  return flows.filter((one) => one.id !== id);
+}

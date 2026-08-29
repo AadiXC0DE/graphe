@@ -274,7 +274,7 @@ const SAY = {
 const ASKING_TOOLS = new Set(['askfirst']);
 
 const READ_TOOLS = new Set([
-  'read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff', 'readmap', 'runchecks',
+  'read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff', 'readmap', 'runchecks', 'lsp',
 ]);
 /** Pi's `find` is `glob` under another name: it runs `fd` and returns file names
  *  without opening any of them. The shell command of the same word is a
@@ -300,6 +300,10 @@ const WRITE_TOOLS = new Set([
   'rename',
   'copy',
 ]);
+/** A change that reaches every file at once rather than a named one. Nobody
+ *  can picture the shape of it beforehand, and it names no file for the checks
+ *  above to judge — so it asks, and it takes a restore point either way. */
+const SWEEPING_TOOLS = new Set(['lsprename']);
 const DELETE_TOOLS = new Set(['delete', 'deletefile', 'remove', 'removefile', 'rm', 'rmdir', 'trash']);
 /** Anything that runs a command somebody typed. `keeprunning` starts one that
  *  stays up rather than one that finishes, which changes how long it lasts and
@@ -341,6 +345,13 @@ const WEB_TOOLS = new Set(['websearch', 'searchweb', 'googlesearch', 'ddgsearch'
  *  without the person knowing — this is the one tool that spends money on
  *  another context window. */
 const TASK_TOOLS = new Set(['task', 'subagent', 'delegate', 'handoff']);
+
+/** The second opinion. It holds its own conversation with another model, is
+ *  given no tools of its own, and hands back words — so nothing here can reach
+ *  a file. Not asked about, because choosing who advises is the consent, and it
+ *  is consulted several times a sitting: a card each time is the fatigue this
+ *  file exists to prevent. What leaves is still checked for keys. */
+const ADVISOR_TOOLS = new Set(['askadvisor', 'recordadvisoroutcome']);
 
 /** The project's own memory. It writes only to the app's own data folder — a
  *  note beside the conversation, never a file in the project — so it is silent
@@ -2119,6 +2130,15 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     return judgeFileTargets(call, ctx, allow(true));
   }
 
+  if (SWEEPING_TOOLS.has(name)) {
+    return ask(
+      'Rename this everywhere in your project?',
+      'It changes the same word in every file that uses it, in one go.',
+      `Some of those files may not be ones you expected. ${SAY.restorePoint}`,
+      { snapshot: true },
+    );
+  }
+
   if (NETWORK_TOOLS.has(name)) {
     const url = readString(input, URL_KEYS) ?? '';
     const text = collectText(input);
@@ -2183,6 +2203,14 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
       'It costs a little more, and its findings come back to this conversation.',
       { mutates: false },
     );
+  }
+
+  if (ADVISOR_TOOLS.has(name)) {
+    // The whole call travels to another account, not one named field of it, so
+    // the whole call is what gets read for keys.
+    const outbound = asText(input);
+    if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
+    return allow();
   }
 
   /* Putting work on the board. Nothing happens to the project here — each piece
@@ -2717,7 +2745,7 @@ export function describeCall(call: ToolCall): CallShape {
     if (SHELL_TOOLS.has(name) || SQL_TOOLS.has(name)) return 'runs a command';
     if (NETWORK_TOOLS.has(name) || WEB_TOOLS.has(name)) return 'reaches the internet';
     if (DELETE_TOOLS.has(name)) return 'deletes something';
-    if (WRITE_TOOLS.has(name)) return 'changes files';
+    if (WRITE_TOOLS.has(name) || SWEEPING_TOOLS.has(name)) return 'changes files';
     if (ASKING_TOOLS.has(name)) return 'reads';
     if (READ_TOOLS.has(name) || LIST_TOOLS.has(name) || SEARCH_TOOLS.has(name)) return 'reads';
     if (DESIGN_READ_TOOLS.has(name) || CODE_READ_TOOLS.has(name) || PAGE_READ_TOOLS.has(name)) return 'reads';

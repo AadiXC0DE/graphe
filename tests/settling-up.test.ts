@@ -13,6 +13,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+import { WORTH_KEEPING } from '../src/agent/pi/history';
+
 const adapter = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
 const shell = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 
@@ -59,13 +61,20 @@ describe('what it does and does not cost', () => {
 describe('what it asks for', () => {
   /** A memory full of "the work went well" is worse than an empty one. */
   it('asks for facts that save time, not for impressions', () => {
-    const at = adapter.indexOf('const WORTH_KEEPING');
-    const asked = adapter.slice(at, at + 1200).toLowerCase();
+    const asked = WORTH_KEEPING.toLowerCase();
     expect(asked).toContain('retain');
     expect(asked).toContain('one fact per note');
     expect(asked).toContain('nothing about how this sitting went');
     // None is a real answer, and saying so is what keeps the store worth reading.
     expect(asked).toMatch(/none|nothing/);
+  });
+
+  /* The words are shared with the replay that has to recognise them. A second
+     copy here would drift, and a prompt the replay does not know comes back on
+     screen as something a person typed. */
+  it('sends the words the replay knows to hide, not a copy of them', () => {
+    expect(adapter).toContain('await session.prompt(WORTH_KEEPING)');
+    expect(adapter).not.toContain('const WORTH_KEEPING');
   });
 });
 

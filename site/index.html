@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Graphe: an agentic coding platform for the Mac desktop</title>
+    <title>Graphe: an agentic coding platform for the desktop</title>
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
@@ -12,14 +12,14 @@
     <link rel="canonical" href="https://usegraphe.com/" />
     <meta
       name="description"
-      content="An open-source agentic coding platform for the Mac desktop. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Clone it and change it in itself. Built on pi."
+      content="A coding agent with a real workspace: a canvas of blocks you join up, helpers in parallel, jobs that run for hours. Open source, your keys, any model."
     />
     <meta name="theme-color" content="#131110" />
 
     <meta property="og:title" content="Graphe: send in a team, not a prompt" />
     <meta
       property="og:description"
-      content="An open-source agentic coding platform for the Mac desktop. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Clone it and change it in itself. Built on pi."
+      content="A coding agent with a real workspace: a canvas of blocks you join up, helpers in parallel, jobs that run for hours. Open source, your keys, any model."
     />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Graphe" />
@@ -31,10 +31,10 @@
     <meta property="og:image:height" content="1800" />
     <meta property="og:image:alt" content="The Graphe window: a conversation beside the project, with what is running, waiting and scheduled on the right." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Graphe: an agentic coding platform for the Mac desktop" />
+    <meta name="twitter:title" content="Graphe: an agentic coding platform for the desktop" />
     <meta
       name="twitter:description"
-      content="Open source. Helpers in parallel, jobs that run for hours, a plan before anything big, and a browser it can use itself. Clone it and change it in itself."
+      content="A canvas of blocks you join up, helpers in parallel, jobs that run for hours, a browser it drives itself. Open source, your keys, any model."
     />
     <meta name="twitter:image" content="https://usegraphe.com/assets/web/app-start-dark.webp" />
 
@@ -65,7 +65,7 @@
         "url": "https://usegraphe.com/",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS",
-        "description": "An open-source agentic coding platform for the desktop. Helpers in parallel, jobs that run for hours, a plan before anything big, a browser it can use itself, and a design system it reads before it writes. Built on pi.",
+        "description": "An open-source agentic coding platform for the desktop. A canvas of blocks you join up, helpers in parallel, jobs that run for hours, a review that reads a pull request in a copy of the project, a browser it drives itself, and a design system it reads before it writes. Your keys, any model. Built on pi. The download is a macOS build.",
         "license": "https://opensource.org/licenses/MIT",
         "isAccessibleForFree": true,
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -98,6 +98,7 @@
 
         <nav class="nav__links" aria-label="Sections">
           <a href="#see">What it does</a>
+          <a href="#canvas">The canvas</a>
           <a href="#evidence">Proof</a>
           <a href="#page">The browser</a>
           <a href="#pi">Built on pi</a>
@@ -140,8 +141,9 @@
           </h1>
 
           <p class="hero__lead reveal" data-reveal style="--i: 2">
-            A full coding agent with a workspace around it. Helpers in parallel, jobs that outlast
-            your attention, a browser it drives itself, a design system it reads before it writes.
+            A full coding agent with a workspace around it. A canvas where a run is blocks you
+            join up, helpers in parallel, jobs that outlast your attention, a browser it drives
+            itself, a design system it reads before it writes.
             Every command sandboxed, nothing in the middle, and open source. Clone it, open it in
             Graphe, and ask for the feature you are missing. Any model you already pay for, changed
             mid-conversation, the meter in plain sight.
@@ -155,7 +157,7 @@
           </div>
 
           <p class="hero__fine reveal" data-reveal style="--i: 4">
-            Open source, MIT · Any provider, your own key · macOS
+            Open source, MIT · Any provider, your own key · macOS, Apple silicon and Intel
           </p>
         </div>
 
@@ -296,6 +298,96 @@
               alt="The meter in the corner of the window: today's total, and a way to see where it went."
               loading="lazy"
             />
+          </article>
+        </div>
+      </section>
+
+      <!-- ───────────────────────────────────────────────── the canvas ── -->
+      <section class="band band--away" id="canvas">
+        <div class="head">
+          <p class="eyebrow reveal" data-reveal>The canvas</p>
+          <h2 class="head__title reveal" data-reveal style="--i: 1">
+            Draw the run.<br /><em>Then leave it to it.</em>
+          </h2>
+          <p class="head__lead reveal" data-reveal style="--i: 2">
+            A canvas is a tab, the way a conversation is a tab, and it owns a conversation of its
+            own. Place the blocks, join them up, press Start. Until you do, nothing has been sent:
+            a flow is a drawing, which is what makes it something you compose rather than
+            something you have already asked for.
+          </p>
+        </div>
+
+        <figure class="wide wide--lead reveal" data-reveal>
+          <img
+            src="assets/web/app-canvas-dark.png"
+            width="2880"
+            height="1800"
+            alt="A canvas open as a tab in Graphe: seven blocks — Custom, Plan, Research, Subagents, Browser, Review and Goal — joined by lines into a dependency graph. The bar above it names the model and says the whole canvas has full access. The band along the foot reads: stopped, three blocks, six turns, four never ran, with a way into the conversation."
+            loading="lazy"
+            decoding="async"
+          />
+          <figcaption class="mono">
+            Seven blocks, three of them run and four still to go · a real canvas, not a drawing of one
+          </figcaption>
+        </figure>
+
+        <div class="blocks reveal" data-reveal>
+          <p class="blocks__label mono" id="blocks-label">The blocks you place</p>
+          <ul class="blocks__list" aria-labelledby="blocks-label">
+            <li>Custom</li>
+            <li>Plan</li>
+            <li>Research</li>
+            <li>Subagents</li>
+            <li>Browser</li>
+            <li>Checks</li>
+            <li>Goal</li>
+            <li>Review</li>
+            <li>Wait for me</li>
+            <li>Pull request</li>
+          </ul>
+          <p class="blocks__note">
+            Each one is work the app already does, and each carries the whole instruction it will
+            be sent with, so editing a block is editing that sentence. Wait for me sends nothing at
+            all: the flow stops there until you say carry on.
+          </p>
+        </div>
+
+        <div class="sheet reveal" data-reveal>
+          <article class="cell">
+            <h3>A block can wait for several</h3>
+            <p>Not one line in and one out. A block waits for as many as you draw into it and begins when the last of them has finished, so “review after both the change and the checks” is one shape rather than a compromise.</p>
+          </article>
+          <article class="cell">
+            <h3>One conversation, one working copy</h3>
+            <p>The branches are a shape, not a fan-out: they run one after another in the same conversation over the same working tree, so the last block sees everything the earlier ones did. Subagents is the block that goes wide.</p>
+          </article>
+          <article class="cell">
+            <h3>Every block can name its own model</h3>
+            <p>The cheap one for the sweep, the careful one for the part that matters, and how hard it thinks set beside it. Ask a block to plan first and it proposes before it touches anything.</p>
+          </article>
+          <article class="cell">
+            <h3>Files pinned to the block that needs them</h3>
+            <p>Pictures go with the ask the way they do from the composer; text goes into it. They are held whole rather than as a path, so a file that moved between drawing the flow and running it cannot quietly empty a block.</p>
+          </article>
+          <article class="cell">
+            <h3>One decision for the whole run</h3>
+            <p>How far it may go on its own is set once, in the bar above the board. It starts at full access, because walking away from it is the point — and the row is right there for the flow that should stop and ask.</p>
+          </article>
+          <article class="cell">
+            <h3>Or take a loop whole</h3>
+            <p>Build, verify, ship. Plan, build, review. Plan, fan out, review. Put one down complete and edit what it says, or place a single block and drag out from there.</p>
+          </article>
+          <article class="cell">
+            <h3>It says where it has got to</h3>
+            <p>While a block runs, its card says what the turn is doing — twenty minutes of “going” tells you nothing — and the foot is a way straight into the conversation to watch it or answer it.</p>
+          </article>
+          <article class="cell">
+            <h3>And what it came to</h3>
+            <p>When it stops, a band along the bottom: how many blocks ran, how many turns that took, how many never got their turn, and the last thing it said.</p>
+          </article>
+          <article class="cell">
+            <h3>The lines carry the state</h3>
+            <p>A slow drift at rest, so the board says which way the work will go. The accent where a run has already been. A travelling pulse into whatever is being worked on now.</p>
           </article>
         </div>
       </section>
@@ -528,11 +620,19 @@
           </article>
           <article class="cell">
             <h3>A review with a verdict</h3>
-            <p>Ships, needs work, or do not land. Findings ranked, with file and line, and one press posts them to the pull request.</p>
+            <p>Pick a pull request and it is fetched into a copy of the project of its own and read there, so nothing you have open moves. Ships, needs work, or do not land, findings ranked P0 to P3 with file, line and how sure it is, and one press posts them to the pull request under your own account.</p>
           </article>
           <article class="cell">
             <h3>A real debugger</h3>
             <p>Attaches lldb, dlv or debugpy to a stuck program. Reads frames, steps, evaluates.</p>
+          </article>
+          <article class="cell">
+            <h3>One name, changed everywhere</h3>
+            <p><span class="mono">formatBytes</span> becomes <span class="mono">formatFileSize</span> in every file that uses it, in one step. It shows you the list before it writes, leaves lock files, binaries and anything holding credentials alone, and saves where you were first.</p>
+          </article>
+          <article class="cell">
+            <h3>One sentence, until it is done</h3>
+            <p>Say what done means and it works toward it on its own: a round of work, a look at what is still unticked and whether the project still builds, then round again on what is left. Full access while it lasts, and it stops and says so when the rounds run out rather than going round for ever.</p>
           </article>
           <article class="cell">
             <h3>Bring your own tools</h3>
@@ -545,10 +645,6 @@
           <article class="cell">
             <h3>Figma, both directions</h3>
             <p>Frames as pictures, variables as tokens, and drift detection that keeps you in step.</p>
-          </article>
-          <article class="cell">
-            <h3>Every width, checked</h3>
-            <p>Phone, tablet, desktop and wide, photographed, so you never decide from one size.</p>
           </article>
           <article class="cell">
             <h3>What our mistakes cost you</h3>
@@ -564,7 +660,7 @@
           </article>
           <article class="cell">
             <h3>Works the computer itself</h3>
-            <p>For the things that are not websites. It takes a picture of the screen, then presses, types and drags on it — a native app, a simulator, a settings pane. Every press is named before it happens.</p>
+            <p>For the things that are not websites. It takes a picture of the screen, then presses, types and drags on it, a native app, a simulator, a settings pane. Every press is named before it happens.</p>
           </article>
           <article class="cell">
             <h3>Every line of work, by name</h3>
@@ -592,7 +688,7 @@
           </article>
           <article class="cell">
             <h3>A browser it can drive anywhere</h3>
-            <p>Any address, not only your own site. It opens the page, reads it, presses things and types into them — signing in to a dashboard to read a number, checking the thing you are copying — from the first turn.</p>
+            <p>Any address, not only your own site. It opens the page, reads it, presses things and types into them, signing in to a dashboard to read a number, checking the thing you are copying, from the first turn.</p>
           </article>
           <article class="cell">
             <h3>Say something without stopping it</h3>
@@ -608,7 +704,7 @@
           </article>
           <article class="cell">
             <h3>A folder of several projects</h3>
-            <p><code>backend/</code> and <code>frontend/</code> beside each other, and it opens the folder rather than making you pick one. Each keeps its own lines of work, its own versions and its own preview.</p>
+            <p><code>backend/</code> and <code>frontend/</code> beside each other, and it opens the folder rather than making you pick one. Each keeps its own lines of work, its own versions and its own preview. Nothing is written into the folder itself to make it look like one project.</p>
           </article>
           <article class="cell">
             <h3>Take a stack in order</h3>
@@ -744,6 +840,7 @@
             <div class="from__side from__side--ours">
               <p class="from__who mono">Graphe adds</p>
               <ul class="from__list">
+                <li>A canvas: a run drawn as blocks, joined up, and left to go</li>
                 <li>Sub-agents and parallel conversations, each in a copy of its own, whose work comes home</li>
                 <li>A plan you reorder, strike and argue with before it runs</li>
                 <li>A browser in the window it can use itself</li>
@@ -753,7 +850,7 @@
                 <li>Background jobs, schedules and servers</li>
                 <li>Code review with a verdict, and the handover</li>
                 <li>Memory between sittings</li>
-                <li>Go-to-definition and project-wide rename, over a language server</li>
+                <li>One name changed in every file that uses it, previewed, with a way back</li>
                 <li>The money, on screen, in your own currency</li>
               </ul>
             </div>
@@ -915,6 +1012,16 @@
               A read hands back four hex characters of a hash of the whole file, whitespace
               canonicalised. An edit names line numbers plus that fingerprint. A file that moved
               underneath is refused, and one stale anchor in a batch applies none of it.
+            </span>
+          </li>
+          <li>
+            <b>rename</b>
+            <span>
+              A word-boundary sweep of the project rather than a language server, and it says so:
+              it lists every line it would change before it changes one, and refuses a name under
+              three characters. Lock files, minified bundles, binaries and anything holding
+              credentials are skipped, a file that moved while it was working is left alone, and a
+              restore point is written before the first byte.
             </span>
           </li>
           <li>
@@ -1216,6 +1323,11 @@
             >
           </div>
           <p class="cta__fine mono">Apple silicon and Intel · macOS · bring your own model key</p>
+          <p class="cta__note">
+            macOS is the only build today. Graphe is an Electron app and the source is open, so
+            Windows and Linux can be built from it — but nothing is set up for that yet, and
+            neither has been tried.
+          </p>
         </div>
       </section>
     </main>

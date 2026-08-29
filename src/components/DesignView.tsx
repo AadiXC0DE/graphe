@@ -241,7 +241,7 @@ export default function DesignView({
         </button>
       </header>
 
-      <div className="sheet__body" ref={body}>
+      <div className="sheet__body scroll--auto" ref={body}>
         <div className="sheet__grid">
           <section className="sheet__block sheet__block--wide sheet__block--bare" id="design-styles">
             <h2 className="sheet__blocktitle">{SAYS.parts.styles}</h2>
@@ -272,7 +272,7 @@ export default function DesignView({
           </section>
 
           {data.drifted.length === 0 ? null : (
-            <section className="sheet__block" id="design-drift">
+            <section className="sheet__block sheet__block--wide" id="design-drift">
               <Drift
                 findings={data.drifted}
                 where={data.styles?.file ?? ''}

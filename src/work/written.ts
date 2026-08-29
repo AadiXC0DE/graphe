@@ -46,6 +46,8 @@ export type Written = {
    *  are not goes at the same thing any more, and keeping one would leave the
    *  others sitting there. */
   ways?: string | null;
+  /** Which model runs it, where a block on the canvas named one. */
+  model?: { providerId: string; modelId: string } | null;
   owner: Owner;
 };
 
@@ -112,6 +114,7 @@ export function asPiece(one: Written): PieceOfWork {
     at: one.at,
     trouble: one.trouble,
     ...(one.ways == null ? {} : { ways: one.ways }),
+    ...(one.model == null ? {} : { model: one.model }),
   };
 }
 
@@ -143,6 +146,7 @@ export function noteOf(
     after: about.after ?? null,
     owner: about.owner,
     ...(piece.ways == null ? {} : { ways: piece.ways }),
+    ...(piece.model == null ? {} : { model: piece.model }),
   };
 }
 
@@ -162,6 +166,14 @@ const STATES: readonly WorkState[] = ['waiting', 'running', 'needs-you', 'done',
 
 function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+function whichModel(value: unknown): { providerId: string; modelId: string } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  const providerId = text(raw['providerId']);
+  const modelId = text(raw['modelId']);
+  return providerId === null || modelId === null ? null : { providerId, modelId };
 }
 
 function amount(value: unknown): Money | null {
@@ -204,6 +216,7 @@ export function readWritten(value: unknown): Written | null {
     trouble: text(raw['trouble']),
     spent: amount(raw['spent']),
     after: text(raw['after']),
+    ...(whichModel(raw['model']) === null ? {} : { model: whichModel(raw['model']) }),
     owner: {
       pid: who['pid'],
       since: typeof who['since'] === 'number' ? who['since'] : 0,

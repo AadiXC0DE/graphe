@@ -240,7 +240,7 @@ function fromToolExecutionEnd(source: Fields): AgentEvent | null {
   const failed = flagAt(source, 'isError') === true;
   const detail = failed ? failureFromResult(source['result']) : undefined;
   const shown = failed ? null : pictureIn(source['result']);
-  const note = failed ? null : noteIn(source['result']);
+  const note = failed ? null : (noteIn(source['result']) ?? advisorAnswer(source));
   return {
     type: 'tool-end',
     id,
@@ -248,6 +248,21 @@ function fromToolExecutionEnd(source: Fields): AgentEvent | null {
     ...(detail === undefined ? { ...(note === null ? {} : { detail: note }) } : { detail }),
     ...(shown === null ? {} : { shown }),
   };
+}
+
+/** The name Pi's advisor addition registers its question under. */
+const ADVISOR_TOOL = 'ask_advisor';
+
+/** What the advisor replied.
+ *
+ * Every other tool's result belongs to the model and stays there. This one is
+ * the whole of the step: without it the conversation says a second model was
+ * asked and never says what it said back.
+ */
+function advisorAnswer(source: Fields): string | null {
+  if (textAt(source, 'toolName') !== ADVISOR_TOOL) return null;
+  const said = partialTextOf(source['result'])?.trim();
+  return said === undefined || said === '' ? null : said;
 }
 
 /** A line a step wants under itself in the feed — "2 errors, 1 request failed".

@@ -1,4 +1,5 @@
 @import './tokens.css';
+@import './scrollbar.css';
 
 *,
 *::before,
@@ -33,11 +34,11 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 
-  /* One scrollbar rule for the whole app, said once here because both
-     properties inherit: thin, with a thumb in the control-edge colour —
-     visible against a card without shouting, and clearly darker than the old
-     --border-strong bar that read as platform furniture. Anything that wants
-     none (the main window scroller) still overrides locally. */
+  /* The thumb for the whole app, in the control-edge colour: visible against a
+     card without shouting, and clearly darker than the old --border-strong bar
+     that read as platform furniture. Only the colour inherits, so this reaches
+     every scroller; the width reaches the window's own bar and no further, and
+     styles/scrollbar.css sets it for the scrollers that ask. */
   scrollbar-width: thin;
   scrollbar-color: var(--border-control) transparent;
 }

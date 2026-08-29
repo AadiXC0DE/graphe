@@ -116,6 +116,8 @@ h3.md__heading {
 /* Tables scroll inside their own box rather than widening the reply. */
 .md__tablewrap {
   margin: 0 0 var(--space-3);
+  /* No reserved gutter: sideways, the strip would be a band of empty under
+     every table narrow enough to fit. */
   overflow-x: auto;
 }
 

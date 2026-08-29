@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useCopying } from '../lib/copying';
 import { canHighlight, highlight } from '../lib/highlight';
 import { languageLabel, languageOf } from '../lib/markdown';
 import './FileView.css';
@@ -46,9 +47,7 @@ function endingOf(path: string): string | null {
 export default function FileView({ path, text, trouble, onClose }: Props) {
   const [cap, setCap] = useState(CHUNK);
   const [coloured, setColoured] = useState<{ code: string; html: string } | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [copyFailed, setCopyFailed] = useState(false);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copying = useCopying({ idle: 'Copy path' });
 
   const ending = endingOf(path);
   const language = languageOf(ending);
@@ -84,37 +83,11 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
     };
   }, [code, language, binary]);
 
-  useEffect(
-    () => () => {
-      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
-    },
-    [],
-  );
-
   const html = coloured !== null && coloured.code === code ? coloured.html : null;
   const rest = lines.length - shown.length;
   const cut = path.lastIndexOf('/');
   const where = cut === -1 ? '' : path.slice(0, cut + 1);
   const name = cut === -1 ? path : path.slice(cut + 1);
-
-  const copy = () => {
-    void navigator.clipboard?.writeText(path).then(
-      () => {
-        setCopyFailed(false);
-        setCopied(true);
-        if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
-        copiedTimer.current = setTimeout(() => setCopied(false), 1600);
-      },
-      () => {
-        // Said, rather than swallowed. A Copy that quietly does nothing leaves
-        // whatever was on the clipboard before, which reads as copying the
-        // wrong thing.
-        setCopyFailed(true);
-        if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
-        copiedTimer.current = setTimeout(() => setCopyFailed(false), 2600);
-      },
-    );
-  };
 
   return (
     <section className="fileview" aria-label={name}>
@@ -126,8 +99,8 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
 
         <span className="fileview__tail">
           {label === null ? null : <span className="fileview__kind">{label}</span>}
-          <button type="button" className="fileview__act" onClick={copy}>
-            {copyFailed ? 'Press \u2318C' : copied ? 'Copied' : 'Copy path'}
+          <button type="button" className="fileview__act" onClick={() => copying.copy(path)}>
+            {copying.label}
           </button>
           {onClose === undefined ? null : (
             <button type="button" className="fileview__act" onClick={onClose}>
@@ -146,7 +119,7 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
       ) : (
         <>
           {html === null ? (
-            <div className="fileview__code">
+            <div className="fileview__code scroll--auto">
               <pre tabIndex={0}>
                 <code>
                   {shown.map((line, index) => (
@@ -162,7 +135,7 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
             </div>
           ) : (
             <div
-              className="fileview__code"
+              className="fileview__code scroll--auto"
               // Shiki's own markup, built from the file as text. See
               // src/lib/highlight.ts.
               dangerouslySetInnerHTML={{ __html: html }}

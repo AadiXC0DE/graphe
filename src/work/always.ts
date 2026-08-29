@@ -126,3 +126,22 @@ export function worthRunning(one: Always, touched: readonly string[]): boolean {
 export function alwaysFile(projectRoot: string): string {
   return `${projectRoot}/.pi/hooks.json`;
 }
+
+/** Whether a path is that file, wherever the project is. */
+export function isAlwaysFile(path: string): boolean {
+  return path.endsWith('/.pi/hooks.json') || path.endsWith('\\.pi\\hooks.json');
+}
+
+/** What the file has in it before anybody has written a line — the shape, with
+ *  the two most ordinary examples in it. Opening an empty path opens nothing,
+ *  which is what pressing the row used to do. */
+export const ALWAYS_TEMPLATE = `{
+  "afterEachChange": [
+    { "name": "format", "run": "npx prettier --write $FILES" }
+  ],
+  "whenItFinishes": [
+    { "name": "tests", "run": "npm test" }
+  ],
+  "whenItOpens": []
+}
+`;

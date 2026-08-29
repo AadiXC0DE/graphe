@@ -48,6 +48,7 @@ import { fileURLToPath } from 'node:url';
 import type { AgentToolResult, AgentToolUpdateCallback, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 
+import { lspRenameTool, lspTool } from './lsp';
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
 import { ProjectHistory, type ReviewTarget } from '../../history/repo';
 import { mapFrom, saysMap, type SourceFile } from '../../files/map';
@@ -2385,7 +2386,11 @@ export const grapheTools = (
       // something connected, and the project with nothing yet is the whole
       // point of this one.
       connectingTool(projectRoot),
+      lspTool(projectRoot),
+      lspRenameTool(projectRoot),
     );
+  } else {
+    tools.push(lspTool(process.cwd()), lspRenameTool(process.cwd()));
   }
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));

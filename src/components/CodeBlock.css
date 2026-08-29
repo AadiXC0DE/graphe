@@ -78,6 +78,17 @@
   font-size: var(--text-sm);
   line-height: 1.6;
   tab-size: 2;
+  /* The same fade `scroll--auto` gives everything else, said here because Shiki
+     writes this <pre> and there is nowhere to put the class. No reserved
+     gutter: sideways, it would be a band of empty under every short line. */
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.codeblock__code pre:hover,
+.codeblock__code pre:focus-within,
+.codeblock__code pre.is-scrolling {
+  scrollbar-color: var(--border-control) transparent;
 }
 
 .codeblock .codeblock__code code {

@@ -499,6 +499,10 @@ export type PieceOfWork = {
   /** The files it changed, read while its copy still exists. Absent until it
    *  has finished, and on anything rebuilt from a note that predates it. */
   touches?: readonly string[] | null;
+  /** Which model runs this one. Absent on everything asked for the ordinary
+   *  way, which takes whatever is answering; set where a block on the canvas
+   *  named one. */
+  model?: { providerId: string; modelId: string } | null;
 };
 
 /** Where one piece of work's copy lives: its own folder inside the room, so
@@ -554,7 +558,15 @@ export class Workbench {
 
   /** Ask for another piece of work. Past the cap it waits its turn rather than
    *  being refused — nobody's request is ever thrown away. */
-  ask(doing: string, options: { id?: string; at?: number; ways?: string | null } = {}): PieceOfWork {
+  ask(
+    doing: string,
+    options: {
+      id?: string;
+      at?: number;
+      ways?: string | null;
+      model?: { providerId: string; modelId: string } | null;
+    } = {},
+  ): PieceOfWork {
     this.asked += 1;
     const piece: PieceOfWork = {
       id: this.freeId(options.id ?? `work-${String(this.asked)}`),
@@ -567,6 +579,7 @@ export class Workbench {
       trouble: null,
       touches: null,
       ...(options.ways == null ? {} : { ways: options.ways }),
+      ...(options.model == null ? {} : { model: options.model }),
     };
     this.work.push(piece);
     return piece;

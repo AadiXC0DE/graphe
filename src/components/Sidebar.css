@@ -271,10 +271,6 @@
   overscroll-behavior: contain;
 }
 
-.shelf__band--scroll::-webkit-scrollbar {
-  display: none;
-}
-
 .shelf__band .shelf__caption {
   display: block;
   padding: 0 var(--space-3) var(--space-2);

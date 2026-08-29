@@ -13,7 +13,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AgentEvent } from '../src/agent/types';
-import { eventsFromEntries } from '../src/agent/pi/history';
+import {
+  NOTES_CARRIED,
+  WORTH_KEEPING,
+  eventsFromEntries,
+  momentsFromEntries,
+} from '../src/agent/pi/history';
 import { applyEvent, type Turn } from '../src/lib/thread';
 
 /** Fold a saved conversation the way the window does when a project opens:
@@ -258,5 +263,82 @@ describe('S-02 the journey back onto the desk', () => {
 
   it('an empty transcript is an empty desk', () => {
     expect(revived([])).toEqual([]);
+  });
+});
+
+/* ========================================================================== */
+/* S-03 Graphe's own words, which nobody typed and nobody read                 */
+/* ========================================================================== */
+
+describe("S-03 the app's own words", () => {
+  /** Exactly what a sitting ends with: the prompt asking for notes, and the
+   *  calls that write them. All of it is on disk as an ordinary exchange. */
+  const settlingUp = [
+    { type: 'message', message: { role: 'user', content: WORTH_KEEPING } },
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'call-9',
+            name: 'retain',
+            arguments: { content: 'The checks run with npm run typecheck && npm test.' },
+          },
+        ],
+      },
+    },
+    { type: 'message', message: { role: 'toolResult', toolCallId: 'call-9', isError: false } },
+  ];
+
+  it('does not replay the end-of-sitting prompt as something a person said', () => {
+    expect(eventsFromEntries([{ type: 'message', message: { role: 'user', content: WORTH_KEEPING } }])).toEqual(
+      [],
+    );
+  });
+
+  it('does not offer the end-of-sitting prompt as a moment to go back to', () => {
+    const entries = [
+      { type: 'message', id: 'm1', message: { role: 'user', content: 'Make the header darker.' } },
+      { type: 'message', id: 'm2', message: { role: 'user', content: WORTH_KEEPING } },
+    ];
+    expect(momentsFromEntries(entries).map((one) => one.said)).toEqual(['Make the header darker.']);
+  });
+
+  it('shows the first message as it was typed, without the notes carried in with it', () => {
+    const carried = `${NOTES_CARRIED}\n- The checks run with npm test.\n- The design tokens live in tokens.css.\n\nMake the header darker.`;
+    const turns = revived([{ type: 'message', message: { role: 'user', content: carried } }]);
+    expect(turns).toMatchObject([{ kind: 'said', from: 'you', text: 'Make the header darker.' }]);
+  });
+
+  it('leaves note-keeping out of a reopened conversation altogether', () => {
+    const turns = revived([
+      { type: 'message', message: { role: 'user', content: 'Make the header darker.' } },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: 'call-1', name: 'recall', arguments: { query: 'how this project is built' } },
+          ],
+        },
+      },
+      { type: 'message', message: { role: 'toolResult', toolCallId: 'call-1', isError: false } },
+      {
+        type: 'message',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Done — the header is darker now.' }] },
+      },
+      ...settlingUp,
+    ]);
+
+    // The whole of it: what they asked, and what it answered.
+    expect(turns.map((turn) => turn.kind)).toEqual(['said', 'said']);
+    expect(turns[0]).toMatchObject({ text: 'Make the header darker.' });
+    expect(turns[1]).toMatchObject({ text: 'Done — the header is darker now.' });
+  });
+
+  it('a sitting that ended in nothing but notes comes back as nothing', () => {
+    expect(revived(settlingUp)).toEqual([]);
   });
 });

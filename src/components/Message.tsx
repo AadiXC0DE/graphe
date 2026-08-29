@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import type { SentPicture } from '../lib/thread';
+import { useCopying } from '../lib/copying';
 import Clipped, { howMuch } from './Clipped';
 import Markdown from './Markdown';
 import './Message.css';
@@ -17,7 +19,61 @@ type Props = {
   /** True when this is the last turn in the thread — it starts unclipped, and
    *  the reader can fold it once they are done with it. */
   isLast?: boolean;
+  /** Pictures that went with this message, drawn above the words. */
+  pictures?: readonly SentPicture[];
+  /** The turn's own words, for the copy control. Nothing is drawn without it. */
+  copy?: string;
 };
+
+/** A clipboard until it lands, then a tick — one 12px box either way, so the
+ *  confirmation never resizes the control. */
+function CopyMark({ done }: { done: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      {done ? (
+        <path
+          d="M1.6 6.3 4.5 9.2l5.9-6.4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : (
+        <>
+          <rect x="3.9" y="3.9" width="6.7" height="6.7" rx="1.6" stroke="currentColor" strokeWidth="1.2" />
+          <path
+            d="M8.3 1.4H3c-.88 0-1.6.72-1.6 1.6v5.3"
+            stroke="currentColor"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+          />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** One picture as it was sent: small, and full size when asked for.
+ *
+ * A picture that will not draw leaves nothing behind — a broken-image icon says
+ * less than the message beside it already does. */
+function Sent({ picture }: { picture: SentPicture }) {
+  const [broken, setBroken] = useState(false);
+  const [open, setOpen] = useState(false);
+  if (broken) return null;
+  return (
+    <button
+      type="button"
+      className={`message__shot ${open ? 'message__shot--open' : ''}`}
+      onClick={() => setOpen((was) => !was)}
+      aria-expanded={open}
+      aria-label={open ? `Shrink ${picture.name}` : `Show ${picture.name} full size`}
+      title={picture.name}
+    >
+      <img src={picture.src} alt={picture.name} onError={() => setBroken(true)} />
+    </button>
+  );
+}
 
 /** One turn in the conversation.
  *
@@ -38,8 +94,10 @@ type Props = {
  * composer people stop trusting with anything technical. What you typed is what
  * is shown.
  */
-export default function Message({ from, children, streaming, aside, isLast }: Props) {
+export default function Message({ from, children, streaming, aside, isLast, pictures, copy }: Props) {
   const mine = from === 'you';
+  // Named for what it copies: one message, not the conversation.
+  const copying = useCopying({ idle: 'Copy this message' });
   const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
   const formatted = !mine && typeof children === 'string';
 
@@ -59,6 +117,13 @@ export default function Message({ from, children, streaming, aside, isLast }: Pr
   return (
     <article className={`message message--${from}`} aria-label={mine ? 'You' : 'Graphe'}>
       <div className="message__who">{mine ? 'You' : 'Graphe'}</div>
+      {pictures === undefined || pictures.length === 0 ? null : (
+        <div className="message__pictures">
+          {pictures.map((picture, at) => (
+            <Sent key={`${picture.src}-${String(at)}`} picture={picture} />
+          ))}
+        </div>
+      )}
       <div
         className={`message__body ${formatted ? 'message__body--rich' : ''}`}
         aria-live={!mine && streaming ? 'polite' : undefined}
@@ -77,6 +142,32 @@ export default function Message({ from, children, streaming, aside, isLast }: Pr
         )}
       </div>
       {aside ? <p className="message__aside">{aside}</p> : null}
+      {/* The room is kept from the first token so the turn does not hop when
+          the reply finishes; the control itself waits until there is a whole
+          answer to take. It stays out while it is copying, so the confirmation
+          survives the cursor leaving. */}
+      {copy === undefined || copy === '' ? null : (
+        <div className="message__foot">
+          {streaming ? null : (
+            <button
+              type="button"
+              className={`message__copy ${copying.copied || copying.failed ? 'message__copy--held' : ''}`}
+              onClick={() => copying.copy(copy)}
+              aria-label={copying.label}
+              title={copying.label}
+            >
+              <CopyMark done={copying.copied} />
+              {/* Beside the icon and out of flow, so saying it landed cannot
+                  widen the control or push what is under it. */}
+              {copying.copied || copying.failed ? (
+                <span className="message__copysaid" aria-hidden="true">
+                  {copying.label}
+                </span>
+              ) : null}
+            </button>
+          )}
+        </div>
+      )}
     </article>
   );
 }

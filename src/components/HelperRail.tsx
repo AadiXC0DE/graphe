@@ -30,10 +30,10 @@ function elapsed(ms: number): string {
 }
 
 /** The first few words of what it was asked. Enough to tell two helpers apart,
- *  which is the whole job of a chip. */
+ *  which is the whole job of a chip. Empty when nothing was asked: a made-up
+ *  label reads as a real one and tells nobody anything. */
 function inShort(task: string): string {
   const words = task.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return 'a piece of work';
   const few = words.slice(0, 4).join(' ');
   return words.length > 4 ? `${few}…` : few;
 }

@@ -126,7 +126,8 @@ describe('the answer to a look-around is built, not looked at again', () => {
   });
 
   it('turns the look-around off for the message that answers it', () => {
-    // Both send paths, and both ways into research.
+    // Both send paths, and every one-shot that comes back as a report to
+    // answer rather than a request to look around again.
     expect(app.match(/const answering = justLookedFirst\.current;/g)?.length).toBe(2);
     expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(4);
     // The rule itself lives where it can be tested, and both paths call it.
@@ -139,11 +140,11 @@ describe('the answer to a look-around is built, not looked at again', () => {
   it('only the guess steps aside for the message that answers it', () => {
     const text = 'now implement the redesign';
     expect(shouldLookFirst({ plans: 'auto', answering: true, text })).toBe(false);
-    // A switch somebody deliberately set to "always" is not overruled by us
-    // deciding they meant something else.
-    expect(shouldLookFirst({ plans: 'always', answering: true, text })).toBe(true);
-    expect(shouldLookFirst({ plans: 'never', answering: false, text })).toBe(false);
+    // Plan mode is a switch somebody deliberately set, so the guess about what
+    // they meant does not overrule it.
+    expect(shouldLookFirst({ plans: 'plan', answering: true, text })).toBe(true);
     expect(shouldLookFirst({ plans: 'research', answering: false, text })).toBe(false);
+    expect(shouldLookFirst({ plans: 'goal', answering: false, text })).toBe(false);
   });
 
   it('does not ask how far the run may go — that was the bug', () => {

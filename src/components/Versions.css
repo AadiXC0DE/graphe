@@ -29,6 +29,9 @@
   overscroll-behavior: contain;
   background: var(--bg);
   border-left: 1px solid var(--border);
+  /* Fixed to the right edge like the panel that mounts it, and panels on the
+     glass carry no bar. */
+  scrollbar-width: none;
 
   animation: rail-arrives var(--dur-ui) var(--ease-out-quart) both;
 }
@@ -387,8 +390,9 @@
   right: 8px;
 }
 
-/* Small enough to sit on a thumbnail without covering it; the target around it
-   is not — ::after pushes the hit area out to a comfortable 40px. */
+/* The star alone, no disc around it. Small enough to sit on a thumbnail without
+   covering it; the target around it is not — ::after pushes the hit area out to
+   a comfortable 40px. */
 .moment__keep {
   position: absolute;
   top: 10px;
@@ -397,14 +401,8 @@
   place-items: center;
   width: 24px;
   height: 24px;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--bg-raised) 86%, transparent);
-  backdrop-filter: blur(8px);
   color: var(--text-faint);
-  transition:
-    color var(--dur-micro) var(--ease-hover),
-    border-color var(--dur-micro) var(--ease-hover);
+  transition: color var(--dur-micro) var(--ease-hover);
 }
 
 .moment__keep::after {
@@ -420,7 +418,6 @@
 
 .moment__keep[aria-pressed='true'] {
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 
 .moment__keep:focus-visible {
@@ -641,7 +638,6 @@
 
   .moment__keep:hover {
     color: var(--text);
-    border-color: var(--border-strong);
   }
 
   .moment__keep[aria-pressed='true']:hover {

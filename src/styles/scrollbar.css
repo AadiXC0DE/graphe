@@ -1,0 +1,37 @@
+/* Zed-like auto-hide scrollbars — the bar keeps one width and only its colour
+   comes and goes. Apply with className="scroll--auto".
+
+   Fading it in by *width* is what a hover-reveal wants to be and cannot: a bar
+   that grows from nothing takes real layout space on the way in and shoves the
+   content sideways under the pointer. Colour costs nothing, so the space is
+   paid for once, at rest, and nothing moves.
+
+   The width is set through :where(), so it costs no specificity and a scroller
+   that wants no bar at all just says `scrollbar-width: none` and wins. Setting
+   it at all is what makes Chromium ignore ::-webkit-scrollbar, which is why
+   there are no pseudo-elements anywhere in here.
+
+   The gutter is each scroller's own call — worth reserving only where the
+   content can grow past the box, and never on a sideways one, where it is a
+   band of empty under everything that fits. */
+
+:where(.scroll--auto) {
+  scrollbar-width: thin;
+}
+
+.scroll--auto {
+  scrollbar-color: transparent transparent;
+}
+
+.scroll--auto:hover,
+.scroll--auto:focus-within,
+.scroll--auto.is-scrolling {
+  scrollbar-color: var(--border-control) transparent;
+}
+
+/* scrollbar-color inherits, so the resting transparent would follow down into
+   every scroller nested inside and hide those bars too. No specificity, so
+   anything with a rule of its own still wins. */
+:where(.scroll--auto) * {
+  scrollbar-color: var(--border-control) transparent;
+}

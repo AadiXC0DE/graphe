@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "ac24fa48-ee59-4e94-b305-19e013baae05",
+  "title": "Lane 1 — CI / Lint / Typecheck / Build (fresh, read-only).",
+  "objective": "Lane 1 — CI / Lint / Typecheck / Build (fresh, read-only).\nRepo: /Users/ownpathdesign/Desktop/graphe, PR #41 head 3bd145c feat/issue-35-plus-polish vs main.\nFocus: CI run 33253795954 (Lint FAIL 41s, Typecheck PASS, Tests PASS, Build PASS). Previous head 360277c was green — this slice introduced regression.\nInspect:\n- src/history/naming.ts:80 Regex /[\\\\s~^:?*[\\\\\\x00-\\x1f\\x7f]/ flagged no-control-regex. Explain why, exact fix (eslint-disable vs charCode), and why local 'npx eslint .' shows 12 extra errors in notes/** (gitignored but not eslint-ignored) while CI shows only 1 error. Check eslint.config.js ignores, .gitignore, notes/**.\n- 47 react-hooks/exhaustive-deps warnings in src/App.tsx + Annotate.tsx — are they safe? List missing deps and stale-closure risk.\n- Build/typecheck gates: any hidden ts errors not caught?\n- Propose minimal fix diff.\nOutput: JSON-ish report with files+lines, error vs warning, impact P0-P3, fix recommendation. Do NOT edit files.",
+  "status": "active",
+  "createdAt": "2026-08-29T13:43:03.714Z",
+  "updatedAt": "2026-08-29T13:43:04.944Z",
+  "runs": [
+    {
+      "runId": "575f025e-8dec-4410-9cf4-ea0cb547056e",
+      "mode": "workflow",
+      "asyncDir": "/var/folders/lh/40fwyyf12hj2k3t1y6dwgbxc0000gn/T/pi-subagents-uid-501/async-subagent-runs/575f025e-8dec-4410-9cf4-ea0cb547056e",
+      "status": "active",
+      "startedAt": "2026-08-29T13:43:03.718Z"
+    }
+  ],
+  "workflowChildren": [
+    {
+      "workflowRunId": "575f025e-8dec-4410-9cf4-ea0cb547056e",
+      "key": "lint-ci",
+      "status": "failed",
+      "startedAt": "2026-08-29T13:43:03.755Z",
+      "updatedAt": "2026-08-29T13:43:04.736Z",
+      "artifactPaths": [],
+      "runId": "360d12bc",
+      "agent": "reviewer",
+      "task": "Lane 1 — CI / Lint / Typecheck / Build (fresh, read-only).\nRepo: /Users/ownpathdesign/Desktop/graphe, PR #41 head 3bd145c feat/issue-35-plus-polish vs main.\nFocus: CI run 33253795954 (Lint FAIL 41s, Typecheck PASS, Tests PASS, Build PASS). Previous head 360277c was green — this slice introduced regression.\nInspect:\n- src/history/naming.ts:80 Regex /[\\\\s~^:?*[\\\\\\x00-\\x1f\\x7f]/ flagged no-control-regex. Explain why, exact fix (eslint-disable vs charCode), and why local 'npx eslint .' shows 12 extra errors in notes/** (gitignored but not eslint-ignored) while CI shows only 1 error. Check eslint.config.js ignores, .gitignore, notes/**.\n- 47 react-hooks/exhaustive-deps warnings in src/App.tsx + Annotate.tsx — are they safe? List missing deps and stale-closure risk.\n- Build/typecheck gates: any hidden ts errors not caught?\n- Propose minimal fix diff.\nOutput: JSON-ish report with files+lines, error vs warning, impact P0-P3, fix recommendation. Do NOT edit files.",
+      "completedAt": "2026-08-29T13:43:04.736Z",
+      "sessionPath": "/Users/ownpathdesign/Library/Application Support/graphe/sessions/2026-08-29T13-31-38-868Z_01a04db7-fdf4-786e-a493-807e372a318d/360d12bc/run-0/session.jsonl",
+      "heartbeat": {
+        "updatedAt": "2026-08-29T13:43:04.736Z",
+        "status": "failed"
+      }
+    },
+    {
+      "workflowRunId": "575f025e-8dec-4410-9cf4-ea0cb547056e",
+      "key": "git-naming-worktree",
+      "status": "failed",
+      "startedAt": "2026-08-29T13:43:04.065Z",
+      "updatedAt": "2026-08-29T13:43:04.800Z",
+      "artifactPaths": [],
+      "runId": "2dd87ba3",
+      "agent": "reviewer",
+      "task": "Lane 2 — Branch naming + git worktree + PR worktree (fresh, read-only).\nRepo: /Users/ownpathdesign/Desktop/graphe, PR #41 diff 360277c..3bd145c (32 files) and full PR 100 files.\nInspect sources:\n- src/history/naming.ts (slugFor, isSafeBranchName, branchNameFor, freeName, renameTo, NEUTRAL, MOST=44, NOISE/FILLER/RESERVED, isSafeBranchName regex control chars)\n- src/history/worktree.ts (branchFor, folderLeaf, createWorktree, landWorktree, dropWorktree, putAwayWorktree, holdsWork/isDirty, writingLeftBehind/smallFilesUnder with MADE_AGAIN, RESCUE_FILES 2000 / 64MiB, branchNames, renameCheckoutBranch with %(upstream) + branch.*.remote checks, nextCheckoutName ENOUGH=200)\n- src/history/checkouts.ts, repo.ts, timeline.ts\n- electron/main.ts:nameBranchAfter (TOCTOU between branchNames snapshot and rename, concurrent first-message race, marked named:true even on rename failure, saveCheckouts), and worktreeLand/worktreeDrop guards for graphe/pr-* .\n- electron/prWorktree.ts:preparePrWorktree (fetch origin pull/N/head, worktree remove --force + prune, branch -f graphe/pr-N FETCH_HEAD, fallback worktree add, error throws) + electron/main.ts:prReviewOpen / prWorktreePrepare handlers\n- tests/branch-naming.test.ts\nEnumerate edge cases: empty/filler-only/unicode/emoji/traversal/graphe/pr collision, MOST clipping, RESERVED, length>200, control chars/DEL/.lock/@{/ //, taken fallback 2..50 then null, two-tabs same-slug race, neutral check, pushed check, isSafeBranchName never rejects own mint, worktree folder/branch sanitization, isDirty vs holdsWork distinction, writingLeftBehind rescue tooBig leak, fetch failure/offline/origin renamed/private PR, concurrent prReviewOpen same PR, land blocked for pr worktrees but drop allowed, branch leak.\nOutput: tables of edge cases with expected vs actual, race windows, data-loss vs leak tradeoffs, test gaps. Do NOT edit.",
+      "completedAt": "2026-08-29T13:43:04.800Z",
+      "sessionPath": "/Users/ownpathdesign/Library/Application Support/graphe/sessions/2026-08-29T13-31-38-868Z_01a04db7-fdf4-786e-a493-807e372a318d/2dd87ba3/run-0/session.jsonl",
+      "heartbeat": {
+        "updatedAt": "2026-08-29T13:43:04.800Z",
+        "status": "failed"
+      }
+    },
+    {
+      "workflowRunId": "575f025e-8dec-4410-9cf4-ea0cb547056e",
+      "key": "canvas-graph",
+      "status": "failed",
+      "startedAt": "2026-08-29T13:43:04.076Z",
+      "updatedAt": "2026-08-29T13:43:04.857Z",
+      "artifactPaths": [],
+      "runId": "79d7a943",
+      "agent": "reviewer",
+      "task": "Lane 3 — Canvas DAG + migration (fresh, read-only).\nRepo: /Users/ownpathdesign/Desktop/graphe, PR #41 canvas changes in src/work/canvas.ts (Block after: string|null -> readonly string[], LOOPS blocks after: number|null -> readonly number[], new join/unjoin/joined/canWaitFor BFS, remove splice, columns far()+walking set, tidy row=min(parents), nextUp every(parents), place/placeLoop, readFlow/readAfter compat, layOut).\nAlso UI in src/components/CanvasView.tsx + CanvasView.css (pulse line, traveling dot).\nInspect:\n- Backward compat: readAfter handling of string, string[], null, '' , array with duplicates/empty/non-string, old files with single wait. Forward compat not needed but mention.\n- DAG correctness: canWaitFor BFS vs old single-chain, cycle detection through diamonds, self-loop, missing id, null parent.\n- join idempotency, unjoin nonexistent, joined toggle.\n- remove splice: gone.after spliced into child's after, dedup + self-filter, case where gone.after empty or duplicate.\n- columns far() memo + walking set for hand-edited cycles, tie-breaking for multi-parent depth (max).\n- tidy row = min(parent rows) vs max far column — does a 2-parent block with parents at different rows pack incorrectly? Column collision only within column.\n- nextUp every(done) vs old single-parent — stalls if OR semantics expected.\n- place/placeLoop sanitization of unknown after ids.\n- LOOPS migration after: [] vs [n], blocks referencing made[] ids.\n- Performance with many blocks (far recursion).\nList every scenario that can break rendering or start order, with file+line, and test gaps vs tests/canvas.test.ts (350 new lines).\nDo NOT edit.",
+      "completedAt": "2026-08-29T13:43:04.857Z",
+      "sessionPath": "/Users/ownpathdesign/Library/Application Support/graphe/sessions/2026-08-29T13-31-38-868Z_01a04db7-fdf4-786e-a493-807e372a318d/79d7a943/run-0/session.jsonl",
+      "heartbeat": {
+        "updatedAt": "2026-08-29T13:43:04.857Z",
+        "status": "failed"
+      }
+    },
+    {
+      "workflowRunId": "575f025e-8dec-4410-9cf4-ea0cb547056e",
+      "key": "plan-goal-lsp",
+      "status": "failed",
+      "startedAt": "2026-08-29T13:43:04.087Z",
+      "updatedAt": "2026-08-29T13:43:04.918Z",
+      "artifactPaths": [],
+      "runId": "1216d255",
+      "agent": "reviewer",
+      "task": "Lane 4 — Plan gate + Goal + Advisor + LSP + AGENTS.md (fresh, read-only).\nRepo: /Users/ownpathdesign/Desktop/graphe, PR #41.\nInspect sources:\n- src/work/goal.ts, src/projects/goals.ts, electron/main.ts planMode Held (held.planMode, deskFor planHeldOn, runWhatCan early return when planHeldOn, checkItFirst planMode capture), goalVerify/real checks, ROUNDS=12/20, goal persistence.\n- src/work/canvas.ts goal block words, src/agent/plan.ts\n- src/lib/agentsMd.ts (86 lines), AGENTS.md handling, non-git walk\n- src/agent/pi/lsp.ts (596 lines): MIN_SYMBOL 3, MAX_FILES 3000, MAX_RENAME_FILES 100 / 1000 occurrences, SOURCE_EXTENSIONS allowlist, GENERATED/MANIFEST/BINARY_EXTENSION/BINARY check looksBinary \\u0000/\\uFFFD, SKIP_DIRS, escapeRegExp, isRenameable, ignoredNames reads root .gitignore only, rename writes every matching file, preview, credentials left alone.\n- src/agent/advisor.ts (192 lines), advisorThinking\n- src/agent/guard/policy.ts changes\n- tests/advisor.test.ts etc.\nEnumerate edge cases: plan toggle mid-copy vs mid-piece, goal baselineN, verify no tsconfig/tsc missing -> passed:false, settle only on checked.ok&&passed, goal leak across projects, advisor depth, LSP short symbol 2 chars rejected, huge rename >100 files refused, binary file destroyed via \\uFFFD rewrite, GENERATED/MANIFEST skip, .gitignore glob ignored, hidden .git paths, credential paths, word-boundary rename catching comments/strings, case sensitivity.\nDo NOT edit.",
+      "completedAt": "2026-08-29T13:43:04.918Z",
+      "sessionPath": "/Users/ownpathdesign/Library/Application Support/graphe/sessions/2026-08-29T13-31-38-868Z_01a04db7-fdf4-786e-a493-807e372a318d/1216d255/run-0/session.jsonl",
+      "heartbeat": {
+        "updatedAt": "2026-08-29T13:43:04.918Z",
+        "status": "failed"
+      }
+    },
+    {
+      "workflowRunId": "575f025e-8dec-4410-9cf4-ea0cb547056e",
+      "key": "ui-copy-a11y",
+      "status": "failed",
+      "startedAt": "2026-08-29T13:43:04.098Z",
+      "updatedAt": "2026-08-29T13:43:04.944Z",
+      "artifactPaths": [],
+      "runId": "08fe056a",
+      "agent": "reviewer",
+      "task": "Lane 5 — UI / Design system / Copy / A11y / Docs (fresh, read-only).\nRepo: /Users/ownpathdesign/Desktop/graphe, PR #41.\nInspect sources:\n- src/components/* (CanvasView.css 52 lines, Files.tsx/css, InStep.css 79, Overview, Responsive, ReviewsView, Sidebar, Versions, etc.), src/App.css 9 lines, src/styles/scrollbar.css new, src/design/widths.ts 15 lines, src/gallery/Gallery.tsx\n- src/components/CanvasView.tsx board pulse/running line, zoom corner, progress band\n- FEATURES.md 36±, README.md 20±, THIRD-PARTY-LICENSES date bump 462 packages\n- Recent polish notes in commit: zoom keeps corner, file panel segmented control, settings icon 2 sliders, kept version star, commit author name, branch naming display, Drift list width, Every width / In step messages\nEnumerate edge cases: responsive widths phone/tablet/desktop/wide photo checks, design drift detection, FIGMA frames, dark/light themes, scrollbar overlay vs shift, accessibility of new segmented control vs two switches, settings icon 16px ray regression, star without circle contrast, commit author vs Graphe author for user-initiated commits, PR worktree commit display, copy em-dash -> comma changes ( FEATURES 38 sections), accessibility of board pulse animation (prefers-reduced-motion), overflow of tidy layout, responsive breakpoints.\nDo NOT edit.",
+      "completedAt": "2026-08-29T13:43:04.944Z",
+      "sessionPath": "/Users/ownpathdesign/Library/Application Support/graphe/sessions/2026-08-29T13-31-38-868Z_01a04db7-fdf4-786e-a493-807e372a318d/08fe056a/run-0/session.jsonl",
+      "heartbeat": {
+        "updatedAt": "2026-08-29T13:43:04.944Z",
+        "status": "failed"
+      }
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "status",
+      "path": "/var/folders/lh/40fwyyf12hj2k3t1y6dwgbxc0000gn/T/pi-subagents-uid-501/async-subagent-runs/575f025e-8dec-4410-9cf4-ea0cb547056e/status.json"
+    },
+    {
+      "kind": "other",
+      "path": "/var/folders/lh/40fwyyf12hj2k3t1y6dwgbxc0000gn/T/pi-subagents-uid-501/async-subagent-runs/575f025e-8dec-4410-9cf4-ea0cb547056e/events.jsonl",
+      "description": "Lifecycle events"
+    }
+  ],
+  "receipts": [],
+  "cwd": "/Users/ownpathdesign/Library/Application Support/graphe/worktrees/-Users-ownpathdesign-Desktop-graphe/conversation-56",
+  "ownerSessionId": "/Users/ownpathdesign/Library/Application Support/graphe/sessions/2026-08-29T13-31-38-868Z_01a04db7-fdf4-786e-a493-807e372a318d.jsonl"
+}

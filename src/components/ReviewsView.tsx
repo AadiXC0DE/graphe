@@ -37,6 +37,10 @@ export const SAYS = {
    *  pull requests when they have several is worse than saying nothing. */
   couldNotAsk: 'I could not read this from github just now.',
   tryAgain: 'Try again',
+  /** While the first fetch is in flight. Nothing is claimed absent until we
+   *  have looked — "no repository" and "not asked yet" are different answers
+   *  and used to share a screen. */
+  looking: 'Reading pull requests and issues…',
   noRepo:
     'This folder is not a github repository, or github is not set up on your terminal.',
   noRepoDetail:
@@ -106,11 +110,20 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
   const shut = useRef<HTMLButtonElement>(null);
   const [tab, setTab] = useState<'prs' | 'issues'>('prs');
   const [open, setOpen] = useState<number | null>(null);
+  // A null repo means one of two things, and only one of them is "there is no
+  // repository here". True once a fetch has come back and we actually know.
+  const [looked, setLooked] = useState(false);
+  const asked = useRef(false);
 
   // The only fetch, on the way in, so the screen is never blank the first time.
   useEffect(() => {
     onRefresh();
   }, [onRefresh]);
+
+  useEffect(() => {
+    if (busy) asked.current = true;
+    else if (asked.current) setLooked(true);
+  }, [busy]);
 
   useEffect(() => {
     shut.current?.focus();
@@ -158,11 +171,25 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
             <kbd className="sheet__key">Esc</kbd>
           </button>
         </header>
-        <div className="sheet__body">
-          <div className="reviews reviews--empty">
-            <h2 className="reviews__none">{SAYS.noRepo}</h2>
-            <p className="reviews__detail">{SAYS.noRepoDetail}</p>
-          </div>
+        <div className="sheet__body scroll--auto">
+          {looked && !busy ? (
+            <div className="reviews reviews--empty">
+              <h2 className="reviews__none">{SAYS.noRepo}</h2>
+              <p className="reviews__detail">{SAYS.noRepoDetail}</p>
+            </div>
+          ) : (
+            <div className="reviews reviews--empty">
+              <div className="reviews__waiting" role="status">
+                <span className="reviews__spinner" aria-hidden="true" />
+                <p className="reviews__waitingsay">{SAYS.looking}</p>
+                <ul className="reviews__ghosts" aria-hidden="true">
+                  <li className="reviews__ghost" />
+                  <li className="reviews__ghost" />
+                  <li className="reviews__ghost" />
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
       </section>
     );
@@ -224,7 +251,7 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
         </button>
       </header>
 
-      <div className="sheet__body">
+      <div className="sheet__body scroll--auto">
         {chosen === null ? (
           <div className="reviews reviews--empty">
             <div className="reviews__blank">

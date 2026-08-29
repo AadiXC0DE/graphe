@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { advisorWords, worthHaving } from '../agent/advisor';
 import type { ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
 import { thinkingLevels } from '../lib/thinking';
@@ -15,6 +16,14 @@ type Props = {
   /** Open the full connect screen — the way to add an account, as opposed to
    *  picking between the ones already here. */
   onConnect: () => void;
+  /** The model asked about the hard parts, or null for one model doing all of
+   *  it. Without `onAdvisor` no second opinion is offered at all. */
+  advisor?: ModelChoice | null;
+  onAdvisor?: (choice: ModelChoice | null) => void;
+  /** How long the advisor thinks before it answers. Undefined is nobody's
+   *  answer yet, which leaves that model's own setting standing. */
+  advisorThinking?: ThinkingLevel | undefined;
+  onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
   /** Lets a native page step aside while this renderer popover is open. */
   onOpenChange?: (open: boolean) => void;
   /** Quieter, for the strip along the top where it sits beside the project's
@@ -70,11 +79,26 @@ export function whatItGivesUp(
  * could pick one, watch nothing change, and have nothing on screen to tell you.
  * The list holds only models that can be used right now; a menu of things that
  * will fail is not a menu.
+ *
+ * Who advises is the same question asked twice, so it is behind this chip too
+ * rather than beside it: one control in the row, and the second model chosen
+ * from inside the place the first one was chosen.
  */
-export default function ThinkingWith({ state, onSelect, onThinking, onConnect, onOpenChange, bare }: Props) {
+export default function ThinkingWith({
+  state,
+  onSelect,
+  onThinking,
+  onConnect,
+  onOpenChange,
+  bare,
+  advisor = null,
+  onAdvisor,
+  advisorThinking,
+  onAdvisorThinking,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<'models' | 'thinking'>('models');
+  const [view, setView] = useState<'models' | 'thinking' | 'advisor' | 'advisorthinking'>('models');
   const root = useRef<HTMLDivElement>(null);
 
   /* Flat, because the provider is a heading in the list rather than a level to
@@ -121,6 +145,47 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, o
         one.providerName.toLowerCase().includes(needle),
     );
   }, [offers, query]);
+
+  /* Whoever will answer, chosen or not: the second opinion is defined against
+     the model actually doing the work. */
+  const doing = current ?? offers[0] ?? null;
+
+  /* The one doing the work is never also the one advising: that is the same
+     answer twice at twice the price. */
+  const advisable = useMemo(
+    () =>
+      offers.filter(
+        (one) =>
+          doing === null || one.providerId !== doing.providerId || one.modelId !== doing.modelId,
+      ),
+    [offers, doing],
+  );
+
+  const advising = useMemo(
+    () =>
+      advisor === null
+        ? null
+        : (offers.find(
+            (one) => one.providerId === advisor.providerId && one.modelId === advisor.modelId,
+          ) ?? null),
+    [offers, advisor],
+  );
+
+  /* Without the addition nothing is advising, whatever was chosen before it was
+     removed. */
+  /* The list is always offered. The addition it needs is Pi's, and a control
+     that lives permanently in this menu cannot send somebody off to a package
+     shelf to make it work — choosing a model is what adds it. */
+  const advisingNow = advising !== null;
+
+  /* Nobody advising is nobody to set a pace for, and a model with one speed has
+     nothing to choose between. */
+  const offerAdvisorPace =
+    advising !== null && onAdvisorThinking !== undefined && advising.thinking.length > 1;
+
+  /* A single band of models is a choice between equals, so the section stays out
+     of the way until the account has a step up in it. */
+  const offerAdvisor = onAdvisor !== undefined && (advisor !== null || worthHaving(advisable));
 
   /* Click away and escape both close it — people reach for both. */
   useEffect(() => {
@@ -189,12 +254,17 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, o
         title={
           nothingConnected
             ? 'No account is connected yet'
-            : current === null
-              ? 'Nothing chosen yet. This is the one that will answer'
-              : `${current.providerName} · ${current.label}`
+            : `${
+                current === null
+                  ? 'Nothing chosen yet. This is the one that will answer'
+                  : `${current.providerName} · ${current.label}`
+              }${advisingNow ? ` — ${advisorWords.advises}: ${advising.label}` : ''}`
         }
       >
         <span className="thinking__dot" aria-hidden="true" />
+        {/* Two dots, two models. The label still names only the one answering:
+            a second model is worth noticing, not worth another sentence. */}
+        {advisingNow ? <span className="thinking__dot thinking__dot--second" aria-hidden="true" /> : null}
         <span className="thinking__label">{label}</span>
         {nothingConnected ? null : (
           <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -210,7 +280,11 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, o
       </button>
 
       {open && !nothingConnected ? (
-        <div className="thinking__menu" role="dialog" aria-label="Choose a model and thinking time">
+        <div
+          className="thinking__menu"
+          role="dialog"
+          aria-label="Choose a model, how long it thinks, and who advises"
+        >
           {view === 'models' ? (
             <>
               <div className="thinking__menuhead">
@@ -262,19 +336,7 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, o
                               setOpen(false);
                             }}
                           >
-                            <span className="thinking__tick" aria-hidden="true">
-                              {isChosen ? (
-                                <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
-                                  <path
-                                    d="M2 6l3 3 5-5.5"
-                                    stroke="currentColor"
-                                    strokeWidth="1.6"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                </svg>
-                              ) : null}
-                            </span>
+                            <Tick on={isChosen} />
                             <span className="thinking__optiontext">
                               <span className="thinking__optionlabel">{one.label}</span>
                               <span className="thinking__optionid">
@@ -307,6 +369,43 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, o
                 </button>
               ) : null}
 
+              {/* Behind the control it belongs to: the second model is the same
+                  question as the first, and a row here is found by the hand
+                  that is already on it. */}
+              {offerAdvisor ? (
+                <div className="thinking__tunerow">
+                  <button
+                    type="button"
+                    className="thinking__tune thinking__tune--words"
+                    onClick={() => setView('advisor')}
+                    aria-label={`${advisorWords.name}: ${advisingNow ? advising.label : advisorWords.none}`}
+                  >
+                    <span>{advisorWords.name}</span>
+                    <span>
+                      <span className="thinking__tunevalue">
+                        {advisingNow ? advising.label : advisorWords.none}
+                      </span>
+                      <span aria-hidden="true">›</span>
+                    </span>
+                  </button>
+                  {/* Beside the name of the model advising, because that is
+                      where somebody looks to stop it. The list behind the row
+                      still has the same press at the top of it. */}
+                  {advisingNow && onAdvisor !== undefined ? (
+                    <button
+                      type="button"
+                      className="thinking__off"
+                      onClick={() => {
+                        onAdvisor(null);
+                        setOpen(false);
+                      }}
+                    >
+                      {advisorWords.turnOff}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
               <button
                 type="button"
                 className="thinking__more"
@@ -317,6 +416,135 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, o
               >
                 Connect another account…
               </button>
+            </>
+          ) : view === 'advisor' && onAdvisor !== undefined ? (
+            <>
+              <header className="thinking__menuhead thinking__menuhead--back">
+                <button type="button" className="thinking__back" onClick={() => setView('models')}>
+                  <span aria-hidden="true">‹</span> Models
+                </button>
+                <span className="thinking__menutitle">{advisorWords.name}</span>
+              </header>
+
+              <p className="thinking__said">{advisorWords.note}</p>
+
+
+                <>
+                  {/* Who does the work was chosen in the view behind this one, so
+                      it is said here rather than offered again. */}
+                  {doing === null ? null : (
+                    <p className="thinking__doing">
+                      <span>{advisorWords.does}</span>
+                      <span className="thinking__doingname">{doing.label}</span>
+                    </p>
+                  )}
+
+                  <div className="thinking__list" role="listbox" aria-label={advisorWords.advises}>
+                    {/* First, so turning it off is one press and never a hunt. */}
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={advisor === null}
+                      className={`thinking__option ${advisor === null ? 'thinking__option--chosen' : ''}`}
+                      onClick={() => {
+                        onAdvisor(null);
+                        setOpen(false);
+                      }}
+                    >
+                      <Tick on={advisor === null} />
+                      <span className="thinking__optiontext">
+                        <span className="thinking__optionlabel">{advisorWords.off}</span>
+                        <span className="thinking__optionnote">{advisorWords.offNote}</span>
+                      </span>
+                    </button>
+
+                    {sections(advisable).map((section) => (
+                      <section className="thinking__group" key={section.key}>
+                        <h4 className="thinking__groupname">
+                          {section.name}
+                          {section.note === undefined ? null : (
+                            <span className="thinking__groupnote">{section.note}</span>
+                          )}
+                        </h4>
+                        {section.models.map((one) => {
+                          const picked =
+                            advisor !== null &&
+                            advisor.providerId === one.providerId &&
+                            advisor.modelId === one.modelId;
+                          return (
+                            <button
+                              key={`${one.providerId}/${one.modelId}`}
+                              type="button"
+                              role="option"
+                              aria-selected={picked}
+                              className={`thinking__option ${picked ? 'thinking__option--chosen' : ''}`}
+                              onClick={() => {
+                                onAdvisor({ providerId: one.providerId, modelId: one.modelId });
+                                setOpen(false);
+                              }}
+                            >
+                              <Tick on={picked} />
+                              <span className="thinking__optiontext">
+                                <span className="thinking__optionlabel">{one.label}</span>
+                                <span className="thinking__optionid">
+                                  {one.providerName} · {one.modelId}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </section>
+                    ))}
+                  </div>
+
+                  {/* The same row the model doing the work has, asked of the
+                      one advising. Out of the way while nobody is advising —
+                      there would be nothing for it to set. */}
+                  {offerAdvisorPace ? (
+                    <button
+                      type="button"
+                      className="thinking__tune"
+                      onClick={() => setView('advisorthinking')}
+                      aria-label={`${advisorWords.thinking} for ${advising.label}`}
+                    >
+                      <span>{advisorWords.thinking}</span>
+                      <span>
+                        {advisorThinking === undefined
+                          ? advisorWords.thinkingUnset
+                          : thinkingLevels[advisorThinking].name}
+                        <span aria-hidden="true">›</span>
+                      </span>
+                    </button>
+                  ) : null}
+
+                  <p className="thinking__said thinking__said--foot">{advisorWords.advisesNote}</p>
+                </>
+            </>
+          ) : view === 'advisorthinking' && advising !== null && onAdvisorThinking !== undefined ? (
+            <>
+              <header className="thinking__menuhead thinking__menuhead--back">
+                <button type="button" className="thinking__back" onClick={() => setView('advisor')}>
+                  <span aria-hidden="true">‹</span> {advisorWords.name}
+                </button>
+                <span className="thinking__menutitle">{advisorWords.thinking}</span>
+              </header>
+              <p
+                className="thinking__selectedmodel"
+                title={`${advising.providerId}/${advising.modelId}`}
+              >
+                {advising.label}
+              </p>
+              <Pace
+                levels={advising.thinking}
+                chosen={advisorThinking ?? null}
+                onPick={(level) => {
+                  onAdvisorThinking(
+                    { providerId: advising.providerId, modelId: advising.modelId },
+                    level,
+                  );
+                  setOpen(false);
+                }}
+              />
             </>
           ) : chosen !== null && current !== null ? (
             <>
@@ -342,6 +570,26 @@ export default function ThinkingWith({ state, onSelect, onThinking, onConnect, o
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Reserved whether or not it is on, so choosing does not shuffle every label
+ *  sideways. */
+function Tick({ on }: { on: boolean }) {
+  return (
+    <span className="thinking__tick" aria-hidden="true">
+      {on ? (
+        <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
+          <path
+            d="M2 6l3 3 5-5.5"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : null}
+    </span>
   );
 }
 
@@ -381,7 +629,9 @@ function Pace({
   onPick,
 }: {
   levels: readonly ThinkingLevel[];
-  chosen: ThinkingLevel;
+  /** Null where nobody has answered yet: nothing is ticked, rather than a rung
+   *  being claimed that the model may not be on. */
+  chosen: ThinkingLevel | null;
   onPick: (level: ThinkingLevel) => void;
 }) {
   if (onPick === undefined) return null;

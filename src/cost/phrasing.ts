@@ -125,7 +125,35 @@ export const meter = {
   mostUsed(name: string): string {
     return `Mostly ${name}`;
   },
+  /** Where the bill went, model by model, largest first — one phrase per model
+   *  rather than one sentence, so the meter can hold them on a single line
+   *  however long a name turns out to be. Two at most: the question somebody
+   *  asks after turning the advisor on is whether a second model is answering,
+   *  not a league table. */
+  models(models: readonly { name: string; share: number }[]): string[] {
+    const [first, second] = models;
+    if (first === undefined) return [];
+    if (second === undefined) return [meter.mostUsed(first.name)];
+    // Never "100% … <1% …". Rounding is allowed to be rough; a second model
+    // that answered is not allowed to read as having answered nothing.
+    const lead = second.share > 0 ? Math.min(first.share, 0.99) : first.share;
+    return [`${percent(lead)} ${first.name}`, `${percent(second.share)} ${second.name}`];
+  },
+  /** What went on attempts that didn't work. Only ever after a sitting settles,
+   *  because mid-run there is nothing honest to say about it. */
+  retries(share: number): string {
+    return `${percent(share)} on attempts that didn’t work`;
+  },
 };
+
+/** A share as a percentage, floored at "<1%" rather than rounded to nothing: a
+ *  model that did answer must not read as having cost zero, and a line that
+ *  vanishes on a rounding moves everything above it. */
+function percent(share: number): string {
+  const held = Math.min(1, Math.max(0, share));
+  const pct = Math.round(held * 100);
+  return pct < 1 && held > 0 ? '<1%' : `${String(pct)}%`;
+}
 
 /* -------------------------------------------------------- before a bigger job */
 
@@ -467,6 +495,14 @@ export function auditableStrings(voice: Voice = {}): string[] {
   push(meter.detailsLink);
   push(meter.onAPlan);
   push(meter.reused(0.72));
+  push(meter.models([{ name: 'the one doing the work', share: 1 }]));
+  push(
+    meter.models([
+      { name: 'the one doing the work', share: 0.8 },
+      { name: 'the one advising', share: 0.2 },
+    ]),
+  );
+  push(meter.retries(0.12));
   push(nothingSpentYet);
   push(meter.today(inr(12_000), voice));
   push(meter.screenReaderLabel(inr(12_000), voice));

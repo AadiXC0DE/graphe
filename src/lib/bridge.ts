@@ -32,6 +32,7 @@ import { howMuchBy } from '../design/gate';
 import { themeFrom } from './theme';
 import { pagesIn, type Page } from '../preview/pages';
 import { holdsBack } from '../projects/heldback';
+import { readFlows, withFlow, withoutFlow, type Flow } from '../work/canvas';
 import { keepsLogins } from '../projects/logins';
 import { keeping } from '../projects/kept';
 import { Ledger } from '../cost/ledger';
@@ -550,6 +551,21 @@ function previewAway(): Away {
       question: null,
       oneOf: { of: 2, at: 2, named: 'the hero' },
     },
+    {
+      id: 'away-4',
+      doing: 'Run the checks once the spacing is in',
+      state: 'waiting',
+      at: started - MINUTE / 2,
+      picture: null,
+      says: null,
+      trouble: null,
+      question: null,
+      after: {
+        id: 'away-3',
+        doing: 'Match the case study page to the new spacing',
+        says: 'After “Match the case study page to the new spacing”',
+      },
+    },
   ];
   const repeats: readonly Repeating[] = [
     {
@@ -570,6 +586,12 @@ function previewAway(): Away {
   };
 }
 
+/** The preview's own canvases. One key per project, so switching folders in a
+ *  browser tab behaves the way it does in the app. */
+function flowsKey(project: string | null): string {
+  return `graphe:flows:${project ?? ''}`;
+}
+
 function previewBridge(): Bridge {
   const listeners = new Set<(notice: AgentNotice) => void>();
   const watching = new Set<(progress: ShowProgress) => void>();
@@ -579,6 +601,21 @@ function previewBridge(): Bridge {
   /** What is going on without anybody. Real state, for as long as the tab is
    *  open, so the band can be pressed rather than only looked at. */
   let atWork: Away = previewAway();
+
+  const heldFlows = (): readonly Flow[] => {
+    try {
+      const raw = localStorage.getItem(flowsKey(openPath));
+      return raw === null ? [] : readFlows(JSON.parse(raw) as unknown);
+    } catch {
+      return [];
+    }
+  };
+
+  const keepFlows = (flows: readonly Flow[]): void => {
+    try {
+      localStorage.setItem(flowsKey(openPath), JSON.stringify(flows));
+    } catch { /* quota or private mode: the shell's own store is the real one */ }
+  };
 
   /** What the tab is keeping in step with. Nothing, until somebody pastes
    *  something into the band. */
@@ -617,6 +654,7 @@ let previewLines: { name: string; current: boolean; upstream: string | null; ahe
 ];
 
 let previewHowFar: HowFar = 'asking';
+let previewPlanMode = false;
   let previewCeiling: SpendLimit | null = null;
   let previewMade = 0;
   let previewCarried: readonly CarriedExtension[] = [
@@ -642,6 +680,8 @@ let previewHowFar: HowFar = 'asking';
   let preferred: Preferences = {
     showMe: false,
     model: null,
+    advisor: null,
+    advisorThinking: null,
     thinking: {},
     kept: {},
     showFiles: true,
@@ -1057,6 +1097,14 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(previewFail<null>());
     },
 
+    preparePrWorktree(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
+    openPrReview(): Promise<Result<{ folder: string; opened: OpenedProject }>> {
+      return Promise.resolve(previewFail<{ folder: string; opened: OpenedProject }>());
+    },
+
     buildStart(): Promise<Result<BuildPlan>> {
       return Promise.resolve(previewFail<BuildPlan>());
     },
@@ -1081,6 +1129,53 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done(null));
     },
 
+    flowLoad(): Promise<Result<readonly Flow[]>> {
+      return Promise.resolve(done(heldFlows()));
+    },
+
+    flowSave(flow: Flow): Promise<Result<null>> {
+      keepFlows(withFlow(heldFlows(), flow));
+      return Promise.resolve(done(null));
+    },
+
+    flowForget(id: string): Promise<Result<null>> {
+      keepFlows(withoutFlow(heldFlows(), id));
+      return Promise.resolve(done(null));
+    },
+
+    goalLoad(): Promise<Result<import('../work/goal').Goal | null>> {
+      try {
+        const raw = localStorage.getItem(`graphe:goal:${openPath ?? ''}`);
+        if (raw === null) return Promise.resolve(done(null));
+        const parsed = JSON.parse(raw) as unknown;
+        if (typeof parsed !== 'object' || parsed === null) return Promise.resolve(done(null));
+        const g = parsed as Record<string, unknown>;
+        if (typeof g['id'] !== 'string' || typeof g['objective'] !== 'string') return Promise.resolve(done(null));
+        return Promise.resolve(done(g as unknown as import('../work/goal').Goal));
+      } catch {
+        return Promise.resolve(done(null));
+      }
+    },
+
+    goalSave(goal: import('../work/goal').Goal): Promise<Result<null>> {
+      try {
+        if (openPath !== null) localStorage.setItem(`graphe:goal:${openPath}`, JSON.stringify(goal));
+      } catch { /* quota or private mode: disk store is the real one */ }
+      return Promise.resolve(done(null));
+    },
+
+    goalClear(): Promise<Result<null>> {
+      try {
+        if (openPath !== null) localStorage.removeItem(`graphe:goal:${openPath}`);
+      } catch { /* already gone */ }
+      return Promise.resolve(done(null));
+    },
+
+    goalVerify(): Promise<Result<{ passed: boolean; reason: string }>> {
+      // Preview has no shell to run checks, so verification did not run.
+      return Promise.resolve(done({ passed: false, reason: 'No checks available in preview.' }));
+    },
+
     /** Two, so the band has something to draw: one somebody has said yes to
      *  and one they have not. */
     carried(): Promise<Result<readonly CarriedExtension[]>> {
@@ -1102,6 +1197,11 @@ let previewHowFar: HowFar = 'asking';
     goAsFarAs(howFar: HowFar): Promise<Result<HowFar>> {
       previewHowFar = howFar;
       return Promise.resolve(done(previewHowFar));
+    },
+
+    setPlanMode(on: boolean): Promise<Result<boolean>> {
+      previewPlanMode = on;
+      return Promise.resolve(done(previewPlanMode));
     },
 
     running(): Promise<Result<readonly RunningPiece[]>> {
@@ -1374,6 +1474,16 @@ let previewHowFar: HowFar = 'asking';
       return Promise.resolve(done({ ...preferred }));
     },
 
+    selectAdvisor(choice: ModelChoice | null): Promise<Result<Preferences>> {
+      preferred = { ...preferred, advisor: choice };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    setAdvisorThinking(level: ThinkingLevel): Promise<Result<Preferences>> {
+      preferred = { ...preferred, advisorThinking: level };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
     setThinking(choice: ModelChoice, level: ThinkingLevel): Promise<Result<Preferences>> {
       preferred = { ...preferred, thinking: { ...preferred.thinking, [modelKey(choice)]: level } };
       return Promise.resolve(done({ ...preferred }));
@@ -1562,7 +1672,7 @@ let previewHowFar: HowFar = 'asking';
       const waited = atWork.pieces.find((one) => one.id === after);
       return this.keepGoing(text).then((answer) => {
         if (!answer.ok || waited === undefined) return answer;
-        const last = answer.value.pieces[answer.value.pieces.length - 1];
+        const last = answer.value.pieces[0];
         if (last === undefined) return answer;
         atWork = {
           ...atWork,
@@ -1949,14 +2059,24 @@ function connect(): Bridge {
     branchCreate: (name, where) => api.branchCreate(name, where),
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),
+    preparePrWorktree: (prNumber, where) => api.preparePrWorktree(prNumber, where),
+    openPrReview: (prNumber, where) => api.openPrReview(prNumber, where),
     buildStart: (source, where) => api.buildStart(source, where),
     buildPlan: (where) => api.buildPlan(where),
     buildAdvance: (op, where) => api.buildAdvance(op, where),
     chooseDocument: (where) => api.chooseDocument(where),
     buildSave: (tasks, where) => api.buildSave(tasks, where),
     buildCancel: (where) => api.buildCancel(where),
+    flowLoad: (whereArg) => (api.flowLoad as unknown as (where?: Where) => Promise<Result<readonly Flow[]>>)?.(whereArg) ?? Promise.resolve(done([])),
+    flowSave: (flow, whereArg) => (api.flowSave as unknown as (flow: Flow, where?: Where) => Promise<Result<null>>)?.(flow, whereArg) ?? Promise.resolve(done(null)),
+    flowForget: (id, whereArg) => (api.flowForget as unknown as (id: string, where?: Where) => Promise<Result<null>>)?.(id, whereArg) ?? Promise.resolve(done(null)),
+    goalLoad: (whereArg) => (api.goalLoad as unknown as (where?: Where) => Promise<Result<import('../work/goal').Goal | null>>)?.(whereArg) ?? Promise.resolve(done(null)),
+    goalSave: (goal, whereArg) => (api.goalSave as unknown as (goal: import('../work/goal').Goal, where?: Where) => Promise<Result<null>>)?.(goal, whereArg) ?? Promise.resolve(done(null)),
+    goalClear: (whereArg) => (api.goalClear as unknown as (where?: Where) => Promise<Result<null>>)?.(whereArg) ?? Promise.resolve(done(null)),
+    goalVerify: (whereArg) => (api.goalVerify as unknown as (where?: Where) => Promise<Result<{ passed: boolean; reason: string }>>)?.(whereArg) ?? Promise.resolve(done({ passed: true, reason: 'No checks.' })),
     stopAsking: (on, where) => api.stopAsking(on, where),
     goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
+    setPlanMode: (on, where) => (api.setPlanMode as unknown as (on: boolean, where?: Where) => Promise<Result<boolean>>)?.(on, where) ?? Promise.resolve(done(on)),
     running: (where) => api.running(where),
     stopRunning: (id, where) => api.stopRunning(id, where),
     carried: (where) => api.carried(where),
@@ -1988,6 +2108,8 @@ function connect(): Bridge {
     cancelConnect: () => api.cancelConnect(),
     disconnect: (providerId) => api.disconnect(providerId),
     selectModel: (choice, where) => api.selectModel(choice, where),
+    selectAdvisor: (choice, where) => api.selectAdvisor(choice, where),
+    setAdvisorThinking: (level, where) => api.setAdvisorThinking(level, where),
     setThinking: (choice, level, where) => api.setThinking(choice, level, where),
     closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
     startAfter: (text, after, where) => api.startAfter(text, after, where),

@@ -1,0 +1,2224 @@
+/* A canvas is a tab, so it sits under the row of tabs rather than over it —
+   switching back to a conversation has to be one press on something you can
+   see. It takes the room a conversation would, and the press in its own bar
+   fills the window when the shape has outgrown that. */
+.canvas {
+  position: fixed;
+  top: var(--topbar-height);
+  bottom: 0;
+  /* Three units, not two: the project's files are a column of their own, and a
+     canvas that only counted the shelf sat underneath them. */
+  left: calc(var(--shelf-take, 0px) + var(--files-take, 0px));
+  right: var(--overview-take, 0px);
+  /* Under the strip along the top and everything that hangs off it — the
+     project's own menu drops through this space and must not land behind. */
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.canvas--full {
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+}
+
+/* -------------------------------------------------------------------- bar */
+
+.canvas__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The name is the tab's words, so it is edited where it is read rather than in
+   a box somewhere else. A field that looks like a field all the time would be
+   a form; this one looks like a heading until it is reached for. */
+.canvas__title {
+  min-width: 0;
+  max-width: 280px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__title:focus {
+  border-color: var(--border-control);
+  background: var(--bg-sunken);
+  outline: none;
+}
+
+.canvas__count {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The third thing that changes what Start does, said beside it. */
+.canvas__far {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* Only once somebody has moved something. Offering to tidy a canvas nobody
+   arranged is offering to undo nothing. */
+.canvas__tidy {
+  flex: none;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__full {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* A flow: what you can place, what you have placed, and what the one you are
+   looking at is set to.
+ *
+ * Three bands, because this surface composes rather than reports and that is
+ * the shape of every tool that does. The middle one is the only part that pans,
+ * and it is the only part with a ground of its own: a grid says "this is a
+ * space you move around in" where the flat surface it replaced said nothing at
+ * all. Everything else is the app's own paper, hairlines and one accent — the
+ * accent spent, as always, on exactly one thing at a time. */
+
+.canvas__bands {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  /* The palette folds against the room the board actually has, not the room the
+     window has: in its own column a canvas is half a wide window, and a
+     window-width rule left the named list taking most of it. */
+  container-type: inline-size;
+}
+
+/* ---------------------------------------------------------------- palette */
+
+/* The rail does not scroll; the list inside it does. The hover label lives out
+   here, where a scrolling box cannot clip it. */
+.canvas__rail {
+  position: relative;
+  /* Its own width rather than a grid track: a container query styles what is
+     inside the container, never the container itself. */
+  width: 216px;
+  min-height: 0;
+  display: flex;
+  border-right: 1px solid var(--border);
+}
+
+.canvas__palette {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-4) var(--space-3);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.canvas__band {
+  margin: 0;
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.canvas__band + .canvas__list {
+  margin-bottom: var(--space-3);
+}
+
+.canvas__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas__pick {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__pick:active {
+  transform: scale(0.98);
+}
+
+.canvas__pick:disabled {
+  opacity: 0.4;
+  cursor: default;
+  transform: none;
+}
+
+.canvas__pickmark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+.canvas__picktext {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.canvas__pickname {
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.canvas__pick--loop .canvas__pickname {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.canvas__picknote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+/* A loop drawn as its own marks, so what you are about to place can be read
+   before you place it. */
+.canvas__shape {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: 3px;
+  color: var(--text-faint);
+}
+
+.canvas__shapemark {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+}
+
+.canvas__shapemark + .canvas__shapemark::before {
+  content: '';
+  position: absolute;
+  width: 5px;
+  height: 1px;
+  margin-left: -9px;
+  background: var(--border-strong);
+}
+
+.canvas__pick--loop .canvas__shapemark {
+  position: relative;
+}
+
+/* ---------------------------------------------------------------- surface */
+
+/* Dragging a card or a line is a gesture, not a selection: without this a drag
+   across the board picks out every label it passes and leaves the whole window
+   highlighted. What is genuinely text — the panel's fields — says so below. */
+.canvas__surface {
+  user-select: none;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--bg-sunken);
+  /* The ground moves with what is on it, so a pan reads as moving rather than
+     as the cards sliding over a fixed page. */
+  background-image: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0);
+  background-size: var(--canvas-dot, 20px) var(--canvas-dot, 20px);
+  background-position: var(--canvas-x, 0) var(--canvas-y, 0);
+  cursor: grab;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+.canvas__surface:active {
+  cursor: grabbing;
+}
+
+.canvas__sheet {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* No size of its own: a card can be dragged anywhere, so the lines behind
+     them are drawn without clipping and the sheet is only an origin. */
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+
+/* ------------------------------------------------------------------ lines */
+
+/* Behind the cards, because a line runs from one to another and belongs to
+   neither. The head is what says which way round it is. */
+.canvas__lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* A 1.5px line is not something a hand can hit, so the press is on a wide
+   invisible copy of it. */
+.canvas__grab {
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.canvas__line {
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+  transition: stroke var(--dur-ui) var(--ease-hover);
+}
+
+/* Pressed, and one key from being taken off. */
+.canvas__line--chosen {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+/* The run has been through here. Colour is the only thing on the board that
+   says how far it got at a glance, and a grid of grey lines said nothing. */
+.canvas__line--passed {
+  stroke: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
+}
+
+/* At rest: a long, slow, barely-there drift the length of the line, so the
+   board says which way the work will go rather than only what is joined.
+   Nothing here is bright — it is the difference between a diagram and a thing
+   that is about to do something. */
+.canvas__drift {
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 26 300;
+  opacity: 0.7;
+  animation: canvas-drifting 5200ms linear infinite;
+}
+
+@keyframes canvas-drifting {
+  from {
+    stroke-dashoffset: 326;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* And this is now: a short bright dash running the length of the line feeding
+   whatever is being worked on. One line at a time, so it reads as the work
+   moving rather than as decoration. */
+.canvas__flow {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  /* Short mark, long gap: one pulse crosses a card-to-card line at a time on
+     a short run and two on a long one, rather than a dotted line. */
+  stroke-dasharray: 14 104;
+  animation: canvas-flowing 1200ms linear infinite;
+}
+
+@keyframes canvas-flowing {
+  from {
+    stroke-dashoffset: 118;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The colour stays; only the travelling goes. */
+@media (prefers-reduced-motion: reduce) {
+  .canvas__flow {
+    animation: none;
+    stroke-dasharray: none;
+    opacity: 0.6;
+  }
+
+  .canvas__drift {
+    display: none;
+  }
+}
+
+/* A proposal, until it is let go. */
+.canvas__trailing {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.canvas__trailing path {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+  stroke-linecap: round;
+}
+
+/* ------------------------------------------------------------------- card */
+
+.canvas__card {
+  position: absolute;
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    box-shadow var(--dur-ui) var(--ease-out-quart);
+}
+
+.canvas__card--picked {
+  z-index: 3;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow-md);
+}
+
+.canvas__card--done {
+  background: var(--bg);
+  border-color: var(--border-strong);
+}
+
+.canvas__card--needs-you {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), var(--shadow-sm);
+}
+
+/* The one card in a flow that cannot move on by itself, so it says so and
+   carries the press that opens it. */
+.canvas__gate {
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  color: var(--accent-ink);
+}
+
+.canvas__round {
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bottom left, clear of the dot: the dot carries 44px of invisible hit area for
+   the hand that drags a line, and it was taking this press. */
+.canvas__carryon {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-2);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__carryon:active {
+  transform: scale(0.97);
+}
+
+.canvas__card--failed {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.canvas__card--target {
+  cursor: copy;
+}
+
+.canvas__face {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  /* Nothing paints past the card: the clamps inside are fixed-height boxes and
+     a long run would otherwise spill over the neighbour below. */
+  min-height: 0;
+  overflow: hidden;
+  padding: var(--space-3);
+  text-align: left;
+  border-radius: var(--radius-lg);
+  cursor: grab;
+  touch-action: none;
+}
+
+.canvas__face:active {
+  cursor: grabbing;
+}
+
+/* Off the sheet while it is in the hand, so it passes over its neighbours
+   rather than through them. */
+.canvas__card--held {
+  z-index: 4;
+  box-shadow: var(--shadow-md);
+  cursor: grabbing;
+}
+
+.canvas__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.canvas__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+}
+
+/* The same object as the one in the palette it was dragged from, so the two
+   read as the same thing in two places. */
+.canvas__markbox {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.canvas__card--running .canvas__markbox,
+.canvas__card--needs-you .canvas__markbox {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.canvas__card--running .canvas__mark,
+.canvas__card--needs-you .canvas__mark {
+  color: var(--accent);
+}
+
+.canvas__kind {
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The state is a word, never only a colour. Quiet until it is worth reading. */
+.canvas__state {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.canvas__card--running .canvas__state,
+.canvas__card--needs-you .canvas__state {
+  color: var(--accent-ink);
+}
+
+.canvas__card--failed .canvas__state {
+  color: var(--danger);
+}
+
+.canvas__says {
+  /* A pasted URL is one word as far as wrapping is concerned, and it ran
+     straight out of the card. */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--text);
+}
+
+/* Once there is something under it — what it came to, or what it is doing —
+   the ask gives up a line. Both are -webkit-box clamps, which cannot shrink
+   under flex, so two at full height overflowed the card. */
+.canvas__card--came .canvas__says {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  color: var(--text-muted);
+}
+
+/* One line, and never a word wider than the card. A step's own words can be a
+   whole path. */
+.canvas__doing {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The card divides in two: what it is asked and came to above, what it is set
+   to below. The hairline is the same one the panel uses over its own foot. */
+.canvas__foots {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  min-height: 16px;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.canvas__foothalf {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  min-width: 0;
+  /* Guaranteed, not hoped for: children that refuse to shrink used to paint
+     straight over the other half of the row. */
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* The right half is what gives way, and inside it the model's name is the one
+   thing long enough to need to. */
+.canvas__foothalf--end {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+}
+
+/* One line rather than scattered words: the gap alone read as a mistake. */
+.canvas__foothalf > * + *::before {
+  content: '·';
+  margin-right: var(--space-2);
+  color: var(--border-strong);
+}
+
+/* Where the flow begins and where it stops, read off the joins. The open dot on
+   that side of the card is the same fact drawn; this is it in words. */
+.canvas__first {
+  flex: none;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.canvas__shots,
+.canvas__turns {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+
+/* The last thing it said, one line of it, on the card. The whole of it is in
+   the panel; this is the cue that there is something to open. */
+/* Marked, because the ask and the answer sit one under the other in the same
+   size and nothing else says which is which. */
+.canvas__came::before {
+  content: '↳';
+  margin-right: 4px;
+  color: var(--text-faint);
+}
+
+.canvas__came {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.canvas__model {
+  flex: 0 1 auto;
+  min-width: 4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+.canvas__shots {
+  flex: none;
+}
+
+/* One hairline along the top of a block that is going. The same line, at the
+   same pace, the board draws — two views of one piece of work should not
+   breathe at different speeds. Its own element rather than a pseudo: the light
+   travels a card's width either side of itself, and the card cannot clip it
+   without also clipping the dot that hangs off its edge. */
+.canvas__sweep {
+  position: absolute;
+  top: 0;
+  left: 1px;
+  right: 1px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  pointer-events: none;
+}
+
+.canvas__sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 70%, transparent),
+    transparent
+  );
+  animation: canvas-sweep 2.4s var(--ease-in-out-cubic) infinite;
+}
+
+@keyframes canvas-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Where a line is drawn from. Always there rather than on hover: it is the one
+   control that teaches what this surface does. */
+/* The two ends of a card, the same shape at both. A dot with nothing in it is
+   an open end: on the left the flow starts here, on the right it stops here. */
+.canvas__socket,
+.canvas__handle {
+  position: absolute;
+  top: calc(var(--canvas-card, 96px) / 2 - 11px);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+}
+
+.canvas__socket {
+  left: -11px;
+  pointer-events: none;
+}
+
+.canvas__handle {
+  right: -11px;
+  cursor: crosshair;
+}
+
+.canvas__dot {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+/* Hollow: nothing joins here yet. */
+.canvas__socket--open .canvas__dot,
+.canvas__handle--open .canvas__dot {
+  background: var(--bg-raised);
+  border-color: var(--border-control);
+}
+
+/* 44px of hit area around a 9px dot. */
+.canvas__handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.canvas__handle:focus-visible .canvas__dot,
+.canvas__face:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------- the foot */
+
+/* The zoom keeps the corner every canvas keeps it in; whatever the board has
+   to say sits in the middle of the room, where the eye already is. */
+.canvas__foot {
+  position: absolute;
+  left: var(--space-4);
+  right: var(--space-4);
+  bottom: var(--space-4);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  gap: var(--space-3);
+  min-width: 0;
+  pointer-events: none;
+}
+
+.canvas__foot > :first-child {
+  grid-column: 2;
+  justify-self: center;
+}
+
+.canvas__zoom {
+  grid-column: 3;
+  justify-self: end;
+}
+
+.canvas__foot > * {
+  pointer-events: auto;
+}
+
+.canvas__hint,
+.canvas__refused {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.canvas__refused {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.canvas__zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.canvas__zoombtn,
+.canvas__fit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* ------------------------------------------------------------ start, stop */
+
+.canvas__run {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.canvas__start,
+.canvas__stop {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__start {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.canvas__stop {
+  border-color: var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.canvas__start:active,
+.canvas__stop:active {
+  transform: scale(0.97);
+}
+
+.canvas__start:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+/* -------------------------------------------------------------- inspector */
+
+/* Beside the card it belongs to, growing out of it. A panel down the side of
+   the window made you look away from the thing you were editing and cost the
+   canvas 300px of the room it exists to give you. */
+.canvas__panel {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  max-height: 500px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  animation: canvas-opens var(--dur-ui) var(--ease-out-quart) both;
+}
+
+.canvas__panel--right {
+  transform-origin: left center;
+}
+
+.canvas__panel--left {
+  transform-origin: right center;
+}
+
+@keyframes canvas-opens {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.canvas__ihead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.canvas__iback {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 24px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__imark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+.canvas__iname {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.canvas__ishut {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__ibody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  scrollbar-gutter: stable;
+}
+
+/* The body scrolls, so nothing inside it is allowed to be squeezed instead —
+   a shrunk block of text loses its last line with no sign it had one. */
+.canvas__ibody > * {
+  flex: none;
+}
+
+/* One row, its value on it, and the way through to the list. The shape every
+   other setting in this app opens with. */
+.canvas__irow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: left;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__irow:not(:disabled):hover {
+    background: var(--bg-sunken);
+  }
+}
+
+.canvas__irow:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.canvas__irowname {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.canvas__irowvalue {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  font-size: var(--text-2xs);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas__irowmore {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.canvas__isearch {
+  flex: none;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.canvas__inone {
+  margin: 0;
+  padding: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* What the block came to, which is the whole reason for running one. */
+.canvas__icame {
+  margin: 0;
+  max-height: 168px;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-size: var(--text-2xs);
+  line-height: 1.55;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.canvas__iturns {
+  margin-left: var(--space-2);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+
+.canvas__ifoot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.canvas__ilabel,
+.canvas__iband {
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.canvas__ilabel + .canvas__isays,
+.canvas__ilabel + .canvas__ipick {
+  margin-top: calc(var(--space-2) * -1 + 2px);
+}
+
+.canvas__iband {
+  margin-top: var(--space-3);
+}
+
+/* Room to write a sentence in, because what a block is asked *is* the block —
+   a one-line field says the instruction is an afterthought. */
+.canvas__isays {
+  flex: none;
+  width: 100%;
+  min-height: 108px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+  resize: vertical;
+}
+
+.canvas__isays:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.canvas__isays:disabled {
+  opacity: 0.6;
+}
+
+/* What this block is shown. Small, because the words are the block and these
+   are what the words are about. */
+/* Attachments, one row each: a picture and a spec file are the same kind of
+   thing to a block, and a grid of thumbnails could not say which file a
+   markdown chip was. */
+.canvas__ifiles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.canvas__ifile {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.canvas__ithumb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--bg);
+  object-fit: cover;
+  overflow: hidden;
+  color: var(--text-faint);
+}
+
+.canvas__ithumb--text {
+  border: 1px solid var(--border);
+}
+
+.canvas__ifiletext {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.canvas__ifilename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--text);
+}
+
+.canvas__ifilesize {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-faint);
+}
+
+.canvas__ifileoff {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__iattach {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__iattach--off {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.canvas__iattach input {
+  display: none;
+}
+
+/* What the block is set to: one band, one row shape, so four settings read as
+   a list rather than as four different controls. */
+.canvas__irows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.canvas__irows > * + * {
+  border-top: 1px solid var(--border);
+}
+
+/* One row that is a switch rather than a way through. The note sits under the
+   name, so a long one never squeezes the switch off the end. */
+.canvas__irow--switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  cursor: pointer;
+}
+
+.canvas__irow--switch .canvas__irowname {
+  grid-column: 1;
+}
+
+.canvas__irownote {
+  grid-column: 1;
+  font-size: 9px;
+  line-height: 1.3;
+  color: var(--text-faint);
+}
+
+.canvas__iswitch {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.canvas__itrack {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--border-control);
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__itrack::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__iswitch:checked + .canvas__itrack {
+  background: var(--accent);
+}
+
+.canvas__iswitch:checked + .canvas__itrack::after {
+  transform: translateX(12px);
+}
+
+.canvas__iswitch:focus-visible + .canvas__itrack {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__ifileoff:hover {
+    background: var(--bg-raised);
+    color: var(--text);
+  }
+
+  .canvas__iattach:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .canvas__irow--switch:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas__itrack::after {
+    transition: none;
+  }
+}
+
+.canvas__imodels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.canvas__itier {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: var(--space-1);
+}
+
+.canvas__itiername {
+  padding: var(--space-1) var(--space-2) 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.canvas__imodel {
+  display: block;
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__imodel--on {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.canvas__imodel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* One row each, folded away. Forty models is a list you scroll past rather
+   than a choice you make. */
+.canvas__ipick {
+  flex: none;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.canvas__ipick:disabled {
+  opacity: 0.6;
+}
+
+/* What runs before this one, and the way to change it. Dragging a line is the
+   quick way; this is the one that can also take a join off. */
+.canvas__iwaits {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 26px;
+  margin-left: calc(var(--space-2) * -1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__iwaits:disabled {
+  opacity: 0.55;
+}
+
+.canvas__iwaits:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__iwaits:not(:disabled):hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+/* Under a block's name in the picker: enough of what it is asked to tell two
+   Custom blocks apart. */
+.canvas__isays2 {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+ /* A real button rather than a word: it is the one press in here that cannot
+   be taken back, so it should look like something you decided to press. */
+.canvas__iremove {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__iremove:active {
+  transform: scale(0.97);
+}
+
+.canvas__iremove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.canvas__iremove:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+}
+
+/* The key that does the same thing, said where the press is. */
+.canvas__ikey {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--text-faint);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__iremove:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+    background: color-mix(in srgb, var(--danger) 8%, var(--bg));
+    color: var(--danger);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas__iremove:active {
+    transform: none;
+  }
+}
+
+/* The textarea keeps its own grip and its own bar, and both landed in the
+   corner as a stray line and a box. It grows with the panel instead. */
+.canvas__isays {
+  resize: none;
+}
+
+/* -------------------------------------------------------------- the first */
+
+.canvas__nothing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  text-align: center;
+}
+
+.canvas__nothingtitle {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.canvas__nothingnote {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+.canvas__loops {
+  display: grid;
+  width: 100%;
+  max-width: 820px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  justify-content: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas__loop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  height: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  text-align: left;
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__loop:active {
+  transform: scale(0.99);
+}
+
+/* The loop's own shape, before it is put down. This is the whole reason the
+   first screen is worth having: you can read what you are about to place. */
+.canvas__loopshape {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+}
+
+.canvas__loopmark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.canvas__loopmark + .canvas__loopmark::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--space-3) * -1 - 1px);
+  width: var(--space-3);
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.canvas__loopname {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.canvas__loopnote {
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------- hover */
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__pick:hover:not(:disabled),
+  .canvas__zoombtn:hover,
+  .canvas__fit:hover,
+  .canvas__imodel:hover:not(:disabled) {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+
+  .canvas__card:hover {
+    border-color: var(--border-strong);
+  }
+
+  .canvas__card--target:hover {
+    border-color: var(--accent);
+  }
+
+  .canvas__handle:hover .canvas__dot {
+    border-color: var(--accent);
+    background: var(--accent);
+    transform: scale(1.15);
+  }
+
+  .canvas__loop:hover {
+    border-color: var(--border-strong);
+  }
+
+  .canvas__start:hover:not(:disabled) {
+    background: var(--accent-ink);
+  }
+
+  .canvas__stop:hover {
+    border-color: var(--border-strong);
+  }
+
+  .canvas__full:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+
+  .canvas__iadd:not(.canvas__iadd--off):hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .canvas__carryon:hover {
+    background: var(--accent-ink);
+  }
+
+  .canvas__tidy:hover {
+    color: var(--text);
+  }
+
+  .canvas__irow:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--bg-sunken);
+  }
+
+  .canvas__iback:hover,
+  .canvas__ishut:hover,
+  .canvas__iremove:hover:not(:disabled) {
+    color: var(--text);
+  }
+
+  .canvas__iremove:hover:not(:disabled) {
+    color: var(--danger);
+  }
+}
+
+/* ------------------------------------------------------------- narrow */
+
+/* Under about 900px the named list and the board cannot both be worth having.
+   The palette folds to its marks and every pixel saved goes to the board. */
+@container (max-width: 900px) {
+  .canvas__rail {
+    width: 56px;
+  }
+
+  .canvas__palette {
+    align-items: stretch;
+    padding: var(--space-3) var(--space-2);
+    /* No gutter at this width: 12px of reserved bar off a 56px rail put every
+       mark off centre. */
+    scrollbar-width: none;
+    scrollbar-gutter: auto;
+  }
+
+  /* Smaller and tighter, so the word fits the rail rather than running under
+     its edge. The loops keep their words or do not appear, and they do not. */
+  .canvas__palette .canvas__band {
+    padding: 0;
+    text-align: center;
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+
+  .canvas__palette .canvas__picktext,
+  .canvas__palette .canvas__loopband {
+    display: none;
+  }
+
+  .canvas__palette .canvas__pick {
+    justify-content: center;
+    padding: var(--space-1) 0;
+  }
+}
+
+/* The word beside the mark, the same chip the folded shelf uses. It is drawn
+   in the rail rather than off the button, because the rail scrolls and would
+   have clipped it. */
+.canvas__tip {
+  position: absolute;
+  left: calc(100% + 1px);
+  translate: 0 -50%;
+  z-index: 20;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--bg);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+  transform-origin: left center;
+  animation: canvas-tip var(--dur-micro) var(--ease-out-quart) both;
+  animation-delay: 300ms;
+}
+
+@keyframes canvas-tip {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas__tip {
+    animation-name: canvas-tip-plain;
+  }
+}
+
+@keyframes canvas-tip-plain {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still there, because it is the only thing separating a block that is going
+     from one that is waiting. Simply at rest. */
+  .canvas__sweep::after {
+    animation: none;
+    background: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+
+  .canvas__panel {
+    animation: none;
+  }
+
+  .canvas__pick:active,
+  .canvas__loop:active,
+  .canvas__start:active,
+  .canvas__stop:active,
+  .canvas__carryon:active {
+    transform: none;
+  }
+
+  .canvas__handle:hover .canvas__dot {
+    transform: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   How the run went
+
+   A flow that simply stops leaves somebody reading cards to work out what it
+   did. This sits above the foot and says it once, with the conversation one
+   press away — the messages are the detail, this is the verdict.
+   --------------------------------------------------------------------------- */
+
+.canvas__ended {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 760px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  animation: canvas-ends var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes canvas-ends {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.canvas__endmark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-sunken);
+  color: var(--text-faint);
+}
+
+.canvas__ended--whole .canvas__endmark {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.canvas__endtext {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.canvas__endhead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.canvas__endword {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.canvas__endcount {
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas__endleft {
+  color: var(--accent-ink);
+}
+
+/* One line of it, so the band stays one row along the foot. The whole answer
+   is in the conversation, and on the card that came to it. */
+.canvas__endsaid {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.canvas__endfrom {
+  margin-right: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.canvas__endopen {
+  flex: none;
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--text-xs);
+  color: var(--text);
+  white-space: nowrap;
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__endopen:active {
+  transform: scale(0.97);
+}
+
+.canvas__endhide {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.canvas__endopen:focus-visible,
+.canvas__endhide:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__endopen:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-sunken);
+  }
+
+  .canvas__endhide:hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas__ended {
+    animation: none;
+  }
+
+  .canvas__endopen:active {
+    transform: none;
+  }
+}
+
+/* The one place inside the surface where words are words. */
+.canvas__panel,
+.canvas__isays,
+.canvas__isearch,
+.canvas__icame {
+  user-select: text;
+}
+
+/* Which project inside the folder the flow works in. Only drawn where the
+   folder holds several — an ordinary project has nothing to choose. */
+.canvas__which {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.canvas__whichpick {
+  border: 0;
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text);
+}
+
+.canvas__whichpick:disabled {
+  opacity: 0.55;
+}
+
+.canvas__whichpick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   While it is going, and what it wants
+   --------------------------------------------------------------------------- */
+
+.canvas__going {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 760px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  animation: canvas-ends var(--dur-ui) var(--ease-out-quart) both;
+}
+
+/* The one state that cannot move on without a person. */
+.canvas__going--asking {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.canvas__goingmark {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+}
+
+.canvas__goingmark--turning {
+  animation: canvas-turning 900ms linear infinite;
+}
+
+.canvas__going--asking .canvas__goingmark {
+  border: 0;
+  background: var(--accent);
+}
+
+@keyframes canvas-turning {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.canvas__goingsaid {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* On the card itself, under what it was asked. */
+.canvas__doing {
+  overflow: hidden;
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  color: var(--accent-ink);
+}
+
+/* What every block runs on, beside how far it may go. */
+.canvas__whichvalue {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   Clearing it, asked first
+   --------------------------------------------------------------------------- */
+
+.canvas__sure {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(360px, calc(100% - var(--space-5)));
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  animation: canvas-opens var(--dur-ui) var(--ease-out-quart) both;
+}
+
+.canvas__surequestion {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.canvas__surerow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.canvas__surekeep,
+.canvas__suredo {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.canvas__surekeep {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.canvas__suredo {
+  border-color: transparent;
+  background: var(--danger);
+  color: var(--accent-text);
+}
+
+.canvas__surekeep:active,
+.canvas__suredo:active {
+  transform: scale(0.97);
+}
+
+.canvas__surekeep:focus-visible,
+.canvas__suredo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .canvas__surekeep:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-sunken);
+  }
+
+  .canvas__suredo:hover {
+    background: color-mix(in srgb, var(--danger) 85%, black);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas__sure,
+  .canvas__going {
+    animation: none;
+  }
+
+  .canvas__goingmark--turning {
+    animation: none;
+  }
+
+  .canvas__surekeep:active,
+  .canvas__suredo:active {
+    transform: none;
+  }
+}

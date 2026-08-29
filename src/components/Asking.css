@@ -79,6 +79,34 @@
   animation: asking-arrives var(--dur-ui) var(--ease-out-quart) both;
 }
 
+/* Down instead, off a chip in a bar along the top, and lined up with its right
+   edge because that is the edge it sits near. */
+.asking--down .asking__menu {
+  top: calc(100% + var(--space-2));
+  bottom: auto;
+  left: auto;
+  right: 0;
+  transform-origin: top right;
+  animation-name: asking-drops;
+}
+
+@keyframes asking-drops {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asking--down .asking__menu {
+    animation: none;
+  }
+}
+
 @keyframes asking-arrives {
   from {
     opacity: 0;

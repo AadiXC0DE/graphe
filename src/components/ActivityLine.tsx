@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { type Advice, advice } from '../lib/describe';
 import './ActivityLine.css';
 
 export type ActivityState = 'running' | 'done' | 'failed';
@@ -25,16 +27,20 @@ type Props = {
 
 /** One thing the agent did, as a read-only feed item.
  *
- * Never an input: no button, no checkbox, no affordance suggesting the user is
- * being asked to approve anything. Confirmations are a different component with
- * a different shape, and blurring the two is how people learn to click without
- * reading.
+ * Never a decision: no checkbox, no affordance suggesting the user is being
+ * asked to approve anything. Confirmations are a different component with a
+ * different shape, and blurring the two is how people learn to click without
+ * reading. The one press here only shows the rest of what the advisor said.
  *
  * The running state pairs its spinner with a sentence, always — "Working…" is an
  * apology, "Reading your Figma file" is information (notes/strategy/UI-DESIGN.md). The
  * state is carried by icon shape as well as colour, so nothing here depends on
  * colour alone. */
 export default function ActivityLine({ state, label, detail, meta, real }: Props) {
+  /* The one line in the feed a second model wrote. It is drawn as what it is
+     rather than as another grey particular, because nobody asked for it. */
+  const said = advice(label, detail);
+
   return (
     <div className={`activity activity--${state}`}>
       {/* 1.4 on a 14-unit box, which renders as a 1.4px stroke — the same
@@ -71,7 +77,11 @@ export default function ActivityLine({ state, label, detail, meta, real }: Props
 
       <span className="activity__text">
         <span className="activity__label">{label}</span>
-        {detail ? <span className="activity__detail">{detail}</span> : null}
+        {said !== null ? (
+          <Said said={said} />
+        ) : detail ? (
+          <span className="activity__detail">{detail}</span>
+        ) : null}
         {real ? <code className="activity__real">{real}</code> : null}
       </span>
 
@@ -81,5 +91,32 @@ export default function ActivityLine({ state, label, detail, meta, real }: Props
         {state === 'running' ? 'in progress' : state === 'done' ? 'done' : 'did not work'}
       </span>
     </div>
+  );
+}
+
+/** What the advisor said, at reading weight, with the model that said it.
+ *
+ * The only press on an activity line, and it decides nothing: three lines is
+ * enough to know whether the rest is worth reading, and a second opinion cut at
+ * a hundred characters was a line nobody could act on. */
+function Said({ said }: { said: Advice }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="activity__advice">
+      {said.model === null ? null : <span className="activity__advisor">{said.model}</span>}
+      <span className={`activity__answer ${open || !said.long ? '' : 'activity__answer--cut'}`}>
+        {said.answer}
+      </span>
+      {said.long ? (
+        <button
+          type="button"
+          className="activity__expand"
+          aria-expanded={open}
+          onClick={() => setOpen((was) => !was)}
+        >
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      ) : null}
+    </span>
   );
 }

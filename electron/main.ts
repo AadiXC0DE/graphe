@@ -85,7 +85,7 @@ import {
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
 import { browserFolder, browserFrame, forgetLogins } from '../src/agent/pi/computer';
-import { alwaysFile, alwaysFrom, WHEN, type When } from '../src/work/always';
+import { ALWAYS_TEMPLATE, alwaysFile, alwaysFrom, isAlwaysFile, WHEN, type When } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
@@ -109,6 +109,7 @@ import {
   type Hatches,
   type InStep,
   type Landing,
+  type ModelChoice,
   type OpenedProject,
   type WentOnline,
   type Overview,
@@ -172,11 +173,14 @@ import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShipp
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor, workflowWords } from '../src/work/workflows';
 import { readCheckoutIndex, type Checkout } from '../src/history/checkouts';
+import { renameTo } from '../src/history/naming';
 import {
+  branchNames,
   bringBack,
   bringBackWords,
   createWorktree,
   nextCheckoutName,
+  renameCheckoutBranch,
   dropWorktree,
   putAwayWorktree,
   releaseWorktree,
@@ -186,6 +190,7 @@ import {
   type RunGit,
   type Rescue,
 } from '../src/history/worktree';
+import { preparePrWorktree } from './prWorktree';
 import {
   addTasks,
   finishTask,
@@ -199,6 +204,11 @@ import {
   startTask,
   type Task,
 } from '../src/work/buildplan';
+import { GoalFile } from '../src/projects/goals';
+import { FlowFile } from '../src/projects/flows';
+import { readFlow, withFlow, withoutFlow, type Flow } from '../src/work/canvas';
+import { notHere, runHelper } from '../src/share/run';
+import { readStoredGoal, type Goal } from '../src/work/goal';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -499,6 +509,14 @@ function couldNotUseModel(named: string, many: number): Trouble {
     actionLabel: 'Got it',
   };
 }
+
+/** A switch handed something that is neither on nor off. Nothing has gone wrong
+ *  with the folder, so it must not read as though it has. */
+const NOT_A_YES_OR_NO: Trouble = {
+  what: 'That switch was not given a yes or a no.',
+  because: 'Try it again — nothing was changed.',
+  actionLabel: 'Got it',
+};
 
 const NOTHING_OPEN: Trouble = {
   what: 'I do not have a folder to work in yet.',
@@ -1555,7 +1573,9 @@ type Held = {
    *  on the project folder. The branch is the durable half: the folder is put
    *  away when nobody is in it and spread out again from the branch. */
   checkouts: Map<string, Checkout>;
-  /** Work being checked before it reaches the files, or null when none is. */
+  /** Work being checked before it reaches the files, or null when none is.
+   *  Single slot for now; per-child (Map<repo, HeldWork>) is the follow-up
+   *  once worktreeLand/Drop prove stable in polyrepo. */
   waiting: HeldWork | null;
   /**
    * The session running that check, while it runs.
@@ -1573,6 +1593,8 @@ type Held = {
   /** True while something is being sent off this computer, so a second press
    *  cannot start a second one. */
   sending: boolean;
+  /** True while Plan Mode is on — writes withheld until explicit Do it / Exit. */
+  planMode: boolean;
 };
 
 /** Every conversation in one project, with the one that has waited longest put
@@ -2635,18 +2657,23 @@ async function photographWaiting(project: string, work: HeldWork): Promise<HeldP
  */
 async function checkItFirst(
   open: { path: string; name: string; held: Held },
+  where: Where,
   from: Speaking,
   text: string,
   cards: readonly ImageCard[] | undefined,
   lookFirst: boolean,
 ): Promise<Result<null>> {
   const held = open.held;
-  const history = new ProjectHistory(open.path);
+  // Per-child when a repo is named — use the child's folder and timeline.
+  // Held.waiting remains a single slot for now; per-child waiting (Map)
+  // is a follow-up once this proves stable. Keep changes minimal.
+  const folder = folderFor(open as Workspace<Held>, where);
+  const timeline = await timelineFor(open as Workspace<Held>, where);
+  const history = new ProjectHistory(folder);
   held.pictures = null;
-  // Checking work first runs it in a copy of one project's history. A folder
-  // holding several projects has none to copy, so this is said plainly rather
-  // than half-working.
-  if (held.timeline === null) return fail(SEVERAL_PROJECTS);
+  // A folder holding several projects has no folder-level history to copy.
+  // When where.repo names a child, its own timeline is used instead.
+  if (timeline === null) return fail(SEVERAL_PROJECTS);
 
   // Work starts from a version. Anything unfinished becomes one first, silently
   // and without a question, exactly as going back does.
@@ -2656,12 +2683,12 @@ async function checkItFirst(
   // letting the result back in later would write over it. Swallowing this was
   // the quiet way to lose an afternoon's edits.
   try {
-    await held.timeline.snapshot({ boundary: 'turn-ended' });
+    await timeline.snapshot({ boundary: 'turn-ended' });
   } catch (cause) {
     return fail(historyTrouble(cause));
   }
 
-  const keptIn = await keepCopyFor(open.path);
+  const keptIn = await keepCopyFor(folder);
   let waiting: HeldWork;
   try {
     waiting = await HeldWork.start({
@@ -2680,7 +2707,7 @@ async function checkItFirst(
 
   // A copy with no pieces in it fails on the first test command, which reads as
   // the work being wrong rather than the copy being empty.
-  const fresh = await getReady(open.path, waiting.folder);
+  const fresh = await getReady(folder, waiting.folder);
   if (!fresh.ready) {
     return fail({
       what: 'I could not get the copy ready.',
@@ -2696,7 +2723,12 @@ async function checkItFirst(
       onEvent: forwardHeld(open.path, held, from),
       timeline: await Timeline.open(waiting.folder),
       model: (await preferences()).all().model,
+      advisor: (await preferences()).all().advisor,
+      advisorThinking: (await preferences()).all().advisorThinking,
       thinking: thinkingFor((await preferences()).all()),
+      // This is the message somebody just sent, run in a copy because they
+      // asked to see it first. Plan gates that message wherever it runs.
+      planMode: held.planMode,
       sessionDir: sessionsFolder(),
     });
     held.checking = inside;
@@ -2715,7 +2747,7 @@ async function checkItFirst(
   // Before settling, because settling deletes the copy and the copy is the only
   // place what the work made exists. A picture that could not be taken is a
   // thinner decision, never a failed one.
-  held.pictures = await photographWaiting(open.path, waiting).catch(() => null);
+  held.pictures = await photographWaiting(folder, waiting).catch(() => null);
 
   try {
     await waiting.settle(saysHeldWork(text));
@@ -3012,6 +3044,36 @@ function freshCheckout(held: Held, project: string): { name: string; folder: str
   });
   held.checkoutsMade = chosen.made;
   return { name: chosen.name, folder: join(worktreesFolder(project), chosen.name) };
+}
+
+/**
+ * Name a conversation's branch after the first thing it was asked to do.
+ *
+ * A checkout is made before anybody has said anything, so its branch starts
+ * neutral. The first request is the first subject there is, and the branch
+ * takes it — once, and only while the branch is still one of ours, still on its
+ * neutral name and tracking nothing anyone else can already fetch.
+ */
+async function nameBranchAfter(
+  open: Workspace<Held>,
+  address: string,
+  request: string,
+): Promise<void> {
+  const checkout = open.held.checkouts.get(address);
+  if (checkout === undefined || checkout.named === true) return;
+  const run = gitRunHereFor();
+  const taken = await branchNames(run, open.path);
+  const wanted = renameTo(checkout, request, (name) => taken.has(name));
+  if (wanted === null) return;
+  const renamed = await renameCheckoutBranch(run, checkout.folder, checkout.branch, wanted);
+  // Marked either way. A refused rename is git saying the branch is not ours to
+  // move, and asking again every turn is how a name starts wandering.
+  open.held.checkouts.set(address, {
+    ...checkout,
+    ...(renamed ? { branch: wanted } : {}),
+    named: true,
+  });
+  await saveCheckouts(open.path, open.held).catch(() => undefined);
 }
 
 /**
@@ -3443,6 +3505,8 @@ async function startConversationUnlocked(
             (held.timeline ?? undefined)
           : await Timeline.open(checkout.folder),
       model: prefs.model,
+      advisor: prefs.advisor,
+      advisorThinking: prefs.advisorThinking,
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
       running: held.running,
@@ -3470,6 +3534,7 @@ async function startConversationUnlocked(
       // are kept.
       cancelBuild: () => cancelThePlan(open.path),
       keepsBrowserLogins: () => keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path),
+      planMode: held.planMode,
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
       // takes them with it. Pi tells them apart by the folder each was recorded
@@ -3570,6 +3635,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     checking: null,
     pictures: null,
     sending: false,
+    planMode: false,
   };
 
   // A folder opened with nothing chosen is the first-run case, and Pi will not
@@ -3915,6 +3981,13 @@ let cancelThePlan: (project: string) => Promise<string> = () =>
 const tickedThisTurn = new Set<string>();
 
 const awayDesks = new Map<string, AwayDesk>();
+
+/** Whether the folder this board belongs to is being held read-only. A board
+ *  outlives the window that opened it, and a folder nobody has open is a folder
+ *  nobody has put in Plan. */
+function planHeldOn(path: string): boolean {
+  return projectAt({ project: path })?.held.planMode === true;
+}
 
 function deskFor(path: string, name: string): AwayDesk {
   const already = awayDesks.get(path);
@@ -4331,7 +4404,15 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       onEvent: hear,
       timeline: await Timeline.open(folder),
       model: (await preferences()).all().model,
+      advisor: (await preferences()).all().advisor,
+      advisorThinking: (await preferences()).all().advisorThinking,
       thinking: thinkingFor((await preferences()).all()),
+      // The board is held before a piece gets this far, so this only catches
+      // Plan arriving while the copy was being made.
+      planMode: planHeldOn(desk.path),
+      // A block on the canvas can name its own; everything else takes the one
+      // the window is set to.
+      ...(piece.model == null ? {} : { model: piece.model }),
       noteServers,
       // Background work gets the same way into Figma as the conversation does:
       // "match this to the design" is exactly the kind of thing left running.
@@ -4450,6 +4531,11 @@ async function runWhatCan(desk: AwayDesk): Promise<void> {
   // What is waiting stays waiting: a limit is not a reason to throw away what
   // somebody asked for.
   if (!fleet.allowsNewWork) return;
+  // Nor while the folder is in Plan. A piece is exactly the work the model is
+  // refused for asking about — its own copy, its own money, its changes there
+  // to be taken afterwards — so who put it on the board cannot be what decides
+  // it. What is already going finishes; stopping it part way would lose it.
+  if (planHeldOn(desk.path)) return;
   desk.starting = true;
   let began: readonly PieceOfWork[];
   try {
@@ -4507,6 +4593,9 @@ async function keepGoing(
   after: string | null = null,
   untilDone = false,
   ways: string | null = null,
+  /** Which model runs it. Null takes whatever is answering, which is every
+   *  route but a block on the canvas that named one. */
+  model: { providerId: string; modelId: string } | null = null,
 ): Promise<WentOn> {
   const desk = deskFor(path, name);
   const id = nextName(desk);
@@ -4529,7 +4618,7 @@ async function keepGoing(
     }
   }
 
-  const piece = desk.bench.ask(doing, { id, at, ways });
+  const piece = desk.bench.ask(doing, { id, at, ways, model });
   // Written down before it starts, so a machine that loses power between the
   // asking and the first word still comes back to something waiting its turn.
   await notes().note(
@@ -5431,6 +5520,13 @@ function register(): void {
     // path from the window is not a path to trust with `open -a`.
     const target = typeof file === 'string' && file !== '' ? inside(open.path, file) : open.path;
     if (target === null) return fail(NOTHING_OPEN);
+    // A file the project has not written yet opens as nothing at all, which is
+    // what "Things this project always does" did before anybody had any. It is
+    // made first, with enough in it to edit.
+    if (isAlwaysFile(target)) {
+      await mkdir(dirname(target), { recursive: true }).catch(() => undefined);
+      await writeFile(target, ALWAYS_TEMPLATE, { flag: 'wx' }).catch(() => undefined);
+    }
     try {
       await new Promise<void>((resolve, reject) => {
         const child = spawn('open', ['-a', found.bundle, target], { stdio: 'ignore' });
@@ -5507,6 +5603,25 @@ function register(): void {
     const session = sessionAt(open, where);
     session?.goAsFarAs(rung);
     return Promise.resolve(done(session?.howFar ?? 'asking'));
+  });
+
+  /** Plan is held on the project rather than on one conversation: it seeds every
+   *  conversation started while it is on, so the two would otherwise disagree
+   *  about a folder that is meant to be read-only. */
+  handle<boolean>(CHANNEL.setPlanMode, (_event, args) => {
+    const [on] = args;
+    if (typeof on !== 'boolean') return Promise.resolve(fail<boolean>(NOT_A_YES_OR_NO));
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
+    open.held.planMode = on;
+    for (const one of open.held.sessions.open) one.held.setPlanMode(on);
+    // What the board was holding is only waiting, so leaving Plan is what lets
+    // it go — without this the queue waits for a turn that never comes.
+    if (!on) {
+      const desk = awayDesks.get(open.path);
+      if (desk !== undefined) void runWhatCan(desk);
+    }
+    return Promise.resolve(done(on));
   });
 
   /** What the open project brought with it. Read off the session that is
@@ -6875,25 +6990,58 @@ function register(): void {
   }
 
   handle<null>(CHANNEL.worktreeLand, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    // This conversation's own checkout. It used to be whichever one git listed
-    // first, so with a second conversation open — or background work in flight —
-    // this landed somebody else's branch.
-    const entry = checkoutEntryFor(open, whereIn(args));
+    const entry = checkoutEntryFor(open, where);
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
-    // Landing folds the copy back into the folder's own history; several
-    // projects have none to fold into.
-    const history = open.held.timeline;
+    // Reviews run in a pr worktree — they are read-only and must not be landed.
+    if (entry.branch.startsWith('graphe/pr-')) {
+      return fail({
+        what: 'This is a pull request review checkout.',
+        because: 'Reviews are read-only — close the tab when you are done. It will be dropped, not landed into the project.',
+        actionLabel: 'Got it',
+      });
+    }
+    // Per-child when a repo is named: folder and timeline come from there.
+    // A folder holding several projects has no folder-level history to land into
+    // — unless where.repo names one child, then that child's timeline is used.
+    // Must not use folderFor() or timelineFor() here: both prefer the checkout's
+    // own folder (entry.folder), which would make bringBack(worktree, worktree)
+    // and snapshot the worktree then delete it — landed files would sit
+    // uncommitted with no restore point. Use the real project (or named child).
+    const child = childRepoFor(open as unknown as Workspace<Held>, where);
+    const repo = child?.path ?? open.path;
+    let history: Timeline | null = null;
+    if (child !== null) {
+      const existing = open.held.childTimelines.get(child.path);
+      if (existing !== undefined) {
+        try {
+          history = await existing;
+        } catch {
+          history = null;
+        }
+      } else {
+        try {
+          const created = Timeline.open(child.path);
+          open.held.childTimelines.set(child.path, created);
+          history = await created;
+        } catch {
+          history = null;
+        }
+      }
+    } else {
+      history = open.held.timeline;
+    }
     if (history === null) return fail(SEVERAL_PROJECTS);
     await putDownCopyConversation(open, entry.address);
-    if ((await reopenCheckout(open.path, entry)) === null) {
+    if ((await reopenCheckout(repo, entry)) === null) {
       return fail(worktreeTrouble(worktreeWords.gone));
     }
     // Copy work is usually uncommitted. Apply its actual files first and await
     // that result; merging only the branch can omit those edits, while racing
     // the settle-time Apply can remove the folder out from underneath it.
-    const carried = await bringBack(gitRunHereFor(), open.path, entry.folder);
+    const carried = await bringBack(gitRunHereFor(), repo, entry.folder);
     if (!carried.ok) return fail(worktreeTrouble(carried.because));
     if (carried.value.conflicted.length > 0) {
       return fail(worktreeTrouble(bringBackWords.heldBack(carried.value.conflicted)));
@@ -6905,7 +7053,7 @@ function register(): void {
         worktreeTrouble(cause instanceof Error ? cause.message : 'The project could not be saved.'),
       );
     }
-    const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
+    const dropped = await dropWorktree(gitRunHereFor(), repo, entry.folder);
     if (dropped.ok) {
       open.held.checkouts.delete(entry.address);
       await saveCheckouts(open.path, open.held).catch(() => undefined);
@@ -6914,19 +7062,117 @@ function register(): void {
   });
 
   handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     // The same rule as landing, and it matters more here: this one deletes.
-    const entry = checkoutEntryFor(open, whereIn(args));
+    const entry = checkoutEntryFor(open, where);
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    const repo = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
     await putDownCopyConversation(open, entry.address);
-    await reopenCheckout(open.path, entry);
-    const dropped = await dropWorktree(gitRunHereFor(), open.path, entry.folder);
+    await reopenCheckout(repo, entry);
+    const dropped = await dropWorktree(gitRunHereFor(), repo, entry.folder);
     if (dropped.ok) {
       open.held.checkouts.delete(entry.address);
       await saveCheckouts(open.path, open.held).catch(() => undefined);
     }
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
+  });
+
+  handle<string>(CHANNEL.prWorktreePrepare, async (_event, args) => {
+    const [prRaw] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const prNumber = typeof prRaw === 'number' ? prRaw : Number(prRaw);
+    if (!Number.isFinite(prNumber) || prNumber <= 0) {
+      return fail({ what: 'I could not tell which pull request you meant.', because: 'The number was missing or not a number.', actionLabel: 'Got it' });
+    }
+    const project = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
+    try {
+      const { folder } = await preparePrWorktree(project, prNumber);
+      return done(folder);
+    } catch (cause) {
+      const details = detailsOf(cause);
+      return fail({
+        what: 'I could not prepare the pull request checkout.',
+        because: cause instanceof Error ? cause.message : 'Something went wrong fetching it.',
+        actionLabel: 'Got it',
+        ...(details === undefined ? {} : { details }),
+      });
+    }
+  });
+
+  // Root a PR review in its own checkout: the session's project is the PR
+  // worktree, so the model reads the right code by construction rather than
+  // by instruction (#12). Events still flow to the open project's desk, and
+  // the conversation registers as an own-copy so landing/put-away behave.
+  handle<{ folder: string; opened: OpenedProject }>(CHANNEL.prReviewOpen, async (_event, args) => {
+    const [prRaw] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const prNumber = typeof prRaw === 'number' ? prRaw : Number(prRaw);
+    if (!Number.isFinite(prNumber) || prNumber <= 0) {
+      return fail({ what: 'I could not tell which pull request you meant.', because: 'The number was missing or not a number.', actionLabel: 'Got it' });
+    }
+    const project = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
+    let folder: string;
+    try {
+      folder = (await preparePrWorktree(project, prNumber)).folder;
+    } catch (cause) {
+      const details = detailsOf(cause);
+      return fail({
+        what: 'I could not prepare the pull request checkout.',
+        because: cause instanceof Error ? cause.message : 'Something went wrong fetching it.',
+        actionLabel: 'Got it',
+        ...(details === undefined ? {} : { details }),
+      });
+    }
+    const prefs = (await preferences()).all();
+    const from: Speaking = { address: null };
+    let session: GrapheSession;
+    try {
+      session = await createSession({
+        projectRoot: folder,
+        mainFolder: open.path,
+        onEvent: forwardTo(open.path, open.held, from),
+        timeline: await Timeline.open(folder),
+        model: prefs.model,
+        advisor: prefs.advisor,
+      advisorThinking: prefs.advisorThinking,
+        thinking: thinkingFor(prefs),
+        trusts: await trustsIn(open.path),
+        running: open.held.running,
+        noteServers,
+        figmaToken: figmaCredential(),
+        planMode: open.held.planMode,
+        sessionDir: sessionsFolder(),
+        fresh: true,
+      });
+    } catch (cause) {
+      const chain = detailsOf(cause);
+      return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
+    }
+    const address = addressOf(session);
+    from.address = address;
+    open.held.checkouts.set(address, { folder, branch: `graphe/pr-${String(prNumber)}` });
+    await saveCheckouts(open.path, open.held).catch(() => undefined);
+    keepConversation(open.held, address, session);
+    return done({
+      folder,
+      opened: {
+        path: open.path,
+        name: open.name,
+        history: session.history,
+        conversation: session.conversation,
+        address,
+        howFar: session.howFar,
+        // Derived, not fixed: this conversation works in the PR checkout, so
+        // it is an own-copy exactly when that checkout is registered.
+        ownCopy: open.held.checkouts.has(address),
+      },
+    });
   });
 
   /* -------------------------------------------------- document to build */
@@ -7205,6 +7451,77 @@ function register(): void {
     });
   });
 
+  handle<readonly Flow[]>(CHANNEL.flowLoad, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done([]);
+    return done(await FlowFile.read(open.path, app.getPath('userData')));
+  });
+
+  handle<null>(CHANNEL.flowSave, async (_event, args) => {
+    const [raw] = args;
+    const open = projectAt(whereIn(args));
+    const flow = readFlow(raw);
+    if (open === null || flow === null) return fail(NOTHING_OPEN);
+    const held = await FlowFile.read(open.path, app.getPath('userData'));
+    await FlowFile.write(open.path, app.getPath('userData'), withFlow(held, flow));
+    return done(null);
+  });
+
+  /** Throw one away. Closing its tab does not come through here — a drawing
+   *  somebody put down is not a drawing they meant to lose. */
+  handle<null>(CHANNEL.flowForget, async (_event, args) => {
+    const [id] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null || typeof id !== 'string') return fail(NOTHING_OPEN);
+    const held = await FlowFile.read(open.path, app.getPath('userData'));
+    await FlowFile.write(open.path, app.getPath('userData'), withoutFlow(held, id));
+    return done(null);
+  });
+
+  handle<Goal | null>(CHANNEL.goalLoad, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done(null);
+    return done(await GoalFile.read(open.path, app.getPath('userData')));
+  });
+
+  handle<null>(CHANNEL.goalSave, async (_event, args) => {
+    const [raw] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    // Read the same way it is read back, so nothing half-shaped reaches disk.
+    const goal = readStoredGoal(raw);
+    if (goal === null) return fail(NOTHING_OPEN);
+    await GoalFile.write(open.path, app.getPath('userData'), goal);
+    return done(null);
+  });
+
+  handle<null>(CHANNEL.goalClear, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done(null);
+    await GoalFile.clear(open.path, app.getPath('userData'));
+    return done(null);
+  });
+
+  handle<{ passed: boolean; reason: string }>(CHANNEL.goalVerify, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    // A check that did not run is not a check that passed: a goal must never
+    // be marked met on the strength of verification that never happened.
+    if (open === null) return done({ passed: false, reason: 'No project open to check.' });
+    const folder = folderFor(open, where);
+    const entries = await readdir(folder).catch(() => [] as string[]);
+    const hasTs = entries.includes('tsconfig.json') || entries.includes('tsconfig.base.json');
+    if (!hasTs) return done({ passed: false, reason: 'No typecheck config in this project, so the check did not run.' });
+    const ran = await runHelper('npx', ['--no-install', 'tsc', '--noEmit'], { folder, patience: 90_000 });
+    if (notHere(ran)) return done({ passed: false, reason: 'TypeScript is not installed here, so the check did not run.' });
+    if (ran.code === 0) return done({ passed: true, reason: 'typecheck passed.' });
+    const reason = ran.said.trim().slice(0, 2000) || 'typecheck failed';
+    return done({ passed: false, reason });
+  });
+
   handle<string>(CHANNEL.skillText, async (_event, args) => {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
@@ -7275,6 +7592,9 @@ function register(): void {
     // sentence the version timeline writes for the same moment — see
     // src/diff/summary.ts.
     open.held.looking.instruction = text;
+    // Their words, not the workflow's expansion of them: the branch is named
+    // after what was asked for.
+    await nameBranchAfter(open, conversation.path, textIn).catch(() => undefined);
     try {
       const lookFirst =
         ways !== null && typeof ways === 'object' && (ways as PromptOptions).lookFirst === true;
@@ -7293,9 +7613,12 @@ function register(): void {
         holdsBack((await preferences()).all().heldBack, open.path) &&
         open.held.waiting === null
       ) {
-        if (await worthACopy(open.path)) {
+        const askFolder = folderFor(open, where);
+        const askTimeline = await timelineFor(open, where);
+        if (await worthACopy(askFolder)) {
           return await checkItFirst(
             open,
+            where,
             { address: conversation.path },
             text,
             imageCards(attachments),
@@ -7304,7 +7627,8 @@ function register(): void {
         }
         // Nothing to show, so the work happens here and one press puts it back.
         // The save point is the whole difference between that and losing it.
-        await open.held.timeline
+        // Per-child when a repo is named; otherwise the project's own.
+        await askTimeline
           ?.snapshot({ boundary: 'before-risky-change' })
           .catch(() => null);
       }
@@ -7610,6 +7934,52 @@ function register(): void {
     // and it is no less true when the tab beside it took the change.
     if (refused.length > 0) {
       return fail(couldNotUseModel(model?.label ?? modelId, refused.length));
+    }
+    return done(saved);
+  });
+
+  handle<Preferences>(CHANNEL.selectAdvisor, async (_event, args) => {
+    const [providerId, modelId] = args;
+    const prefs = await preferences();
+    const off = providerId === null || modelId === null;
+    if (!off && (typeof providerId !== 'string' || typeof modelId !== 'string')) {
+      return done(prefs.all());
+    }
+    // A model the window drew from a stale list is not a preference. Turning it
+    // off needs no such check — nobody has to exist for nobody to be asked.
+    let choice: ModelChoice | null = null;
+    if (!off) {
+      const providers = await readConnection(await defaultAgentDir());
+      const known = providers.some(
+        (provider) =>
+          provider.providerId === providerId &&
+          provider.models.some((model) => model.id === modelId),
+      );
+      if (!known) return done(prefs.all());
+      choice = { providerId: providerId as string, modelId: modelId as string };
+    }
+    const saved = await prefs.change({ advisor: choice });
+    // On the conversations already open, not only the next one: one press is
+    // the whole promise of the control.
+    const open = projectAt(whereIn(args));
+    for (const one of open?.held.sessions.open ?? []) {
+      await one.held.useAdvisor(choice, saved.advisorThinking ?? undefined);
+    }
+    return done(saved);
+  });
+
+  /* Not keyed by model like `setThinking`: the same model can be doing the work
+     in one place and advising in another, and the two are different answers. */
+  handle<Preferences>(CHANNEL.setAdvisorThinking, async (_event, args) => {
+    const [level] = args;
+    const prefs = await preferences();
+    if (!['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(level as string)) {
+      return done(prefs.all());
+    }
+    const saved = await prefs.change({ advisorThinking: level as ThinkingLevel });
+    const open = projectAt(whereIn(args));
+    for (const one of open?.held.sessions.open ?? []) {
+      await one.held.useAdvisor(saved.advisor, level as ThinkingLevel);
     }
     return done(saved);
   });

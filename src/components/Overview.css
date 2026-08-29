@@ -19,18 +19,12 @@
   background: var(--bg);
   border-left: 1px solid var(--border);
   overflow-y: auto;
-  /* No bar down the window's right edge. This panel is fixed to the glass top
-     to bottom, so the thin one every scroller inherits runs the whole height of
-     the window — furniture beside the work, and hardest to explain in full
-     screen where there is no frame around it. The same reason the conversation
-     scroller has none. Hidden, not disabled: wheel, trackpad and keyboard all
-     still scroll it. */
+  /* Fixed to the glass, so no bar: it would run the full height of the window
+     beside the work rather than in it, and the reveal shoved every line in the
+     panel sideways under the pointer. Wheel, trackpad and keyboard still
+     scroll it. */
   scrollbar-width: none;
-  /* Inert while the bar is hidden, and kept for the day it is not: without it
-     the panel's contents jump sideways the moment one appears. */
-  scrollbar-gutter: stable;
   overscroll-behavior: contain;
-
 }
 
 /* Nothing sits above this panel — no strip, and no traffic lights on this side
@@ -121,10 +115,10 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Save / commit
-   The changed set as one thing, named the way git names it and said the way
-   people say it. The individual files are a project-place's job now; here is
-   the one thing the hand does with them as a whole.
+   Commit
+   The changed set as one thing, named the way git names it. The individual
+   files are a project-place's job now; here is the one thing the hand does with
+   them as a whole.
    --------------------------------------------------------------------------- */
 
 /* The branch, then the plain note under it: git's word on its own line (the
@@ -362,24 +356,10 @@
 
 /* The panel is a flex column that ends with the meter, which docks into its
    foot: the versions list scrolls above it and the meter sits on the bottom
-   edge whether the list above it is one row or forty. */
+   edge whether the list above it is one row or forty. The panel gives up its
+   bottom padding so the meter lands flush on the glass; everything the meter
+   needs to stay there is in CostMeter.css, under .cost-meter--panel. */
 .overview { padding-bottom: 0; }
-
-/* The meter, docked. The panel's own foot — flush to the glass, one hairline
-   between it and the timeline above it. */
-.overview .cost-meter--corner {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  width: auto;
-  border: none;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  box-shadow: none;
-  background: var(--bg);
-  padding: var(--space-2) var(--space-4);
-  margin: 0;
-}
 
 @media (max-width: 1100px) {
   .overview {
@@ -400,9 +380,14 @@
 /* The band's own action. One per band at most — a panel of buttons is a
    toolbar, and this is not one. */
 .overview__do {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
   margin-top: var(--space-3);
   min-height: 28px;
   padding: 0 var(--space-3);
+  white-space: nowrap;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
@@ -423,13 +408,20 @@
 
 .overview__actions .overview__do { margin-top: 0; }
 
-/* Two voices in one control: the git word, then the plain translation. A thin
-   pipe separates them so the pair reads as term + note rather than one blurry
-   button. */
+/* The operation, then where it lands. A thin pipe separates them so the pair
+   reads as one press with a destination rather than two labels.
+
+   The branch is the half that gives way: a name taken from what somebody asked
+   for is as long as their sentence, and wrapped it broke the button in two. */
 .overview__do .overview__plainsay {
   position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
   margin-left: var(--space-2);
   padding-left: var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .overview__do .overview__plainsay::before {
@@ -469,8 +461,11 @@
   }
 }
 
-/* The panel's own foot, above the meter. */
+/* The panel's own foot, above the meter. It takes the slack, which is what
+   keeps the money on the glass however short the panel's contents are — the
+   meter is the one thing in here that should never need looking for. */
 .overview__foot {
+  margin-top: auto;
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--border);
 }
@@ -478,20 +473,6 @@
 .overview__foot .overview__do {
   margin-top: 0;
   width: 100%;
-}
-
-/* The money stays on the glass however long the panel gets — it is the one
-   thing in here that should never need looking for. Everything else, the way to
-   hand the work on included, scrolls with the rest. */
-.overview .cost-meter--corner {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  background: var(--bg);
-}
-
-.overview__foot {
-  margin-top: auto;
 }
 
 /* ---------------------------------------------------------------------------

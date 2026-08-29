@@ -8,9 +8,10 @@ import {
   researchWords,
   type Depth,
 } from '../agent/research';
+import { goalWords } from '../work/goal';
 import './HowToWork.css';
 
-export type Plans = 'auto' | 'always' | 'never' | 'research';
+export type Plans = 'auto' | 'research' | 'goal' | 'plan';
 
 type Props = {
   plans: Plans;
@@ -21,9 +22,10 @@ type Props = {
  * Whether to look before touching anything.
  *
  * It sits in the composer's own row next to the model, because it is the other
- * thing that changes what happens when you press send. The default decides for
- * itself and is the one almost nobody needs to think about; the other two are
- * for the person who has an opinion about this particular message.
+ * thing that changes what happens when you press send. Four, and no more: the
+ * list had grown until nobody could find the one they wanted in it. What is
+ * left is the default, the two that change what a whole message becomes, and
+ * the one that holds the writes back.
  */
 const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[] = [
   {
@@ -33,22 +35,22 @@ const CHOICES: readonly { id: Plans; chip: string; name: string; note: string }[
     note: 'Looks around first when a request sounds like a lot, and gets straight on with the small ones.',
   },
   {
-    id: 'always',
-    chip: 'Plans first',
-    name: 'Always plan first',
-    note: 'Tells you what it would do every time, and waits.',
-  },
-  {
-    id: 'never',
-    chip: 'Straight in',
-    name: 'Never plan',
-    note: 'Gets on with it. You can still put anything back afterwards.',
-  },
-  {
     id: 'research',
     chip: researchWords.chip,
     name: researchWords.name,
     note: researchWords.note,
+  },
+  {
+    id: 'goal',
+    chip: goalWords.chip,
+    name: goalWords.name,
+    note: goalWords.note,
+  },
+  {
+    id: 'plan',
+    chip: 'Plan',
+    name: 'Plan only',
+    note: 'Reads and proposes. Nothing is changed and nothing is run until you say go ahead.',
   },
 ];
 
@@ -62,7 +64,11 @@ export default function HowToWork({ plans, onPlans }: Props) {
   /* The chip keeps its own words at the setting nobody had to choose, and wears
      the setting itself once somebody has. */
   const label =
-    plans === 'research' && howFar !== DEFAULT_DEPTH ? howDeep(howFar).name : chosen.chip;
+    plans === 'research' && howFar !== DEFAULT_DEPTH
+      ? howDeep(howFar).name
+      : plans === 'goal'
+        ? `${chosen.chip} · full access`
+        : chosen.chip;
 
   /* Click away and escape both close it — people reach for both. */
   useEffect(() => {
@@ -109,14 +115,20 @@ export default function HowToWork({ plans, onPlans }: Props) {
 
       {open ? (
         <div className="ways__menu" role="listbox" aria-label="Whether to plan first">
-          {CHOICES.map((choice) => (
+          {CHOICES.map((choice) => {
+            const blocked = choice.id === 'goal' && plans === 'plan';
+            return (
             <button
               key={choice.id}
               type="button"
               role="option"
               aria-selected={choice.id === plans}
-              className={`ways__option ${choice.id === plans ? 'ways__option--chosen' : ''}`}
+              aria-disabled={blocked ? 'true' : undefined}
+              disabled={blocked}
+              className={`ways__option ${choice.id === plans ? 'ways__option--chosen' : ''}${blocked ? ' ways__option--blocked' : ''}`}
+              title={blocked ? 'Plan mode is on — finish or exit plan before starting a goal.' : choice.note}
               onClick={() => {
+                if (blocked) return;
                 onPlans(choice.id);
                 setOpen(false);
               }}
@@ -147,10 +159,11 @@ export default function HowToWork({ plans, onPlans }: Props) {
                     </span>
                   ) : null}
                 </span>
-                <span className="ways__note">{choice.note}</span>
+                <span className="ways__note">{blocked ? 'Plan mode is on — finish or exit plan before starting a goal.' : choice.note}</span>
               </span>
             </button>
-          ))}
+          );
+          })}
 
           {/* Behind the choice it belongs to, so it is found by the hand that
               is already here and is out of the way of everybody else. */}

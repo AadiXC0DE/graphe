@@ -28,3 +28,7 @@ build/icon.iconset/
 site/assets/shots/*
 !site/assets/shots/app-*.png
 !site/assets/shots/crop-*.png
+
+# Subagent scratch: what a helper was asked, what it said, its transcript.
+# Runtime state, not project config — .pi/hooks.json and .pi/mcp.json stay.
+.pi/subagents/

@@ -323,3 +323,63 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* ---------------------------------------------------------------------------
+   Looking
+   Shown until the first answer comes back. Nothing here says a list is empty
+   or a folder is not a repository, because at this point nobody has looked.
+   --------------------------------------------------------------------------- */
+
+.reviews__waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.reviews__spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text-faint);
+  border-radius: 50%;
+  animation: reviews-turn 800ms linear infinite;
+}
+
+.reviews__waitingsay {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+.reviews__ghosts {
+  list-style: none;
+  width: 100%;
+  max-width: 320px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.reviews__ghost {
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+
+.reviews__ghost:nth-child(2) { width: 84%; }
+.reviews__ghost:nth-child(3) { width: 62%; }
+
+@keyframes reviews-turn {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reviews__spinner {
+    animation: none;
+    border-top-color: var(--border);
+  }
+}

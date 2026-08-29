@@ -70,11 +70,9 @@
      use-stick-to-bottom watches, and it identifies the scroller it is being
      asked about by reading the computed `overflow` shorthand. */
   overflow: auto;
-  /* No bar on the window itself. macOS apps do not put one down the side of
-     their main content, and under *Show scroll bars: Always* Chromium would
-     draw a permanent classic one 328px from the words it belongs to, on top of
-     the rail. Hidden, not disabled: wheel, trackpad and keyboard all still
-     scroll, and the small boxes that scroll on purpose keep their own bar. */
+  /* No bar down the side of the window: this one would run the full height of
+     the glass, beside the work rather than in it. Wheel, trackpad and keyboard
+     still scroll it. */
   scrollbar-width: none;
   /* The browser's own scroll anchoring and a stick-to-bottom hook are two
      things trying to hold the same rope. Ours wins. */
@@ -115,6 +113,13 @@
 /* The overview owns the right-hand edge; the ramp belongs to the conversation. */
 .app--overviewed::before {
   right: var(--rail-width);
+}
+
+/* A tab shows one thing. With a canvas in front the conversation is not behind
+   it, it is simply not drawn — otherwise the composer and the strip of what is
+   running sit over the canvas and take the presses meant for it. */
+.app--canvas .app__column {
+  display: none;
 }
 
 .app__column {
@@ -646,9 +651,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  /* Its title lands on the same band as the rail's and the conversation's
-     first line. */
-  padding: var(--topbar-height) var(--space-2) var(--space-3);
+  /* Nothing sits above this panel — the strip along the top starts where the
+     panel ends — so its title lands on the shelf's band, not below it. */
+  padding: var(--space-2) var(--space-2) var(--space-3);
   background: var(--bg);
   border-right: 1px solid var(--border);
   overflow: hidden;
@@ -659,7 +664,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: 0 var(--space-1) var(--space-2);
+  min-height: 34px;
+  padding: 0 var(--space-1);
 }
 
 .filespanel__title {
@@ -790,12 +796,13 @@
 
    With *Show scroll bars: Always* — the default whenever a mouse is connected —
    macOS has no overlay bar to fall back on: anything that genuinely overflows
-   gets a classic bar taking real width. Every scroller in the app now wears
-   one thin bar, inherited from body (styles/global.css); nothing opts in here
-   any more. The one exception is above: this scroller hides the bar entirely,
-   because macOS apps do not put one down the side of their main content.
+   gets a classic bar taking real width. Every scroller in the app wears one
+   thin bar, inherited from body (styles/global.css); the fade that keeps it
+   quiet until somebody wants it is in styles/scrollbar.css. The scroller above
+   opts out entirely, as do the panels fixed to the glass, because macOS apps
+   do not put a bar down the side of their main content.
    Standard properties only — ::-webkit-scrollbar pseudo-elements were measured
-   here once and are ignored whenever scrollbar-width is set, so they stayed
+   here once and are ignored whenever a standard one is set, so they stayed
    out. */
 
 /* Headings set two or three words long look broken when the last word drops to

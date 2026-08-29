@@ -36,89 +36,105 @@ type Props = {
   onGo: (link: SettingsLink) => void;
 };
 
-/** Each row knows its own kind and its own id, so a switch row and a link row
- *  are told apart by the union, not by a string field that could disagree. */
-const LINKS: readonly (
-  | { id: SettingsLink; name: string; note: string; kind: 'go' }
-  | { id: 'show-me'; name: string; note: string; kind: 'show-me' }
-  | { id: 'files'; name: string; note: string; kind: 'files' }
-  | { id: 'hold-back'; name: string; note: string; kind: 'hold-back' }
-  | { id: 'keep-logins'; name: string; note: string; kind: 'keep-logins' }
-  | { id: 'always'; name: string; note: string; kind: 'always' }
-  | { id: 'theme'; name: string; note: string; kind: 'theme' }
-)[] = [
+/** The screens this one leads to. Places rather than preferences, so they sit
+ *  in their own band above the switches instead of among them. */
+const PLACES: readonly { id: SettingsLink; name: string; note: string }[] = [
   {
     id: 'skills',
     name: 'Skills',
     note: 'Craft you can call up with @ in a message.',
-    kind: 'go',
   },
   {
     id: 'connected',
     name: 'Other tools',
     note: 'The design files, databases and services this project can reach.',
-    kind: 'go',
   },
   {
     id: 'add-more',
     name: 'Add more to Graphe',
     note: 'Give it new things it can do for you.',
-    kind: 'go',
   },
   {
     id: 'usage',
     name: 'What this cost',
     note: 'Spend, what was reused from earlier, and the work that needed another try.',
-    kind: 'go',
+  },
+];
+
+/** Each row knows its own kind and its own id, so a switch row and a link row
+ *  are told apart by the union, not by a string field that could disagree. */
+type Row =
+  | { id: 'show-me'; name: string; note: string; kind: 'show-me' }
+  | { id: 'files'; name: string; note: string; kind: 'files' }
+  | { id: 'hold-back'; name: string; note: string; kind: 'hold-back' }
+  | { id: 'keep-logins'; name: string; note: string; kind: 'keep-logins' }
+  | { id: 'always'; name: string; note: string; kind: 'always' }
+  | { id: SettingsLink; name: string; note: string; kind: 'go' };
+
+/** Named bands, so a wide window has something to lay out. The theme picker
+ *  carries no rows: the group is the control. */
+const GROUPS: readonly { id: string; title: string; rows: readonly Row[] }[] = [
+  {
+    id: 'project',
+    title: 'This project',
+    rows: [
+      {
+        id: 'hold-back',
+        name: 'Check new work first',
+        note: 'Where there is something to look at, changes are made in a copy and shown to you before anything reaches your files. Everywhere else a save point goes down before the work starts. Off, your files change as the work happens and every moment is one press from undone.',
+        kind: 'hold-back',
+      },
+      {
+        id: 'always',
+        name: 'Things this project always does',
+        note: 'Commands that run without being asked: format what was written, run the tests. One file, kept with the project.',
+        kind: 'always',
+      },
+      {
+        id: 'keep-logins',
+        name: 'Stay signed in while I browse',
+        note: 'The browser I open pages in keeps what it is signed in to, so a site you sign into once stays signed in for this project. Off, every page opens in a browser that has never been anywhere. Turning it off again forgets what was kept.',
+        kind: 'keep-logins',
+      },
+    ],
   },
   {
-    id: 'show-me',
-    name: 'Show me the real thing',
-    note: 'Commands, paths and model names under the plain sentences.',
-    kind: 'show-me',
+    id: 'seeing',
+    title: 'What you see',
+    rows: [
+      {
+        id: 'show-me',
+        name: 'Show me the real thing',
+        note: 'Commands, paths and model names under the plain sentences.',
+        kind: 'show-me',
+      },
+      {
+        id: 'files',
+        name: 'Everything in this project',
+        note: 'The folder as a tree you can walk, beside the conversation.',
+        kind: 'files',
+      },
+    ],
   },
   {
-    id: 'files',
-    name: 'Everything in this project',
-    note: 'The folder as a tree you can walk, beside the conversation.',
-    kind: 'files',
+    id: 'elsewhere',
+    title: 'Open elsewhere',
+    rows: [
+      {
+        id: 'folder',
+        name: 'Reveal the folder',
+        note: 'Open it where this computer keeps files.',
+        kind: 'go',
+      },
+      {
+        id: 'editor',
+        name: 'Open in your editor',
+        note: 'Hand the project to the place you already write code.',
+        kind: 'go',
+      },
+    ],
   },
-  {
-    id: 'hold-back',
-    name: 'Check new work first',
-    note: 'Where there is something to look at, changes are made in a copy and shown to you before anything reaches your files. Everywhere else a save point goes down before the work starts. Off, your files change as the work happens and every moment is one press from undone.',
-    kind: 'hold-back',
-  },
-  {
-    id: 'always',
-    name: 'Things this project always does',
-    note: 'Commands that run without being asked: format what was written, run the tests. One file, kept with the project.',
-    kind: 'always',
-  },
-  {
-    id: 'keep-logins',
-    name: 'Stay signed in while I browse',
-    note: 'The browser I open pages in keeps what it is signed in to, so a site you sign into once stays signed in for this project. Off, every page opens in a browser that has never been anywhere. Turning it off again forgets what was kept.',
-    kind: 'keep-logins',
-  },
-  {
-    id: 'theme',
-    name: THEME_WORDS.name,
-    note: THEME_WORDS.note,
-    kind: 'theme',
-  },
-  {
-    id: 'folder',
-    name: 'Reveal the folder',
-    note: 'Open it where this computer keeps files.',
-    kind: 'go',
-  },
-  {
-    id: 'editor',
-    name: 'Open in your editor',
-    note: 'Hand the project to the place you already write code.',
-    kind: 'go',
-  },
+  { id: 'theme', title: THEME_WORDS.name, rows: [] },
 ];
 
 /**
@@ -162,87 +178,118 @@ export default function Settings({
   const onScreen = showing('system', window.matchMedia('(prefers-color-scheme: dark)').matches);
   const onScreenName = onScreen === 'dark' ? THEME_WORDS.graphe : THEME_WORDS[onScreen];
 
+  const row = (one: Row) => {
+    const text = (
+      <span className="settings__text">
+        <span className="settings__name">{one.name}</span>
+        <span className="settings__note">{one.note}</span>
+      </span>
+    );
+
+    if (one.kind === 'always') {
+      return (
+        <li key={one.id}>
+          <button type="button" className="settings__row" onClick={() => onGo('always')}>
+            {text}
+            <span className="settings__meta">
+              {always === null || always.rows.length === 0
+                ? 'None yet'
+                : `${String(always.rows.length)} of them`}
+            </span>
+            <span className="settings__chev" aria-hidden="true">
+              ›
+            </span>
+          </button>
+        </li>
+      );
+    }
+
+    if (one.kind === 'go') {
+      return (
+        <li key={one.id}>
+          <button
+            type="button"
+            className="settings__row"
+            onClick={() => {
+              onGo(one.id);
+              onClose();
+            }}
+          >
+            {text}
+            <span className="settings__chev" aria-hidden="true">
+              ›
+            </span>
+          </button>
+        </li>
+      );
+    }
+
+    const switches = {
+      'show-me': { on: showMe, change: onToggleShowMe },
+      files: { on: showFiles, change: onToggleShowFiles },
+      'hold-back': { on: holdBack, change: onToggleHoldBack },
+      'keep-logins': { on: keepLogins, change: onToggleKeepLogins },
+    } as const;
+    const flip = switches[one.kind];
+    return (
+      <li key={one.id}>
+        <label className="settings__row settings__row--switch">
+          {text}
+          <Switch on={flip.on} onChange={flip.change} label={one.name} />
+        </label>
+      </li>
+    );
+  };
+
   return (
     <section className="settings" aria-label="Settings" role="dialog" aria-modal="true">
       <header className="settings__top">
-        <div>
-          <p className="settings__eyebrow">Graphe</p>
-          <h1>Settings</h1>
-          <p>Things you change once in a while, not every message.</p>
+        <div className="settings__topinner">
+          <div>
+            <p className="settings__eyebrow">Graphe</p>
+            <h1>Settings</h1>
+            <p>Things you change once in a while, not every message.</p>
+          </div>
+          <button type="button" className="settings__close" onClick={onClose}>
+            Close <kbd>Esc</kbd>
+          </button>
         </div>
-        <button type="button" className="settings__close" onClick={onClose}>
-          Close <kbd>Esc</kbd>
-        </button>
       </header>
 
-      <ul className="settings__list">
-        {LINKS.map((one) => {
-          if (one.kind === 'show-me') {
-            return (
-              <li key={one.id}>
-                <label className="settings__row settings__row--switch">
-                  <span className="settings__text">
-                    <span className="settings__name">{one.name}</span>
-                    <span className="settings__note">{one.note}</span>
+      {/* The scroller, and what the bands below measure themselves against —
+          this surface rather than the window. */}
+      <div className="settings__body scroll--auto">
+        <div className="settings__inner">
+          <nav className="settings__places" aria-label="Screens">
+            {PLACES.map((one) => (
+              <button
+                key={one.id}
+                type="button"
+                className="settings__place"
+                onClick={() => {
+                  onGo(one.id);
+                  onClose();
+                }}
+              >
+                <span className="settings__placetop">
+                  <span className="settings__name">{one.name}</span>
+                  <span className="settings__chev" aria-hidden="true">
+                    ›
                   </span>
-                  <Switch on={showMe} onChange={onToggleShowMe} label={one.name} />
-                </label>
-              </li>
-            );
-          }
-          if (one.kind === 'always') {
-            return (
-              <li key={one.id}>
-                <button type="button" className="settings__row" onClick={() => onGo('always')}>
-                  <span className="settings__text">
-                    <span className="settings__name">{one.name}</span>
-                    <span className="settings__note">{one.note}</span>
-                  </span>
-                  <span className="settings__meta">
-                    {always === null || always.rows.length === 0
-                      ? 'None yet'
-                      : `${String(always.rows.length)} of them`}
-                  </span>
-                </button>
-              </li>
-            );
-          }
-          if (one.kind === 'keep-logins') {
-            return (
-              <li key={one.id}>
-                <label className="settings__row settings__row--switch">
-                  <span className="settings__text">
-                    <span className="settings__name">{one.name}</span>
-                    <span className="settings__note">{one.note}</span>
-                  </span>
-                  <Switch on={keepLogins} onChange={onToggleKeepLogins} label={one.name} />
-                </label>
-              </li>
-            );
-          }
-          if (one.kind === 'hold-back') {
-            return (
-              <li key={one.id}>
-                <label className="settings__row settings__row--switch">
-                  <span className="settings__text">
-                    <span className="settings__name">{one.name}</span>
-                    <span className="settings__note">{one.note}</span>
-                  </span>
-                  <Switch on={holdBack} onChange={onToggleHoldBack} label={one.name} />
-                </label>
-              </li>
-            );
-          }
-          if (one.kind === 'theme') {
-            return (
-              <li key={one.id}>
-                <div className="settings__row settings__row--theme">
-                  <span className="settings__text">
-                    <span className="settings__name">{one.name}</span>
-                    <span className="settings__note">{one.note}</span>
-                  </span>
+                </span>
+                <span className="settings__note">{one.note}</span>
+              </button>
+            ))}
+          </nav>
+
+          <div className="settings__grid">
+            {GROUPS.map((group) =>
+              group.id === 'theme' ? (
+                <section key={group.id} className="settings__group settings__group--theme">
+                  <h2 className="settings__grouptitle">{group.title}</h2>
                   <div className="settings__theme-wrap">
-                    <span className="settings__themes" role="group" aria-label={one.name}>
+                    <p className="settings__note">{THEME_WORDS.note}</p>
+                    <span className="settings__themes" role="group" aria-label={group.title}>
                       {THEMES.map((pick) => (
                         <button
                           key={pick.id}
@@ -273,63 +320,34 @@ export default function Settings({
                         </button>
                       ))}
                     </span>
-                    <button
-                      type="button"
-                      className={`settings__system ${theme === 'system' ? 'settings__system--on' : ''}`}
-                      aria-pressed={theme === 'system'}
-                      onClick={() => onTheme('system')}
-                    >
-                      {THEME_WORDS.system}
-                    </button>
-                    {theme === 'system' ? (
-                      /* Saying which palette the computer picked spares the
-                         reader five thumbnails and a guess about what they
-                         are actually looking at. */
-                      <p className="settings__system-note">{onScreenName} right now.</p>
-                    ) : null}
+                    <div className="settings__theme-foot">
+                      <button
+                        type="button"
+                        className={`settings__system ${theme === 'system' ? 'settings__system--on' : ''}`}
+                        aria-pressed={theme === 'system'}
+                        onClick={() => onTheme('system')}
+                      >
+                        {THEME_WORDS.system}
+                      </button>
+                      {theme === 'system' ? (
+                        /* Saying which palette the computer picked spares the
+                           reader five thumbnails and a guess about what they
+                           are actually looking at. */
+                        <p className="settings__system-note">{onScreenName} right now.</p>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              </li>
-            );
-          }
-          if (one.kind === 'files') {
-            return (
-              <li key={one.id}>
-                <label className="settings__row settings__row--switch">
-                  <span className="settings__text">
-                    <span className="settings__name">{one.name}</span>
-                    <span className="settings__note">{one.note}</span>
-                  </span>
-                  <Switch on={showFiles} onChange={onToggleShowFiles} label={one.name} />
-                </label>
-              </li>
-            );
-          }
-          if (one.kind === 'go') {
-            return (
-              <li key={one.id}>
-                <button
-                  type="button"
-                  className="settings__row"
-                  onClick={() => {
-                    onGo(one.id);
-                    onClose();
-                  }}
-                >
-                  <span className="settings__text">
-                    <span className="settings__name">{one.name}</span>
-                    <span className="settings__note">{one.note}</span>
-                  </span>
-                  <span className="settings__chev" aria-hidden="true">
-                    ›
-                  </span>
-                </button>
-              </li>
-            );
-          }
-          return null;
-        })}
-      </ul>
+                </section>
+              ) : (
+                <section key={group.id} className={`settings__group settings__group--${group.id}`}>
+                  <h2 className="settings__grouptitle">{group.title}</h2>
+                  <ul className="settings__rows">{group.rows.map(row)}</ul>
+                </section>
+              ),
+            )}
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

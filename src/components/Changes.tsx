@@ -337,7 +337,7 @@ export default function Changes({ open, diff, busy = false, onClose, onKeep }: P
     return (
       <section className="sheet changes" aria-label={SAYS.heading}>
         {head}
-        <div className="sheet__body">
+        <div className="sheet__body scroll--auto">
           <div className="changes__blank">
             <h2 className="changes__blanktitle">{SAYS.reading}</h2>
             <p className="changes__blankdetail">{SAYS.readingDetail}</p>
@@ -351,7 +351,7 @@ export default function Changes({ open, diff, busy = false, onClose, onKeep }: P
     return (
       <section className="sheet changes" aria-label={SAYS.heading}>
         {head}
-        <div className="sheet__body">
+        <div className="sheet__body scroll--auto">
           <div className="changes__blank">
             <h2 className="changes__blanktitle">{SAYS.nothing}</h2>
             <p className="changes__blankdetail">{SAYS.nothingDetail}</p>
@@ -365,7 +365,7 @@ export default function Changes({ open, diff, busy = false, onClose, onKeep }: P
     <section className="sheet changes" aria-label={SAYS.heading}>
       {head}
 
-      <div className="sheet__body" ref={body} tabIndex={-1}>
+      <div className="sheet__body scroll--auto" ref={body} tabIndex={-1}>
         <ol className="changes__files">
           {files.map((file) => {
             const state = fileKeep(file, dropped);
@@ -445,7 +445,7 @@ export default function Changes({ open, diff, busy = false, onClose, onKeep }: P
                         <span className="changes__tally">{SAYS.tally(hunk.added, hunk.removed)}</span>
                       </button>
 
-                      <div className="changes__lines">
+                      <div className="changes__lines scroll--auto">
                         {linesOf(hunk).map((line, index) => (
                           <div
                             key={`${hunk.id}:${String(index)}`}

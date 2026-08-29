@@ -89,6 +89,12 @@ type Props = {
   plans?: Plans;
   onPlans?: (plans: Plans) => void;
   onSelectModel?: (choice: ModelChoice) => void;
+  /** The model asked about the hard parts, or null for one model doing all of
+   *  it. Chosen from inside the model chip, not beside it. */
+  advisor?: ModelChoice | null;
+  onAdvisor?: (choice: ModelChoice | null) => void;
+  advisorThinking?: ThinkingLevel | null;
+  onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
   onConnect?: () => void;
   /** How long the chosen model should take before answering. */
   onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
@@ -192,6 +198,10 @@ export default function Composer({
   plans,
   onPlans,
   onSelectModel,
+  advisor,
+  onAdvisor,
+  advisorThinking,
+  onAdvisorThinking,
   onConnect,
   onThinking,
   anywhere = true,
@@ -695,7 +705,7 @@ export default function Composer({
 
       <textarea
         ref={areaRef}
-        className="composer__input"
+        className="composer__input scroll--auto"
         value={value}
         rows={1}
         autoFocus={autoFocus}
@@ -830,6 +840,10 @@ export default function Composer({
             onConnect={onConnect}
             onThinking={onThinking}
             onOpenChange={onComposerPopoverOpenChange}
+            advisor={advisor ?? null}
+            {...(onAdvisor === undefined ? {} : { onAdvisor })}
+            {...(advisorThinking == null ? {} : { advisorThinking })}
+            {...(onAdvisorThinking === undefined ? {} : { onAdvisorThinking })}
           />
         )}
 
@@ -838,11 +852,7 @@ export default function Composer({
             once and nobody needs on screen forever. The room the conversation
             has left is worth that space; nothing is. */}
         <span className={`composer__hint ${listening ? 'composer__hint--loud' : ''}`}>
-          {listening
-            ? SAYING.listening
-            : attachments.length > 0
-              ? 'I can see this. Say what you want changed.'
-              : ''}
+          {listening ? SAYING.listening : ''}
         </span>
 
         {/* How full the conversation is, and the one thing to do about it. On

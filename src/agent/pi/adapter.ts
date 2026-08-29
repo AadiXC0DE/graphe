@@ -45,6 +45,7 @@ import {
 } from '../guard/policy';
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
+import { readAgentsMd } from '../../lib/agentsMd';
 import {
   ALWAYS_WORDS,
   alwaysFile,
@@ -54,7 +55,7 @@ import {
   type When,
 } from '../../work/always';
 import type { HowFar } from '../guard/policy';
-import { PLAN_WORDS, parseProposal, readOnlyTools } from '../plan';
+import { PLAN_WORDS, parseProposal, withheldWhilePlanning } from '../plan';
 import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
@@ -62,11 +63,19 @@ import { RepairCoordinator, repairPrompt } from './repair';
 import { checksAfterChange, saysFailed, sourceAmong } from './verify';
 import { notHere, runHelper } from '../../share/run';
 import { readdir, realpath } from 'node:fs/promises';
-import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
+import {
+  NOTES_CARRIED,
+  WORTH_KEEPING,
+  eventsFromEntries,
+  momentToReturnTo,
+  momentsFromEntries,
+  type Moment,
+} from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
 import { browserFolder, closeBrowser } from './computer';
 import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type CancelBuild, type HelperModel, type HelperPace } from './tools';
+import { lspTool } from './lsp';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
@@ -75,17 +84,6 @@ import { parseReview } from './review';
 import { askWords, cannotAsk, saysAnswers, tidyQuestions, type Answers } from '../asking';
 import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
 
-/**
- * The last thing said in a sitting, and nobody is reading the answer.
- *
- * Named things rather than impressions: a note saying the work went well helps
- * nobody next time, and a memory full of them is worse than an empty one.
- */
-const WORTH_KEEPING = `This sitting is over and nobody is reading this reply, so keep it to the notes.
-
-Look back over what we just did. If you learned anything about this project that would save time next time — how it is built, how it is run, what it expects, a decision and why it went that way, something that caught you out — write each one down with retain, one fact per note, in a sentence that will still make sense months from now.
-
-Write nothing about how this sitting went, nothing you already have a note for, and nothing that reading the code would tell you just as fast. Most sittings are worth one or two notes and many are worth none, which is a fine answer. Say nothing else.`;
 import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
 import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
 import { Running, type RunningPiece } from '../running';
@@ -97,11 +95,18 @@ import {
 } from './importers';
 
 import { readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 
+import {
+  ADVISOR_SETTINGS_FILE,
+  advisorSettings,
+  advisorToolNames,
+  extensionToolNames,
+  type LoadedExtension,
+} from '../advisor';
 import { idFor } from '../../projects/carried';
-import type { ThinkingLevel } from '../../lib/ipc';
+import type { ModelChoice, ThinkingLevel } from '../../lib/ipc';
 
 /** Yes or no, from a person. There is deliberately no third answer: no "always",
  *  no "for this session", no "don't ask again". Confirmation fatigue is what
@@ -148,6 +153,40 @@ const NO_RESTORE_POINT =
   "I could not save a restore point first, so I have not made this change. Nothing has been lost.";
 const SYMLINK_ESCAPE =
   'This path reaches somewhere outside your project folder through a link, so I have left it alone.';
+/**
+ * Turn the advisor's tools on or off on a session already running.
+ *
+ * The names stay in the allowlist either way; only whether they are active
+ * changes, so one press takes effect on the next step. False when the switch
+ * did not take — an older Pi has no such call and keeps the tools the
+ * conversation started with, which is a chip and an advisor that disagree
+ * until somebody is told.
+ */
+export function switchAdvisorTools(
+  session: {
+    getActiveToolNames: () => readonly string[];
+    setActiveToolsByName: (names: string[]) => unknown;
+  },
+  tools: readonly string[],
+  on: boolean,
+): boolean {
+  if (tools.length === 0) return true;
+  try {
+    const active = new Set(session.getActiveToolNames());
+    for (const name of tools) {
+      if (on) active.add(name);
+      else active.delete(name);
+    }
+    session.setActiveToolsByName([...active]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** What the user reads when the advisor switch did not take. */
+export const ADVISOR_STUCK =
+  'I could not switch the advisor in this conversation: the version of Pi installed keeps the tools a conversation started with. The choice is saved, so it stands from the next time this project is opened.';
 
 /* -------------------------------------------------------------------------- */
 /* Questions waiting on a person                                               */
@@ -307,6 +346,9 @@ export type InterceptorOptions = {
    *  the project is refused with a sentence telling the model to propose it
    *  instead, which is the whole of planning before doing. */
   planning?: () => boolean;
+  /** True while Plan is on. Unlike `planning`, which lasts one look-around
+   *  pass, this stays until somebody exits it. */
+  planMode?: () => boolean;
   /** The project's own rules, as they were read. They can only ever make an
    *  answer harder, so a project that carries none changes nothing here. */
   rules?: () => Rules;
@@ -341,7 +383,7 @@ function whyItMatters(verdict: Verdict): string {
 export function createGuardInterceptor(
   options: InterceptorOptions,
 ): (call: ToolCall) => Promise<Interception> {
-  const { facts, relay, confirmations, timeline, planning, rules, world, filesMayHaveMoved, workBegan } =
+  const { facts, relay, confirmations, timeline, planning, planMode, rules, world, filesMayHaveMoved, workBegan } =
     options;
 
   /* Fails closed. A host with no history wired cannot run destructive work at all:
@@ -394,6 +436,14 @@ export function createGuardInterceptor(
       await options.paused.gate();
       relay.waitingForYou(false);
     }
+    // Plan is read-only until somebody leaves it, and it outranks the autonomy
+    // ladder: "go as far as you like" is standing permission, Plan is a
+    // decision made on this message, and the later decision wins.
+    if (planMode?.() === true && withheldWhilePlanning(call)) {
+      relay.blocked(call, PLAN_WORDS.withheld);
+      return { block: true, reason: PLAN_WORDS.withheld };
+    }
+
     // The explicit top autonomy rung is full access for this sitting. Keep this
     // before planning too: otherwise a leftover plan-only state silently turns
     // "Get on with it" back into a restricted mode. `evaluate` mirrors this
@@ -436,7 +486,7 @@ export function createGuardInterceptor(
 
     // Looking only. Withheld rather than refused-as-an-error: the model is told
     // to put it in the plan, which is the answer we actually want back.
-    if (planning?.() === true && readOnlyTools([call.name]).length === 0) {
+    if (planning?.() === true && withheldWhilePlanning(call)) {
       return { block: true, reason: PLAN_WORDS.withheld };
     }
 
@@ -615,6 +665,16 @@ export type CreateSessionOptions = {
    *  and git belongs inside each one, say. Facts only; never instructions
    *  somebody did not choose. */
   contextNotes?: readonly string[];
+  /** Open in Plan: nothing that could change the project runs until somebody
+   *  leaves it. A new conversation starts wherever the project last was. */
+  planMode?: boolean;
+  /** The model asked about the hard parts, or null for one model doing all of
+   *  it. Only means anything with the advisor addition installed — without it
+   *  there is no tool to turn on, and the choice sits waiting. */
+  advisor?: ModelChoice | null;
+  /** How long the advisor takes before answering. Left out, whatever is in the
+   *  package's settings file stands. */
+  advisorThinking?: ThinkingLevel | null;
 };
 
 /**
@@ -684,6 +744,10 @@ export type GrapheSession = {
    *  when the choice does not resolve to a model this computer can use; the
    *  session then carries on with what it had rather than picking for you. */
   useModel(choice: { providerId: string; modelId: string } | null): Promise<boolean>;
+  /** Ask a stronger model about the hard parts from now on, or null to have
+   *  one model do all of it. Silent where the advisor addition is not
+   *  installed: there is no tool to turn on, and the choice waits for it. */
+  useAdvisor(choice: ModelChoice | null, thinks?: ThinkingLevel): Promise<void>;
   /** Which model is answering, or null for "whatever the account offers". */
   readonly model: { providerId: string; modelId: string } | null;
   /** How much time this model is taking before it answers. */
@@ -753,6 +817,8 @@ export type GrapheSession = {
   /** How far it may go on its own, for as long as this session lives. A
    *  ceiling on questions, never on what is refused. */
   goAsFarAs(howFar: HowFar): void;
+  /** Plan Mode — persistent read-only until explicit Exit / Do it. */
+  setPlanMode(on: boolean): void;
   /** Where the ladder is set right now. */
   readonly howFar: HowFar;
   /** What this session has kept running — servers, watchers, anything started
@@ -1128,6 +1194,37 @@ function theirsAndTrusted(
   };
 }
 
+/**
+ * Write the chosen advisor where the addition will look for it.
+ *
+ * The file is Pi's, not ours, and somebody may well be keeping their own
+ * settings in it — so it is read, three keys are changed, and the rest is put
+ * back exactly as it was. Never throws: an advisor that does not survive the
+ * quit is not worth refusing to open a project over.
+ */
+async function keepAdvisorSettings(
+  agentDir: string,
+  advises: ModelChoice | null,
+  does: ModelChoice | null,
+  advisorThinks?: ThinkingLevel | undefined,
+): Promise<void> {
+  const file = join(agentDir, ADVISOR_SETTINGS_FILE);
+  let existing: unknown = null;
+  try {
+    existing = JSON.parse(await readFile(file, 'utf8'));
+  } catch {
+    // No file yet, or one nobody can parse. Either way there is nothing to keep.
+  }
+  const next = advisorSettings(existing, { advises, does, advisorThinks });
+  if (JSON.stringify(existing) === JSON.stringify(next)) return;
+  try {
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  } catch {
+    // The choice applies to this sitting anyway; only the memory of it is lost.
+  }
+}
+
 /** Every conversation this folder has had. Never throws: a folder with no
  *  transcripts is an empty list, not a failure. */
 export async function listConversations(
@@ -1455,6 +1552,8 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
 
   /** True only for the length of a looking-around pass. */
   let planning = false;
+  /** True while Plan is on. Unlike `planning`, it lasts until somebody leaves it. */
+  let planMode = options.planMode === true;
   /** Nothing reaches the window while this is on, except what was spent. Used
    *  for the one turn nobody asked for — see `settleUp`. */
   let unwatched = false;
@@ -1547,6 +1646,16 @@ const MOST_AFTER_SAYINGS = 3;
   const always = alwaysFrom(
     await readFile(alwaysFile(options.projectRoot ?? ''), 'utf8').catch(() => null),
   );
+  // AGENTS.md hierarchy — Codex-compatible, closest wins, 32 KiB cap.
+  // Read once at sitting start, no writes. Prepended to system prompt after memory.
+  let agentsMdNote: string | null = null;
+  if (options.projectRoot !== undefined && options.projectRoot !== '') {
+    try {
+      agentsMdNote = await readAgentsMd(options.projectRoot);
+    } catch {
+      agentsMdNote = null;
+    }
+  }
 
   /**
    * Run the things this project always does, at one of the three moments.
@@ -1780,6 +1889,7 @@ const MOST_AFTER_SAYINGS = 3;
     paused,
     timeline: options.timeline,
     planning: () => planning,
+    planMode: () => planMode,
     rules: () => house,
     world: desk.world,
     filesMayHaveMoved: forgetChecks,
@@ -1789,14 +1899,14 @@ const MOST_AFTER_SAYINGS = 3;
   const runtime = await runtimeFor(agentDir);
   /** Filled while the loader runs, which is before anything below can read it. */
   let carried: readonly Carried[] = [];
+  const agentsPrompt = agentsMdNote === null ? [] : [`<agents_md>\n${agentsMdNote}\n</agents_md>`];
+  const allNotes = [...(options.contextNotes ?? []), ...agentsPrompt];
   const loader = new pi.DefaultResourceLoader({
     cwd: options.projectRoot,
     agentDir,
     // A few sentences about the folder itself, when there is something a folder
     // listing cannot say. Empty is the ordinary case and passes nothing through.
-    ...(options.contextNotes === undefined || options.contextNotes.length === 0
-      ? {}
-      : { appendSystemPrompt: [...options.contextNotes] }),
+    ...(allNotes.length === 0 ? {} : { appendSystemPrompt: allNotes }),
     // Extensions are on, but only the ones the person chose for themselves.
     // `extensionsOverride` runs after discovery and before anything is
     // installed into the session, so it is the one place a rule like that can
@@ -1827,6 +1937,21 @@ const MOST_AFTER_SAYINGS = 3;
   await loader.reload({
     resolveProjectTrust: async () => (options.trustProject ?? (() => false))(),
   });
+
+  // Extensions register their tools while the loader runs. Naming `tools` at
+  // all makes Pi read that array as the whole allowlist, so anything an
+  // extension added has to be in it or the person installed a tool nothing can
+  // ever call. The Guard still sees every one of these calls, and a name it has
+  // no row for still stops to ask.
+  const loadedExtensions = loader.getExtensions().extensions as readonly LoadedExtension[];
+  const extensionTools = extensionToolNames(loadedExtensions);
+  /** The advisor's own tools, kept apart because a chip turns them on and off
+   *  without rebuilding the conversation. */
+  const advisorTools = advisorToolNames(loadedExtensions);
+  const advises = options.advisor ?? null;
+  if (advisorTools.length > 0) {
+    await keepAdvisorSettings(agentDir, advises, options.model ?? null, options.advisorThinking ?? undefined);
+  }
 
   // Graphe's own tools — the web search and the task helper — travel as Pi's
   // `customTools`, which keeps them out of the extension machinery entirely:
@@ -2015,6 +2140,13 @@ const MOST_AFTER_SAYINGS = 3;
   // sentence the model can act on.
   if (!benchmarkToolFloor) customTools.push(mcpTool(mcpRegistry));
 
+  // Minimal LSP stub: always available via grep fallback, no external server needed.
+  // grapheTools already adds lspTool when not benchmark; this keeps the session
+  // covered even if that path is bypassed.
+  if (!benchmarkToolFloor && !customTools.some((tool) => tool.name === 'lsp')) {
+    customTools.push(lspTool(options.projectRoot));
+  }
+
   // The shell is Pi's tool, not ours, and it is the one that can change
   // anything on this disk. Pi builds it from `createBashToolDefinition`, whose
   // `operations` seam is where a command is actually run — so the same
@@ -2093,7 +2225,7 @@ const MOST_AFTER_SAYINGS = 3;
         // Naming `tools` at all switches Pi from "the four defaults plus every
         // custom tool" to "exactly this list", so ours have to be in it or they
         // vanish. Taken off the tools themselves rather than written twice.
-        tools: [...WORKING_TOOLS, ...customTools.map((tool) => tool.name)],
+        tools: [...WORKING_TOOLS, ...customTools.map((tool) => tool.name), ...extensionTools],
         // Cast because Pi's own bash definition is narrower in its schema than
         // the list it goes into; Pi assigns it the same way internally.
         customTools: [...customTools, boundShell as (typeof customTools)[number]],
@@ -2120,6 +2252,17 @@ const MOST_AFTER_SAYINGS = 3;
     await session.steer(text);
   };
   alreadyBilled = rawBill() ?? 0;
+
+  const advisorActive = (on: boolean): boolean => switchAdvisorTools(session, advisorTools, on);
+  /** Set when a press did nothing, cleared once it has been said. */
+  let advisorStuck = false;
+  const sayAdvisorStuck = (): void => {
+    if (!advisorStuck) return;
+    advisorStuck = false;
+    options.onEvent({ type: 'message-delta', text: `\n\n${ADVISOR_STUCK}` });
+    options.onEvent({ type: 'message-end' });
+  };
+  advisorStuck = !advisorActive(advises !== null);
 
   const unsubscribe = session.subscribe((event) => {
     relay.fromPi(event);
@@ -2225,6 +2368,7 @@ const MOST_AFTER_SAYINGS = 3;
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
       sayRulesDiagnostics();
+      sayAdvisorStuck();
       // Once a sitting, before the first request goes anywhere.
       if (!openedAlready) {
         openedAlready = true;
@@ -2270,7 +2414,7 @@ const MOST_AFTER_SAYINGS = 3;
             try {
               const notes = await memory.recall('', { limit: 4 });
               if (notes.length > 0) {
-                said = `A few notes I keep about this project, most relevant first:\n${notes
+                said = `${NOTES_CARRIED}\n${notes
                   .map((note) => `- ${note.content}`)
                   .join('\n')}\n\n${said}`;
               }
@@ -2387,6 +2531,14 @@ const MOST_AFTER_SAYINGS = 3;
         await tidyIfItHasGrownLong();
         activePrompts = Math.max(0, activePrompts - 1);
       }
+    },
+
+    async useAdvisor(next, thinks): Promise<void> {
+      if (closed) return;
+      advisorStuck = !advisorActive(next !== null);
+      // Not into the middle of a reply: the next turn opens with it instead.
+      if (!session.isStreaming) sayAdvisorStuck();
+      if (advisorTools.length > 0) await keepAdvisorSettings(agentDir, next, inUse, thinks);
     },
 
     async useModel(next): Promise<boolean> {
@@ -2566,6 +2718,10 @@ const MOST_AFTER_SAYINGS = 3;
 
     goAsFarAs(howFar: HowFar): void {
       facts.howFar = howFar;
+    },
+
+    setPlanMode(on: boolean): void {
+      planMode = on;
     },
 
     get howFar(): HowFar {

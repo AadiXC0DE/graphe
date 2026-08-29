@@ -105,8 +105,11 @@ gh release create v<version> \
   --notes-file <(git log --oneline "$(git describe --tags --abbrev=0 HEAD^)"..HEAD)
 ```
 
-Release notes are for designers. "Fixed a race in the event relay" means nothing to them; "the
-conversation no longer jumps to the bottom while you are reading" does.
+Release notes are for the people who will install it, not for the people who wrote it. "Fixed a race
+in the event relay" names the repair; "the conversation no longer jumps to the bottom while you are
+reading" names what they will notice. Write the second one. Developers are the audience now, so the
+operation's real name belongs in them — branch, commit, worktree, rename — but the sentence is still
+about what changed for somebody using it.
 
 ## 5. Update the Homebrew cask
 
@@ -183,4 +186,15 @@ which fails if the file on disk no longer matches the tree. The generated file a
 
 ## Windows and Linux
 
-Not yet — G6 in the backlog. Mac first, done properly.
+No build, and none promised. `electron-builder.js` configures `mac` targets only, so `npm run
+package` produces Mac artifacts and nothing else.
+
+Nothing in the app is deliberately Mac-only — the window chrome and the quit behaviour already
+branch on `process.platform`, and Electron itself runs everywhere — so a source build elsewhere is
+plausible. It is also untested, and at least one thing is outright Mac-only: opening a file in an
+editor shells out to `open -a`. Somebody who wants to try has the source and the licence; that is a
+different sentence from a supported platform, and neither the site nor this file should blur the
+two.
+
+Adding one properly means a `win`/`linux` block, icons, an install route for each, and somebody
+running it on those machines before it is offered. Mac first, done properly.

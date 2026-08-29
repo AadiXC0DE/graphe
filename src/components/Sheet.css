@@ -98,6 +98,8 @@
   gap: var(--space-1);
   padding-top: var(--space-1);
   overflow-x: auto;
+  /* No bar: a bar along the foot would take height from the head and lift the
+     chips off the line the rest of the row sits on. */
   scrollbar-width: none;
 }
 
@@ -268,8 +270,7 @@
   /* What the bands inside measure themselves against — the surface, not the
      window, so the gallery draws the same thing a narrow window does. */
   container-type: inline-size;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
 }
 
 .sheet__grid {
@@ -335,7 +336,6 @@
    as the ones written here. */
 .sheet__block .drift__heading,
 .sheet__block .legible__heading,
-.sheet__block .widths__heading,
 .sheet__block .instep__heading {
   font-size: var(--text-xs);
   font-weight: 500;

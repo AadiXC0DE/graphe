@@ -76,6 +76,8 @@ export default function Files({
   const chosen = selected ?? selectedHere;
 
   const treeRef = useRef<HTMLDivElement>(null);
+  const changedRef = useRef<HTMLButtonElement>(null);
+  const everyRef = useRef<HTMLButtonElement>(null);
 
   const tree = useMemo(() => buildTree(files, all ? EVERYTHING : {}), [files, all]);
   const shown = useMemo(() => (only ? changedOnly(tree) : tree), [tree, only]);
@@ -139,14 +141,21 @@ export default function Files({
     onSelect(row.node.path);
   }
 
-  function setOnly(next: boolean) {
-    setOnlyHere(next);
-    onOnlyChanged?.(next);
+  /* Two views of one folder, never both: what this version touched, or the
+     whole thing with the machinery in it. */
+  function show(onlyChangedNow: boolean) {
+    setOnlyHere(onlyChangedNow);
+    setEverythingHere(!onlyChangedNow);
+    onOnlyChanged?.(onlyChangedNow);
+    onEverything?.(!onlyChangedNow);
   }
 
-  function setAll(next: boolean) {
-    setEverythingHere(next);
-    onEverything?.(next);
+  function onPickKeys(event: KeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    const next = !only;
+    show(next);
+    (next ? changedRef : everyRef).current?.focus();
   }
 
   /* The tree keys, as everybody who has ever used one expects them: right opens
@@ -212,23 +221,38 @@ export default function Files({
   return (
     <section className="files" aria-label="Everything in this project">
       <div className="files__band">
-        <button
-          type="button"
-          className="files__chip"
-          aria-pressed={only}
-          onClick={() => setOnly(!only)}
+        <div
+          className="files__pick"
+          role="radiogroup"
+          aria-label="What to show"
+          data-at={only ? 'changed' : 'every'}
+          onKeyDown={onPickKeys}
         >
-          Only what changed
-        </button>
-        <button
-          type="button"
-          className="files__chip"
-          aria-pressed={all}
-          onClick={() => setAll(!all)}
-          title="Include the dotted names and lock files a project keeps for itself"
-        >
-          Every file
-        </button>
+          <span className="files__picked" aria-hidden="true" />
+          <button
+            type="button"
+            role="radio"
+            ref={changedRef}
+            className="files__opt"
+            aria-checked={only}
+            tabIndex={only ? 0 : -1}
+            onClick={() => show(true)}
+          >
+            Only what changed
+          </button>
+          <button
+            type="button"
+            role="radio"
+            ref={everyRef}
+            className="files__opt"
+            aria-checked={!only}
+            tabIndex={only ? -1 : 0}
+            onClick={() => show(false)}
+            title="Include the dotted names and lock files a project keeps for itself"
+          >
+            Every file
+          </button>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -241,7 +265,7 @@ export default function Files({
         </p>
       ) : (
         <div
-          className="files__tree"
+          className="files__tree scroll--auto"
           role="tree"
           aria-label="Files and folders"
           ref={treeRef}

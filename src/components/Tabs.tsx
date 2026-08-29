@@ -9,10 +9,15 @@ export type TabState = 'working' | 'asking' | 'finished' | 'idle';
 /** One open conversation. A tab is a conversation, not a project — that is the
  *  unit of work people switch between, and it is the only shape in which "two
  *  agents in one codebase" can be said at all. */
+/** A tab is a conversation or a canvas. Both are units of work somebody
+ *  switches between, which is the only thing a tab has ever meant here. */
+export type TabKind = 'chat' | 'canvas';
+
 export type Tab = {
   id: string;
   /** What this conversation is called. */
   title: string;
+  kind: TabKind;
   /** The project it is in, in the words the person calls their folder. */
   project: string;
   /** The project's folder, which is what groups tabs and picks the underline. */
@@ -82,7 +87,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
           <svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true">
             <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
-          <span>New conversation</span>
+          <span>{SAYS.add}</span>
         </button>
       </div>
     );
@@ -119,6 +124,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
               }}
               title={`${tab.title} (${tab.project})`}
             >
+              {tab.kind === 'canvas' ? <Kind kind="canvas" /> : null}
               <Mark state={tab.state} />
               <span className="tabs__text">
                 <span className="tabs__title">{tab.title}</span>
@@ -139,7 +145,15 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
         ))}
       </div>
 
-      <button type="button" className="tabs__add" onClick={onNew} aria-label={SAYS.add} title={SAYS.add}>
+      {/* One press, one thing. A canvas is opened from the shelf, where the
+          rest of the project's rooms are. */}
+      <button
+        type="button"
+        className="tabs__add"
+        onClick={onNew}
+        aria-label={SAYS.add}
+        title={SAYS.add}
+      >
         <svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true">
           <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
@@ -169,7 +183,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
           </button>
 
           {listing ? (
-            <div className="tabs__list" role="menu" aria-label={SAYS.more}>
+            <div className="tabs__list scroll--auto" role="menu" aria-label={SAYS.more}>
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
@@ -181,6 +195,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
                     setListing(false);
                   }}
                 >
+                  {tab.kind === 'canvas' ? <Kind kind="canvas" /> : null}
                   <Mark state={tab.state} />
                   <span className="tabs__text">
                     <span className="tabs__title">{tab.title}</span>
@@ -193,6 +208,29 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Which kind of tab it is. A conversation draws nothing — it is the ordinary
+ *  one, and a row where every tab wears a mark is a row where none of them
+ *  mean anything. */
+function Kind({ kind }: { kind: TabKind }) {
+  // A conversation draws nothing: an empty box is 14px a tab cannot spare.
+  if (kind === 'chat') return null;
+  return (
+    <span className="tabs__kind" aria-hidden="true">
+      <svg viewBox="0 0 16 16" width="11" height="11" fill="none">
+        <rect x="1.5" y="5.5" width="4.5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+        <rect x="10" y="1.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+        <rect x="10" y="9.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+        <path
+          d="M6 8h2a1.5 1.5 0 0 0 1.5-1.5V6.25M6 8h2a1.5 1.5 0 0 1 1.5 1.5v0.25"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    </span>
   );
 }
 

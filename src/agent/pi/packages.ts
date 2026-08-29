@@ -69,6 +69,10 @@ export const CURATED: readonly { id: string; why: string }[] = [
     id: 'pi-subagents',
     why: 'Lets me split a long job between several helpers working at once, so a big change finishes in one sitting.',
   },
+  {
+    id: 'pi-advisor-flow',
+    why: 'The advisor: a stronger model asked before a plan, when I keep getting something wrong, and before I tell you a thing is finished.',
+  },
 ];
 
 const VOUCHED = new Map(CURATED.map((one, order) => [one.id, { order, why: one.why }]));

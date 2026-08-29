@@ -372,6 +372,20 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.worktreeDrop, named(where)) as Promise<Result<null>>;
   },
 
+  preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>> {
+    if (typeof prNumber !== 'number' || !Number.isFinite(prNumber) || prNumber <= 0) {
+      return Promise.resolve(refuse<string>('I could not tell which pull request you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.prWorktreePrepare, prNumber, named(where)) as Promise<Result<string>>;
+  },
+
+  openPrReview(prNumber: number, where?: Where): Promise<Result<{ folder: string; opened: OpenedProject }>> {
+    if (typeof prNumber !== 'number' || !Number.isFinite(prNumber) || prNumber <= 0) {
+      return Promise.resolve(refuse<{ folder: string; opened: OpenedProject }>('I could not tell which pull request you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.prReviewOpen, prNumber, named(where)) as Promise<Result<{ folder: string; opened: OpenedProject }>>;
+  },
+
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>> {
     return ipcRenderer.invoke(CHANNEL.buildStart, source, named(where)) as Promise<Result<BuildPlan>>;
   },
@@ -409,6 +423,35 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.buildCancel, named(where)) as Promise<Result<null>>;
   },
 
+  flowLoad(where?: Where): Promise<Result<readonly import('../src/work/canvas').Flow[]>> {
+    return ipcRenderer.invoke(CHANNEL.flowLoad, named(where)) as Promise<Result<readonly import('../src/work/canvas').Flow[]>>;
+  },
+
+  flowSave(flow: import('../src/work/canvas').Flow, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.flowSave, flow, named(where)) as Promise<Result<null>>;
+  },
+
+
+  flowForget(id: string, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.flowForget, id, named(where)) as Promise<Result<null>>;
+  },
+
+  goalLoad(where?: Where): Promise<Result<import('../src/work/goal').Goal | null>> {
+    return ipcRenderer.invoke(CHANNEL.goalLoad, named(where)) as Promise<Result<import('../src/work/goal').Goal | null>>;
+  },
+
+  goalSave(goal: import('../src/work/goal').Goal, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.goalSave, goal, named(where)) as Promise<Result<null>>;
+  },
+
+  goalClear(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.goalClear, named(where)) as Promise<Result<null>>;
+  },
+
+  goalVerify(where?: Where): Promise<Result<{ passed: boolean; reason: string }>> {
+    return ipcRenderer.invoke(CHANNEL.goalVerify, named(where)) as Promise<Result<{ passed: boolean; reason: string }>>;
+  },
+
   carried(where?: Where): Promise<Result<readonly CarriedExtension[]>> {
     return ipcRenderer.invoke(CHANNEL.carried, named(where)) as Promise<Result<readonly CarriedExtension[]>>;
   },
@@ -435,6 +478,11 @@ const api: GrapheApi = {
     const RUNGS: readonly string[] = ['looking', 'asking', 'changing', 'doing'];
     if (!RUNGS.includes(howFar)) return Promise.resolve(refuse<HowFar>('I could not apply that.'));
     return ipcRenderer.invoke(CHANNEL.goAsFarAs, howFar, named(where)) as Promise<Result<HowFar>>;
+  },
+
+  setPlanMode(on: boolean, where?: Where): Promise<Result<boolean>> {
+    if (typeof on !== 'boolean') return Promise.resolve(refuse<boolean>('That is not a yes or a no.'));
+    return ipcRenderer.invoke(CHANNEL.setPlanMode, on, named(where)) as Promise<Result<boolean>>;
   },
 
   running(where?: Where): Promise<Result<readonly RunningPiece[]>> {
@@ -661,6 +709,36 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<Preferences>('I could not tell which model you meant.'));
     }
     return ipcRenderer.invoke(CHANNEL.selectModel, choice.providerId, choice.modelId, named(where)) as Promise<
+      Result<Preferences>
+    >;
+  },
+
+  selectAdvisor(choice: ModelChoice | null, where?: Where): Promise<Result<Preferences>> {
+    if (choice === null) {
+      return ipcRenderer.invoke(CHANNEL.selectAdvisor, null, null, named(where)) as Promise<
+        Result<Preferences>
+      >;
+    }
+    if (
+      typeof choice !== 'object' ||
+      typeof choice.providerId !== 'string' ||
+      typeof choice.modelId !== 'string'
+    ) {
+      return Promise.resolve(refuse<Preferences>('I could not tell which model you meant.'));
+    }
+    return ipcRenderer.invoke(
+      CHANNEL.selectAdvisor,
+      choice.providerId,
+      choice.modelId,
+      named(where),
+    ) as Promise<Result<Preferences>>;
+  },
+
+  setAdvisorThinking(level: ThinkingLevel, where?: Where): Promise<Result<Preferences>> {
+    if (typeof level !== 'string') {
+      return Promise.resolve(refuse<Preferences>('I could not tell how long you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.setAdvisorThinking, level, named(where)) as Promise<
       Result<Preferences>
     >;
   },

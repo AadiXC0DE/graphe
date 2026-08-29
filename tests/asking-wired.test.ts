@@ -30,7 +30,7 @@ import { EventRelay } from '../src/agent/pi/events';
 import { ROLES } from '../src/agent/pi/child';
 import { grapheTools } from '../src/agent/pi/tools';
 import { changesAnything } from '../src/agent/guard/policy';
-import { readOnlyTools } from '../src/agent/plan';
+import { readOnlyTools, withheldWhilePlanning } from '../src/agent/plan';
 import { askWords, cannotAsk, saysAnswers, tidyQuestions } from '../src/agent/asking';
 import { applyEvent, askingYou, type Turn } from '../src/lib/thread';
 import type { AgentEvent, ToolCall } from '../src/agent/types';
@@ -194,7 +194,8 @@ describe('asking is not itself a change', () => {
     // come through it, because the instructions for a plan tell the model to
     // use it before the list.
     expect(readOnlyTools(['ask_first'])).toEqual(['ask_first']);
-    expect(adapter).toContain("if (planning?.() === true && readOnlyTools([call.name]).length === 0)");
+    expect(withheldWhilePlanning(call('ask_first', { questions: [] }))).toBe(false);
+    expect(adapter).toContain('if (planning?.() === true && withheldWhilePlanning(call))');
   });
 });
 

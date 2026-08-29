@@ -88,6 +88,9 @@
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-sunken);
+  /* No bar: this is a 22px pill, and any bar along its foot is thicker than the
+     room inside it. The buttons scroll under the pointer instead. */
+  scrollbar-width: none;
 }
 
 .pane__variation {
@@ -163,6 +166,9 @@
   place-items: center;
   overflow: auto;
   background: var(--bg-sunken);
+  /* The page inside is whatever width was picked, so the gutter is reserved
+     rather than let the centred screen jump when a tall one starts to scroll. */
+  scrollbar-gutter: stable;
 }
 
 /* The box the native page view is glued to. `auto` fills the room; a fixed

@@ -15,9 +15,12 @@ import type { AgentEvent, ImageCard, ReviewVerdict } from '../agent/types';
 import type { Answers, Question } from '../agent/asking';
 import type { Prompt } from '../cost/phrasing';
 import { PLAN_WORDS } from '../agent/plan';
-import { describeCall } from './describe';
+import { ADVISOR_ANSWERED, ADVISOR_LABEL, describeCall, isNoteKeeping } from './describe';
 import { realWords } from './showme';
 import type { Decision, Trouble } from './ipc';
+
+/** A picture somebody put in the box, as the conversation shows it back. */
+export type SentPicture = { name: string; src: string };
 
 /**
  * One thing in the conversation, whoever caused it.
@@ -29,7 +32,19 @@ import type { Decision, Trouble } from './ipc';
  * reason the feed reads as one conversation instead of a log next to a chat.
  */
 export type Turn =
-  | { kind: 'said'; id: string; from: MessageAuthor; text: string; streaming: boolean }
+  | {
+      kind: 'said';
+      id: string;
+      from: MessageAuthor;
+      text: string;
+      streaming: boolean;
+      /** Pictures attached to this message, held as the object URLs the
+       *  composer already made. An object URL keeps the file it points at alive
+       *  until it is revoked, and this one must not be — the turn is what shows
+       *  it. No ceiling like `MOST_PICTURES` because it is the same URL the
+       *  panel's own reference list is already holding: nothing new is kept. */
+      pictures?: readonly SentPicture[];
+    }
   | {
       kind: 'did';
       id: string;
@@ -156,8 +171,15 @@ export function newId(): string {
   return `turn-${counter}`;
 }
 
-export function said(from: MessageAuthor, text: string): Turn {
-  return { kind: 'said', id: newId(), from, text, streaming: false };
+export function said(from: MessageAuthor, text: string, pictures?: readonly SentPicture[]): Turn {
+  return {
+    kind: 'said',
+    id: newId(),
+    from,
+    text,
+    streaming: false,
+    ...(pictures === undefined || pictures.length === 0 ? {} : { pictures }),
+  };
 }
 
 export function estimated(text: string, prompt: Prompt): Turn {
@@ -201,10 +223,17 @@ function closeActivity(
     if (turn === undefined) continue;
     if (turn.kind !== 'did' || turn.callId !== callId || turn.state !== 'running') continue;
     const next = [...turns];
+    // The advisor's reply is what it said, not what it was asked, so it goes
+    // where a helper's findings go and the question stays on the turn beside
+    // it. The line then says the second model answered rather than only that
+    // it was asked, which is the half somebody would otherwise never see.
+    const answered = state === 'done' && detail !== undefined && turn.label === ADVISOR_LABEL;
     next[index] = {
       ...turn,
       state,
-      detail: detail ?? turn.detail,
+      ...(answered
+        ? { label: ADVISOR_ANSWERED, progress: detail }
+        : { detail: detail ?? turn.detail }),
       ...(shown === undefined ? {} : { shown }),
     };
     return shown === undefined ? next : onlyTheNewestPictures(next);
@@ -306,6 +335,9 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       );
 
     case 'tool-start': {
+      // Notes kept between sittings are the app's own bookkeeping. Nothing in
+      // the project moved, so the conversation says nothing about it.
+      if (isNoteKeeping(event.call.name)) return turns;
       const described = describeCall(event.call);
       return [
         ...turns,
@@ -345,6 +377,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
     case 'blocked': {
       const closed = closeActivity(turns, event.call.id, 'failed', event.reason);
       if (closed !== turns) return closed;
+      if (isNoteKeeping(event.call.name)) return turns;
       return [
         ...turns,
         {

@@ -11,6 +11,8 @@
   gap: var(--space-1);
   margin-bottom: var(--space-2);
   overflow-x: auto;
+  /* No bar: it would sit between the rail and the composer, in the one gap the
+     row above the box has, and this rail is meant to be the quiet thing there. */
   scrollbar-width: none;
 }
 

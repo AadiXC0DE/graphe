@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { useCopying } from '../lib/copying';
 import { canHighlight, highlight } from '../lib/highlight';
 import Clipped, { howMuch } from './Clipped';
 import './CodeBlock.css';
@@ -47,9 +48,7 @@ const SETTLED_MS = 120;
  */
 export default function CodeBlock({ code, language, label, tail }: Props) {
   const [coloured, setColoured] = useState<{ code: string; html: string } | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [copyFailed, setCopyFailed] = useState(false);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copying = useCopying();
 
   useEffect(() => {
     if (!canHighlight(language)) return;
@@ -65,13 +64,6 @@ export default function CodeBlock({ code, language, label, tail }: Props) {
     };
   }, [code, language]);
 
-  useEffect(
-    () => () => {
-      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
-    },
-    [],
-  );
-
   /* Only ever shown for the code it was made from. A block that is still
      growing falls back to plain text rather than showing a coloured version of
      what it used to say.
@@ -84,25 +76,6 @@ export default function CodeBlock({ code, language, label, tail }: Props) {
      disagree. */
   const html =
     tail === undefined && coloured !== null && coloured.code === code ? coloured.html : null;
-
-  const copy = () => {
-    void navigator.clipboard?.writeText(code).then(
-      () => {
-        setCopyFailed(false);
-        setCopied(true);
-        if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
-        copiedTimer.current = setTimeout(() => setCopied(false), 1600);
-      },
-      () => {
-        // Said, rather than swallowed. A Copy that quietly does nothing leaves
-        // whatever was on the clipboard before, which reads as copying the
-        // wrong thing.
-        setCopyFailed(true);
-        if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
-        copiedTimer.current = setTimeout(() => setCopyFailed(false), 2600);
-      },
-    );
-  };
 
   const block =
     html === null ? (
@@ -127,8 +100,8 @@ export default function CodeBlock({ code, language, label, tail }: Props) {
     <div className="codeblock">
       <div className="codeblock__bar">
         <span className="codeblock__lang">{label ?? 'Code'}</span>
-        <button type="button" className="codeblock__copy" onClick={copy}>
-          {copyFailed ? 'Press \u2318C' : copied ? 'Copied' : 'Copy'}
+        <button type="button" className="codeblock__copy" onClick={() => copying.copy(code)}>
+          {copying.label}
         </button>
       </div>
 

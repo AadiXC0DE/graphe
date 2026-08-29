@@ -49,6 +49,10 @@ Some shots are hand-cropped from a whole-window capture (`crop-*.png`) with `sip
 because a detail reads better than a whole screen. Re-crop those by hand if the
 interface moves under them.
 
+`app-canvas-dark.png` is the one the page loads as captured rather than as WebP: the
+canvas is fine lines and small type, and re-encoding it costs more legibility than it
+saves bytes. Leave it out of `optimise.mjs`'s output.
+
 ## Putting it somewhere
 
 Static hosting, any of it. The page has no server side.

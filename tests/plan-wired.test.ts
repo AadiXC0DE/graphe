@@ -104,3 +104,68 @@ describe('the window actually sends what was decided', () => {
     expect(APP).toMatch(/questions=\{turn\.questions\}/);
   });
 });
+
+/* ========================================================================== */
+/* The gate reaches every session, not only the one in front                   */
+/* ========================================================================== */
+
+/**
+ * Plan is a gate, and a gate with a door beside it is not one.
+ *
+ * A session is built in four places — the conversation, the copy made when
+ * somebody has asked to see work checked first, a pull request's own checkout,
+ * and a piece on the board. Three of them were opened without the gate, so with
+ * "check it first" on, the very message Plan was holding ran in a copy with
+ * every tool it started with. What this asserts is not a wording: it is that a
+ * fifth session, added later, cannot quietly be the fourth hole.
+ */
+describe('every session Plan has to reach', () => {
+  const SHELL = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
+
+  /** Every `createSession({ … })` in the shell, as the text of its arguments. */
+  function sessionsBuilt(): readonly string[] {
+    const built: string[] = [];
+    const opener = 'createSession({';
+    for (let at = SHELL.indexOf(opener); at !== -1; at = SHELL.indexOf(opener, at + 1)) {
+      let depth = 0;
+      let end = at + opener.length - 1;
+      for (; end < SHELL.length; end += 1) {
+        const letter = SHELL[end];
+        if (letter === '{') depth += 1;
+        if (letter === '}') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      built.push(SHELL.slice(at, end + 1));
+    }
+    return built;
+  }
+
+  it('finds every place a session is opened', () => {
+    // Four today. A fifth is not a failure — it is a prompt to say whether the
+    // gate belongs in it, which is exactly what the next case asks.
+    expect(sessionsBuilt().length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('opens none of them without saying whether Plan is on', () => {
+    const ungated = sessionsBuilt().filter((one) => !one.includes('planMode:'));
+    expect(ungated, `a session opened outside the gate: ${String(ungated.length)}`).toEqual([]);
+  });
+
+  it('holds the board while the folder is in Plan', () => {
+    // A piece on the board is the work the model is refused for asking about,
+    // so who put it there cannot be what decides it.
+    expect(SHELL).toContain('if (planHeldOn(desk.path)) return;');
+  });
+
+  it('lets the board go again when Plan is left', () => {
+    // Held pieces are only waiting; without this they wait for a turn that
+    // never comes.
+    expect(SHELL).toMatch(/if \(!on\) \{[\s\S]{0,200}runWhatCan\(desk\)/);
+  });
+
+  it('reads Plan off the folder, so a board nobody has open is not held', () => {
+    expect(SHELL).toContain("return projectAt({ project: path })?.held.planMode === true;");
+  });
+});

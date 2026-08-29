@@ -12,34 +12,62 @@
 }
 
 .files__band {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-1);
   padding: 0 var(--space-1) var(--space-3);
 }
 
-/* The same chip as the version rail's, because it is the same idea: one press,
-   one thing shown or not shown. */
-.files__chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 var(--space-2);
+/* Two views of one folder, so one control: the selection slides across rather
+   than two switches a person can press into a state that does not exist. */
+.files__pick {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 2px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
-  transition:
-    color var(--dur-micro) var(--ease-hover),
-    background-color var(--dur-micro) var(--ease-hover);
-}
-
-.files__chip[aria-pressed='true'] {
-  color: var(--text);
   background: var(--bg-sunken);
 }
 
-.files__chip:focus-visible {
+.files__picked {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--dur-micro) var(--ease-in-out-cubic);
+}
+
+.files__pick[data-at='every'] .files__picked {
+  transform: translateX(100%);
+}
+
+.files__opt {
+  position: relative;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0 var(--space-1);
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.files__opt[aria-checked='true'] {
+  color: var(--text);
+}
+
+.files__opt:active {
+  transform: scale(0.97);
+}
+
+.files__opt:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -48,29 +76,9 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The tree grows a row at a time; the gutter is reserved so the names do not
+     step sideways the moment it outgrows the box. */
   scrollbar-gutter: stable;
-  /* Thin, dark, modern — like the landing and the rest of the app shell.
-     The native thick bar dominated the file list; this keeps it quiet. */
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.files__tree::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.files__tree::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 6px;
-}
-
-.files__tree::-webkit-scrollbar-thumb:hover {
-  background: var(--border-control);
-}
-
-.files__tree::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .files__row {
@@ -180,14 +188,18 @@
     background: var(--bg-sunken);
   }
 
-  .files__chip:hover {
-    color: var(--text);
-    background: var(--bg-sunken);
+  .files__opt[aria-checked='false']:hover {
+    color: var(--text-muted);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .files__twist {
+  .files__twist,
+  .files__picked {
     transition: none;
+  }
+
+  .files__opt:active {
+    transform: none;
   }
 }

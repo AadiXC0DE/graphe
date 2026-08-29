@@ -158,7 +158,7 @@ export default function HistoryView({
         </button>
       </header>
 
-      <div className="sheet__body">
+      <div className="sheet__body scroll--auto">
         <div className="graph">
           <div className="graph__lines" style={{ ['--row' as string]: `${String(ROW)}px` }}>
             {versions.length === 0 ? <p className="graph__none">{SAYS.none}</p> : null}

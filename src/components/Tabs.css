@@ -28,12 +28,10 @@
   flex: 1 1 auto;
   width: 0;
   min-width: 0;
+  /* It cannot scroll, so it carries no scrollbar rules at all. A gutter is
+     reserved on any scroll box, hidden included, so a width that changed on
+     hover moved every tab out from under the pointer. */
   overflow: hidden;
-  scrollbar-width: none;
-}
-
-.tabs__strip::-webkit-scrollbar {
-  display: none;
 }
 
 .tabs__tab {
@@ -194,6 +192,7 @@
   border-radius: var(--radius-md);
   background: var(--bg-raised);
   box-shadow: var(--shadow-md);
+  scrollbar-gutter: stable;
 }
 
 .tabs__row {
@@ -216,6 +215,21 @@
     background: var(--bg-sunken);
     color: var(--text);
   }
+}
+
+/* Which kind of thing a tab is. A conversation draws nothing — the ordinary
+   one needs no badge. */
+.tabs__kind {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+}
+
+.tabs__tab--here .tabs__kind {
+  color: var(--text-muted);
 }
 
 /* --------------------------------------------------------------- the marks */

@@ -107,6 +107,16 @@ const WHEN_UNSAID: Readonly<Record<string, unknown>> = {
   contextMaxChars: 48_000,
   advisorToolResultMaxLines: 60,
   advisorToolResultMaxBytes: 3_000,
+  // Two, not the package's three. "It has tried the same thing twice" is the
+  // single most reliable sign a second opinion is worth paying for, and by the
+  // third attempt the context it would be reading is already the wrong shape.
+  advisorLoopThreshold: 2,
+  // The three standing gates cover deciding, failing and finishing. They do not
+  // cover judging — a review, an audit, a verdict on somebody else's change is
+  // exactly the work a second reader is for, and it reaches none of the three
+  // because nothing was planned, nothing failed and nothing was declared done.
+  advisorCustomInvocation:
+    'you are giving a verdict on code — a review, an audit, or a judgement on somebody else’s change; before a change that touches many files or would be hard to undo; and when what you are about to say rests on an assumption about this project you have not actually checked.',
 };
 
 /**

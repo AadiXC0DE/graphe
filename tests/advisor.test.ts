@@ -152,6 +152,8 @@ describe('the settings the addition reads', () => {
       contextMaxChars: 8000,
       advisorToolResultMaxLines: 4000,
       advisorToolResultMaxBytes: 900_000,
+      advisorLoopThreshold: 7,
+      advisorCustomInvocation: 'the moon is full',
     };
     const next = advisorSettings(theirs, { advises: OPUS, does: HAIKU });
     expect(next).toEqual({
@@ -168,14 +170,12 @@ describe('the settings the addition reads', () => {
    *  ships with. It answered anyway, on an omission marker. */
   it('gives the advisor a window, and a cap no single step can fill', () => {
     const first = advisorSettings(null, { advises: OPUS, does: null });
-    expect(first).toEqual({
-      advisor: 'anthropic/claude-opus-4-5',
-      alwaysOn: true,
-      advisorRedactSecrets: true,
-      contextMaxChars: 48_000,
-      advisorToolResultMaxLines: 60,
-      advisorToolResultMaxBytes: 3_000,
-    });
+    expect(first['advisor']).toBe('anthropic/claude-opus-4-5');
+    expect(first['alwaysOn']).toBe(true);
+    expect(first['advisorRedactSecrets']).toBe(true);
+    expect(first['contextMaxChars']).toBe(48_000);
+    expect(first['advisorToolResultMaxLines']).toBe(60);
+    expect(first['advisorToolResultMaxBytes']).toBe(3_000);
     expect(Number(first['advisorToolResultMaxBytes'])).toBeLessThan(
       Number(first['contextMaxChars']) / 4,
     );
@@ -391,5 +391,28 @@ describe('every conversation gets the advisor, including a canvas one', () => {
   it('and so is how long it thinks', () => {
     const paced = main.match(/advisorThinking: (?:prefs\.advisorThinking|\(await preferences\(\)\)\.all\(\)\.advisorThinking)/g)?.length ?? 0;
     expect(paced).toBe(main.match(/createSession\(\{/g)?.length ?? 0);
+  });
+});
+
+describe('how readily the advisor is asked', () => {
+  it('asks after two equivalent attempts rather than three', () => {
+    // The package's own default is three. By the third the context the advisor
+    // would read is already the wrong shape.
+    expect(advisorSettings(null, { advises: OPUS, does: null })['advisorLoopThreshold']).toBe(2);
+  });
+
+  it('adds the moment the three standing gates miss', () => {
+    const said = String(advisorSettings(null, { advises: OPUS, does: null })['advisorCustomInvocation']);
+    // Judging: nothing was planned, nothing failed, nothing was declared done,
+    // so none of the three fire — and a verdict is what a second reader is for.
+    expect(said).toContain('verdict');
+    expect(said).toContain('review');
+  });
+
+  it('and neither is written over an answer somebody already gave', () => {
+    const theirs = { advisorLoopThreshold: 5, advisorCustomInvocation: 'never' };
+    const next = advisorSettings(theirs, { advises: OPUS, does: null });
+    expect(next['advisorLoopThreshold']).toBe(5);
+    expect(next['advisorCustomInvocation']).toBe('never');
   });
 });

@@ -1139,3 +1139,21 @@ describe('what a line between two blocks is doing', () => {
     expect(view).toContain("doing === 'live' ?");
   });
 });
+
+describe('canvases are saved one at a time, not one instead of another', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  it('holds a timer per canvas', () => {
+    // One shared timer meant a touch on the second canvas cancelled the first
+    // one's write, and that edit was gone until something else happened to it.
+    expect(app).toContain('const savingFlows = useRef(new Map<string');
+    expect(app).toContain('savingFlows.current.get(next.id)');
+    expect(app).toContain('savingFlows.current.set(next.id,');
+    expect(app).not.toContain('const savingFlow = useRef<ReturnType<typeof setTimeout>');
+  });
+
+  it('writes what is still waiting when the window goes, rather than dropping it', () => {
+    expect(app).toContain('for (const held of savingFlows.current.values())');
+    expect(app).toContain('held.write();');
+  });
+});

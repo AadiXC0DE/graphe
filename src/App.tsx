@@ -4410,11 +4410,21 @@ function Conversation() {
 
   /* On screen at once, on disk a moment later. Typing what a block should do is
      a keystroke at a time, and a file written per keystroke is a file written
-     for nothing. */
-  const savingFlow = useRef<ReturnType<typeof setTimeout> | null>(null);
+     for nothing.
+     
+     One timer per canvas, not one for all of them: a single timer meant a touch
+     on the second canvas cancelled the first one's write, and that edit was
+     gone until something else happened to it. */
+  const savingFlows = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; write: () => void }>());
   useEffect(
     () => () => {
-      if (savingFlow.current !== null) clearTimeout(savingFlow.current);
+      // Whatever is still waiting goes down now. Clearing the timers instead
+      // was the same loss by another route.
+      for (const held of savingFlows.current.values()) {
+        clearTimeout(held.timer);
+        held.write();
+      }
+      savingFlows.current.clear();
     },
     [],
   );
@@ -4423,10 +4433,16 @@ function Conversation() {
     setFlows((held) => withFlow(held, next));
     const path = desksNow.current.current;
     if (path === null) return;
-    if (savingFlow.current !== null) clearTimeout(savingFlow.current);
-    savingFlow.current = setTimeout(() => {
+    const waiting = savingFlows.current.get(next.id);
+    if (waiting !== undefined) clearTimeout(waiting.timer);
+    const write = () => {
       void bridge.flowSave(next, { project: path });
+    };
+    const timer = setTimeout(() => {
+      savingFlows.current.delete(next.id);
+      write();
     }, 400);
+    savingFlows.current.set(next.id, { timer, write });
   }, []);
 
   /** A canvas of its own, in front. */
@@ -4792,6 +4808,9 @@ function Conversation() {
   const covered =
     watchAt !== null ||
     designAt !== null ||
+    // A canvas filling the window covers the whole renderer, and a native page
+    // left drawn over it takes the presses and the keys meant for the board.
+    (canvasAt !== null && canvasFull) ||
     graphOpen ||
     reviewsOpen ||
     helpersAt !== null ||
@@ -5965,6 +5984,12 @@ function Conversation() {
           onThinking={setBlockThinking}
           repos={desk?.overview?.repos ?? []}
           doing={canvasDoing}
+          onModel={selectModel}
+          onConnect={() => setConnectedOpen(true)}
+          advisor={preferences.advisor}
+          onAdvisor={selectAdvisor}
+          {...(preferences.advisorThinking === null ? {} : { advisorThinking: preferences.advisorThinking })}
+          onAdvisorThinking={setAdvisorThinking}
           full={canvasFull}
           onFull={setCanvasFull}
           {...(canvasHere.conversation === null || desk === null

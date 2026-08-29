@@ -36,6 +36,7 @@ import type { ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { thinkingLevels } from '../lib/thinking';
 import { byTier, tierNames } from '../lib/modeltiers';
 import Asking from './Asking';
+import ThinkingWith from './ThinkingWith';
 import './CanvasView.css';
 
 const ZOOM = { least: 0.4, most: 1.6, step: 0.15 } as const;
@@ -64,6 +65,14 @@ type Props = {
    *  picker writes — it belongs to the model, not to the turn. */
   thinking?: Readonly<Record<string, ThinkingLevel>>;
   onThinking?: ((choice: ModelChoice, level: ThinkingLevel) => void) | undefined;
+  /** The model every block runs on unless it names its own, changed from the
+   *  same picker the composer has. */
+  onModel?: ((choice: ModelChoice) => void) | undefined;
+  onConnect?: (() => void) | undefined;
+  advisor?: ModelChoice | null | undefined;
+  onAdvisor?: ((choice: ModelChoice | null) => void) | undefined;
+  advisorThinking?: ThinkingLevel | undefined;
+  onAdvisorThinking?: ((choice: ModelChoice, level: ThinkingLevel) => void) | undefined;
   /** The projects inside this folder, where it holds several. Empty for an
    *  ordinary project, and then the flow never names one. */
   repos?: readonly { name: string }[];
@@ -205,7 +214,7 @@ function Mark({ kind }: { kind: BlockKind }) {
  * ordinary turn in this canvas's own conversation, and only once Start has
  * been pressed.
  */
-export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, thinking, onThinking, repos = [], full, onFull, onOpenThread, doing }: Props) {
+export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, thinking, onThinking, onModel, onConnect, advisor, onAdvisor, advisorThinking, onAdvisorThinking, repos = [], full, onFull, onOpenThread, doing }: Props) {
   const surface = useRef<HTMLDivElement>(null);
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -218,6 +227,12 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
    *  the hand lets go, which set the card down one step short of the drop. */
   const movingNow = useRef<{ id: string; x: number; y: number } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
+  /* Whether the model picker is open, and a key that puts it away. Escape does
+     not reach it over a full-window canvas, so the board closes it the only way
+     that is certain: by starting it again, shut. */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerRound, setPickerRound] = useState(0);
+
   /** Asked before every block goes. Taking a whole canvas off by accident is
    *  the one thing here that cannot be undone by dragging something back. */
   const [clearing, setClearing] = useState(false);
@@ -251,18 +266,6 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
     },
     [at.x, at.y, at.scale],
   );
-
-  /** The model a block with no model of its own lands on. */
-  const onNow = useMemo(() => {
-    const chose = connection?.chosen;
-    if (chose == null) return null;
-    for (const provider of connection?.providers ?? []) {
-      for (const model of provider.models) {
-        if (provider.providerId === chose.providerId && model.id === chose.modelId) return model.label;
-      }
-    }
-    return chose.modelId;
-  }, [connection]);
 
   const laid = useMemo(() => layOut(flow), [flow]);
   const ending = useMemo(() => endedAs(flow), [flow]);
@@ -386,6 +389,12 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
       const on = event.target as Element | null;
       if (on?.closest('input, textarea, select, [contenteditable]') != null) return;
       if (event.key === 'Escape') {
+        if (pickerOpen) {
+          setPickerOpen(false);
+          setPickerRound((was) => was + 1);
+          event.preventDefault();
+          return;
+        }
         if (joining !== null) { setJoining(null); return; }
         if (picked !== null) { setPicked(null); event.stopPropagation(); }
         return;
@@ -571,7 +580,18 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
 
   return (
     <section className={`canvas ${full ? 'canvas--full' : ''}`} aria-label={flow.name}>
-      <header className="canvas__bar">
+      {/* Escape, caught here rather than on the document: over a full-window
+          canvas the picker's own listener does not always see it, and a menu
+          that will not close on Escape is a menu that traps the hand. */}
+      <header
+        className="canvas__bar"
+        onKeyDownCapture={(event) => {
+          if (event.key !== 'Escape' || !pickerOpen) return;
+          event.preventDefault();
+          setPickerOpen(false);
+          setPickerRound((was) => was + 1);
+        }}
+      >
         <input
           className="canvas__title"
           value={flow.name}
@@ -595,13 +615,25 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
           </button>
         )}
 
-        {/* What a block with no model of its own runs on, said where it is set
-            rather than only described inside a block's panel. */}
+        {/* What a block with no model of its own runs on, chosen here rather
+            than only described inside a block's panel. The same picker the
+            composer has: one control for one question. */}
         <div className="canvas__far">
-          <span className="canvas__which" title={canvasWords.everyBlock}>
-            <span className="canvas__whichname">{canvasWords.model}</span>
-            <span className="canvas__whichvalue">{onNow ?? canvasWords.whichever}</span>
-          </span>
+          {connection === null || onModel === undefined ? null : (
+            <ThinkingWith
+              key={pickerRound}
+              state={connection}
+              onSelect={onModel}
+              onOpenChange={setPickerOpen}
+              onConnect={onConnect ?? (() => undefined)}
+              {...(onThinking === undefined ? {} : { onThinking })}
+              {...(advisor === undefined ? {} : { advisor })}
+              {...(onAdvisor === undefined ? {} : { onAdvisor })}
+              {...(advisorThinking === undefined ? {} : { advisorThinking })}
+              {...(onAdvisorThinking === undefined ? {} : { onAdvisorThinking })}
+              bare
+            />
+          )}
           {/* Only where the folder holds several. One flow works in one of
               them: a pull request has to be opened somewhere. */}
           {repos.length > 1 ? (
@@ -1054,7 +1086,7 @@ function Card({
   const says = block.says.trim();
   return (
     <div
-      className={`canvas__card canvas__card--${block.state}${came === undefined ? '' : ' canvas__card--came'}${picked ? ' canvas__card--picked' : ''}${target ? ' canvas__card--target' : ''}${held ? ' canvas__card--held' : ''}`}
+      className={`canvas__card canvas__card--${block.state}${came === undefined && doing === undefined ? '' : ' canvas__card--came'}${picked ? ' canvas__card--picked' : ''}${target ? ' canvas__card--target' : ''}${held ? ' canvas__card--held' : ''}`}
       data-block={block.id}
       style={{ left: block.x, top: block.y, width: CARD.width, height: CARD.height, '--canvas-card': `${String(CARD.height)}px` } as CSSProperties}
     >

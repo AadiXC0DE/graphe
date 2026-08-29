@@ -13,11 +13,13 @@
  *     rewritten for nothing, and `change` is the one place that can tell.
  */
 
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { ADVISOR_STUCK, switchAdvisorTools } from '../src/agent/pi/adapter';
 import { evaluate } from '../src/agent/guard/policy';
 
 import {
@@ -316,5 +318,78 @@ describe('the Guard on a second opinion', () => {
     expect(ask({ question: 'Why does this fail?', draft: key }).kind).toBe('deny');
     expect(ask({ question: 'Why does this fail?', context: { env: key } }).kind).toBe('deny');
     expect(ask({ question: 'Why does this fail?', notes: [key] }).kind).toBe('deny');
+  });
+});
+
+/* The chip is a switch, and a switch that did nothing has to say so: on a Pi
+   with no way to change which tools are active the advisor stays exactly as
+   the conversation started, whichever way it was pressed. */
+describe('turning the advisor on and off mid-conversation', () => {
+  const TOOLS = ['ask_advisor', 'record_advisor_outcome'];
+
+  function sessionWith(active: string[]) {
+    const state = { active };
+    return {
+      state,
+      getActiveToolNames: (): readonly string[] => state.active,
+      setActiveToolsByName: (names: string[]): void => {
+        state.active = names;
+      },
+    };
+  }
+
+  it('adds the advisor tools when it goes on and takes them away when it goes off', () => {
+    const session = sessionWith(['read', 'bash']);
+
+    expect(switchAdvisorTools(session, TOOLS, true)).toBe(true);
+    expect(session.state.active).toEqual(['read', 'bash', ...TOOLS]);
+
+    expect(switchAdvisorTools(session, TOOLS, false)).toBe(true);
+    expect(session.state.active).toEqual(['read', 'bash']);
+  });
+
+  it('says the switch did not take when the installed Pi cannot make it', () => {
+    const older = {
+      getActiveToolNames: (): readonly string[] => ['read'],
+      setActiveToolsByName: undefined as unknown as (names: string[]) => void,
+    };
+
+    expect(switchAdvisorTools(older, TOOLS, true)).toBe(false);
+    expect(switchAdvisorTools(older, TOOLS, false)).toBe(false);
+  });
+
+  it('has nothing to report when the advisor addition is not installed', () => {
+    const session = sessionWith(['read']);
+    expect(switchAdvisorTools(session, [], true)).toBe(true);
+    expect(session.state.active).toEqual(['read']);
+  });
+
+  it('tells the window what happened instead of failing silently', () => {
+    expect(ADVISOR_STUCK).toContain('advisor');
+    expect(ADVISOR_STUCK).toContain('saved');
+
+    const adapter = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
+    // Both the setting at open and the press mid-conversation feed the same
+    // line, and both say it rather than dropping it in a catch.
+    expect(adapter.match(/advisorStuck = !advisorActive\(/g)).toHaveLength(2);
+    expect(adapter).toContain('sayAdvisorStuck();');
+  });
+});
+
+describe('every conversation gets the advisor, including a canvas one', () => {
+  const main = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
+
+  it('is passed at every place a session is opened', () => {
+    // A canvas opens its conversation through the same handler a tab does, so
+    // "does the canvas use the advisor" is the same question as "does chat".
+    const opens = main.match(/createSession\(\{/g)?.length ?? 0;
+    const carried = main.match(/advisor: (?:prefs\.advisor|\(await preferences\(\)\)\.all\(\)\.advisor)/g)?.length ?? 0;
+    expect(opens).toBeGreaterThan(0);
+    expect(carried).toBe(opens);
+  });
+
+  it('and so is how long it thinks', () => {
+    const paced = main.match(/advisorThinking: (?:prefs\.advisorThinking|\(await preferences\(\)\)\.all\(\)\.advisorThinking)/g)?.length ?? 0;
+    expect(paced).toBe(main.match(/createSession\(\{/g)?.length ?? 0);
   });
 });

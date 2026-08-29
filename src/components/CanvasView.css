@@ -590,6 +590,9 @@
 }
 
 .canvas__says {
+  /* A pasted URL is one word as far as wrapping is concerned, and it ran
+     straight out of the card. */
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -600,13 +603,24 @@
   color: var(--text);
 }
 
-/* Once it has run, what it came to is the more useful of the two, so the ask
-   gives up a line to it. Both clamps are -webkit-box, which cannot shrink under
-   flex — two of them at full height overflowed the card. */
+/* Once there is something under it — what it came to, or what it is doing —
+   the ask gives up a line. Both are -webkit-box clamps, which cannot shrink
+   under flex, so two at full height overflowed the card. */
 .canvas__card--came .canvas__says {
   -webkit-line-clamp: 1;
   line-clamp: 1;
   color: var(--text-muted);
+}
+
+/* One line, and never a word wider than the card. A step's own words can be a
+   whole path. */
+.canvas__doing {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* The card divides in two: what it is asked and came to above, what it is set
@@ -2097,8 +2111,6 @@
 /* On the card itself, under what it was asked. */
 .canvas__doing {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--text-2xs);
   line-height: 1.35;
   color: var(--accent-ink);

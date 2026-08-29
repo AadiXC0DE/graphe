@@ -15,6 +15,17 @@ function planWith(n: number, done: number): BuildPlan {
   return { tasks, total: n, done } as unknown as BuildPlan;
 }
 
+describe('an objective that says nothing', () => {
+  it('is never met, with or without a plan', () => {
+    const plan = planWith(3, 3);
+    for (const blank of ['', '   ', '\n\t']) {
+      expect(verifyGoal(null, [], blank).met).toBe(false);
+      expect(verifyGoal(plan, [], blank, 0).met).toBe(false);
+      expect(verifyGoal(null, [], blank).reason).toContain('No objective');
+    }
+  });
+});
+
 describe('verifyGoal baseline binding', () => {
   it('leftover incomplete plan does not drive a new goal', () => {
     const leftover = planWith(8, 3); // 3/8 from earlier work

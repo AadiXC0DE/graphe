@@ -27,6 +27,8 @@ function resolveRoot(options: LspOptions): string {
   return raw.trim() === '' ? process.cwd() : raw;
 }
 
+/** Never walked. Dependencies, build output, and the dotted folders that are
+ *  tooling state rather than a project's own configuration. */
 const SKIP_DIRS = new Set([
   'node_modules',
   '.git',
@@ -39,6 +41,24 @@ const SKIP_DIRS = new Set([
   '.next',
   '.turbo',
   '.cache',
+  '.graphe',
+  '.hg',
+  '.svn',
+  '.idea',
+  '.yarn',
+  '.pnpm-store',
+  '.parcel-cache',
+  '.nuxt',
+  '.svelte-kit',
+  '.vercel',
+  '.terraform',
+  '.gradle',
+  '.dart_tool',
+  '.venv',
+  '.tox',
+  '.mypy_cache',
+  '.pytest_cache',
+  '.ruff_cache',
 ]);
 
 const MAX_FILES = 3000;
@@ -154,10 +174,12 @@ async function walkFiles(
         truncated = true;
         return;
       }
-      // Hidden entries, files as well as folders: keys live in those.
-      if (entry.name.startsWith('.')) continue;
       if (SKIP_DIRS.has(entry.name) || ignored.has(entry.name)) continue;
       const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+      // Keys and passwords are never read into the conversation and never
+      // rewritten, wherever they sit — folders of them included, so .ssh and
+      // .aws are refused as a whole rather than file by file.
+      if (isCredentialPath(rel)) continue;
       const full = join(dir, entry.name);
       // A symlink is neither isDirectory() nor isFile() here, so links are
       // skipped. Deliberate: we do not follow one out of the project.
@@ -166,9 +188,6 @@ async function walkFiles(
         continue;
       }
       if (!entry.isFile()) continue;
-      // Keys and passwords are never read into the conversation and never
-      // rewritten, wherever they sit.
-      if (isCredentialPath(rel)) continue;
       if (BINARY_EXTENSION.test(entry.name)) continue;
       const content = await readFile(full, 'utf8').catch(() => null);
       if (content === null) continue;
@@ -438,8 +457,7 @@ async function performRename(
     return `${head}\n\n${String(skipped)} occurrence(s) are in files I do not rewrite — lock files, bundles, binaries — and were left alone.${staleNote}`;
   }
   if (stale.length > 0) return `${head}${staleNote}`;
-  // The walk never opens hidden paths, so a clean grep is not ours to promise.
-  return `${head}\n\nNo file I rewrite still holds "${from}". Hidden paths are not walked, so grep .github, .vscode and other dotfiles yourself.`;
+  return `${head}\n\nNo file I rewrite still holds "${from}". Dependencies, build output and files holding keys are never walked.`;
 }
 
 type LspParams = {
@@ -564,7 +582,7 @@ export function lspRenameTool(options: LspOptions): ToolDefinition {
       'Writes. Every source file holding the symbol is rewritten in one go.',
       'Preview first with lsp(operation: "preview", symbol, newName) whenever the name is short or a common word — that one changes nothing.',
       'Only source is rewritten: lock files, minified bundles, binaries, and anything holding keys are left alone and reported.',
-      'Hidden paths — .github, .vscode, dotfiles — are neither searched nor rewritten, so grep those yourself afterwards.',
+      "A project's own dotted folders — .github, .vscode — are rewritten like any other source; .git, dependencies and build output are not walked.",
       'Grep-backed, not a language server: a name that also appears in prose or with another meaning is changed there too.',
       'A very short symbol, or one matching an enormous part of the project, is refused rather than swept.',
     ],

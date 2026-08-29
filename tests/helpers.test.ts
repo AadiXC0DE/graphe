@@ -111,4 +111,15 @@ describe('a piece of work sent to a helper', () => {
     ]);
     expect(nowDoing(turns).helpers[0]?.state).toBe('failed');
   });
+
+  /* Somebody else's tool can be called `subagent` and mean something else
+     entirely. It wore the helper's words and drew a card that said only "a
+     piece of work" — a label nobody wrote, where the question belongs. */
+  it('is not a helper when no piece of work was handed over', () => {
+    const turns = fold([
+      { type: 'tool-start', call: { id: 'call-1', name: 'subagent', input: { action: 'status' } } },
+    ]);
+    expect(nowDoing(turns).helpers).toEqual([]);
+    expect(turns[0]).toMatchObject({ kind: 'did', label: 'Working on your project' });
+  });
 });

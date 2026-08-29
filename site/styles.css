@@ -255,6 +255,7 @@ a {
 
 .nav__links a {
   text-decoration: none;
+  white-space: nowrap;
   transition: color 160ms ease;
 }
 
@@ -1551,6 +1552,56 @@ a {
   font-size: 0.75rem;
 }
 
+/* Opens a band instead of closing one, so it does not carry the gap a closing
+   picture needs — the heading above it already left that room. */
+.wide--lead {
+  margin-top: 0;
+}
+
+/* ───────────────────────────────────────────────────── the canvas ── */
+
+/* The blocks, named as the app names them. A row of them rather than a
+   sentence: the list is the point, and a sentence buries it. */
+.blocks {
+  max-width: var(--full);
+  margin: clamp(40px, 5vw, 64px) auto clamp(32px, 4vw, 48px);
+}
+
+.blocks__label {
+  color: var(--haze-dim);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.blocks__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.blocks__list li {
+  padding: 7px 13px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
+  background: var(--night);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  color: var(--haze);
+}
+
+.blocks__note {
+  margin-top: 18px;
+  max-width: var(--measure);
+  color: var(--haze);
+  font-size: 0.9375rem;
+}
+
 /* ────────────────────────────────────────────────── both audiences ── */
 
 /* Two columns, one row per event: the left is what anybody reads, the right is
@@ -2437,6 +2488,18 @@ a {
 
 /* ──────────────────────────────────────────────────────── narrower ── */
 
+/* Seven section names want a wide window to sit on one line. Below that the
+   strip goes, rather than folding into two rows of half a name each. */
+@media (max-width: 1200px) {
+  .nav__links {
+    display: none;
+  }
+
+  .nav__end {
+    margin-inline-start: auto;
+  }
+}
+
 /* The fan is a picture of three stages side by side, and the wiring between
    them only lines up while the lanes are one tall column. Below that it is the
    same three stages, read downwards, with the wires taken out rather than
@@ -2504,14 +2567,6 @@ a {
   .method__top {
     grid-template-columns: 1fr;
     gap: 20px;
-  }
-
-  .nav__links {
-    display: none;
-  }
-
-  .nav__end {
-    margin-inline-start: auto;
   }
 }
 

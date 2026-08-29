@@ -15,7 +15,7 @@ import type { AgentEvent, ImageCard, ReviewVerdict } from '../agent/types';
 import type { Answers, Question } from '../agent/asking';
 import type { Prompt } from '../cost/phrasing';
 import { PLAN_WORDS } from '../agent/plan';
-import { ADVISOR_ANSWERED, ADVISOR_LABEL, describeCall } from './describe';
+import { ADVISOR_ANSWERED, ADVISOR_LABEL, describeCall, isNoteKeeping } from './describe';
 import { realWords } from './showme';
 import type { Decision, Trouble } from './ipc';
 
@@ -335,6 +335,9 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
       );
 
     case 'tool-start': {
+      // Notes kept between sittings are the app's own bookkeeping. Nothing in
+      // the project moved, so the conversation says nothing about it.
+      if (isNoteKeeping(event.call.name)) return turns;
       const described = describeCall(event.call);
       return [
         ...turns,
@@ -374,6 +377,7 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
     case 'blocked': {
       const closed = closeActivity(turns, event.call.id, 'failed', event.reason);
       if (closed !== turns) return closed;
+      if (isNoteKeeping(event.call.name)) return turns;
       return [
         ...turns,
         {

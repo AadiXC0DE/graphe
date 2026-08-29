@@ -63,7 +63,14 @@ import { RepairCoordinator, repairPrompt } from './repair';
 import { checksAfterChange, saysFailed, sourceAmong } from './verify';
 import { notHere, runHelper } from '../../share/run';
 import { readdir, realpath } from 'node:fs/promises';
-import { eventsFromEntries, momentToReturnTo, momentsFromEntries, type Moment } from './history';
+import {
+  NOTES_CARRIED,
+  WORTH_KEEPING,
+  eventsFromEntries,
+  momentToReturnTo,
+  momentsFromEntries,
+  type Moment,
+} from './history';
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
 import { browserFolder, closeBrowser } from './computer';
@@ -77,17 +84,6 @@ import { parseReview } from './review';
 import { askWords, cannotAsk, saysAnswers, tidyQuestions, type Answers } from '../asking';
 import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
 
-/**
- * The last thing said in a sitting, and nobody is reading the answer.
- *
- * Named things rather than impressions: a note saying the work went well helps
- * nobody next time, and a memory full of them is worse than an empty one.
- */
-const WORTH_KEEPING = `This sitting is over and nobody is reading this reply, so keep it to the notes.
-
-Look back over what we just did. If you learned anything about this project that would save time next time — how it is built, how it is run, what it expects, a decision and why it went that way, something that caught you out — write each one down with retain, one fact per note, in a sentence that will still make sense months from now.
-
-Write nothing about how this sitting went, nothing you already have a note for, and nothing that reading the code would tell you just as fast. Most sittings are worth one or two notes and many are worth none, which is a fine answer. Say nothing else.`;
 import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
 import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
 import { Running, type RunningPiece } from '../running';
@@ -157,6 +153,40 @@ const NO_RESTORE_POINT =
   "I could not save a restore point first, so I have not made this change. Nothing has been lost.";
 const SYMLINK_ESCAPE =
   'This path reaches somewhere outside your project folder through a link, so I have left it alone.';
+/**
+ * Turn the advisor's tools on or off on a session already running.
+ *
+ * The names stay in the allowlist either way; only whether they are active
+ * changes, so one press takes effect on the next step. False when the switch
+ * did not take — an older Pi has no such call and keeps the tools the
+ * conversation started with, which is a chip and an advisor that disagree
+ * until somebody is told.
+ */
+export function switchAdvisorTools(
+  session: {
+    getActiveToolNames: () => readonly string[];
+    setActiveToolsByName: (names: string[]) => unknown;
+  },
+  tools: readonly string[],
+  on: boolean,
+): boolean {
+  if (tools.length === 0) return true;
+  try {
+    const active = new Set(session.getActiveToolNames());
+    for (const name of tools) {
+      if (on) active.add(name);
+      else active.delete(name);
+    }
+    session.setActiveToolsByName([...active]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** What the user reads when the advisor switch did not take. */
+export const ADVISOR_STUCK =
+  'I could not switch the advisor in this conversation: the version of Pi installed keeps the tools a conversation started with. The choice is saved, so it stands from the next time this project is opened.';
 
 /* -------------------------------------------------------------------------- */
 /* Questions waiting on a person                                               */
@@ -2223,23 +2253,16 @@ const MOST_AFTER_SAYINGS = 3;
   };
   alreadyBilled = rawBill() ?? 0;
 
-  /** On and off without rebuilding the conversation. The names stay in the
-   *  allowlist either way; only whether they are active changes, so turning the
-   *  advisor off is one press and takes effect on the next step. */
-  const advisorActive = (on: boolean): void => {
-    if (advisorTools.length === 0) return;
-    try {
-      const active = new Set(session.getActiveToolNames());
-      for (const name of advisorTools) {
-        if (on) active.add(name);
-        else active.delete(name);
-      }
-      session.setActiveToolsByName([...active]);
-    } catch {
-      // An older Pi without the call leaves the allowlist as it was.
-    }
+  const advisorActive = (on: boolean): boolean => switchAdvisorTools(session, advisorTools, on);
+  /** Set when a press did nothing, cleared once it has been said. */
+  let advisorStuck = false;
+  const sayAdvisorStuck = (): void => {
+    if (!advisorStuck) return;
+    advisorStuck = false;
+    options.onEvent({ type: 'message-delta', text: `\n\n${ADVISOR_STUCK}` });
+    options.onEvent({ type: 'message-end' });
   };
-  advisorActive(advises !== null);
+  advisorStuck = !advisorActive(advises !== null);
 
   const unsubscribe = session.subscribe((event) => {
     relay.fromPi(event);
@@ -2345,6 +2368,7 @@ const MOST_AFTER_SAYINGS = 3;
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
       sayRulesDiagnostics();
+      sayAdvisorStuck();
       // Once a sitting, before the first request goes anywhere.
       if (!openedAlready) {
         openedAlready = true;
@@ -2390,7 +2414,7 @@ const MOST_AFTER_SAYINGS = 3;
             try {
               const notes = await memory.recall('', { limit: 4 });
               if (notes.length > 0) {
-                said = `A few notes I keep about this project, most relevant first:\n${notes
+                said = `${NOTES_CARRIED}\n${notes
                   .map((note) => `- ${note.content}`)
                   .join('\n')}\n\n${said}`;
               }
@@ -2511,7 +2535,9 @@ const MOST_AFTER_SAYINGS = 3;
 
     async useAdvisor(next, thinks): Promise<void> {
       if (closed) return;
-      advisorActive(next !== null);
+      advisorStuck = !advisorActive(next !== null);
+      // Not into the middle of a reply: the next turn opens with it instead.
+      if (!session.isStreaming) sayAdvisorStuck();
       if (advisorTools.length > 0) await keepAdvisorSettings(agentDir, next, inUse, thinks);
     },
 

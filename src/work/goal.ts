@@ -129,7 +129,9 @@ export function verifyGoal(
   planBaselineN = 0,
 ): { met: boolean; reason: string } {
   const said = objective.trim();
-  if (said === '') return { met: true, reason: 'No objective.' };
+  // A blank objective has not been met — nothing was asked for, so nothing can
+  // report done and finish the goal on its own.
+  if (said === '') return { met: false, reason: 'No objective set, so there is nothing to check.' };
 
   if (plan !== null) {
     // Only tasks with n > baseline belong to this goal

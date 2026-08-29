@@ -232,17 +232,69 @@ describe('when it cannot finish', () => {
 });
 
 describe('what the walk skips', () => {
-  it('never promises a clean grep when the name also sits in a hidden path', async () => {
+  it('renames a project\'s own dotted config, workflows included', async () => {
     write('.github/workflows/ci.yml', 'run: node scripts/formatBytes.js\n');
     write('.eslintrc.json', '{ "rules": { "formatBytes": "off" } }\n');
     write('src/format.ts', 'export const formatBytes = 1;\n');
 
     const said = await run(rename(), { symbol: 'formatBytes', newName: 'formatFileSize' });
 
-    expect(read('.github/workflows/ci.yml')).toContain('formatBytes');
-    expect(read('.eslintrc.json')).toContain('formatBytes');
+    expect(read('.github/workflows/ci.yml')).toContain('formatFileSize');
+    expect(read('.eslintrc.json')).toContain('formatFileSize');
     expect(read('src/format.ts')).toContain('formatFileSize');
-    expect(said).toMatch(/hidden paths are not walked/i);
+    expect(said).toContain('No file I rewrite still holds');
+    expect(said).not.toMatch(/hidden paths/i);
+  });
+
+  it('finds a reference in a workflow', async () => {
+    write('.github/workflows/ci.yml', 'run: node scripts/formatBytes.js\n');
+
+    const said = await run(lsp(), { operation: 'references', symbol: 'formatBytes' });
+
+    expect(said).toContain('.github/workflows/ci.yml');
+  });
+
+  it('never reads or writes anything inside .git', async () => {
+    write('.git/config', '[remote "origin"]\n\turl = formatBytes\n');
+    write('.git/HEAD', 'ref: refs/heads/formatBytes\n');
+    write('src/format.ts', 'export const formatBytes = 1;\n');
+
+    const found = await run(lsp(), { operation: 'references', symbol: 'formatBytes' });
+    await run(rename(), { symbol: 'formatBytes', newName: 'formatFileSize' });
+
+    expect(found).not.toContain('.git/');
+    expect(read('.git/config')).toContain('formatBytes');
+    expect(read('.git/HEAD')).toContain('formatBytes');
+  });
+
+  it('never reads a nested .env or a key folder, and never rewrites one', async () => {
+    write('apps/web/.env', 'TOKEN=formatBytes-secret\n');
+    write('.ssh/id_rsa', 'formatBytes private key\n');
+    write('src/format.ts', 'export const formatBytes = 1;\n');
+
+    const found = await run(lsp(), { operation: 'references', symbol: 'formatBytes' });
+    await run(rename(), { symbol: 'formatBytes', newName: 'formatFileSize' });
+
+    expect(found).not.toContain('formatBytes-secret');
+    expect(found).not.toContain('.ssh/');
+    expect(read('apps/web/.env')).toContain('formatBytes-secret');
+    expect(read('.ssh/id_rsa')).toContain('formatBytes');
+  });
+
+  it('leaves dependencies and build output out', async () => {
+    write('node_modules/pkg/index.js', 'exports.formatBytes = 1;\n');
+    write('dist/bundle.js', 'const formatBytes = 1;\n');
+    write('.graphe/worktrees/pr-3/src/format.ts', 'export const formatBytes = 1;\n');
+    write('src/format.ts', 'export const formatBytes = 1;\n');
+
+    const found = await run(lsp(), { operation: 'references', symbol: 'formatBytes' });
+    await run(rename(), { symbol: 'formatBytes', newName: 'formatFileSize' });
+
+    expect(found).not.toContain('node_modules');
+    expect(read('node_modules/pkg/index.js')).toContain('formatBytes');
+    expect(read('dist/bundle.js')).toContain('formatBytes');
+    expect(read('.graphe/worktrees/pr-3/src/format.ts')).toContain('formatBytes');
+    expect(read('src/format.ts')).toContain('formatFileSize');
   });
 
   it('leaves out folders the project already ignores', async () => {

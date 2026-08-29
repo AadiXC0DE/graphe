@@ -9,6 +9,11 @@
  * conversation: an `error`, which would replay as a dismissable trouble card,
  * and a compaction, which Pi hoists above the messages it summarised.
  *
+ * Graphe's own words are taken back off the messages it sent on somebody's
+ * behalf. They went out as ordinary user messages and are on disk as such, so
+ * without this a reopened conversation shows the app talking to itself as
+ * though a person had typed it.
+ *
  * Known loss: a call the Guard blocked was written down as an ordinary failed
  * result, so it comes back as a step that failed rather than one somebody said
  * no to.
@@ -47,9 +52,43 @@ function momentAt(source: Fields): number | null {
 /** The words of a user message, whether it was stored as one string or as
  *  blocks. A message that is pictures only cannot be resurrected — there is no
  *  file anywhere that knows what it was — so it simply does not come back. */
+/**
+ * The prompt sent when a sitting ends, asking for anything worth keeping.
+ *
+ * Named things rather than impressions: a note saying the work went well helps
+ * nobody next time, and a memory full of them is worse than an empty one.
+ *
+ * It lives beside the replay rather than beside the send, because the two have
+ * to agree on it word for word or it comes back as a message somebody read.
+ */
+export const WORTH_KEEPING = `This sitting is over and nobody is reading this reply, so keep it to the notes.
+
+Look back over what we just did. If you learned anything about this project that would save time next time — how it is built, how it is run, what it expects, a decision and why it went that way, something that caught you out — write each one down with retain, one fact per note, in a sentence that will still make sense months from now.
+
+Write nothing about how this sitting went, nothing you already have a note for, and nothing that reading the code would tell you just as fast. Most sittings are worth one or two notes and many are worth none, which is a fine answer. Say nothing else.`;
+
+/** The line above the notes carried into the first question of a sitting. */
+export const NOTES_CARRIED = 'A few notes I keep about this project, most relevant first:';
+
+/**
+ * What the person actually typed, out of the message that was sent for them.
+ *
+ * Two things are Graphe's: the whole end-of-sitting prompt, which nobody wrote
+ * and nobody read the reply to, and the notes pinned above the first question,
+ * which are the app remembering rather than the person speaking.
+ */
+function whatTheyTyped(text: string): string | null {
+  const said = text.trim();
+  if (said === '' || said === WORTH_KEEPING) return null;
+  if (!said.startsWith(NOTES_CARRIED)) return said;
+  const after = said.indexOf('\n\n');
+  const typed = after === -1 ? '' : said.slice(after + 2).trim();
+  return typed === '' ? null : typed;
+}
+
 function userWords(message: Fields): string | null {
   const content = message['content'];
-  if (typeof content === 'string') return content === '' ? null : content;
+  if (typeof content === 'string') return whatTheyTyped(content);
   const list = Array.isArray(content) ? content : null;
   if (list === null) return null;
   let words = '';
@@ -60,7 +99,7 @@ function userWords(message: Fields): string | null {
     const text = textAt(source, 'text');
     if (text !== null) words += words === '' ? text : `\n\n${text}`;
   }
-  return words === '' ? null : words;
+  return words === '' ? null : whatTheyTyped(words);
 }
 
 function callOf(block: Fields): ToolCall | null {

@@ -217,14 +217,17 @@ export function describeCall(call: ToolCall): Described {
 
     case 'task':
     case 'subagent':
-    case 'delegate':
-      return {
-        label: TASK_LABEL,
-        // Not through `short`: a piece of work handed to a helper is a
-        // paragraph, and dropping it past 64 characters left the helper board
-        // saying "Asked" and then nothing at all.
-        detail: oneLine(textField(input, ['task', 'instructions'])),
-      };
+    case 'delegate': {
+      // Not through `short`: a piece of work handed to a helper is a
+      // paragraph, and dropping it past 64 characters left the helper board
+      // saying "Asked" and then nothing at all.
+      const work = oneLine(textField(input, ['task', 'instructions']));
+      // No piece of work, so nothing to put on the helper board. Somebody
+      // else's tool called `subagent` landed there as a card labelled with a
+      // placeholder where the question belongs.
+      if (work === undefined) return { label: 'Working on your project' };
+      return { label: TASK_LABEL, detail: work };
+    }
 
     /* Not "working on your project": it is the opposite of working, and the
        line sits directly above the card holding the questions. */
@@ -292,6 +295,27 @@ export const WEB_SEARCH_LABEL = 'Searching the web';
 
 /** The words a delegated piece of work wears in the thread. */
 export const TASK_LABEL = 'Sending a piece of work to a helper';
+
+/** The memory verbs.
+ *
+ * Keeping notes is the app's own bookkeeping, not work on somebody's project:
+ * nothing in the folder changes and there is nothing to look at afterwards. The
+ * feed leaves them out entirely — see `applyEvent` — which also keeps a
+ * reopened conversation from ending in a run of "Making a note to remember",
+ * since the last turn of every sitting is nothing but those.
+ */
+const NOTE_KEEPING: ReadonlySet<string> = new Set([
+  'retain',
+  'remember',
+  'recall',
+  'reflect',
+  'memory_edit',
+  'forget',
+]);
+
+export function isNoteKeeping(name: string): boolean {
+  return NOTE_KEEPING.has(name.toLowerCase());
+}
 
 /** The advisor, asked and answered. Said out loud rather than slipped past:
  *  nobody presses a button for it, so the line is the only evidence it ran. */

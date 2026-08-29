@@ -85,7 +85,7 @@ import {
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
 import { browserFolder, browserFrame, forgetLogins } from '../src/agent/pi/computer';
-import { alwaysFile, alwaysFrom, WHEN, type When } from '../src/work/always';
+import { ALWAYS_TEMPLATE, alwaysFile, alwaysFrom, isAlwaysFile, WHEN, type When } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
@@ -5520,6 +5520,13 @@ function register(): void {
     // path from the window is not a path to trust with `open -a`.
     const target = typeof file === 'string' && file !== '' ? inside(open.path, file) : open.path;
     if (target === null) return fail(NOTHING_OPEN);
+    // A file the project has not written yet opens as nothing at all, which is
+    // what "Things this project always does" did before anybody had any. It is
+    // made first, with enough in it to edit.
+    if (isAlwaysFile(target)) {
+      await mkdir(dirname(target), { recursive: true }).catch(() => undefined);
+      await writeFile(target, ALWAYS_TEMPLATE, { flag: 'wx' }).catch(() => undefined);
+    }
     try {
       await new Promise<void>((resolve, reject) => {
         const child = spawn('open', ['-a', found.bundle, target], { stdio: 'ignore' });

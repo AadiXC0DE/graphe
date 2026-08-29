@@ -186,3 +186,22 @@ describe('whether to rename at all', () => {
     );
   });
 });
+
+describe('a link is not a name', () => {
+  it('drops a URL and names the request instead', () => {
+    expect(slugFor('do a PR review for https://github.com/AadiXC0DE/graphe/pull/41'))
+      .toBe('pr-review-for');
+    expect(slugFor('fix the nav on paper-street.com and ship it')).toBe('fix-nav-on-and-ship-it');
+  });
+
+  it('is still a name when the words are only a link', () => {
+    // Nothing left to name it after, so the neutral name stands.
+    expect(slugFor('https://github.com/AadiXC0DE/graphe/pull/41')).toBeNull();
+  });
+
+  it('never comes out longer than a branch list can read', () => {
+    const long = slugFor('rewrite the entire authentication and authorisation subsystem end to end');
+    expect(long).not.toBeNull();
+    expect((long ?? '').length).toBeLessThanOrEqual(44);
+  });
+});

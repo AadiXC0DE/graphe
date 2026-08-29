@@ -46,7 +46,11 @@ const RESERVED = new Set(['head', 'main', 'master', 'origin', 'conversation']);
 export function slugFor(text: string): string | null {
   const all = text
     .toLowerCase()
+    // A URL and a code span are both one long token that names nothing: a
+    // request with a link in it became the link rather than the request.
     .replace(/`[^`]*`/g, ' ')
+    .replace(/\bhttps?:\/\/\S+/g, ' ')
+    .replace(/\b[\w.-]+\.(?:com|org|net|io|dev|sh|app|co|ai|xyz)\b\S*/g, ' ')
     .split(/[^a-z0-9]+/)
     .filter((word) => word !== '');
   if (all.length === 0) return null;

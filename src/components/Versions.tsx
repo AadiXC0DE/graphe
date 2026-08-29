@@ -351,9 +351,8 @@ function Moment({
         onClick={onKeep}
       >
         {/* A five-point star is top-heavy: its filled mass sits below its
-            bounding-box centre, so a box-centred star reads low in the circle.
-            The path is raised until its area-centroid lands on the viewBox
-            centre, which is the point the surrounding circle shares. */}
+            bounding-box centre, so a box-centred star reads low. The path is
+            raised until its area-centroid lands on the viewBox centre. */}
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path
             d="M8 1.8l1.56 4.06 4.34.22-3.38 2.74 1.12 4.2L8 10.65l-3.64 2.37 1.12-4.2-3.38-2.74 4.34-.22z"

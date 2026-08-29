@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   branchFor,
+  branchNames,
   bringBack,
   checkoutFolder,
   createWorktree,
@@ -22,6 +23,7 @@ import {
   holdsWork,
   landWorktree,
   putAwayWorktree,
+  renameCheckoutBranch,
   reopenWorktree,
   sweepCheckouts,
   worktreeWords,
@@ -832,6 +834,75 @@ describe('putting a conversation away and asking for it again', () => {
       const landed = await landWorktree(git(), repo, folder);
       expect(landed.ok).toBe(true);
       expect(readFileContent(repo, 'a.txt')).toBe('the tab decided this\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('renameCheckoutBranch — naming one after what it turned out to be', () => {
+  it('renames the branch the checkout is on, and takes the folder with it', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'conversation-2', null);
+      if (!made.ok || made.value === null) return;
+      const { folder, branch } = made.value;
+
+      expect(await renameCheckoutBranch(git(), folder, branch, 'graphe/dark-mode')).toBe(true);
+      expect((await raw(folder, 'rev-parse', '--abbrev-ref', 'HEAD')).trim()).toBe(
+        'graphe/dark-mode',
+      );
+      expect(await branchNames(git(), repo)).toContain('graphe/dark-mode');
+      expect(await branchNames(git(), repo)).not.toContain(branch);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses when the folder is not on the branch it was told about', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'conversation-3', null);
+      if (!made.ok || made.value === null) return;
+      const { folder } = made.value;
+
+      expect(await renameCheckoutBranch(git(), folder, 'graphe/somebody-else', 'graphe/x')).toBe(
+        false,
+      );
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a branch somebody else can already fetch', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'conversation-4', null);
+      if (!made.ok || made.value === null) return;
+      const { folder, branch } = made.value;
+
+      const head = (await raw(folder, 'rev-parse', 'HEAD')).trim();
+      await raw(repo, 'update-ref', `refs/remotes/origin/${branch}`, head);
+      await raw(repo, 'config', `branch.${branch}.remote`, 'origin');
+      await raw(repo, 'config', `branch.${branch}.merge`, `refs/heads/${branch}`);
+
+      expect(await renameCheckoutBranch(git(), folder, branch, 'graphe/dark-mode')).toBe(false);
+      expect((await raw(folder, 'rev-parse', '--abbrev-ref', 'HEAD')).trim()).toBe(branch);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses rather than writing over a name already in use', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'conversation-5', null);
+      if (!made.ok || made.value === null) return;
+      const { folder, branch } = made.value;
+      await raw(repo, 'branch', 'graphe/dark-mode');
+
+      expect(await renameCheckoutBranch(git(), folder, branch, 'graphe/dark-mode')).toBe(false);
+      expect((await raw(folder, 'rev-parse', '--abbrev-ref', 'HEAD')).trim()).toBe(branch);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

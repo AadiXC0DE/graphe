@@ -115,10 +115,10 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Save / commit
-   The changed set as one thing, named the way git names it and said the way
-   people say it. The individual files are a project-place's job now; here is
-   the one thing the hand does with them as a whole.
+   Commit
+   The changed set as one thing, named the way git names it. The individual
+   files are a project-place's job now; here is the one thing the hand does with
+   them as a whole.
    --------------------------------------------------------------------------- */
 
 /* The branch, then the plain note under it: git's word on its own line (the
@@ -403,9 +403,8 @@
 
 .overview__actions .overview__do { margin-top: 0; }
 
-/* Two voices in one control: the git word, then the plain translation. A thin
-   pipe separates them so the pair reads as term + note rather than one blurry
-   button. */
+/* The operation, then where it lands. A thin pipe separates them so the pair
+   reads as one press with a destination rather than two labels. */
 .overview__do .overview__plainsay {
   position: relative;
   margin-left: var(--space-2);

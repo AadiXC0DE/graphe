@@ -39,8 +39,11 @@ export type Block = {
   /** What this one is asked to do. The kind's own words until somebody edits. */
   says: string;
   model: BlockModel;
-  /** The block this one waits for, or null when it waits for nothing. */
-  after: string | null;
+  /** Every block this one waits for. Empty means it waits for nothing and the
+   *  flow can begin here. Several means it begins when the last of them has
+   *  finished — a review after both the change and the checks is the shape
+   *  people draw, and one parent could not say it. */
+  after: readonly string[];
   /** Look around and propose before touching anything. */
   lookFirst?: boolean;
   /** Files this block carries. Pictures go with the ask the way they do from
@@ -189,7 +192,7 @@ export const canvasWords = {
   whichNote: 'Which project inside this folder the whole flow works in',
   nothing: 'Nothing — it starts the flow',
   /** In the picker, above the blocks it could be made to wait for. */
-  afterWhich: 'Runs after',
+  afterWhich: 'Runs after all of these',
   shows: 'Shows it',
   files: 'Attachments',
   filesCount: (n: number): string => (n === 1 ? '1 file' : `${String(n)} files`),
@@ -205,6 +208,7 @@ export const canvasWords = {
   tidyNote: 'Put every block back in line',
   remove: 'Remove',
   connect: 'Drag from a block’s dot to the one that should follow it',
+  unjoined: 'Took that one off. Drag again to put it back.',
   fit: 'Fit',
   further: 'Further out',
   closer: 'Closer',
@@ -391,9 +395,9 @@ export type Loop = {
   id: string;
   name: string;
   note: string;
-  /** `after` is an index into this same list, so a loop is a shape rather than
+  /** `after` is indices into this same list, so a loop is a shape rather than
    *  a set of ids nobody has yet. */
-  blocks: readonly { kind: BlockKind; after: number | null }[];
+  blocks: readonly { kind: BlockKind; after: readonly number[] }[];
 };
 
 export const LOOPS: readonly Loop[] = [
@@ -402,10 +406,10 @@ export const LOOPS: readonly Loop[] = [
     name: 'Build, verify, ship',
     note: 'Make the change, open it in the browser, run the checks, then a pull request.',
     blocks: [
-      { kind: 'custom', after: null },
-      { kind: 'browser', after: 0 },
-      { kind: 'checks', after: 1 },
-      { kind: 'pull-request', after: 2 },
+      { kind: 'custom', after: [] },
+      { kind: 'browser', after: [0] },
+      { kind: 'checks', after: [1] },
+      { kind: 'pull-request', after: [2] },
     ],
   },
   {
@@ -413,9 +417,9 @@ export const LOOPS: readonly Loop[] = [
     name: 'Plan, build, review',
     note: 'Read the project before touching it, make the change, then read the diff back.',
     blocks: [
-      { kind: 'plan', after: null },
-      { kind: 'custom', after: 0 },
-      { kind: 'review', after: 1 },
+      { kind: 'plan', after: [] },
+      { kind: 'custom', after: [0] },
+      { kind: 'review', after: [1] },
     ],
   },
   {
@@ -423,9 +427,9 @@ export const LOOPS: readonly Loop[] = [
     name: 'Plan, fan out, review',
     note: 'One pass to see the shape, subagents in parallel, then one verdict over the lot.',
     blocks: [
-      { kind: 'plan', after: null },
-      { kind: 'subagents', after: 0 },
-      { kind: 'review', after: 1 },
+      { kind: 'plan', after: [] },
+      { kind: 'subagents', after: [0] },
+      { kind: 'review', after: [1] },
     ],
   },
 ];
@@ -441,14 +445,15 @@ export function blockId(): string {
   return `block-${Date.now().toString(36)}-${String(counter)}`;
 }
 
-export function place(flow: Flow, kind: BlockKind, after: string | null = null): Flow {
+export function place(flow: Flow, kind: BlockKind, after: string | readonly string[] | null = null): Flow {
   const spec = specOf(kind);
+  const asked = after === null ? [] : typeof after === 'string' ? [after] : after;
   const block: Block = {
     id: blockId(),
     kind,
     says: spec.says,
     model: null,
-    after: flow.blocks.some((one) => one.id === after) ? after : null,
+    after: [...new Set(asked.filter((one) => flow.blocks.some((block) => block.id === one)))],
   };
   return { ...flow, blocks: [...flow.blocks, block] };
 }
@@ -459,7 +464,7 @@ export function placeLoop(flow: Flow, loop: Loop): Flow {
   const made: string[] = [];
   for (const one of loop.blocks) {
     const before = next.blocks.length;
-    next = place(next, one.kind, one.after === null ? null : (made[one.after] ?? null));
+    next = place(next, one.kind, one.after.map((at) => made[at] ?? '').filter((id) => id !== ''));
     made.push(next.blocks[before]?.id ?? '');
   }
   return next;
@@ -473,7 +478,11 @@ export function change(flow: Flow, id: string, over: Partial<Omit<Block, 'id'>>)
 }
 
 /** Take one out, and hand whatever was waiting on it to what it was waiting for
- *  — a block removed from the middle must not strand the rest of the line. */
+ *  — a block removed from the middle must not strand the rest of the line.
+ *
+ *  With several parents that is a splice rather than a swap: the removed
+ *  block's own waits take its place in each child's list, beside whatever else
+ *  that child was already waiting for. */
 export function remove(flow: Flow, id: string): Flow {
   const gone = flow.blocks.find((one) => one.id === id);
   if (gone === undefined) return flow;
@@ -481,7 +490,16 @@ export function remove(flow: Flow, id: string): Flow {
     ...flow,
     blocks: flow.blocks
       .filter((one) => one.id !== id)
-      .map((one) => (one.after === id ? { ...one, after: gone.after } : one)),
+      .map((one) =>
+        one.after.includes(id)
+          ? {
+              ...one,
+              after: [
+                ...new Set([...one.after.filter((was) => was !== id), ...gone.after]),
+              ].filter((was) => was !== one.id),
+            }
+          : one,
+      ),
   };
 }
 
@@ -500,18 +518,43 @@ export function canWaitFor(
   if (id === after) return { ok: false, because: canvasWords.itself };
   const byId = new Map(flow.blocks.map((one) => [one.id, one]));
   if (!byId.has(id) || !byId.has(after)) return { ok: false, because: canvasWords.missing };
-  let walk: string | null = after;
+  // Everything the proposed parent already waits for, however many branches
+  // that is. A single walk up one chain missed a ring closed through the other.
   const seen = new Set<string>();
-  while (walk !== null && !seen.has(walk)) {
-    if (walk === id) return { ok: false, because: canvasWords.loop };
-    seen.add(walk);
-    walk = byId.get(walk)?.after ?? null;
+  const todo = [after];
+  while (todo.length > 0) {
+    const one = todo.pop() as string;
+    if (one === id) return { ok: false, because: canvasWords.loop };
+    if (seen.has(one)) continue;
+    seen.add(one);
+    todo.push(...(byId.get(one)?.after ?? []));
   }
   return { ok: true };
 }
 
+/** Add a wait. Already waiting for it, or unable to, and the flow is unchanged
+ *  — dropping a line twice is not two lines. */
 export function join(flow: Flow, id: string, after: string | null): Flow {
-  return canWaitFor(flow, id, after).ok ? change(flow, id, { after }) : flow;
+  if (after === null) return change(flow, id, { after: [] });
+  const block = flow.blocks.find((one) => one.id === id);
+  if (block === undefined || block.after.includes(after)) return flow;
+  return canWaitFor(flow, id, after).ok
+    ? change(flow, id, { after: [...block.after, after] })
+    : flow;
+}
+
+/** Take one wait off. What is left may be nothing, and then the flow begins
+ *  here — which is how a line is removed as well as added. */
+export function unjoin(flow: Flow, id: string, after: string): Flow {
+  const block = flow.blocks.find((one) => one.id === id);
+  if (block === undefined || !block.after.includes(after)) return flow;
+  return change(flow, id, { after: block.after.filter((one) => one !== after) });
+}
+
+/** Whether a line already runs from one to the other, so a second drag over it
+ *  can take it off rather than refuse. */
+export function joined(flow: Flow, id: string, after: string): boolean {
+  return flow.blocks.find((one) => one.id === id)?.after.includes(after) === true;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -543,7 +586,9 @@ export function nextUp(flow: Flow): Block | null {
   const done = new Set(flow.done);
   for (const block of runOrder(flow)) {
     if (done.has(block.id)) continue;
-    if (block.after !== null && !done.has(block.after)) continue;
+    // Every one of them, not the first: a block with two waits begins when the
+    // last of them has finished.
+    if (!block.after.every((one) => done.has(one))) continue;
     return block;
   }
   return null;
@@ -563,19 +608,22 @@ export function stateOf(block: Block, flow: Flow): BlockState {
 function columns(flow: Flow): Map<string, number> {
   const byId = new Map(flow.blocks.map((one) => [one.id, one]));
   const at = new Map<string, number>();
-  for (const block of flow.blocks) {
-    let far = 0;
-    const seen = new Set([block.id]);
-    let walk = block.after;
-    while (walk !== null && !seen.has(walk)) {
-      const parent = byId.get(walk);
-      if (parent === undefined) break;
-      seen.add(walk);
-      far += 1;
-      walk = parent.after;
-    }
-    at.set(block.id, far);
-  }
+  // One past the furthest thing it waits for, so a block waiting on two chains
+  // of different lengths sits after both of them rather than beside the short
+  // one. `walking` closes a ring a hand-edited file could still hold.
+  const walking = new Set<string>();
+  const far = (id: string): number => {
+    const held = at.get(id);
+    if (held !== undefined) return held;
+    if (walking.has(id)) return 0;
+    walking.add(id);
+    const parents = byId.get(id)?.after ?? [];
+    const deep = parents.reduce((most, one) => (byId.has(one) ? Math.max(most, far(one) + 1) : most), 0);
+    walking.delete(id);
+    at.set(id, deep);
+    return deep;
+  };
+  for (const block of flow.blocks) far(block.id);
   return at;
 }
 
@@ -649,7 +697,9 @@ export function tidy(flow: Flow): Readonly<Record<string, { x: number; y: number
   for (const block of runOrder(flow)) {
     const column = at.get(block.id) ?? 0;
     const used = taken.get(column) ?? new Set<number>();
-    let row = block.after === null ? 0 : (rowOf.get(block.after) ?? 0);
+    // Beside the first thing it waits for, or the top row when it waits for
+    // nothing; then down until the column is free.
+    let row = block.after.length === 0 ? 0 : Math.min(...block.after.map((one) => rowOf.get(one) ?? 0));
     while (used.has(row)) row += 1;
     used.add(row);
     taken.set(column, used);
@@ -695,7 +745,7 @@ export function isArranged(flow: Flow): boolean {
  *  mistake — they start together — but which they are is worth saying, because
  *  a block accidentally left unattached would otherwise start on its own. */
 export function startsAt(flow: Flow): readonly Block[] {
-  return flow.blocks.filter((one) => one.after === null);
+  return flow.blocks.filter((one) => one.after.length === 0);
 }
 
 /**
@@ -730,9 +780,22 @@ export function endedAs(flow: Flow): Ending | null {
   return { whole: left.length === 0, ran: done.size, turns, left, last };
 }
 
+/**
+ * What one line between two blocks is doing.
+ *
+ * Colour is progress and motion is only ever now: a line both ends of which
+ * have finished has been through, and the line feeding whatever is being worked
+ * on carries the wave. A board of grey lines said neither.
+ */
+export function lineState(parent: BlockState, block: BlockState): 'idle' | 'passed' | 'live' {
+  if (parent !== 'done') return 'idle';
+  if (block === 'running' || block === 'needs-you') return 'live';
+  return block === 'done' ? 'passed' : 'idle';
+}
+
 /** Everything waiting directly on this one. */
 export function waitingOn(flow: Flow, id: string): readonly Block[] {
-  return flow.blocks.filter((one) => one.after === id);
+  return flow.blocks.filter((one) => one.after.includes(id));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -755,6 +818,14 @@ function readSaid(value: unknown, have: ReadonlySet<string>): Readonly<Record<st
     };
   }
   return kept;
+}
+
+/** Whatever the file held, as a list of ids. A string is a flow written when a
+ *  block could only wait for one thing. */
+function readAfter(value: unknown): readonly string[] {
+  if (typeof value === 'string') return value === '' ? [] : [value];
+  if (!Array.isArray(value)) return [];
+  return [...new Set((value as readonly unknown[]).filter((one): one is string => typeof one === 'string' && one !== ''))];
 }
 
 function readAt(value: unknown): { x: number; y: number } | null {
@@ -821,7 +892,7 @@ export function readFlow(raw: unknown): Flow | null {
       kind: kind as BlockKind,
       says: typeof block['says'] === 'string' ? block['says'] : '',
       model: readModel(block['model']),
-      after: typeof block['after'] === 'string' ? block['after'] : null,
+      after: readAfter(block['after']),
       ...(block['lookFirst'] === true ? { lookFirst: true } : {}),
       ...(readFiles(block['files'] ?? block['pictures']).length === 0
         ? {}
@@ -832,37 +903,44 @@ export function readFlow(raw: unknown): Flow | null {
 
   // A wait pointing at a block that did not survive the read would strand it,
   // and a ring of them would be a flow that draws but never starts. Both become
-  // a block that waits for nothing, which is a flow somebody can still run.
+  // one wait fewer, which is a flow somebody can still run.
   const have = new Set(blocks.map((one) => one.id));
-  const standing = blocks.map((one) =>
-    one.after !== null && !have.has(one.after) ? { ...one, after: null } : one,
+  const after = new Map(
+    blocks.map((one) => [one.id, one.after.filter((was) => was !== one.id && have.has(was))]),
   );
-  const after = new Map(standing.map((one) => [one.id, one.after]));
-  for (const one of standing) {
-    const seen = new Set([one.id]);
-    let walk = after.get(one.id) ?? null;
-    while (walk !== null) {
-      if (seen.has(walk)) {
-        // One edge per ring, so a shape that was nearly right stays nearly
-        // right rather than falling apart into loose blocks.
-        after.set(one.id, null);
-        break;
-      }
-      seen.add(walk);
-      walk = after.get(walk) ?? null;
+  // Edges are added back one at a time and any that closes a ring is dropped,
+  // so a shape that was nearly right stays nearly right rather than falling
+  // apart into loose blocks.
+  const kept = new Map(blocks.map((one) => [one.id, [] as string[]]));
+  const reaches = (from: string, to: string): boolean => {
+    const seen = new Set<string>();
+    const todo = [from];
+    while (todo.length > 0) {
+      const one = todo.pop() as string;
+      if (one === to) return true;
+      if (seen.has(one)) continue;
+      seen.add(one);
+      todo.push(...(kept.get(one) ?? []));
+    }
+    return false;
+  };
+  for (const one of blocks) {
+    for (const parent of after.get(one.id) ?? []) {
+      if (reaches(parent, one.id)) continue;
+      kept.get(one.id)?.push(parent);
     }
   }
-  const kept = standing.map((one) => ({ ...one, after: after.get(one.id) ?? null }));
   const startedAt = held['startedAt'];
   const name = held['name'];
   const conversation = held['conversation'];
   const running = held['running'];
   const doneList = held['done'];
-  const have2 = new Set(kept.map((one) => one.id));
+  const standing: Block[] = blocks.map((one) => ({ ...one, after: kept.get(one.id) ?? [] }));
+  const have2 = new Set(standing.map((one) => one.id));
   return {
     id,
     name: typeof name === 'string' && name.trim() !== '' ? name : canvasWords.untitled,
-    blocks: kept,
+    blocks: standing,
     conversation: typeof conversation === 'string' && conversation !== '' ? conversation : null,
     repo: typeof held['repo'] === 'string' && held['repo'] !== '' ? held['repo'] : null,
     howFar: isHowFar(held['howFar']) ? held['howFar'] : 'asking',

@@ -14,6 +14,9 @@ import {
   carryOnWords,
   BLOCKS,
   canStart,
+  unjoin,
+  joined,
+  tidy,
   canvasWords,
   endedAs,
   canWaitFor,
@@ -26,6 +29,7 @@ import {
   isRunning,
   join,
   layOut,
+  lineState,
   LOOPS,
   MOST_FILES,
   MOST_TEXT,
@@ -101,7 +105,7 @@ describe('placing blocks', () => {
 
   it('refuses to place one behind a block nobody has', () => {
     const flow = place(newFlow(), 'custom', 'nowhere');
-    expect(flow.blocks[0]?.after).toBeNull();
+    expect(flow.blocks[0]?.after).toEqual([]);
   });
 
   it('changes only the block it was asked about', () => {
@@ -119,13 +123,13 @@ describe('taking one out', () => {
     const [look, work, review] = idsOf(flow);
     const next = remove(flow, work!);
     expect(idsOf(next)).toEqual([look, review]);
-    expect(next.blocks.find((one) => one.id === review)?.after).toBe(look);
+    expect(next.blocks.find((one) => one.id === review)?.after).toEqual([look]);
   });
 
   it('frees the head of a chain rather than stranding the rest', () => {
     const flow = chained('plan', 'custom');
     const next = remove(flow, idsOf(flow)[0]!);
-    expect(next.blocks[0]?.after).toBeNull();
+    expect(next.blocks[0]?.after).toEqual([]);
   });
 
   it('does nothing for a block nobody has', () => {
@@ -233,24 +237,23 @@ describe('the loops somebody can put down whole', () => {
   it('chains every block behind one that comes earlier in the same list', () => {
     for (const loop of LOOPS) {
       loop.blocks.forEach((one, index) => {
-        if (one.after === null) return;
-        expect(one.after, loop.id).toBeLessThan(index);
+        for (const was of one.after) expect(was, loop.id).toBeLessThan(index);
       });
     }
   });
 
   it('starts each loop with exactly one block that waits for nothing', () => {
     for (const loop of LOOPS) {
-      expect(loop.blocks.filter((one) => one.after === null), loop.id).toHaveLength(1);
+      expect(loop.blocks.filter((one) => one.after.length === 0), loop.id).toHaveLength(1);
     }
   });
 
   it('puts one down as a real chain of real ids', () => {
     const flow = placeLoop(newFlow(), LOOPS[0]!);
     expect(flow.blocks).toHaveLength(LOOPS[0]!.blocks.length);
-    expect(flow.blocks[0]?.after).toBeNull();
-    expect(flow.blocks[1]?.after).toBe(flow.blocks[0]?.id);
-    expect(flow.blocks[2]?.after).toBe(flow.blocks[1]?.id);
+    expect(flow.blocks[0]?.after).toEqual([]);
+    expect(flow.blocks[1]?.after).toEqual([flow.blocks[0]?.id]);
+    expect(flow.blocks[2]?.after).toEqual([flow.blocks[1]?.id]);
   });
 
   it('puts a second one down beside the first rather than over it', () => {
@@ -263,7 +266,9 @@ describe('the loops somebody can put down whole', () => {
     for (const loop of LOOPS) {
       const flow = placeLoop(newFlow(), loop);
       for (const block of flow.blocks) {
-        expect(canWaitFor(flow, block.id, block.after).ok, loop.id).toBe(true);
+        for (const was of block.after) {
+          expect(canWaitFor(flow, block.id, was).ok, loop.id).toBe(true);
+        }
       }
     }
   });
@@ -338,8 +343,9 @@ describe('the order it goes on the board in', () => {
     const flow = chained('plan', 'custom', 'checks', 'review');
     const order = runOrder(flow).map((one) => one.id);
     for (const block of flow.blocks) {
-      if (block.after === null) continue;
-      expect(order.indexOf(block.id)).toBeGreaterThan(order.indexOf(block.after));
+      for (const was of block.after) {
+        expect(order.indexOf(block.id)).toBeGreaterThan(order.indexOf(was));
+      }
     }
   });
 
@@ -511,8 +517,8 @@ describe('reading a flow off the disk', () => {
         { id: 'b', kind: 'review', after: 'a' },
       ],
     });
-    expect(flow?.blocks[0]?.after).toBeNull();
-    expect(flow?.blocks[1]?.after).toBe('a');
+    expect(flow?.blocks[0]?.after).toEqual([]);
+    expect(flow?.blocks[1]?.after).toEqual(['a']);
   });
 
   it('keeps a model only when both halves of it are there', () => {
@@ -560,7 +566,7 @@ describe('reading a flow off the disk', () => {
       kind: 'custom' as const,
       says: 'Follow this spec.',
       model: null,
-      after: null,
+      after: [],
       files: [
         { name: 'spec.md', mimeType: 'text/markdown', kind: 'text' as const, bytes: '# Spec\nDo the thing.' },
         { name: 'shot.png', mimeType: 'image/png', kind: 'image' as const, bytes: 'AAA' },
@@ -787,14 +793,14 @@ describe('branches, and the shapes people actually draw', () => {
         { id: 'b', kind: 'checks', after: 'a' },
       ],
     });
-    expect(flow?.blocks.filter((one) => one.after === null)).toHaveLength(1);
+    expect(flow?.blocks.filter((one) => one.after.length === 0)).toHaveLength(1);
     expect(nextUp({ ...flow!, startedAt: 1 })).not.toBeNull();
   });
 
   it('removing the middle of a branch hands its children back up the chain', () => {
     const { flow, a, b, d } = branched();
     const without = remove(flow, b);
-    expect(without.blocks.find((one) => one.id === d)?.after).toBe(a);
+    expect(without.blocks.find((one) => one.id === d)?.after).toEqual([a]);
     expect(without.blocks).toHaveLength(3);
   });
 });
@@ -818,5 +824,315 @@ describe('a folder that holds several projects', () => {
     expect(app).toContain('...(flow.repo === null ? {} : { repo: flow.repo }),');
     // Both the conversation it opens and every turn it sends.
     expect(app.match(/\.\.\.\(flow\.repo === null \? \{\} : \{ repo: flow\.repo \}\),/g)?.length).toBe(2);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+   A block can wait for more than one thing
+   --------------------------------------------------------------------------- */
+
+describe('waiting for several blocks at once', () => {
+  /** The shape people actually draw: build and check in parallel, one review
+   *  after both. A → B, A → C, B → D, C → D. */
+  function diamond() {
+    let flow = place(newFlow(), 'plan');
+    const a = flow.blocks[0]!.id;
+    flow = place(flow, 'custom', a);
+    const b = flow.blocks[1]!.id;
+    flow = place(flow, 'checks', a);
+    const c = flow.blocks[2]!.id;
+    flow = place(flow, 'review', [b, c]);
+    return { flow, a, b, c, d: flow.blocks[3]!.id };
+  }
+
+  it('places one behind several at once', () => {
+    const { flow, b, c, d } = diamond();
+    expect(flow.blocks.find((one) => one.id === d)?.after).toEqual([b, c]);
+  });
+
+  it('does not begin until every one of them has finished', () => {
+    const { flow, a, b, c, d } = diamond();
+    const going: Flow = { ...flow, startedAt: 1 };
+    expect(nextUp(going)?.id).toBe(a);
+    // A done: both branches are up, in order, and never the review.
+    const afterA: Flow = { ...going, done: [a] };
+    expect([b, c]).toContain(nextUp(afterA)?.id);
+    const afterB: Flow = { ...going, done: [a, b] };
+    expect(nextUp(afterB)?.id).toBe(c);
+    const afterC: Flow = { ...going, done: [a, c] };
+    expect(nextUp(afterC)?.id).toBe(b);
+    // Only once both are in.
+    expect(nextUp({ ...going, done: [a, b, c] })?.id).toBe(d);
+  });
+
+  it('runs every block exactly once', () => {
+    const { flow } = diamond();
+    let going: Flow = { ...flow, startedAt: 1 };
+    const order: string[] = [];
+    for (let round = 0; round < 20; round += 1) {
+      const next = nextUp(going);
+      if (next === null) break;
+      order.push(next.id);
+      going = { ...going, done: [...going.done, next.id] };
+    }
+    expect(order).toHaveLength(4);
+    expect(new Set(order).size).toBe(4);
+    expect(endedAs(going)?.whole).toBe(true);
+  });
+
+  it('a branch that never finished holds only what waits on it', () => {
+    const { flow, a, b, c, d } = diamond();
+    // A and B done, C stopped: the review waits, C is still what is up.
+    const stuck: Flow = { ...flow, startedAt: 1, done: [a, b] };
+    expect(nextUp(stuck)?.id).toBe(c);
+    expect(nextUp(stuck)?.id).not.toBe(d);
+  });
+
+  it('one start, one end', () => {
+    const { flow, a, d } = diamond();
+    expect(startsAt(flow).map((one) => one.id)).toEqual([a]);
+    expect(flow.blocks.filter((one) => waitingOn(flow, one.id).length === 0).map((one) => one.id)).toEqual([d]);
+  });
+
+  it('sits past the furthest thing it waits for, not beside the nearest', () => {
+    // A → B → C → E and A → E: E belongs after C, not next to B.
+    let flow = place(newFlow(), 'plan');
+    const a = flow.blocks[0]!.id;
+    flow = place(flow, 'custom', a);
+    const b = flow.blocks[1]!.id;
+    flow = place(flow, 'checks', b);
+    const c = flow.blocks[2]!.id;
+    flow = place(flow, 'review', [a, c]);
+    const drawn = layOut(flow);
+    const at = (id: string) => drawn.blocks.find((one) => one.id === id)!;
+    expect(at(flow.blocks[3]!.id).x).toBeGreaterThan(at(c).x);
+  });
+
+  it('lays every block somewhere of its own', () => {
+    const { flow } = diamond();
+    const drawn = layOut(flow);
+    const spots = new Set(drawn.blocks.map((one) => `${String(one.x)},${String(one.y)}`));
+    expect(spots.size).toBe(drawn.blocks.length);
+  });
+
+  it('refuses a ring closed through the other branch', () => {
+    const { flow, a, d } = diamond();
+    // A already reaches D through both branches, so A waiting for D is a ring
+    // no single-chain walk would have caught.
+    expect(canWaitFor(flow, a, d).ok).toBe(false);
+    expect(join(flow, a, d)).toBe(flow);
+  });
+
+  it('refuses to wait for itself, and for a block nobody has', () => {
+    const { flow, a } = diamond();
+    expect(canWaitFor(flow, a, a).ok).toBe(false);
+    expect(canWaitFor(flow, a, 'nowhere').ok).toBe(false);
+    expect(canWaitFor(flow, 'nowhere', a).ok).toBe(false);
+  });
+
+  it('joining the same pair twice is one line', () => {
+    const { flow, b, d } = diamond();
+    const again = join(flow, d, b);
+    expect(again).toBe(flow);
+    expect(again.blocks.find((one) => one.id === d)?.after).toEqual(flow.blocks.find((one) => one.id === d)?.after);
+  });
+
+  it('takes one wait off and leaves the rest', () => {
+    const { flow, b, c, d } = diamond();
+    const off = unjoin(flow, d, b);
+    expect(off.blocks.find((one) => one.id === d)?.after).toEqual([c]);
+    expect(joined(off, d, b)).toBe(false);
+    expect(joined(off, d, c)).toBe(true);
+    // Taking off a wait nobody has changes nothing.
+    expect(unjoin(off, d, b)).toBe(off);
+    expect(unjoin(off, 'nowhere', c)).toBe(off);
+  });
+
+  it('a block with every wait taken off starts the flow', () => {
+    const { flow, b, c, d } = diamond();
+    const loose = unjoin(unjoin(flow, d, b), d, c);
+    expect(startsAt(loose).map((one) => one.id)).toContain(d);
+    expect(nextUp({ ...loose, startedAt: 1 })).not.toBeNull();
+  });
+
+  it('removing the middle splices its waits into what waited on it', () => {
+    const { flow, a, b, c, d } = diamond();
+    const without = remove(flow, b);
+    // D waited on B and C; B waited on A. D now waits on C and A.
+    expect([...(without.blocks.find((one) => one.id === d)?.after ?? [])].sort()).toEqual([a, c].sort());
+    expect(without.blocks).toHaveLength(3);
+  });
+
+  it('removing a block never leaves one waiting for itself', () => {
+    // A → B, B → C, and C → A would be a ring, so: A → B → C, plus A → C.
+    let flow = place(newFlow(), 'plan');
+    const a = flow.blocks[0]!.id;
+    flow = place(flow, 'custom', a);
+    const b = flow.blocks[1]!.id;
+    flow = place(flow, 'checks', [a, b]);
+    const c = flow.blocks[2]!.id;
+    const without = remove(flow, b);
+    expect(without.blocks.find((one) => one.id === c)?.after).toEqual([a]);
+    expect(without.blocks.every((one) => !one.after.includes(one.id))).toBe(true);
+  });
+
+  it('the picker never offers a block that would close a ring', () => {
+    const { flow, a, b, c, d } = diamond();
+    const could = (id: string) =>
+      flow.blocks.filter((one) => one.id !== id && canWaitFor(flow, id, one.id).ok).map((one) => one.id);
+    expect(could(a)).toEqual([]);
+    expect(could(b).sort()).toEqual([a, c].sort());
+    expect(could(d).sort()).toEqual([a, b, c].sort());
+  });
+
+  it('reads a flow written when a block could only wait for one thing', () => {
+    const flow = readFlow({
+      id: 'f',
+      blocks: [
+        { id: 'a', kind: 'plan' },
+        { id: 'b', kind: 'custom', after: 'a' },
+        { id: 'c', kind: 'review', after: ['a', 'b'] },
+      ],
+    });
+    expect(flow?.blocks[0]?.after).toEqual([]);
+    expect(flow?.blocks[1]?.after).toEqual(['a']);
+    expect(flow?.blocks[2]?.after).toEqual(['a', 'b']);
+  });
+
+  it('drops what it cannot make sense of, one wait at a time', () => {
+    const flow = readFlow({
+      id: 'f',
+      blocks: [
+        { id: 'a', kind: 'plan' },
+        // itself, a block nobody has, the same one twice, and a number
+        { id: 'b', kind: 'custom', after: ['b', 'gone', 'a', 'a', 7, ''] },
+        { id: 'c', kind: 'review', after: {} },
+      ],
+    });
+    expect(flow?.blocks[1]?.after).toEqual(['a']);
+    expect(flow?.blocks[2]?.after).toEqual([]);
+  });
+
+  it('breaks a ring at one edge and keeps every other wait', () => {
+    // A → B → C → A, plus a fourth waiting on A. Only the edge that closes the
+    // ring goes; the rest of the shape stands.
+    const flow = readFlow({
+      id: 'f',
+      blocks: [
+        { id: 'a', kind: 'plan', after: ['c'] },
+        { id: 'b', kind: 'custom', after: ['a'] },
+        { id: 'c', kind: 'checks', after: ['b'] },
+        { id: 'd', kind: 'review', after: ['a'] },
+      ],
+    });
+    const edges = (flow?.blocks ?? []).flatMap((one) => one.after.map((was) => `${was}->${one.id}`));
+    // Three of the four survive — which one goes is whichever closed the ring
+    // as the file was read, and any of them is a correct break.
+    expect(edges).toHaveLength(3);
+    // The edge outside the ring is never the one taken.
+    expect(edges).toContain('a->d');
+    // And what is left runs: something is up, and everything gets a turn.
+    let going: Flow = { ...flow!, startedAt: 1 };
+    const order: string[] = [];
+    for (let round = 0; round < 10; round += 1) {
+      const next = nextUp(going);
+      if (next === null) break;
+      order.push(next.id);
+      going = { ...going, done: [...going.done, next.id] };
+    }
+    expect(new Set(order).size).toBe(4);
+  });
+
+  it('reads back exactly what was written, however many waits', () => {
+    const { flow } = diamond();
+    const back = readFlows(JSON.parse(JSON.stringify([flow])) as unknown)[0];
+    expect(back?.blocks.map((one) => one.after)).toEqual(flow.blocks.map((one) => one.after));
+  });
+
+  it('every kind of block can wait for several, gates included', () => {
+    for (const spec of BLOCKS) {
+      let flow = place(newFlow(), 'plan');
+      const a = flow.blocks[0]!.id;
+      flow = place(flow, 'checks', a);
+      const b = flow.blocks[1]!.id;
+      flow = place(flow, spec.kind, [a, b]);
+      const one = flow.blocks[2]!;
+      expect(one.after, spec.kind).toEqual([a, b]);
+      // It is offered only once both are in, whatever kind it is.
+      expect(nextUp({ ...flow, startedAt: 1, done: [a] })?.id, spec.kind).toBe(b);
+      expect(nextUp({ ...flow, startedAt: 1, done: [a, b] })?.id, spec.kind).toBe(one.id);
+      // A gate still stops for a person rather than being sent.
+      expect(isGate(one), spec.kind).toBe(spec.kind === 'wait');
+    }
+  });
+
+  it('a gate with two waits holds both branches until it is opened', () => {
+    let flow = place(newFlow(), 'plan');
+    const a = flow.blocks[0]!.id;
+    flow = place(flow, 'checks', a);
+    const b = flow.blocks[1]!.id;
+    flow = place(flow, 'wait', [a, b]);
+    const gate = flow.blocks[2]!.id;
+    flow = place(flow, 'pull-request', gate);
+    const stopped: Flow = { ...flow, startedAt: 1, done: [a, b], running: gate };
+    expect(stateOf(flow.blocks[2]!, stopped)).toBe('needs-you');
+    // Nothing past the gate is up while it holds.
+    expect(nextUp(stopped)?.id).toBe(gate);
+    expect(nextUp({ ...stopped, running: null, done: [a, b, gate] })?.id).toBe(flow.blocks[3]!.id);
+  });
+
+  it('tidying a diamond is the same every time', () => {
+    const { flow } = diamond();
+    expect(tidy(flow)).toEqual(tidy(tidied(flow)));
+    expect(isArranged(tidied(flow))).toBe(false);
+  });
+
+  it('a flow of nothing but starts is a flow', () => {
+    let flow = place(newFlow(), 'plan');
+    flow = place(flow, 'checks');
+    flow = place(flow, 'review');
+    expect(startsAt(flow)).toHaveLength(3);
+    const going: Flow = { ...flow, startedAt: 1 };
+    expect(nextUp(going)).not.toBeNull();
+    expect(endedAs({ ...going, done: flow.blocks.map((one) => one.id) })?.whole).toBe(true);
+  });
+
+  it('says how a run of several branches ended', () => {
+    const { flow, a, b, c, d } = diamond();
+    const half = endedAs({ ...flow, startedAt: 1, done: [a, b] });
+    expect(half?.whole).toBe(false);
+    expect(half?.left.map((one) => one.id).sort()).toEqual([c, d].sort());
+    expect(endedAs({ ...flow, startedAt: 1, done: [a, b, c, d] })?.whole).toBe(true);
+  });
+});
+
+describe('what a line between two blocks is doing', () => {
+  it('is idle until the run has left the block it comes from', () => {
+    for (const from of ['draft', 'waiting', 'running', 'needs-you', 'failed'] as const) {
+      for (const to of ['draft', 'waiting', 'running', 'needs-you', 'done', 'failed'] as const) {
+        expect(lineState(from, to), `${from}->${to}`).toBe('idle');
+      }
+    }
+  });
+
+  it('carries the wave into whatever is being worked on', () => {
+    expect(lineState('done', 'running')).toBe('live');
+    expect(lineState('done', 'needs-you')).toBe('live');
+  });
+
+  it('wears the accent once both ends are finished', () => {
+    expect(lineState('done', 'done')).toBe('passed');
+  });
+
+  it('says nothing about a block that has not had its turn', () => {
+    expect(lineState('done', 'waiting')).toBe('idle');
+    expect(lineState('done', 'draft')).toBe('idle');
+    expect(lineState('done', 'failed')).toBe('idle');
+  });
+
+  it('the view asks this rather than working it out itself', () => {
+    const view = readFileSync(new URL('../src/components/CanvasView.tsx', import.meta.url), 'utf8');
+    expect(view).toContain('lineState(parent.state, block.state)');
+    expect(view).toContain("doing === 'live' ?");
   });
 });

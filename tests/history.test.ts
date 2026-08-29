@@ -619,6 +619,24 @@ describe('H-08 identity and configuration', () => {
     expect(repo.AUTOMATIC_IDENTITY.email).toBe('noreply@graphe.local');
   });
 
+  it('a commit somebody pressed carries their own name, not ours', async () => {
+    const root = await newFolder();
+    await writeFile(path.join(root, 'index.html'), '<h1>one</h1>');
+    const line = await Timeline.open(root);
+    // The identity git would use for this folder if we left it alone.
+    await storage(root, ['config', 'user.name', 'A Developer']);
+    await storage(root, ['config', 'user.email', 'dev@example.test']);
+
+    await line.snapshot({ by: 'graphe' });
+    const automatic = (await storage(root, ['log', '-1', '--format=%an%x09%ae'])).trim();
+    expect(automatic).toBe([repo.AUTOMATIC_IDENTITY.name, repo.AUTOMATIC_IDENTITY.email].join('\t'));
+
+    await writeFile(path.join(root, 'index.html'), '<h1>two</h1>');
+    await line.snapshot({ by: 'you' });
+    const pressed = (await storage(root, ['log', '-1', '--format=%an%x09%ae%x09%cn%x09%ce'])).trim();
+    expect(pressed).toBe(['A Developer', 'dev@example.test', 'A Developer', 'dev@example.test'].join('\t'));
+  });
+
   it('a host may say who its saves belong to', async () => {
     const root = await newFolder();
     const line = await Timeline.open(root, {

@@ -10,8 +10,10 @@
 
 import { branchFor } from './worktree';
 
-/** A conversation's copy of the project: where it goes, and what it is on. */
-export type Checkout = { folder: string; branch: string };
+/** A conversation's copy of the project: where it goes, and what it is on.
+ *  `named` is set once the branch has been renamed after the work — it happens
+ *  at most once, so the fact has to outlive the sitting that did it. */
+export type Checkout = { folder: string; branch: string; named?: boolean };
 
 /** The last segment of a path, either separator. */
 function leafOf(folder: string): string {
@@ -28,10 +30,10 @@ export function checkoutRow(value: unknown): Checkout | null {
     return { folder: value, branch: branchFor(leaf) };
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
-  const row = value as { folder?: unknown; branch?: unknown };
+  const row = value as { folder?: unknown; branch?: unknown; named?: unknown };
   if (typeof row.folder !== 'string' || typeof row.branch !== 'string') return null;
   if (row.folder.trim() === '' || row.branch.trim() === '') return null;
-  return { folder: row.folder, branch: row.branch };
+  return { folder: row.folder, branch: row.branch, ...(row.named === true ? { named: true } : {}) };
 }
 
 /** The whole index, as read back. `keep` decides which folders belong to this

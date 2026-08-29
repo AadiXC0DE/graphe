@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { InStep as InStepView, Move } from '../lib/ipc';
+import { agoInSentence } from '../lib/when';
 import './InStep.css';
 
 type Props = {
@@ -22,8 +23,13 @@ type Props = {
 /** Every word this component can put on screen, in one place. */
 export const SAYS = {
   heading: 'In step with Figma',
+  /** What it needs, and what it does with it. The empty state is the one most
+   *  people meet, and "I will tell you when it moves" said nothing about the
+   *  reading it takes or the press it puts under each difference. */
   invitation:
-    'Point me at a Figma file and I will tell you when it moves on without you.',
+    'Paste a Figma file or frame. I read its colour, spacing and type as they stand now and keep that reading as what this work was built from — after that, every look tells you what has moved, and offers to build each change in.',
+  /** The way in for somebody who has to make the reading work at all. */
+  needs: 'Reading a file needs a Figma access token in FIGMA_TOKEN.',
   placeholder: 'Paste a Figma address',
   follow: 'Follow it',
   lookAgain: 'Look again',
@@ -32,6 +38,13 @@ export const SAYS = {
   caughtUp: 'It matches now',
   stop: 'Stop following',
   open: 'Open in Figma',
+  /** Where it stands, in two words, beside the heading. */
+  state: {
+    none: 'Not following',
+    level: 'In step',
+    drifted: 'Drifted',
+  },
+  looked: (when: string): string => `Looked ${when}`,
 } as const;
 
 /** Two colours touching, so the eye does the comparing — the same argument the
@@ -50,9 +63,10 @@ function Pair({ move }: { move: Move }) {
  * What has moved on in Figma since the work was built from it.
  *
  * Presentational and nothing else: everything it knows arrives as props and
- * everything it can do leaves as a callback. The empty state is the one people
- * meet first, so it is an invitation with a field in it rather than a sentence
- * about there being nothing here.
+ * everything it can do leaves as a callback. Where it stands is said in two
+ * words beside the heading — not following, in step, drifted — because a band
+ * that only ever shows an invitation looks the same whether nothing is followed
+ * or the last look failed.
  */
 export default function InStep({
   state,
@@ -72,6 +86,7 @@ export default function InStep({
       <section className="instep" aria-label={SAYS.heading}>
         <header className="instep__head">
           <h2 className="instep__heading">{SAYS.heading}</h2>
+          <span className="instep__state">{SAYS.state.none}</span>
         </header>
         <p className="instep__invite">{SAYS.invitation}</p>
         <form
@@ -102,18 +117,34 @@ export default function InStep({
           </button>
         </form>
         {state.trouble === null ? null : <p className="instep__trouble">{state.trouble}</p>}
+        <p className="instep__needs">{SAYS.needs}</p>
       </section>
     );
   }
+
+  const drifted = moved.length > 0;
 
   return (
     <section className="instep" aria-label={SAYS.heading}>
       <header className="instep__head">
         <h2 className="instep__heading">{SAYS.heading}</h2>
+        <span className={`instep__state${drifted ? ' instep__state--drifted' : ''}`}>
+          {drifted ? SAYS.state.drifted : SAYS.state.level}
+        </span>
         <button type="button" className="instep__quiet" onClick={onStop} disabled={busy}>
           {SAYS.stop}
         </button>
       </header>
+
+      {/* Which file, when it was last read, and the way back to it. All three
+          were in the reading already and none of them reached the screen. */}
+      <p className="instep__file">
+        <span className="instep__name">{following.name}</span>
+        <span className="instep__looked">{SAYS.looked(agoInSentence(following.readAt))}</span>
+        <a className="instep__open" href={following.url} target="_blank" rel="noreferrer">
+          {SAYS.open}
+        </a>
+      </p>
 
       <p className="instep__says">{state.says}</p>
 

@@ -485,13 +485,20 @@ export function sizesFor(sheets: readonly string[]): readonly Width[] {
 export const responsive = {
   button: 'Does this work on a phone?',
   working: 'Having a look at every size…',
-  heading: 'Every size',
   empty: 'No pictures yet — ask, and I’ll look at it at all three widths.',
   again: 'Look again',
+  /** What the press does, said before anybody presses it: a button with no
+   *  sentence over it is a button nobody presses twice. */
+  what:
+    'Serves the project, opens the page at every width you design for and photographs each one. Anything sitting past the edge of the screen comes back flagged, with how many pixels over it is.',
+  /** And where the widths come from, for somebody who wants different ones. */
+  where:
+    'The widths are the ones your own stylesheets already ask for — at most four, and always with a phone and a full-width look among them. Write another into the stylesheet and the next look uses it.',
   /** On the picture, where the fault is. */
   flagged: 'Doesn’t fit',
   missing: 'Didn’t come out',
-  /** What clicking a size does. */
-  pick: 'Work at this size',
-  picked: 'Working at this size',
+  /** What clicking a size does. It marks the one being read and nothing more,
+   *  so it does not promise work nobody is doing at that width. */
+  pick: 'Look at this one',
+  picked: 'Looking at this one',
 };

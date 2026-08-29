@@ -173,11 +173,14 @@ import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShipp
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor, workflowWords } from '../src/work/workflows';
 import { readCheckoutIndex, type Checkout } from '../src/history/checkouts';
+import { renameTo } from '../src/history/naming';
 import {
+  branchNames,
   bringBack,
   bringBackWords,
   createWorktree,
   nextCheckoutName,
+  renameCheckoutBranch,
   dropWorktree,
   putAwayWorktree,
   releaseWorktree,
@@ -3041,6 +3044,36 @@ function freshCheckout(held: Held, project: string): { name: string; folder: str
   });
   held.checkoutsMade = chosen.made;
   return { name: chosen.name, folder: join(worktreesFolder(project), chosen.name) };
+}
+
+/**
+ * Name a conversation's branch after the first thing it was asked to do.
+ *
+ * A checkout is made before anybody has said anything, so its branch starts
+ * neutral. The first request is the first subject there is, and the branch
+ * takes it — once, and only while the branch is still one of ours, still on its
+ * neutral name and tracking nothing anyone else can already fetch.
+ */
+async function nameBranchAfter(
+  open: Workspace<Held>,
+  address: string,
+  request: string,
+): Promise<void> {
+  const checkout = open.held.checkouts.get(address);
+  if (checkout === undefined || checkout.named === true) return;
+  const run = gitRunHereFor();
+  const taken = await branchNames(run, open.path);
+  const wanted = renameTo(checkout, request, (name) => taken.has(name));
+  if (wanted === null) return;
+  const renamed = await renameCheckoutBranch(run, checkout.folder, checkout.branch, wanted);
+  // Marked either way. A refused rename is git saying the branch is not ours to
+  // move, and asking again every turn is how a name starts wandering.
+  open.held.checkouts.set(address, {
+    ...checkout,
+    ...(renamed ? { branch: wanted } : {}),
+    named: true,
+  });
+  await saveCheckouts(open.path, open.held).catch(() => undefined);
 }
 
 /**
@@ -7552,6 +7585,9 @@ function register(): void {
     // sentence the version timeline writes for the same moment — see
     // src/diff/summary.ts.
     open.held.looking.instruction = text;
+    // Their words, not the workflow's expansion of them: the branch is named
+    // after what was asked for.
+    await nameBranchAfter(open, conversation.path, textIn).catch(() => undefined);
     try {
       const lookFirst =
         ways !== null && typeof ways === 'object' && (ways as PromptOptions).lookFirst === true;

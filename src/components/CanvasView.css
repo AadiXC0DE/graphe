@@ -324,11 +324,44 @@
 .canvas__line {
   stroke: var(--border-strong);
   stroke-width: 1.5;
+  transition: stroke var(--dur-ui) var(--ease-hover);
 }
 
-.canvas__line--live {
+/* The run has been through here. Colour is the only thing on the board that
+   says how far it got at a glance, and a grid of grey lines said nothing. */
+.canvas__line--passed {
+  stroke: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
+}
+
+/* And this is now: a short bright dash running the length of the line feeding
+   whatever is being worked on. One line at a time, so it reads as the work
+   moving rather than as decoration. */
+.canvas__flow {
   stroke: var(--accent);
   stroke-width: 2;
+  stroke-linecap: round;
+  /* Short mark, long gap: one pulse crosses a card-to-card line at a time on
+     a short run and two on a long one, rather than a dotted line. */
+  stroke-dasharray: 14 104;
+  animation: canvas-flowing 1200ms linear infinite;
+}
+
+@keyframes canvas-flowing {
+  from {
+    stroke-dashoffset: 118;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The colour stays; only the travelling goes. */
+@media (prefers-reduced-motion: reduce) {
+  .canvas__flow {
+    animation: none;
+    stroke-dasharray: none;
+    opacity: 0.6;
+  }
 }
 
 /* A proposal, until it is let go. */
@@ -728,16 +761,29 @@
 
 /* --------------------------------------------------------------- the foot */
 
+/* The zoom keeps the corner every canvas keeps it in; whatever the board has
+   to say sits in the middle of the room, where the eye already is. */
 .canvas__foot {
   position: absolute;
   left: var(--space-4);
   right: var(--space-4);
   bottom: var(--space-4);
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
   gap: var(--space-3);
   min-width: 0;
   pointer-events: none;
+}
+
+.canvas__foot > :first-child {
+  grid-column: 2;
+  justify-self: center;
+}
+
+.canvas__zoom {
+  grid-column: 3;
+  justify-self: end;
 }
 
 .canvas__foot > * {

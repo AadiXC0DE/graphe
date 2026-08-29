@@ -40,6 +40,20 @@ const SEVERAL = {
   whose: 'Whose history',
 } as const;
 
+/** The commit band. One press, one operation, named as itself — the second half
+ *  of the button says where the commit lands, which is the thing a label cannot
+ *  carry and the thing a developer wants before pressing it. */
+const COMMITTING = {
+  heading: 'Commit',
+  waiting: (count: number): string =>
+    count === 1 ? 'One change is not committed yet.' : `${count} changes are not committed yet.`,
+  onto: (branch: string): string => `to ${branch}`,
+  what: (branch: string | null): string =>
+    branch === null
+      ? 'Stage every change in this project and commit it.'
+      : `Stage every change in this project and commit it to ${branch}.`,
+} as const;
+
 /** Where a project stands, beyond the line of work its own control already
  *  names. Empty when there is nothing to say — a project in step says it by
  *  saying nothing, and a row with a word on the end of it reads as a warning. */
@@ -477,16 +491,20 @@ export default function Overview({
 
       {git !== null && changedCount > 0 ? (
         <section className="overview__block">
-          <h2 className="overview__title">Save / commit</h2>
-          <p className="overview__summary">
-            {changedCount === 1
-              ? 'One change is waiting to be saved.'
-              : `${changedCount} changes are waiting to be saved.`}
-          </p>
+          <h2 className="overview__title">{COMMITTING.heading}</h2>
+          <p className="overview__summary">{COMMITTING.waiting(changedCount)}</p>
           <div className="overview__actions">
-            <button type="button" className="overview__do" onClick={() => onSave()} disabled={busy}>
-              Commit
-              <span className="overview__plainsay">Save it now</span>
+            <button
+              type="button"
+              className="overview__do"
+              onClick={() => onSave()}
+              disabled={busy}
+              title={COMMITTING.what(git.branch)}
+            >
+              {COMMITTING.heading}
+              {git.branch === null ? null : (
+                <span className="overview__plainsay">{COMMITTING.onto(git.branch)}</span>
+              )}
             </button>
           </div>
         </section>

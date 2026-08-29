@@ -588,3 +588,51 @@ export function nextCheckoutName(
   // count, so this can never loop and never hands back a name in use.
   return { name: `conversation-${now.toString(36)}`, made: at };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Renaming one after what it turned out to be about                           */
+/* -------------------------------------------------------------------------- */
+
+/** Every branch this repository already has, for `freeName` to fall back on. */
+export async function branchNames(run: RunGit, repo: string): Promise<Set<string>> {
+  const listed = await run(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], {
+    cwd: repo,
+  });
+  if (listed.code !== 0 || listed.out === undefined) return new Set();
+  return new Set(
+    listed.out
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== ''),
+  );
+}
+
+/**
+ * Rename the branch a conversation's checkout is on.
+ *
+ * Run inside that checkout, where the branch is the current one, so git can
+ * only ever be renaming a branch nothing else has out. Refused when the folder
+ * is not on `from` any more, or when the branch tracks a copy elsewhere — a
+ * name somebody else can already fetch has stopped being ours to change.
+ */
+export async function renameCheckoutBranch(
+  run: RunGit,
+  folder: string,
+  from: string,
+  to: string,
+): Promise<boolean> {
+  const on = await branchAt(run, folder);
+  if (on !== from) return false;
+
+  // Both, because either alone misses a case: `%(upstream)` is empty until a
+  // fetch refspec maps the remote, and the config is empty on a branch that
+  // was pushed without being set to track.
+  const tracks = await run(['for-each-ref', '--format=%(upstream)', `refs/heads/${from}`], {
+    cwd: folder,
+  });
+  if (tracks.code !== 0 || (tracks.out ?? '').trim() !== '') return false;
+  const configured = await run(['config', '--get', `branch.${from}.remote`], { cwd: folder });
+  if (configured.code === 0 && (configured.out ?? '').trim() !== '') return false;
+
+  return (await run(['branch', '-m', to], { cwd: folder })).code === 0;
+}

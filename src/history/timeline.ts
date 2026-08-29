@@ -140,7 +140,7 @@ export class Timeline {
 
     const id = await this.folder.snapshot(
       message(title, { by, kind: chosen ? 'named' : 'automatic', moment: boundary }),
-      { evenIfNothingChanged: request.evenIfNothingChanged ?? false },
+      { evenIfNothingChanged: request.evenIfNothingChanged ?? false, theirs: by === 'you' },
     );
     if (!id) return null;
     return this.require(id);

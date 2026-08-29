@@ -37,13 +37,17 @@
   white-space: nowrap;
 }
 
+/* A list, not a column of paragraphs. Given the whole band it fills the room
+   the way the sheet's own grid does — as many tracks as fit, one when they do
+   not — so fifty near-misses are still something you can scan. */
 .drift__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr));
+  align-items: start;
+  gap: var(--space-1) var(--space-3);
 }
 
 .drift__row {

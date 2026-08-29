@@ -10,7 +10,9 @@ import {
   isArranged,
   isRunning,
   join,
+  joined,
   layOut,
+  lineState,
   LOOPS,
   MOST_FILES,
   notReady,
@@ -20,6 +22,7 @@ import {
   ROUNDS,
   specOf,
   tidied,
+  unjoin,
   waitingOn,
   type Block,
   type BlockKind,
@@ -461,6 +464,13 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
       const over = document.elementFromPoint(event.clientX, event.clientY)?.closest('.canvas__card');
       const onto = over?.getAttribute('data-block') ?? null;
       if (onto === null || onto === from) return;
+      // Dragged over a line that is already there, the same gesture takes it
+      // off — which is how a wait is removed without opening anything.
+      if (joined(flow, onto, from)) {
+        onFlow(unjoin(flow, onto, from));
+        setRefused(canvasWords.unjoined);
+        return;
+      }
       const said = canWaitFor(flow, onto, from);
       if (!said.ok) {
         setRefused(said.because);
@@ -619,20 +629,27 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
                     <path d="M1.5 1.5 5.5 4 1.5 6.5" fill="none" stroke="context-stroke" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                   </marker>
                 </defs>
-                {drawn.map((block) => {
-                  const parent = drawn.find((one) => one.id === block.after);
-                  if (parent === undefined) return null;
-                  const live = block.state === 'running';
-                  return (
-                    <path
-                      key={`${parent.id}-${block.id}`}
-                      className={`canvas__line ${live ? 'canvas__line--live' : ''}`}
-                      d={line(leaves(parent), arrives(block))}
-                      fill="none"
-                      markerEnd="url(#canvas-tip)"
-                    />
-                  );
-                })}
+                {/* One line per wait, so a block that begins after two things
+                    has two lines into it. */}
+                {drawn.flatMap((block) =>
+                  block.after.map((was) => {
+                    const parent = drawn.find((one) => one.id === was);
+                    if (parent === undefined) return null;
+                    const doing = lineState(parent.state, block.state);
+                    const path = line(leaves(parent), arrives(block));
+                    return (
+                      <g key={`${parent.id}-${block.id}`}>
+                        <path
+                          className={`canvas__line ${doing === 'passed' ? 'canvas__line--passed' : ''}`}
+                          d={path}
+                          fill="none"
+                          markerEnd="url(#canvas-tip)"
+                        />
+                        {doing === 'live' ? <path className="canvas__flow" d={path} fill="none" /> : null}
+                      </g>
+                    );
+                  }),
+                )}
               </svg>
 
               {drawn.map((block) => (
@@ -640,8 +657,8 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
                   key={block.id}
                   block={block}
                   rounds={flow.running === block.id ? flow.rounds : 0}
-                  first={block.after === null && flow.blocks.length > 1}
-                  last={waitingOn(flow, block.id).length === 0 && flow.blocks.length > 1 && block.after !== null}
+                  first={block.after.length === 0 && flow.blocks.length > 1}
+                  last={waitingOn(flow, block.id).length === 0 && flow.blocks.length > 1 && block.after.length > 0}
                   model={modelName(block, connection)}
                   came={flow.said[block.id]}
                   onCarryOn={onCarryOn}
@@ -689,6 +706,19 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
           {/* One row along the foot: the zoom under the block list it lines up
               with, and beside it whatever the canvas has to say. */}
           <div className="canvas__foot">
+            {refused !== null ? (
+              <span className="canvas__refused" role="status">{refused}</span>
+            ) : ending !== null && hidEnding !== flow.startedAt ? (
+              <Ended
+                ending={ending}
+                {...(onOpenThread === undefined || flow.conversation === null ? {} : { onOpenThread })}
+                onHide={() => setHidEnding(flow.startedAt)}
+              />
+            ) : unjoined ? (
+              <span className="canvas__hint">{canvasWords.connect}</span>
+            ) : (
+              <span />
+            )}
             {laid.blocks.length === 0 ? null : (
               <div className="canvas__zoom">
                 <button type="button" className="canvas__zoombtn" onClick={() => zoom(-ZOOM.step)} aria-label={canvasWords.further}>−</button>
@@ -705,17 +735,6 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
                 <button type="button" className="canvas__zoombtn" onClick={() => zoom(ZOOM.step)} aria-label={canvasWords.closer}>+</button>
               </div>
             )}
-            {refused !== null ? (
-              <span className="canvas__refused" role="status">{refused}</span>
-            ) : ending !== null && hidEnding !== flow.startedAt ? (
-              <Ended
-                ending={ending}
-                {...(onOpenThread === undefined || flow.conversation === null ? {} : { onOpenThread })}
-                onHide={() => setHidEnding(flow.startedAt)}
-              />
-            ) : unjoined ? (
-              <span className="canvas__hint">{canvasWords.connect}</span>
-            ) : null}
           </div>
         </div>
 
@@ -1185,13 +1204,13 @@ function Inspector({
     return tiered.map(([tier, models]) => ({ name: tierNames[tier].name, models }));
   }, [found]);
 
-  const waits = flow.blocks.find((one) => one.id === block.after) ?? null;
+  const waits = flow.blocks.filter((one) => block.after.includes(one.id));
   /* Everything this block could be made to wait for — itself and anything that
      would close a ring are not offered, so the picker cannot draw a shape the
      board would refuse. */
   const could = flow.blocks.filter((one) => one.id !== block.id && canWaitFor(flow, block.id, one.id).ok);
   const held = block.files ?? [];
-  const first = block.after === null;
+  const first = block.after.length === 0;
 
   /* The depths this exact model takes, and where it is set. Absent for a block
      left on whatever is answering: that is the composer's own setting, and the
@@ -1252,36 +1271,41 @@ function Inspector({
         </div>
       ) : view === 'after' ? (
         <div className="canvas__ibody scroll--auto">
+          {/* Several, not one: it begins when the last of them has finished.
+              The list stays open, because picking two is two presses. */}
           <span className="canvas__ilabel">{canvasWords.afterWhich}</span>
-          <div className="canvas__imodels" role="listbox" aria-label={canvasWords.afterWhich}>
+          <div className="canvas__imodels" role="listbox" aria-multiselectable="true" aria-label={canvasWords.afterWhich}>
             <button
               type="button"
               role="option"
-              aria-selected={block.after === null}
-              className={`canvas__imodel ${block.after === null ? 'canvas__imodel--on' : ''}`}
-              onClick={() => {
-                onChange({ after: null });
-                setView('block');
-              }}
+              aria-selected={first}
+              className={`canvas__imodel ${first ? 'canvas__imodel--on' : ''}`}
+              onClick={() => onChange({ after: [] })}
             >
               {canvasWords.nothing}
             </button>
-            {could.map((one) => (
-              <button
-                key={one.id}
-                type="button"
-                role="option"
-                aria-selected={one.id === block.after}
-                className={`canvas__imodel ${one.id === block.after ? 'canvas__imodel--on' : ''}`}
-                onClick={() => {
-                  onChange({ after: one.id });
-                  setView('block');
-                }}
-              >
-                {specOf(one.kind).name}
-                <span className="canvas__isays2">{one.says.trim() === '' ? specOf(one.kind).note : one.says.trim()}</span>
-              </button>
-            ))}
+            {could.map((one) => {
+              const on = block.after.includes(one.id);
+              return (
+                <button
+                  key={one.id}
+                  type="button"
+                  role="option"
+                  aria-selected={on}
+                  className={`canvas__imodel ${on ? 'canvas__imodel--on' : ''}`}
+                  onClick={() =>
+                    onChange({
+                      after: on
+                        ? block.after.filter((was) => was !== one.id)
+                        : [...block.after, one.id],
+                    })
+                  }
+                >
+                  {specOf(one.kind).name}
+                  <span className="canvas__isays2">{one.says.trim() === '' ? specOf(one.kind).note : one.says.trim()}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       ) : view === 'model' ? (
@@ -1381,7 +1405,9 @@ function Inspector({
             <button type="button" className="canvas__irow" onClick={() => setView('after')} disabled={going}>
               <span className="canvas__irowname">{canvasWords.waitsFor}</span>
               <span className="canvas__irowvalue">
-                {waits === null ? canvasWords.nothingBefore : specOf(waits.kind).name}
+                {waits.length === 0
+                  ? canvasWords.nothingBefore
+                  : waits.map((one) => specOf(one.kind).name).join(', ')}
               </span>
               <span className="canvas__irowmore" aria-hidden="true">›</span>
             </button>

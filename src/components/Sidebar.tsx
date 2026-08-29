@@ -447,14 +447,13 @@ export default function Sidebar({
                   title="Skills, spend, and the rest"
                 >
                   <span className="shelf__moremark" aria-hidden="true">
+                    {/* Two sliders, not a burst. Eight 1.4px rays at 1.4px
+                        wide cannot resolve at this size — it read as a smudge
+                        beside marks that read cleanly. */}
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" />
-                      <path
-                        d="M8 1.8v1.4M8 12.8v1.4M1.8 8h1.4M12.8 8h1.4M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1"
-                        stroke="currentColor"
-                        strokeWidth="1.4"
-                        strokeLinecap="round"
-                      />
+                      <path d="M2.5 4.75h11M2.5 11.25h11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                      <circle cx="6" cy="4.75" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
+                      <circle cx="10.5" cy="11.25" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
                     </svg>
                   </span>
                   <span className="shelf__rowname">Settings</span>
@@ -698,13 +697,9 @@ export default function Sidebar({
               data-tip="Settings"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" />
-                <path
-                  d="M8 1.8v1.4M8 12.8v1.4M1.8 8h1.4M12.8 8h1.4M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l1 1"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                />
+                <path d="M2.5 4.75h11M2.5 11.25h11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                <circle cx="6" cy="4.75" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
+                <circle cx="10.5" cy="11.25" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
               </svg>
             </button>
           )}

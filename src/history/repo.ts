@@ -414,7 +414,7 @@ export class ProjectHistory {
    *  not worth a line in the timeline. */
   async snapshot(
     message: string,
-    options: { evenIfNothingChanged?: boolean } = {},
+    options: { evenIfNothingChanged?: boolean; theirs?: boolean } = {},
   ): Promise<string | null> {
     await this.ensureReady();
     const text = message.trim();
@@ -433,7 +433,9 @@ export class ProjectHistory {
     const args = ['commit', '--no-verify', '--cleanup=verbatim', '--message', text];
     if (options.evenIfNothingChanged) args.push('--allow-empty');
 
-    const saved = await this.attempt(args);
+    // A commit somebody pressed is theirs, and carries their name. Only the
+    // ones nobody asked for are attributed to us.
+    const saved = await this.attempt(args, { theirIdentity: options.theirs === true });
     if (saved.code !== 0) throw new HistoryError(historyProblems.saveFailed, detailsOf(saved));
 
     const id = await this.currentVersion();
@@ -775,7 +777,7 @@ export class ProjectHistory {
    *  a failure means, and several of them mean "no", not "broken". */
   private async attempt(
     args: readonly string[],
-    options: { theirSettings?: boolean } = {},
+    options: { theirSettings?: boolean; theirIdentity?: boolean } = {},
   ): Promise<Attempt> {
     const settings = FORCED_SETTINGS.flatMap((setting) => ['-c', setting]);
     const full = ['-C', this.root, ...settings, ...args];
@@ -783,7 +785,7 @@ export class ProjectHistory {
       try {
         const { stdout, stderr } = await run(this.tool, full, {
           cwd: this.root,
-          env: this.environment(options.theirSettings === true),
+          env: this.environment(options.theirSettings === true, options.theirIdentity === true),
           maxBuffer: 64 * 1024 * 1024,
           windowsHide: true,
         });
@@ -815,8 +817,11 @@ export class ProjectHistory {
 
   /** `theirSettings` is only ever true for sending work somewhere shared, where
    *  this computer's own way of proving who you are is the whole point. */
-  private environment(theirSettings = false): NodeJS.ProcessEnv {
-    const ours = theirSettings
+  private environment(theirSettings = false, theirIdentity = false): NodeJS.ProcessEnv {
+    // Their own name needs their own config to read it from, so the two travel
+    // together. Automatic saves keep both of ours.
+    const loose = theirSettings || theirIdentity;
+    const ours = loose
       ? {}
       : {
           // Nothing outside this folder gets a vote in how a snapshot is taken.
@@ -825,12 +830,17 @@ export class ProjectHistory {
           GIT_CONFIG_NOSYSTEM: '1',
           GIT_ASKPASS: '',
         };
+    const who = theirIdentity
+      ? {}
+      : {
+          GIT_AUTHOR_NAME: this.identity.name,
+          GIT_AUTHOR_EMAIL: this.identity.email,
+          GIT_COMMITTER_NAME: this.identity.name,
+          GIT_COMMITTER_EMAIL: this.identity.email,
+        };
     return {
       ...process.env,
-      GIT_AUTHOR_NAME: this.identity.name,
-      GIT_AUTHOR_EMAIL: this.identity.email,
-      GIT_COMMITTER_NAME: this.identity.name,
-      GIT_COMMITTER_EMAIL: this.identity.email,
+      ...who,
       ...ours,
       // Never sit waiting on a prompt nobody will ever see.
       GIT_TERMINAL_PROMPT: '0',

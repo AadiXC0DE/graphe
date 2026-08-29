@@ -1477,8 +1477,8 @@ export default function Gallery() {
             </div>
             <p className="gallery__caption">
               It opens on what changed, with everything else folded away, because a version is the
-              one thing a file tree cannot know about — and the chips that change that sit in the
-              panel's own band rather than in a settings screen. “Every file” is the way back to the
+              one thing a file tree cannot know about — and the control that changes that sits in
+              the panel's own band rather than in a settings screen. “Every file” is the way back to the
               whole folder, machinery and all, for somebody who came to check our working. Nothing
               here can be edited: the way to change a file is to ask for the change, and a box that
               looked editable and was not would be a worse lie than no box at all.

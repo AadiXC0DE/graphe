@@ -96,7 +96,7 @@ function Sent({ picture }: { picture: SentPicture }) {
  */
 export default function Message({ from, children, streaming, aside, isLast, pictures, copy }: Props) {
   const mine = from === 'you';
-  // Named apart from the thread's own "Copy the conversation" underneath it.
+  // Named for what it copies: one message, not the conversation.
   const copying = useCopying({ idle: 'Copy this message' });
   const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
   const formatted = !mine && typeof children === 'string';

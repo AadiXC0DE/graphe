@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createGoal, readStoredGoal, ROUNDS, verifyGoal, withElapsed } from '../src/work/goal';
 import type { BuildPlan } from '../src/lib/ipc';
@@ -138,5 +139,28 @@ describe('the round budget', () => {
   it('is a number the window can count against', () => {
     expect(Number.isInteger(ROUNDS)).toBe(true);
     expect(ROUNDS).toBeGreaterThan(0);
+  });
+});
+
+describe('one parse, both sides of the wire', () => {
+  it('the shell reads a goal file exactly as strictly as the window does', () => {
+    // A goal missing planBaselineN used to pass the shell's own check and fail
+    // the window's, so a half-written file could drive a resume.
+    const half = {
+      id: 'g1',
+      objective: 'ship it',
+      status: 'active',
+      iterations: 2,
+      startedAt: 1,
+    };
+    expect(readStoredGoal(half)).toBeNull();
+    expect(readStoredGoal({ ...half, planBaselineN: 0 })).not.toBeNull();
+
+    const goals = readFileSync(new URL('../src/projects/goals.ts', import.meta.url), 'utf8');
+    expect(goals).toContain('readStoredGoal(JSON.parse(raw) as unknown)');
+    expect(goals).not.toContain('function isGoal');
+
+    const main = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
+    expect(main).toContain('const goal = readStoredGoal(raw);');
   });
 });

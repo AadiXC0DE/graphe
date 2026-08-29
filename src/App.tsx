@@ -197,8 +197,8 @@ import {
   type SentPicture,
   type Turn,
 } from "./lib/thread";
-import { asMarkdown, wordsOf, worthCopying, COPY_WORDS } from "./lib/transcript";
-import { copyText, useCopying } from "./lib/copying";
+import { asMarkdown, wordsOf, COPY_WORDS } from "./lib/transcript";
+import { copyText } from "./lib/copying";
 import { markFor, themeFrom, type Theme } from "./lib/theme";
 import "./App.css";
 
@@ -515,11 +515,17 @@ function Conversation() {
     }
   }, []);
 
-  const setGoalPersist = useCallback((next: Goal | null) => {
-    const project = desksNow.current.current;
-    setGoal(next);
-    persistGoal(next, project);
-  }, [persistGoal]);
+  /** A goal set for a named folder rather than for whichever is in front. A
+   *  turn settles long after it was sent, and somebody who switched projects in
+   *  between must not have this goal written into the one they are looking at
+   *  now. */
+  const setGoalFor = useCallback(
+    (next: Goal | null, project: string) => {
+      if (desksNow.current.current === project) setGoal(next);
+      persistGoal(next, project);
+    },
+    [persistGoal],
+  );
 
   // Load goal when project opens or reloads. Always resolves to *this*
   // project's goal: a project with none must clear the previous one's,
@@ -2256,7 +2262,7 @@ function Conversation() {
                   goalRuns.current.delete(goalOwner);
                 } else if (activeGoal.iterations < ROUNDS) {
                   const nextGoal: Goal = { ...withElapsed(activeGoal), iterations: activeGoal.iterations + 1 };
-                  setGoalPersist(nextGoal);
+                  setGoalFor(nextGoal, where);
                   goalRuns.current.add(goalOwner);
                   say(`Iteration ${String(nextGoal.iterations)} · Goal not met, task continues — ${verdict.reason}`);
                   void bridge.prompt(
@@ -2268,7 +2274,7 @@ function Conversation() {
                 } else {
                   say(`Goal paused after ${String(activeGoal.iterations)} iterations (budget reached). /goal resume to carry on.`);
                   const pausedLim: Goal = { ...withElapsed(activeGoal), status: 'paused' };
-                  setGoalPersist(pausedLim);
+                  setGoalFor(pausedLim, where);
                   goalRuns.current.delete(goalOwner);
                 }
               } else {
@@ -2281,7 +2287,7 @@ function Conversation() {
                     const reason = checked.value.reason;
                     if (still.iterations < ROUNDS) {
                       const nextGoal: Goal = { ...withElapsed(still), iterations: still.iterations + 1 };
-                      setGoalPersist(nextGoal);
+                      setGoalFor(nextGoal, where);
                       goalRuns.current.add(goalOwner);
                       say(`Iteration ${String(nextGoal.iterations)} · Goal not yet met — checks failed: ${reason}`);
                       void bridge.prompt(
@@ -2293,7 +2299,7 @@ function Conversation() {
                     } else {
                       say(`Goal paused after ${String(still.iterations)} iterations (budget reached, checks still failing). /goal resume to carry on.`);
                       const paused: Goal = { ...withElapsed(still), status: 'paused' };
-                      setGoalPersist(paused);
+                      setGoalFor(paused, where);
                       goalRuns.current.delete(goalOwner);
                     }
                     return;
@@ -2306,7 +2312,7 @@ function Conversation() {
                     return;
                   }
                   const finishedGoal: Goal = { ...withElapsed(still), iterations: still.iterations + 1, status: 'done' };
-                  setGoalPersist(finishedGoal);
+                  setGoalFor(finishedGoal, where);
                   say(`Iteration ${String(finishedGoal.iterations)} · Goal met, task finished — ${verdict.reason} Checks passed.`);
                   goalRuns.current.delete(goalOwner);
                   goalRuns.current.delete(`${where}\u0000`);
@@ -2393,7 +2399,7 @@ function Conversation() {
       settledWell,
       movePane,
       say,
-      setGoalPersist,
+      setGoalFor,
       persistGoal,
     ],
   );
@@ -4451,7 +4457,11 @@ function Conversation() {
     async (flow: Flow, block: Block): Promise<void> => {
       const path = desksNow.current.current;
       if (path === null || flow.conversation === null) return;
-      const where: Where = { project: path, conversation: flow.conversation };
+      const where: Where = {
+        project: path,
+        conversation: flow.conversation,
+        ...(flow.repo === null ? {} : { repo: flow.repo }),
+      };
       await bridge.goAsFarAs(flow.howFar, where);
       // Pictures go the way a message's do; text a block carries is already in
       // what it is asked, put there by asksOf.
@@ -4486,7 +4496,10 @@ function Conversation() {
       // Its own conversation, opened but not switched to: the canvas stays in
       // front, and what the flow says is readable afterwards like anything else
       // said in this project.
-      const opened = await bridge.openConversation(null, { project: path });
+      const opened = await bridge.openConversation(null, {
+        project: path,
+        ...(flow.repo === null ? {} : { repo: flow.repo }),
+      });
       if (!opened.ok) {
         troubleHere(opened.trouble);
         return null;
@@ -5582,9 +5595,6 @@ function Conversation() {
                   Worked for {durationInWords(finishedRun.seconds)}
                 </p>
               ) : null}
-              {desk.turns.filter(worthCopying).length > 1 ? (
-                <CopyThread turns={desk.turns} />
-              ) : null}
             </div>
           </>
         )}
@@ -5920,6 +5930,7 @@ function Conversation() {
           connection={connection}
           thinking={preferences?.thinking ?? {}}
           onThinking={setBlockThinking}
+          repos={desk?.overview?.repos ?? []}
           full={canvasFull}
           onFull={setCanvasFull}
           {...(canvasHere.conversation === null || desk === null
@@ -6126,22 +6137,6 @@ function Picture({ change }: { change: VisualChange }) {
         return answer.ok ? answer.value : null;
       }}
     />
-  );
-}
-
-/** The whole exchange on the clipboard, on the same quiet band as how long the
- *  run took. Somewhere else — an issue, a message, a document — is where a
- *  conversation usually ends up. */
-function CopyThread({ turns }: { turns: readonly Turn[] }) {
-  const copying = useCopying({ idle: COPY_WORDS.whole });
-  return (
-    <button
-      type="button"
-      className="threadnote threadcopy"
-      onClick={() => copying.copy(asMarkdown(turns))}
-    >
-      {copying.label}
-    </button>
   );
 }
 

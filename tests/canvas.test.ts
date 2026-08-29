@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 /** A flow, before anything runs.
  *
  * The claim this file exists for: drawing one changes nothing. A flow is a
@@ -795,5 +796,27 @@ describe('branches, and the shapes people actually draw', () => {
     const without = remove(flow, b);
     expect(without.blocks.find((one) => one.id === d)?.after).toBe(a);
     expect(without.blocks).toHaveLength(3);
+  });
+});
+
+describe('a folder that holds several projects', () => {
+  it('a flow names one of them, and reads one back', () => {
+    expect(newFlow().repo).toBeNull();
+    expect(readFlow({ id: 'f', blocks: [], repo: 'backend' })?.repo).toBe('backend');
+    expect(readFlow({ id: 'f', blocks: [], repo: '' })?.repo).toBeNull();
+    expect(readFlow({ id: 'f', blocks: [], repo: 7 })?.repo).toBeNull();
+    expect(readFlow({ id: 'f', blocks: [] })?.repo).toBeNull();
+  });
+
+  it('what a flow works in survives a write and a read', () => {
+    const flow = { ...place(newFlow(), 'pull-request'), repo: 'backend' };
+    expect(readFlows(JSON.parse(JSON.stringify([flow])) as unknown)[0]?.repo).toBe('backend');
+  });
+
+  it('the window sends every block to the folder the flow names', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    expect(app).toContain('...(flow.repo === null ? {} : { repo: flow.repo }),');
+    // Both the conversation it opens and every turn it sends.
+    expect(app.match(/\.\.\.\(flow\.repo === null \? \{\} : \{ repo: flow\.repo \}\),/g)?.length).toBe(2);
   });
 });

@@ -21,7 +21,7 @@
 /* The control's own room, held open whether or not the control is in it, so a
    turn never changes height as the cursor crosses it or as the reply finishes.
    24px is the 4px drop plus the control, so the turn ends exactly where the
-   control does: any less and it hangs over "Copy the conversation" at the foot
+   control does: any less and it hangs over whatever sits at the foot
    of the thread, near enough to read as a pair and near enough to take the top
    of that press. */
 .message__foot {

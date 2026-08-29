@@ -9,24 +9,12 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 
-import type { Goal } from '../work/goal';
+import { readStoredGoal, type Goal } from '../work/goal';
 
 function goalFileFor(project: string, base: string): string {
   const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
   const digest = createHash('sha256').update(resolve(project)).digest('hex').slice(0, 8);
   return join(base, 'goals', `${key}-${digest}.json`);
-}
-
-function isGoal(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null) return false;
-  const g = value as Record<string, unknown>;
-  return (
-    typeof g['id'] === 'string' &&
-    typeof g['objective'] === 'string' &&
-    (g['status'] === 'active' || g['status'] === 'paused' || g['status'] === 'done') &&
-    typeof g['iterations'] === 'number' &&
-    typeof g['startedAt'] === 'number'
-  );
 }
 
 export class GoalFile {
@@ -38,9 +26,9 @@ export class GoalFile {
     const file = goalFileFor(project, userData);
     try {
       const raw = await readFile(file, 'utf8');
-      const parsed = JSON.parse(raw) as unknown;
-      if (!isGoal(parsed)) return null;
-      return parsed as Goal;
+      // The same parse the window uses, so a half-written file cannot be
+      // strict enough for the shell and too loose for the screen.
+      return readStoredGoal(JSON.parse(raw) as unknown);
     } catch {
       return null;
     }

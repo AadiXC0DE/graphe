@@ -205,7 +205,7 @@ import { GoalFile } from '../src/projects/goals';
 import { FlowFile } from '../src/projects/flows';
 import { readFlow, withFlow, withoutFlow, type Flow } from '../src/work/canvas';
 import { notHere, runHelper } from '../src/share/run';
-import type { Goal } from '../src/work/goal';
+import { readStoredGoal, type Goal } from '../src/work/goal';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -7449,9 +7449,10 @@ function register(): void {
     const [raw] = args;
     const where = whereIn(args);
     const open = projectAt(where);
-    if (open === null || typeof raw !== 'object' || raw === null) return fail(NOTHING_OPEN);
-    const goal = raw as Goal;
-    if (typeof goal.id !== 'string' || typeof goal.objective !== 'string') return fail(NOTHING_OPEN);
+    if (open === null) return fail(NOTHING_OPEN);
+    // Read the same way it is read back, so nothing half-shaped reaches disk.
+    const goal = readStoredGoal(raw);
+    if (goal === null) return fail(NOTHING_OPEN);
     await GoalFile.write(open.path, app.getPath('userData'), goal);
     return done(null);
   });

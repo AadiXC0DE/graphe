@@ -736,6 +736,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  min-width: 0;
   pointer-events: none;
 }
 
@@ -1704,15 +1705,13 @@
    --------------------------------------------------------------------------- */
 
 .canvas__ended {
-  position: absolute;
-  left: var(--space-4);
-  right: var(--space-4);
-  bottom: calc(var(--space-4) + 40px);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-3);
-  max-width: 720px;
-  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 760px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-raised);
@@ -1750,10 +1749,9 @@
 .canvas__endtext {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   flex: 1 1 auto;
   min-width: 0;
-  padding-top: 2px;
 }
 
 .canvas__endhead {
@@ -1779,11 +1777,11 @@
   color: var(--accent-ink);
 }
 
-/* Two lines of it. The whole answer is in the conversation; this is enough to
-   know whether it is worth opening. */
+/* One line of it, so the band stays one row along the foot. The whole answer
+   is in the conversation, and on the card that came to it. */
 .canvas__endsaid {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
   font-size: var(--text-xs);
@@ -1865,4 +1863,36 @@
 .canvas__isearch,
 .canvas__icame {
   user-select: text;
+}
+
+/* Which project inside the folder the flow works in. Only drawn where the
+   folder holds several — an ordinary project has nothing to choose. */
+.canvas__which {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.canvas__whichpick {
+  border: 0;
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text);
+}
+
+.canvas__whichpick:disabled {
+  opacity: 0.55;
+}
+
+.canvas__whichpick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

@@ -61,6 +61,9 @@ type Props = {
    *  picker writes — it belongs to the model, not to the turn. */
   thinking?: Readonly<Record<string, ThinkingLevel>>;
   onThinking?: ((choice: ModelChoice, level: ThinkingLevel) => void) | undefined;
+  /** The projects inside this folder, where it holds several. Empty for an
+   *  ordinary project, and then the flow never names one. */
+  repos?: readonly { name: string }[];
   /** Covering the whole window rather than sitting in its own column. */
   full: boolean;
   onFull: (full: boolean) => void;
@@ -195,7 +198,7 @@ function Mark({ kind }: { kind: BlockKind }) {
  * ordinary turn in this canvas's own conversation, and only once Start has
  * been pressed.
  */
-export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, thinking, onThinking, full, onFull, onOpenThread }: Props) {
+export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, connection, thinking, onThinking, repos = [], full, onFull, onOpenThread }: Props) {
   const surface = useRef<HTMLDivElement>(null);
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -204,6 +207,9 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
   /** A card under the hand, drawn where the hand is rather than where it was
    *  last saved: a block that only moves when you let go does not feel moved. */
   const [moving, setMoving] = useState<{ id: string; x: number; y: number } | null>(null);
+  /** Where the card is this instant. `moving` is a render behind by the time
+   *  the hand lets go, which set the card down one step short of the drop. */
+  const movingNow = useRef<{ id: string; x: number; y: number } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   /** The ending band, put away by hand. Held by which run it was, so a second
    *  run says how that one went rather than staying hidden. */
@@ -286,6 +292,9 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
   );
 
   const fit = useCallback(() => {
+    // Never while something is in the hand: re-framing moves the ground under
+    // the card being dragged, which reads as the card snapping away.
+    if (held.current !== null || panning.current !== null) return;
     const box = surface.current?.getBoundingClientRect();
     if (box === undefined || laid.width === 0) return;
     const scale = Math.min(1, (box.width - 96) / laid.width, (box.height - 120) / laid.height);
@@ -308,17 +317,32 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
     fit();
   }, [fit, laid.blocks.length]);
 
+  /* The observer reads this rather than closing over `fit`, whose identity
+     changes with the drawing. Subscribed to `fit` it re-subscribed on every
+     pointermove of a drag, and `observe()` fires once immediately — so the
+     board re-framed under the hand that was moving a card. */
+  const fitNow = useRef(fit);
+  fitNow.current = fit;
+
   useEffect(() => {
     const node = surface.current;
     if (node === null) return;
     // The bands either side open and close under it; a flow that never
     // re-framed would be stranded off the edge by a panel it did not ask for.
-    const watch = new ResizeObserver(() => {
-      if (!touched.current) fit();
+    // Only a real change in the room counts — the first call is the size it
+    // already had.
+    let was: { width: number; height: number } | null = null;
+    const watch = new ResizeObserver(([entry]) => {
+      const box = entry?.contentRect;
+      if (box === undefined) return;
+      const now = { width: Math.round(box.width), height: Math.round(box.height) };
+      const moved = was !== null && (was.width !== now.width || was.height !== now.height);
+      was = now;
+      if (moved && !touched.current) fitNow.current();
     });
     watch.observe(node);
     return () => watch.disconnect();
-  }, [fit]);
+  }, []);
 
   const zoom = useCallback((by: number, about?: { x: number; y: number }) => {
     touched.current = true;
@@ -393,11 +417,13 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
           touched.current = true;
         }
         if (dragged.current) {
-          setMoving({
+          const spot = {
             id: card.id,
             x: Math.round(card.fromX + (event.clientX - card.x) / at.scale),
             y: Math.round(card.fromY + (event.clientY - card.y) / at.scale),
-          });
+          };
+          movingNow.current = spot;
+          setMoving(spot);
         }
         return;
       }
@@ -417,7 +443,8 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
       const card = held.current;
       held.current = null;
       if (card !== null) {
-        const spot = moving;
+        const spot = movingNow.current;
+        movingNow.current = null;
         setMoving(null);
         if (dragged.current && spot !== null) {
           onFlow(change(flow, card.id, { at: { x: spot.x, y: spot.y } }));
@@ -441,12 +468,13 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
       }
       onFlow(join(flow, onto, from));
     },
-    [joining, moving, flow, onFlow],
+    [joining, flow, onFlow],
   );
 
   const lost = useCallback(() => {
     panning.current = null;
     held.current = null;
+    movingNow.current = null;
     setMoving(null);
     setJoining(null);
   }, []);
@@ -502,6 +530,25 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
         ) : null}
 
         <div className="canvas__far">
+          {/* Only where the folder holds several. One flow works in one of
+              them: a pull request has to be opened somewhere. */}
+          {repos.length > 1 ? (
+            <label className="canvas__which" title={canvasWords.whichNote}>
+              <span className="canvas__whichname">{canvasWords.which}</span>
+              <select
+                className="canvas__whichpick"
+                value={flow.repo ?? repos[0]?.name ?? ''}
+                disabled={going}
+                onChange={(event) => onFlow({ ...flow, repo: event.target.value })}
+              >
+                {repos.map((one) => (
+                  <option key={one.name} value={one.name}>
+                    {one.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <Asking howFar={flow.howFar} onHowFar={(rung) => onFlow({ ...flow, howFar: rung })} opens="down-right" />
         </div>
 
@@ -639,16 +686,8 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
 
           {joining === null ? null : <Trailing from={joining} blocks={drawn} at={at} />}
 
-          {ending === null || hidEnding === flow.startedAt ? null : (
-            <Ended
-              ending={ending}
-              {...(onOpenThread === undefined || flow.conversation === null ? {} : { onOpenThread })}
-              onHide={() => setHidEnding(flow.startedAt)}
-            />
-          )}
-
-          {/* The zoom sits under the block list it lines up with; what is said
-              about joining is only worth saying while nothing is joined. */}
+          {/* One row along the foot: the zoom under the block list it lines up
+              with, and beside it whatever the canvas has to say. */}
           <div className="canvas__foot">
             {laid.blocks.length === 0 ? null : (
               <div className="canvas__zoom">
@@ -668,6 +707,12 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
             )}
             {refused !== null ? (
               <span className="canvas__refused" role="status">{refused}</span>
+            ) : ending !== null && hidEnding !== flow.startedAt ? (
+              <Ended
+                ending={ending}
+                {...(onOpenThread === undefined || flow.conversation === null ? {} : { onOpenThread })}
+                onHide={() => setHidEnding(flow.startedAt)}
+              />
             ) : unjoined ? (
               <span className="canvas__hint">{canvasWords.connect}</span>
             ) : null}

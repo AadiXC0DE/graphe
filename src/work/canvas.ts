@@ -94,6 +94,10 @@ export type Flow = {
    *  canvas is a way of sending, not a second kind of agent. Null until it has
    *  been started once. */
   conversation: string | null;
+  /** One project inside a folder that holds several, by its folder name. Null
+   *  where the project is one repo, which is every ordinary project. A whole
+   *  flow works in one of them: a pull request has to be opened somewhere. */
+  repo: string | null;
   /** How far the whole flow may go on its own, where a block does not say. */
   howFar: HowFar;
   /** The block being run right now, or null. */
@@ -119,6 +123,7 @@ export function newFlow(name = canvasWords.untitled): Flow {
     name,
     blocks: [],
     conversation: null,
+    repo: null,
     // The same rung a conversation opens on. A canvas is not a reason to be
     // asked less, and the row in its own bar is where that is changed.
     howFar: 'asking',
@@ -179,6 +184,9 @@ export const canvasWords = {
       ? 'Whatever this canvas’s conversation is set to.'
       : `Whatever this canvas’s conversation is set to — ${model} right now.`,
   waitsFor: 'Runs after',
+  /** Only where the project holds several. */
+  which: 'Works in',
+  whichNote: 'Which project inside this folder the whole flow works in',
   nothing: 'Nothing — it starts the flow',
   /** In the picker, above the blocks it could be made to wait for. */
   afterWhich: 'Runs after',
@@ -856,6 +864,7 @@ export function readFlow(raw: unknown): Flow | null {
     name: typeof name === 'string' && name.trim() !== '' ? name : canvasWords.untitled,
     blocks: kept,
     conversation: typeof conversation === 'string' && conversation !== '' ? conversation : null,
+    repo: typeof held['repo'] === 'string' && held['repo'] !== '' ? held['repo'] : null,
     howFar: isHowFar(held['howFar']) ? held['howFar'] : 'asking',
     // Nothing is running the moment this is read: the window that was running
     // it is gone, and claiming otherwise would draw a block that never moves.

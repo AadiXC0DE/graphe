@@ -38,7 +38,7 @@ function folderWithServer(): { folder: string; command: string } {
     `
 import { createServer } from 'node:http';
 const s = createServer((_q, r) => r.end('hello'));
-s.listen(0, '127.0.0.1', () => {
+s.listen(Number(process.env.PORT ?? 0), '127.0.0.1', () => {
   console.log('ready on http://localhost:' + s.address().port + '/');
 });
 `,
@@ -279,20 +279,20 @@ describe('RU-04 a piece that will not close', () => {
 });
 
 /* ========================================================================== */
-/* RU-05 a server that came up in a conversation's own checkout                */
+/* RU-05 a server we moved to a port of our own                                */
 /* ========================================================================== */
 
 /** Reaches keep_running's own answer, because that answer is what gets passed
  *  on. The address is the one thing anybody carries out of here, so the sentence
- *  about which copy it belongs to has to travel with it or it is not read. */
-async function startedBy(copy: boolean): Promise<string> {
+ *  about the port having moved has to travel with it or it is not read. */
+async function startedBy(port: number | null): Promise<string> {
   const running = register();
   const { folder, command } = folderWithServer();
   const tools = runningTools(running, {
     folder,
     parts: () => PARTS,
     writable: [folder],
-    copy,
+    port,
   });
   const start = tools.find((one) => one.name === 'keep_running');
   expect(start).toBeDefined();
@@ -304,15 +304,16 @@ async function startedBy(copy: boolean): Promise<string> {
   return answer.content.map((one) => one.text ?? '').join('\n');
 }
 
-describe('RU-05 the address a checkout answers on', () => {
-  it('says it is a second copy, with the address, when the work is in its own checkout', async () => {
-    const said = await startedBy(true);
-    expect(said).toContain('It is up at http://localhost:');
+describe('RU-05 the address a copy answers on', () => {
+  it('serves on the port it was given, and says so with the address', async () => {
+    const port = 5387;
+    const said = await startedBy(port);
+    expect(said).toContain(`It is up at http://localhost:${String(port)}`);
     expect(said).toContain(PORT_WORDS.secondCopy);
   }, 20_000);
 
-  it('says nothing of the sort for the project the person is looking at', async () => {
-    const said = await startedBy(false);
+  it('leaves the port alone, and says nothing of the sort, when it was given none', async () => {
+    const said = await startedBy(null);
     expect(said).toContain('It is up at http://localhost:');
     expect(said).not.toContain(PORT_WORDS.secondCopy);
   }, 20_000);

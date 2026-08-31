@@ -1577,12 +1577,9 @@ export function runningTools(
     onChange?: () => void;
     /** The door this copy owns. Four copies of one project all run the same
      *  start command, and without this they all ask for the same port and three
-     *  of them look as though they failed for no reason. */
+     *  of them look as though they failed for no reason. Null leaves the port
+     *  to the project's own config, which is what a terminal does. */
     port?: number | null;
-    /** Whether this session works in a conversation's own checkout. What comes
-     *  up here then answers on its own address, and the project's own is not
-     *  it. */
-    copy?: boolean;
   },
 ): ToolDefinition[] {
   return [
@@ -1627,10 +1624,11 @@ export function runningTools(
           piece.address === null
             ? 'It is up. It has not printed an address, so either it is not one that listens or it is still starting. Ask running() again in a moment.'
             : `It is up at ${piece.address}.`;
-        // With the address or not at all: the address is the thing that gets
-        // passed on, and this is the sentence that stops it looking broken.
+        // Only when we moved the port. On the project's usual port there is
+        // nothing to warn about, and saying so sends people editing settings
+        // that were already right.
         const alsoSay =
-          where.copy === true && piece.address !== null ? `\n\n${PORT_WORDS.secondCopy}` : '';
+          where.port != null && piece.address !== null ? `\n\n${PORT_WORDS.secondCopy}` : '';
         return {
           content: [
             { type: 'text', text: `${describePiece(piece)}\n\n${found}${alsoSay}\n\n${tail(said)}` },

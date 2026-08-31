@@ -22,7 +22,9 @@
  *  - **Nothing leaves by default.** `reach: 'secure'` opens outbound 443 and
  *    nothing else — no other port, no listening socket. `Bounds.through` points
  *    it at a single address on this machine instead, which is how the reachable
- *    hosts get filtered by name rather than by port.
+ *    hosts get filtered by name rather than by port. `reach: 'serving'` is the
+ *    exception: a server somebody asked to start gets the ordinary network, the
+ *    same as it would from a terminal.
  *
  * Folders travel as `-D` parameters rather than inside the profile text, so a
  * project folder whose name contains a quote or a parenthesis cannot rewrite the
@@ -35,10 +37,12 @@ import { dirname } from 'node:path';
 /**
  * What may leave the machine, and what may arrive.
  *
- * `serving` is `secure` plus the one thing a development server needs and the
- * boundary otherwise refuses: a port on this machine, which a browser on this
- * machine can knock on. Local only — nothing on the network outside can reach
- * it, and it is asked for by name rather than being what every command gets.
+ * `serving` is for a server somebody asked to start: a port on this machine for
+ * a browser on this machine to knock on, and the ordinary outbound network its
+ * own code needs to answer on it. Nothing on the network outside can reach the
+ * port it binds, and it is asked for by name rather than being what every
+ * command gets — `secure`, which is what everything else runs under, still
+ * leaves by 443 or by the doorway alone.
  */
 export type Reach = 'nothing' | 'secure' | 'serving';
 
@@ -316,16 +320,27 @@ export function seatbeltProfile(bounds: Bounds): Profile {
 
   if (bounds.reach === 'secure' || bounds.reach === 'serving') {
     const door = doorway(bounds.through);
-    if (door === null) {
+    if (door !== null) {
+      // One door, on this machine, which checks the address by name before it
+      // opens. Nothing else is reachable — including the name service, because
+      // the door is what does the looking up. Asked for explicitly, so it holds
+      // for `serving` too.
+      lines.push(`(allow network-outbound (remote ip "localhost:${String(door)}") (remote unix-socket))`);
+    } else if (bounds.reach === 'serving') {
+      // A development server is the person's own program, started because they
+      // asked for it. It talks to a database on 5432, a pooler on 6543, a cache
+      // on 6379, a staging API on 8080 — and holding it to 443 keeps the agent
+      // from nothing, because the agent already ran this code by starting it.
+      // What it does instead is take the project's own database away with no
+      // error that points here: pages serve, and sign-in fails. Linux has given
+      // it the whole network all along; this is the same answer on macOS.
+      lines.push('(allow network-outbound)');
+      lines.push('(allow system-socket)');
+    } else {
       // Secure addresses and the name lookup they need, and nothing else. Port
       // rather than address is as far as this gets on its own.
       lines.push('(allow network-outbound (remote tcp "*:443") (remote unix-socket))');
       lines.push('(allow system-socket)');
-    } else {
-      // One door, on this machine, which checks the address by name before it
-      // opens. Nothing else is reachable — including the name service, because
-      // the door is what does the looking up.
-      lines.push(`(allow network-outbound (remote ip "localhost:${String(door)}") (remote unix-socket))`);
     }
   }
 

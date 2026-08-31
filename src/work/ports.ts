@@ -60,12 +60,12 @@ export const PORT_WORDS = {
   servingAt: (port: number): string => `Its own preview, on port ${String(port)}`,
   /** When every door in the range is spoken for. */
   noRoom: 'Every preview address is already in use, so this one shares the usual one.',
-  /** Said with the address, whenever a server comes up in a conversation's own
-   *  checkout. The project's usual port is not this one, and an auth callback,
-   *  a trusted origin or a CORS allow-list written against that port will turn
-   *  this address away with an error that points nowhere near us. */
+  /** Said with the address, whenever a server comes up on a port we picked
+   *  rather than the project's own. An auth callback, a trusted origin or a
+   *  CORS allow-list written against the usual port will turn this address away
+   *  with an error that points nowhere near us. */
   secondCopy:
-    'This conversation works in its own checkout, so this is a second copy of the project on a port of its own — anything pinned to the port the project usually serves on (sign-in callbacks, trusted origins, CORS allow-lists) will refuse this address until it is told about this one.',
+    'This copy serves on a port of its own rather than the one the project usually uses — anything pinned to that one (sign-in callbacks, trusted origins, CORS allow-lists) will refuse this address until it is told about this one.',
 } as const;
 
 /**

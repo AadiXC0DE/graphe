@@ -13,11 +13,12 @@
  *
  * ## The boundary is still on
  *
- * These run inside the same kernel boundary as every other command, with one
- * capability added by name: `reach: 'serving'` lets a process bind a port on
- * this machine (see sandbox/profile.ts). That is the whole difference. Writes
- * are bound to the same folders, the private places are still refused, and
- * nothing outside this machine can reach what is bound.
+ * These run inside the same kernel boundary as every other command, with the two
+ * things a server needs added by name: `reach: 'serving'` lets a process bind a
+ * port on this machine, and lets it reach the network the way it would from a
+ * terminal — its own database, its own API (see sandbox/profile.ts). Writes are
+ * bound to the same folders, the private places are still refused, and nothing
+ * outside this machine can reach the port it binds.
  *
  * Pure enough to test: everything that decides — what to call a piece, which
  * address came out of its output, what to keep of it — is a function here, and

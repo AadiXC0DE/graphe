@@ -105,7 +105,7 @@ describe('what the process is told', () => {
 
   it('names what a second copy on its own port will break, in the words those settings use', () => {
     const said = PORT_WORDS.secondCopy;
-    expect(said).toMatch(/checkout/);
+    expect(said).toMatch(/port of its own/);
     expect(said).toMatch(/trusted origins/);
     expect(said).toMatch(/CORS/);
     // One sentence. A paragraph above a link does not get read.

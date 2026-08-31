@@ -1,6 +1,8 @@
 import { copyFile, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import { seededIn } from './seeding';
+
 /** One conversation, its own checkout.
  *
  * Two tabs working the same project parallel are two agents writing the same
@@ -291,6 +293,9 @@ export async function writingLeftBehind(
   if (code !== 0 || out === undefined) return { files: [], tooBig: false };
   const keep: string[] = [];
   let tooBig = false;
+  // A `.env` carried in when the checkout was made is still in the project it
+  // came from, so rescuing it would only put someone's keys in a third folder.
+  const copies = new Set(await seededIn(run, folder).catch(() => []));
   for (const row of out.split('\0')) {
     if (!row.startsWith('!! ')) continue;
     const entry = row.slice(3).replace(/\/+$/, '');
@@ -301,7 +306,7 @@ export async function writingLeftBehind(
     // the install and keep the notes.
     const under = await smallFilesUnder(folder, entry);
     if (under === null) tooBig = true;
-    else keep.push(...under);
+    else keep.push(...under.filter((one) => !copies.has(one)));
   }
   return { files: keep, tooBig };
 }

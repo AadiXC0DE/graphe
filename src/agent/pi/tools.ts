@@ -75,6 +75,7 @@ import { desktopHere, desktopTools } from './desktop';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
 import { ceilingWords, fleet, MOST_AT_ONCE } from '../../cost/fleet';
 import { Running, type RunningPiece } from '../running';
+import { PORT_WORDS } from '../../work/ports';
 import { hold } from '../sandbox';
 import { doorwayEnvironment, type Doorway } from '../sandbox/egress';
 import type { LivePage, Money, PageAct, PageReading, SpendReason } from '../types';
@@ -1578,6 +1579,10 @@ export function runningTools(
      *  start command, and without this they all ask for the same port and three
      *  of them look as though they failed for no reason. */
     port?: number | null;
+    /** Whether this session works in a conversation's own checkout. What comes
+     *  up here then answers on its own address, and the project's own is not
+     *  it. */
+    copy?: boolean;
   },
 ): ToolDefinition[] {
   return [
@@ -1590,7 +1595,7 @@ export function runningTools(
       promptGuidelines: [
         'Use keep_running for `npm run dev`, `vite`, `python3 -m http.server`, an API, a watcher — anything that stays up. Running one through bash cannot work: bash waits for a command to finish, and this kind never does.',
         'Several can run at once — a front end and two back ends is ordinary. Each gets an id.',
-        'It comes back with the address it is reachable at, when it prints one. Give that address to the person; the window can open it.',
+        'It comes back with the address it is reachable at, when it prints one. Give that address to the person, along with anything else that came back with it; the window can open it.',
         'Check on one later with running(), and end it with stop_running(id). Do not start a second copy of something already up — look first.',
       ],
       parameters: Type.Object({
@@ -1622,8 +1627,14 @@ export function runningTools(
           piece.address === null
             ? 'It is up. It has not printed an address, so either it is not one that listens or it is still starting. Ask running() again in a moment.'
             : `It is up at ${piece.address}.`;
+        // With the address or not at all: the address is the thing that gets
+        // passed on, and this is the sentence that stops it looking broken.
+        const alsoSay =
+          where.copy === true && piece.address !== null ? `\n\n${PORT_WORDS.secondCopy}` : '';
         return {
-          content: [{ type: 'text', text: `${describePiece(piece)}\n\n${found}\n\n${tail(said)}` }],
+          content: [
+            { type: 'text', text: `${describePiece(piece)}\n\n${found}${alsoSay}\n\n${tail(said)}` },
+          ],
           details: {},
         };
       },

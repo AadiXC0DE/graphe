@@ -174,6 +174,7 @@ import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShipp
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor, workflowWords } from '../src/work/workflows';
 import { readCheckoutIndex, type Checkout } from '../src/history/checkouts';
+import { seedCheckout, seedWords } from '../src/history/seeding';
 import { renameTo } from '../src/history/naming';
 import {
   branchNames,
@@ -3459,7 +3460,7 @@ async function startConversation(
   open: { path: string; held: Held },
   how: Opening,
   keep?: string,
-): Promise<Result<{ session: GrapheSession; address: string }>> {
+): Promise<Result<Started>> {
   const asked = how.kind === 'carry-on' ? how.path : undefined;
   if (asked === undefined) return startConversationUnlocked(open, how, keep);
   const key = `${open.path}\u0000${asked}`;
@@ -3472,6 +3473,9 @@ async function startConversation(
   return attempt;
 }
 
+/** A conversation now live, and anything the window should say over it once. */
+type Started = { session: GrapheSession; address: string; note?: string };
+
 /**
  * Start a conversation in a project, and put it in front of the others.
  *
@@ -3482,7 +3486,7 @@ async function startConversationUnlocked(
   open: { path: string; held: Held },
   how: Opening,
   keep?: string,
-): Promise<Result<{ session: GrapheSession; address: string }>> {
+): Promise<Result<Started>> {
   const held = open.held;
   const asked = how.kind === 'carry-on' ? how.path : undefined;
   if (asked !== undefined) {
@@ -3521,6 +3525,17 @@ async function startConversationUnlocked(
       madeCheckout = true;
     }
   }
+  // A checkout holds tracked files and nothing else, so the `.env.local` the
+  // project needs to run is not in it. Idempotent, so a checkout spread out
+  // again copies nothing twice.
+  const seeded =
+    checkout === null
+      ? { carried: [] as readonly string[], left: 0 }
+      : await seedCheckout(gitRunHereFor(), open.path, checkout.folder);
+  const notes = [
+    ...(held.childRepos.length >= SEVERAL_CHILDREN ? await childRepoNotes(held.childRepos) : []),
+    ...(checkout === null ? [] : [seedWords.told(seeded.carried)]),
+  ];
   let session: GrapheSession;
   try {
     session = await createSession({
@@ -3545,12 +3560,10 @@ async function startConversationUnlocked(
       trusts: await trustsIn(open.path),
       running: held.running,
       noteServers,
-      // A folder holding several projects cannot say so itself, and the agent
-      // would otherwise learn it from git failing. Facts only — names and
-      // where each project stands.
-      ...(held.childRepos.length >= SEVERAL_CHILDREN
-        ? { contextNotes: await childRepoNotes(held.childRepos) }
-        : {}),
+      // Facts the folder cannot state for itself and the agent would otherwise
+      // learn from a command failing: a parent holding several projects, and a
+      // checkout that has no install in it.
+      ...(notes.length === 0 ? {} : { contextNotes: notes }),
       // Without this the agent's own way into Figma is never built, so pasting
       // a link got its text read back while the panel beside it could open the
       // file. The panel and the agent read the same credential now.
@@ -3604,7 +3617,20 @@ async function startConversationUnlocked(
     await saveCheckouts(open.path, held).catch(() => undefined);
   }
   keepConversation(held, address, session);
-  return done({ session, address });
+  return done({
+    session,
+    address,
+    // Carried out to whoever built the conversation, rather than sent now: the
+    // window has no thread to put it in until this call has answered.
+    ...(seeded.carried.length === 0 ? {} : { note: seedWords.carried(seeded.carried, open.path) }),
+  });
+}
+
+/** A conversation's history with one thing said over it, as the window folds
+ *  every other event. */
+function withNote(history: readonly AgentEvent[], note: string | undefined): readonly AgentEvent[] {
+  if (note === undefined) return history;
+  return [...history, { type: 'message-delta', text: note }, { type: 'message-end' }];
 }
 
 async function openTheProject(path: string): Promise<Result<OpenedProject>> {
@@ -3699,7 +3725,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   return done({
     path,
     name,
-    history: started.value.session.history,
+    history: withNote(started.value.session.history, started.value.note),
     conversation: started.value.session.conversation,
     address: started.value.address,
     howFar: started.value.session.howFar,
@@ -6522,7 +6548,7 @@ function register(): void {
     return done({
       path: open.path,
       name: open.name,
-      history: started.value.session.history,
+      history: withNote(started.value.session.history, started.value.note),
       conversation: started.value.session.conversation,
       address: started.value.address,
       howFar: started.value.session.howFar,

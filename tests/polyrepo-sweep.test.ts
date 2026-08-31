@@ -62,7 +62,14 @@ describe('the window names the project it is acting on', () => {
 
   it('the preview in the project menu behaves like the pill beside it', () => {
     expect(APP).not.toContain('onPreview={() => void seeIt()}');
-    expect(APP).toContain("onPreview={() => (severalProjects ? movePane('split') : void seeIt())}");
+    // Both start one for whichever project the panel is showing, and both only
+    // reveal a page that is already served. The row's own press is gone, so
+    // these two are the whole of the way in.
+    expect(
+      APP.match(/if \(pane === 'off'\) void seeIt\(undefined, undefined, panelRepoNow\.current \?\? undefined\);/g)
+        ?.length,
+    ).toBe(2);
+    expect(APP.match(/else movePane\('split'\);/g)?.length).toBe(2);
   });
 
   it('the panel tells the window which project it is showing', () => {

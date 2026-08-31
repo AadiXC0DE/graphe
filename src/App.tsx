@@ -5312,7 +5312,14 @@ function Conversation() {
                   onShowMe={changeShowMe}
                   showFiles={preferences.showFiles}
                   onShowFiles={changeShowFiles}
-                  onPreview={() => (severalProjects ? movePane('split') : void seeIt())}
+                  onPreview={() => {
+                    if (!severalProjects) {
+                      void seeIt();
+                      return;
+                    }
+                    if (pane === 'off') void seeIt(undefined, undefined, panelRepoNow.current ?? undefined);
+                    else movePane('split');
+                  }}
                   onAccount={openConnect}
                   onAddMore={openAddMore}
                 />
@@ -5347,11 +5354,19 @@ function Conversation() {
           <button
             type="button"
             className="previewpill"
-            /* In a folder holding several projects the pill is a way back to
-               the page already being served, not a way to start one — starting
-               is a press on the project's own row, which is the only place
-               that knows which project is meant. */
-            onClick={() => (severalProjects ? movePane('split') : void seeIt())}
+            /* In a folder holding several projects, whichever one the panel is
+               showing is the one meant. That used to be the row's own press;
+               with the row gone this is the only way left to start one, and a
+               pill that could only ever reveal a page nobody had served was no
+               way at all. */
+            onClick={() => {
+              if (!severalProjects) {
+                void seeIt();
+                return;
+              }
+              if (pane === 'off') void seeIt(undefined, undefined, panelRepoNow.current ?? undefined);
+              else movePane('split');
+            }}
             disabled={busy || (progress !== null && !progress.done)}
           >
             {pillLabel}

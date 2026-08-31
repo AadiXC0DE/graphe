@@ -190,7 +190,33 @@ describe('the window hears about the projects', () => {
    *  preview press, so in a folder holding several nothing starts one. */
   it('leaves the pill a way back to what is already served', () => {
     expect(APP).toContain('severalProjects');
-    expect(APP).toContain("onClick={() => (severalProjects ? movePane('split') : void seeIt())}");
+    expect(APP).toContain("else movePane('split');");
     expect(OVERVIEW).not.toContain('onSeeProject');
+  });
+});
+
+/** The row's own Preview press is gone. It was the only thing that could start
+ *  one in a folder holding several projects, so the pill had to grow the job —
+ *  a pill that could only ever reveal a page nobody had served is no way in. */
+describe('starting a preview in a folder holding several projects', () => {
+  const app = APP;
+
+  it('has no press left on the project rows', () => {
+    expect(app).not.toContain('onSeeProject');
+  });
+
+  it('starts one for whichever project the panel is showing', () => {
+    expect(app).toContain(
+      "if (pane === 'off') void seeIt(undefined, undefined, panelRepoNow.current ?? undefined);",
+    );
+    // Both ways in — the pill and the project menu — or one of them is a dead end.
+    expect(
+      app.match(/if \(pane === 'off'\) void seeIt\(undefined, undefined, panelRepoNow\.current \?\? undefined\);/g)
+        ?.length,
+    ).toBe(2);
+  });
+
+  it('and still only reveals a page that is already being served', () => {
+    expect(app).toContain("else movePane('split');");
   });
 });

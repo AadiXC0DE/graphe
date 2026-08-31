@@ -115,3 +115,21 @@ export function slicePages(
     note: notes.length > 0 ? `\n\n(You have the first pages, one at a time: ${notes.join(', and ')}. Ask again for a later page to keep reading.)` : '',
   };
 }
+
+/** Characters of an attached PDF carried into the message. The same ceiling a
+ *  fetched paper gets: everything here is paid for again in every later turn. */
+export const MAX_ATTACHED_CHARACTERS = 20_000;
+
+/** An attached PDF, as the words that go with the message.
+ *
+ *  A scan with no text in it still gets a block. A paper that arrives and then
+ *  means nothing reads as the app having lost it, which is the one ending this
+ *  must not have. */
+export function attachedPaper(name: string, pages: readonly string[]): string {
+  const called = name.replace(/["<>]/g, '').trim() || 'attachment.pdf';
+  if (pages.length === 0) {
+    return `<attached-pdf name="${called}">This PDF is pictures rather than words, so there is no text in it to read. A screenshot of the pages that matter would work.</attached-pdf>`;
+  }
+  const { text, note } = slicePages(pages, MAX_ATTACHED_CHARACTERS);
+  return `<attached-pdf name="${called}">\n${text}${note}\n</attached-pdf>`;
+}

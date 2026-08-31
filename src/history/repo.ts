@@ -54,6 +54,7 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { ChangeKind } from './titles';
+import type { Fetched } from '../lib/ipc';
 import { stripType } from '../lib/conventional';
 
 const run = promisify(execFile);
@@ -134,6 +135,8 @@ export const historyProblems = {
   holdFailed: 'I couldn’t keep that work aside, so I’ve left your project alone.',
   nameTaken: 'Your project already has work under that name, so I’ve left it alone.',
   sendFailed: 'I couldn’t send that on, so nothing has left this computer.',
+  fetchFailed: 'I couldn’t fetch from origin, so nothing here has changed.',
+  fastForwardFailed: 'I couldn’t fast-forward this branch, so I’ve left it as it was.',
 } as const;
 
 /** A failure the user might see. `message` is the sentence; `details` is the raw
@@ -754,6 +757,75 @@ export class ProjectHistory {
       theirSettings: true,
     });
     if (sent.code !== 0) throw new HistoryError(historyProblems.sendFailed, detailsOf(sent));
+  }
+
+  /**
+   * Where this branch stands against the shared copy, without asking it.
+   *
+   * No remote, a detached HEAD and a branch that tracks nothing are ordinary
+   * days here, not failures — each one has an answer of its own.
+   */
+  async standing(): Promise<Fetched> {
+    await this.ensureReady();
+    const remote = await this.sharedCopy();
+    const head = await this.attempt(['symbolic-ref', '--quiet', '--short', 'HEAD']);
+    const onBranch = head.code === 0 ? head.stdout.trim() : '';
+    const branch = onBranch === '' ? null : onBranch;
+    const tracked = await this.attempt([
+      'rev-parse',
+      '--abbrev-ref',
+      '--symbolic-full-name',
+      '@{upstream}',
+    ]);
+    const tracks = tracked.code === 0 ? tracked.stdout.trim() : '';
+    const upstream = tracks === '' ? null : tracks;
+    const here = { branch, upstream, ahead: 0, behind: 0, dirty: await this.hasUnsavedChanges(), moved: 0 };
+
+    if (remote === null) return { ...here, state: 'no-remote' };
+    if (branch === null) return { ...here, state: 'detached' };
+    if (upstream === null) return { ...here, state: 'no-upstream' };
+
+    // Left is what the upstream holds and we do not, right is the other way.
+    const counted = await this.attempt(['rev-list', '--left-right', '--count', `${upstream}...HEAD`]);
+    if (counted.code !== 0) return { ...here, state: 'up-to-date' };
+    const [left = '0', right = '0'] = counted.stdout.trim().split(/\s+/);
+    const behind = Number.parseInt(left, 10) || 0;
+    const ahead = Number.parseInt(right, 10) || 0;
+    const state =
+      behind > 0 && ahead > 0 ? 'diverged' : behind > 0 ? 'behind' : ahead > 0 ? 'ahead' : 'up-to-date';
+    return { ...here, ahead, behind, state };
+  }
+
+  /**
+   * Fetch from origin, and say where that leaves this branch.
+   *
+   * Nothing in the folder moves: this only brings the remote-tracking branches
+   * up to date. Runs with the machine's own configuration for the same reason
+   * `sendLine` does — reaching origin needs whatever this computer uses to
+   * prove who you are.
+   */
+  async fetchShared(): Promise<Fetched> {
+    await this.ensureReady();
+    if ((await this.sharedCopy()) === null) return this.standing();
+    const got = await this.attempt(['fetch', SHARED], { theirSettings: true });
+    if (got.code !== 0) throw new HistoryError(historyProblems.fetchFailed, detailsOf(got));
+    return this.standing();
+  }
+
+  /**
+   * Fast-forward this branch onto its upstream.
+   *
+   * Only ever a fast-forward, and only over a clean tree. A branch that has
+   * diverged wants a merge or a rebase, and that is a decision somebody makes
+   * rather than one a button takes for them — so anything but a clean run
+   * forward is answered with where things stand and nothing is touched.
+   */
+  async fastForward(): Promise<Fetched> {
+    const before = await this.standing();
+    if (before.state !== 'behind' || before.dirty || before.upstream === null) return before;
+    const moved = await this.attempt(['merge', '--ff-only', before.upstream]);
+    if (moved.code !== 0) throw new HistoryError(historyProblems.fastForwardFailed, detailsOf(moved));
+    return { ...(await this.standing()), moved: before.behind };
   }
 
   /* ------------------------------------------------------------- internals */

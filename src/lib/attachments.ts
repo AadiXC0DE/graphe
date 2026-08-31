@@ -58,8 +58,13 @@ export function pictureType(name: string, said: string | undefined): string {
   return TYPE_BY_NAME[extensionOf(name)] ?? '';
 }
 
-/** The exports that come out of a design tool at the end of a day's work. */
-const DOCUMENTS: readonly string[] = ['pdf', 'fig', 'sketch', 'xd', 'ai', 'psd', 'eps'];
+/** The one document that travels: the shell reads a PDF into words before the
+ *  message goes, the same way `webfetch` reads a paper off an address. */
+const DOCUMENTS: readonly string[] = ['pdf'];
+
+/** A design tool's own save file. Nothing can read one, so it is refused at the
+ *  box rather than dropped after the message has gone. */
+const DESIGN_EXPORTS: readonly string[] = ['fig', 'sketch', 'xd', 'ai', 'psd', 'eps'];
 
 export function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.');
@@ -84,14 +89,22 @@ export type Verdict =
 /**
  * Whether this file can come along, and what to say if not.
  *
- * Two refusals, both of them explanations. The size one names the number and
+ * Three refusals, all of them explanations. The size one names the number and
  * the ceiling, because "too large" without a figure leaves somebody guessing at
- * what would fit. The kind one names what does work, because a list of what is
+ * what would fit. The other two name what does work, because a list of what is
  * accepted is more use than a verdict on what was not.
  */
 export function checkFile(file: FileFacts): Verdict {
   const extension = extensionOf(file.name);
   const type = file.type ?? '';
+
+  if (DESIGN_EXPORTS.includes(extension)) {
+    return {
+      ok: false,
+      because: `I cannot open a .${extension}. Export it as a PDF or a PNG, or paste the Figma link.`,
+    };
+  }
+
   const kind: 'image' | 'document' | null = IMAGES.includes(extension)
     ? 'image'
     : DOCUMENTS.includes(extension)
@@ -105,7 +118,7 @@ export function checkFile(file: FileFacts): Verdict {
   if (kind === null) {
     return {
       ok: false,
-      because: `I can look at pictures, PDFs and design exports${
+      because: `I can look at pictures and PDFs${
         extension === '' ? '' : `, and this one is a .${extension}`
       }. A screenshot of it would work.`,
     };
@@ -227,13 +240,6 @@ export const ATTACH_WORDS = {
     links.length === 1
       ? `The design I am talking about is here: ${links[0] ?? ''}`
       : `The designs I am talking about are here:\n${links.map((one) => `- ${one}`).join('\n')}`,
-  /** Said when something in the box is not a picture. Only pictures travel with
-   *  a message; a file that sits there looking attached and is never read is
-   *  the worst of the three possible answers. */
-  onlyPictures: (names: readonly string[]): string =>
-    names.length === 1
-      ? `${names[0] ?? ''} will not be read. Only pictures go with a message. Put it in your project folder and ask me to open it.`
-      : `${String(names.length)} of these will not be read. Only pictures go with a message. Put them in your project folder and ask me to open them.`,
 } as const;
 
 /**

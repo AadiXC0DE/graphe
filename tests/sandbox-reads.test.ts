@@ -8,7 +8,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp, realpath } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -97,6 +97,57 @@ describe('what a bound command may read', () => {
     expect(runtime?.out).toContain('started');
     expect(runtime?.out).toContain('{"ok":true}');
   }, 90_000);
+});
+
+/* The bug this exists to stop coming back: a dev server started here could not
+   read the project's own `.env.local`, so it came up and then failed on every
+   request. The agent read that as the file being wrong and spent a dozen turns
+   rewriting it — including under sudo — in somebody's real project.
+
+   The boundary is under the project's own processes, not under the agent. The
+   Guard still refuses the agent the contents (S-13 in guard.test.ts); this is
+   about `npm run dev` being able to open the file it is given. */
+describe("the project's own environment file, under the boundary", () => {
+  it('opens .env.local at the root and nested, and still refuses one outside', async () => {
+    const look = await boundaryHere();
+    if (!look.ok) {
+      expect(look.why).toMatch(/no-boundary-here|piece-missing|not-holding/);
+      return;
+    }
+
+    const folder = await newFolder();
+    writeFileSync(join(folder, '.env.local'), 'API_KEY=inside\n');
+    writeFileSync(join(folder, '.env'), 'API_KEY=root\n');
+    mkdirSync(join(folder, 'apps', 'web'), { recursive: true });
+    writeFileSync(join(folder, 'apps', 'web', '.env.production'), 'API_KEY=nested\n');
+
+    const elsewhere = await newFolder();
+    writeFileSync(join(elsewhere, '.env'), 'API_KEY=somebody-elses\n');
+
+    for (const [what, path] of [
+      ['root .env.local', join(folder, '.env.local')],
+      ['root .env', join(folder, '.env')],
+      ['nested .env.production', join(folder, 'apps', 'web', '.env.production')],
+    ] as const) {
+      const read = await bound(folder, '/bin/cat', [path]);
+      if (read === null) continue;
+      expect(read.code, `${what}: ${read.err}`).toBe(0);
+      expect(read.out, what).toContain('API_KEY=');
+    }
+
+    // Somebody else's, one folder over, stays shut.
+    const theirs = await bound(folder, '/bin/cat', [join(elsewhere, '.env')]);
+    if (theirs !== null) expect(theirs.out).not.toContain('somebody-elses');
+  });
+
+  it('still covers a real key sitting in the project', async () => {
+    const look = await boundaryHere();
+    if (!look.ok) return;
+    const folder = await newFolder();
+    writeFileSync(join(folder, 'server.pem'), 'PRIVATE KEY inside\n');
+    const read = await bound(folder, '/bin/cat', [join(folder, 'server.pem')]);
+    if (read !== null) expect(read.out).not.toContain('PRIVATE KEY inside');
+  });
 });
 
 /* Keys kept inside the project, rather than in a home folder. The Guard

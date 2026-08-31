@@ -30,7 +30,6 @@ import {
   shallower,
   modelInFront,
   readsPictures,
-  ATTACH_WORDS,
   PICTURE_WORDS,
 } from '../lib/attachments';
 import {
@@ -129,7 +128,7 @@ type Props = {
 /** What the file picker offers, in the same order a designer would think of
  *  them. The drop and paste paths accept the same things and say so themselves
  *  — see src/lib/attachments.ts. */
-const ACCEPT = 'image/*,application/pdf,.fig,.sketch,.xd,.ai,.psd,.eps';
+const ACCEPT = 'image/*,application/pdf';
 
 let counter = 0;
 function newId(): string {
@@ -244,15 +243,9 @@ export default function Composer({
      is left to the provider to answer. */
   const blindToPictures =
     readsPictures(connection) === false && attachments.some((one) => one.kind === 'image');
-  /* Anything in the box that is not a picture. Only pictures travel with a
-     message — a document chip sits there looking attached and is never read,
-     which is the worst of the three possible answers. */
-  const notPictures = attachments.filter((one) => one.kind === 'document').map((one) => one.name);
   const cannotRead = blindToPictures
     ? PICTURE_WORDS.cannotRead(modelInFront(connection)?.label ?? 'This model')
-    : notPictures.length > 0
-      ? ATTACH_WORDS.onlyPictures(notPictures)
-      : null;
+    : null;
   const [mentionAt, setMentionAt] = useState(0);
 
   const areaRef = useRef<HTMLTextAreaElement>(null);

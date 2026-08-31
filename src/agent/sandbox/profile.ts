@@ -174,6 +174,21 @@ export function usableFolder(candidate: string): string | null {
   return clean === '' ? '/' : clean;
 }
 
+/** A path, as a literal in a Seatbelt regex. */
+function asRegex(path: string): string {
+  return path.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+}
+
+/** The project's own `.env`, at the root or anywhere under it.
+ *
+ * Read-only and only inside the project: the code being built reads it to run.
+ * Denying it made a dev server start and then fail on every request, which
+ * reads as the project being broken. The Guard asks before anything writes one,
+ * and `.env` anywhere else on the disk stays refused by name below. */
+function projectEnvFiles(roots: readonly string[]): string[] {
+  return roots.map((root) => `(regex #"^${asRegex(root)}(/[^/]+)*/\\.env($|\\.)")`);
+}
+
 /** Files that are keys wherever they sit, including inside the project. */
 const PRIVATE_BY_NAME = [
   String.raw`/\.env($|\.)`,
@@ -286,6 +301,10 @@ export function seatbeltProfile(bounds: Bounds): Profile {
     lines.push(`(deny file-read* (regex #"${pattern}"))`);
   }
   lines.push(`(allow file-read* ${PUBLIC_CERTIFICATES.join(' ')})`);
+  // After the deny, so it wins for these and only these — the same order the
+  // certificates use.
+  const ownEnv = projectEnvFiles(writable);
+  if (ownEnv.length > 0) lines.push(`(allow file-read* ${ownEnv.join(' ')})`);
   // Last, so a key in one of these folders is refused whatever it is called.
   for (let index = 0; index < kept.length; index++) {
     lines.push(`(deny file-read* (subpath (param "PRIVATE${String(index)}")))`);

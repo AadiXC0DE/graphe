@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { createWorktree, type RunGit } from '../src/history/worktree';
+import { keepOutOfCommits } from './excludes';
 
 /**
  * Prepare an isolated worktree for a pull request — fetch and checkout.
@@ -56,26 +56,10 @@ export const EXCLUDE_LINE = '.graphe/';
  * Keep the checkouts out of the person's next commit.
  *
  * `git add -A` stages a worktree folder as an embedded repository, so without
- * this a review checkout lands in somebody's commit. It goes in the clone's own
- * exclude file, which is never committed — writing the project's `.gitignore`
- * would be a change to a tracked file nobody asked for. Best effort: a repo
- * whose exclude file cannot be written is not a reason to refuse the review.
+ * this a review checkout lands in somebody's commit.
  */
-export async function keepCheckoutsOutOfCommits(project: string): Promise<boolean> {
-  const found = await gitRun(project, ['rev-parse', '--git-common-dir']);
-  if (found.code !== 0) return false;
-  const gitDir = resolve(project, (found.out ?? '').trim());
-  const file = join(gitDir, 'info', 'exclude');
-  const existing = await readFile(file, 'utf8').catch(() => '');
-  if (existing.split('\n').some((line) => line.trim() === EXCLUDE_LINE)) return true;
-  const ending = existing === '' || existing.endsWith('\n') ? existing : `${existing}\n`;
-  try {
-    await mkdir(join(gitDir, 'info'), { recursive: true });
-    await writeFile(file, `${ending}${EXCLUDE_LINE}\n`, 'utf8');
-    return true;
-  } catch {
-    return false;
-  }
+export function keepCheckoutsOutOfCommits(project: string): Promise<boolean> {
+  return keepOutOfCommits(project, [EXCLUDE_LINE]);
 }
 
 export async function preparePrWorktree(project: string, prNumber: number): Promise<{ folder: string }> {

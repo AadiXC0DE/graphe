@@ -168,7 +168,7 @@ describe('the window hears about the projects', () => {
     expect(block).toContain('onSwitch={(name) => onSwitchBranch(name, one.name)}');
     expect(block).toContain('onCreate={(name) => onCreateBranch(name, one.name)}');
     expect(block).toContain('onSave(one.name)');
-    expect(block).toContain('onSeeProject(one.name)');
+    expect(block).toContain('askOrigin(one.name, forward)');
   });
 
   it('shows one project’s history at a time, and says whose', () => {
@@ -185,12 +185,12 @@ describe('the window hears about the projects', () => {
     expect(APP).toContain('repoVersions: desk.repoVersions,');
   });
 
-  /** Starting a preview needs a project, so it is a press on the project's own
-   *  row. The pill stays a way back to the page already being served — never a
-   *  disabled control behind a hint nobody can reach. */
-  it('leaves starting a preview to the project’s own row', () => {
+  /** The pill is a way back to the page already being served, never a disabled
+   *  control behind a hint nobody can reach. The project rows no longer carry a
+   *  preview press, so in a folder holding several nothing starts one. */
+  it('leaves the pill a way back to what is already served', () => {
     expect(APP).toContain('severalProjects');
     expect(APP).toContain("onClick={() => (severalProjects ? movePane('split') : void seeIt())}");
-    expect(OVERVIEW).toContain('onSeeProject(one.name)');
+    expect(OVERVIEW).not.toContain('onSeeProject');
   });
 });

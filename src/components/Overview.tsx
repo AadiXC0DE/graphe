@@ -13,6 +13,7 @@ import type {
   Away as AwayState,
   Decision,
   EveryKind,
+  Fetched,
   GitSnapshot,
   InStep as InStepState,
   Landing as LandingState,
@@ -35,7 +36,6 @@ const SEVERAL = {
   heading: 'The projects',
   changed: 'changed',
   save: 'Commit',
-  see: 'Preview',
   /** The strip above the timeline, when there is more than one timeline. */
   whose: 'Whose history',
 } as const;
@@ -53,6 +53,83 @@ const COMMITTING = {
       ? 'Stage every change in this project and commit it.'
       : `Stage every change in this project and commit it to ${branch}.`,
 } as const;
+
+/** Origin, and the two things this panel does against it. Both named as
+ *  themselves: a fetch moves nothing, a fast-forward moves the branch and is
+ *  only ever offered where it can lose nothing. Anything else — a divergence,
+ *  a dirty tree — is said and left for the person to decide. */
+const ORIGIN = {
+  heading: 'Origin',
+  fetch: 'Fetch',
+  fetching: 'Fetching…',
+  forward: 'Fast-forward',
+  forwarding: 'Fast-forwarding…',
+} as const;
+
+function commits(count: number): string {
+  return count === 1 ? '1 commit' : `${String(count)} commits`;
+}
+
+/** Where a branch stands against origin, in the words git uses for it. */
+export function saysStanding(found: Fetched): string {
+  const upstream = found.upstream ?? 'origin';
+  switch (found.state) {
+    case 'no-remote':
+      return 'No remote named origin. This project is only here.';
+    case 'detached':
+      return 'Detached HEAD, so there is no branch to fetch onto.';
+    case 'no-upstream':
+      return `${found.branch ?? 'This branch'} tracks nothing on origin.`;
+    case 'ahead':
+      return `${commits(found.ahead)} ahead of ${upstream}, none behind.`;
+    case 'behind':
+      return `${commits(found.behind)} behind ${upstream}.`;
+    case 'diverged':
+      return `Diverged from ${upstream}: ${commits(found.ahead)} ahead, ${String(found.behind)} behind. A merge or a rebase is yours to make.`;
+    case 'up-to-date':
+      return `Up to date with ${upstream}.`;
+  }
+}
+
+/** What the band says after a press. A fast-forward reports what it took in;
+ *  everything else reports where the branch stands, and why nothing moved. */
+export function saysFound(found: Fetched): string {
+  if (found.moved > 0) {
+    return `Fast-forwarded ${found.branch ?? 'HEAD'} to ${found.upstream ?? 'origin'} — ${commits(found.moved)} in.`;
+  }
+  const standing = saysStanding(found);
+  return found.state === 'behind' && found.dirty
+    ? `${standing} Uncommitted changes here, so nothing has moved.`
+    : standing;
+}
+
+/** True when the branch can be moved forward without losing anything. */
+function canFastForward(found: Fetched | undefined): boolean {
+  return found !== undefined && found.state === 'behind' && !found.dirty;
+}
+
+/** Where a project stood at the last status read — what the band says before
+ *  anybody has fetched. `no-remote` is not among the answers: a status cannot
+ *  tell a missing origin from a branch that tracks nothing. */
+function standingOf(git: GitSnapshot): Fetched {
+  const current = git.branches.find((one) => one.current);
+  const upstream = current?.upstream ?? null;
+  const ahead = current?.ahead ?? git.ahead;
+  const behind = current?.behind ?? git.behind;
+  const state: Fetched['state'] =
+    git.branch === '(detached)'
+      ? 'detached'
+      : upstream === null
+        ? 'no-upstream'
+        : behind > 0 && ahead > 0
+          ? 'diverged'
+          : behind > 0
+            ? 'behind'
+            : ahead > 0
+              ? 'ahead'
+              : 'up-to-date';
+  return { branch: git.branch, upstream, ahead, behind, dirty: git.dirty, moved: 0, state };
+}
 
 /** Where a project stands, beyond the line of work its own control already
  *  names. Empty when there is nothing to say — a project in step says it by
@@ -152,8 +229,11 @@ type Props = {
   onSwitchBranch: (name: string, repo?: string) => void;
   /** Start a new line of work and move the project onto it. */
   onCreateBranch: (name: string, repo?: string) => void;
-  /** Put one of the projects here in front of you, running. */
-  onSeeProject?: (repo: string) => void;
+  /** Fetch from origin and answer where that leaves the branch. Null when the
+   *  shell refused and has already said why. */
+  onFetch?: (repo?: string) => Promise<Fetched | null>;
+  /** Fast-forward that branch onto its upstream. */
+  onFastForward?: (repo?: string) => Promise<Fetched | null>;
   /** Write a page of what changed, for somebody who is not you. */
   onShare: (repo?: string) => void;
   /** Said whenever the panel changes which project it is showing. */
@@ -308,7 +388,8 @@ export default function Overview({
   onOpenGraph,
   onSwitchBranch,
   onCreateBranch,
-  onSeeProject,
+  onFetch,
+  onFastForward,
   onShare,
   onWhose,
 
@@ -357,6 +438,34 @@ export default function Overview({
   useEffect(() => {
     tellWhose.current?.(whose?.name ?? null);
   }, [whose?.name]);
+
+  /* What the last fetch found, by project folder name — '' for the folder
+     itself. Held here rather than in the overview: a fetch is a press somebody
+     made, and its answer belongs beside the press until they press again. */
+  const [found, setFound] = useState<Readonly<Record<string, Fetched>>>({});
+  const [working, setWorking] = useState<string | null>(null);
+
+  /** What the press says: the operation it will run, or that it is running. */
+  const originSays = (key: string, forward: boolean): string =>
+    working === key
+      ? forward
+        ? ORIGIN.forwarding
+        : ORIGIN.fetching
+      : forward
+        ? ORIGIN.forward
+        : ORIGIN.fetch;
+
+  const askOrigin = (repo: string | undefined, forward: boolean): void => {
+    const ask = forward ? onFastForward : onFetch;
+    if (ask === undefined || working !== null) return;
+    const key = repo ?? '';
+    setWorking(key);
+    void ask(repo)
+      .then((answer) => {
+        if (answer !== null) setFound((was) => ({ ...was, [key]: answer }));
+      })
+      .finally(() => setWorking(null));
+  };
 
   /* Which band of the panel is in front. Bands used to stack into one column
      that only got longer; now each has a home and nothing is buried. */
@@ -428,49 +537,57 @@ export default function Overview({
         <section className="overview__block">
           <h2 className="overview__title">{SEVERAL.heading}</h2>
           <ul className="projects">
-            {view.repos.map((one) => (
-              <li key={one.path} className="projects__one">
-                <div className="projects__head">
-                  <span className="projects__name">{one.name}</span>
-                  <span className="projects__state">{repoState(one.git)}</span>
-                </div>
-                <div className="projects__row">
-                  <Lines
-                    branches={one.git.branches}
-                    fallback={one.git.branch}
-                    busy={busy}
-                    onSwitch={(name) => onSwitchBranch(name, one.name)}
-                    onCreate={(name) => onCreateBranch(name, one.name)}
-                  />
-                  <div className="projects__acts">
-                    {one.git.dirty ? (
-                      <button
-                        type="button"
-                        className="projects__act"
-                        // Two rows of the same two words: the name has to be in
-                        // the label, or one press cannot be told from another.
-                        aria-label={`${SEVERAL.save} ${one.name}`}
-                        onClick={() => onSave(one.name)}
-                        disabled={busy}
-                      >
-                        {SEVERAL.save}
-                      </button>
-                    ) : null}
-                    {onSeeProject === undefined ? null : (
-                      <button
-                        type="button"
-                        className="projects__act"
-                        aria-label={`${SEVERAL.see} ${one.name}`}
-                        onClick={() => onSeeProject(one.name)}
-                        disabled={busy}
-                      >
-                        {SEVERAL.see}
-                      </button>
-                    )}
+            {view.repos.map((one) => {
+              const stands = found[one.name];
+              const forward = canFastForward(stands);
+              return (
+                <li key={one.path} className="projects__one">
+                  <div className="projects__head">
+                    <span className="projects__name">{one.name}</span>
+                    <span className="projects__state">{repoState(one.git)}</span>
                   </div>
-                </div>
-              </li>
-            ))}
+                  <div className="projects__row">
+                    <Lines
+                      branches={one.git.branches}
+                      fallback={one.git.branch}
+                      busy={busy}
+                      onSwitch={(name) => onSwitchBranch(name, one.name)}
+                      onCreate={(name) => onCreateBranch(name, one.name)}
+                    />
+                    <div className="projects__acts">
+                      {one.git.dirty ? (
+                        <button
+                          type="button"
+                          className="projects__act"
+                          // Two rows of the same two words: the name has to be in
+                          // the label, or one press cannot be told from another.
+                          aria-label={`${SEVERAL.save} ${one.name}`}
+                          onClick={() => onSave(one.name)}
+                          disabled={busy}
+                        >
+                          {SEVERAL.save}
+                        </button>
+                      ) : null}
+                      {onFetch === undefined ? null : (
+                        <button
+                          type="button"
+                          className="projects__act"
+                          aria-label={`${forward ? ORIGIN.forward : ORIGIN.fetch} ${one.name}`}
+                          aria-busy={working === one.name}
+                          onClick={() => askOrigin(one.name, forward)}
+                          disabled={busy || working !== null}
+                        >
+                          {originSays(one.name, forward)}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {stands === undefined ? null : (
+                    <p className="projects__found">{saysFound(stands)}</p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       ) : null}
@@ -486,6 +603,33 @@ export default function Overview({
             onSwitch={onSwitchBranch}
             onCreate={onCreateBranch}
           />
+        </section>
+      )}
+
+      {/* Origin. Two operations, one at a time: a fetch says what is there and
+          moves nothing, and only a fetch that found a clean run forward turns
+          the press into the fast-forward. A divergence, a dirty tree, no
+          remote, no upstream — each is said and nothing is done. */}
+      {git === null || several || onFetch === undefined ? null : (
+        <section className="overview__block">
+          <h2 className="overview__title">{ORIGIN.heading}</h2>
+          <p className="overview__summary">
+            {found[''] === undefined ? saysStanding(standingOf(git)) : saysFound(found[''])}
+          </p>
+          <div className="overview__actions">
+            <button
+              type="button"
+              className="overview__do"
+              aria-busy={working === ''}
+              onClick={() => askOrigin(undefined, canFastForward(found['']))}
+              disabled={busy || working !== null}
+            >
+              {originSays('', canFastForward(found['']))}
+              {canFastForward(found['']) && found['']?.upstream != null ? (
+                <span className="overview__plainsay">{`to ${found[''].upstream}`}</span>
+              ) : null}
+            </button>
+          </div>
         </section>
       )}
 

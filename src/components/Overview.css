@@ -647,9 +647,37 @@
   transform: scale(0.97);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .projects__act:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+.projects__act:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .projects__act:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* A press that is away doing something. It is disabled like its neighbours, so
+   without this the one actually working is the one that looks least alive. */
+.projects__act[aria-busy='true']:disabled,
+.overview__do[aria-busy='true']:disabled {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/* What the last fetch found, under the row that asked. */
+.projects__found {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 
 /* Whose history is in front. Two or three names, so a row of them reads faster

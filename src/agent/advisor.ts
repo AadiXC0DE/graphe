@@ -190,7 +190,7 @@ export function extensionToolNames(extensions: readonly LoadedExtension[]): read
 }
 
 /** Segment by segment, so `pi-advisor` never answers for `pi-advisor-flow`. */
-function fromPackage(where: string, id: string): boolean {
+export function fromPackage(where: string, id: string): boolean {
   return where.split(/[\\/]/).includes(id);
 }
 

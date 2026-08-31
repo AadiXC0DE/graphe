@@ -58,6 +58,7 @@ import {
   type ConnectionState,
   type Decided,
   type Decision,
+  type Fetched,
   type FileEntry,
   type HandedOver,
   type Landing,
@@ -647,11 +648,34 @@ let previewRunning: readonly RunningPiece[] = [
 /** Lines of work the tab can actually move between, so the switcher is a
  *  control somebody can try rather than a picture of one. */
 let previewLine = 'main';
+/** Uncommitted changes in the made-up project. Real state, because it is what
+ *  decides whether a fast-forward is offered: commit, and the press appears. */
+let previewDirty = true;
 let previewLines: { name: string; current: boolean; upstream: string | null; ahead: number; behind: number; message: string }[] = [
   { name: 'main', current: true, upstream: 'origin/main', ahead: 0, behind: 2, message: 'The preview line' },
   { name: 'pricing-page', current: false, upstream: 'origin/pricing-page', ahead: 3, behind: 0, message: 'Pricing table, second pass' },
   { name: 'hero-rework', current: false, upstream: null, ahead: 1, behind: 0, message: 'One big line for the hero' },
 ];
+
+/** Where the made-up project stands against origin, read off the same branch
+ *  list the switcher draws so the two can never disagree. */
+function previewStandsOn(): Fetched {
+  const line = previewLines.find((one) => one.name === previewLine);
+  const upstream = line?.upstream ?? null;
+  const ahead = line?.ahead ?? 0;
+  const behind = line?.behind ?? 0;
+  const state: Fetched['state'] =
+    upstream === null
+      ? 'no-upstream'
+      : behind > 0 && ahead > 0
+        ? 'diverged'
+        : behind > 0
+          ? 'behind'
+          : ahead > 0
+            ? 'ahead'
+            : 'up-to-date';
+  return { branch: previewLine, upstream, ahead, behind, dirty: previewDirty, moved: 0, state };
+}
 
 let previewHowFar: HowFar = 'asking';
 let previewPlanMode = false;
@@ -828,17 +852,19 @@ let previewPlanMode = false;
       done({
         git: {
           branch: previewLine,
-          dirty: true,
-          unstaged: 2,
-          staged: 1,
-          untracked: 1,
-          ahead: 0,
-          behind: 2,
+          dirty: previewDirty,
+          unstaged: previewDirty ? 2 : 0,
+          staged: previewDirty ? 1 : 0,
+          untracked: previewDirty ? 1 : 0,
+          ahead: previewStandsOn().ahead,
+          behind: previewStandsOn().behind,
           branches: previewLines.map((one) => ({ ...one, current: one.name === previewLine })),
-          files: PREVIEW_CHANGED.map((path) => ({
-            path,
-            kind: path.startsWith('public/') ? ('new' as const) : ('changed' as const),
-          })),
+          files: previewDirty
+            ? PREVIEW_CHANGED.map((path) => ({
+                path,
+                kind: path.startsWith('public/') ? ('new' as const) : ('changed' as const),
+              }))
+            : [],
         },
         preview: null,
         artifacts: [
@@ -1089,6 +1115,21 @@ let previewPlanMode = false;
       previewLine = made;
       return Promise.resolve(done(null));
     },
+    /** Nothing to reach in a browser tab, so the fetch itself always works and
+     *  the answer is whatever the branch list already says. */
+    fetchOrigin(): Promise<Result<Fetched>> {
+      return Promise.resolve(done(previewStandsOn()));
+    },
+
+    fastForward(): Promise<Result<Fetched>> {
+      const before = previewStandsOn();
+      if (before.state !== 'behind' || before.dirty) return Promise.resolve(done(before));
+      previewLines = previewLines.map((one) =>
+        one.name === previewLine ? { ...one, behind: 0 } : one,
+      );
+      return Promise.resolve(done({ ...previewStandsOn(), moved: before.behind }));
+    },
+
     worktreeLand(): Promise<Result<null>> {
       return Promise.resolve(previewFail<null>());
     },
@@ -1214,6 +1255,7 @@ let previewPlanMode = false;
     },
 
     saveVersion(name?: string): Promise<Result<readonly SavedVersion[]>> {
+      previewDirty = false;
       const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
       const already = previewVersions(path).map((one) => ({ ...one, current: false }));
       const saved: SavedVersion = {
@@ -2057,6 +2099,8 @@ function connect(): Bridge {
     onBrowserFrame: (listener) => api.onBrowserFrame(listener),
     branchSwitch: (name, where) => api.branchSwitch(name, where),
     branchCreate: (name, where) => api.branchCreate(name, where),
+    fetchOrigin: (where) => api.fetchOrigin(where),
+    fastForward: (where) => api.fastForward(where),
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),
     preparePrWorktree: (prNumber, where) => api.preparePrWorktree(prNumber, where),

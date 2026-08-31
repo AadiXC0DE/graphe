@@ -135,6 +135,7 @@ import {
   type Look,
   type Move,
   type Pack,
+  type Fetched,
   type Page,
   type Preferences,
   type PromptAttachment,
@@ -2814,7 +2815,8 @@ function Conversation() {
       // attached once went out again with every message after it, so a model
       // that could not read pictures failed on the next message too, and the
       // one after that, and nothing on screen said why.
-      if (inTheBox.length > 0 && !blind) emptyTheBox();
+      const held = blind && inTheBox.some((one) => one.kind === "image");
+      if (inTheBox.length > 0 && !held) emptyTheBox();
 
       // The pictures go along for the ride: read into the base64 the shell
       // expects, and — the same moment — recorded in the overview as the
@@ -2840,11 +2842,14 @@ function Conversation() {
         if (attached.kind === "figma" && attached.url !== undefined) {
           links.push(attached.url);
         }
-        if (!blind && attached.kind === "image" && attached.file !== undefined) {
+        // A PDF travels as its words, so a model that cannot read pictures can
+        // still be handed one.
+        const travels = attached.kind === "document" || (attached.kind === "image" && !blind);
+        if (travels && attached.file !== undefined) {
           const bytes = await pictureBytes(attached.file);
           if (bytes !== null) {
             pictures.push({
-              kind: "image",
+              kind: attached.kind === "document" ? "document" : "image",
               name: attached.name,
               // The shell will not carry a picture whose type is blank, and a
               // file dragged out of some folders arrives with nothing said
@@ -4092,6 +4097,32 @@ function Conversation() {
       branchMove((where) => bridge.branchCreate(name, where), repo);
     },
     [branchMove],
+  );
+
+  /* Origin, for whichever project the press came from. Same shape as the moves
+     above: one place reads which folder and conversation is in front. */
+  const fromOrigin = useCallback(
+    async (
+      ask: (where: Where) => Promise<Result<Fetched>>,
+      repo?: string,
+    ): Promise<Fetched | null> => {
+      const here = currentDesk(desksNow.current);
+      if (here === null) return null;
+      const where: Where = {
+        project: here.path,
+        ...(here.address == null ? {} : { conversation: here.address }),
+        ...(repo === undefined ? {} : { repo }),
+      };
+      const answer = await ask(where);
+      if (!answer.ok) {
+        troubleHere(answer.trouble);
+        return null;
+      }
+      void refreshVersions(here.path);
+      void refreshOverview(here.path, here.address);
+      return answer.value;
+    },
+    [refreshVersions, refreshOverview, troubleHere],
   );
 
   /* ------------------------------------------- while you are not looking */
@@ -5836,7 +5867,8 @@ function Conversation() {
           }}
           onSwitchBranch={switchBranch}
           onCreateBranch={createBranch}
-          onSeeProject={(repo) => void seeIt(undefined, undefined, repo)}
+          onFetch={(repo) => fromOrigin((where) => bridge.fetchOrigin(where), repo)}
+          onFastForward={(repo) => fromOrigin((where) => bridge.fastForward(where), repo)}
           onShare={(repo) => void bridge.shareReview(repo === undefined ? undefined : { repo })}
           onDecide={decideOnWork}
           onHowMuch={changeHowMuch}

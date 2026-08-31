@@ -418,6 +418,59 @@ s.listen(0, '127.0.0.1', () => { console.log('LISTENING OK'); process.exit(0); }
     expect(seatbeltProfile({ writable: ['/tmp/x'], reach: 'secure' }).text).not.toContain('network-bind');
     expect(seatbeltProfile({ writable: ['/tmp/x'], reach: 'nothing' }).text).not.toContain('network-bind');
   });
+
+  /* A server that can only leave by 443 cannot reach its own database, and says
+     so as a page that will not sign in rather than as anything pointing here.
+     Pinned against the kernel: an address in the range reserved for documents
+     answers to nobody, so the only way `EPERM` comes back is us refusing. */
+  const REACH_OUT = `
+const s = require('net').connect({ host: '192.0.2.1', port: 5432, timeout: 2500 });
+s.on('connect', () => { console.log('CONNECTED'); process.exit(0); });
+s.on('timeout', () => { console.log('TIMED OUT'); process.exit(0); });
+s.on('error', (e) => { console.log('ERROR ' + e.code); process.exit(0); });
+`;
+
+  async function tryToReachOut(reach: 'secure' | 'serving'): Promise<string> {
+    const profile = seatbeltProfile({ writable: [newFolder()], reach });
+    const args = [
+      ...profile.params.flatMap(([name, value]) => ['-D', `${name}=${value}`]),
+      '-p',
+      profile.text,
+      process.execPath,
+      '-e',
+      REACH_OUT,
+    ];
+    try {
+      const { stdout } = await runFile('/usr/bin/sandbox-exec', args, { timeout: 20_000 });
+      return stdout.trim();
+    } catch (cause) {
+      const said = cause as { stdout?: string; stderr?: string };
+      return `${said.stdout ?? ''}${said.stderr ?? ''}`.trim();
+    }
+  }
+
+  it.runIf(process.platform === 'darwin')('lets a server reach a database port, not only 443', async () => {
+    expect(await tryToReachOut('serving')).not.toContain('EPERM');
+  }, 30_000);
+
+  it.runIf(process.platform === 'darwin')('still holds the agent to 443', async () => {
+    expect(await tryToReachOut('secure')).toContain('EPERM');
+  }, 30_000);
+
+  it('holds the agent to 443 and lets a server out', () => {
+    const agent = seatbeltProfile({ writable: ['/tmp/x'], reach: 'secure' }).text;
+    expect(agent).toContain('(allow network-outbound (remote tcp "*:443") (remote unix-socket))');
+
+    const server = seatbeltProfile({ writable: ['/tmp/x'], reach: 'serving' }).text;
+    expect(server).toContain('(allow network-outbound)');
+    expect(server).not.toContain('*:443');
+  });
+
+  it('still sends everything through the door when one was asked for', () => {
+    const text = seatbeltProfile({ writable: ['/tmp/x'], reach: 'serving', through: 8899 }).text;
+    expect(text).toContain('(allow network-outbound (remote ip "localhost:8899")');
+    expect(text).not.toContain('(allow network-outbound)\n');
+  });
 });
 
 describe('a real refusal', () => {

@@ -273,8 +273,9 @@ async function decide(command: string, args: readonly string[], bounds: Bounds):
  *    address by name (`egress.ts`), and the macOS profile allows nothing else.
  *    On Linux there is no port filter at all — bubblewrap can only remove the
  *    network entirely — so the door is not used there and `secure` is the whole
- *    network. The helper the `task` tool spawns, and anything `keep_running`
- *    starts, still reach any address on 443.
+ *    network. The helper the `task` tool spawns still reaches any address on
+ *    443. What `keep_running` starts is not filtered at all: it is the person's
+ *    own server, and its own database is not on 443.
  *  - **Nothing can listen.** A bound command reaches out and cannot be reached,
  *    so a development server started from the shell never comes up. Graphe
  *    serves its own preview from outside all of this, which is why that has not

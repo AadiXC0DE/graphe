@@ -3540,10 +3540,6 @@ async function startConversationUnlocked(
   try {
     session = await createSession({
       projectRoot: checkout?.folder ?? open.path,
-      // Named only when this conversation is running in a copy, so the copy
-      // takes a preview address of its own and the project on screen keeps the
-      // ordinary one.
-      mainFolder: open.path,
       onEvent: forwardTo(open.path, held, from),
       // Restore points must describe the tree this session is actually changing.
       timeline:
@@ -4462,9 +4458,9 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       // stops to ask. A run that waited for an answer nobody is there to give
       // would be a night spent on a question.
       unattended: true,
-      // The folder this is a copy of, so the copy takes a preview address of
-      // its own and leaves the ordinary one to the project on screen.
-      mainFolder: desk.path,
+      // Nobody is watching this one, and several copies really do run the same
+      // start command at once, so it takes a preview address of its own.
+      ownPort: true,
       onEvent: hear,
       timeline: await Timeline.open(folder),
       model: (await preferences()).all().model,
@@ -7237,7 +7233,6 @@ function register(): void {
     try {
       session = await createSession({
         projectRoot: folder,
-        mainFolder: open.path,
         onEvent: forwardTo(open.path, open.held, from),
         timeline: await Timeline.open(folder),
         model: prefs.model,

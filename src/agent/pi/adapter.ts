@@ -645,10 +645,12 @@ export type CreateSessionOptions = {
   /** Whether one of the extensions this folder carries has been said yes to.
    *  Left out, none of them are: a folder's own code never loads by default. */
   trusts?: (id: string) => boolean;
-  /** The folder somebody is actually looking at, when this session is running
-   *  in a copy of it. The copy gets its own preview address; the real one keeps
-   *  the ordinary one. */
-  mainFolder?: string;
+  /** Give what this session starts a preview address of its own, decided by
+   *  its folder. For work nobody is watching: several copies really do run the
+   *  same start command at once, and a stable address is what a preview links
+   *  to. A conversation someone is sitting in front of must not set this — it
+   *  is meant to behave exactly like a terminal in that folder. */
+  ownPort?: boolean;
   /** Somewhere to put a piece of background work. Given, the agent can break a
    *  request into pieces that run side by side; left out, it cannot — which is
    *  what keeps a run on the board from filling the board it is running on. */
@@ -2130,7 +2132,6 @@ const MOST_AFTER_SAYINGS = 3;
      sessions own one and close it themselves. */
   const ownsRunning = options.running === undefined;
   const keptRunning = options.running ?? new Running();
-  const inACopy = options.mainFolder !== undefined && options.mainFolder !== options.projectRoot;
   if (!benchmarkToolFloor) {
     customTools.push(
       ...runningTools(keptRunning, {
@@ -2140,11 +2141,9 @@ const MOST_AFTER_SAYINGS = 3;
           return { shell: config.shell, args: config.args };
         },
         writable: shellBounds(options.projectRoot, options.projectRoot).writable,
-        // A door of this copy's own. The project itself keeps the ordinary one,
-        // so the folder somebody is looking at behaves exactly as it always did;
-        // it is the copies that would otherwise collide.
-        port: inACopy ? PORTS.claim(options.projectRoot) : null,
-        copy: inACopy,
+        // Only where nobody is watching. A conversation sets nothing, so the
+        // project's own config decides its port exactly as a terminal would.
+        port: options.ownPort === true ? PORTS.claim(options.projectRoot) : null,
         ...(options.noteServers === undefined ? {} : { noted: options.noteServers }),
         onChange: () => {
           say({ type: 'running', pieces: keptRunning.list() });

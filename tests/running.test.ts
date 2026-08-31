@@ -14,6 +14,8 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { Running, addressIn, labelFor } from '../src/agent/running';
+import { runningTools } from '../src/agent/pi/tools';
+import { PORT_WORDS } from '../src/work/ports';
 import { whichServersAreStray } from '../src/work/strays';
 
 const PARTS = { shell: '/bin/bash', args: ['-c'] as const };
@@ -273,5 +275,45 @@ describe('RU-04 a piece that will not close', () => {
 
     expect(piece.state).toBe('stopped');
     expect(running.at(piece.id)?.state).toBe('stopped');
+  }, 20_000);
+});
+
+/* ========================================================================== */
+/* RU-05 a server that came up in a conversation's own checkout                */
+/* ========================================================================== */
+
+/** Reaches keep_running's own answer, because that answer is what gets passed
+ *  on. The address is the one thing anybody carries out of here, so the sentence
+ *  about which copy it belongs to has to travel with it or it is not read. */
+async function startedBy(copy: boolean): Promise<string> {
+  const running = register();
+  const { folder, command } = folderWithServer();
+  const tools = runningTools(running, {
+    folder,
+    parts: () => PARTS,
+    writable: [folder],
+    copy,
+  });
+  const start = tools.find((one) => one.name === 'keep_running');
+  expect(start).toBeDefined();
+  const run = start?.execute as unknown as (
+    id: string,
+    params: unknown,
+  ) => Promise<{ content: readonly { text?: string }[] }>;
+  const answer = await run('call-1', { command });
+  return answer.content.map((one) => one.text ?? '').join('\n');
+}
+
+describe('RU-05 the address a checkout answers on', () => {
+  it('says it is a second copy, with the address, when the work is in its own checkout', async () => {
+    const said = await startedBy(true);
+    expect(said).toContain('It is up at http://localhost:');
+    expect(said).toContain(PORT_WORDS.secondCopy);
+  }, 20_000);
+
+  it('says nothing of the sort for the project the person is looking at', async () => {
+    const said = await startedBy(false);
+    expect(said).toContain('It is up at http://localhost:');
+    expect(said).not.toContain(PORT_WORDS.secondCopy);
   }, 20_000);
 });

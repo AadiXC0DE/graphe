@@ -102,4 +102,13 @@ describe('what the process is told', () => {
     expect(PORT_WORDS.servingAt(5201)).toContain('5201');
     expect(PORT_WORDS.noRoom).toMatch(/[.!]$/);
   });
+
+  it('names what a second copy on its own port will break, in the words those settings use', () => {
+    const said = PORT_WORDS.secondCopy;
+    expect(said).toMatch(/checkout/);
+    expect(said).toMatch(/trusted origins/);
+    expect(said).toMatch(/CORS/);
+    // One sentence. A paragraph above a link does not get read.
+    expect(said.split('. ').length).toBe(1);
+  });
 });

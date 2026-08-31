@@ -2130,6 +2130,7 @@ const MOST_AFTER_SAYINGS = 3;
      sessions own one and close it themselves. */
   const ownsRunning = options.running === undefined;
   const keptRunning = options.running ?? new Running();
+  const inACopy = options.mainFolder !== undefined && options.mainFolder !== options.projectRoot;
   if (!benchmarkToolFloor) {
     customTools.push(
       ...runningTools(keptRunning, {
@@ -2142,10 +2143,8 @@ const MOST_AFTER_SAYINGS = 3;
         // A door of this copy's own. The project itself keeps the ordinary one,
         // so the folder somebody is looking at behaves exactly as it always did;
         // it is the copies that would otherwise collide.
-        port:
-          options.mainFolder !== undefined && options.mainFolder !== options.projectRoot
-            ? PORTS.claim(options.projectRoot)
-            : null,
+        port: inACopy ? PORTS.claim(options.projectRoot) : null,
+        copy: inACopy,
         ...(options.noteServers === undefined ? {} : { noted: options.noteServers }),
         onChange: () => {
           say({ type: 'running', pieces: keptRunning.list() });

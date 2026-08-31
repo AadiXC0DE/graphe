@@ -33,9 +33,26 @@ describe('what the composer takes', () => {
     }
   });
 
-  it('takes the exports that come out of a design tool', () => {
-    for (const name of ['Brand.pdf', 'Landing.fig', 'Old site.sketch', 'poster.ai']) {
-      expect(checkFile({ name, type: '', size: 2 * MB })).toEqual({ ok: true, kind: 'document' });
+  it('takes a PDF, because the shell reads one into words', () => {
+    expect(checkFile({ name: 'Brand.pdf', type: '', size: 2 * MB })).toEqual({
+      ok: true,
+      kind: 'document',
+    });
+    expect(checkFile({ name: 'pasted', type: 'application/pdf', size: 2 * MB })).toEqual({
+      ok: true,
+      kind: 'document',
+    });
+  });
+
+  /* These used to be taken, chipped, and then dropped on the way out without a
+     word. Nothing can read one, so the refusal happens at the box. */
+  it("refuses a design tool's own save file, naming what would work", () => {
+    for (const name of ['Landing.fig', 'Old site.sketch', 'poster.ai', 'cover.psd', 'a.xd', 'b.eps']) {
+      const verdict = checkFile({ name, type: '', size: 2 * MB });
+      expect(verdict.ok).toBe(false);
+      if (verdict.ok) return;
+      expect(verdict.because).toMatch(/PDF/);
+      expect(verdict.because).toMatch(/Figma link/);
     }
   });
 
@@ -258,16 +275,6 @@ describe('what goes back into the message', () => {
     const many = ATTACH_WORDS.alsoLook(['https://figma.com/file/a', 'https://figma.com/file/b']);
     expect(many).toContain('https://figma.com/file/a');
     expect(many).toContain('https://figma.com/file/b');
-  });
-
-  it('says plainly that anything else in the box will not be read', () => {
-    const one = ATTACH_WORDS.onlyPictures(['Brand guidelines.pdf']);
-    expect(one).toContain('Brand guidelines.pdf');
-    expect(one).toMatch(/only pictures/i);
-    // And what to do instead, because "it will not be read" on its own is a
-    // dead end.
-    expect(one).toMatch(/project folder/i);
-    expect(ATTACH_WORDS.onlyPictures(['a.pdf', 'b.fig'])).toMatch(/^2 of these/);
   });
 });
 

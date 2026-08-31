@@ -39,6 +39,7 @@ import Welcome from '../components/Welcome';
 import type {
   CarriedExtension,
   ConnectionState,
+  Fetched,
   FileEntry,
   FoundAccount,
   Away as AwayState,
@@ -1055,6 +1056,27 @@ function Section({ title, note, children }: { title: string; note: string; child
 
 function noop() {}
 
+/** What origin answers with in the gallery. Real shapes, so the two rows show
+ *  the two answers that matter: one that can be fast-forwarded and one that
+ *  cannot. */
+const STANDS: Readonly<Record<string, Fetched>> = {
+  '': { branch: 'main', upstream: 'origin/main', ahead: 0, behind: 2, dirty: false, moved: 0, state: 'behind' },
+  backend: { branch: 'main', upstream: 'origin/main', ahead: 0, behind: 2, dirty: true, moved: 0, state: 'behind' },
+  frontend: {
+    branch: 'new-checkout',
+    upstream: 'origin/new-checkout',
+    ahead: 3,
+    behind: 0,
+    dirty: false,
+    moved: 0,
+    state: 'ahead',
+  },
+};
+
+function fetched(repo?: string): Promise<Fetched | null> {
+  return Promise.resolve(STANDS[repo ?? ''] ?? null);
+}
+
 /** Everything the panel draws, for a folder that is one project. */
 const OVERVIEW_VIEW = {
   repos: [],
@@ -1892,8 +1914,10 @@ export default function Gallery() {
             onSave={noop}
                 onOpenDesign={noop}
                 onSwitchBranch={() => {}}
-onCreateBranch={() => {}}
-          onOpenGraph={noop}
+                onCreateBranch={() => {}}
+                onFetch={fetched}
+                onFastForward={fetched}
+                onOpenGraph={noop}
                 onShare={noop}
                 onDecide={noop}
                 onHandOver={noop}
@@ -1919,7 +1943,7 @@ onCreateBranch={() => {}}
 
           <Section
             title="A folder that holds several projects"
-            note="Open a working directory with backend/ and frontend/ beside each other and there is no folder-level line of work to move, no folder-level save. Each project gets its own row, its own line of work, and its own press to save it or see it running — the same controls a folder with one project gets, said once per project."
+            note="Open a working directory with backend/ and frontend/ beside each other and there is no folder-level line of work to move, no folder-level save. Each project gets its own row, its own line of work, and its own press to commit it or fetch from its origin — the same controls a folder with one project gets, said once per project."
           >
             <div className="gallery__overview">
               <Overview
@@ -1942,7 +1966,8 @@ onCreateBranch={() => {}}
                 onOpenDesign={noop}
                 onSwitchBranch={noop}
                 onCreateBranch={noop}
-                onSeeProject={noop}
+                onFetch={fetched}
+                onFastForward={fetched}
                 onOpenGraph={noop}
                 onShare={noop}
                 onDecide={noop}

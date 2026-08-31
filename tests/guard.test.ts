@@ -502,9 +502,6 @@ describe('S-12 stored information stays owner-only unless someone says otherwise
 
 describe('S-13 keys are never read, never echoed, never logged', () => {
   const credentialFiles = [
-    '.env',
-    '.env.local',
-    '.env.production',
     '.npmrc',
     '.netrc',
     '.git-credentials',
@@ -521,6 +518,30 @@ describe('S-13 keys are never read, never echoed, never logged', () => {
       expect(kindOf(bash(`cat ${path}`))).toBe('deny');
     });
   }
+
+  /* The environment file is refused like any other key: running a project does
+     not need the values, only the file, and the file is opened by the project's
+     own process rather than by the agent. What is different is being asked
+     before it is *changed* — editing one is a real thing to want, and the
+     sentence about opening a file full of keys is the wrong one for it. */
+  const envFiles = ['.env', '.env.local', '.env.production', 'apps/web/.env'];
+
+  for (const path of envFiles) {
+    it(`still refuses to read ${path}`, () => {
+      expect(kindOf(call('read', { path }))).toBe('deny');
+      expect(kindOf(bash(`cat ${path}`))).toBe('deny');
+    });
+
+    it(`asks before changing ${path}`, () => {
+      expect(kindOf(call('write', { path, content: 'A=1' }))).toBe('confirm');
+    });
+  }
+
+  it('and the ask names the file, not a keychain nobody asked about', () => {
+    const asked = evaluate(call('write', { path: '.env.local', content: 'A=1' }), ctx);
+    expect(asked.kind).toBe('confirm');
+    expect(JSON.stringify(asked)).toContain('environment file');
+  });
 
   it('refuses to list the keys the project runs with', () => {
     expect(kindOf(bash('env'))).toBe('deny');
@@ -1222,7 +1243,7 @@ describe('P-01 find - Pi\'s glob tool, and the shell command wearing its name', 
   it('is still held inside the project folder', () => {
     expect(kindOf(glob({ pattern: '*', path: '../..' }))).toBe('deny');
     expect(kindOf(glob({ pattern: '*', path: '/etc' }))).toBe('deny');
-    expect(kindOf(glob({ pattern: '*', path: '.env' }))).toBe('deny');
+    expect(kindOf(glob({ pattern: '*', path: '~/.ssh' }))).toBe('deny');
   });
 
   /** The crux: allowing the tool must not reach the command of the same name. */

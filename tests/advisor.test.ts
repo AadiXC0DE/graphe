@@ -416,3 +416,46 @@ describe('how readily the advisor is asked', () => {
     expect(next['advisorCustomInvocation']).toBe('never');
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* What the advisor can actually see of the plan                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A run finished with the last step of a build plan unticked, straight after
+ * the advisor was asked whether it was done.
+ *
+ * The advisor reads the conversation and the working tree, and the plan is in
+ * neither: it is kept in the app's own folder so it never shows up in the
+ * project somebody is watching. All it had was the list as agreed, before any
+ * of it was built. So the turn carries the plan itself, and both readers get
+ * the same checklist.
+ */
+describe('the plan the advisor reads', () => {
+  const MAIN = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
+
+  it('goes out with the turn, read from the plan file each time', () => {
+    expect(MAIN).toContain('const stored = await readStoredTasks(open.path)');
+    expect(MAIN).toContain('const plan = stored === null ? null : planStanding(stored.tasks)');
+  });
+
+  it('is part of the message, not something said beside it', () => {
+    expect(MAIN).toContain("const asked = [text, papers, plan ?? ''].filter");
+  });
+
+  /* Two ways out of the handler. A plan that made it into one of them is a plan
+     the advisor sees half the time. */
+  it('goes down both paths out of the handler', () => {
+    const at = MAIN.indexOf('return await checkItFirst(');
+    expect(at).toBeGreaterThan(-1);
+    expect(MAIN.slice(at, at + 240)).toContain('asked,');
+    expect(MAIN).toContain('chosen.length === 0\n          ? asked');
+  });
+
+  /* The person's own words are what the branch is named after and what sits
+     beside the pictures. The checklist is for the model, not for them. */
+  it('is not mistaken for what the person typed', () => {
+    expect(MAIN).toContain('open.held.looking.instruction = text;');
+    expect(MAIN).toContain('await nameBranchAfter(open, conversation.path, textIn)');
+  });
+});

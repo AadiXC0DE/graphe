@@ -33,6 +33,7 @@ import {
   type HandedOver,
   type Landing,
   type WentOnline,
+  type Fetched,
   type FileEntry,
   type FoundAccount,
   type GrapheApi,
@@ -150,7 +151,7 @@ const api: GrapheApi = {
             (one) =>
               one !== null &&
               typeof one === 'object' &&
-              one.kind === 'image' &&
+              (one.kind === 'image' || one.kind === 'document') &&
               typeof one.name === 'string' &&
               typeof one.mimeType === 'string' &&
               typeof one.bytes === 'string' &&
@@ -363,6 +364,12 @@ const api: GrapheApi = {
   },
   branchCreate(name: string, where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.branchCreate, name, named(where)) as Promise<Result<null>>;
+  },
+  fetchOrigin(where?: Where): Promise<Result<Fetched>> {
+    return ipcRenderer.invoke(CHANNEL.fetchOrigin, named(where)) as Promise<Result<Fetched>>;
+  },
+  fastForward(where?: Where): Promise<Result<Fetched>> {
+    return ipcRenderer.invoke(CHANNEL.fastForward, named(where)) as Promise<Result<Fetched>>;
   },
   worktreeLand(where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.worktreeLand, named(where)) as Promise<Result<null>>;

@@ -168,7 +168,7 @@ describe('the window hears about the projects', () => {
     expect(block).toContain('onSwitch={(name) => onSwitchBranch(name, one.name)}');
     expect(block).toContain('onCreate={(name) => onCreateBranch(name, one.name)}');
     expect(block).toContain('onSave(one.name)');
-    expect(block).toContain('onSeeProject(one.name)');
+    expect(block).toContain('askOrigin(one.name, forward)');
   });
 
   it('shows one project’s history at a time, and says whose', () => {
@@ -185,12 +185,38 @@ describe('the window hears about the projects', () => {
     expect(APP).toContain('repoVersions: desk.repoVersions,');
   });
 
-  /** Starting a preview needs a project, so it is a press on the project's own
-   *  row. The pill stays a way back to the page already being served — never a
-   *  disabled control behind a hint nobody can reach. */
-  it('leaves starting a preview to the project’s own row', () => {
+  /** The pill is a way back to the page already being served, never a disabled
+   *  control behind a hint nobody can reach. The project rows no longer carry a
+   *  preview press, so in a folder holding several nothing starts one. */
+  it('leaves the pill a way back to what is already served', () => {
     expect(APP).toContain('severalProjects');
-    expect(APP).toContain("onClick={() => (severalProjects ? movePane('split') : void seeIt())}");
-    expect(OVERVIEW).toContain('onSeeProject(one.name)');
+    expect(APP).toContain("else movePane('split');");
+    expect(OVERVIEW).not.toContain('onSeeProject');
+  });
+});
+
+/** The row's own Preview press is gone. It was the only thing that could start
+ *  one in a folder holding several projects, so the pill had to grow the job —
+ *  a pill that could only ever reveal a page nobody had served is no way in. */
+describe('starting a preview in a folder holding several projects', () => {
+  const app = APP;
+
+  it('has no press left on the project rows', () => {
+    expect(app).not.toContain('onSeeProject');
+  });
+
+  it('starts one for whichever project the panel is showing', () => {
+    expect(app).toContain(
+      "if (pane === 'off') void seeIt(undefined, undefined, panelRepoNow.current ?? undefined);",
+    );
+    // Both ways in — the pill and the project menu — or one of them is a dead end.
+    expect(
+      app.match(/if \(pane === 'off'\) void seeIt\(undefined, undefined, panelRepoNow\.current \?\? undefined\);/g)
+        ?.length,
+    ).toBe(2);
+  });
+
+  it('and still only reveals a page that is already being served', () => {
+    expect(app).toContain("else movePane('split');");
   });
 });

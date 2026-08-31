@@ -102,6 +102,7 @@ import {
   type ConnectStep,
   type ConnectionState,
   type Decided,
+  type Fetched,
   type FileEntry,
   type GitBranch,
   type GitSnapshot,
@@ -191,6 +192,7 @@ import {
   type Rescue,
 } from '../src/history/worktree';
 import { preparePrWorktree } from './prWorktree';
+import { RUNTIME_SCRATCH, keepOutOfCommits } from './excludes';
 import {
   addTasks,
   finishTask,
@@ -198,6 +200,7 @@ import {
   isFinished,
   nextOf,
   note as noteOn,
+  planStanding,
   progress,
   readPlan,
   setStatus,
@@ -281,6 +284,7 @@ import type {
   RunningPiece,
 } from '../src/agent/types';
 import { holdPage } from '../src/agent/pi/tools';
+import { attachedPaper, readPdfPages } from '../src/agent/pi/pdf';
 import { OnlineError, putOnline, whatIsHereForOnline } from '../src/share/publish';
 import { onlineWords } from '../src/share/online';
 import { canPutOnline, canSendItOn } from '../src/share/tools';
@@ -1851,6 +1855,36 @@ function imageCards(value: unknown): readonly ImageCard[] | undefined {
     cards.push({ bytes, mimeType });
   }
   return cards.length === 0 ? undefined : cards;
+}
+
+/**
+ * What arrived as documents, read into the words that go with the message.
+ *
+ * A PDF cannot travel to the model as a PDF — the session carries text and
+ * pictures — so it is read here, where `webfetch` already reads papers off an
+ * address. A PDF that will not open still says so in the message: a paper that
+ * arrives and then means nothing reads as the app having lost it.
+ */
+async function paperWords(value: unknown): Promise<string> {
+  if (!Array.isArray(value)) return '';
+  const blocks: string[] = [];
+  for (const entry of value) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const paper = entry as Record<string, unknown>;
+    if (paper['kind'] !== 'document') continue;
+    const bytes = paper['bytes'];
+    if (typeof bytes !== 'string' || bytes === '') continue;
+    const name = typeof paper['name'] === 'string' ? paper['name'] : 'attachment.pdf';
+    try {
+      // A plain Uint8Array, not the Buffer decoding hands back: the reader
+      // refuses one outright.
+      const { pages } = await readPdfPages(new Uint8Array(Buffer.from(bytes, 'base64')));
+      blocks.push(attachedPaper(name, pages));
+    } catch {
+      blocks.push(attachedPaper(name, []));
+    }
+  }
+  return blocks.join('\n\n');
 }
 
 /**
@@ -3637,6 +3671,10 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     sending: false,
     planMode: false,
   };
+
+  // Before the first session exists, so nothing a helper or a checkout writes
+  // is ever stageable in this project.
+  await keepOutOfCommits(path, RUNTIME_SCRATCH);
 
   // A folder opened with nothing chosen is the first-run case, and Pi will not
   // pick later — so pick now, before the session is made and binds it.
@@ -6936,6 +6974,44 @@ function register(): void {
     return done(null);
   });
 
+  /** Fetch from origin. Nothing in the folder moves — this only brings the
+   *  remote-tracking branches up to date and answers with where that leaves
+   *  the branch, up to date included. */
+  handle<Fetched>(CHANNEL.fetchOrigin, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const timeline = await timelineFor(open, where);
+    if (timeline === null) return fail(SEVERAL_PROJECTS);
+    try {
+      return done(await new ProjectHistory(folderFor(open, where)).fetchShared());
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  /** Fast-forward the branch onto its upstream. Refuses a dirty tree and a
+   *  branch that has diverged: both want a decision, and this is not one. */
+  handle<Fetched>(CHANNEL.fastForward, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const timeline = await timelineFor(open, where);
+    if (timeline === null) return fail(SEVERAL_PROJECTS);
+    if (stillWriting(open.held)) {
+      return fail({
+        what: 'Not yet. This is still being written.',
+        because: 'Let it finish and fast-forward then, so nothing lands under files that are still changing.',
+        actionLabel: 'Got it',
+      });
+    }
+    try {
+      return done(await new ProjectHistory(folderFor(open, where)).fastForward());
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
   /** Start a new line of work and move the project onto it. A name is checked
    *  before it is used: spaces and leading dashes are the mistakes that make a
    *  name mean something other than what it says. */
@@ -7596,6 +7672,15 @@ function register(): void {
     // after what was asked for.
     await nameBranchAfter(open, conversation.path, textIn).catch(() => undefined);
     try {
+      // A PDF has become words by the time the message goes. Read here rather
+      // than in the window: the extraction is Node's, and the same reader
+      // already serves `webfetch`.
+      const papers = await paperWords(attachments);
+      // The plan lives outside the project, so it reaches the model — and the
+      // advisor reading this conversation — only if the turn carries it.
+      const stored = await readStoredTasks(open.path);
+      const plan = stored === null ? null : planStanding(stored.tasks);
+      const asked = [text, papers, plan ?? ''].filter((one) => one !== '').join('\n\n');
       const lookFirst =
         ways !== null && typeof ways === 'object' && (ways as PromptOptions).lookFirst === true;
       const queue =
@@ -7620,7 +7705,7 @@ function register(): void {
             open,
             where,
             { address: conversation.path },
-            text,
+            asked,
             imageCards(attachments),
             lookFirst,
           );
@@ -7644,8 +7729,8 @@ function register(): void {
       const chosen = loaded.filter((one) => one.text !== '').slice(0, 4);
       const withSkills =
         chosen.length === 0
-          ? text
-          : `${text}\n\n<graphe-selected-skills>\n${chosen
+          ? asked
+          : `${asked}\n\n<graphe-selected-skills>\n${chosen
               .map(
                 ({ skill, text: instructions }) =>
                   `The user explicitly selected @${skill.handle}. Follow these instructions for this request:\n<skill name="${skill.name}">\n${instructions.slice(0, 50000)}\n</skill>`,

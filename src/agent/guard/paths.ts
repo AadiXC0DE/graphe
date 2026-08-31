@@ -226,6 +226,22 @@ export function isProjectRoot(projectRoot: string, candidate: string): boolean {
 }
 
 /** Does this file hold keys, passwords or sign-in details? */
+/**
+ * A project's own environment file: `.env`, `.env.local`, `.env.production`.
+ *
+ * Named apart from the keys for one reason: what it is asked before being
+ * *changed*. Reading it is still refused like any other key — running a dev
+ * server does not need the values, only the file, and the file is opened by the
+ * project's own process rather than by the agent. Editing one is a real thing
+ * to want, and "this would open a file that holds your keys" is the wrong
+ * sentence for it.
+ */
+export function isEnvFile(candidate: string): boolean {
+  const path = toPosix(candidate).toLowerCase();
+  const basename = path.split('/').filter((segment) => segment !== '').pop() ?? '';
+  return basename === '.env' || basename.startsWith('.env.');
+}
+
 export function isCredentialPath(candidate: string): boolean {
   const path = toPosix(candidate).toLowerCase();
   const segments = path.split('/').filter((segment) => segment !== '');

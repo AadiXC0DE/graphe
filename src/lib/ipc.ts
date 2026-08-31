@@ -832,20 +832,21 @@ export type ConnectOutcome =
 export type Hatches = { editor: string | null };
 
 /**
- * A picture brought in to be shown to the agent.
+ * A picture or a PDF brought in to be shown to the agent.
  *
  * The bytes cross the wire as base64 because a structured clone would strip a
- * `File` to nothing once it leaves the renderer; the shell hands them on to
- * the session, which hands them to the model. `name` is only for the row of
- * attached things — it never leaves the window.
+ * `File` to nothing once it leaves the renderer. A picture goes on to the model
+ * as a picture; a PDF is read into words in the shell first, because the
+ * session carries text and pictures and nothing else.
  */
 export type PromptAttachment = {
-  kind: 'image';
-  /** The person's own file name, for showing. */
+  kind: 'image' | 'document';
+  /** The person's own file name. Shown in the window, and named to the model so
+   *  it can answer about "the brand guidelines" rather than "the attachment". */
   name: string;
   /** e.g. 'image/png'. */
   mimeType: string;
-  /** The picture, base64-encoded without the data: prefix. */
+  /** The bytes, base64-encoded without the data: prefix. */
   bytes: string;
 };
 
@@ -1057,6 +1058,38 @@ export type GitSnapshot = {
   behind: number;
 };
 
+/** What a branch is doing against the shared copy it tracks. Every one of these
+ *  is an ordinary day — only a fetch that could not reach origin is a failure. */
+export type FetchedState =
+  /** This project is only here. */
+  | 'no-remote'
+  /** Sitting on a commit rather than a branch. */
+  | 'detached'
+  /** On a branch that tracks nothing. */
+  | 'no-upstream'
+  | 'up-to-date'
+  | 'behind'
+  | 'ahead'
+  /** Both have commits the other does not. */
+  | 'diverged';
+
+/** Where a branch stands against origin, read after a fetch. */
+export type Fetched = {
+  /** The branch, or null on a detached HEAD. */
+  branch: string | null;
+  /** What it tracks, e.g. `origin/main`; null when it tracks nothing. */
+  upstream: string | null;
+  /** Commits this branch has that its upstream does not. */
+  ahead: number;
+  /** Commits its upstream has that this branch does not. */
+  behind: number;
+  /** Uncommitted changes in the folder, which is what stops a fast-forward. */
+  dirty: boolean;
+  /** Commits a fast-forward just took in. Zero for a fetch. */
+  moved: number;
+  state: FetchedState;
+};
+
 /**
  * The two sentences "See it" is allowed to say while it works.
  *
@@ -1220,6 +1253,8 @@ export const CHANNEL = {
   browserFrame: 'graphe:browser-frame',
   branchSwitch: 'graphe:branch-switch',
   branchCreate: 'graphe:branch-create',
+  fetchOrigin: 'graphe:fetch-origin',
+  fastForward: 'graphe:fast-forward',
   worktreeLand: 'graphe:worktree-land',
   worktreeDrop: 'graphe:worktree-drop',
   prWorktreePrepare: 'graphe:pr-worktree-prepare',
@@ -1464,6 +1499,10 @@ export type GrapheApi = {
   branchSwitch(name: string, where?: Where): Promise<Result<null>>;
   /** Start a new line of work and move the project onto it. */
   branchCreate(name: string, where?: Where): Promise<Result<null>>;
+  /** Fetch from origin and say where that leaves this branch. Moves nothing. */
+  fetchOrigin(where?: Where): Promise<Result<Fetched>>;
+  /** Fast-forward this branch onto its upstream. Refuses anything else. */
+  fastForward(where?: Where): Promise<Result<Fetched>>;
   /** Merge the front conversation's own branch back, and drop the checkout. */
   worktreeLand(where?: Where): Promise<Result<null>>;
   /** Throw the front conversation's own checkout away, branch and all. */

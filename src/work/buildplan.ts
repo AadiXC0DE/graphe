@@ -156,6 +156,27 @@ export function toMarkdown(plan: readonly Task[]): string {
   return lines.join('\n');
 }
 
+/**
+ * The plan as it stands, said into the turn that is about to run.
+ *
+ * The list is kept outside the project, so nothing that reads the working tree
+ * finds it — the advisor included, which is why a run could be signed off with
+ * a step still unticked. Saying it puts the checklist in the conversation both
+ * of them read.
+ *
+ * Null when there is nothing left to build.
+ */
+export function planStanding(plan: readonly Task[]): string | null {
+  if (plan.length === 0 || isFinished(plan)) return null;
+  const { done, total } = progress(plan);
+  return [
+    `<build-plan done="${String(done)}" total="${String(total)}">`,
+    toMarkdown(plan),
+    '</build-plan>',
+    'An unticked step is a step that is not done. Call step_done as each one lands, and do not call the work finished while any of them is still unticked.',
+  ].join('\n');
+}
+
 /** The first done task after a resume — a machine-readable answer to "where
  *  were we?" A plan file is the truth; the conversation is disposable. */
 export function resumeFrom(plan: readonly Task[]): number {

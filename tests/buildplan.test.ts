@@ -9,6 +9,7 @@ import {
   nextOf,
   note,
   numberFrom,
+  planStanding,
   progress,
   isFinished,
   readPlan,
@@ -182,5 +183,39 @@ describe('isFinished — when the tracker has nothing left to say', () => {
   it('is not finished when there is no plan at all', () => {
     // Otherwise every project with no plan reads as one that just completed.
     expect(isFinished([])).toBe(false);
+  });
+});
+
+/* The list is kept outside the project on purpose, which means nothing that
+   reads the working tree — the advisor included — can find it. A run was signed
+   off with a step still unticked because the only view of the plan anyone had
+   was a snapshot from the moment it was agreed. */
+describe('planStanding — the plan the turn carries', () => {
+  const half = [
+    { n: 1, title: 'Header', acceptance: '', test: null, status: 'done' as const, note: null },
+    { n: 2, title: 'Changelog', acceptance: '', test: null, status: 'pending' as const, note: null },
+  ];
+
+  it('names every step and which of them are still open', () => {
+    const said = planStanding(half);
+    expect(said).toContain('- [x] Header');
+    expect(said).toContain('- [ ] Changelog');
+  });
+
+  it('counts them, so a reader does not have to', () => {
+    expect(planStanding(half)).toContain('done="1" total="2"');
+  });
+
+  it('says what an unticked step means, because a list alone is not a rule', () => {
+    const said = planStanding(half) ?? '';
+    expect(said).toMatch(/unticked/);
+    expect(said).toContain('step_done');
+  });
+
+  /* Nothing left to say. A finished plan repeated into every later turn is the
+     4/4 that used to sit above every conversation in the project. */
+  it('says nothing when the plan is done, and nothing when there is no plan', () => {
+    expect(planStanding(half.map((one) => ({ ...one, status: 'done' as const })))).toBeNull();
+    expect(planStanding([])).toBeNull();
   });
 });

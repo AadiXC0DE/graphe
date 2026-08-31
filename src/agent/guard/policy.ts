@@ -49,6 +49,7 @@ import {
   containsPath,
   isAgentFolder,
   isCredentialPath,
+  isEnvFile,
   isHistoryStore,
   isProjectRoot,
   isSignInStore,
@@ -1936,6 +1937,17 @@ function judgeFileTargets(
     if (check.resolved !== null) resolved.push(check.resolved);
   }
   for (const path of resolved) {
+    if (isEnvFile(path)) {
+      judgement = strictest(
+        judgement,
+        ask(
+          'Change this project’s environment file?',
+          'It holds the keys and addresses the project runs with, and everything running against it reads the same file.',
+          'A value changed here changes what the project connects to until you change it back.',
+        ),
+      );
+      continue;
+    }
     if (isCredentialPath(path)) {
       judgement = strictest(
         judgement,

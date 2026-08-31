@@ -685,27 +685,27 @@ describe('H-08 identity and configuration', () => {
 /* H-09 the language audit                                                     */
 /* ========================================================================== */
 
-describe('H-09 git exists, but is never spoken', () => {
-  /** The "jargon to retire" table in research/03, plus the rest of the storage
-   *  layer's own vocabulary. Word boundaries throughout, so "header" is never
-   *  mistaken for the thing git calls HEAD. */
+describe('H-09 the layer below the operation is never spoken', () => {
+  /** What stays out of a sentence, and what no longer does.
+   *
+   *  This list used to hold `commit`, `branch`, `merge` and the rest of git's
+   *  operation names, from a time when the audience was designers. CLAUDE.md
+   *  now says the opposite in as many words — "Name the operation. `branch`,
+   *  `commit`, `pull request`, `changelog` are what the thing is, and a button
+   *  that talks around them makes a developer translate before they can act."
+   *  The panel has said BRANCH and Commit to people for two releases.
+   *
+   *  What the same rule still refuses is the layer underneath: "the plumbing
+   *  nobody pressed a button to reach". Those are below, and a sentence that
+   *  reaches for one is still a sentence explaining a mechanism nobody asked
+   *  about. Word boundaries throughout, so "header" is never mistaken for the
+   *  thing git calls HEAD. */
   const RETIRED: { name: string; pattern: RegExp }[] = [
-    { name: 'commit', pattern: /\bcommit(s|ted|ting)?\b/i },
-    { name: 'branch', pattern: /\bbranch(es|ed|ing)?\b/i },
-    { name: 'merge', pattern: /\bmerg(e|es|ed|ing)\b/i },
-    { name: 'push', pattern: /\bpush(es|ed|ing)?\b/i },
-    { name: 'pull', pattern: /\bpull(s|ed|ing)?\b/i },
     { name: 'HEAD', pattern: /\bhead\b/i },
-    { name: 'stash', pattern: /\bstash(es|ed|ing)?\b/i },
-    { name: 'revert', pattern: /\brevert(s|ed|ing)?\b/i },
-    { name: 'rebase', pattern: /\brebas(e|es|ed|ing)\b/i },
-    { name: 'checkout', pattern: /\bcheck(s|ed|ing)? ?out\b/i },
-    { name: 'clone', pattern: /\bclone(s|d)?\b/i },
-    { name: 'repository', pattern: /\brepos?(itor(y|ies))?\b/i },
-    { name: 'git', pattern: /\bgit\b/i },
-    { name: 'a raw identifier', pattern: /\bsha\b|\bhunk\b|\breflog\b|\bworktree\b/i },
+    { name: 'a raw identifier', pattern: /\bsha\b|\bhunk\b|\breflog\b|\bworktree\b|\brefspec\b|\bblob\b/i },
     { name: 'staging', pattern: /\bstag(e|es|ed|ing)\b/i },
-    { name: 'rollback', pattern: /\broll(s|ed|ing)? ?back\b/i },
+    { name: 'the index', pattern: /\bgit index\b/i },
+    { name: 'plumbing output', pattern: /\bstderr\b|\bstdout\b|\bexit code\b/i },
   ];
 
   /** Every string these modules can put in front of somebody. */
@@ -748,17 +748,31 @@ describe('H-09 git exists, but is never spoken', () => {
 
   it('would notice a violation if one were written', () => {
     const violations = [
-      'Committed your changes',
-      'Created a branch for this variant',
-      'Merged the two versions',
       'You are in detached HEAD state',
-      'Reverting to commit a1b2c3d',
-      'Stashed your work first',
-      'Checking out the earlier version',
-      'Rolling back the repository',
+      'Reset the sha to a1b2c3d',
+      'Applied the hunk to the index',
+      'Read it out of the reflog',
+      'Staged your work first',
+      'The worktree is dirty',
+      'git exited with exit code 128',
+      'Wrote the blob and updated the refspec',
     ];
     for (const text of violations) {
-      expect(RETIRED.some(({ pattern }) => pattern.test(text))).toBe(true);
+      expect(RETIRED.some(({ pattern }) => pattern.test(text)), text).toBe(true);
+    }
+  });
+
+  /** And the operations themselves are now allowed to be called what they are,
+   *  which is the whole of the change. */
+  it('lets a sentence name the operation', () => {
+    const named = [
+      'I couldn’t fast-forward this branch, so I’ve left it as it was.',
+      'Nothing to commit.',
+      'Opened a pull request.',
+      'This repository has no origin.',
+    ];
+    for (const text of named) {
+      expect(RETIRED.some(({ pattern }) => pattern.test(text)), text).toBe(false);
     }
   });
 

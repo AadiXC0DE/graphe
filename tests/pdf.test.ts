@@ -12,6 +12,8 @@ import {
   arxivId,
   parseArxivMeta,
   slicePages,
+  attachedPaper,
+  MAX_ATTACHED_CHARACTERS,
 } from '../src/agent/pi/pdf';
 
 describe('knowing a paper when one is handed over', () => {
@@ -82,5 +84,38 @@ describe('reading one page at a time', () => {
     expect(text).toContain('a'.repeat(400));
     expect(text).not.toContain('b'.repeat(400));
     expect(note).toContain('first pages');
+  });
+});
+
+/* A PDF attached to a message cannot travel as a PDF — the session carries text
+   and pictures. It is read into words in the shell instead, so a person who
+   attaches one gets an answer about it rather than silence. */
+describe('a PDF attached to a message', () => {
+  it('carries the pages under the name the person gave it', () => {
+    const said = attachedPaper('Brand guidelines.pdf', ['Our red is #b8492c.']);
+    expect(said).toContain('Brand guidelines.pdf');
+    expect(said).toContain('Our red is #b8492c.');
+  });
+
+  it('says so when the PDF is a scan with no words in it', () => {
+    const said = attachedPaper('Poster.pdf', []);
+    expect(said).toContain('Poster.pdf');
+    expect(said).toMatch(/pictures rather than words/);
+    // And what would work, because a dead end is worse than a refusal.
+    expect(said).toMatch(/screenshot/i);
+  });
+
+  it('stops at the same ceiling a fetched paper gets', () => {
+    const said = attachedPaper('Long.pdf', ['a'.repeat(MAX_ATTACHED_CHARACTERS + 10), 'tail']);
+    expect(said.length).toBeLessThan(MAX_ATTACHED_CHARACTERS + 800);
+    expect(said).not.toContain('tail');
+  });
+
+  /* The block is read by a model as one region. A name carrying a quote or an
+     angle bracket would end it early. */
+  it('will not let a file name break out of its own block', () => {
+    const said = attachedPaper('a"><script>.pdf', ['hi']);
+    expect(said).not.toContain('<script>');
+    expect(said.match(/</g)?.length).toBe(2);
   });
 });

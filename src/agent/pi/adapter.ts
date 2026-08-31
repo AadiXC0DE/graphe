@@ -105,6 +105,7 @@ import {
   extensionToolNames,
   type LoadedExtension,
 } from '../advisor';
+import { SUBAGENT_SETTINGS_FILE, artifactsBesideSessions, subagentsLoaded } from './subagents';
 import { idFor } from '../../projects/carried';
 import type { ModelChoice, ThinkingLevel } from '../../lib/ipc';
 
@@ -1225,6 +1226,35 @@ async function keepAdvisorSettings(
   }
 }
 
+/**
+ * Point the subagents extension's scratch away from the project.
+ *
+ * Its own default is `<project>/.pi/subagents/`, which is how twenty-two files
+ * of helper transcript ended up in front of somebody's next commit. Written
+ * once, only when the file has no answer of its own, and never over a file we
+ * cannot read — the same rule the advisor settings follow.
+ */
+async function keepSubagentSettings(agentDir: string): Promise<void> {
+  const file = join(agentDir, SUBAGENT_SETTINGS_FILE);
+  const text = await readFile(file, 'utf8').catch(() => null);
+  let existing: unknown = null;
+  if (text !== null) {
+    try {
+      existing = JSON.parse(text);
+    } catch {
+      return;
+    }
+  }
+  const next = artifactsBesideSessions(existing);
+  if (next === null) return;
+  try {
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  } catch {
+    // The exclude keeps the scratch uncommittable either way.
+  }
+}
+
 /** Every conversation this folder has had. Never throws: a folder with no
  *  transcripts is an empty list, not a failure. */
 export async function listConversations(
@@ -1952,6 +1982,7 @@ const MOST_AFTER_SAYINGS = 3;
   if (advisorTools.length > 0) {
     await keepAdvisorSettings(agentDir, advises, options.model ?? null, options.advisorThinking ?? undefined);
   }
+  if (subagentsLoaded(loadedExtensions)) await keepSubagentSettings(agentDir);
 
   // Graphe's own tools — the web search and the task helper — travel as Pi's
   // `customTools`, which keeps them out of the extension machinery entirely:

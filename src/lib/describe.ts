@@ -248,6 +248,8 @@ export function describeCall(call: ToolCall): Described {
       return { label: 'Reading the shape of the project' };
     case 'read_diff':
       return { label: 'Reading the changes so far' };
+    case 'read_document':
+      return { label: 'Reading a document', detail: short(textField(input, ['path'])) };
     case 'run_checks':
       return { label: "Running the project's own checks" };
     case 'figma_read':

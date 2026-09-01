@@ -174,6 +174,7 @@ export function planStanding(plan: readonly Task[]): string | null {
     toMarkdown(plan),
     '</build-plan>',
     'An unticked step is a step that is not done. Call step_done as each one lands, and do not call the work finished while any of them is still unticked.',
+    'Work through the whole list in this reply rather than stopping after one. A progress report is not a step. A second opinion — an advisor verdict, a review, a list of what is not yet proven — is advice on the work, never permission to leave the list unfinished.',
   ].join('\n');
 }
 

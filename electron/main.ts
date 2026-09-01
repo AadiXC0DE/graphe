@@ -8383,5 +8383,9 @@ if (!app.requestSingleInstanceLock()) {
     writeDownWhatWasGoing();
     stopEverythingAway();
     closeSession();
+    // Last, and not politely: whatever is still serving has to be gone before
+    // this process is, or it outlives the app that started it with nobody left
+    // who can stop it. The ordinary stop leans on a timer there is no time for.
+    for (const one of workspaces.open) one.held.running.stopAllNow();
   });
 }

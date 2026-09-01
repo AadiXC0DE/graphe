@@ -276,6 +276,8 @@ const ASKING_TOOLS = new Set(['askfirst']);
 
 const READ_TOOLS = new Set([
   'read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff', 'readmap', 'runchecks', 'lsp',
+  // A pdf or a deck is a file like any other: same folder rules, same refusals.
+  'readdocument',
 ]);
 /** Pi's `find` is `glob` under another name: it runs `fd` and returns file names
  *  without opening any of them. The shell command of the same word is a

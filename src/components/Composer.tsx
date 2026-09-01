@@ -324,7 +324,9 @@ export default function Composer({
         note: [extensionOf(file.name).toUpperCase(), readableSize(file.size)]
           .filter(Boolean)
           .join(' · '),
-        preview: kind === 'image' ? URL.createObjectURL(file) : undefined,
+        // A document gets one as well: it is what opens the PDF again from the
+        // thread, and without it an attachment is a name and nothing else.
+        preview: kind === 'image' || kind === 'document' ? URL.createObjectURL(file) : undefined,
         file,
       }));
 

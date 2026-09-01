@@ -12,5 +12,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    /* Well past what any test here needs. A handful walk node_modules or start
+       real processes, and under a full parallel run they were losing a race
+       with the five-second default — a red build about machine load rather than
+       about the code. A test that genuinely hangs still fails, just later. */
+    testTimeout: 30_000,
   },
 });

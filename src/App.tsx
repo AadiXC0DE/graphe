@@ -43,7 +43,7 @@ import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
 import { drainStarted } from "./lib/queue";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
-import type { ConnectedState } from "./lib/ipc";
+import type { BuildPlan, ConnectedState } from "./lib/ipc";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Connected from "./components/Connected";
 import Palette from "./components/Palette";
@@ -90,10 +90,18 @@ import {
   parseGoalCommand,
   readStoredGoal,
   ROUNDS,
+  baselineFor,
   verifyGoal,
   withElapsed,
   type Goal,
 } from "./work/goal";
+import {
+  carryOnPrompt,
+  freshCarryOn,
+  nextMove,
+  type CarryOn,
+} from "./work/carryon";
+import { quietWords, wentQuiet } from "./work/board";
 import { ADVISOR_PACKAGE } from "./agent/advisor";
 import {
   asksOf,
@@ -180,6 +188,7 @@ import {
   receive,
   researchLog,
   tookBack,
+  withoutTakenBack,
   recordedIn,
   type Desk,
   type Desks,
@@ -212,6 +221,11 @@ const showGallery = new URLSearchParams(window.location.search).has("gallery");
  *  project's name in it — can be screenshotted without a desktop shell under the
  *  page. Ignored by the app: a window loaded by the shell has no query string. */
 const openOnLoad = new URLSearchParams(window.location.search).get("open");
+
+/** How often the file tree is walked while a run is going. Short enough that a
+ *  new folder appears while somebody is still looking for it, long enough that
+ *  a step writing forty files does not walk the project forty times. */
+const FILES_APART = 1_200;
 
 export default function App() {
   return showGallery ? <Gallery /> : <Conversation />;
@@ -1032,8 +1046,8 @@ function Conversation() {
   const picturesInTheBox = useCallback(
     (): readonly SentPicture[] =>
       attachmentsNow.current.flatMap((one) =>
-        one.kind === "image" && one.preview !== undefined
-          ? [{ name: one.name, src: one.preview }]
+        (one.kind === "image" || one.kind === "document") && one.preview !== undefined
+          ? [{ name: one.name, src: one.preview, kind: one.kind }]
           : [],
       ),
     [],
@@ -1622,6 +1636,31 @@ function Conversation() {
     setFiles((current) => ({ ...current, [path]: answer.value }));
   }, []);
 
+  /* When the tree was last walked, per project. A run that writes forty files
+     would otherwise walk the folder forty times. */
+  const filesReadAt = useRef<Record<string, number>>({});
+
+  /**
+   * The tree, while the work is still going.
+   *
+   * It used to be read only when a reply settled, so a folder the agent made
+   * ten minutes ago appeared ten minutes late — and for work on the board,
+   * which settles somewhere else entirely, later still. Throttled rather than
+   * immediate: this walks a folder, and a step that writes is a step that often
+   * writes again straight away.
+   */
+  const refreshFilesSoon = useCallback(
+    (path: string) => {
+      if (!wantsFiles.current) return;
+      const last = filesReadAt.current[path] ?? 0;
+      const now = Date.now();
+      if (now - last < FILES_APART) return;
+      filesReadAt.current = { ...filesReadAt.current, [path]: now };
+      void refreshFiles(path);
+    },
+    [refreshFiles],
+  );
+
   const readFile = useCallback((path: string) => {
     setReading({ path, text: null, trouble: null });
     void bridge.fileText(path).then((answer) => {
@@ -2020,6 +2059,64 @@ function Conversation() {
     // changes, and this is a first paint rather than a subscription to that.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* Where each conversation has got to in working its list down. Kept off
+     state: it changes inside the event subscription, and a re-render per round
+     would rebuild the subscription mid-run. */
+  const carryOn = useRef<Record<string, CarryOn>>({});
+
+  /* Conversations somebody pressed Escape on, until their run settles. The
+     settle still arrives, and without this the list would ask for its next step
+     immediately after being stopped. */
+  const stoppedByHand = useRef<Record<string, boolean>>({});
+
+  /**
+   * Ask for the next step when a settled reply has left some unticked.
+   *
+   * The model finishes a step and ends its reply; without this the list waits
+   * for somebody to type "continue", once per step. What stops it is the
+   * interesting half — see work/carryon.ts — and every way out says so, because
+   * a loop that goes quiet is the bug it was written to fix wearing a hat.
+   */
+  const carryOnWith = useCallback(
+    (project: string, conversation: string | null, runKey: string, plan: BuildPlan | null) => {
+      if (stoppedByHand.current[runKey] === true) {
+        const going = { ...stoppedByHand.current };
+        delete going[runKey];
+        stoppedByHand.current = going;
+        return;
+      }
+      if (plan === null || plan.next === null) {
+        const without = { ...carryOn.current };
+        delete without[runKey];
+        carryOn.current = without;
+        return;
+      }
+      const next = plan.tasks.find((one) => one.n === plan.next)?.title ?? null;
+      const move = nextMove(carryOn.current[runKey] ?? freshCarryOn(), {
+        done: plan.done,
+        total: plan.total,
+        next,
+      });
+      if (move.kind === 'rest') return;
+      if (move.kind === 'stop') {
+        const without = { ...carryOn.current };
+        delete without[runKey];
+        carryOn.current = without;
+        say(move.said);
+        return;
+      }
+      carryOn.current = { ...carryOn.current, [runKey]: move.state };
+      say(move.said);
+      void bridge.prompt(
+        carryOnPrompt(next ?? 'the next step', plan.done, plan.total),
+        [],
+        { queue: 'followUp' },
+        { project, ...(conversation === null ? {} : { conversation }) },
+      );
+    },
+    [say],
+  );
+
   /* Everything the agent does, in order. Subscribed once for the life of the
      window: the bridge outlives any one prompt, and re-subscribing per send
      would drop events that arrive between them. Each event carries the folder
@@ -2086,6 +2183,12 @@ function Conversation() {
         // How long the active run is going for, so a long one ends with a quiet
         // "worked for" line rather than silence. The clock starts on the first
         // real step and stops when the run settles.
+        // A step that has finished may have made a folder, and the panel showing
+        // it a reply later is the panel being wrong for as long as the reply
+        // takes.
+        if (notice.event.type === 'tool-end' && notice.project !== null) {
+          refreshFilesSoon(notice.project);
+        }
         if (notice.event.type === 'tool-start') {
           didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [runKey]: true };
           if (runStartedAt.current[runKey] === undefined) {
@@ -2173,6 +2276,14 @@ function Conversation() {
                 .then((answer) => {
                   if (answer.ok) {
                     setBuildPlan(answer.value === null ? null : { path: where, plan: answer.value });
+                    // A list with steps left asks for the next one itself. Goal
+                    // Mode runs its own round of this, so it is left to do it
+                    // rather than both asking and the conversation getting two.
+                    const goalHasIt =
+                      goalNow.current !== null &&
+                      goalNow.current.status === 'active' &&
+                      where === goalProject.current;
+                    if (!goalHasIt) carryOnWith(where, notice.conversation ?? null, runKey, answer.value);
                   } else {
                     void refreshBuildPlan(where);
                   }
@@ -2397,6 +2508,7 @@ function Conversation() {
       refreshVersions,
       refreshOverview,
       refreshFiles,
+      refreshFilesSoon,
       refreshRoom,
       refreshRunning,
       refreshBuildPlan,
@@ -2405,6 +2517,7 @@ function Conversation() {
       say,
       setGoalFor,
       persistGoal,
+      carryOnWith,
     ],
   );
 
@@ -2531,6 +2644,14 @@ function Conversation() {
     if (desk !== null) {
       const owner = `${desk.path}\u0000${desk.address ?? ''}`;
       setHolding((current) => ({ ...current, [owner]: false }));
+      /* Stop means stop. A list still being worked down must not ask for its
+         next step the moment this run settles, or Escape reads as a pause. */
+      if (carryOn.current[owner] !== undefined) {
+        const without = { ...carryOn.current };
+        delete without[owner];
+        carryOn.current = without;
+      }
+      stoppedByHand.current = { ...stoppedByHand.current, [owner]: true };
     }
     // Stopping a running goal also pauses it so it doesn't quietly keep running.
     if (goalNow.current !== null && goalNow.current.status === 'active') {
@@ -2801,6 +2922,20 @@ function Conversation() {
         ...(desk?.address == null ? {} : { conversation: desk.address }),
       };
       const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
+      /* Somebody has said something, so the run that was working a list down
+         starts its rounds again from zero. The ceiling is there to stop a loop
+         nobody is watching, not to ration a person who is. */
+      if (owner !== null && carryOn.current[owner] !== undefined) {
+        const without = { ...carryOn.current };
+        delete without[owner];
+        carryOn.current = without;
+      }
+      // And a new message is not the stopped run: the flag was for that one.
+      if (owner !== null && stoppedByHand.current[owner] === true) {
+        const going = { ...stoppedByHand.current };
+        delete going[owner];
+        stoppedByHand.current = going;
+      }
       // What is in the box at the moment of sending — never a snapshot from
       // whenever this callback was last rebuilt (see `attachmentsNow`).
       const inTheBox = attachmentsNow.current;
@@ -2830,7 +2965,7 @@ function Conversation() {
       // all — it sees a message about a design it was never given.
       const links: string[] = [];
       for (const attached of inTheBox) {
-        if (attached.kind === "image" || attached.kind === "figma") {
+        if (attached.kind === "image" || attached.kind === "figma" || attached.kind === "document") {
           reference.push({
             id: attached.id,
             kind: attached.kind,
@@ -2995,11 +3130,7 @@ function Conversation() {
             say('Say what done looks like after /goal — one sentence, checkable.');
             return;
           }
-          const baseline = (() => {
-            const p = buildPlanNow.current?.plan;
-            if (p === undefined || p === null) return 0;
-            return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
-          })();
+          const baseline = baselineFor(buildPlanNow.current?.plan.tasks);
           const created = createGoal(objective, 'doing', baseline);
           const withTime = withElapsed(created);
           setGoal(withTime);
@@ -3095,11 +3226,7 @@ function Conversation() {
       // becomes the objective itself.
       if (plans === 'goal' && goalNow.current === null && text.trim() !== '' && !text.trim().startsWith('/')) {
         const objective = text.trim();
-        const baseline = (() => {
-          const p = buildPlanNow.current?.plan;
-          if (p === undefined || p === null) return 0;
-          return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
-        })();
+        const baseline = baselineFor(buildPlanNow.current?.plan.tasks);
         const created = createGoal(objective, 'doing', baseline);
         const withTime2 = withElapsed(created);
         setGoal(withTime2);
@@ -3254,11 +3381,7 @@ function Conversation() {
         if (plans === 'goal') {
           const owner = `${desk.path}\u0000${desk.address ?? ''}`;
           if (goalNow.current === null && text.trim() !== '' && !text.trim().startsWith('/')) {
-            const baseline = (() => {
-              const p = buildPlanNow.current?.plan;
-              if (p === undefined || p === null) return 0;
-              return p.tasks.reduce((m, t) => Math.max(m, t.n), 0);
-            })();
+            const baseline = baselineFor(buildPlanNow.current?.plan.tasks);
             const created = createGoal(text.trim(), 'doing', baseline);
             const withTimeH = withElapsed(created);
             setGoal(withTimeH);
@@ -3549,6 +3672,11 @@ function Conversation() {
       // clear.
       if (words.length === 0) return;
       setDraft((was) => intoTheBox(was, words));
+      // And out of the conversation, or the same sentence is on screen twice:
+      // once as though it had been said, once in the box waiting to be.
+      setDesks((current) =>
+        changeCurrent(current, (one) => ({ ...one, turns: withoutTakenBack(one.turns, words) })),
+      );
       if (owner !== null) setQueued((was) => ({ ...was, [owner]: [] }));
     });
   }, [troubleAt]);
@@ -3668,7 +3796,20 @@ function Conversation() {
         // A list nobody told the model about is a list nobody ticks.
         const say = agreed.length > 0 ? `${withExtra}\n\n${PLAN_WORDS.ticking}` : withExtra;
         void deliver(say, sizeUp(say), { lookFirst: false });
-      } else setDraft(text);
+      } else {
+        /* "Change something first" used to put the original sentence back in
+           the box, which threw away the strikes, the moves and the notes just
+           made and asked for the same plan again. It now goes back as a
+           revision — still looking, nothing changing — so the answer is another
+           plan to read rather than work already started. */
+        const again = chosen?.decision === undefined ? null : decidedMessage(chosen.decision);
+        if (again === null) {
+          setDraft(text);
+          return;
+        }
+        const revise = `${text}\n\n${again}\n\n${PLAN_WORDS.planAgain}`;
+        void deliver(revise, sizeUp(revise), { lookFirst: true });
+      }
     },
     [deliver, desk, desks, refreshBuildPlan],
   );
@@ -4136,7 +4277,8 @@ function Conversation() {
    */
   const [away, setAway] = useState<Readonly<Record<string, AwayState>>>({});
   /* Read while a loop is being put down, so each step is chained behind the id
-     the board actually gave the one before it rather than a stale one. */
+     the board actually gave the one before it rather than a stale one — and,
+     in the notice handler, to see what the board looked like a moment ago. */
   const awayNow = useRef<Readonly<Record<string, AwayState>>>({});
   awayNow.current = away;
   const awayHere = desks.current === null ? null : (away[desks.current] ?? null);
@@ -4246,6 +4388,31 @@ function Conversation() {
      after it has been away and come back. Subscribed once. */
   useEffect(() => {
     const stopAway = bridge.onAway((notice) => {
+      /* The last piece has landed. Work on the board carries on whether or not
+         the conversation does — and used to finish with nothing said, so the
+         conversation that started it never learned the thing it was waiting for
+         had happened.
+
+         Read against a ref rather than inside the state updater: this sends a
+         message, and an updater that React may run twice is no place for one. */
+      const over = wentQuiet(awayNow.current[notice.project]?.pieces, notice.away.pieces);
+      if (over !== null) {
+        const desk = desksNow.current.byPath[notice.project];
+        // Only into a conversation with nothing already going: a run in flight
+        // hears things between steps, and this is not that.
+        if (desk !== undefined && desk.doing == null) {
+          say(`Background work finished — ${String(over.length)} to look at.`);
+          void bridge.prompt(
+            quietWords(over),
+            [],
+            { queue: 'followUp' },
+            {
+              project: notice.project,
+              ...(desk.address == null ? {} : { conversation: desk.address }),
+            },
+          );
+        }
+      }
       setAway((current) => ({ ...current, [notice.project]: notice.away }));
       setNow(Date.now());
     });

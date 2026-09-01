@@ -64,6 +64,10 @@ import {
  *  Reads correctly both on its own and spliced into "mostly me retrying …". */
 export const DEFAULT_SPEND_LABEL = 'Working on what you asked for';
 
+/** The name the advisor addition registers its question under — the same one
+ *  events.ts reads the reply out of. */
+const ADVISOR_TOOL = 'ask_advisor';
+
 export type SpendReport = {
   amount: Money;
   label: string;
@@ -226,7 +230,28 @@ export class SpendWatch {
     return amount === null ? null : { amount, label: DEFAULT_SPEND_LABEL, reason: 'work' };
   }
 
+  /**
+   * What the advisor spent, under the advisor's own name.
+   *
+   * A second model is asked inside a tool call, so nothing about it looks like
+   * an assistant turn and the breakdown listed one model where two were paid
+   * for. Its own answer carries what it cost — read from there rather than
+   * inferred, and only from the tool that could have written it.
+   */
+  #advisorPriced(source: Fields): void {
+    if (textAt(source, 'toolName') !== ADVISOR_TOOL) return;
+    const details = fieldsOf(fieldsOf(source['result'])?.['details']);
+    if (details === null) return;
+    const usage = fieldsOf(details['usage']);
+    const cost = usage === null ? null : usage['cost'];
+    const model = textAt(details, 'advisor');
+    if (model === null || typeof cost !== 'number' || !(cost > 0)) return;
+    const name = shortModelName(model);
+    this.#byModel.set(name, (this.#byModel.get(name) ?? 0) + cost);
+  }
+
   #toolFinished(source: Fields): void {
+    this.#advisorPriced(source);
     const id = textAt(source, 'toolCallId');
     if (id === null) return;
     const attempt = this.#open.get(id);

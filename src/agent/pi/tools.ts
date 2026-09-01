@@ -2281,6 +2281,33 @@ export type StepDone = (note: string | null) => Promise<string>;
  *  can see it — never from here, where neither of those is true. */
 export type CancelBuild = () => Promise<string>;
 
+/** Write that checklist, or add to it. Same wiring, same reason. */
+export type MakeChecklist = (titles: readonly string[]) => Promise<string>;
+
+const makeChecklistTool = (make: MakeChecklist): ToolDefinition => ({
+  name: 'make_checklist',
+  label: 'Writing the checklist',
+  description:
+    'Put the steps this job breaks into on screen as a checklist the person can watch, and tick off with step_done as each one lands. Use it when a request has several parts, when you are working toward a goal and there is no checklist yet, or when you find work along the way that was not on the list. Called again, it adds to the list rather than replacing it.',
+  promptSnippet: 'make_checklist(steps) — put the steps on screen as a checklist',
+  promptGuidelines: [
+    'Work with more than two or three parts to it gets a checklist first, before the first change. It is what the person watches, and what a later session resumes from.',
+    'One step per thing that is separately finishable. Not "build the feature", and not every file you will touch.',
+    'Working toward a goal with no checklist on screen, write one for the goal before anything else.',
+  ],
+  parameters: Type.Object({
+    steps: Type.Array(Type.String({ minLength: 1 }), {
+      description: 'The steps, in the order they should happen, in plain words.',
+      minItems: 1,
+    }),
+  }),
+  executionMode: 'sequential',
+  execute: async (_callId, params: { steps: readonly string[] }): ToolResult => {
+    const said = await make(params.steps);
+    return { content: [{ type: 'text', text: said }], details: {} };
+  },
+});
+
 const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
   name: 'step_done',
   label: 'Ticking one off the list',
@@ -2384,6 +2411,7 @@ export const grapheTools = (
   askFirst?: AskFirst | null,
   stepDone?: StepDone | null,
   cancelBuild?: CancelBuild | null,
+  makeChecklist?: MakeChecklist | null,
   /** Whether this project's browser keeps what it is signed in to. Asked each
    *  time rather than read once, so turning it off takes effect at once. */
   keepsBrowserLogins?: () => boolean,
@@ -2414,6 +2442,9 @@ export const grapheTools = (
   // Same reach as the ticking: wherever a checklist can exist, saying no to it
   // must exist too, and it comes from the shell so it lands on the right file.
   if (cancelBuild !== undefined && cancelBuild !== null) tools.push(cancelBuildTool(cancelBuild));
+  // Same reach again: wherever a list can be ticked, it has to be possible to
+  // write one — otherwise every list waits for somebody to type it.
+  if (makeChecklist !== undefined && makeChecklist !== null) tools.push(makeChecklistTool(makeChecklist));
   if (projectRoot !== undefined && projectRoot !== '') {
     tools.push(
       readMapTool(projectRoot),

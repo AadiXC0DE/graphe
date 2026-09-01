@@ -92,6 +92,9 @@ export type HeldShellOptions = {
    * rebuilding the agent.
    */
   unrestricted?: () => boolean;
+  /** Where a development server goes in full access, instead of being waited
+   *  on for twenty minutes outside everything that tracks what is running. */
+  keepInstead?: KeepInstead;
   /** Home, for the folders below. Tests pass their own. */
   home?: string;
   /** Addresses this project may reach, on top of the ones every project gets. */
@@ -278,6 +281,10 @@ export const REFUSED: Record<Refusal, string> = {
  *  whole build in memory. */
 const TAIL = 8_000;
 
+/** What to do with a server started in full access instead of waiting on it.
+ *  Answers with the sentence to print, or null to run it the ordinary way. */
+export type KeepInstead = (command: string, cwd: string) => Promise<string | null>;
+
 export const CANNOT_LISTEN =
   'I did not run that here. A command run this way is waited on until it finishes, and this kind never does, and what I run has no port of its own to be reached on. Start it with the keep_running tool instead: it stays up after this turn, several can run at once, and it comes back with the address it is reachable at. Ask it about them again with running(), and end one with stop_running(id).';
 
@@ -431,6 +438,19 @@ export function heldShell(options: HeldShellOptions): HeldShell {
       // not use their normal supporting folders even though the Guard had let
       // the command through.
       if (options.unrestricted?.() === true) {
+        /* A server is still started for real here — that is what full access
+           means — but it is handed to the register rather than waited on. Left
+           in the foreground it held the turn for twenty minutes, and was
+           invisible to the one thing that knows what is already up: several
+           conversations each starting the same server is how the machine ran
+           out of memory with nothing on screen saying why. */
+        if (options.keepInstead !== undefined && isForegroundDevelopmentServer(command)) {
+          const said = await options.keepInstead(command, cwd);
+          if (said !== null) {
+            run.onData(Buffer.from(`${said}\n`));
+            return { exitCode: 0 };
+          }
+        }
         // A command with no ceiling can pin the sitting for hours. Twenty
         // minutes is long enough for a real build and short enough that a stuck
         // loop cannot burn a night. Dev servers are detached before they get

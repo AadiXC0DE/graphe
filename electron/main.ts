@@ -3576,6 +3576,9 @@ async function startConversationUnlocked(
       // here, so the tool cannot guess a path that does not match where plans
       // are kept.
       cancelBuild: () => cancelThePlan(open.path),
+      // And can write one. A model that can tick a list off but never make one
+      // leaves every list to be typed by somebody.
+      makeChecklist: (titles) => layOutThePlan(open.path, titles),
       keepsBrowserLogins: () => keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path),
       planMode: held.planMode,
       // One folder of transcripts for all projects, under the app's own data
@@ -4025,6 +4028,9 @@ type AwayDesk = {
 let tickOneOff: (project: string, note: string | null) => Promise<string> = () =>
   Promise.resolve(NO_LIST_TO_TICK);
 
+/** What a list the model wrote for itself is called at the top of the panel. */
+const WHAT_THE_MODEL_CALLED_IT = 'What this needs';
+
 const NO_LIST_TO_TICK =
   'There is no checklist on screen for this project, so there was nothing to tick. Carry on.';
 
@@ -4033,6 +4039,12 @@ const NO_LIST_TO_TICK =
  *  `register`, so they meet through these lets. */
 let cancelThePlan: (project: string) => Promise<string> = () =>
   Promise.resolve(NO_LIST_TO_TICK);
+
+/** Writing the checklist in the first place. Without this the model could tick
+ *  a list off and stand it down but never make one, so anything that wanted a
+ *  list — Goal Mode most of all — could only ask a person to write it. */
+let layOutThePlan: (project: string, titles: readonly string[]) => Promise<string> = () =>
+  Promise.resolve('There is nowhere to put a checklist for this project yet.');
 
 /** Projects whose checklist the model has moved itself this turn. The window
  *  advances one step per reply for a plan worked a reply at a time; when the
@@ -7372,6 +7384,41 @@ function register(): void {
       return `“${was.title}” is ticked off — ${String(how.done)} of ${String(how.total)} done.${
         next === null ? '' : ` Next on the list: “${next.title}”.`
       }`;
+    });
+
+  /**
+   * Write the checklist, or add to the one already there.
+   *
+   * Same queue as every other plan change, and the same file — so a list the
+   * model wrote is the list the person sees, ticks off and resumes from, with
+   * nothing to reconcile.
+   */
+  layOutThePlan = async (project: string, titles: readonly string[]): Promise<string> =>
+    onePlanAtATime(project, async () => {
+      const wanted = titles.map((one) => one.trim()).filter((one) => one !== '');
+      if (wanted.length === 0) return 'A checklist needs at least one step.';
+      const stored = await readStoredTasks(project);
+      if (stored === null) {
+        const tasks = wanted.map((title, at) => ({
+          n: at + 1,
+          title,
+          acceptance: '',
+          test: null,
+          status: 'pending' as const,
+          note: null,
+        }));
+        await writeBuildPlan(project, WHAT_THE_MODEL_CALLED_IT, tasks);
+        pushBuildPlan(project, await readBuildPlan(project));
+        return `The checklist is on screen — ${String(tasks.length)} steps, starting with “${String(
+          tasks[0]?.title,
+        )}”. Tick each one off with step_done as it lands.`;
+      }
+      const tasks = addTasks(stored.tasks, wanted);
+      await writeBuildPlan(project, stored.source, tasks);
+      pushBuildPlan(project, await readBuildPlan(project));
+      return `Added ${String(wanted.length)} to the checklist, which now has ${String(
+        tasks.length,
+      )}. Tick each one off with step_done as it lands.`;
     });
 
   /** Cancel the checklist. Through the same queue as every other plan change:

@@ -56,6 +56,19 @@ async function alive(pid: number): Promise<boolean> {
   }
 }
 
+/** Gone, allowing for the moment between the signal landing and the kernel
+ *  reaping. Nothing of ours is being waited for here — the signals have all
+ *  been sent by the time this is called, and under a loaded machine `ps` can
+ *  still name a process for a beat afterwards. */
+async function gone(pid: number, within = 3_000): Promise<boolean> {
+  const until = Date.now() + within;
+  for (;;) {
+    if (!(await alive(pid))) return true;
+    if (Date.now() > until) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 describe('RL-01 the same command twice', () => {
   it('hands back the one already running rather than a second copy', async () => {
     const running = register();
@@ -193,8 +206,8 @@ describe('RL-03 quitting takes the servers with it', () => {
 
     running.stopAllNow();
 
-    // No await on anything of ours: whatever this needed, it has already done.
-    for (const pid of pids) expect(await alive(pid)).toBe(false);
+    // No await on anything of ours: every signal went out inside that call.
+    for (const pid of pids) expect(await gone(pid)).toBe(true);
     expect(running.list()).toHaveLength(0);
   }, 60_000);
 

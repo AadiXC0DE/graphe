@@ -41,7 +41,7 @@ import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
-import { drainStarted } from "./lib/queue";
+import { drainStarted, withoutOurs } from "./lib/queue";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
 import type { BuildPlan, ConnectedState } from "./lib/ipc";
 import Settings, { type SettingsLink } from "./components/Settings";
@@ -91,6 +91,7 @@ import {
   readStoredGoal,
   ROUNDS,
   baselineFor,
+  goalWords,
   verifyGoal,
   withElapsed,
   type Goal,
@@ -506,6 +507,10 @@ function Conversation() {
   const goalNow = useRef(goal);
   goalNow.current = goal;
   const goalRuns = useRef(new Set<string>());
+  /* Goals that have already been asked to lay out their steps. Asked once: a
+     goal that cannot be broken into a checklist twice over is one to stop on,
+     not to keep asking. */
+  const askedForAList = useRef(new Set<string>());
   /* Which project the goal in hand belongs to. The goal itself is one value for
      the window, so without this a run landing for another folder is verified
      against — and continued toward — a goal that is not its own. */
@@ -2077,6 +2082,52 @@ function Conversation() {
    * interesting half — see work/carryon.ts — and every way out says so, because
    * a loop that goes quiet is the bug it was written to fix wearing a hat.
    */
+  /* Messages this app queued for itself — carrying on through a list, going
+     round again toward a goal. Kept per conversation so the waiting line can
+     leave them out: drawn there they read as something somebody typed and is
+     waiting for, and they are neither. */
+  const oursInLine = useRef<Record<string, readonly string[]>>({});
+
+  /**
+   * Send one of those, exactly as a person's message would be sent.
+   *
+   * Not through `deliver`, which reads the composer and the box in front of
+   * it — but everything `deliver` does that the screen depends on has to
+   * happen anyway. The first of those is `doing`: without it the run has no
+   * job against it, the tab stops spinning, and a conversation that is very
+   * much working looks stopped.
+   */
+  const nudgeOn = useCallback(
+    (project: string, conversation: string | null, text: string) => {
+      const owner = `${project}\u0000${conversation ?? ''}`;
+      oursInLine.current = {
+        ...oursInLine.current,
+        [owner]: [...(oursInLine.current[owner] ?? []), text],
+      };
+      const started = { task: sizeUp(text), startedAt: Date.now() };
+      setDesks((current) =>
+        changeDesk(current, project, (one) => {
+          if (conversation !== null && conversation !== one.address) {
+            const parked = one.parked[conversation];
+            if (parked === undefined) return one;
+            return {
+              ...one,
+              parked: { ...one.parked, [conversation]: { ...parked, doing: parked.doing ?? started } },
+            };
+          }
+          return { ...one, doing: one.doing ?? started };
+        }),
+      );
+      void bridge.prompt(
+        text,
+        [],
+        { queue: 'followUp' },
+        { project, ...(conversation === null ? {} : { conversation }) },
+      );
+    },
+    [],
+  );
+
   const carryOnWith = useCallback(
     (project: string, conversation: string | null, runKey: string, plan: BuildPlan | null) => {
       if (stoppedByHand.current[runKey] === true) {
@@ -2107,14 +2158,9 @@ function Conversation() {
       }
       carryOn.current = { ...carryOn.current, [runKey]: move.state };
       say(move.said);
-      void bridge.prompt(
-        carryOnPrompt(next ?? 'the next step', plan.done, plan.total),
-        [],
-        { queue: 'followUp' },
-        { project, ...(conversation === null ? {} : { conversation }) },
-      );
+      nudgeOn(project, conversation, carryOnPrompt(next ?? 'the next step', plan.done, plan.total));
     },
-    [say],
+    [say, nudgeOn],
   );
 
   /* Everything the agent does, in order. Subscribed once for the life of the
@@ -2227,6 +2273,10 @@ function Conversation() {
             const { [queueOwner]: _drained, ...withoutDrained } = was;
             return withoutDrained;
           });
+          if (oursInLine.current[queueOwner] !== undefined) {
+            const { [queueOwner]: _mine, ...rest } = oursInLine.current;
+            oursInLine.current = rest;
+          }
           // A long run earns its quiet measure. Short runs stay silent — a
           // line under every quick change is the noise this product removes.
           const started = runStartedAt.current[runKey];
@@ -2373,18 +2423,31 @@ function Conversation() {
                     ? 0
                     : planForVerify.tasks.filter((t) => t.n > activeGoal.planBaselineN).length;
                 if (ownedCount === 0) {
-                  say(`Goal not met — ${verdict.reason}. Add tasks to the build plan for auto-checking, or say /goal clear when done. Not auto-continuing.`);
-                  goalRuns.current.delete(goalOwner);
+                  /* A goal is a sentence, not a checklist, and asking somebody
+                     to go and write one before their goal will run is the
+                     wrong way round. It asks for the list instead — once. If a
+                     round goes by and there is still none, it stands down
+                     rather than going round forever on nothing to check. */
+                  if (!askedForAList.current.has(goalOwner)) {
+                    askedForAList.current.add(goalOwner);
+                    goalRuns.current.add(goalOwner);
+                    say(goalWords.workingOutTheSteps);
+                    nudgeOn(where, notice.conversation ?? null, goalWords.askForTheSteps(activeGoal.objective));
+                  } else {
+                    say(goalWords.noStepsEither);
+                    askedForAList.current.delete(goalOwner);
+                    goalRuns.current.delete(goalOwner);
+                  }
                 } else if (activeGoal.iterations < ROUNDS) {
+                  askedForAList.current.delete(goalOwner);
                   const nextGoal: Goal = { ...withElapsed(activeGoal), iterations: activeGoal.iterations + 1 };
                   setGoalFor(nextGoal, where);
                   goalRuns.current.add(goalOwner);
                   say(`Iteration ${String(nextGoal.iterations)} · Goal not met, task continues — ${verdict.reason}`);
-                  void bridge.prompt(
+                  nudgeOn(
+                    where,
+                    notice.conversation ?? null,
                     `Continue toward the goal: ${activeGoal.objective}. ${verdict.reason}`,
-                    [],
-                    { queue: 'followUp' },
-                    { project: where, ...(notice.conversation == null ? {} : { conversation: notice.conversation }) },
                   );
                 } else {
                   say(`Goal paused after ${String(activeGoal.iterations)} iterations (budget reached). /goal resume to carry on.`);
@@ -2405,11 +2468,10 @@ function Conversation() {
                       setGoalFor(nextGoal, where);
                       goalRuns.current.add(goalOwner);
                       say(`Iteration ${String(nextGoal.iterations)} · Goal not yet met — checks failed: ${reason}`);
-                      void bridge.prompt(
+                      nudgeOn(
+                        where,
+                        notice.conversation ?? null,
                         `Continue toward the goal: ${still.objective}. Checks failed: ${reason}`,
-                        [],
-                        { queue: 'followUp' },
-                        { project: where, ...(notice.conversation == null ? {} : { conversation: notice.conversation }) },
                       );
                     } else {
                       say(`Goal paused after ${String(still.iterations)} iterations (budget reached, checks still failing). /goal resume to carry on.`);
@@ -2444,7 +2506,10 @@ function Conversation() {
         if (notice.event.type === 'queued') {
           const owner = `${notice.project ?? ''}\u0000${notice.conversation ?? ''}`;
           const words = [...notice.event.steering, ...notice.event.followUp];
-          setQueued((was) => ({ ...was, [owner]: words }));
+          // Our own nudges are behind the run like anything else, and nobody
+          // typed them. Drawn in the line they read as somebody's message
+          // waiting, which is two wrong things at once.
+          setQueued((was) => ({ ...was, [owner]: withoutOurs(words, oursInLine.current[owner] ?? []) }));
         }
         // The agent has begun on one of the queued messages, so it is not
         // waiting any more. Pi reports this drain through its own bookkeeping
@@ -2456,6 +2521,13 @@ function Conversation() {
         if (notice.event.type === 'message-started') {
           const owner = `${notice.project ?? ''}\u0000${notice.conversation ?? ''}`;
           const started = notice.event.text;
+          // Begun, so it is no longer one of ours waiting — and the next round
+          // of the same list must not be hidden by this one's entry.
+          const ours = oursInLine.current[owner];
+          if (ours !== undefined) {
+            const left = drainStarted(ours, started);
+            oursInLine.current = { ...oursInLine.current, [owner]: left };
+          }
           setQueued((was) => {
             const remaining = drainStarted(was[owner] ?? [], started);
             return remaining === was[owner] ? was : { ...was, [owner]: remaining };
@@ -2518,6 +2590,7 @@ function Conversation() {
       setGoalFor,
       persistGoal,
       carryOnWith,
+      nudgeOn,
     ],
   );
 
@@ -4402,15 +4475,7 @@ function Conversation() {
         // hears things between steps, and this is not that.
         if (desk !== undefined && desk.doing == null) {
           say(`Background work finished — ${String(over.length)} to look at.`);
-          void bridge.prompt(
-            quietWords(over),
-            [],
-            { queue: 'followUp' },
-            {
-              project: notice.project,
-              ...(desk.address == null ? {} : { conversation: desk.address }),
-            },
-          );
+          nudgeOn(notice.project, desk.address ?? null, quietWords(over));
         }
       }
       setAway((current) => ({ ...current, [notice.project]: notice.away }));

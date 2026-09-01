@@ -34,16 +34,23 @@ describe('FL-01 a list with steps left asks for the next one', () => {
     expect(APP).toContain('if (!goalHasIt) carryOnWith(');
   });
 
-  it('sends the next round behind the run rather than interrupting it', () => {
+  it('goes out the same way every nudge does', () => {
     const at = APP.indexOf('carryOnPrompt(next ?? ');
     expect(at).toBeGreaterThan(-1);
-    expect(APP.slice(at, at + 400)).toContain("queue: 'followUp'");
+    expect(APP.slice(at - 60, at + 120)).toContain('nudgeOn(project, conversation,');
   });
 
-  it('asks in the conversation that settled, not whichever is in front', () => {
-    const at = APP.indexOf('carryOnPrompt(next ?? ');
-    const block = APP.slice(at, at + 400);
+  /* Everything the app queues for itself goes through one place, so the two
+     things the screen depends on cannot be forgotten at one call site and not
+     another: the job that makes the tab spin, and staying out of the line. */
+  it('behind the run, in the conversation that settled, spinning, and not in the line', () => {
+    const at = APP.indexOf('const nudgeOn = useCallback(');
+    expect(at).toBeGreaterThan(-1);
+    const block = APP.slice(at, at + 1800);
+    expect(block).toContain("queue: 'followUp'");
     expect(block).toContain('conversation === null ? {} : { conversation }');
+    expect(block).toContain('doing: one.doing ?? started');
+    expect(block).toContain('oursInLine.current');
   });
 });
 
@@ -154,5 +161,46 @@ describe('FL-08 a line taken back leaves the conversation', () => {
     const block = APP.slice(at, at + 1200);
     expect(block).toContain('intoTheBox(was, words)');
     expect(block).toContain('withoutTakenBack(one.turns, words)');
+  });
+});
+
+describe('FL-09 a run the app kept going still looks like it is running', () => {
+  /* The loop worked and the tab stopped spinning, because everything that made
+     the screen say "working" lived in `deliver` and these do not go through it. */
+  it('goal mode goes round through the same nudge', () => {
+    expect(APP).toContain('Continue toward the goal: ${activeGoal.objective}');
+    const at = APP.indexOf('Continue toward the goal: ${activeGoal.objective}');
+    expect(APP.slice(at - 200, at)).toContain('nudgeOn(');
+  });
+
+  it('so does the board when it goes quiet', () => {
+    expect(APP).toContain('nudgeOn(notice.project, desk.address ?? null, quietWords(over))');
+  });
+
+  it('and none of the three are drawn as somebody waiting in line', () => {
+    const at = APP.indexOf("if (notice.event.type === 'queued')");
+    expect(APP.slice(at, at + 700)).toContain('withoutOurs(words, oursInLine.current[owner] ?? [])');
+  });
+});
+
+describe('FL-10 a goal makes its own checklist', () => {
+  it('asks for one instead of telling the person to go and write it', () => {
+    const at = APP.indexOf('if (ownedCount === 0)');
+    const block = APP.slice(at, at + 900);
+    expect(block).toContain('goalWords.askForTheSteps');
+    expect(block).not.toContain('Not auto-continuing');
+  });
+
+  it('asks once, then stops rather than going round on nothing to check', () => {
+    const at = APP.indexOf('if (ownedCount === 0)');
+    const block = APP.slice(at, at + 900);
+    expect(block).toContain('askedForAList.current.has(goalOwner)');
+    expect(block).toContain('goalWords.noStepsEither');
+  });
+
+  it('and there is a tool that can actually write one', () => {
+    const TOOLS = read('../src/agent/pi/tools.ts');
+    expect(TOOLS).toContain("name: 'make_checklist'");
+    expect(TOOLS).toContain('makeChecklistTool(makeChecklist)');
   });
 });

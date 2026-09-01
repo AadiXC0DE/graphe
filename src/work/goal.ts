@@ -59,6 +59,27 @@ function nextId(): string {
   return `goal-${String(Date.now())}-${String(counter)}`;
 }
 
+/**
+ * Which tasks a new goal inherits.
+ *
+ * A leftover list from earlier work must not report a new goal done before it
+ * has started, which is what the baseline is for. But a list still being worked
+ * when the goal is set is not leftover — it is the checklist for exactly the
+ * thing being asked for, and excluding it left the goal with nothing to verify
+ * against, so it ran one round and stood down.
+ *
+ * So: a finished list is history and is skipped past; an unfinished one is the
+ * goal's own.
+ */
+export function baselineFor(
+  tasks: readonly { n: number; status: string }[] | null | undefined,
+): number {
+  if (tasks === null || tasks === undefined || tasks.length === 0) return 0;
+  const anyLeft = tasks.some((one) => one.status !== 'done');
+  if (anyLeft) return 0;
+  return tasks.reduce((most, one) => Math.max(most, one.n), 0);
+}
+
 /** One goal from a sentence, active and counting from now. */
 export function createGoal(objective: string, howFar: HowFar = 'doing', planBaselineN = 0): Goal {
   const said = objective.trim();

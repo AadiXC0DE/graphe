@@ -123,6 +123,31 @@
   margin-bottom: var(--space-2);
 }
 
+/* An attached document: a row you can open, not a picture you can enlarge. */
+.message__paper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.message__paper:hover {
+  border-color: var(--border-strong, var(--border));
+}
+
+.message__papername {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .message__shot {
   display: block;
   padding: 0;

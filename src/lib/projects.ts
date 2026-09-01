@@ -40,7 +40,7 @@ import { readsAFile, TASK_LABEL, WEB_SEARCH_LABEL } from './describe';
  *  shaped the work belongs in it whether the thread still mentions it or not. */
 export type Reference = {
   id: string;
-  kind: 'image' | 'figma';
+  kind: 'image' | 'figma' | 'document';
   name: string;
   note: string;
   /** An object URL, for images only. Live for as long as this session. */
@@ -200,6 +200,34 @@ export function tookBack(taken: {
   followUp: readonly string[];
 }): readonly string[] {
   return [...taken.steering, ...taken.followUp].filter((one) => one.trim() !== '');
+}
+
+/**
+ * The thread with the lines that came back taken out of it.
+ *
+ * A queued line is shown the moment it is typed, which is right — it is going
+ * to be sent. Taking it back puts it in the box again, and leaving the shown
+ * copy behind means the same sentence twice: once in the conversation as
+ * though it had been said, once in the box waiting to be. Only the trailing
+ * ones go, and only the person's own: anything the model has already answered
+ * is history, whatever it says.
+ */
+export function withoutTakenBack(turns: readonly Turn[], words: readonly string[]): readonly Turn[] {
+  const left = words.map((one) => one.trim()).filter((one) => one !== '');
+  if (left.length === 0) return turns;
+  const kept = [...turns];
+  for (let at = kept.length - 1; at >= 0 && left.length > 0; at -= 1) {
+    const turn = kept[at];
+    if (turn === undefined) continue;
+    // Anything that is not the person speaking sits between the queued lines
+    // and what came before them, and stops the walk: past it is answered work.
+    if (turn.kind !== 'said' || turn.from !== 'you') break;
+    const found = left.indexOf(turn.text.trim());
+    if (found === -1) break;
+    left.splice(found, 1);
+    kept.splice(at, 1);
+  }
+  return kept;
 }
 
 /** The box with the line put back into it. Whatever was already typed there

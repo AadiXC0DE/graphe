@@ -60,6 +60,20 @@ function CopyMark({ done }: { done: boolean }) {
 function Sent({ picture }: { picture: SentPicture }) {
   const [broken, setBroken] = useState(false);
   const [open, setOpen] = useState(false);
+  /* A document has no thumbnail to grow — it is a row with its name, and the
+     press opens it rather than enlarging it. Without this a PDF attached to a
+     message left nothing behind at all, so a file somebody sent looked lost. */
+  if (picture.kind === 'document') {
+    return (
+      <a className="message__paper" href={picture.src} target="_blank" rel="noreferrer" title={picture.name}>
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+          <path d="M4 2h5l3 3v9H4z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+          <path d="M9 2v3h3" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+        </svg>
+        <span className="message__papername">{picture.name}</span>
+      </a>
+    );
+  }
   if (broken) return null;
   return (
     <button

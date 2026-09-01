@@ -47,6 +47,7 @@ import { fileURLToPath } from 'node:url';
 // line that names Pi and expects `import type` on it.
 import type { AgentToolResult, AgentToolUpdateCallback, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
+import { READABLE, documentSaid, readDocument } from './documents';
 
 import { lspRenameTool, lspTool } from './lsp';
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
@@ -1593,7 +1594,7 @@ export function runningTools(
         'Use keep_running for `npm run dev`, `vite`, `python3 -m http.server`, an API, a watcher — anything that stays up. Running one through bash cannot work: bash waits for a command to finish, and this kind never does.',
         'Several can run at once — a front end and two back ends is ordinary. Each gets an id.',
         'It comes back with the address it is reachable at, when it prints one. Give that address to the person, along with anything else that came back with it; the window can open it.',
-        'Check on one later with running(), and end it with stop_running(id). Do not start a second copy of something already up — look first.',
+        'Check on one later with running(), and end it with stop_running(id). Starting something already running here hands back the one that is up rather than a second copy.',
       ],
       parameters: Type.Object({
         command: Type.String({ description: 'The command to start, exactly as it would be typed.', minLength: 1 }),
@@ -1603,6 +1604,9 @@ export function runningTools(
       execute: async (_callId, params: { command: string; label?: string }, signal: AbortSignal | undefined): ToolResult => {
         const command = params.command.trim();
         if (command === '') throw new Error('I need a command to start.');
+        // Asked before starting, because `start` hands the running one back
+        // rather than a second copy and the answer should say which happened.
+        const alreadyUp = running.same(command, where.folder) !== null;
         const piece = await running.start({
           command,
           folder: where.folder,
@@ -1622,8 +1626,8 @@ export function runningTools(
         }
         const found =
           piece.address === null
-            ? 'It is up. It has not printed an address, so either it is not one that listens or it is still starting. Ask running() again in a moment.'
-            : `It is up at ${piece.address}.`;
+            ? `${alreadyUp ? 'That is already running' : 'It is up'}. It has not printed an address, so either it is not one that listens or it is still starting. Ask running() again in a moment.`
+            : `${alreadyUp ? 'That is already running' : 'It is up'} at ${piece.address}.`;
         // Only when we moved the port. On the project's usual port there is
         // nothing to warn about, and saying so sends people editing settings
         // that were already right.
@@ -2347,6 +2351,28 @@ const askFirstTool = (askFirst: AskFirst): ToolDefinition => ({
   },
 });
 
+/* A PDF, a Word file, a deck, a spreadsheet. The ordinary read answers with a
+   screenful of binary, so without this the way to read one is to write a
+   throwaway script — which works, and is the wrong shape for a thing people
+   hand over every day. */
+const readDocumentTool: ToolDefinition = {
+  name: 'read_document',
+  label: 'Reading a document',
+  description: `Read a PDF, Word file, slide deck or spreadsheet as text (${READABLE}). Use it for any of those; the ordinary file read answers with binary and cannot be used on them.`,
+  promptSnippet: 'read_document(path) — read a pdf, docx, pptx or xlsx as text',
+  promptGuidelines: [
+    `Read ${READABLE} with this rather than with the shell, which answers with binary for all of them. A script to pull the text out of one is never needed.`,
+  ],
+  parameters: Type.Object({
+    path: Type.String({ description: 'The file to read.', minLength: 1 }),
+  }),
+  executionMode: 'parallel',
+  execute: async (_callId, params: { path: string }): ToolResult => {
+    const document = await readDocument(params.path);
+    return { content: [{ type: 'text', text: documentSaid(params.path, document) }], details: {} };
+  },
+};
+
 export const grapheTools = (
   agentDir: string,
   figmaToken?: string | null,
@@ -2365,6 +2391,7 @@ export const grapheTools = (
   const tools: ToolDefinition[] = [
     websearchTool,
     webfetchTool,
+    readDocumentTool,
     taskTool(agentDir, model, thinking, projectRoot),
     scoreCandidatesTool,
     // A browser of its own, on from the first turn. Every other agent ships one

@@ -88,6 +88,11 @@ export const PLAN_WORDS = {
     return kept === 1 ? 'Do that one' : `Do those ${String(kept)}`;
   },
   alternative: 'Change something first',
+  /** Sent back with the changes somebody made, when they want to see the plan
+   *  again rather than start on it. The loop the card exists for: propose,
+   *  change, propose again, and only then build. */
+  planAgain:
+    'Do not start on this yet. Take those changes, and show me the revised plan the same way — as a short numbered list — before anything changes.',
   /** Beside each step. Dropping one is a decision, not a deletion — it comes
    *  straight back, so nobody has to be sure before they try it. */
   drop: 'Leave this out',

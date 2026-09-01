@@ -188,6 +188,23 @@ export type StartOptions = {
   onChange?: () => void;
 };
 
+/** As many servers as one project has a use for. A front end and two back ends
+ *  is ordinary; past this it is not a project running, it is a machine filling
+ *  up. A development server holds most of a gigabyte, and the way people find
+ *  out this number was missing is the machine running out of memory. */
+export const MOST_RUNNING = 4;
+
+/** The same command asked for twice. Whitespace only — anything cleverer would
+ *  start claiming `npm run dev` and `npm run dev -- --host` are one thing. */
+export function sameCommand(one: string, other: string): boolean {
+  return one.replace(/\s+/g, ' ').trim() === other.replace(/\s+/g, ' ').trim();
+}
+
+/** Still up, or still coming up. A stopped one is not in the way of anything. */
+function isLive(piece: RunningPiece): boolean {
+  return piece.state === 'starting' || piece.state === 'running';
+}
+
 /**
  * Everything this project has running.
  *
@@ -211,6 +228,16 @@ export class Running {
     return entry === undefined ? null : { ...entry.piece };
   }
 
+  /** The live piece already running this exact command here, if there is one. */
+  same(command: string, folder: string): RunningPiece | null {
+    for (const entry of this.#entries.values()) {
+      if (!isLive(entry.piece)) continue;
+      if (entry.piece.folder !== folder) continue;
+      if (sameCommand(entry.piece.command, command)) return { ...entry.piece };
+    }
+    return null;
+  }
+
   /** What it has said since the last time somebody asked. `all` for the lot. */
   said(id: string, options: { all?: boolean } = {}): string {
     const entry = this.#entries.get(id);
@@ -229,6 +256,26 @@ export class Running {
     const wasAborted = (): boolean => options.signal?.aborted === true;
     if (this.#closed) throw new Error('That project is no longer open.');
     if (wasAborted()) throw new Error('Starting that was stopped.');
+
+    /* Already up. Told not to start a second copy, a model still does — a new
+       conversation has never seen the first one — and every extra copy is a
+       whole development server's worth of memory for a port that is already
+       taken. So this is a rule here rather than a sentence in a description. */
+    const already = this.same(options.command, options.folder);
+    if (already !== null) return already;
+
+    /* And a ceiling, because dedup only catches the same command twice. Four
+       different ones left running all afternoon fills the machine just as
+       well, and the person finds out when something else dies. */
+    const live = this.list().filter(isLive);
+    if (live.length >= MOST_RUNNING) {
+      throw new Error(
+        `${String(live.length)} things are already running here, which is as many as I keep up at once: ${live
+          .map((one) => one.label)
+          .join(', ')}. Stop one with stop_running before starting another.`,
+      );
+    }
+
     const id = `run-${String(++this.#next)}`;
     const bounds: Bounds = { writable: [...options.writable], reach: 'serving' };
     const bound = await hold(options.parts.shell, [...options.parts.args, options.command], bounds);
@@ -379,6 +426,26 @@ export class Running {
     this.#entries.clear();
   }
 
+  /**
+   * Stop everything before this process can exit, with nothing left waiting on
+   * a timer.
+   *
+   * The ordinary stop is polite: it asks, then insists half a second later. On
+   * quit there is no half second — the app goes, the timer never fires, and
+   * what was asked politely to stop carries on running with nobody left who
+   * knows it is there. Somebody finds it when the machine runs out of memory.
+   */
+  stopAllNow(): void {
+    this.#closed = true;
+    for (const entry of this.#entries.values()) {
+      endNow(entry.child);
+      entry.child = null;
+      entry.piece.state = 'stopped';
+      entry.resolveEnded();
+    }
+    this.#entries.clear();
+  }
+
   /** Drop the ones that have ended, so a list somebody reads is about now. Kept
    *  separate from stopping: a piece that fell over stays visible until asked
    *  about, or nobody would ever learn that it had. */
@@ -410,6 +477,25 @@ function settled(entry: Entry, patience: number): Promise<void> {
  * cleanup hooks time to run, while keeping Stop perceptibly instant. */
 const FORCE_AFTER_MS = 500;
 const STOP_WAIT_MS = 1500;
+
+/** End a process group now, with no grace period and no timer to depend on.
+ *  For quit, where there is no later. */
+function endNow(child: ChildProcess | null): void {
+  if (child === null || child.pid === undefined) return;
+  const group = process.platform !== 'win32';
+  for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+    try {
+      if (group) process.kill(-child.pid, signal);
+      else child.kill(signal);
+    } catch {
+      try {
+        child.kill(signal);
+      } catch {
+        // Already gone, which is the result asked for.
+      }
+    }
+  }
+}
 
 /** End a process group, politely and then not. Killing the shell alone leaves
  * the server it started behind, which is how a port stays busy after a stop. */

@@ -217,6 +217,50 @@ export function bandOf(state: WorkState): BandKey {
   return 'finished';
 }
 
+/**
+ * Whether the board has just gone quiet, and what finished on it.
+ *
+ * Work set going carries on whether or not the conversation does, which is the
+ * point of it — and meant that when the last piece landed, nothing said so.
+ * The conversation that started it had stopped and had no way to learn that the
+ * thing it was waiting for had happened.
+ *
+ * Null unless this is the moment it went quiet: something was in flight before,
+ * nothing is now, and at least one piece got far enough to have a result. A
+ * board that was already quiet says nothing, or it would say it every time
+ * anything at all moved.
+ */
+export function wentQuiet<T extends OnBoard>(
+  before: readonly T[] | undefined,
+  after: readonly T[],
+): readonly T[] | null {
+  const busy = (pieces: readonly T[]): boolean =>
+    pieces.some((one) => one.state === 'running' || one.state === 'waiting');
+  if (before === undefined || !busy(before) || busy(after)) return null;
+  const over = after.filter((one) => one.state === 'done' || one.state === 'failed');
+  return over.length === 0 ? null : over;
+}
+
+/** What to tell the conversation the work belonged to. Names what finished, so
+ *  a model reading only this still knows what to go and look at. */
+export function quietWords(pieces: readonly { doing: string; state: WorkState }[]): string {
+  const done = pieces.filter((one) => one.state === 'done');
+  const failed = pieces.filter((one) => one.state === 'failed');
+  const count = (n: number, thing: string): string =>
+    `${String(n)} ${thing}${n === 1 ? '' : 's'}`;
+  const tally = [
+    done.length === 0 ? null : `${count(done.length, 'piece')} finished`,
+    failed.length === 0 ? null : `${count(failed.length, 'piece')} did not`,
+  ]
+    .filter((one) => one !== null)
+    .join(' and ');
+  return [
+    `The work set going in the background is done — ${tally}:`,
+    ...pieces.map((one) => `- ${one.doing}${one.state === 'failed' ? ' (did not finish)' : ''}`),
+    'Look at what each one changed, take in what is worth keeping, and carry on with what you were doing.',
+  ].join('\n');
+}
+
 /** The whole board in the order it is drawn. */
 export function orderWork<T extends OnBoard>(pieces: readonly T[]): readonly T[] {
   return [...pieces].sort((one, other) => {

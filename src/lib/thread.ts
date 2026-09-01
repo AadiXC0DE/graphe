@@ -20,7 +20,10 @@ import { realWords } from './showme';
 import type { Decision, Trouble } from './ipc';
 
 /** A picture somebody put in the box, as the conversation shows it back. */
-export type SentPicture = { name: string; src: string };
+/** One thing sent with a message. A picture is drawn; a document is a row with
+ *  its name, because that is what a PDF looks like to somebody who wants it
+ *  back. `src` opens it either way. */
+export type SentPicture = { name: string; src: string; kind?: 'image' | 'document' };
 
 /**
  * One thing in the conversation, whoever caused it.

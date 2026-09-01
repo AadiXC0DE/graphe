@@ -20,3 +20,26 @@ export function drainStarted(
   if (at === -1) return line;
   return line.filter((_, where) => where !== at);
 }
+/**
+ * The line without the app's own nudges in it.
+ *
+ * Carrying on through a checklist, and going round again toward a goal, both
+ * put a message behind the run — which is right, and which Pi reports as a
+ * queued message like any other. Drawn, it reads as something the person typed
+ * and is waiting for, and it is neither: nobody typed it and there is nothing
+ * to wait for.
+ */
+export function withoutOurs(
+  line: readonly string[],
+  ours: readonly string[],
+): readonly string[] {
+  if (ours.length === 0 || line.length === 0) return line;
+  const left = [...ours];
+  const kept = line.filter((one) => {
+    const at = left.indexOf(one);
+    if (at === -1) return true;
+    left.splice(at, 1);
+    return false;
+  });
+  return kept.length === line.length ? line : kept;
+}

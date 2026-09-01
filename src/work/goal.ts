@@ -38,6 +38,20 @@ export type Goal = {
 };
 
 export const goalWords = {
+  /** Said once, when a goal is set on something with no checklist yet. Asking
+   *  somebody to write one before their goal will run is the wrong way round:
+   *  breaking the work into steps is the work. */
+  workingOutTheSteps: 'Working out the steps for this first.',
+  askForTheSteps: (objective: string): string =>
+    [
+      `Working toward this goal: ${objective}`,
+      'There is no checklist on screen for it yet. Break it into the steps it actually takes and put them up with make_checklist, then start on the first one and tick each off with step_done as it lands.',
+      'One step per thing that is separately finishable.',
+    ].join(' '),
+  /** When a round has gone by and there is still no list to check against. */
+  noStepsEither:
+    'I could not break this goal into steps to check against, so I have stopped rather than going round on nothing. Say what done looks like in a few concrete steps, or /goal clear if it is already done.',
+
   chip: 'Goal',
   name: 'Work toward a goal',
   note: 'Keep working toward one sentence until it is done — checks after every round and carries on by itself. Full access while it lasts.',

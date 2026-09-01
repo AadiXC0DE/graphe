@@ -96,6 +96,42 @@
   min-width: 0;
 }
 
+/* Whose name gives up the width, at any width.
+
+   These used to be conditional on a narrow composer, on the assumption that a
+   wide one has room. A model called "Muse Spark 1.2 Contributor" is a model
+   name three times the length of the ones this was measured against, and with
+   Queue and Interrupt out as well the row ran off its own edge on a full-width
+   window. Shrinking is what the label is for; the container queries below only
+   say how far. */
+.composer__row .ways,
+.composer__row .asking,
+.composer__row .thinking {
+  flex: 0 1 auto;
+}
+
+.composer__row .ways__chip,
+.composer__row .asking__chip,
+.composer__row .thinking__chip {
+  min-width: 0;
+}
+
+.composer__row .ways__label,
+.composer__row .asking__label,
+.composer__row .thinking__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* And whose does not. Queue and Interrupt are the two presses that only exist
+   while something is running, and a press squashed to fit is a press missed. */
+.composer__row .composer__queue,
+.composer__row .room {
+  flex: none;
+}
+
 /* The message controls read as a compact working strip, not a row whose
    * available width is redistributed into arbitrary gaps. The quiet hint takes
    * the flexible space and keeps the room/send pair parked at the far edge. */
@@ -415,15 +451,6 @@
      drift back down the row. The meter takes the job of pushing them right. */
   .composer__row .room {
     margin-left: auto;
-  }
-
-  .composer__row .thinking {
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-
-  .composer__row .thinking__chip {
-    min-width: 0;
   }
 
   .composer__row .thinking__label {

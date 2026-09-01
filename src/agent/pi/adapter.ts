@@ -74,7 +74,7 @@ import {
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
 import { browserFolder, closeBrowser } from './computer';
-import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type CancelBuild, type HelperModel, type HelperPace } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type CancelBuild, type MakeChecklist, type HelperModel, type HelperPace } from './tools';
 import { lspTool } from './lsp';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
@@ -660,6 +660,8 @@ export type CreateSessionOptions = {
   /** Cancel that checklist. Same reach as `stepDone`, so it only exists where
    *  a list could. */
   cancelBuild?: CancelBuild;
+  /** Write that checklist in the first place. */
+  makeChecklist?: MakeChecklist;
   /** Whether this project's browser keeps what it is signed in to between
    *  sittings. Asked each time, so turning it off takes effect at once. */
   keepsBrowserLogins?: () => boolean;
@@ -1980,9 +1982,14 @@ const MOST_AFTER_SAYINGS = 3;
   /** The advisor's own tools, kept apart because a chip turns them on and off
    *  without rebuilding the conversation. */
   const advisorTools = advisorToolNames(loadedExtensions);
-  const advises = options.advisor ?? null;
+  /* The advisor addition keeps one settings file for the whole machine, so the
+     choice that file holds is whichever conversation wrote it last. Held here
+     as well, and written again before each turn, so the file says what *this*
+     conversation chose at the moment it is about to be used. */
+  let advises = options.advisor ?? null;
+  let advisorThinks = options.advisorThinking ?? undefined;
   if (advisorTools.length > 0) {
-    await keepAdvisorSettings(agentDir, advises, options.model ?? null, options.advisorThinking ?? undefined);
+    await keepAdvisorSettings(agentDir, advises, options.model ?? null, advisorThinks);
   }
   if (subagentsLoaded(loadedExtensions)) await keepSubagentSettings(agentDir);
 
@@ -2069,6 +2076,7 @@ const MOST_AFTER_SAYINGS = 3;
         options.unattended === true ? null : askFirst,
         options.stepDone,
         options.cancelBuild,
+        options.makeChecklist,
         options.keepsBrowserLogins,
       );
 
@@ -2220,6 +2228,34 @@ const MOST_AFTER_SAYINGS = 3;
     },
     plain: localShell,
     unrestrictedPlain: fullAccessShell,
+    // Full access still starts it for real; the register is what knows it is
+    // there, will not start a second copy of it, and can stop it afterwards.
+    keepInstead: async (command, cwd) => {
+      try {
+        const config = pi.getShellConfig(settings.shell);
+        if (config.commandTransport === 'stdin') return null;
+        const already = keptRunning.same(command, cwd) !== null;
+        const piece = await keptRunning.start({
+          command,
+          folder: cwd,
+          parts: { shell: config.shell, args: config.args },
+          writable: shellBounds(options.projectRoot, options.projectRoot).writable,
+          ...(options.noteServers === undefined ? {} : { noted: options.noteServers }),
+          onChange: () => say({ type: 'running', pieces: keptRunning.list() }),
+        });
+        const where =
+          piece.address === null
+            ? 'It has not printed an address yet — ask running() again in a moment.'
+            : `at ${piece.address}`;
+        return [
+          `${already ? 'That is already running' : 'Started and left running'} ${where}`,
+          `Check on it with running(), and end it with stop_running(${piece.id}).`,
+        ].join(' ');
+      } catch (cause) {
+        // The register's own refusal — too many up already — is the answer.
+        return cause instanceof Error ? cause.message : null;
+      }
+    },
   });
   const boundShell = pi.createBashToolDefinition(options.projectRoot, {
     operations: shell,
@@ -2413,6 +2449,11 @@ const MOST_AFTER_SAYINGS = 3;
       // put a form up is exactly what this must never do.
       if (activePrompts === 0) asksLeft = 'open';
       activePrompts += 1;
+      // Before the turn, not only when the choice changed: the file is shared
+      // with every other conversation, and the last one to write it wins.
+      if (advisorTools.length > 0) {
+        await keepAdvisorSettings(agentDir, advises, inUse, advisorThinks).catch(() => undefined);
+      }
       const looking = options?.lookFirst === true;
       if (looking) {
         planning = true;
@@ -2565,6 +2606,8 @@ const MOST_AFTER_SAYINGS = 3;
     async useAdvisor(next, thinks): Promise<void> {
       if (closed) return;
       advisorStuck = !advisorActive(next !== null);
+      advises = next;
+      advisorThinks = thinks;
       // Not into the middle of a reply: the next turn opens with it instead.
       if (!session.isStreaming) sayAdvisorStuck();
       if (advisorTools.length > 0) await keepAdvisorSettings(agentDir, next, inUse, thinks);

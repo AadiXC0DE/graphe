@@ -22,13 +22,14 @@
 // platform-specific binary nobody on this machine loads is still being
 // redistributed.
 //
-// Which is why this and its `--check` belong on the machine the app is built
-// on and nowhere else: half of what is installed is a platform's own binaries,
-// so a manifest written on a Mac and checked on Linux disagrees about a tree
-// neither of them is describing.
+// Which is why this belongs on the machine the app is built on: half of what is
+// installed is a platform's own binaries.
 //
-// `--check` writes nothing and fails if the file on disk is out of date, which
-// is what CI should run.
+// `--check` writes nothing and fails if anything installed here is missing from
+// the file. Not "identical to what this machine would write": an optional native
+// dependency installs where there is a prebuilt binary for the machine and not
+// where there is not, so two Macs with one lockfile have different trees. What
+// must never happen is something shipping undocumented.
 //
 // ## Why the lockfile fingerprint is in the file
 //
@@ -282,35 +283,6 @@ export function render(collected, at = new Date(), lock = 'unknown') {
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
 
-/**
- * What changed between two manifests, in the fewest lines that say it.
- *
- * Package names first — a package that came or went is the whole answer nine
- * times out of ten. Only when the same packages are on both sides is it worth
- * saying which lines moved.
- */
-function whatDiffers(before, after) {
-  const names = (text) => new Set([...text.matchAll(/^### (\S+)/gm)].map((one) => one[1]));
-  const was = names(before);
-  const now = names(after);
-  const gone = [...was].filter((one) => !now.has(one));
-  const came = [...now].filter((one) => !was.has(one));
-  const said = [];
-  if (gone.length > 0) said.push(`no longer installed: ${gone.slice(0, 12).join(', ')}`);
-  if (came.length > 0) said.push(`newly installed: ${came.slice(0, 12).join(', ')}`);
-  if (said.length > 0) return said;
-
-  // Same packages, different text — a version or a licence moved.
-  const lines = (text) => text.split('\n');
-  const a = lines(before);
-  const b = lines(after);
-  for (let at = 0; at < Math.max(a.length, b.length) && said.length < 6; at += 1) {
-    if (a[at] === b[at]) continue;
-    said.push(`line ${String(at + 1)}: was ${JSON.stringify(a[at] ?? '')}, now ${JSON.stringify(b[at] ?? '')}`);
-  }
-  return said.length === 0 ? ['nothing this can name — the files differ in whitespace'] : said;
-}
-
 /* -------------------------------------------------------------------------- */
 
 if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) {
@@ -325,22 +297,37 @@ if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[
       );
       process.exit(1);
     }
-    // The fingerprint says the tree; this says the file actually describes it.
+    /*
+     * The fingerprint says which tree was intended; this says the file really
+     * describes what is installed.
+     *
+     * Not "identical", because it cannot be. An optional native dependency —
+     * `canvas`, under `unpdf` — installs where there is a prebuilt binary for
+     * the machine and not where there is not, so the same lockfile gives a
+     * different tree on two Macs. A manifest that names something this machine
+     * does not have is a manifest describing a machine that does; a package
+     * installed here and named nowhere is the real failure, because that one
+     * ships undocumented.
+     */
     const collected = await collect();
-    const undated = (text) => text.replace(/^\d+ packages, generated .*$/m, '');
-    const wanted = render(collected, new Date(), lock);
-    if (undated(existing) !== undated(wanted)) {
+    const named = new Set([...existing.matchAll(/^### (\S+) (\S+)$/gm)].map((one) => `${one[1]} ${one[2]}`));
+    const missing = collected.packages
+      .map((one) => `${one.name} ${one.version}`)
+      .filter((one) => !named.has(one));
+    if (missing.length > 0) {
       console.error(
-        'THIRD-PARTY-LICENSES.md is out of date. Run `npm run licenses` and commit the result.',
+        'THIRD-PARTY-LICENSES.md does not describe everything installed. Run `npm run licenses -- --force` and commit the result.',
       );
-      // And what differs, because "out of date" on its own costs whoever reads
-      // it an hour working out which of four hundred packages moved.
-      for (const line of whatDiffers(undated(existing), undated(wanted))) {
-        console.error(`  ${line}`);
-      }
+      for (const one of missing.slice(0, 20)) console.error(`  installed and undocumented: ${one}`);
       process.exit(1);
     }
-    console.log(`THIRD-PARTY-LICENSES.md is up to date (${collected.packages.length} packages).`);
+    const extra = named.size - collected.packages.length;
+    console.log(
+      `THIRD-PARTY-LICENSES.md describes everything installed (${String(collected.packages.length)} of ${String(named.size)}).` +
+        (extra > 0
+          ? ` ${String(extra)} named here are not installed on this machine — optional binaries for another one.`
+          : ''),
+    );
     process.exit(0);
   }
 

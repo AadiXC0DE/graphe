@@ -71,7 +71,8 @@ export type Preferences = {
    */
   advisorGates: { completionGate: boolean; loopGate: boolean };
   /**
-   * Whether add-ons that start turns of their own keep their hooks.
+   * How much of an add-on that starts turns of its own runs: all of it, its
+   * tools without its hooks, or none of it.
    *
    * On, because Graphe ships a shelf of them and an app that installs something
    * and then quietly disables half of it is worse than one that never offered
@@ -80,7 +81,7 @@ export type Preferences = {
    * asking for a turn as one more reason among its own, counts it against the
    * same budget and names it. So it can be let through.
    */
-  addons: 'on' | 'tools-only';
+  addons: 'on' | 'tools-only' | 'off';
   /** How the app looks, as a set of token overrides — accent, tone, contrast,
    *  radius, density, fonts, motion. Five colour presets were the whole of it
    *  before, and a preset is somebody else's taste. */
@@ -240,7 +241,10 @@ function asPreferences(value: unknown): Preferences {
     advisor: asAdvisor(record['advisor']),
     advisorThinking: asAdvisorThinking(record['advisorThinking']),
     advisorGates: asGates(record['advisorGates']),
-    addons: record['addons'] === 'tools-only' ? 'tools-only' : 'on',
+    addons:
+      record['addons'] === 'tools-only' || record['addons'] === 'off'
+        ? record['addons']
+        : 'on',
     appearance: readAppearance(record['appearance']),
     thinking,
     kept: asKept(record['kept']),

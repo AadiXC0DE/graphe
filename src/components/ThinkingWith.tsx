@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { advisorSwitchWords, advisorWords, worthHaving } from '../agent/advisor';
-import { policyWords, type Policy } from '../agent/pi/extension-policy';
+import { advisorWords, worthHaving } from '../agent/advisor';
 import type { ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
 import { thinkingLevels } from '../lib/thinking';
@@ -25,15 +24,9 @@ type Props = {
    *  answer yet, which leaves that model's own setting standing. */
   advisorThinking?: ThinkingLevel | undefined;
   onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
-  /** The two gates the advisor can hold, both off by default. Asking a second
-   *  model before saying a job is done turns "finish" into "report"; asking it
-   *  every time a command repeats fires on running the tests three times. */
-  advisorGates?: { completionGate: boolean; loopGate: boolean };
-  onAdvisorGate?: (which: 'completionGate' | 'loopGate', on: boolean) => void;
-  /** Whether add-ons that start work of their own are on for this conversation.
-   *  Off means their tools still work and their hooks do not. */
-  addons?: Policy;
-  onAddons?: (choice: Policy) => void;
+  /** Open Settings on the Models page, where the gates and the rest of the
+   *  advisor live. Left off, the link is not offered. */
+  onMoreAdvisor?: () => void;
   /** What the chosen model was measured doing on a long job. Null for one
    *  nothing has measured, which is most of them. */
   longJobs?: string | null;
@@ -56,6 +49,10 @@ type Offer = {
    *  cannot are different claims. */
   takesImages: boolean | null;
 };
+
+/** The link at the foot of the advisor view. Named for where it lands, so the
+ *  press is not a surprise. */
+export const MORE_ADVISOR = 'More advisor settings';
 
 export const SWAP_WORDS = {
   losesPictures: 'Reads no pictures',
@@ -108,10 +105,7 @@ export default function ThinkingWith({
   onAdvisor,
   advisorThinking,
   onAdvisorThinking,
-  advisorGates,
-  onAdvisorGate,
-  addons,
-  onAddons,
+  onMoreAdvisor,
   longJobs = null,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -276,7 +270,7 @@ export default function ThinkingWith({
                 current === null
                   ? 'Nothing chosen yet. This is the one that will answer'
                   : `${current.providerName} · ${current.label}`
-              }${advisingNow ? ` — ${advisorWords.advises}: ${advising.label}` : ''}`
+              }${advisingNow ? ` · ${advisorWords.advises}: ${advising.label}` : ''}`
         }
       >
         <span className="thinking__dot" aria-hidden="true" />
@@ -363,6 +357,13 @@ export default function ThinkingWith({
                               {givesUp === null ? null : (
                                 <span className="thinking__optionloses">{givesUp}</span>
                               )}
+                              {/* What this one was measured doing on a long
+                                  list, read before somebody starts a night's
+                                  work on a model known to stop early. Only the
+                                  one answering has ever been measured. */}
+                              {isChosen && longJobs !== null ? (
+                                <span className="thinking__optionlong">{longJobs}</span>
+                              ) : null}
                             </span>
                           </button>
                         );
@@ -423,65 +424,6 @@ export default function ThinkingWith({
                   ) : null}
                 </div>
               ) : null}
-
-              {/* The two gates, behind the same control as the model that
-                  holds them. Both off: a second opinion is advice on the work,
-                  and neither of these was ever somebody's decision. */}
-              {offerAdvisor && advisorGates !== undefined && onAdvisorGate !== undefined ? (
-                <>
-                  <button
-                    type="button"
-                    className="thinking__tune thinking__tune--words"
-                    onClick={() => onAdvisorGate('completionGate', !advisorGates.completionGate)}
-                    aria-pressed={advisorGates.completionGate}
-                    title={advisorSwitchWords.completionGate.hint}
-                  >
-                    <span>{advisorSwitchWords.completionGate.label}</span>
-                    <span className="thinking__tunevalue">
-                      {advisorGates.completionGate ? 'On' : 'Off'}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="thinking__tune thinking__tune--words"
-                    onClick={() => onAdvisorGate('loopGate', !advisorGates.loopGate)}
-                    aria-pressed={advisorGates.loopGate}
-                    title={advisorSwitchWords.loopGate.hint}
-                  >
-                    <span>{advisorSwitchWords.loopGate.label}</span>
-                    <span className="thinking__tunevalue">
-                      {advisorGates.loopGate ? 'On' : 'Off'}
-                    </span>
-                  </button>
-                </>
-              ) : null}
-
-              {/* And the one about add-ons, in the same place for the same
-                  reason: what starts a turn is a question about how the model
-                  runs, so it belongs beside the model. */}
-              {addons !== undefined && onAddons !== undefined ? (
-                <button
-                  type="button"
-                  className="thinking__tune thinking__tune--words"
-                  onClick={() => onAddons(addons === 'on' ? 'tools-only' : 'on')}
-                  aria-pressed={addons === 'on'}
-                  title={policyWords.note}
-                >
-                  <span>{policyWords.label}</span>
-                  <span className="thinking__tunevalue">{addons === 'on' ? 'On' : 'Off'}</span>
-                </button>
-              ) : null}
-
-              {/* What this model was measured doing on a long list, when
-                  anybody has measured it. Said before somebody starts a night's
-                  work on one known to stop early, rather than after.
-
-                  How heavy the prompt is does NOT belong here. It was a number
-                  with no unit, no scale and nothing to press, dropped into the
-                  middle of a list of switches — and a reading nobody can act on
-                  is not information, it is furniture. It lives in the
-                  diagnostics, where somebody is already asking why. */}
-              {longJobs !== null ? <p className="thinking__note">{longJobs}</p> : null}
 
               <button
                 type="button"
@@ -595,6 +537,23 @@ export default function ThinkingWith({
                   ) : null}
 
                   <p className="thinking__said thinking__said--foot">{advisorWords.advisesNote}</p>
+
+                  {/* The precise controls live behind the same chip, one press
+                      further in: the gates are read a few times a year, and a
+                      row for each of them here would cost every reader of this
+                      menu two lines. */}
+                  {onMoreAdvisor === undefined ? null : (
+                    <button
+                      type="button"
+                      className="thinking__more"
+                      onClick={() => {
+                        setOpen(false);
+                        onMoreAdvisor();
+                      }}
+                    >
+                      {MORE_ADVISOR}
+                    </button>
+                  )}
                 </>
             </>
           ) : view === 'advisorthinking' && advising !== null && onAdvisorThinking !== undefined ? (

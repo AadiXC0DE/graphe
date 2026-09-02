@@ -162,14 +162,14 @@ export function useGoalChip(options: {
         say(
           showing === null
             ? 'No goal set. Use /goal <one sentence> to set one.'
-            : `Goal: ${showing.objective} — ${showing.status}, ${String(showing.iterations)} iterations, ${elapsedWords(goalElapsed(showing))} elapsed.`,
+            : `Goal: ${showing.objective} · ${showing.status}, ${String(showing.iterations)} iterations, ${elapsedWords(goalElapsed(showing))} elapsed.`,
         );
         return nothingToSend;
       }
       if (parsed.kind === 'set' || parsed.kind === 'replace') {
         const objective = parsed.objective.trim() === '' ? text.slice(5).trim() : parsed.objective;
         if (objective === '') {
-          say('Say what done looks like after /goal — one sentence, checkable.');
+          say('Say what done looks like after /goal: one sentence, checkable.');
           return nothingToSend;
         }
         const withTime = withElapsed(createGoal(objective, 'doing'));
@@ -184,7 +184,7 @@ export function useGoalChip(options: {
           const paused: Goal = { ...withElapsed(going), status: 'paused' };
           setGoal(paused);
           persist(paused, ownerDesk?.path ?? null);
-          say('Goal paused — rounds kept, files kept. /goal resume to carry on.');
+          say('Goal paused: rounds kept, files kept. /goal resume to carry on.');
         } else {
           say('No active goal to pause.');
         }
@@ -220,7 +220,7 @@ export function useGoalChip(options: {
           setGoal(null);
           persist(null, ownerDesk?.path ?? null);
           setPlans('auto');
-          say(`Goal cleared — was: ${going.objective}`);
+          say(`Goal cleared, was: ${going.objective}`);
         } else {
           say('No goal to clear.');
         }

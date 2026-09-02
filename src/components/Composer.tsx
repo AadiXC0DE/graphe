@@ -105,12 +105,8 @@ type Props = {
   onAdvisor?: (choice: ModelChoice | null) => void;
   advisorThinking?: ThinkingLevel | null;
   onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
-  /** The two advisor gates and the add-ons switch, all behind the model chip
-   *  because that is where the hand already is. */
-  advisorGates?: { completionGate: boolean; loopGate: boolean };
-  onAdvisorGate?: (which: 'completionGate' | 'loopGate', on: boolean) => void;
-  addons?: 'on' | 'tools-only' | 'off';
-  onAddons?: (choice: 'on' | 'tools-only' | 'off') => void;
+  /** Open Settings on the Models page, from inside the chip's advisor view. */
+  onMoreAdvisor?: () => void;
   /** What the chosen model was measured doing on a long job. */
   longJobs?: string | null;
   onConnect?: () => void;
@@ -255,10 +251,7 @@ export default function Composer({
   onAdvisor,
   advisorThinking,
   onAdvisorThinking,
-  advisorGates,
-  onAdvisorGate,
-  addons,
-  onAddons,
+  onMoreAdvisor,
   longJobs,
   onConnect,
   onThinking,
@@ -988,10 +981,7 @@ export default function Composer({
             {...(onAdvisor === undefined ? {} : { onAdvisor })}
             {...(advisorThinking == null ? {} : { advisorThinking })}
             {...(onAdvisorThinking === undefined ? {} : { onAdvisorThinking })}
-            {...(advisorGates === undefined ? {} : { advisorGates })}
-            {...(onAdvisorGate === undefined ? {} : { onAdvisorGate })}
-            {...(addons === undefined ? {} : { addons })}
-            {...(onAddons === undefined ? {} : { onAddons })}
+            {...(onMoreAdvisor === undefined ? {} : { onMoreAdvisor })}
             {...(longJobs == null ? {} : { longJobs })}
           />
         )}

@@ -1,9 +1,9 @@
 /* Quieter controls, full-screen over the work.
 
-   Two bands: the screens this leads to, then the preferences in named groups.
-   Both are grids measured against this surface with a container query, so the
-   width the sheet actually has decides the columns — a 780px column of rows
-   down the middle of a 1500px window was reading as a phone list. */
+   A list of pages down the side and the chosen page's rows beside it, both
+   measured against this surface with a container query rather than the window:
+   the sheet sits between the shelf and the overview panel, and a window media
+   query would give it columns it has no room for. */
 
 .settings {
   position: fixed;
@@ -99,8 +99,9 @@
 }
 
 .settings__inner {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: var(--space-5);
   width: 100%;
   max-width: 1360px;
@@ -108,104 +109,114 @@
   padding: var(--space-5) var(--space-6) var(--space-7);
 }
 
+@container (min-width: 780px) {
+  .settings__inner {
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: var(--space-6);
+  }
+
+  /* The page list stays put while its page scrolls: seven names are the map,
+     and a map that scrolls away is a map you have to go back for. */
+  .settings__pages {
+    position: sticky;
+    top: 0;
+  }
+}
+
 /* ---------------------------------------------------------------------------
-   The screens this leads to
-   Four of them, so the column counts are four, two and one: no arrangement
-   here ever strands a single tile on a row of its own.
+   The pages, down the side
    --------------------------------------------------------------------------- */
 
-.settings__places {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3);
-}
-
-@container (min-width: 600px) {
-  .settings__places {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@container (min-width: 1040px) {
-  .settings__places {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-.settings__place {
+.settings__pages {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
   min-width: 0;
-  min-height: 92px;
-  padding: var(--space-4);
+}
+
+.settings__search {
+  width: 100%;
+  min-height: 32px;
+  margin-bottom: var(--space-2);
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.settings__search:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.settings__page {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
   text-align: left;
   cursor: pointer;
   transition:
-    background-color var(--dur-micro) var(--ease-hover),
-    border-color var(--dur-micro) var(--ease-hover),
-    transform var(--dur-micro) var(--ease-out-quart);
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
 }
 
-.settings__place:active {
-  transform: scale(0.97);
+.settings__page--on {
+  background: var(--bg-raised);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 500;
 }
 
-.settings__placetop {
+.settings__page:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.settings__page-body {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  flex-direction: column;
+  gap: var(--space-3);
   min-width: 0;
 }
 
-.settings__place:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.settings__pagetitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.settings__pagenote,
+.settings__empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* Which page a result came from, so nobody wonders where it was found. */
+.settings__from {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* The row somebody asked for by name, so the press that opened this screen
+   lands on something visible. */
+.settings__at > .settings__row,
+.settings__at.settings__block {
+  background: var(--bg-sunken);
 }
 
 /* ---------------------------------------------------------------------------
    The preferences, in named groups
    --------------------------------------------------------------------------- */
-
-.settings__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-4);
-}
-
-/* Placed rather than flowed. Auto-placement left a 200px hole under the short
-   group while the tall one ran on beside it; this stacks the two short groups
-   against the tall one and gives the swatches the full width they can use. */
-@container (min-width: 780px) {
-  .settings__grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .settings__group--project {
-    grid-column: 1;
-    grid-row: 1 / span 2;
-  }
-
-  .settings__group--seeing {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .settings__group--elsewhere {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
-  .settings__group--theme {
-    grid-column: 1 / -1;
-    grid-row: 3;
-  }
-}
 
 .settings__group {
   display: flex;
@@ -218,14 +229,10 @@
   overflow: hidden;
 }
 
-.settings__grouptitle {
-  margin: 0;
-  padding: var(--space-4) var(--space-4) var(--space-3);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-faint);
+/* A card holding a control that opens over it: the model chip's menu is drawn
+   outside the row, and a card that clips its corners would cut it in half. */
+.settings__group--roomy {
+  overflow: visible;
 }
 
 .settings__rows {
@@ -247,6 +254,13 @@
   background: transparent;
   text-align: left;
   transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+/* The rules go between rows, so the first one has none: against the card's own
+   border it reads as a double line. */
+.settings__rows > li:first-child > .settings__row,
+.settings__rows > li:first-child.settings__block {
+  border-top: 0;
 }
 
 .settings__row--switch {
@@ -310,11 +324,6 @@ button.settings__row {
     background: var(--bg-sunken);
   }
 
-  .settings__place:hover {
-    background: var(--bg-sunken);
-    border-color: var(--border-strong);
-  }
-
   .settings__close:hover {
     color: var(--text);
     border-color: var(--border-strong);
@@ -327,8 +336,7 @@ button.settings__row {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings__close:active,
-  .settings__place:active {
+  .settings__close:active {
     transform: none;
   }
 }
@@ -513,13 +521,6 @@ button.settings__row {
     gap: var(--space-5);
   }
 
-  /* The note stops at what it needs; the swatches sit against it rather than
-     drifting to the middle of a very wide card. */
-  .settings__theme-wrap > .settings__note {
-    flex: 0 1 auto;
-    max-width: 42ch;
-  }
-
   .settings__theme-foot {
     margin-left: auto;
   }
@@ -566,4 +567,133 @@ button.settings__row {
   background: none;
   border: 0;
   cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+   Rows that are more than a name and a switch
+   --------------------------------------------------------------------------- */
+
+/* A preference whose control will not fit on the right-hand end of a row: the
+   model chip, the three-way, the swatches. The name sits on its own line and
+   the control gets the width under it. */
+.settings__block {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.settings__blockhead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.settings__sub {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.settings__subtitle {
+  margin: 0;
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* One of three, drawn as one strip so the reading is "these are the choices"
+   rather than "here are three buttons". */
+.settings__choices {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  margin: 0 var(--space-4);
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+
+.settings__choice {
+  padding: 4px var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.settings__choice--on {
+  background: var(--bg-raised);
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.settings__choice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings__choice:not(.settings__choice--on):hover {
+    color: var(--text);
+  }
+
+  .settings__page:not(.settings__page--on):hover {
+    background: var(--bg-sunken);
+    color: var(--text);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Every action and the key it answers to
+   --------------------------------------------------------------------------- */
+
+.settings__chords {
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.settings__chordlist {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+}
+
+.settings__chordlist li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 26px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.settings__chordlist kbd {
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text);
+}
+
+/* An action that ships with no key is a fact, not a gap. */
+.settings__chordlist kbd.settings__unbound {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-faint);
 }

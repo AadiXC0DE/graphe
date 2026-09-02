@@ -126,7 +126,7 @@ export default function HowToWork({ plans, onPlans }: Props) {
               aria-disabled={blocked ? 'true' : undefined}
               disabled={blocked}
               className={`ways__option ${choice.id === plans ? 'ways__option--chosen' : ''}${blocked ? ' ways__option--blocked' : ''}`}
-              title={blocked ? 'Plan mode is on — finish or exit plan before starting a goal.' : choice.note}
+              title={blocked ? 'Plan mode is on. Finish or exit plan before starting a goal.' : choice.note}
               onClick={() => {
                 if (blocked) return;
                 onPlans(choice.id);
@@ -159,7 +159,7 @@ export default function HowToWork({ plans, onPlans }: Props) {
                     </span>
                   ) : null}
                 </span>
-                <span className="ways__note">{blocked ? 'Plan mode is on — finish or exit plan before starting a goal.' : choice.note}</span>
+                <span className="ways__note">{blocked ? 'Plan mode is on. Finish or exit plan before starting a goal.' : choice.note}</span>
               </span>
             </button>
           );

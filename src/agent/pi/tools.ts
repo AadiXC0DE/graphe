@@ -1353,7 +1353,7 @@ export const taskTool = (
     'Give the helper one whole piece of work: a question it can answer without this conversation.',
     // Without this the model sends one helper, waits for its answer, and sends
     // the next — which is a queue wearing a fan-out's clothes.
-    'To send several helpers, put every task call in the same reply. They then work at once instead of queueing, and you get all the answers together.',
+    'To send several helpers, put every task call in the same reply. They then work at the same time instead of queueing, and you get all the answers together.',
     // Said out loud so a split is sized to what will actually start. A fan-out
     // refused on the way out costs the turn and answers nothing.
     `At most ${String(MOST_AT_ONCE.helper)} helpers work at once. Ask for more than that in one reply and the rest are turned away, so send the ones the answer depends on first.`,

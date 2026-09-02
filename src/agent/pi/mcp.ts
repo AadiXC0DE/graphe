@@ -774,7 +774,7 @@ export function connectingTool(projectRoot: string): ToolDefinition {
     promptSnippet: 'connect_tool(known) or connect_tool(name, where): plug another tool server in',
     promptGuidelines: [
       'Only when the person has asked for a particular tool. Never connect one on a hunch, and never as a step in some larger errand they did not ask for.',
-      `Prefer known for one we already vouch for — its start line is checked. Those are: ${REACHABLE.map((one) => one.id).join(', ')}.`,
+      `Prefer known for one we already vouch for, because its start line is checked. Those are: ${REACHABLE.map((one) => one.id).join(', ')}.`,
       'Never put a key, a token or a password on the where line. Values a server needs are added to .pi/mcp.json by hand, not by you.',
       'It becomes reachable through mcp in the next conversation in this project, not in this one. Say so rather than trying to use it straight away.',
     ],

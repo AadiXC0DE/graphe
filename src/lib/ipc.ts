@@ -351,6 +351,30 @@ export type CarriedExtension = {
   trusted: boolean;
 };
 
+/**
+ * One installed add-on, as the settings screen draws it.
+ *
+ * `policy` is what the loader will actually do with it here, worked out from
+ * its capability card rather than from its name — so an add-on published
+ * tomorrow is described on the same evidence as one installed today.
+ */
+export type AddonHere = {
+  name: string;
+  says: string;
+  policy: 'on' | 'tools-only' | 'off';
+  startsTurns: boolean;
+  runsBackgroundWork: boolean;
+  rewritesSystemPrompt: boolean;
+};
+
+/** Every add-on loaded here, and how many processes they have running between
+ *  them. */
+export type AddonReport = {
+  says: Readonly<Record<string, string>>;
+  each: readonly AddonHere[];
+  running: number;
+};
+
 /** One thing that can be added to Graphe. */
 export type Pack = {
   id: string;
@@ -454,10 +478,10 @@ export type Preferences = {
    *  "report"; asking it every time a command repeats fires on running the
    *  tests three times. */
   advisorGates: { completionGate: boolean; loopGate: boolean };
-  /** Whether add-ons that start turns of their own keep their hooks. Off keeps
-   *  their tools and drops the hooks — Graphe is already deciding when a turn
-   *  begins, and two of those is the bug. */
-  addons: 'on' | 'tools-only';
+  /** How much of an add-on that starts turns of its own runs. `tools-only`
+   *  keeps its tools and drops the hooks — Graphe is already deciding when a
+   *  turn begins, and two of those is the bug; `off` leaves it out entirely. */
+  addons: 'on' | 'tools-only' | 'off';
   /** How the app looks, as token overrides. Five colour presets were the whole
    *  of it before, and a preset is somebody else's taste. */
   appearance: Appearance;
@@ -1738,7 +1762,7 @@ export type GrapheApi = {
     where?: Where,
   ): Promise<Result<Preferences>>;
   /** Whether add-ons that start turns of their own keep their hooks here. */
-  setAddons(choice: 'on' | 'tools-only', where?: Where): Promise<Result<Preferences>>;
+  setAddons(choice: 'on' | 'tools-only' | 'off', where?: Where): Promise<Result<Preferences>>;
   /** Let this exact model take more or less time before it answers. */
   setThinking(choice: ModelChoice, level: ThinkingLevel, where?: Where): Promise<Result<Preferences>>;
   /** Where the money went in this project, asked for rather than waited for.
@@ -1950,7 +1974,7 @@ export type GrapheApi = {
    * one published tomorrow is described on the same evidence as one installed
    * today.
    */
-  addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>>;
+  addons(): Promise<Result<AddonReport>>;
   storage(): Promise<Result<{ says: string; couldClear: number; because: string }>>;
   clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>>;
 

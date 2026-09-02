@@ -115,7 +115,7 @@ const FORMATTED = `Done. The hero is built from your Figma frame, and I kept to 
 
 > The cards are the only part that does not sit on your 12-column grid at 1024px.
 
-The type scale came from [the file you linked](https://www.figma.com/design/8Kx2/Landing-v4) — say the word and I will widen the container instead.`;
+The type scale came from [the file you linked](https://www.figma.com/design/8Kx2/Landing-v4). Say the word and I will widen the container instead.`;
 
 /** The same renderer, mid-sentence, with a fence that has been opened and not
  *  closed. This is what the thread looks like for most of a reply's life. */
@@ -1174,7 +1174,7 @@ export default function Gallery() {
           <h1 className="gallery__title">Graphe interface kit</h1>
           <p className="gallery__sub">
             Every presentational piece of the conversation, with real copy. Motion follows
-            notes/strategy/UI-DESIGN.md — most of what is on this page deliberately does not move.
+            notes/strategy/UI-DESIGN.md: most of what is on this page deliberately does not move.
           </p>
         </div>
         <div className="gallery__themes" role="group" aria-label="Theme">
@@ -1222,7 +1222,7 @@ export default function Gallery() {
               </Message>
               <Message from="graphe" aside="This one’s fiddly, so I took the Careful route.">
                 It’s built. One thing worth knowing: the frame puts 68px above the headline, which
-                isn’t on your spacing scale, so I used 72px — the nearest step you already use
+                isn’t on your spacing scale, so I used 72px, the nearest step you already use
                 everywhere else. It reads identically and it won’t drift next time.
               </Message>
               <Message from="you">Good. What about the three cards under it?</Message>
@@ -1239,7 +1239,7 @@ export default function Gallery() {
           >
             <div className="thread-sample">
               <Message from="you">
-                Make the space above the headline *roughly* 40px — I’ll fine-tune it after.
+                Make the space above the headline *roughly* 40px, and I’ll fine-tune it after.
               </Message>
               <Message from="graphe">{FORMATTED}</Message>
               <Message from="graphe" streaming>
@@ -1289,7 +1289,7 @@ export default function Gallery() {
               The step happening now is the one the eye lands on, and it gets there by weight rather
               than by anything moving: the line is darker and slightly heavier, and the only thing
               in the feed that turns is the ring beside it. There is no bar filling up, because
-              nothing here knows how many steps are left — and a progress bar that is guessing is
+              nothing here knows how many steps are left, and a progress bar that is guessing is
               worse than no progress bar.
             </p>
           </Section>
@@ -1333,7 +1333,7 @@ export default function Gallery() {
             <p className="gallery__caption">
               This turns the safest mode in the app from something you switch on out of caution into
               the one you want, because it is the only one that shows you what you are agreeing to.
-              A width that would not build says so and is still decidable — never a blank frame.
+              A width that would not build says so and is still decidable, never a blank frame.
             </p>
           </Section>
 
@@ -1359,7 +1359,7 @@ export default function Gallery() {
             <Tabs tabs={OPEN} at="t2" onOpen={noop} onClose={noop} onNew={noop} />
             <p className="gallery__caption">
               The state mark is the point. Switching away from something still working and having
-              the tab tell you when it needs you is the whole reason tabs exist here — and the
+              the tab tell you when it needs you is the whole reason tabs exist here, and the
               question mark is the loudest thing in the strip, because it is the only state that
               cannot move on without a person.
             </p>
@@ -1374,7 +1374,7 @@ export default function Gallery() {
             </div>
             <p className="gallery__caption">
               The state is a shape, not a colour: a ring that turns while it works, a tick when it
-              is finished, a bar when it stopped. A helper that has come back recedes — the record
+              is finished, a bar when it stopped. A helper that has come back recedes: the record
               is worth keeping on screen, and it is not worth as much as the one still going.
             </p>
           </Section>
@@ -1394,7 +1394,7 @@ export default function Gallery() {
             </div>
             <p className="gallery__caption">
               Directly above the composer, because that is where the words were typed. Each can be
-              taken back out — the words return to the box, so a second thought can be changed
+              taken back out, and the words return to the box, so a second thought can be changed
               rather than only cancelled.
             </p>
           </Section>
@@ -1458,7 +1458,7 @@ export default function Gallery() {
             <p className="gallery__caption">
               One menu, everything under the project's name: where you were, the way out, the
               preview, the account, and the switch. The escape hatches are never conditional and
-              never further away than this — the project is an ordinary folder in ordinary git, and
+              never further away than this: the project is an ordinary folder in ordinary git, and
               a product that makes that hard has quietly become a walled garden. What the button
               says is whatever editor the machine actually has; with none installed there is one
               row here, not a button that opens nothing.
@@ -1499,7 +1499,7 @@ export default function Gallery() {
             </div>
             <p className="gallery__caption">
               It opens on what changed, with everything else folded away, because a version is the
-              one thing a file tree cannot know about — and the control that changes that sits in
+              one thing a file tree cannot know about, and the control that changes that sits in
               the panel's own band rather than in a settings screen. “Every file” is the way back to the
               whole folder, machinery and all, for somebody who came to check our working. Nothing
               here can be edited: the way to change a file is to ask for the change, and a box that
@@ -1520,14 +1520,14 @@ export default function Gallery() {
             </button>
             <p className="gallery__caption">
               At the top, before the list, the accounts opencode and Codex have saved on this
-              machine — “Already on this computer” — because pasting a key that is already on the
+              machine, under “Already on this computer”, because pasting a key that is already on the
               disk is the first friction this screen exists to remove, and the sentence under the
               name says which tool saved it and what kind of account it is. One click brings it
               over; the credential is copied between the tool's own files by the shell and never
               crosses to this window, which only ever sees the name, the kind, and the source. The
               provider then flips to “working on this machine” below. Below that, the sign-in
               options lead through the provider's own site, and a model is a plain row you can
-              pick whenever you like — “now working with this” is the same row, turned on.
+              pick whenever you like: “now working with this” is the same row, turned on.
             </p>
           </Section>
 
@@ -1539,7 +1539,7 @@ export default function Gallery() {
               Open the add-more screen
             </button>
             <p className="gallery__caption">
-              The switches are real — turn one on and off. Each row is the name, the file it loads
+              The switches are real: turn one on and off. Each row is the name, the file it loads
               set as a path, and one switch; the second path is long enough to break over two lines
               rather than push the panel wider. The line about starting a fresh conversation sits
               above the switches, once, because the cost of saying yes should be read before the
@@ -1565,7 +1565,7 @@ export default function Gallery() {
             </div>
             <p className="gallery__caption">
               Running and finished. Nothing is lost either way, and the full conversation is still
-              there to scroll back through — which is the fear that keeps people in bloated
+              there to scroll back through, which is the fear that keeps people in bloated
               conversations in the first place, so it is the half of the sentence that matters.
             </p>
           </Section>
@@ -1651,7 +1651,7 @@ export default function Gallery() {
             <p className="gallery__caption">
               The second one is the same box with a picture in it and a model chosen that reads
               only words. It is said at the moment the picture goes in rather than after a turn
-              has been spent on it — the provider's own refusal arrives as a wall of JSON several
+              has been spent on it. The provider's own refusal arrives as a wall of JSON several
               seconds later, and by then the money is gone. The picture stays where it is, so
               switching model and pressing again is the whole of the fix.
             </p>
@@ -1663,7 +1663,7 @@ export default function Gallery() {
             </p>
             <p className="gallery__caption">
               A Figma link keeps its own chip and its own name, because it is a place rather than a
-              copy. This composer is live — drop something on it. Nothing is sent anywhere: the
+              copy. This composer is live: drop something on it. Nothing is sent anywhere: the
               chips stay put after a message goes, and the hint says so instead of letting anyone
               believe a picture went along with their sentence.
             </p>
@@ -1755,7 +1755,7 @@ export default function Gallery() {
             </div>
             <p className="gallery__caption">
               Going back is itself a version, so it can be undone like anything else. The strip says
-              which moment you are looking at and offers to take it back — and it goes away when it
+              which moment you are looking at and offers to take it back, and it goes away when it
               stops being true. Clicking a row opens a field to name it.
             </p>
           </Section>
@@ -1813,8 +1813,8 @@ export default function Gallery() {
             </div>
             <p className="gallery__caption">
               Expanded and reduced. The strip keeps the mark at the top, so the way back is in the
-              place the expanded shelf used it. Everything else about the project — the way out,
-              the machinery switch — stays under the project's name in the top bar, where a person
+              place the expanded shelf used it. Everything else about the project, the way out and
+              the machinery switch, stays under the project's name in the top bar, where a person
               who wants the wheel already knows where to look.
             </p>
           </Section>
@@ -1833,7 +1833,7 @@ export default function Gallery() {
             </div>
             <p className="gallery__caption">
               Ready, and still getting there. It is the same row the menu offers under the
-              project's name — one destination, two doors, both reachable with the keyboard. Near
+              project's name: one destination, two doors, both reachable with the keyboard. Near
               the words about the work, not the housekeeping of the top bar: the preview is the
               point, and the pill lives beside it.
             </p>
@@ -1934,7 +1934,7 @@ export default function Gallery() {
               />
             </div>
             <p className="gallery__caption">
-              Git says it in a designer's words — “2 files changed, 1 new” — and the branch in
+              Git says it in a designer's words, “2 files changed, 1 new”, and the branch in
               mono, because names are not translated. A search that worked leaves nothing but its
               question; only a failure says “stopped”. The meter docks into the foot, the way it
               docked into the foot of the rail.
@@ -2009,7 +2009,7 @@ export default function Gallery() {
             <p className="gallery__caption">
               The two colours meet along one seam, the way the near-miss rows meet: a shade you
               cannot see is exactly when the sentence has to do the work. Nothing here is read on a
-              timer — a tool that opens somebody's Figma file every ten minutes without being asked
+              timer: a tool that opens somebody's Figma file every ten minutes without being asked
               is a different product.
             </p>
           </Section>
@@ -2078,7 +2078,7 @@ export default function Gallery() {
             <p className="gallery__caption">
               The question first, whole, in the Guard's own words. Under it the sheet, then one box
               that gets on with something whether or not this window stays open, then the things
-              asked for over and over — each with when it happens next and a way to stop it. Nothing
+              asked for over and over, each with when it happens next and a way to stop it. Nothing
               runs here that a person cannot see and end.
             </p>
           </Section>
@@ -2192,7 +2192,7 @@ vite v6.0.5 building for production...
             </div>
             <p className="gallery__caption">
               Each band keeps its own empty state rather than disappearing, so pressing a chip
-              never lands on nothing. The two long ones — every movement, every near-miss — draw a
+              never lands on nothing. The two long ones, every movement and every near-miss, draw a
               screenful and offer the rest, because each row here is a live demonstration.
             </p>
           </Section>
@@ -2212,7 +2212,7 @@ vite v6.0.5 building for production...
               />
             </div>
             <p className="gallery__caption">
-              The lines are one drawing behind the rows rather than a fragment per row — a line
+              The lines are one drawing behind the rows rather than a fragment per row: a line
               runs between two rows and belongs to neither. The column beside it is the row you
               have chosen, whole: who, when, what it came after, and what has moved since.
             </p>

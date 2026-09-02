@@ -95,7 +95,7 @@ export function saysStanding(found: Fetched): string {
  *  everything else reports where the branch stands, and why nothing moved. */
 export function saysFound(found: Fetched): string {
   if (found.moved > 0) {
-    return `Fast-forwarded ${found.branch ?? 'HEAD'} to ${found.upstream ?? 'origin'} — ${commits(found.moved)} in.`;
+    return `Fast-forwarded ${found.branch ?? 'HEAD'} to ${found.upstream ?? 'origin'}, ${commits(found.moved)} in.`;
   }
   const standing = saysStanding(found);
   return found.state === 'behind' && found.dirty

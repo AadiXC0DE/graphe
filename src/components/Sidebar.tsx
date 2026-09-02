@@ -3,7 +3,7 @@ import { bridge } from '../lib/bridge';
 import type { Conversation, NewerVersion, RecentProject } from '../lib/ipc';
 import { ago } from '../lib/when';
 import type { Reference } from '../lib/projects';
-import { byDay, matching, needsDayLabels, needsSearch } from '../lib/shelf';
+import { byDay, foldOlder, matching, needsDayLabels, needsSearch } from '../lib/shelf';
 import { keepAsking, offersOwnCopy, OWN_COPY_WORDS } from '../lib/owncopy';
 import './Sidebar.css';
 
@@ -106,7 +106,12 @@ export default function Sidebar({
     () => (searchable ? matching(conversations, term) : conversations),
     [conversations, searchable, term],
   );
-  const days = useMemo(() => byDay(found, now ?? Date.now()), [found, now]);
+  const days = useMemo(() => {
+    const at = now ?? Date.now();
+    // Past a month nobody is looking for Tuesday, so the dates stop and the
+    // search field takes over.
+    return foldOlder(byDay(found, at), at);
+  }, [found, now]);
   const labelled = needsDayLabels(days);
 
   return (

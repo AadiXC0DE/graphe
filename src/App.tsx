@@ -48,11 +48,13 @@ import { drainStarted } from "./lib/queue";
 import { foldEvents } from "./lib/hydrate";
 import { capsNow, saysCaps } from "./work/capacity";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
-import type { AgentNotice, ConnectedState, ContinuationNotice } from "./lib/ipc";
+import type { AddonHere, AgentNotice, ConnectedState, ContinuationNotice } from "./lib/ipc";
+import { settingsCommands } from "./work/settingspages";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Connected from "./components/Connected";
 import Palette from "./components/Palette";
 import Changes from "./components/Changes";
+import { CHANGE_WORDS } from "./components/DiffView";
 import Against from "./components/Against";
 import { parseDiff, undoOf } from "./diff/hunks";
 import { REACHABLE, alreadyReached, asServer } from "./agent/pi/reach";
@@ -166,6 +168,7 @@ import {
   currentDesk,
   helpersRunning,
   intoTheBox,
+  moveThread,
   noDesks,
   nowDoing,
   openDesk,
@@ -256,7 +259,7 @@ const SOMEBODY_ELSES =
 
 /** Said once, after the press. What was copied matters more than that it was. */
 const DIAGNOSTICS_COPIED =
-  'Copied. It carries the version, this machine, the add-ons, the last lines of the log and why the last job stopped — no conversations and no keys.';
+  'Copied. It carries the version, this machine, the add-ons, the last lines of the log and why the last job stopped. No conversations and no keys.';
 
 /** What the sweep came to. Said in what it freed, because that is the thing
  *  somebody pressed it for. */
@@ -802,6 +805,9 @@ function Conversation() {
   const [connectedOpen, setConnectedOpen] = useState(false);
   const [connected, setConnected] = useState<ConnectedState | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Which preference somebody asked for by name, so Settings opens on the page
+   *  holding it rather than on the first one. */
+  const [settingsAt, setSettingsAt] = useState<string | null>(null);
   const [usageOpen, setUsageOpen] = useState(false);
   const [skills, setSkills] = useState<readonly Skill[]>([]);
   const [workflows, setWorkflows] = useState<readonly Workflow[]>([]);
@@ -1070,7 +1076,7 @@ function Conversation() {
 
   const handlePlans = useCallback((next: Plans) => {
     if (next === 'goal' && plans === 'plan') {
-      say('Plan mode is on — finish or exit plan before starting a goal.');
+      say('Plan mode is on. Finish or exit plan before starting a goal.');
       return;
     }
     if ((next === 'plan') !== (plans === 'plan')) holdWrites(next === 'plan');
@@ -1192,7 +1198,7 @@ function Conversation() {
   }, []);
 
   const setAddons = useCallback((choice: 'on' | 'tools-only' | 'off') => {
-    void bridge.setAddons(choice === 'on' ? 'on' : 'tools-only').then((answer) => {
+    void bridge.setAddons(choice).then((answer) => {
       if (answer.ok) setPreferences(answer.value);
     });
   }, []);
@@ -1822,6 +1828,7 @@ function Conversation() {
   /** What each installed add-on will actually do, worked out by asking it. Read
    *  when the shelf opens: the answer changes only when something is added. */
   const [addonSays, setAddonSays] = useState<Readonly<Record<string, string>>>({});
+  const [addonsHere, setAddonsHere] = useState<readonly AddonHere[]>([]);
   const [addonsRunning, setAddonsRunning] = useState<number | null>(null);
 
   /** What the chosen model was measured doing on a long job, or null for one
@@ -2378,13 +2385,14 @@ function Conversation() {
   }, [preferences.model]);
 
   useEffect(() => {
-    if (!addMore) return;
+    if (!addMore && !settingsOpen) return;
     void bridge.addons().then((answer) => {
       if (!answer.ok) return;
       setAddonSays(answer.value.says);
+      setAddonsHere(answer.value.each);
       setAddonsRunning(answer.value.running);
     });
-  }, [addMore]);
+  }, [addMore, settingsOpen]);
 
   /* Only while the sheet is open, and once each time it opens. */
   useEffect(() => {
@@ -2559,7 +2567,7 @@ function Conversation() {
     const going = goalChip.now();
     if (going !== null && going.status === 'active') {
       goalChip.hold({ ...withElapsed(going), status: 'paused' }, desk?.path ?? null);
-      say('Goal paused — Esc stopped the run. /goal resume to carry on.');
+      say('Goal paused: Esc stopped the run. /goal resume to carry on.');
     }
     void bridge.stop({
       ...(desk === null ? {} : { project: desk.path }),
@@ -3023,7 +3031,7 @@ function Conversation() {
       // Goal commands are handled here, not sent to the model.
       const goalCommand = goalChip.command(text);
       if (plans === 'plan' && goalCommand !== null && goalCommand.kind !== 'show') {
-        say('Plan mode is on — finish or exit plan before starting a goal.');
+        say('Plan mode is on. Finish or exit plan before starting a goal.');
         return;
       }
       const answeredGoal = goalChip.answer(text);
@@ -3317,7 +3325,7 @@ function Conversation() {
             await swapConversation(null);
             if (navigation.current !== request || currentDesk(desksNow.current)?.path !== project) return;
             const base = reviewPrompt(item, repository, repo?.here ?? null);
-            const extra = `\n\nThe PR's code has been checked out at ${prFolder} — read files from there (for example ${prFolder}/src/App.tsx) and treat that folder as the PR root. Do not read from the open project folder for PR files.`;
+            const extra = `\n\nThe PR's code has been checked out at ${prFolder}. Read files from there (for example ${prFolder}/src/App.tsx) and treat that folder as the PR root. Do not read from the open project folder for PR files.`;
             void send(`${base}${extra}`);
             return;
           } catch (cause2) {
@@ -3577,7 +3585,7 @@ function Conversation() {
           setDesks((current) =>
             changeCurrent(current, (one) => ({
               ...one,
-              turns: [...one.turns, said('graphe', 'Out of Plan — going ahead with it.')],
+              turns: [...one.turns, said('graphe', 'Out of Plan, going ahead with it.')],
             })),
           );
         }
@@ -4196,7 +4204,19 @@ function Conversation() {
       { id: 'stop', name: 'Stop what is running', where: 'Conversation',
         run: () => halt(), ready: busy, whyNot: 'Nothing is running.' },
     ];
-    return made.map((one) => ({ ...one, run: () => { setPaletteOpen(false); one.run(); } }));
+    /* Every preference by name, so "dark" or "cookies" is one press from here
+       and nobody has to know which page it is on. */
+    const settings = settingsCommands((row) => {
+      setSettingsAt(row.id);
+      setSettingsOpen(true);
+    });
+    return [...made, ...settings].map((one) => ({
+      ...one,
+      run: () => {
+        setPaletteOpen(false);
+        one.run();
+      },
+    }));
   }, [
     openProject, actingRepoNow, busy, swapConversation, goToScreen, togglePane, refreshRepo,
     refreshSkills, refreshWorkflows, refreshConnected, openAddMore, openConnect, openCanvas, browse,
@@ -4483,6 +4503,12 @@ function Conversation() {
           goToScreen("usage");
           setUsageOpen(true);
           return;
+        case 'accounts':
+          openConnect();
+          return;
+        case 'palette':
+          setPaletteOpen(true);
+          return;
         case 'folder':
           revealFolder();
           return;
@@ -4503,6 +4529,7 @@ function Conversation() {
       refreshSkills,
       refreshWorkflows,
       openAddMore,
+      openConnect,
       revealFolder,
       openInEditor,
     ],
@@ -4702,6 +4729,15 @@ function Conversation() {
     });
 
   const tabs: readonly Tab[] = [...threadTabs, ...canvasTabs];
+
+  /* Where a tab sits is the person's to decide: the row is spatial memory, and
+     a row that cannot be arranged is one nobody can learn. Conversations only,
+     because a canvas belongs to the project rather than to this row. */
+  const reorderTab = (id: string, to: number): void => {
+    if (openProject === null || to >= threadTabs.length) return;
+    if (!threadTabs.some((one) => one.id === id)) return;
+    setDesks((current) => moveThread(current, openProject, ownerOf(id).address, to));
+  };
   const canvasHere = canvasAt === null ? null : (flows.find((one) => one.id === canvasAt) ?? null);
 
   /* What the canvas's own turn is doing this second. Its conversation is
@@ -4715,7 +4751,7 @@ function Conversation() {
         : (desk?.parked[canvasHere.conversation]?.turns ?? []);
     const step = nowDoing(turns).step;
     return {
-      step: step === null ? null : step.detail == null ? step.label : `${step.label} — ${step.detail}`,
+      step: step === null ? null : step.detail == null ? step.label : `${step.label} · ${step.detail}`,
       asking: turns.some((one) => one.kind === 'asked' && one.answered === null),
     };
   }, [canvasHere, desk?.address, desk?.turns, desk?.parked]);
@@ -4798,6 +4834,7 @@ function Conversation() {
                 setCanvasAt(null);
                 void swapConversation(null);
               }}
+              onReorder={reorderTab}
             />
           ) : null}
 
@@ -5006,6 +5043,16 @@ function Conversation() {
         diff={changeText}
         busy={busy}
         onClose={() => setChangesOpen(false)}
+        onExplain={(file, line) => {
+          setChangesOpen(false);
+          const asked = CHANGE_WORDS.explain(file, line);
+          void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+        }}
+        onFix={(file, line) => {
+          setChangesOpen(false);
+          const asked = CHANGE_WORDS.fix(file, line);
+          void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+        }}
         onKeep={(kept) => {
           const whole = changeText ?? '';
           const keeping = new Set(parseDiff(kept).flatMap((one) => one.hunks).map((one) => one.id));
@@ -5064,7 +5111,11 @@ function Conversation() {
 
       <Settings
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          setSettingsAt(null);
+        }}
+        startAt={settingsAt}
         showMe={preferences.showMe}
         showFiles={preferences.showFiles}
         holdBack={holdsBack(preferences.heldBack, desk?.path)}
@@ -5107,6 +5158,20 @@ function Conversation() {
         showingDark={markFor(theme) !== null && markFor(theme) !== 'light' && markFor(theme) !== 'pink'}
         ownStyles={ownStyles ?? undefined}
         onReloadStyles={loadOwnStyles}
+        onMac={ON_MAC}
+        connection={connection}
+        onSelectModel={selectModel}
+        onThinking={changeThinking}
+        onConnect={openConnect}
+        advisor={preferences.advisor}
+        onAdvisor={selectAdvisor}
+        advisorThinking={preferences.advisorThinking}
+        onAdvisorThinking={setAdvisorThinking}
+        advisorGates={preferences.advisorGates}
+        onAdvisorGate={setAdvisorGate}
+        addons={preferences.addons}
+        onAddons={setAddons}
+        addonsHere={addonsHere}
       />
 
       <Usage
@@ -5389,10 +5454,10 @@ function Conversation() {
               onAdvisor={selectAdvisor}
               advisorThinking={preferences.advisorThinking}
               onAdvisorThinking={setAdvisorThinking}
-              advisorGates={preferences.advisorGates}
-              onAdvisorGate={setAdvisorGate}
-              addons={preferences.addons}
-              onAddons={setAddons}
+              onMoreAdvisor={() => {
+                setSettingsAt('model');
+                setSettingsOpen(true);
+              }}
               longJobs={longJobs}
               onConnect={openConnect}
               onThinking={changeThinking}

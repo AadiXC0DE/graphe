@@ -406,7 +406,7 @@ describe('the one line above the list', () => {
 
   it('is the sentence, exactly', () => {
     expect(saysInStep('Header', [move('a'), move('b'), move('c')])).toBe(
-      'Your Header in Figma has moved on since this was built — three things differ.',
+      'Your Header in Figma has moved on since this was built: three things differ.',
     );
   });
 

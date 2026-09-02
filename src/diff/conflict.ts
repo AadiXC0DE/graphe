@@ -281,6 +281,6 @@ export function saysConflict(file: Conflict): string {
   const sides =
     first === undefined || first.kind !== 'clash'
       ? ''
-      : ` — ${first.mineLabel || conflictWords.mine} and ${first.theirsLabel || conflictWords.theirs}`;
+      : `, ${first.mineLabel || conflictWords.mine} and ${first.theirsLabel || conflictWords.theirs}`;
   return `Both sides changed the same ${conflictWords.places(file.clashes)} in this file${sides}.`;
 }

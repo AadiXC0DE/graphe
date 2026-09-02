@@ -1,9 +1,25 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AppearanceBand from './AppearanceBand';
-import type { Appearance } from '../design/appearance';
-import type { AlwaysDoes } from '../lib/ipc';
-import { THEMES, THEME_WORDS, showing, type Theme } from '../lib/theme';
 import Switch from './Switch';
+import ThinkingWith from './ThinkingWith';
+import { advisorSwitchWords, advisorWords } from '../agent/advisor';
+import { policyWords, saysPolicy, type Policy } from '../agent/pi/extension-policy';
+import type { Appearance } from '../design/appearance';
+import { ACTIONS, ACTION_WORDS, chordFor, type Where } from '../lib/actions';
+import type { AddonHere, AlwaysDoes, ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
+import { saysChord } from '../lib/keys';
+import { THEMES, THEME_WORDS, showing, type Theme } from '../lib/theme';
+import {
+  PAGES,
+  pageFor,
+  pageWords,
+  rowAt,
+  rowsOn,
+  search,
+  settingsWords,
+  type Page,
+  type Row,
+} from '../work/settingspages';
 import './Settings.css';
 
 export type SettingsLink =
@@ -11,6 +27,8 @@ export type SettingsLink =
   | 'connected'
   | 'add-more'
   | 'usage'
+  | 'accounts'
+  | 'palette'
   | 'show-me'
   | 'files'
   | 'folder'
@@ -20,6 +38,9 @@ export type SettingsLink =
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** The row somebody asked for by name in the palette, so the screen opens on
+   *  the page holding it rather than on the first one. */
+  startAt?: string | null;
   showMe: boolean;
   showFiles: boolean;
   /** Check new work before it lands, rather than as it happens. */
@@ -59,140 +80,83 @@ type Props = {
    *  token it does not offer gets written. */
   ownStyles?: string;
   onReloadStyles?: () => void;
+  /** How a chord is drawn. The one thing on this screen that has to know which
+   *  computer it is running on. */
+  onMac?: boolean;
+
+  /* --------------------------------------------------------------- models */
+  /** Everything the model row needs: it draws the same chip the composer does,
+   *  so the list, the thinking time and the advisor are one control in both
+   *  places rather than two that can disagree. */
+  connection?: ConnectionState | null;
+  onSelectModel?: (choice: ModelChoice) => void;
+  onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
+  onConnect?: () => void;
+  advisor?: ModelChoice | null;
+  onAdvisor?: (choice: ModelChoice | null) => void;
+  advisorThinking?: ThinkingLevel | null;
+  onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
+  /** The two gates the advisor can hold, both off by default. */
+  advisorGates?: { completionGate: boolean; loopGate: boolean };
+  onAdvisorGate?: (which: 'completionGate' | 'loopGate', on: boolean) => void;
+
+  /* -------------------------------------------------------------- add-ons */
+  /** How much of an add-on that starts turns of its own runs here. */
+  addons?: Policy;
+  onAddons?: (choice: Policy) => void;
+  /** Every add-on loaded here, with what its capability card said. Empty until
+   *  a conversation has been opened, which is when they are read. */
+  addonsHere?: readonly AddonHere[];
 };
 
-/** The screens this one leads to. Places rather than preferences, so they sit
- *  in their own band above the switches instead of among them. */
-const PLACES: readonly { id: SettingsLink; name: string; note: string }[] = [
-  {
-    id: 'skills',
-    name: 'Skills',
-    note: 'Craft you can call up with @ in a message.',
-  },
-  {
-    id: 'connected',
-    name: 'Other tools',
-    note: 'The design files, databases and services this project can reach.',
-  },
-  {
-    id: 'add-more',
-    name: 'Add more to Graphe',
-    note: 'Give it new things it can do for you.',
-  },
-  {
-    id: 'usage',
-    name: 'What this cost',
-    note: 'Spend, what was reused from earlier, and the work that needed another try.',
-  },
+const POLICIES: readonly { id: Policy; label: string }[] = [
+  { id: 'on', label: policyWords.on },
+  { id: 'tools-only', label: policyWords.toolsOnly },
+  { id: 'off', label: policyWords.off },
 ];
 
-/** Each row knows its own kind and its own id, so a switch row and a link row
- *  are told apart by the union, not by a string field that could disagree. */
-type Row =
-  | { id: 'show-me'; name: string; note: string; kind: 'show-me' }
-  | { id: 'files'; name: string; note: string; kind: 'files' }
-  | { id: 'hold-back'; name: string; note: string; kind: 'hold-back' }
-  | { id: 'keep-logins'; name: string; note: string; kind: 'keep-logins' }
-  | { id: 'always'; name: string; note: string; kind: 'always' }
-  | { id: 'diagnostics'; name: string; note: string; kind: 'diagnostics' }
-  | { id: 'storage'; name: string; note: string; kind: 'storage' }
-  | { id: SettingsLink; name: string; note: string; kind: 'go' };
+const ADDON_WORDS = {
+  none: 'Nothing is loaded here yet. Open a conversation and this fills in.',
+  /** Above the list, so the three-way above it is read as the default it is. */
+  each: 'What is loaded here',
+} as const;
 
-/** Named bands, so a wide window has something to lay out. The theme picker
- *  carries no rows: the group is the control. */
-const GROUPS: readonly { id: string; title: string; rows: readonly Row[] }[] = [
-  {
-    id: 'project',
-    title: 'This project',
-    rows: [
-      {
-        id: 'hold-back',
-        name: 'Check new work first',
-        note: 'Where there is something to look at, changes are made in a copy and shown to you before anything reaches your files. Everywhere else a save point goes down before the work starts. Off, your files change as the work happens and every moment is one press from undone.',
-        kind: 'hold-back',
-      },
-      {
-        id: 'always',
-        name: 'Things this project always does',
-        note: 'Commands that run without being asked: format what was written, run the tests. One file, kept with the project.',
-        kind: 'always',
-      },
-      {
-        id: 'keep-logins',
-        name: 'Stay signed in while I browse',
-        note: 'The browser I open pages in keeps what it is signed in to, so a site you sign into once stays signed in for this project. Off, every page opens in a browser that has never been anywhere. Turning it off again forgets what was kept.',
-        kind: 'keep-logins',
-      },
-    ],
-  },
-  {
-    id: 'seeing',
-    title: 'What you see',
-    rows: [
-      {
-        id: 'show-me',
-        name: 'Show me the real thing',
-        note: 'Commands, paths and model names under the plain sentences.',
-        kind: 'show-me',
-      },
-      {
-        id: 'files',
-        name: 'Everything in this project',
-        note: 'The folder as a tree you can walk, beside the conversation.',
-        kind: 'files',
-      },
-    ],
-  },
-  {
-    id: 'elsewhere',
-    title: 'Open elsewhere',
-    rows: [
-      {
-        id: 'folder',
-        name: 'Reveal the folder',
-        note: 'Open it where this computer keeps files.',
-        kind: 'go',
-      },
-      {
-        id: 'editor',
-        name: 'Open in your editor',
-        note: 'Hand the project to the place you already write code.',
-        kind: 'go',
-      },
-    ],
-  },
-  {
-    id: 'app',
-    title: 'This app',
-    rows: [
-      {
-        id: 'diagnostics',
-        name: 'Copy diagnostics',
-        note: 'Everything worth sending when something goes wrong: the version, this machine, the add-ons, the last lines of the log and why the last job stopped. No conversations and no keys.',
-        kind: 'diagnostics',
-      },
-      {
-        id: 'storage',
-        name: 'Clear finished work',
-        note: 'Copies of finished conversations, board pieces already taken in, and old transcripts. Nothing holding work you have not taken in is ever cleared.',
-        kind: 'storage',
-      },
-    ],
-  },
-  { id: 'theme', title: THEME_WORDS.name, rows: [] },
-  { id: 'appearance', title: 'Make it yours', rows: [] },
-];
+/** Rows whose control will not sit on the right-hand end of a row, so each one
+ *  gets a card of its own. The model chip opens a menu over the card, which a
+ *  card that clips its corners would cut in half. */
+const BLOCKS = new Set(['theme', 'model', 'addons']);
+
+/** The rows of a page cut into cards: a block row alone, everything else in the
+ *  run it arrived in. */
+function runs(rows: readonly Row[]): readonly [Row, ...Row[]][] {
+  const cut: [Row, ...Row[]][] = [];
+  for (const row of rows) {
+    const last = cut[cut.length - 1];
+    if (last === undefined || BLOCKS.has(row.id) || BLOCKS.has(last[0].id)) cut.push([row]);
+    else last.push(row);
+  }
+  return cut;
+}
+
+const KEY_WORDS = {
+  /** The honest name for a list somebody cannot yet change. */
+  reading: 'These are the keys this window is listening for.',
+} as const;
 
 /**
- * The quieter controls, in one place.
+ * The quieter controls, as pages you can search.
  *
- * Things somebody reaches for a few times a week, not every message — skills,
- * spend, whether the machinery is named. They used to be buttons competing
- * with the work; here they sit behind one word and leave the shelf alone.
+ * One sheet worked while there were eleven things on it. Past that the only way
+ * anybody finds a preference is to read all of them, and the person who knows
+ * exactly what they want reads the most. So the rows live in
+ * `work/settingspages.ts`, which knows which page each one is on and what else
+ * somebody might call it, and the same search answers this sidebar and the
+ * command palette.
  */
 export default function Settings({
   open,
   onClose,
+  startAt = null,
   showMe,
   showFiles,
   holdBack,
@@ -215,7 +179,25 @@ export default function Settings({
   showingDark = false,
   ownStyles,
   onReloadStyles,
+  onMac = false,
+  connection = null,
+  onSelectModel,
+  onThinking,
+  onConnect,
+  advisor = null,
+  onAdvisor,
+  advisorThinking,
+  onAdvisorThinking,
+  advisorGates,
+  onAdvisorGate,
+  addons,
+  onAddons,
+  addonsHere = [],
 }: Props) {
+  const [page, setPage] = useState<Page>('appearance');
+  const [query, setQuery] = useState('');
+  const [chords, setChords] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -227,6 +209,19 @@ export default function Settings({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  /* Every opening starts clean, and one asked for by name starts on the page
+     holding it. */
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setChords(false);
+    setPage(rowAt(startAt ?? '')?.page ?? 'appearance');
+  }, [open, startAt]);
+
+  const typed = query.trim();
+  const found = useMemo(() => (typed === '' ? null : search(typed)), [typed]);
+  const bestPage = useMemo(() => (typed === '' ? null : pageFor(typed)), [typed]);
+
   if (!open) return null;
 
   /* Following the computer still lands somewhere; this is where. Read at the
@@ -234,118 +229,361 @@ export default function Settings({
   const onScreen = showing('system', window.matchMedia('(prefers-color-scheme: dark)').matches);
   const onScreenName = onScreen === 'dark' ? THEME_WORDS.graphe : THEME_WORDS[onScreen];
 
-  const row = (one: Row) => {
-    const text = (
-      <span className="settings__text">
-        <span className="settings__name">{one.name}</span>
-        <span className="settings__note">{one.note}</span>
+  const shown = found ?? rowsOn(page);
+  const highlighted = startAt === null || typed !== '' ? null : startAt;
+
+  const words = (row: Row, note?: string) => (
+    <span className="settings__text">
+      <span className="settings__name">{row.name}</span>
+      <span className="settings__note">{note ?? row.note}</span>
+      {found === null ? null : (
+        <span className="settings__from">{settingsWords.on(row.page)}</span>
+      )}
+    </span>
+  );
+
+  const goes = (row: Row, link: SettingsLink, meta?: string) => (
+    <button
+      type="button"
+      className="settings__row"
+      onClick={() => {
+        onGo(link);
+        onClose();
+      }}
+    >
+      {words(row)}
+      {meta === undefined ? null : <span className="settings__meta">{meta}</span>}
+      <span className="settings__chev" aria-hidden="true">
+        ›
       </span>
-    );
+    </button>
+  );
 
-    if (one.kind === 'diagnostics') {
-      return (
-        <li key={one.id}>
-          <button
-            type="button"
-            className="settings__row"
-            onClick={() => onCopyDiagnostics?.()}
-            disabled={onCopyDiagnostics === undefined}
-          >
-            {text}
-            <span className="settings__meta">{version === undefined ? '' : version}</span>
-          </button>
-        </li>
-      );
-    }
+  const flip = (row: Row, on: boolean, change: () => void) => (
+    <label className="settings__row settings__row--switch">
+      {words(row)}
+      <Switch on={on} onChange={change} label={row.name} />
+    </label>
+  );
 
-    if (one.kind === 'storage') {
-      return (
-        <li key={one.id}>
-          <button
-            type="button"
-            className="settings__row"
-            onClick={() => onClearFinishedWork?.()}
-            disabled={onClearFinishedWork === undefined || (storage?.couldClear ?? 0) === 0}
-          >
-            <span className="settings__text">
-              <span className="settings__name">{one.name}</span>
-              <span className="settings__note">
-                {storage === null ? one.note : `${storage.says} ${storage.because}`}
+  /** The two switches the advisor holds, drawn under the model row because that
+   *  is the control they belong to. */
+  const gates =
+    advisorGates === undefined || onAdvisorGate === undefined
+      ? null
+      : (
+          <section className="settings__sub" aria-label={advisorWords.name}>
+            <h3 className="settings__subtitle">{advisorWords.name}</h3>
+            <ul className="settings__rows">
+              {(['completionGate', 'loopGate'] as const).map((which) => (
+                <li key={which}>
+                  <label className="settings__row settings__row--switch">
+                    <span className="settings__text">
+                      <span className="settings__name">{advisorSwitchWords[which].label}</span>
+                      <span className="settings__note">{advisorSwitchWords[which].hint}</span>
+                    </span>
+                    <Switch
+                      on={advisorGates[which]}
+                      onChange={(on) => onAdvisorGate(which, on)}
+                      label={advisorSwitchWords[which].label}
+                    />
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+
+  const drawRow = (row: Row) => {
+    const at = row.id === highlighted ? ' settings__at' : '';
+
+    switch (row.id) {
+      case 'theme':
+        return (
+          <li key={row.id} className={`settings__block${at}`}>
+            <div className="settings__blockhead">{words(row)}</div>
+            <div className="settings__theme-wrap">
+              <span className="settings__themes" role="group" aria-label={row.name}>
+                {THEMES.map((pick) => (
+                  <button
+                    key={pick.id}
+                    type="button"
+                    className={`settings__theme ${theme === pick.id ? 'settings__theme--on' : ''}`}
+                    aria-pressed={theme === pick.id}
+                    onClick={() => onTheme(pick.id)}
+                    title={pick.label}
+                  >
+                    <span
+                      className="settings__thumb"
+                      aria-hidden="true"
+                      style={
+                        {
+                          background: pick.preview.bg,
+                          borderColor: pick.preview.border,
+                          ['--thumb-accent' as string]: pick.preview.accent,
+                          ['--thumb-text' as string]: pick.preview.text,
+                        } as React.CSSProperties
+                      }
+                    >
+                      <span
+                        className="settings__thumb-raised"
+                        style={{ background: pick.preview.raised, borderColor: pick.preview.border }}
+                      />
+                      <span className="settings__thumb-dot" style={{ background: pick.preview.accent }} />
+                      <span className="settings__thumb-line" style={{ background: pick.preview.text }} />
+                      <span
+                        className="settings__thumb-line settings__thumb-line--muted"
+                        style={{ background: pick.preview.text }}
+                      />
+                    </span>
+                    <span className="settings__theme-label">{pick.label}</span>
+                  </button>
+                ))}
               </span>
-            </span>
-            <span className="settings__meta">
-              {storage === null || storage.couldClear === 0
-                ? 'Nothing to clear'
-                : `${String(storage.couldClear)} to clear`}
-            </span>
-          </button>
-        </li>
-      );
-    }
+              <div className="settings__theme-foot">
+                <button
+                  type="button"
+                  className={`settings__system ${theme === 'system' ? 'settings__system--on' : ''}`}
+                  aria-pressed={theme === 'system'}
+                  onClick={() => onTheme('system')}
+                >
+                  {THEME_WORDS.system}
+                </button>
+                {theme === 'system' ? (
+                  /* Saying which palette the computer picked spares the reader
+                     five thumbnails and a guess about what they are actually
+                     looking at. */
+                  <p className="settings__system-note">{onScreenName} right now.</p>
+                ) : null}
+              </div>
+            </div>
+          </li>
+        );
 
-    if (one.kind === 'always') {
-      return (
-        <li key={one.id}>
-          <button type="button" className="settings__row" onClick={() => onGo('always')}>
-            {text}
-            <span className="settings__meta">
-              {always === null || always.rows.length === 0
-                ? 'None yet'
-                : `${String(always.rows.length)} of them`}
-            </span>
-            <span className="settings__chev" aria-hidden="true">
-              ›
-            </span>
-          </button>
-        </li>
-      );
-    }
+      case 'show-me':
+        return (
+          <li key={row.id} className={at}>
+            {flip(row, showMe, onToggleShowMe)}
+          </li>
+        );
 
-    if (one.kind === 'go') {
-      return (
-        <li key={one.id}>
-          <button
-            type="button"
-            className="settings__row"
-            onClick={() => {
-              onGo(one.id);
-              onClose();
-            }}
-          >
-            {text}
-            <span className="settings__chev" aria-hidden="true">
-              ›
-            </span>
-          </button>
-        </li>
-      );
-    }
+      case 'files':
+        return (
+          <li key={row.id} className={at}>
+            {flip(row, showFiles, onToggleShowFiles)}
+          </li>
+        );
 
-    const switches = {
-      'show-me': { on: showMe, change: onToggleShowMe },
-      files: { on: showFiles, change: onToggleShowFiles },
-      'hold-back': { on: holdBack, change: onToggleHoldBack },
-      'keep-logins': { on: keepLogins, change: onToggleKeepLogins },
-    } as const;
-    const flip = switches[one.kind];
-    return (
-      <li key={one.id}>
-        <label className="settings__row settings__row--switch">
-          {text}
-          <Switch on={flip.on} onChange={flip.change} label={one.name} />
-        </label>
-      </li>
-    );
+      case 'hold-back':
+        return (
+          <li key={row.id} className={at}>
+            {flip(row, holdBack, onToggleHoldBack)}
+          </li>
+        );
+
+      case 'keep-logins':
+        return (
+          <li key={row.id} className={at}>
+            {flip(row, keepLogins, onToggleKeepLogins)}
+          </li>
+        );
+
+      case 'shortcuts':
+        return (
+          <li key={row.id} className={at}>
+            <button
+              type="button"
+              className="settings__row"
+              aria-expanded={chords}
+              onClick={() => setChords((was) => !was)}
+            >
+              {words(row)}
+              <span className="settings__meta">{ACTIONS.length}</span>
+              <span className="settings__chev" aria-hidden="true">
+                {chords ? '⌄' : '›'}
+              </span>
+            </button>
+            {chords ? <Chords onMac={onMac} /> : null}
+          </li>
+        );
+
+      case 'palette':
+        return (
+          <li key={row.id} className={at}>
+            <button
+              type="button"
+              className="settings__row"
+              onClick={() => {
+                onGo('palette');
+                onClose();
+              }}
+            >
+              {words(row)}
+              <span className="settings__meta">{saysChord(row.keys ?? null, onMac)}</span>
+            </button>
+          </li>
+        );
+
+      case 'model':
+        return (
+          <li key={row.id} className={`settings__block${at}`}>
+            <div className="settings__blockhead">
+              {words(row)}
+              {onSelectModel === undefined || onConnect === undefined ? null : (
+                <ThinkingWith
+                  state={connection}
+                  onSelect={onSelectModel}
+                  onConnect={onConnect}
+                  advisor={advisor}
+                  {...(onThinking === undefined ? {} : { onThinking })}
+                  {...(onAdvisor === undefined ? {} : { onAdvisor })}
+                  {...(advisorThinking == null ? {} : { advisorThinking })}
+                  {...(onAdvisorThinking === undefined ? {} : { onAdvisorThinking })}
+                />
+              )}
+            </div>
+            {gates}
+          </li>
+        );
+
+      case 'accounts':
+        return <li key={row.id} className={at}>{goes(row, 'accounts')}</li>;
+
+      case 'usage':
+        return <li key={row.id} className={at}>{goes(row, 'usage')}</li>;
+
+      case 'skills':
+        return <li key={row.id} className={at}>{goes(row, 'skills')}</li>;
+
+      case 'connected':
+        return <li key={row.id} className={at}>{goes(row, 'connected')}</li>;
+
+      case 'add-more':
+        return <li key={row.id} className={at}>{goes(row, 'add-more')}</li>;
+
+      case 'folder':
+        return <li key={row.id} className={at}>{goes(row, 'folder')}</li>;
+
+      case 'editor':
+        return <li key={row.id} className={at}>{goes(row, 'editor')}</li>;
+
+      case 'always':
+        return (
+          <li key={row.id} className={at}>
+            <button type="button" className="settings__row" onClick={() => onGo('always')}>
+              {words(row)}
+              <span className="settings__meta">
+                {always === null || always.rows.length === 0
+                  ? 'None yet'
+                  : `${String(always.rows.length)} of them`}
+              </span>
+              <span className="settings__chev" aria-hidden="true">
+                ›
+              </span>
+            </button>
+          </li>
+        );
+
+      case 'addons':
+        return (
+          <li key={row.id} className={`settings__block${at}`}>
+            <div className="settings__blockhead">{words(row)}</div>
+            {addons === undefined || onAddons === undefined ? null : (
+              <div
+                className="settings__choices"
+                role="radiogroup"
+                aria-label={row.name}
+              >
+                {POLICIES.map((one) => (
+                  <button
+                    key={one.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={addons === one.id}
+                    className={`settings__choice ${addons === one.id ? 'settings__choice--on' : ''}`}
+                    onClick={() => onAddons(one.id)}
+                  >
+                    {one.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {addons === undefined ? null : (
+              <p className="settings__machine">{saysPolicy(addons)}</p>
+            )}
+            <section className="settings__sub" aria-label={ADDON_WORDS.each}>
+              <h3 className="settings__subtitle">{ADDON_WORDS.each}</h3>
+              {addonsHere.length === 0 ? (
+                <p className="settings__machine">{ADDON_WORDS.none}</p>
+              ) : (
+                <ul className="settings__rows">
+                  {addonsHere.map((one) => (
+                    <li key={one.name}>
+                      <div className="settings__row">
+                        <span className="settings__text">
+                          <span className="settings__name">{one.name}</span>
+                          <span className="settings__note">{one.says}</span>
+                        </span>
+                        <span className="settings__meta">{saysPolicy(one.policy)}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </li>
+        );
+
+      case 'storage':
+        return (
+          <li key={row.id} className={at}>
+            <button
+              type="button"
+              className="settings__row"
+              onClick={() => onClearFinishedWork?.()}
+              disabled={onClearFinishedWork === undefined || (storage?.couldClear ?? 0) === 0}
+            >
+              {words(row, storage === null ? row.note : `${storage.says} ${storage.because}`)}
+              <span className="settings__meta">
+                {storage === null || storage.couldClear === 0
+                  ? 'Nothing to clear'
+                  : `${String(storage.couldClear)} to clear`}
+              </span>
+            </button>
+          </li>
+        );
+
+      case 'diagnostics':
+        return (
+          <li key={row.id} className={at}>
+            <button
+              type="button"
+              className="settings__row"
+              onClick={() => onCopyDiagnostics?.()}
+              disabled={onCopyDiagnostics === undefined}
+            >
+              {words(row)}
+              <span className="settings__meta">{version === undefined ? '' : version}</span>
+            </button>
+            {/* What this machine will do at once, worked out from the machine
+                rather than written down. Quiet, under the row that sends it. */}
+            {caps === undefined ? null : <p className="settings__machine">{caps}</p>}
+          </li>
+        );
+
+      default:
+        return null;
+    }
   };
 
   return (
-    <section className="settings" aria-label="Settings" role="dialog" aria-modal="true">
+    <section className="settings" aria-label={settingsWords.title} role="dialog" aria-modal="true">
       <header className="settings__top">
         <div className="settings__topinner">
           <div>
             <p className="settings__eyebrow">Graphe</p>
-            <h1>Settings</h1>
-            <p>Things you change once in a while, not every message.</p>
+            <h1>{settingsWords.title}</h1>
+            <p>{settingsWords.note}</p>
           </div>
           <button type="button" className="settings__close" onClick={onClose}>
             Close <kbd>Esc</kbd>
@@ -357,125 +595,121 @@ export default function Settings({
           this surface rather than the window. */}
       <div className="settings__body scroll--auto">
         <div className="settings__inner">
-          <nav className="settings__places" aria-label="Screens">
-            {PLACES.map((one) => (
-              <button
-                key={one.id}
-                type="button"
-                className="settings__place"
-                onClick={() => {
-                  onGo(one.id);
-                  onClose();
-                }}
-              >
-                <span className="settings__placetop">
-                  <span className="settings__name">{one.name}</span>
-                  <span className="settings__chev" aria-hidden="true">
-                    ›
-                  </span>
-                </span>
-                <span className="settings__note">{one.note}</span>
-              </button>
-            ))}
+          <nav className="settings__pages" aria-label={settingsWords.title}>
+            <input
+              className="settings__search"
+              type="search"
+              value={query}
+              placeholder={settingsWords.search}
+              aria-label={settingsWords.search}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {PAGES.map((one) => {
+              /* While something is typed the sidebar follows the answer rather
+                 than the last press, so searching never leaves somebody looking
+                 at a page with no results on it. */
+              const on = typed === '' ? one === page : one === bestPage;
+              return (
+                <button
+                  key={one}
+                  type="button"
+                  className={`settings__page ${on ? 'settings__page--on' : ''}`}
+                  aria-current={on}
+                  title={pageWords[one].note}
+                  onClick={() => {
+                    setQuery('');
+                    setPage(one);
+                  }}
+                >
+                  {pageWords[one].name}
+                </button>
+              );
+            })}
           </nav>
 
-          <div className="settings__grid">
-            {GROUPS.map((group) =>
-              group.id === 'theme' ? (
-                <section key={group.id} className="settings__group settings__group--theme">
-                  <h2 className="settings__grouptitle">{group.title}</h2>
-                  <div className="settings__theme-wrap">
-                    <p className="settings__note">{THEME_WORDS.note}</p>
-                    <span className="settings__themes" role="group" aria-label={group.title}>
-                      {THEMES.map((pick) => (
-                        <button
-                          key={pick.id}
-                          type="button"
-                          className={`settings__theme ${theme === pick.id ? 'settings__theme--on' : ''}`}
-                          aria-pressed={theme === pick.id}
-                          onClick={() => onTheme(pick.id)}
-                          title={pick.label}
-                        >
-                          <span
-                            className="settings__thumb"
-                            aria-hidden="true"
-                            style={
-                              {
-                                background: pick.preview.bg,
-                                borderColor: pick.preview.border,
-                                ['--thumb-accent' as string]: pick.preview.accent,
-                                ['--thumb-text' as string]: pick.preview.text,
-                              } as React.CSSProperties
-                            }
-                          >
-                            <span className="settings__thumb-raised" style={{ background: pick.preview.raised, borderColor: pick.preview.border }} />
-                            <span className="settings__thumb-dot" style={{ background: pick.preview.accent }} />
-                            <span className="settings__thumb-line" style={{ background: pick.preview.text }} />
-                            <span className="settings__thumb-line settings__thumb-line--muted" style={{ background: pick.preview.text }} />
-                          </span>
-                          <span className="settings__theme-label">{pick.label}</span>
-                        </button>
-                      ))}
-                    </span>
-                    <div className="settings__theme-foot">
-                      <button
-                        type="button"
-                        className={`settings__system ${theme === 'system' ? 'settings__system--on' : ''}`}
-                        aria-pressed={theme === 'system'}
-                        onClick={() => onTheme('system')}
-                      >
-                        {THEME_WORDS.system}
-                      </button>
-                      {theme === 'system' ? (
-                        /* Saying which palette the computer picked spares the
-                           reader five thumbnails and a guess about what they
-                           are actually looking at. */
-                        <p className="settings__system-note">{onScreenName} right now.</p>
-                      ) : null}
-                    </div>
-                  </div>
-                </section>
-              ) : (
-                <section key={group.id} className={`settings__group settings__group--${group.id}`}>
-                  <h2 className="settings__grouptitle">{group.title}</h2>
-                  <ul className="settings__rows">{group.rows.map(row)}</ul>
-                  {/* What this machine will do at once, worked out from the
-                      machine rather than written down. Quiet, under the rows it
-                      explains — a technical user goes looking for it, and
-                      nobody else has to read it. */}
-                  {group.id === 'app' && caps !== undefined ? (
-                    <p className="settings__machine">{caps}</p>
-                  ) : null}
-                  {group.id === 'appearance' && appearance !== undefined && onAppearance !== undefined ? (
-                    <>
-                      <AppearanceBand
-                        appearance={appearance}
-                        onChange={onAppearance}
-                        on={showingDark ? 'dark' : 'light'}
-                      />
-                      {ownStyles === undefined || ownStyles === '' ? null : (
-                        <p className="settings__machine">
-                          Write your own tokens in <code>{ownStyles}</code>. It loads last, so it
-                          wins.{' '}
-                          {onReloadStyles === undefined ? null : (
-                            <button
-                              type="button"
-                              className="settings__inline"
-                              onClick={onReloadStyles}
-                            >
-                              Read it again
-                            </button>
-                          )}
-                        </p>
-                      )}
-                    </>
-                  ) : null}
-                </section>
-              ),
+          <div className="settings__page-body">
+            <h2 className="settings__pagetitle">
+              {found === null ? pageWords[page].name : settingsWords.search}
+            </h2>
+            <p className="settings__pagenote">
+              {found === null ? pageWords[page].note : ''}
+            </p>
+
+            {found !== null && found.length === 0 ? (
+              <p className="settings__empty">{settingsWords.nothing}</p>
+            ) : (
+              runs(shown).map((run) => (
+                <div
+                  key={run[0].id}
+                  className={`settings__group ${BLOCKS.has(run[0].id) ? 'settings__group--roomy' : ''}`}
+                >
+                  <ul className="settings__rows">{run.map(drawRow)}</ul>
+                </div>
+              ))
             )}
+
+            {/* The band belongs to Appearance and to nothing else, so it is
+                drawn under that page rather than as a row of its own. */}
+            {found === null &&
+            page === 'appearance' &&
+            appearance !== undefined &&
+            onAppearance !== undefined ? (
+              <div className="settings__group">
+                <h3 className="settings__subtitle">Make it yours</h3>
+                <AppearanceBand
+                  appearance={appearance}
+                  onChange={onAppearance}
+                  on={showingDark ? 'dark' : 'light'}
+                />
+                {ownStyles === undefined || ownStyles === '' ? null : (
+                  <p className="settings__machine">
+                    Write your own tokens in <code>{ownStyles}</code>. It loads last, so it wins.{' '}
+                    {onReloadStyles === undefined ? null : (
+                      <button type="button" className="settings__inline" onClick={onReloadStyles}>
+                        Read it again
+                      </button>
+                    )}
+                  </p>
+                )}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Every action and the key it answers to, as this window is listening now.
+ *
+ * Read rather than set: the chords are one list in `lib/actions.ts`, and until
+ * a saved binding reaches the key handler a field that took a new one would be
+ * a control that changes nothing.
+ */
+function Chords({ onMac }: { onMac: boolean }) {
+  const wheres: readonly Where[] = ['anywhere', 'in a project', 'in a conversation'];
+  return (
+    <div className="settings__chords">
+      <p className="settings__machine">{KEY_WORDS.reading}</p>
+      {wheres.map((where) => (
+        <section key={where}>
+          <h3 className="settings__subtitle">{ACTION_WORDS.where[where]}</h3>
+          <ul className="settings__chordlist">
+            {ACTIONS.filter((one) => one.where === where).map((one) => {
+              const chord = chordFor(one.id);
+              return (
+                <li key={one.id}>
+                  <span>{one.says}</span>
+                  <kbd className={chord === null ? 'settings__unbound' : ''}>
+                    {chord === null ? ACTION_WORDS.unbound : saysChord(chord, onMac)}
+                  </kbd>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+    </div>
   );
 }

@@ -57,3 +57,32 @@ export function byDay<T extends Moment>(items: readonly T[], now: number): reado
 export function needsDayLabels(days: readonly Day<unknown>[]): boolean {
   return days.length > 1;
 }
+
+/** Past this, a date stops being something anybody navigates by. */
+export const EARLIER_AFTER_DAYS = 30;
+
+export const EARLIER = { key: 'earlier', label: 'Earlier' } as const;
+
+/**
+ * Everything older than a month under one heading.
+ *
+ * A shelf that names every day it has ever seen is a shelf of headings. Past a
+ * month nobody is looking for Tuesday, they are looking for the one about the
+ * migration, and that is what the search field is for.
+ */
+export function foldOlder<T extends Moment>(
+  days: readonly Day<T>[],
+  now: number,
+  after: number = EARLIER_AFTER_DAYS,
+): readonly Day<T>[] {
+  const cut = now - after * 24 * 60 * 60 * 1000;
+  const recent: Day<T>[] = [];
+  const older: T[] = [];
+  for (const day of days) {
+    const kept = day.items.filter((one) => one.at >= cut);
+    for (const one of day.items) if (one.at < cut) older.push(one);
+    if (kept.length > 0) recent.push({ ...day, items: kept });
+  }
+  if (older.length === 0) return recent;
+  return [...recent, { key: EARLIER.key, label: EARLIER.label, items: older }];
+}

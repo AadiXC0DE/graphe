@@ -43,16 +43,14 @@ describe('settings can be scrolled to the end', () => {
     expect(css).toContain('@container (min-width: 780px)');
   });
 
-  it('never strands a lone tile on a row of its own', () => {
-    // Four screens to go to, so every column count it can take divides four.
+  it('stacks the page list over its page until there is room for both', () => {
+    // One column at every width the sheet can be, and the sidebar beside the
+    // page only once the container query says the room is there.
     const counts = css
-      .split('.settings__places {')
+      .split('.settings__inner {')
       .slice(1)
       .map((after) => /grid-template-columns: ([^;]+);/.exec(after.slice(0, after.indexOf('}')))?.[1]);
-    expect(counts.length).toBeGreaterThan(1);
-    for (const one of counts) {
-      expect(one).toMatch(/^(minmax\(0, 1fr\)|repeat\((2|4), minmax\(0, 1fr\)\))$/);
-    }
+    expect(counts).toEqual(['minmax(0, 1fr)', '220px minmax(0, 1fr)']);
   });
 });
 

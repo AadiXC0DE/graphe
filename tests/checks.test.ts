@@ -129,7 +129,7 @@ describe('CH-03 the brief', () => {
   it('numbers them and asks for their names back', () => {
     const said = checksBrief([{ key: 'fit', name: 'Design fit', line: 'Tokens only.' }], true);
     expect(said).toContain(CHECK_WORDS.itsOwn);
-    expect(said).toContain('1. Design fit — Tokens only.');
+    expect(said).toContain('1. Design fit: Tokens only.');
     expect(said).toContain('checks');
   });
 

@@ -139,3 +139,30 @@ export async function highlight(code: string, language: string): Promise<string 
     return null;
   }
 }
+
+/** One coloured run of a line. The colour is whatever the theme resolved to,
+ *  which for our CSS-variables theme is `var(--code-token-…)`. */
+export type Token = { text: string; colour: string | null };
+
+/**
+ * The same colour as `highlight`, as tokens rather than markup.
+ *
+ * A diff row is not a block of code: it carries a line number, a sign, a tint
+ * for the side it is on, and a word mark inside it. All of that has to sit
+ * around the same characters, so the caller needs the runs rather than a
+ * finished string of HTML.
+ */
+export async function tokensOf(
+  code: string,
+  language: string,
+): Promise<readonly (readonly Token[])[] | null> {
+  if (!canHighlight(language) || code === '') return null;
+  try {
+    const core = await highlighter();
+    await grammar(core, language);
+    const { tokens } = core.codeToTokens(code, { lang: language, theme: THEME });
+    return tokens.map((line) => line.map((one) => ({ text: one.content, colour: one.color ?? null })));
+  } catch {
+    return null;
+  }
+}

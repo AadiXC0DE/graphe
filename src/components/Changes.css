@@ -504,3 +504,14 @@
     transform: none;
   }
 }
+
+/* The lines are the viewer's now: it brings its own scroller, its own header
+   band and its own windowing, so the sheet body only has to get out of its
+   way. */
+.changes__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}

@@ -243,7 +243,7 @@ describe('W-04d what the three panes are handed', () => {
 describe('W-04e the line over the three panes', () => {
   it('counts the places and names both sides', () => {
     expect(saysConflict(readConflict(ONE_CLASH))).toBe(
-      'Both sides changed the same 1 place in this file — HEAD and graphe/blue-header.',
+      'Both sides changed the same 1 place in this file, HEAD and graphe/blue-header.',
     );
   });
 

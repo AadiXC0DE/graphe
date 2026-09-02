@@ -27,7 +27,7 @@ export const SAYS = {
    *  people meet, and "I will tell you when it moves" said nothing about the
    *  reading it takes or the press it puts under each difference. */
   invitation:
-    'Paste a Figma file or frame. I read its colour, spacing and type as they stand now and keep that reading as what this work was built from — after that, every look tells you what has moved, and offers to build each change in.',
+    'Paste a Figma file or frame. I read its colour, spacing and type as they stand now and keep that reading as what this work was built from. After that, every look tells you what has moved, and offers to build each change in.',
   /** The way in for somebody who has to make the reading work at all. */
   needs: 'Reading a file needs a Figma access token in FIGMA_TOKEN.',
   placeholder: 'Paste a Figma address',

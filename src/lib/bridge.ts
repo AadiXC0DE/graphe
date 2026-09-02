@@ -79,6 +79,7 @@ import {
   type PutBack,
   type RepoLook,
   type RecentProject,
+  type AddonReport,
   type CarriedExtension,
   type Result,
   type Room,
@@ -1550,7 +1551,7 @@ let previewPlanMode = false;
       return Promise.resolve(done({ ...preferred }));
     },
 
-    setAddons(choice: 'on' | 'tools-only'): Promise<Result<Preferences>> {
+    setAddons(choice: 'on' | 'tools-only' | 'off'): Promise<Result<Preferences>> {
       preferred = { ...preferred, addons: choice };
       return Promise.resolve(done({ ...preferred }));
     },
@@ -1966,8 +1967,8 @@ let previewPlanMode = false;
       return Promise.resolve(done(null));
     },
 
-    addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>> {
-      return Promise.resolve(done({ says: {}, running: 0 }));
+    addons(): Promise<Result<AddonReport>> {
+      return Promise.resolve(done({ says: {}, each: [], running: 0 }));
     },
 
     storage(): Promise<Result<{ says: string; couldClear: number; because: string }>> {

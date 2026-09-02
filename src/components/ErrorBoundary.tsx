@@ -4,7 +4,7 @@ import './ErrorBoundary.css';
 
 /** The card's words, in one place so a test and the window read the same ones. */
 export const boundaryWords = {
-  what: (where: string) => `Something went wrong in ${where} — here is what to send me.`,
+  what: (where: string) => `Something went wrong in ${where}. Here is what to send me.`,
   copy: 'Copy diagnostics',
   copied: 'Copied',
   noMessage: 'No message came with it.',
@@ -20,7 +20,7 @@ export function boundaryReport(
   at: number,
 ): string {
   return [
-    'Graphe — something went wrong',
+    'Graphe: something went wrong',
     `when: ${new Date(at).toISOString()}`,
     `where: ${where}`,
     `what: ${message}`,

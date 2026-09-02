@@ -333,6 +333,26 @@ export function showThread(desks: Desks, project: string, address: string): Desk
   });
 }
 
+/**
+ * Move one conversation to another place in the row.
+ *
+ * The row is spatial memory, so where a tab sits is the person's to decide.
+ * `to` is where it lands in the row as it looks now, clamped: a drag that ends
+ * off the end of the strip means the end of the strip.
+ */
+export function moveThread(desks: Desks, project: string, address: string, to: number): Desks {
+  return changeDesk(desks, project, (desk) => {
+    const from = desk.order.indexOf(address);
+    if (from < 0) return desk;
+    const wanted = Math.max(0, Math.min(desk.order.length - 1, to));
+    if (wanted === from) return desk;
+    const order = [...desk.order];
+    order.splice(from, 1);
+    order.splice(wanted, 0, address);
+    return { ...desk, order };
+  });
+}
+
 /** Put a conversation down without losing what is in it. Never the one in
  *  front — closing what you are looking at is a different move. */
 export function parkThread(desks: Desks, project: string, address: string): Desks {

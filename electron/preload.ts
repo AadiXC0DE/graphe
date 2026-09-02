@@ -56,6 +56,7 @@ import {
   type Look,
   type Pack,
   type Result,
+  type AddonReport,
   type CarriedExtension,
   type Room,
   type SideOfWork,
@@ -784,7 +785,7 @@ const api: GrapheApi = {
     >;
   },
 
-  setAddons(choice: 'on' | 'tools-only', where?: Where): Promise<Result<Preferences>> {
+  setAddons(choice: 'on' | 'tools-only' | 'off', where?: Where): Promise<Result<Preferences>> {
     return ipcRenderer.invoke(CHANNEL.setAddons, choice, named(where)) as Promise<
       Result<Preferences>
     >;
@@ -1203,7 +1204,7 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.longJobs, providerId, modelId);
   },
 
-  addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>> {
+  addons(): Promise<Result<AddonReport>> {
     return ipcRenderer.invoke(CHANNEL.addons);
   },
 

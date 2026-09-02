@@ -304,6 +304,16 @@
   white-space: nowrap;
 }
 
+/* What this one was measured doing on a long list. Grey and wrapped: it is a
+   sentence read once, not a label scanned down the column. */
+.thinking__optionlong {
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-faint);
+  white-space: normal;
+}
+
 /* Reserved whether or not there is a tick in it, so choosing does not shuffle
    every label sideways by ten pixels. */
 .thinking__tick {

@@ -141,8 +141,8 @@ describe('MP-03 the words', () => {
       ]),
     );
     expect(said).toContain(MAP_WORDS.heading);
-    expect(said).toContain('src — 1 file, reaches into src/work');
-    expect(said).toContain('src/work — 1 file, reaches nothing else');
+    expect(said).toContain('src: 1 file, reaches into src/work');
+    expect(said).toContain('src/work: 1 file, reaches nothing else');
   });
 
   it('says when there was more than one reading holds', () => {

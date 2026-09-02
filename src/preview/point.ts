@@ -1142,7 +1142,7 @@ function pointerScript(): string {
     if (event.stopImmediatePropagation) event.stopImmediatePropagation();
   }
 
-  /* Our own controls stay clickable while pointing is live — swallowing their
+  /* Our own controls stay clickable while pointing is live: swallowing their
      presses at the capture phase would leave no way to switch it back off. */
   function block(event) {
     if (ours(event.target)) return;
@@ -1171,7 +1171,7 @@ function pointerScript(): string {
   /* A note, written where it is about.
      
      The alternative was putting what was clicked into the message box and
-     leaving somebody to describe the rest — which meant looking away from the
+     leaving somebody to describe the rest, which meant looking away from the
      thing they were looking at, and reading a paragraph of measurements to find
      out we already knew which button they meant. A box on the spot asks the only
      question worth asking, and what was clicked travels with the answer. */
@@ -1361,7 +1361,7 @@ function pointerScript(): string {
   });
   window.addEventListener('pagehide', stop);
   /** Take the whole overlay off: any note being written, and every mark left
-   *  behind. Called when the work a note asked for has been done — a pin that
+   *  behind. Called when the work a note asked for has been done. A pin that
    *  outlives what it asked about is a page covered in old questions. */
   function clear() {
     stop();

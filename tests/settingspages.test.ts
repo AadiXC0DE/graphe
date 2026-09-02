@@ -92,9 +92,16 @@ describe('the rows', () => {
     }
   });
 
-  it('put the settings file where a technical reader goes looking', () => {
-    expect(rowAt('settings-file')?.page).toBe('advanced');
-    expect(rowAt('settings-file')?.note).toContain('~/.pi/agent/settings.json');
+  /* There is no such file. Nothing in the app or in the agent it embeds reads
+     ~/.pi/agent/settings.json, so a row promising the keys it honours would
+     have been a row about nothing. */
+  it('offers no settings file, because the app honours none', () => {
+    expect(rowAt('settings-file')).toBeNull();
+    for (const row of ROWS) expect(row.note).not.toContain('settings.json');
+  });
+
+  it('puts the add-ons policy where the add-ons are', () => {
+    expect(rowAt('addons')?.page).toBe('add-ons');
   });
 });
 

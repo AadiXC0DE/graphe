@@ -14,6 +14,7 @@
  * preferences are and where they are found.
  */
 
+import { policyWords } from '../agent/pi/extension-policy';
 import { matches, type Command } from '../lib/commands';
 import { THEME_WORDS } from '../lib/theme';
 
@@ -73,7 +74,7 @@ export const pageWords: Record<Page, { name: string; note: string }> = {
   },
   advanced: {
     name: 'Advanced',
-    note: 'The settings file, the editor, and the things this project does without being asked.',
+    note: 'The editor you write code in, and the things this project does without being asked.',
   },
 };
 
@@ -91,8 +92,8 @@ export const settingsWords = {
  * Every preference, in the order its page draws it.
  *
  * The rows are the ones the sheet has today, sorted onto the pages a person
- * would look on, plus the two the technical half of the audience goes hunting
- * for: the chords, and the settings file this app honours.
+ * would look on, plus the chords the technical half of the audience goes
+ * hunting for.
  */
 export const ROWS: readonly Row[] = [
   /* ------------------------------------------------------------ appearance */
@@ -127,7 +128,7 @@ export const ROWS: readonly Row[] = [
     id: 'shortcuts',
     page: 'keys',
     name: 'Keyboard shortcuts',
-    note: 'Every command and the keys it answers to. Change any of them, or clear one.',
+    note: 'The chord behind every action in the window, and the ones that ship without one.',
     kind: 'goes',
     also: ['chords', 'bindings', 'hotkeys', 'keys', 'shortcut'],
   },
@@ -168,6 +169,16 @@ export const ROWS: readonly Row[] = [
   },
 
   /* --------------------------------------------------------------- add-ons */
+  {
+    id: 'addons',
+    page: 'add-ons',
+    /* Short on purpose. The palette scores a name by the letters in it, and a
+       long one answers to words nobody meant by it. */
+    name: 'Add-ons that start turns',
+    note: policyWords.note,
+    kind: 'choice',
+    also: ['hooks', 'turns', 'extensions', 'orchestrating', 'policy'],
+  },
   {
     id: 'skills',
     page: 'add-ons',
@@ -253,14 +264,6 @@ export const ROWS: readonly Row[] = [
     note: 'Hand the project to the place you already write code.',
     kind: 'goes',
     also: ['vscode', 'code', 'ide', 'zed'],
-  },
-  {
-    id: 'settings-file',
-    page: 'advanced',
-    name: 'The settings file',
-    note: 'The keys in ~/.pi/agent/settings.json this app honours, what each one changes here, and which of them a project has already set.',
-    kind: 'goes',
-    also: ['json', 'config', 'pi', 'settings.json', 'dotfile'],
   },
 ];
 

@@ -128,6 +128,8 @@ import {
   type Result,
   type RepoItem,
   type RepoLook,
+  type AddonHere,
+  type AddonReport,
   type CarriedExtension,
   type Room,
   type Skill,
@@ -6864,7 +6866,7 @@ function register(): void {
       return fail({ what: 'I have not made that page.', because: safe.because, actionLabel: 'Got it' });
     }
     const where = await dialog.showSaveDialog(mainWindow ?? undefined!, {
-      defaultPath: join(app.getPath('desktop'), `${open.name} — what changed.html`),
+      defaultPath: join(app.getPath('desktop'), `${open.name} - what changed.html`),
       filters: [{ name: 'Web page', extensions: ['html'] }],
     });
     if (where.canceled || where.filePath === undefined) return done(null);
@@ -8175,7 +8177,7 @@ function register(): void {
     if (entry.branch.startsWith('graphe/pr-')) {
       return fail({
         what: 'This is a pull request review checkout.',
-        because: 'Reviews are read-only — close the tab when you are done. It will be dropped, not landed into the project.',
+        because: 'Reviews are read-only. Close the tab when you are done: it will be dropped, not landed into the project.',
         actionLabel: 'Got it',
       });
     }
@@ -8780,21 +8782,24 @@ function register(): void {
     }
   });
 
-  handle<{ says: Readonly<Record<string, string>>; running: number }>(
-    CHANNEL.addons,
-    async (_event, args) => {
-      const open = projectAt(whereIn(args));
-      const says: Record<string, string> = {};
-      for (const one of open?.held.sessions.open ?? []) {
-        for (const addon of one.held.addons) says[addon.name] = addon.says;
+  handle<AddonReport>(CHANNEL.addons, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    const says: Record<string, string> = {};
+    /* One entry per add-on, not per session: the same add-on loaded into three
+       conversations is one thing somebody sets. */
+    const each = new Map<string, AddonHere>();
+    for (const one of open?.held.sessions.open ?? []) {
+      for (const addon of one.held.addons) {
+        says[addon.name] = addon.says;
+        each.set(addon.name, addon);
       }
-      const running = await addonProcesses(
-        process.pid,
-        spawned.all().map((one) => one.pid),
-      ).catch(() => 0);
-      return done({ says, running });
-    },
-  );
+    }
+    const running = await addonProcesses(
+      process.pid,
+      spawned.all().map((one) => one.pid),
+    ).catch(() => 0);
+    return done({ says, each: [...each.values()], running });
+  });
 
   handle<{ says: string; couldClear: number; because: string }>(CHANNEL.storage, async () => {
     const folders = await measureFolders(app.getPath('userData'));
@@ -9403,7 +9408,7 @@ function register(): void {
   handle<Preferences>(CHANNEL.setAddons, async (_event, args) => {
     const [choice] = args;
     const prefs = await preferences();
-    if (choice !== 'on' && choice !== 'tools-only') return done(prefs.all());
+    if (choice !== 'on' && choice !== 'tools-only' && choice !== 'off') return done(prefs.all());
     return done(await prefs.change({ addons: choice }));
   });
 

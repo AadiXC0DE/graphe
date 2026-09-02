@@ -407,7 +407,7 @@ export function saysFixThis(
   if (worth.length === 0 && failures.length === 0) return null;
   const lines = [
     ...worth.map(
-      (one) => `- ${one.text}${one.where === null ? '' : ` (${one.where})`}${one.many > 1 ? ` — ${String(one.many)} times` : ''}`,
+      (one) => `- ${one.text}${one.where === null ? '' : ` (${one.where})`}${one.many > 1 ? ` (${String(one.many)} times)` : ''}`,
     ),
     ...failures.map((one) => `- ${tabsWords.saysFailure(one)}`),
   ];

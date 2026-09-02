@@ -45,7 +45,7 @@ import { keepsLogins } from "./projects/logins";
 import { lookFirstStore } from "./lib/lookfirst";
 import { escapeMeans } from "./lib/escape";
 import { heldWrites } from "./lib/heldwrites";
-import { drainStarted, withoutOurs } from "./lib/queue";
+import { drainStarted } from "./lib/queue";
 import { foldEvents } from "./lib/hydrate";
 import { capsNow, saysCaps } from "./work/capacity";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
@@ -2100,7 +2100,6 @@ function Conversation() {
             const { [queueOwner]: _drained, ...withoutDrained } = was;
             return withoutDrained;
           });
-          runs.oursDrained(queueOwner);
           // A long run earns its quiet measure. Short runs stay silent — a
           // line under every quick change is the noise this product removes.
           const seconds = runs.settled(runKey);
@@ -2201,7 +2200,9 @@ function Conversation() {
           // Our own nudges are behind the run like anything else, and nobody
           // typed them. Drawn in the line they read as somebody's message
           // waiting, which is two wrong things at once.
-          setQueued((was) => ({ ...was, [owner]: withoutOurs(words, runs.ours(owner)) }));
+          // The app's own messages are already out of this: the shell takes
+          // them out on the way, because the shell is what queued them.
+          setQueued((was) => ({ ...was, [owner]: words }));
         }
         // The agent has begun on one of the queued messages, so it is not
         // waiting any more. Pi reports this drain through its own bookkeeping
@@ -2215,7 +2216,6 @@ function Conversation() {
           const started = notice.event.text;
           // Begun, so it is no longer one of ours waiting — and the next round
           // of the same list must not be hidden by this one's entry.
-          runs.oursStarted(owner, drainStarted(runs.ours(owner), started));
           setQueued((was) => {
             const remaining = drainStarted(was[owner] ?? [], started);
             return remaining === was[owner] ? was : { ...was, [owner]: remaining };

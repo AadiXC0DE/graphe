@@ -221,6 +221,7 @@ import { keyOf } from '../src/work/owner';
 import { writeAtomically, writeAtomicallySync } from '../src/lib/atomic';
 import { GoalFile } from '../src/projects/goals';
 import { continuationOwner } from './continuation-owner';
+import { drainStarted, withoutOurs } from '../src/lib/queue';
 import { copiesFolder } from '../src/work/copies';
 import { checkoutWords, validateCheckouts } from '../src/history/checkouts';
 import {
@@ -2557,8 +2558,7 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // Failures are the one kind of event that can arrive in somebody else's
     // words — see the note at the top of plainly.ts. Everything else in the
     // stream was written by us or by the Guard and goes through untouched.
-    const said: AgentEvent =
-      event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
+    const said: AgentEvent = enrichForTheWindow(path, from.address ?? '', event);
     send(path, said, from.address ?? undefined);
 
     // Which files a turn wrote, collected as it goes. Read off the same stream
@@ -4452,6 +4452,35 @@ async function sendOnTheirBehalf(project: string, address: string, text: string)
  *  line they read as something somebody typed and is waiting for, and they are
  *  neither. */
 const ours = new Map<string, readonly string[]>();
+
+/**
+ * One event on its way to the window, said in the window's terms.
+ *
+ * Two things: a failure arrives in somebody else's words and is made plain, and
+ * the waiting line has this app's own messages taken out of it. Carrying a list
+ * on puts a message behind the run — which is right, and which Pi reports as a
+ * queued message like any other. Drawn, it reads as something the person typed
+ * and is waiting for, and it is neither.
+ */
+function enrichForTheWindow(project: string, address: string, event: AgentEvent): AgentEvent {
+  if (event.type === 'error') return { type: 'error', message: plainMessage(event.message) };
+  if (event.type === 'queued') {
+    const mine = ours.get(keyOf(project, address)) ?? [];
+    if (mine.length === 0) return event;
+    return {
+      type: 'queued',
+      steering: withoutOurs(event.steering, mine),
+      followUp: withoutOurs(event.followUp, mine),
+    };
+  }
+  // And once one of ours has begun, it is not waiting any more.
+  if (event.type === 'message-started') {
+    const key = keyOf(project, address);
+    const mine = ours.get(key);
+    if (mine !== undefined) ours.set(key, drainStarted(mine, event.text));
+  }
+  return event;
+}
 
 /**
  * The project's own checks, for a goal to be measured against.
@@ -8768,8 +8797,10 @@ function register(): void {
        The ceiling is there to stop a loop nobody is watching, not to ration a
        person who is. */
     continuations.spoke(open.path, addressOf(conversation.held));
-    // A new job, so the next apply puts a version down again.
+    // A new job, so the next apply puts a version down again, and whatever the
+    // app had queued for itself is behind us.
     open.held.snappedBeforeApply.delete(addressOf(conversation.held));
+    ours.delete(keyOf(open.path, addressOf(conversation.held)));
     // Their own words, kept for the sentence beside the pictures. The same
     // sentence the version timeline writes for the same moment — see
     // src/diff/summary.ts.

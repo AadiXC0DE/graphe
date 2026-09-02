@@ -33,20 +33,11 @@ export type RunLedger = {
   /** Whatever is still gathered goes out now, because the end of a message
    *  closes the turn and an unflushed tail would be lost. */
   flush(owner: string): void;
-  /** The messages the app queued for itself, so the waiting line can leave them
-   *  out: drawn there they read as something somebody typed and is waiting for,
-   *  and they are neither. */
-  ours(owner: string): readonly string[];
-  /** One of ours has begun, so it is no longer waiting. */
-  oursStarted(owner: string, left: readonly string[]): void;
-  /** The queue has drained, so nothing of ours is waiting in it. */
-  oursDrained(owner: string): void;
 };
 
 export function useRunLedger(): RunLedger {
   const startedAt = useRef<Readonly<Record<string, number>>>({});
   const didWork = useRef<Readonly<Record<string, boolean>>>({});
-  const oursInLine = useRef<Record<string, readonly string[]>>({});
   const streams = useRef(new Map<string, Coalescer>());
   const held = useRef<RunLedger | null>(null);
 
@@ -81,18 +72,6 @@ export function useRunLedger(): RunLedger {
     },
     flush(owner) {
       streams.current.get(owner)?.flush();
-    },
-    ours(owner) {
-      return oursInLine.current[owner] ?? [];
-    },
-    oursStarted(owner, left) {
-      if (oursInLine.current[owner] === undefined) return;
-      oursInLine.current = { ...oursInLine.current, [owner]: left };
-    },
-    oursDrained(owner) {
-      if (oursInLine.current[owner] === undefined) return;
-      const { [owner]: _mine, ...rest } = oursInLine.current;
-      oursInLine.current = rest;
     },
   };
 

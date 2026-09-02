@@ -1775,11 +1775,6 @@ function Conversation() {
     because: string;
   } | null>(null);
 
-  /* How heavy the system prompt has become. Pi's own text, forty tools'
-     guidelines, an add-on's five-kilobyte tool description, AGENTS.md, skills
-     and memory all land in the same window as the work — and the chip is where
-     somebody can see it before a small model stops coping. */
-  const [promptSize, setPromptSize] = useState<number | null>(null);
 
   /* The canvases this project has. Drawing one changes nothing until Start. */
   const [flows, setFlows] = useState<readonly Flow[]>([]);
@@ -2057,7 +2052,6 @@ function Conversation() {
         if (notice.event.type === 'tool-end' && notice.project !== null) {
           refreshFilesSoon(notice.project);
         }
-        if (notice.event.type === 'prompt-size') setPromptSize(notice.event.characters);
         if (notice.event.type === 'tool-start' && runs.stepStarted(runKey)) {
           // A new run makes the old footer's measure history.
           setFinishedRun((was) => (was !== null && was.owner === runKey ? null : was));
@@ -5262,7 +5256,6 @@ function Conversation() {
               onAdvisorGate={setAdvisorGate}
               addons={preferences.addons}
               onAddons={setAddons}
-              promptSize={promptSize}
               longJobs={longJobs}
               onConnect={openConnect}
               onThinking={changeThinking}

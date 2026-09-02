@@ -159,7 +159,7 @@ describe('D1 — the real name of what just happened', () => {
           advisor: null,
           advisorThinking: null,
           advisorGates: { completionGate: false, loopGate: false },
-          addons: 'tools-only',
+          addons: 'on',
           showMe: true,
           model: null,
           thinking: {},

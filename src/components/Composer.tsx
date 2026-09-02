@@ -110,8 +110,6 @@ type Props = {
   onAdvisorGate?: (which: 'completionGate' | 'loopGate', on: boolean) => void;
   addons?: 'on' | 'tools-only' | 'off';
   onAddons?: (choice: 'on' | 'tools-only' | 'off') => void;
-  /** How heavy the system prompt has become, in characters. */
-  promptSize?: number | null;
   /** What the chosen model was measured doing on a long job. */
   longJobs?: string | null;
   onConnect?: () => void;
@@ -257,7 +255,6 @@ export default function Composer({
   onAdvisorGate,
   addons,
   onAddons,
-  promptSize,
   longJobs,
   onConnect,
   onThinking,
@@ -974,7 +971,6 @@ export default function Composer({
             {...(onAdvisorGate === undefined ? {} : { onAdvisorGate })}
             {...(addons === undefined ? {} : { addons })}
             {...(onAddons === undefined ? {} : { onAddons })}
-            {...(promptSize == null ? {} : { promptSize })}
             {...(longJobs == null ? {} : { longJobs })}
           />
         )}

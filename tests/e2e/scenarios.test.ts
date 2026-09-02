@@ -330,12 +330,26 @@ describe('S-7 an add-on that starts work of its own', () => {
     );
   });
 
-  it('keeps its tools and loses its lifecycle hooks in a conversation', async () => {
+  /* It used to keep its tools and lose its hooks, which sounds cautious and is
+     not: an add-on whose tool starts the work and whose hook delivers the
+     result launches and then never answers. Half an add-on is worse than none.
+     What made the hooks dangerous is handled below instead — a hook that stops
+     answering is let go of, and a turn it asks for is one reason among the
+     authority's own. */
+  it('runs whole in a conversation, where somebody is watching every turn', async () => {
     const card = await probe(fixture);
     const policy = policyFor(card, 'conversation');
-    expect(policy).toBe('tools-only');
-    expect(dropsLifecycleHooks(policy)).toBe(true);
-    expect(saysPolicy(policy)).toBe('Its tools work; it cannot start a turn');
+    expect(policy).toBe('on');
+    expect(dropsLifecycleHooks(policy)).toBe(false);
+  });
+
+  it('stands down where Graphe is driving and nobody is watching', async () => {
+    const card = await probe(fixture);
+    for (const session of ['board', 'helper', 'canvas'] as const) {
+      const policy = policyFor(card, session);
+      expect(policy).toBe('off');
+      expect(saysPolicy(policy)).toBeTruthy();
+    }
   });
 
   it('lets go of a hook that stops answering', async () => {

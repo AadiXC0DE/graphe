@@ -66,7 +66,26 @@ export function policyFor(
   session: SessionKind,
   chosen?: Policy,
 ): Policy {
-  if (chosen !== undefined) return chosen;
+  if (chosen !== undefined && session === 'conversation') return chosen;
   if (card !== null && !card.orchestrating) return 'on';
-  return session === 'conversation' ? 'tools-only' : 'off';
+  /*
+   * A conversation gets the whole add-on, hooks and all.
+   *
+   * It used to get its tools without its hooks, which sounds cautious and is
+   * not: an add-on whose tool starts work and whose hook delivers the result is
+   * an add-on that launches and then never answers. Half an add-on is worse
+   * than none, because none is at least legible.
+   *
+   * What made the hooks dangerous — two things deciding when a turn begins — is
+   * handled where it belongs now. An add-on asking for a turn is one reason
+   * among the Continuation Authority's own, counted against the same budget and
+   * named out loud, and a lifecycle handler that stops answering is let go of
+   * rather than allowed to hold the settle.
+   *
+   * A board piece, a helper and a canvas block still get none of it. Nobody is
+   * sitting in front of those, and four of them each starting turns of their own
+   * is four loops nobody asked for.
+   */
+  if (session === 'conversation') return 'on';
+  return 'off';
 }

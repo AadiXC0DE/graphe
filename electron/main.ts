@@ -50,6 +50,7 @@ import { dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
+import { letChildrenRunAsNode } from '../src/agent/pi/childenv';
 import {
   connectToProvider,
   connection as readConnection,
@@ -358,6 +359,16 @@ import { knownTrouble, plainMessage, plainTrouble } from './plainly';
  * Electron ships a Node that has it.
  */
 patchWorkerThreads();
+
+/**
+ * And one more thing an add-on cannot know: `process.execPath` here is Electron,
+ * not node. An add-on that spawns "the runtime I am running under" — which is
+ * the obvious way to start a fresh agent — gets a second Electron application
+ * that never opens a window and never says anything. That is what "the subagent
+ * produced no output" was. See src/agent/pi/childenv.ts for why this is a patch
+ * on the spawn rather than a variable on the environment.
+ */
+letChildrenRunAsNode();
 
 /**
  * The PATH a Finder-launched app inherits is `/usr/bin:/bin:/usr/sbin:/sbin`,
@@ -2558,6 +2569,11 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // Failures are the one kind of event that can arrive in somebody else's
     // words — see the note at the top of plainly.ts. Everything else in the
     // stream was written by us or by the Guard and goes through untouched.
+    /* How heavy the system prompt got, kept for the diagnostics rather than
+       shown in the window. It is a number with no unit and nothing to press —
+       useless beside a switch, and the first thing worth knowing when somebody
+       asks why a small model stopped coping. */
+    if (event.type === 'prompt-size') promptSizes.set(keyOf(path, from.address ?? ''), event.characters);
     const said: AgentEvent = enrichForTheWindow(path, from.address ?? '', event);
     send(path, said, from.address ?? undefined);
 
@@ -4453,6 +4469,10 @@ async function sendOnTheirBehalf(project: string, address: string, text: string)
  *  neither. */
 const ours = new Map<string, readonly string[]>();
 
+/** How heavy the system prompt was on the last call of each conversation. Read
+ *  by the diagnostics, drawn nowhere. */
+const promptSizes = new Map<string, number>();
+
 /**
  * One event on its way to the window, said in the window's terms.
  *
@@ -4623,7 +4643,7 @@ function whyStopped(): string {
           list: null,
           rounds: { sent: last.move.state.rounds, stuck: last.move.state.stuckRounds },
           blockedStreak: null,
-          promptCharacters: null,
+          promptCharacters: promptSizes.get(keyOf(one.path, address)) ?? null,
           addons: conversation.held.addons.map((addon) => ({
             name: addon.name,
             says: addon.says,

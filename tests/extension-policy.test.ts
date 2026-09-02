@@ -51,11 +51,15 @@ describe('an add-on that only adds tools', () => {
 });
 
 describe('an add-on that starts work of its own', () => {
-  it('keeps its tools in a conversation, where somebody is watching every turn', () => {
-    expect(policyFor(drives, 'conversation')).toBe('tools-only');
+  /* It used to get its tools without its hooks, which sounds cautious and is
+     not: an add-on whose tool starts the work and whose hook delivers the
+     result launches and then never answers. Half an add-on is worse than none,
+     because none is at least legible. */
+  it('runs whole in a conversation, where somebody is watching every turn', () => {
+    expect(policyFor(drives, 'conversation')).toBe('on');
   });
 
-  it('stands down entirely wherever Graphe is driving', () => {
+  it('stands down entirely wherever Graphe is driving and nobody is watching', () => {
     expect(policyFor(drives, 'board')).toBe('off');
     expect(policyFor(drives, 'helper')).toBe('off');
     expect(policyFor(drives, 'canvas')).toBe('off');
@@ -63,8 +67,10 @@ describe('an add-on that starts work of its own', () => {
 });
 
 describe('an add-on nothing could be read out of', () => {
-  it('is treated as one that drives, because it is the one we know least about', () => {
-    expect(policyFor(null, 'conversation')).toBe('tools-only');
+  /* Not knowing what it does is a reason to keep it out of the places nobody is
+     watching, not a reason to hand somebody a tool that cannot finish. */
+  it('runs whole where somebody is watching, and nowhere else', () => {
+    expect(policyFor(null, 'conversation')).toBe('on');
     for (const session of SESSIONS.filter((one) => one !== 'conversation')) {
       expect(policyFor(null, session)).toBe('off');
     }
@@ -72,11 +78,17 @@ describe('an add-on nothing could be read out of', () => {
 });
 
 describe('what somebody chose for this conversation', () => {
-  it('beats every default, whatever the card and wherever it is', () => {
+  /* Only for a conversation: the switch says "for this conversation", and a
+     board piece is not one. Somebody turning add-ons on where they are sitting
+     must not turn them on in four copies running overnight. */
+  it('is honoured where they said it, and nowhere they did not', () => {
     for (const card of [quiet, drives, null]) {
-      for (const session of SESSIONS) {
+      for (const chosen of CHOICES) {
+        expect(policyFor(card, 'conversation', chosen)).toBe(chosen);
+      }
+      for (const session of SESSIONS.filter((one) => one !== 'conversation')) {
         for (const chosen of CHOICES) {
-          expect(policyFor(card, session, chosen)).toBe(chosen);
+          expect(policyFor(card, session, chosen)).toBe(policyFor(card, session));
         }
       }
     }

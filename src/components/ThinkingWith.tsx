@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { advisorSwitchWords, advisorWords, worthHaving } from '../agent/advisor';
 import { policyWords, type Policy } from '../agent/pi/extension-policy';
-import { saysPromptSize } from '../agent/pi/standing';
 import type { ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
 import { thinkingLevels } from '../lib/thinking';
@@ -35,8 +34,6 @@ type Props = {
    *  Off means their tools still work and their hooks do not. */
   addons?: Policy;
   onAddons?: (choice: Policy) => void;
-  /** How heavy the system prompt has become, in characters. */
-  promptSize?: number | null;
   /** What the chosen model was measured doing on a long job. Null for one
    *  nothing has measured, which is most of them. */
   longJobs?: string | null;
@@ -115,7 +112,6 @@ export default function ThinkingWith({
   onAdvisorGate,
   addons,
   onAddons,
-  promptSize = null,
   longJobs = null,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -478,14 +474,14 @@ export default function ThinkingWith({
 
               {/* What this model was measured doing on a long list, when
                   anybody has measured it. Said before somebody starts a night's
-                  work on one known to stop early, rather than after. */}
-              {longJobs !== null || promptSize !== null ? (
-                <p className="thinking__note">
-                  {[longJobs, promptSize === null ? null : saysPromptSize(promptSize)]
-                    .filter((one) => one !== null)
-                    .join(' · ')}
-                </p>
-              ) : null}
+                  work on one known to stop early, rather than after.
+
+                  How heavy the prompt is does NOT belong here. It was a number
+                  with no unit, no scale and nothing to press, dropped into the
+                  middle of a list of switches — and a reading nobody can act on
+                  is not information, it is furniture. It lives in the
+                  diagnostics, where somebody is already asking why. */}
+              {longJobs !== null ? <p className="thinking__note">{longJobs}</p> : null}
 
               <button
                 type="button"

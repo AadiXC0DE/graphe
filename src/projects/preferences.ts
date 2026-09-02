@@ -69,9 +69,16 @@ export type Preferences = {
    * somebody's decision; both are theirs now.
    */
   advisorGates: { completionGate: boolean; loopGate: boolean };
-  /** Whether add-ons that start turns of their own keep their hooks. Off keeps
-   *  their tools and drops the hooks; Graphe is already deciding when a turn
-   *  begins, and two of those is the bug. */
+  /**
+   * Whether add-ons that start turns of their own keep their hooks.
+   *
+   * On, because Graphe ships a shelf of them and an app that installs something
+   * and then quietly disables half of it is worse than one that never offered
+   * it. The reason to take the hooks away was that two things deciding when a
+   * turn begins is a bug — but the Continuation Authority handles an add-on
+   * asking for a turn as one more reason among its own, counts it against the
+   * same budget and names it. So it can be let through.
+   */
   addons: 'on' | 'tools-only';
   /** How much time each model should take before it answers. The map is keyed
    * by its provider and model id because different models support different
@@ -165,7 +172,7 @@ export const defaultPreferences: Preferences = {
   advisor: null,
   advisorThinking: null,
   advisorGates: { completionGate: false, loopGate: false },
-  addons: 'tools-only',
+  addons: 'on',
   thinking: {},
   kept: {},
   trusted: {},
@@ -211,7 +218,7 @@ function asPreferences(value: unknown): Preferences {
     advisor: asAdvisor(record['advisor']),
     advisorThinking: asAdvisorThinking(record['advisorThinking']),
     advisorGates: asGates(record['advisorGates']),
-    addons: record['addons'] === 'on' ? 'on' : 'tools-only',
+    addons: record['addons'] === 'tools-only' ? 'tools-only' : 'on',
     thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),

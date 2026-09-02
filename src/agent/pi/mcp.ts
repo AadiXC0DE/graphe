@@ -24,6 +24,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 
 import { findSecret } from '../guard/policy';
+import * as noted from '../../share/spawned';
 
 import { REACHABLE, pinnedSpec, readReach, whereOf, type Read } from './reach';
 
@@ -101,6 +102,9 @@ type Session = {
   config: McpServerConfig;
   client: import('@modelcontextprotocol/sdk/client/index.js').Client;
   tools: readonly { name: string; description?: string }[];
+  /** The child, where this is a server we started. A server already listening
+   *  somewhere is somebody else's process and is not ours to write down. */
+  pid?: number;
 };
 
 import { BrowserSignIn, type Keeps, type OpensPages } from './mcpauth';
@@ -136,6 +140,10 @@ const MAX_RESULT_CHARACTERS = 20_000;
 function toolResultText(text: string): { content: [{ type: 'text'; text: string }]; details: Record<string, never> } {
   return { content: [{ type: 'text', text }], details: {} };
 }
+
+/** The ones we vouch for that are language servers rather than ordinary tool
+ *  servers, so the ledger can say which it is holding. */
+const LANGUAGE_SERVERS = new Set(['code-read']);
 
 /** A server we start ourselves, talking over its own pipes. */
 async function startedHere(config: McpServerConfig): Promise<Transport> {
@@ -312,6 +320,15 @@ export class McpRegistry {
     }
     signIn?.done();
 
+    // Written down once it is up, because only a started transport knows its
+    // child's pid. Ended when it closes, whether we closed it or it fell over.
+    const pid = here ? ((transport as { pid?: number | null }).pid ?? undefined) : undefined;
+    if (pid !== undefined) {
+      const kind = LANGUAGE_SERVERS.has(config.name) ? 'lsp' : 'mcp';
+      noted.started({ pid, what: config.name, kind });
+      client.onclose = (): void => noted.ended(pid);
+    }
+
     let listed: readonly { name: string; description?: string }[] = [];
     try {
       const result = await client.listTools();
@@ -321,7 +338,7 @@ export class McpRegistry {
       // names what it wants.
       listed = [];
     }
-    const session: Session = { config, client, tools: listed };
+    const session: Session = { config, client, tools: listed, ...(pid === undefined ? {} : { pid }) };
     this.sessions.set(config.name, session);
     return session;
   }
@@ -389,6 +406,7 @@ export class McpRegistry {
       } catch {
         // A server that will not say goodbye is still gone when its pipes close.
       }
+      noted.ended(session.pid);
     }
     this.sessions.clear();
   }

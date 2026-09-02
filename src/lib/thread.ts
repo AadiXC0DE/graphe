@@ -611,6 +611,7 @@ export function applyEventInto(turns: Turn[], event: AgentEvent): boolean {
     case 'model-reading':
     case 'running':
     case 'busy':
+    case 'extension-turn':
     case 'prompt-size':
       return false;
 

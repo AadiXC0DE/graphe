@@ -46,6 +46,7 @@ import {
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
 import { readAgentsMd } from '../../lib/agentsMd';
+import { AGENTS_BUDGET, standingWords, withinBudget } from './standing';
 import {
   ALWAYS_WORDS,
   alwaysFile,
@@ -1798,6 +1799,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         : raw;
     if (event.type === 'tool-start') didSomething = true;
     if (event.type === 'error') failedThisRun = true;
+    /* An add-on's message inside a turn somebody asked for is part of that
+       turn. Only one that arrives with nothing running is a run nobody typed,
+       and that is the only one the authority has to hear about. */
+    if (event.type === 'extension-turn' && activePrompts > 0) return;
     /* A step refused by something outside Graphe. Graphe's own refusals never
        reach here as a tool result — they are said as `blocked`, with a reason
        the person has already read. This is a hook somebody installed saying no,
@@ -1913,7 +1918,11 @@ const MOST_AFTER_SAYINGS = 3;
   let agentsMdNote: string | null = null;
   if (options.projectRoot !== undefined && options.projectRoot !== '') {
     try {
-      agentsMdNote = await readAgentsMd(options.projectRoot);
+      const read = await readAgentsMd(options.projectRoot);
+      // Held to the same cap the budget holds it to. A 40 KB house-rules file
+      // would otherwise take most of the window before the work starts, and
+      // the rest of it is on disk for the model to read when it needs it.
+      agentsMdNote = read === null ? null : withinBudget(read, AGENTS_BUDGET, standingWords.agentsTrimmed);
     } catch {
       agentsMdNote = null;
     }
@@ -2288,12 +2297,15 @@ const MOST_AFTER_SAYINGS = 3;
    * tools but loses its hooks in an ordinary conversation, because Graphe is
    * already deciding when a turn begins and two of those is the bug.
    */
-  withHookBudget(loader.getExtensions(), (over) => {
-    options.onEvent({
-      type: 'notice',
-      what: `${over.extension} took too long on ${over.event} and was left to it.`,
+  const budgetHooks = (): void => {
+    withHookBudget(loader.getExtensions(), (over) => {
+      options.onEvent({
+        type: 'notice',
+        what: `${over.extension} took too long on ${over.event} and was left to it.`,
+      });
     });
-  });
+  };
+  budgetHooks();
   for (const one of loadedExtensions) {
     const where = (one as { resolvedPath?: string; path?: string }).resolvedPath ?? '';
     if (!cards.has(where)) continue;
@@ -2783,6 +2795,9 @@ const MOST_AFTER_SAYINGS = 3;
       // second is somebody adding to work already going, and stopping that to
       // put a form up is exactly what this must never do.
       if (activePrompts === 0) {
+        // Again before every run: an add-on that registered a handler inside
+        // `session_start` registered it after the first sweep went past.
+        budgetHooks();
         asksLeft = 'open';
         runNumber += 1;
         // Said rather than inferred. The window used to work out that it was

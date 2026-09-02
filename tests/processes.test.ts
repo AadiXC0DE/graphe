@@ -5,13 +5,27 @@
  * with nobody left who can stop it. So these spawn real children and check that
  * none of them are there afterwards — including one that refuses to take the
  * hint.
+ *
+ * The second half walks every place in `src/` that starts a process and checks
+ * that it says so, and says so again when it is over. A spawn site nobody wrote
+ * down is exactly the one that survives a quit.
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { addonProcesses, alive, ledger, type Spawned } from '../electron/processes';
+import { defaultHost } from '../src/agent/pi/computer';
+import { McpRegistry } from '../src/agent/pi/mcp';
+import { taskTool } from '../src/agent/pi/tools';
+import { runHelper } from '../src/share/run';
+import { watchWhatWeStart } from '../src/share/spawned';
+
+vi.setConfig({ testTimeout: 30_000 });
 
 const onUnix = process.platform !== 'win32';
 const started: ChildProcess[] = [];
@@ -152,5 +166,150 @@ describe('processes somebody else started', () => {
 
   it('answers zero rather than failing on a pid that is not there', async () => {
     await expect(addonProcesses(2 ** 30)).resolves.toBe(0);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* What each spawn writes down                                                 */
+/* -------------------------------------------------------------------------- */
+
+const folders: string[] = [];
+
+async function newFolder(): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), 'graphe-spawned-'));
+  folders.push(folder);
+  return folder;
+}
+
+/** A connected tool server that answers nothing and stays up until it is
+ *  closed. Enough to have a real child on the other end of a real transport. */
+async function stubServer(): Promise<string> {
+  const sdk = resolve('node_modules/@modelcontextprotocol/sdk/dist/esm');
+  const file = join(await newFolder(), 'server.mjs');
+  await writeFile(
+    file,
+    `import { Server } from ${JSON.stringify(`${sdk}/server/index.js`)};
+import { StdioServerTransport } from ${JSON.stringify(`${sdk}/server/stdio.js`)};
+import { ListToolsRequestSchema } from ${JSON.stringify(`${sdk}/types.js`)};
+const server = new Server({ name: 'stub', version: '1' }, { capabilities: { tools: {} } });
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
+await server.connect(new StdioServerTransport());
+`,
+    'utf8',
+  );
+  return file;
+}
+
+/** The helper program, which only exists in a built copy of the app. A
+ *  stand-in that reports once and stops is enough to have a real child. */
+async function helperProgram(): Promise<string> {
+  const file = join(await newFolder(), 'helper.mjs');
+  await writeFile(
+    file,
+    `process.stdin.resume();
+process.stdin.on('end', () => {
+  console.log(JSON.stringify({ type: 'done', outcome: { ok: true, text: 'reported' } }));
+});
+`,
+    'utf8',
+  );
+  return file;
+}
+
+afterAll(async () => {
+  await Promise.all(folders.splice(0).map((one) => rm(one, { recursive: true, force: true })));
+});
+
+/** The seam every corner of `src/` starts a process through. Real children
+ *  here, because the claim is about the spawn sites and not about the map. */
+function watching(): { rows: Spawned[]; gone: number[] } {
+  const rows: Spawned[] = [];
+  const gone: number[] = [];
+  watchWhatWeStart({
+    started: (one) => rows.push({ ...one, at: Date.now() }),
+    ended: (pid) => gone.push(pid),
+  });
+  return { rows, gone };
+}
+
+/** A row closing is one event later than the call that started it. */
+async function until(that: () => boolean): Promise<void> {
+  for (let look = 0; look < 200 && !that(); look += 1) {
+    await new Promise((done) => setTimeout(done, 25));
+  }
+  expect(that()).toBe(true);
+}
+
+function rowFor(rows: readonly Spawned[], what: string): Spawned {
+  const found = rows.find((one) => one.what === what);
+  expect(found, `nothing written down for ${what}`).toBeDefined();
+  return found as Spawned;
+}
+
+describe('what each spawn writes down', () => {
+  afterEach(() => {
+    watchWhatWeStart(null);
+    delete process.env['GRAPHE_HELPER_PROGRAM'];
+  });
+
+  it.runIf(onUnix)('an outside command, as a tool', async () => {
+    const seen = watching();
+    await runHelper('sh', ['-c', 'exit 0'], { folder: tmpdir() });
+
+    const row = rowFor(seen.rows, 'sh');
+    expect(row.kind).toBe('tool');
+    await until(() => seen.gone.includes(row.pid));
+  });
+
+  it.runIf(onUnix)('the browser, as a browser', async () => {
+    const seen = watching();
+    await defaultHost(tmpdir())('sh', ['-c', 'exit 0'], {});
+
+    const row = rowFor(seen.rows, 'sh');
+    expect(row.kind).toBe('browser');
+    await until(() => seen.gone.includes(row.pid));
+  });
+
+  it('a connected tool server, as an add-on server', async () => {
+    const seen = watching();
+    const registry = new McpRegistry({
+      servers: [{ name: 'stub', command: process.execPath, args: [await stubServer()] }],
+    });
+    await registry.toolsOf('stub');
+
+    const row = rowFor(seen.rows, 'stub');
+    expect(row.kind).toBe('mcp');
+    expect(alive(row.pid)).toBe(true);
+
+    await registry.close();
+    await until(() => seen.gone.includes(row.pid));
+  });
+
+  /* The one connected server that is a language server rather than a tool
+     server, so the ledger says which it is holding. */
+  it('a read of the code, as a language server', async () => {
+    const seen = watching();
+    const registry = new McpRegistry({
+      servers: [{ name: 'code-read', command: process.execPath, args: [await stubServer()] }],
+    });
+    await registry.toolsOf('code-read');
+
+    expect(rowFor(seen.rows, 'code-read').kind).toBe('lsp');
+    await registry.close();
+  });
+
+  it.runIf(onUnix)('a helper agent, as a helper', async () => {
+    process.env['GRAPHE_HELPER_PROGRAM'] = await helperProgram();
+    const seen = watching();
+    await taskTool(await newFolder()).execute(
+      'call-1',
+      { task: 'Say what you can see and stop.' },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    const row = rowFor(seen.rows, 'helper agent');
+    await until(() => seen.gone.includes(row.pid));
   });
 });

@@ -70,7 +70,7 @@ export default function AppearanceBand({ appearance, onChange, on }: Props) {
 
   return (
     <section className="appearance" aria-label={appearanceWords.name}>
-      <style>{cssFor(showing, on).replace(/:root, :root\[data-theme\]/g, '.appearance__preview')}</style>
+      <style>{cssFor(showing, on, '.appearance__preview')}</style>
       <p className="appearance__note">{appearanceWords.note}</p>
 
       {row(

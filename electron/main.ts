@@ -244,7 +244,7 @@ import { addonProcesses, ledger } from './processes';
 import { watchWhatWeStart } from '../src/share/spawned';
 import { MENU_IDS, menuTemplate, type MenuItem } from './menu';
 import { gather, saysDiagnostics } from './diagnostics';
-import { MOST_ROWS, standingBlock } from '../src/agent/pi/standing';
+import { MOST_ROWS, SKILL_BUDGET, standingBlock, standingWords, withinBudget } from '../src/agent/pi/standing';
 import { FlowFile } from '../src/projects/flows';
 import { readFlow, withFlow, withoutFlow, type Flow } from '../src/work/canvas';
 import { notHere, runHelper } from '../src/share/run';
@@ -2649,6 +2649,17 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     ) {
       continuations.waiting(path, from.address ?? '', true);
     }
+    // A card taken back off the screen is a card nobody is going to answer.
+    if (said.type === 'questions-withdrawn' || said.type === 'asking-withdrawn') {
+      continuations.waiting(path, from.address ?? '', false);
+    }
+
+    /* An add-on started a turn of its own. It has already begun, so this is not
+       permission being asked for: it is counted against the same budget as
+       every other reason to carry on, and named when the run stops. */
+    if (said.type === 'extension-turn') {
+      continuations.extensionAsked(path, from.address ?? '', said.from, said.text);
+    }
 
     // Against the ceiling as well as into the ledger. This is the conversation
     // somebody is sitting in front of, so it is never registered as something
@@ -3853,7 +3864,7 @@ async function startConversationUnlocked(
       // once. Only the conversation in front gets this: the runs on the board
       // must not be able to fill the board they are running on.
       putOnBoard: (doing, after, ways) =>
-        keepGoing(open.path, basename(open.path), doing, after, false, ways ?? null),
+        keepGoing(open.path, basename(open.path), doing, after, false, ways ?? null, null, from.address ?? ''),
       // Whoever is doing the work says which step moved, rather than the window
       // guessing from where one reply ends and the next begins. `from.address`
       // is filled the moment this conversation has a name, which is before any
@@ -4400,7 +4411,10 @@ let listNow: (project: string, address: string) => Promise<StoredPlan | null> = 
  * fired on the same settle and none knew the other two existed.
  */
 const continuations = continuationOwner({
-  send: (project, address, text) => {
+  send: (project, address, text, why) => {
+    // A round toward the goal is what a round is counted for. Counting them on
+    // the settle counted the ones that never went out.
+    if (why === 'goal') void countGoalRound(project, address);
     void sendOnTheirBehalf(project, address, text);
   },
   say: (project, address, text) => {
@@ -4408,6 +4422,12 @@ const continuations = continuationOwner({
     const at = address === '' ? undefined : address;
     send(project, { type: 'message-delta', text: `\n\n${text}` }, at);
     send(project, { type: 'message-end' }, at);
+  },
+  halt: (project, address) => {
+    const open = projectAt({ project });
+    if (open === null) return;
+    const session = sessionAt(open, address === '' ? {} : { conversation: address });
+    void session?.stop().catch(() => undefined);
   },
   tell: (one) => {
     if (mainWindow === null || mainWindow.isDestroyed()) return;
@@ -4442,6 +4462,8 @@ const continuations = continuationOwner({
     // they are not run on every round to be thrown away.
     const checks = how.done < how.total ? null : await runProjectChecks(project, address);
     const verdict = verifyGoal(plan, checks, goal.objective);
+    // Met is a change worth writing. Not met is the same goal it was: the round
+    // is counted where the round is sent.
     if (verdict.met) {
       await GoalFile.write(
         project,
@@ -4449,17 +4471,23 @@ const continuations = continuationOwner({
         { ...withElapsed(goal), status: 'done' },
         address,
       );
-    } else {
-      await GoalFile.write(
-        project,
-        app.getPath('userData'),
-        { ...withElapsed(goal), iterations: goal.iterations + 1 },
-        address,
-      );
     }
     return { ...verdict, objective: goal.objective };
   },
 });
+
+/** One more round toward the goal, written down so a restart keeps the count. */
+async function countGoalRound(project: string, address: string): Promise<void> {
+  const userData = app.getPath('userData');
+  const goal = await GoalFile.read(project, userData, address).catch(() => null);
+  if (goal === null || goal.status !== 'active') return;
+  await GoalFile.write(
+    project,
+    userData,
+    { ...withElapsed(goal), iterations: goal.iterations + 1 },
+    address,
+  ).catch(() => undefined);
+}
 
 /**
  * The one path a message the person did not type goes out by.
@@ -5482,6 +5510,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       saidBriefly(run.said),
     );
     tellThem(notice.title, notice.body, desk.path);
+    tellTheConversation(desk, landed);
   }
   noteDown(desk, piece.id);
   whatFollows(desk, piece.id);
@@ -5506,6 +5535,24 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
 function whatFollows(desk: AwayDesk, id: string): void {
   const moved = desk.chain.finished(id);
   for (const one of [...moved.started, ...moved.stopped]) noteDown(desk, one);
+}
+
+/**
+ * The conversation that asked for this piece hears that it landed.
+ *
+ * Through the authority rather than around it, so it is counted against the
+ * same budget as every other reason to send, named in the line under the reply,
+ * and left out of the waiting line. A conversation with nothing running has no
+ * settle coming, so this is its settle.
+ */
+function tellTheConversation(desk: AwayDesk, piece: PieceOfWork): void {
+  const open = projectAt({ project: desk.path });
+  if (open === null) return;
+  const address = piece.startedBy ?? open.held.sessions.current?.path ?? '';
+  continuations.landed(desk.path, address, { id: piece.id, title: piece.doing });
+  const session = sessionAt(open, address === '' ? {} : { conversation: address });
+  if (session === null || session.working) return;
+  void continuations.settled(desk.path, address, 'finished');
 }
 
 /** Everything behind this one, however far back, on the board saying why it will
@@ -5590,6 +5637,9 @@ async function keepGoing(
   /** Which model runs it. Null takes whatever is answering, which is every
    *  route but a block on the canvas that named one. */
   model: { providerId: string; modelId: string } | null = null,
+  /** The conversation that asked. Null where nobody did: the canvas, a plan
+   *  picked up off the disk, a piece asked for from the board itself. */
+  startedBy: string | null = null,
 ): Promise<WentOn> {
   const desk = deskFor(path, name);
   const id = nextName(desk);
@@ -5597,7 +5647,7 @@ async function keepGoing(
   if (untilDone) desk.goals.add(id);
 
   if (after !== null) {
-    const asked = desk.chain.hold({ id, doing, at, after });
+    const asked = desk.chain.hold({ id, doing, at, after, startedBy });
     if (!asked.ok) return { ok: false, because: asked.because };
     desk.after.set(id, after);
     if (asked.waits) {
@@ -5612,7 +5662,7 @@ async function keepGoing(
     }
   }
 
-  const piece = desk.bench.ask(doing, { id, at, ways, model });
+  const piece = desk.bench.ask(doing, { id, at, ways, model, startedBy });
   // Written down before it starts, so a machine that loses power between the
   // asking and the first word still comes back to something waiting its turn.
   await notes().note(
@@ -5663,7 +5713,7 @@ async function pickUpWhereWeLeftOff(): Promise<void> {
       });
       if (next.do === 'leave' || next.do === 'carry-on') continue;
 
-      const piece = desk.bench.ask(one.doing, { id: one.id, at: one.at, ways: one.ways ?? null });
+      const piece = desk.bench.ask(one.doing, { id: one.id, at: one.at, ways: one.ways ?? null, startedBy: one.startedBy ?? null });
       Object.assign(piece, asPiece(one));
       if (one.spent !== null) desk.costs.set(piece.id, one.spent);
       if (one.says !== null) desk.saids.set(piece.id, one.says);
@@ -5706,7 +5756,7 @@ function putPlansBack(desk: AwayDesk, written: readonly Written[]): void {
     const piece = desk.bench.pieces.find((on) => on.id === one.id);
     if (piece === undefined || piece.state !== 'waiting') continue;
 
-    const asked = desk.chain.hold({ id: one.id, doing: one.doing, at: one.at, after: one.after });
+    const asked = desk.chain.hold({ id: one.id, doing: one.doing, at: one.at, after: one.after, startedBy: one.startedBy ?? null });
     if (asked.ok && !asked.waits) continue;
     if (!asked.ok) {
       desk.bench.stopped(one.id, afterWords.broke);
@@ -7191,7 +7241,7 @@ function register(): void {
       const held = desk.chain.take(id);
       if (held === null) return done(awayNow(open.path));
       desk.after.delete(id);
-      desk.bench.ask(held.doing, { id: held.id, at: held.at });
+      desk.bench.ask(held.doing, { id: held.id, at: held.at, startedBy: held.startedBy ?? null });
       noteDown(desk, id);
       pushAway(open.path);
       await runWhatCan(desk);
@@ -7209,9 +7259,9 @@ function register(): void {
 
     // Nothing left to wait for, or nothing that would hold: either way it goes
     // back on the board and takes its turn there.
-    const asked = desk.chain.hold({ id, doing: was.doing, at: was.at, after });
+    const asked = desk.chain.hold({ id, doing: was.doing, at: was.at, after, startedBy: was.startedBy ?? null });
     if (asked.ok) desk.after.set(id, after);
-    if (!asked.ok || !asked.waits) desk.bench.ask(was.doing, { id, at: was.at });
+    if (!asked.ok || !asked.waits) desk.bench.ask(was.doing, { id, at: was.at, startedBy: was.startedBy ?? null });
     noteDown(desk, id);
     pushAway(open.path);
     if (!asked.ok) return fail(couldNotWait(asked.because));
@@ -8524,6 +8574,12 @@ function register(): void {
     return found === null ? null : addressOf(found.held);
   }
 
+  /** A card has been answered, so the loop is no longer held back by it. A
+   *  click is an answer; before this only typing counted as one. */
+  function answered(open: Workspace<Held>, where: Where): void {
+    continuations.waiting(open.path, listAddress(open, where) ?? '', false);
+  }
+
   handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildPlan, async (_event, args) => {
     const where = whereIn(args);
     const open = projectAt(where);
@@ -8770,7 +8826,18 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return done(null);
-    return done(await GoalFile.read(open.path, app.getPath('userData')));
+    const address = listAddress(open, where);
+    if (address === null) return done(null);
+    const userData = app.getPath('userData');
+    const found = await GoalFile.read(open.path, userData, address);
+    if (found !== null) return done(found);
+    // A goal written when there was one per project belongs to whichever
+    // conversation asks for it first, and only once.
+    const older = await GoalFile.read(open.path, userData);
+    if (older === null) return done(null);
+    await GoalFile.write(open.path, userData, older, address);
+    await GoalFile.clear(open.path, userData);
+    return done(older);
   });
 
   handle<null>(CHANNEL.goalSave, async (_event, args) => {
@@ -8778,10 +8845,12 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
+    const address = listAddress(open, where);
+    if (address === null) return fail(NOTHING_OPEN);
     // Read the same way it is read back, so nothing half-shaped reaches disk.
     const goal = readStoredGoal(raw);
     if (goal === null) return fail(NOTHING_OPEN);
-    await GoalFile.write(open.path, app.getPath('userData'), goal);
+    await GoalFile.write(open.path, app.getPath('userData'), goal, address);
     return done(null);
   });
 
@@ -8789,7 +8858,9 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return done(null);
-    await GoalFile.clear(open.path, app.getPath('userData'));
+    const address = listAddress(open, where);
+    if (address === null) return done(null);
+    await GoalFile.clear(open.path, app.getPath('userData'), address);
     return done(null);
   });
 
@@ -8955,7 +9026,7 @@ function register(): void {
           : `${asked}\n\n<graphe-selected-skills>\n${chosen
               .map(
                 ({ skill, text: instructions }) =>
-                  `The user explicitly selected @${skill.handle}. Follow these instructions for this request:\n<skill name="${skill.name}">\n${instructions.slice(0, 50000)}\n</skill>`,
+                  `The user explicitly selected @${skill.handle}. Follow these instructions for this request:\n<skill name="${skill.name}">\n${withinBudget(instructions, SKILL_BUDGET, standingWords.skillTrimmed)}\n</skill>`,
               )
               .join('\n\n')}\n</graphe-selected-skills>`;
       await agent.prompt(withSkills, imageCards(attachments), { lookFirst, queue });
@@ -9051,8 +9122,13 @@ function register(): void {
     // Whichever session asked. A check running in a copy draws its card into
     // the same thread, and answering it into the conversation behind would have
     // returned quietly false and left the run waiting forever.
-    if (open.held.checking?.answerAsked(id, picked) === true) return done(true);
-    return done(sessionAt(open, where)?.answerAsked(id, picked) ?? false);
+    if (open.held.checking?.answerAsked(id, picked) === true) {
+      answered(open, where);
+      return done(true);
+    }
+    const took = sessionAt(open, where)?.answerAsked(id, picked) ?? false;
+    if (took) answered(open, where);
+    return done(took);
   });
 
   handle<boolean>(CHANNEL.answer, async (_event, args) => {
@@ -9063,8 +9139,13 @@ function register(): void {
     if (open === null) return done(false);
     // Same again for the Guard's own questions: the check in a copy asks them
     // too, and it is the one that has to hear the answer.
-    if (open.held.checking?.answer(callId, decision as Decision) === true) return done(true);
-    return done(sessionAt(open, where)?.answer(callId, decision as Decision) ?? false);
+    if (open.held.checking?.answer(callId, decision as Decision) === true) {
+      answered(open, where);
+      return done(true);
+    }
+    const took = sessionAt(open, where)?.answer(callId, decision as Decision) ?? false;
+    if (took) answered(open, where);
+    return done(took);
   });
 
   /**

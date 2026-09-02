@@ -12,26 +12,33 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { GRAPHE_OWNED, reconcile } from '../../src/agent/advisor';
 import { budgetMs, forgetOverruns, recentOverruns, withHookBudget, type Overrun } from '../../src/agent/pi/hook-budget';
 import { dropsLifecycleHooks, policyFor, saysPolicy } from '../../src/agent/pi/extension-policy';
 import { probe, saysCard } from '../../src/agent/pi/extension-probe';
 import {
+  AGENTS_BUDGET,
   EXTENSION_BUDGET,
   standingBlock,
-  trimToBudget,
-  type Piece,
+  standingWords,
+  withinBudget,
 } from '../../src/agent/pi/standing';
 import { parseProposal } from '../../src/agent/plan';
 import { implementationPlanFromResearch, stepsFromReport } from '../../src/agent/research';
 import type { AgentEvent, Money } from '../../src/agent/types';
 import { changeDesk, noDesks, openDesk, receive } from '../../src/lib/projects';
+import { GoalFile } from '../../src/projects/goals';
 import { Workspaces } from '../../src/projects/workspaces';
 import { STEP_WAS_STOPPED, type Turn } from '../../src/lib/thread';
 import { carryOnWords } from '../../src/work/carryon';
 import { MOST_ROUNDS, continuationWords } from '../../src/work/continuation';
+import { createGoal } from '../../src/work/goal';
 import { harness, type Report } from './harness';
 
 const tick = (n: number) => ({ name: 'step_done', input: { n } });
@@ -326,7 +333,7 @@ describe('S-7 an add-on that starts work of its own', () => {
     expect(card?.runsBackgroundWork).toBe(true);
     expect(card?.orchestrating).toBe(true);
     expect(saysCard(card!)).toBe(
-      'starts turns on its own · runs work in the background · changes the system prompt',
+      'starts turns on its own · runs work in the background · changes the system prompt · 6.2k of every prompt',
     );
   });
 
@@ -371,22 +378,17 @@ describe('S-7 an add-on that starts work of its own', () => {
     forgetOverruns();
   });
 
-  it('trims its six kilobytes out of the prompt and leaves ours alone', async () => {
+  /* Its tool descriptions reach the model through the tool schema rather than
+     the system prompt, so there is nothing of ours to cut. What is owed is
+     saying what it weighs, on its own row. */
+  it('says on its row what its six kilobytes cost every call', async () => {
     const card = await probe(fixture);
     const bytes = card?.toolPromptBytes ?? 0;
     expect(bytes).toBeGreaterThan(EXTENSION_BUDGET);
-    const ours = standingBlock({ list: null, goal: 'make the tests pass', notes: [] }) ?? '';
-    const pieces: readonly Piece[] = [
-      { kind: 'pi', from: 'pi', text: 'p'.repeat(58_000) },
-      { kind: 'extension', from: 'orchestrating', text: 'd'.repeat(bytes) },
-      { kind: 'graphe', from: 'graphe', text: ours },
-    ];
-    const trimmed = trimToBudget(pieces);
-    expect(trimmed.now).toBeLessThan(trimmed.was);
-    expect(trimmed.cut.map((one) => one.from)).toEqual(['orchestrating']);
-    const addon = trimmed.pieces.find((one) => one.kind === 'extension');
-    expect(addon?.text.length).toBeLessThanOrEqual(EXTENSION_BUDGET + 80);
-    expect(trimmed.pieces.find((one) => one.kind === 'graphe')?.text).toBe(ours);
+    expect(card === null ? '' : saysCard(card)).toContain('of every prompt');
+    expect(standingBlock({ list: null, goal: 'make the tests pass', notes: [] })).toContain(
+      '<graphe-standing>',
+    );
   });
 
   it('gets one attributed turn per settle, however often it asks', async () => {
@@ -586,5 +588,88 @@ describe('S-10 a run that costs nothing', () => {
     expect(report.busy).toBe(false);
     expect(report.waiting).toEqual([]);
     expect(app.desks().byPath[app.project]?.doing).toBeNull();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('S-11 a goal set through the shell rather than through the harness', () => {
+  /* The window saved it with no address and the authority read it with one, so
+     the two halves never met and Goal Mode ran a single round. */
+  it('is written and read at the same conversation', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'graphe-s11-'));
+    try {
+      const address = '/sessions/a.jsonl';
+      await GoalFile.write('/work/site', base, createGoal('ship the release', 'doing'), address);
+      expect(await GoalFile.read('/work/site', base, address)).toMatchObject({
+        objective: 'ship the release',
+        status: 'active',
+      });
+      expect(await GoalFile.read('/work/site', base, '/sessions/b.jsonl')).toBeNull();
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('sends one round toward it, naming it', async () => {
+    const app = harness({ goal: 'every test passes', list: numbered(2) });
+    const report = await app.run([{ says: 'Started.', calls: ticks(1, 1) }, { says: 'Done.' }]);
+    expect(report.sends.some((one) => one.why === 'goal' || one.why === 'checklist')).toBe(true);
+    expect(report.goal?.objective).toBe('every test passes');
+  });
+});
+
+describe('S-12 background work landing while the conversation is idle', () => {
+  it('sends once, to the conversation that asked, and says why', async () => {
+    const app = harness({ list: numbered(1) });
+    await app.run([{ says: 'Set that going.' }]);
+    app.open('/b');
+
+    await app.landed(app.project, { id: 'w1', title: 'rewrite the header' });
+    const asked = app.report(app.project);
+    expect(asked.continuations).toBe(1);
+    expect(asked.sends[0]?.why).toBe('board');
+    expect(asked.said[0]).toContain('rewrite the header');
+    expect(app.report('/b').continuations).toBe(0);
+  });
+
+  it('says it once however many times the same piece lands', async () => {
+    const app = harness({ list: numbered(1) });
+    await app.run([{ says: 'Set that going.' }]);
+    await app.landed(app.project, { id: 'w1', title: 'rewrite the header' });
+    await app.landed(app.project, { id: 'w1', title: 'rewrite the header' });
+    expect(app.report(app.project).continuations).toBe(1);
+  });
+});
+
+describe('S-14 a question answered with a click, mid-list', () => {
+  /* Only typing used to clear the hold, so the first Yes ended the automatic
+     rounds for the rest of a twelve-step job. */
+  it('holds while the card is open, and carries on once it is answered', async () => {
+    const app = harness({ list: numbered(3) });
+    const held = await app.run([{ says: 'Waiting on you.', how: 'asked-person' }]);
+    expect(held.continuations).toBe(0);
+
+    app.answered();
+    await app.landed(app.project, { id: 'w1', title: 'the thing they asked about' });
+    expect(app.report(app.project).continuations).toBe(1);
+  });
+});
+
+describe('S-16 a house-rules file nobody could carry whole', () => {
+  it('reaches the prompt at its cap, with a pointer to the rest', () => {
+    const carried = withinBudget('x'.repeat(40_000), AGENTS_BUDGET, standingWords.agentsTrimmed);
+    expect(carried.length).toBeLessThanOrEqual(AGENTS_BUDGET + standingWords.agentsTrimmed.length + 2);
+    expect(carried).toContain(standingWords.agentsTrimmed);
+  });
+
+  it('is held where it is read rather than after the prompt is assembled', () => {
+    const adapter = readFileSync(
+      fileURLToPath(new URL('../../src/agent/pi/adapter.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(adapter).toContain(
+      'withinBudget(read, AGENTS_BUDGET, standingWords.agentsTrimmed)',
+    );
   });
 });

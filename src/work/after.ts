@@ -29,6 +29,9 @@ export type Follower = {
   at: number;
   /** The piece of work it comes after. */
   after: string;
+  /** The conversation that asked for the plan, carried through so the answer
+   *  reaches whoever is waiting on it. */
+  startedBy?: string | null;
 };
 
 export type Allowed = { ok: true } | { ok: false; because: string };
@@ -78,7 +81,7 @@ function short(doing: string): string {
  */
 export type Board = {
   /** Put a piece of work on the board, waiting its turn. */
-  ask: (doing: string, where: { id: string; at: number }) => void;
+  ask: (doing: string, where: { id: string; at: number; startedBy?: string | null }) => void;
   /** Put one on the board that will never run, and why. */
   stopped: (id: string, trouble: string) => void;
   /** Where one already on the board has got to, or null when it has none. */
@@ -144,7 +147,7 @@ export class Following {
 
   /** Write one down as waiting. `waits: false` means what it was asked to follow
    *  is already done, so there is nothing to hold it back. */
-  hold(one: { id: string; doing: string; at: number; after: string }): Asked {
+  hold(one: { id: string; doing: string; at: number; after: string; startedBy?: string | null }): Asked {
     const allowed = this.could(one.id, one.after);
     if (!allowed.ok) return allowed;
     if (this.#stage(one.after) === 'landed') return { ok: true, waits: false };
@@ -170,7 +173,7 @@ export class Following {
     const free = this.waiting.filter((one) => one.after === id);
     for (const one of free) {
       this.#waiting.delete(one.id);
-      this.#board.ask(one.doing, { id: one.id, at: one.at });
+      this.#board.ask(one.doing, { id: one.id, at: one.at, startedBy: one.startedBy ?? null });
     }
     return { started: free.map((one) => one.id), stopped: [] };
   }
@@ -193,7 +196,7 @@ export class Following {
       for (const one of this.waiting) {
         if (!front.includes(one.after)) continue;
         this.#waiting.delete(one.id);
-        this.#board.ask(one.doing, { id: one.id, at: one.at });
+        this.#board.ask(one.doing, { id: one.id, at: one.at, startedBy: one.startedBy ?? null });
         this.#board.stopped(one.id, reason);
         fallen.push(one.id);
         next.push(one.id);

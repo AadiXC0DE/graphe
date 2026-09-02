@@ -503,6 +503,9 @@ export type PieceOfWork = {
    *  way, which takes whatever is answering; set where a block on the canvas
    *  named one. */
   model?: { providerId: string; modelId: string } | null;
+  /** The conversation that asked for it, so the answer goes back to whoever is
+   *  waiting on it rather than to whichever tab happens to be in front. */
+  startedBy?: string | null;
 };
 
 /** Where one piece of work's copy lives: its own folder inside the room, so
@@ -565,6 +568,7 @@ export class Workbench {
       at?: number;
       ways?: string | null;
       model?: { providerId: string; modelId: string } | null;
+      startedBy?: string | null;
     } = {},
   ): PieceOfWork {
     this.asked += 1;
@@ -580,6 +584,7 @@ export class Workbench {
       touches: null,
       ...(options.ways == null ? {} : { ways: options.ways }),
       ...(options.model == null ? {} : { model: options.model }),
+      ...(options.startedBy == null ? {} : { startedBy: options.startedBy }),
     };
     this.work.push(piece);
     return piece;

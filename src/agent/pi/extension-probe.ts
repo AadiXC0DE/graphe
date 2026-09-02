@@ -16,6 +16,8 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { EXTENSION_BUDGET } from './standing';
+
 /** A factory that never answers is a factory we stop waiting for. */
 const PROBE_MS = 5000;
 
@@ -82,15 +84,27 @@ export function saysCard(card: CapabilityCard): string {
   if (card.startsTurns) parts.push('starts turns on its own');
   if (card.runsBackgroundWork) parts.push('runs work in the background');
   if (card.rewritesSystemPrompt) parts.push('changes the system prompt');
-  if (parts.length > 0) return parts.join(' · ');
 
   const quiet: string[] = [];
   if (card.tools.length === 1) quiet.push('adds one tool');
   else if (card.tools.length > 1) quiet.push(`adds ${card.tools.length} tools`);
   if (card.commands.length === 1) quiet.push('adds one command');
   else if (card.commands.length > 1) quiet.push(`adds ${card.commands.length} commands`);
-  if (quiet.length === 0) return 'adds nothing you can call';
-  return quiet.join(' · ');
+
+  const said = parts.length > 0 ? parts : quiet;
+  // Tool descriptions ride in every call this add-on is loaded for, so a heavy
+  // one is worth saying out loud rather than leaving to be discovered.
+  const weight = saysPromptWeight(card.toolPromptBytes);
+  if (weight !== null) said.push(weight);
+  if (said.length === 0) return 'adds nothing you can call';
+  return said.join(' · ');
+}
+
+/** What an add-on's tool descriptions cost every call, once that is enough to
+ *  matter. Null under the cap, which is nearly all of them. */
+export function saysPromptWeight(bytes: number, most = EXTENSION_BUDGET): string | null {
+  if (bytes <= most) return null;
+  return `${String(Math.round(bytes / 100) / 10)}k of every prompt`;
 }
 
 /* -------------------------------------------------------------------------- */

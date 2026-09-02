@@ -37,6 +37,7 @@
  */
 
 import { scratchFolder } from '../../work/copies';
+import * as noted from '../../share/spawned';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -996,7 +997,14 @@ export function debugTools(registry: DebugRegistry): ToolDefinition[] {
  *  always where the shell is — including inside a packaged app, where
  *  Electron's own Node reads it out of the asar exactly as it reads anything
  *  else. */
-const SUBAGENT_RUNNER = fileURLToPath(new URL('./subagent-runner.mjs', import.meta.url));
+const BUILT_RUNNER = fileURLToPath(new URL('./subagent-runner.mjs', import.meta.url));
+
+/** The helper program this run hands work to. Named elsewhere it is that one
+ *  instead, which is how a helper can be started without a built app. */
+function subagentRunner(): string {
+  const named = (process.env['GRAPHE_HELPER_PROGRAM'] ?? '').trim();
+  return named === '' ? BUILT_RUNNER : named;
+}
 
 /** The last of the child's own noise we keep, in characters. */
 const STDERR_TAIL = 4000;
@@ -1124,8 +1132,9 @@ export type HelperPace = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
  *  which reads exactly like a helper that crashed. Under vitest this module is
  *  the TypeScript source, so the built child really is not next door. */
 function whyNoHelper(): string | null {
-  if (existsSync(SUBAGENT_RUNNER)) return null;
-  return `The helper program is not built into this copy of the app (nothing at ${SUBAGENT_RUNNER}), so there is nothing for me to hand the work to.`;
+  const runner = subagentRunner();
+  if (existsSync(runner)) return null;
+  return `The helper program is not built into this copy of the app (nothing at ${runner}), so there is nothing for me to hand the work to.`;
 }
 
 /** The last thing the child said for itself, if it is short enough to be a
@@ -1193,18 +1202,15 @@ async function runSubagent(
   const gate = await doorForHelpers().catch(() => null);
   const through = gate !== null && gate.open ? gate.port : undefined;
 
-  const bound = await hold(
-    process.execPath,
-    [SUBAGENT_RUNNER],
-    helperBounds(cwd, job.agentDir, through),
-  );
+  const runner = subagentRunner();
+  const bound = await hold(process.execPath, [runner], helperBounds(cwd, job.agentDir, through));
   boundary.asked = bound.held;
   if (!bound.held) boundary.because = bound.sentence;
 
   return new Promise((resolve) => {
     const child = spawn(
       bound.held ? bound.command : process.execPath,
-      bound.held ? [...bound.args] : [SUBAGENT_RUNNER],
+      bound.held ? [...bound.args] : [runner],
       {
         cwd,
         env: {
@@ -1215,6 +1221,10 @@ async function runSubagent(
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     );
+    // A helper outlives nothing but its own turn, and a turn can be abandoned:
+    // quitting has to take it with it.
+    noted.started({ pid: child.pid, what: `${job.role ?? 'helper'} agent`, kind: 'helper' });
+    child.once('exit', () => noted.ended(child.pid));
 
     let buffer = '';
     let done = false;

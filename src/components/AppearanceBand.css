@@ -1,34 +1,37 @@
-/* How the app looks, as a handful of choices. The preview below them is the
-   real stylesheet on real surfaces — a drawing of what a theme might look like
-   is the one thing a theme builder must not show. */
+/* How the app looks, as a handful of choices.
+
+   Drawn as settings rows, because that is what they are: the band sits inside a
+   settings card whose rows are full width with their own inset, and anything
+   that brings its own box reads as a panel dropped into a list. */
 
 .appearance {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+  display: contents;
 }
 
 .appearance__note {
   margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
   color: var(--text-muted);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  line-height: 1.5;
 }
 
 .appearance__row {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  /* Top, not centre: a control beside a two-line hint sits on the name it
+     answers to, not halfway down the sentence under it. */
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.appearance__row:last-of-type {
-  border-bottom: 0;
+  gap: var(--space-2) var(--space-4);
+  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
 }
 
 .appearance__text {
   display: flex;
+  flex: 1 1 14rem;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -37,19 +40,23 @@
 .appearance__name {
   color: var(--text);
   font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.45;
 }
 
 .appearance__hint {
   color: var(--text-faint);
   font-size: var(--text-xs);
+  line-height: 1.5;
 }
 
 .appearance__choices {
   display: flex;
-  flex: 0 0 auto;
+  flex: none;
   gap: 2px;
   padding: 2px;
   background: var(--bg-sunken);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
 
@@ -59,6 +66,8 @@
   color: var(--text-muted);
   font: inherit;
   font-size: var(--text-xs);
+  line-height: 1.45;
+  white-space: nowrap;
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
@@ -69,8 +78,11 @@
 }
 
 .appearance__row > button[role='switch'] {
-  flex: 0 0 auto;
+  flex: none;
+  min-width: 4rem;
+  padding: var(--space-2) var(--space-3);
   background: var(--bg-sunken);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
 
@@ -90,31 +102,32 @@
 }
 
 .appearance__colour {
-  flex: 0 0 auto;
-  width: 44px;
-  height: 28px;
+  flex: none;
+  width: 4rem;
+  height: 2rem;
   padding: 0;
   background: none;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
 .appearance__font {
-  flex: 0 0 auto;
-  width: 180px;
-  padding: var(--space-1) var(--space-2);
+  flex: 0 1 12rem;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
   color: var(--text);
   font: inherit;
   font-size: var(--text-xs);
   background: var(--bg-sunken);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
 /* The preview carries the whole token set for the appearance being considered,
    so everything inside it is drawn the way the app would draw it. */
 .appearance__preview {
+  margin: var(--space-4);
   padding: var(--space-4);
   background: var(--bg);
   border: 1px solid var(--border);

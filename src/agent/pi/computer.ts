@@ -87,8 +87,9 @@ export type BrowserHost = (
 /** Where the program lives, and what has to go in front of its arguments. */
 export type Way = { tool: string; lead: readonly string[] };
 
-function defaultHost(folder: string): BrowserHost {
-  return (tool, args, options) => runHelper(tool, args, { folder, ...options });
+export function defaultHost(folder: string): BrowserHost {
+  // Written down as a browser, so quitting knows what it is ending.
+  return (tool, args, options) => runHelper(tool, args, { folder, ...options, kind: 'browser' });
 }
 
 /** The installed program if it is here, and a fetched one if it is not. */

@@ -308,6 +308,15 @@ export type AgentEvent =
    */
   | { type: 'busy'; on: boolean }
   /**
+   * An add-on started a turn of its own.
+   *
+   * Pi lets an extension send a message with `triggerTurn`, which begins a run
+   * nobody typed. Said out loud and counted against the same budget as every
+   * other reason to carry on, or an add-on has a loop of its own and the app
+   * has no idea it is running.
+   */
+  | { type: 'extension-turn'; from: string; text: string }
+  /**
    * Something about the app, not about this conversation.
    *
    * A spending ceiling reached, an add-on refusing every step, a folder that

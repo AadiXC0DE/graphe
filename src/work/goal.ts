@@ -200,7 +200,8 @@ export function readStoredGoal(raw: unknown): Goal | null {
   };
 }
 
-/** Key for localStorage per project. */
-export function goalStorageKey(project: string): string {
-  return `graphe:goal:${project}`;
+/** Key for localStorage. One goal per conversation, so the fallback store is
+ *  addressed the same way the file on disk is. */
+export function goalStorageKey(project: string, address = ''): string {
+  return address === '' ? `graphe:goal:${project}` : `graphe:goal:${project}\u0000${address}`;
 }

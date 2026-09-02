@@ -228,11 +228,16 @@ export function asCss(tokens: Readonly<Record<string, string>>, selector = ':roo
  * Matched at `:root, :root[data-theme]` rather than a bare `:root`, because a
  * theme's own block is `:root[data-theme='graphe']` and beats a plain `:root`
  * on specificity — a token that loses that tie is a control that does nothing.
+ *
+ * `under` narrows the whole sheet to one element, which is what the preview
+ * needs: a preview that reaches past its own swatch is not a preview.
  */
-export function cssFor(one: Appearance, on: Base = 'light'): string {
-  const root = asCss(tokensFor(one, on), ':root, :root[data-theme]');
+export function cssFor(one: Appearance, on: Base = 'light', under?: string): string {
+  const at = under ?? ':root, :root[data-theme]';
+  const root = asCss(tokensFor(one, on), at);
   if (one.ligatures) return root;
-  return `${root}\ncode, pre, kbd, samp {\n  font-variant-ligatures: none;\n}`;
+  const inside = under === undefined ? '' : `${under} `;
+  return `${root}\n${inside}code, ${inside}pre, ${inside}kbd, ${inside}samp {\n  font-variant-ligatures: none;\n}`;
 }
 
 /* -------------------------------------------------------------------------- */

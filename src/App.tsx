@@ -471,7 +471,10 @@ function Conversation() {
           (turn.kind === 'did' && turn.state === 'running') ||
           (turn.kind === 'tidying' && turn.state === 'running'),
       )) ||
-    (desk !== null && (sendsInTheAir[keyOf(desk.path, desk.address ?? '')] ?? 0) > 0);
+    (desk !== null && (sendsInTheAir[keyOf(desk.path, desk.address ?? '')] ?? 0) > 0) ||
+    // A turn nobody typed has no shape to read until its first token. The shell
+    // says when one is in flight, and that is what the composer answers to.
+    (desk !== null && desk.busy);
 
   /** What this computer remembers. Null until the shell has been asked — which
    *  is not the same as an empty list, and the two states look different: one is
@@ -1037,7 +1040,7 @@ function Conversation() {
 
   /** Goal Mode — one sentence saying what done looks like, kept per folder.
    *  See src/hooks/useGoalChip.ts; the loop toward it lives in the shell. */
-  const goalChip = useGoalChip({ desksNow, project: desks.current, say, setPlans });
+  const goalChip = useGoalChip({ desksNow, project: desks.current, address: desk?.address ?? null, say, setPlans });
 
   /** Hold a project read-only, or let it go again. Plan is a gate rather than a
    *  prompt, so the shell has to be told: nothing else can withhold a write. */
@@ -4095,7 +4098,6 @@ function Conversation() {
   const board = useBoard({
     desksNow,
     project: desks.current,
-    say,
     troubleHere,
     refreshVersions,
     refreshOverview,
@@ -4216,6 +4218,27 @@ function Conversation() {
         notice.resting
           ? Object.fromEntries(Object.entries(current).filter(([key]) => key !== owner))
           : { ...current, [owner]: notice },
+      );
+      // A turn the app sends for itself is still a turn: it is measured, and
+      // the tab spins for it. Without this the screen reads idle until the
+      // first token, which is a screen saying the opposite of what is true.
+      if (notice.resting) return;
+      setDesks((current) =>
+        changeDesk(current, notice.project, (one) => {
+          const started = { task: sizeUp(notice.said), startedAt: Date.now() };
+          if (notice.address !== '' && notice.address !== one.address) {
+            const parked = one.parked[notice.address];
+            if (parked === undefined) return one;
+            return {
+              ...one,
+              parked: {
+                ...one.parked,
+                [notice.address]: { ...parked, doing: parked.doing ?? started, busy: true },
+              },
+            };
+          }
+          return { ...one, doing: one.doing ?? started, busy: true };
+        }),
       );
     });
     return () => {

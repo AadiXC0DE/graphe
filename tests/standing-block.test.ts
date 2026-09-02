@@ -19,9 +19,9 @@ import {
   saysPromptSize,
   standingBlock,
   standingWords,
-  trimToBudget,
-  type Piece,
+  withinBudget,
 } from '../src/agent/pi/standing';
+import { saysPromptWeight } from '../src/agent/pi/extension-probe';
 
 const list = (done: number, total: number, rows = total) => ({
   markdown: Array.from(
@@ -89,63 +89,34 @@ describe('the block itself', () => {
 describe('the budget', () => {
   const long = (n: number): string => 'x'.repeat(n);
 
-  function pieces(): Piece[] {
-    return [
-      { kind: 'pi', from: 'pi', text: long(10_000) },
-      { kind: 'extension', from: 'an add-on', text: `${long(6_000)}\n\nand more` },
-      { kind: 'skill', from: 'a skill', text: long(50_000) },
-      { kind: 'agents', from: 'AGENTS.md', text: long(32_000) },
-      { kind: 'graphe', from: 'graphe', text: long(2_000) },
-    ];
-  }
-
-  it('leaves a prompt already inside the budget alone', () => {
-    const small: Piece[] = [{ kind: 'pi', from: 'pi', text: long(100) }];
-    const trimmed = trimToBudget(small);
-    expect(trimmed.pieces).toEqual(small);
-    expect(trimmed.cut).toEqual([]);
-    expect(trimmed.now).toBe(trimmed.was);
+  /* Held where each piece is read rather than after the prompt is assembled:
+     what is cut has to be predictable, or a run behaves differently for a
+     reason nobody can name. */
+  it('leaves a piece already inside its cap alone', () => {
+    const small = long(100);
+    expect(withinBudget(small, AGENTS_BUDGET, standingWords.agentsTrimmed)).toBe(small);
   });
 
-  /* Fixed rather than "cut the biggest": what is cut has to be predictable, or
-     a run behaves differently for a reason nobody can name. */
-  it('cuts add-on text first, then skills, then AGENTS.md', () => {
-    const trimmed = trimToBudget(pieces());
-    expect(trimmed.cut.map((one) => one.from)).toEqual(['an add-on', 'a skill', 'AGENTS.md']);
+  it('holds AGENTS.md to its cap and leaves a pointer rather than a truncation', () => {
+    const cut = withinBudget(long(32_000), AGENTS_BUDGET, standingWords.agentsTrimmed);
+    expect(cut.length).toBeLessThanOrEqual(AGENTS_BUDGET + standingWords.agentsTrimmed.length + 2);
+    expect(cut).toContain(standingWords.agentsTrimmed);
   });
 
-  it('never cuts Graphe’s own block, because it is what holds the job together', () => {
-    const trimmed = trimToBudget(pieces());
-    const ours = trimmed.pieces.find((one) => one.kind === 'graphe');
-    expect(ours?.text).toHaveLength(2_000);
-    expect(trimmed.cut.some((one) => one.from === 'graphe')).toBe(false);
+  it('holds one skill to its cap', () => {
+    const cut = withinBudget(long(50_000), SKILL_BUDGET, standingWords.skillTrimmed);
+    expect(cut.length).toBeLessThanOrEqual(SKILL_BUDGET + standingWords.skillTrimmed.length + 2);
+    expect(cut).toContain(standingWords.skillTrimmed);
   });
 
-  it('never cuts Pi’s own text either — that is not ours to trim', () => {
-    const trimmed = trimToBudget(pieces());
-    expect(trimmed.pieces.find((one) => one.kind === 'pi')?.text).toHaveLength(10_000);
+  it('cuts at the first paragraph where there is one inside the cap', () => {
+    const cut = withinBudget(`first line\n\n${long(20_000)}`, AGENTS_BUDGET, standingWords.agentsTrimmed);
+    expect(cut).toBe(`first line\n${standingWords.agentsTrimmed}`);
   });
 
-  it('holds each kind to its own budget and says so where it cut', () => {
-    const trimmed = trimToBudget(pieces());
-    const of = (kind: Piece['kind']): number =>
-      trimmed.pieces.find((one) => one.kind === kind)?.text.length ?? 0;
-    expect(of('extension')).toBeLessThanOrEqual(EXTENSION_BUDGET + standingWords.extensionTrimmed.length + 2);
-    expect(of('skill')).toBeLessThanOrEqual(SKILL_BUDGET + standingWords.skillTrimmed.length + 2);
-    expect(of('agents')).toBeLessThanOrEqual(AGENTS_BUDGET + standingWords.agentsTrimmed.length + 2);
-    expect(trimmed.now).toBeLessThan(trimmed.was);
-  });
-
-  it('leaves a pointer rather than a truncation nobody can act on', () => {
-    const trimmed = trimToBudget(pieces());
-    expect(trimmed.pieces.find((one) => one.kind === 'agents')?.text).toContain(
-      standingWords.agentsTrimmed,
-    );
-  });
-
-  it('reports how much each cut saved', () => {
-    const trimmed = trimToBudget(pieces());
-    for (const one of trimmed.cut) expect(one.saved).toBeGreaterThan(0);
+  it('says what an add-on weighs only once it is worth saying', () => {
+    expect(saysPromptWeight(EXTENSION_BUDGET)).toBeNull();
+    expect(saysPromptWeight(6_400)).toBe('6.4k of every prompt');
   });
 });
 

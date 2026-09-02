@@ -106,6 +106,9 @@ type Registered = {
 /** Set on a handler we have already wrapped, so a second pass is a no-op. */
 const BUDGETED = Symbol.for('graphe.hook-budget');
 
+/** Set on a handler map already watching for late registrations. */
+const WATCHED = Symbol.for('graphe.hook-budget.watched');
+
 /** The folder an extension lives in, which is what its author called it. */
 function nameOf(one: Registered): string {
   const where = one.resolvedPath ?? one.path ?? '';
@@ -164,6 +167,37 @@ export function withHookBudget<T extends { extensions?: readonly unknown[] }>(
         ),
       );
     }
+    watchForLateOnes(handlers, extension, ms, onOverrun);
   }
   return runner;
+}
+
+/**
+ * An add-on that registers `agent_end` inside `session_start` registers it after
+ * this has already been round once. Anything set from then on is wrapped as it
+ * lands, so a late handler is budgeted like an early one.
+ *
+ * Re-running the sweep also catches the other way of registering, which is
+ * pushing onto the list already there.
+ */
+function watchForLateOnes(
+  handlers: Map<string, Handler[]>,
+  extension: string,
+  ms: number,
+  onOverrun: (o: Overrun) => void,
+): void {
+  if (WATCHED in handlers) return;
+  Object.defineProperty(handlers, WATCHED, { value: true });
+  const set = handlers.set.bind(handlers);
+  handlers.set = (event: string, list: Handler[]): Map<string, Handler[]> => {
+    if (!BUDGETED_EVENTS.includes(event) || !Array.isArray(list)) return set(event, list);
+    return set(
+      event,
+      list.map((handler) =>
+        typeof handler === 'function' && !(BUDGETED in handler)
+          ? budgeted(handler, extension, event, ms, onOverrun)
+          : handler,
+      ),
+    );
+  };
 }

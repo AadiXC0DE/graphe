@@ -15,7 +15,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { bridge } from '../lib/bridge';
 import { folderCalled, type Desks } from '../lib/projects';
-import { quietWords, wentQuiet } from '../work/board';
 import type {
   Away as AwayState,
   Decision,
@@ -66,17 +65,15 @@ export function useBoard(options: {
   desksNow: { current: Desks };
   /** The folder in front. */
   project: string | null;
-  say: (text: string) => void;
   troubleHere: (trouble: Trouble) => void;
   refreshVersions: (path: string) => Promise<void>;
   refreshOverview: (path: string, conversation?: string | null) => Promise<void>;
 }): Board {
-  const { desksNow, project, say, troubleHere, refreshVersions, refreshOverview } = options;
+  const { desksNow, project, troubleHere, refreshVersions, refreshOverview } = options;
 
   const [away, setAway] = useState<Readonly<Record<string, AwayState>>>({});
   /* Read while a loop is being put down, so each step is chained behind the id
-     the board actually gave the one before it rather than a stale one — and,
-     in the notice handler, to see what the board looked like a moment ago. */
+     the board actually gave the one before it rather than a stale one. */
   const awayNow = useRef<Readonly<Record<string, AwayState>>>({});
   awayNow.current = away;
 
@@ -104,37 +101,13 @@ export function useBoard(options: {
      after it has been away and come back. Subscribed once. */
   useEffect(() => {
     return bridge.onAway((notice) => {
-      /* The last piece has landed. Work on the board carries on whether or not
-         the conversation does — and used to finish with nothing said, so the
-         conversation that started it never learned the thing it was waiting for
-         had happened.
-
-         Read against a ref rather than inside the state updater: this sends a
-         message, and an updater that React may run twice is no place for one. */
-      const over = wentQuiet(awayNow.current[notice.project]?.pieces, notice.away.pieces);
-      if (over !== null) {
-        const desk = desksNow.current.byPath[notice.project];
-        // Only into a conversation with nothing already going: a run in flight
-        // hears things between steps, and this is not that.
-        if (desk !== undefined && desk.doing == null) {
-          say(`Background work finished — ${String(over.length)} to look at.`);
-          void bridge.prompt(
-            quietWords(over),
-            [],
-            { queue: 'followUp' },
-            {
-              project: notice.project,
-              ...(desk.address == null ? {} : { conversation: desk.address }),
-            },
-          );
-        }
-      }
+      // Only the board's own state. A piece finishing reaches the conversation
+      // through the shell, which is the one thing allowed to send.
       setAway((current) => ({ ...current, [notice.project]: notice.away }));
       setClock(Date.now());
     });
-    // Subscribed once for the life of the window; everything it reads it reads
-    // through a ref.
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // Subscribed once for the life of the window.
+  }, []);
 
   /* Every folder's board, once, on the way in. Notices arrive as things happen;
      without this first read, work already running in a project nobody has

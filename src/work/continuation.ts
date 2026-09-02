@@ -164,6 +164,16 @@ function halt(state: State, said: string, stuckRounds = state.stuckRounds): Move
 }
 
 /**
+ * An add-on's turn has already begun by the time anything hears about it, so
+ * its round is checked as it arrives rather than on the settle. Null while
+ * there is budget left, and then the ordinary path counts it.
+ */
+export function extensionOverBudget(state: State): { said: string; state: State } | null {
+  if (state.stopped || state.rounds < MOST_ROUNDS) return null;
+  return { said: continuationWords.spent(state.rounds), state: { ...state, stopped: true } };
+}
+
+/**
  * Whether to send, rest or stop.
  *
  * The order is the point: stopped and waiting come before every reason to

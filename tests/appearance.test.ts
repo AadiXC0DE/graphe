@@ -219,3 +219,13 @@ describe('AP-07 the words', () => {
     }
   });
 });
+
+describe('the preview', () => {
+  it('never reaches past its own swatch', () => {
+    const sheet = cssFor({ ...defaultAppearance, ligatures: false }, 'light', '.appearance__preview');
+    expect(sheet).toContain('.appearance__preview {');
+    expect(sheet).toContain('.appearance__preview code');
+    expect(sheet).not.toMatch(/(^|\n)code,/);
+    expect(sheet).not.toContain(':root');
+  });
+});

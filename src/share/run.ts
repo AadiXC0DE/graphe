@@ -62,6 +62,9 @@ export type RunOptions = {
   /** Handed to the helper on its own input, for anything too long or too
    *  punctuated to survive being an argument. */
   input?: string;
+  /** What this is, in the ledger. An outside command unless the caller knows
+   *  better — the browser tools start a browser through this same door. */
+  kind?: noted.Kind;
 };
 
 /** One helper, once. Never throws — a failure is a code and some words. */
@@ -108,7 +111,7 @@ export function runHelper(
     );
     // Written down while it runs, so quitting can take it with it. A helper
     // that outlives the app spends until it is done with nobody watching.
-    noted.started({ pid: child.pid, what: tool, kind: 'helper' });
+    noted.started({ pid: child.pid, what: tool, kind: options.kind ?? 'tool' });
     child.once('exit', () => noted.ended(child.pid));
     if (options.input !== undefined) {
       child.stdin?.on('error', () => undefined);

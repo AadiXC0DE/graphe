@@ -93,13 +93,13 @@ describe('progress and next', () => {
   });
 
   it('counts what is done, what remains and what is stuck', () => {
-    expect(standing(plan)).toEqual({ done: 0, total: 2, failed: 0 });
+    expect(standing(plan)).toEqual({ done: 0, total: 2, failed: 0, skipped: 0 });
     const mixed = [
       { n: 1, title: 'A', acceptance: '', test: null, status: 'done' as const, note: null },
       { n: 2, title: 'B', acceptance: '', test: null, status: 'failed' as const, note: null },
       { n: 3, title: 'C', acceptance: '', test: null, status: 'pending' as const, note: null },
     ];
-    expect(standing(mixed)).toEqual({ done: 1, total: 3, failed: 1 });
+    expect(standing(mixed)).toEqual({ done: 1, total: 3, failed: 1, skipped: 0 });
   });
 
   it('picks up the next task as the one being worked on', () => {
@@ -127,8 +127,8 @@ describe('toMarkdown / readPlan — a plan that survives a restart', () => {
       { n: 2, title: 'Footer', acceptance: '', test: 'npm test', status: 'pending' as const, note: null },
     ];
     const md = toMarkdown(plan);
-    expect(md).toContain('- [x] Header');
-    expect(md).toContain('- [ ] Footer (runs `npm test`)');
+    expect(md).toContain('- [x] 1. Header');
+    expect(md).toContain('- [ ] 2. Footer (runs `npm test`)');
 
     const back = readPlan(plan);
     expect(back).toHaveLength(2);
@@ -198,8 +198,8 @@ describe('planStanding — the plan the turn carries', () => {
 
   it('names every step and which of them are still open', () => {
     const said = planStanding(half);
-    expect(said).toContain('- [x] Header');
-    expect(said).toContain('- [ ] Changelog');
+    expect(said).toContain('- [x] 1. Header');
+    expect(said).toContain('- [ ] 2. Changelog');
   });
 
   it('counts them, so a reader does not have to', () => {

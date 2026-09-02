@@ -59,7 +59,7 @@ describe('a PDF the person attached', () => {
   /* Two ways out of the handler — held back for a look first, or sent — and a
      PDF that only made it into one of them is a PDF lost half the time. */
   it('goes with the message down both paths out of the handler', () => {
-    expect(MAIN).toContain("const asked = [text, papers, plan ?? ''].filter");
+    expect(MAIN).toContain("const asked = [text, papers].filter");
     const at = MAIN.indexOf('return await checkItFirst(');
     expect(at).toBeGreaterThan(-1);
     expect(MAIN.slice(at, at + 240)).toContain('asked,');

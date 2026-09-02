@@ -207,6 +207,19 @@ export type SittingUsage = {
   byModel: readonly { name: string; share: number }[];
 };
 
+/**
+ * How a run ended.
+ *
+ * `finished` is the model reaching the end of its own work. Everything else is
+ * a turn that was ended by something: the person, a failure, a question that
+ * has to be answered before anything else can happen, or an add-on that refused
+ * every step it was asked for.
+ */
+export type SettledHow = 'finished' | 'stopped' | 'failed' | 'asked-person' | 'blocked-by-addon';
+
+/** One press offered under a notice. `id` is what comes back. */
+export type NoticeAction = { id: string; label: string };
+
 export type AgentEvent =
   | { type: 'message-delta'; text: string }
   | { type: 'message-end' }
@@ -276,9 +289,42 @@ export type AgentEvent =
   | { type: 'holding'; seconds: number }
   /** Done waiting. `ok` is false when asking again did not help either. */
   | { type: 'held'; ok: boolean }
-  /** The agent has finished everything it was doing, tool calls included. The
-   *  moment the session split is worth working out. */
-  | { type: 'settled' }
+  /**
+   * The agent has finished everything it was doing, tool calls included. The
+   * moment the session split is worth working out.
+   *
+   * `how` is the difference between a turn that ended and a turn that was
+   * ended. Everything downstream that means "the model finished" — advancing a
+   * list, bringing the work in, taking a picture — reads it, because a
+   * synthetic settle from Stop used to reach all of them looking like success.
+   */
+  | { type: 'settled'; how?: SettledHow; run?: string }
+  /**
+   * Whether a run is in flight, said by the thing that knows.
+   *
+   * The window used to work this out from the shape of the turns, so a step
+   * left running by a stop kept the composer a spinner for the rest of the
+   * sitting. This is the answer rather than the inference.
+   */
+  | { type: 'busy'; on: boolean }
+  /**
+   * Something about the app, not about this conversation.
+   *
+   * A spending ceiling reached, an add-on refusing every step, a folder that
+   * could not be swept. These used to arrive as `error`, which paints the
+   * conversation red for something it did not do.
+   */
+  | { type: 'notice'; what: string; because?: string; actions?: readonly NoticeAction[] }
+  /**
+   * How heavy the system prompt has become, in characters.
+   *
+   * Pi's own text, forty tools' guidelines, an add-on's five-kilobyte tool
+   * description, `AGENTS.md`, skills and memory all land in the same window as
+   * the work. Said as characters rather than tokens: a token count that is
+   * right for one model is wrong for the next, and a wrong number is worse than
+   * a plain one.
+   */
+  | { type: 'prompt-size'; characters: number }
   /**
    * A handful of things it would rather not guess, asked before it starts.
    *

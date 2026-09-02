@@ -121,6 +121,15 @@ export type Desk = {
    *  measured when it settles. Null when nothing is running. */
   doing: { task: Task; startedAt: number } | null;
   /**
+   * The job that has just settled, held only until its cost lands.
+   *
+   * `doing` clears the moment the run does, because a provider that reports no
+   * cost never sends a summary and the spinner used to wait on money that was
+   * never coming. The split arrives a beat later, so the job it belongs to is
+   * kept here to be filed against.
+   */
+  filing: { task: Task; startedAt: number } | null;
+  /**
    * Which conversation is on screen, as the shell addresses it. Null before the
    * shell has said — everything still works, it just cannot be addressed.
    */
@@ -262,6 +271,7 @@ function blankDesk(path: string, name: string): Desk {
     putBack: null,
     jobs: [],
     doing: null,
+    filing: null,
     address: null,
     parked: {},
     order: [],
@@ -446,29 +456,49 @@ function measure(
   desk: Desk,
   notice: AgentNotice,
   at: number,
-): Pick<Desk, 'jobs' | 'doing' | 'counted'> {
-  const unchanged = { jobs: desk.jobs, doing: desk.doing, counted: desk.counted };
+): Pick<Desk, 'jobs' | 'doing' | 'filing' | 'counted'> {
+  const unchanged = {
+    jobs: desk.jobs,
+    doing: desk.doing,
+    filing: desk.filing,
+    counted: desk.counted,
+  };
+  /* The job is over when the run is over, whatever it cost. A provider that
+     reports no cost never sends a summary, so the tab spinner and the composer
+     used to wait on money that was never coming. The job itself is held back
+     one beat so the split, when there is one, still has something to file
+     against. */
+  if (notice.event.type === 'settled') {
+    return { ...unchanged, doing: null, filing: desk.doing ?? desk.filing };
+  }
   if (notice.event.type !== 'spend-summary') return unchanged;
 
   const total = notice.event.summary.total;
   const spent = total.minor - desk.counted;
+  const job = desk.doing ?? desk.filing;
   // Nothing to file: no job in flight, or it cost nothing measurable. A zero is
   // not an observation, and recording one would drag every later estimate down.
-  if (desk.doing === null || spent <= 0) {
-    return { jobs: desk.jobs, doing: null, counted: Math.max(desk.counted, total.minor) };
+  if (job === null || spent <= 0) {
+    return {
+      jobs: desk.jobs,
+      doing: null,
+      filing: null,
+      counted: Math.max(desk.counted, total.minor),
+    };
   }
 
   return {
     jobs: [
       ...desk.jobs,
       {
-        ...desk.doing.task,
+        ...job.task,
         cost: { minor: spent, currency: total.currency },
-        durationMs: Math.max(0, at - desk.doing.startedAt),
+        durationMs: Math.max(0, at - job.startedAt),
         at,
       },
     ],
     doing: null,
+    filing: null,
     counted: total.minor,
   };
 }

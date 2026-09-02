@@ -47,6 +47,28 @@ export const advisorWords = {
   missingAdd: 'Add more to Graphe',
 } as const;
 
+/** The two moments somebody can ask the advisor into, beyond the ones it takes
+ *  itself. Both off: each one pauses work that was going fine. */
+export const advisorSwitchWords = {
+  completionGate: {
+    label: 'Ask the advisor before saying it’s done',
+    hint: 'A second read at the end, worth having on a change that would be hard to undo. It answers with whatever is still unproven, so expect a longer finish.',
+  },
+  loopGate: {
+    label: 'Ask when it repeats itself',
+    hint: 'Pauses for a second opinion when the same step comes round again. Running the checks a few times counts as repeating, so leave this off unless you want the pause.',
+  },
+} as const;
+
+/** The notice when something installed has refused everything since. Said as
+ *  what happened, with the two ways out of it. */
+export const addonBlockedWords = {
+  what: 'An add-on has stopped every step.',
+  because: (n: number) => `${n} in a row were refused, each for the same reason.`,
+  reset: 'Reset it for this conversation',
+  off: 'Turn it off here',
+} as const;
+
 /** How Pi's own settings name a model: the provider, then the model. */
 export function modelRef(choice: ModelChoice): string {
   return `${choice.providerId}/${choice.modelId}`;
@@ -91,42 +113,92 @@ export function worthHaving(models: readonly Priced[]): boolean {
 /* -------------------------------------------------------------------------- */
 
 /**
- * What the advisor is given, if the file has no answer of its own.
+ * The keys Graphe owns, written on every start.
  *
- * The package walks the conversation newest first and stops at the first entry
- * too big for the window, so one 47KB file read left the advisor with an
- * omission marker and nothing else — it answered, on nothing. Capping each
- * result and widening the window keeps the walk going past a large one.
+ * A file written by an older install kept its own answers for good, so a live
+ * machine ran with a 15 000-character window (the package stops at the first
+ * result too big for it, and answers on the omission marker), secrets travelling
+ * unredacted, and a single provider hiccup refusing every tool for the rest of
+ * the sitting. These nine are ours to keep right; every other key in the file
+ * belongs to whoever opened it and is left exactly as it was.
  *
- * Secrets are redacted here rather than by the Guard: the context is built
- * inside the package, out of the conversation and the working tree, so the
- * Guard's own check on the call never sees it.
+ * The gates are off because both fire on ordinary work — three test runs is
+ * "repeating itself", and a verdict asked for at the end arrives as a list of
+ * everything still unproven, which reads as "not finished".
  */
-const WHEN_UNSAID: Readonly<Record<string, unknown>> = {
+export const GRAPHE_OWNED = {
   advisorRedactSecrets: true,
   contextMaxChars: 48_000,
   advisorToolResultMaxLines: 60,
   advisorToolResultMaxBytes: 3_000,
-  // Two, not the package's three. "It has tried the same thing twice" is the
-  // single most reliable sign a second opinion is worth paying for, and by the
-  // third attempt the context it would be reading is already the wrong shape.
-  advisorLoopThreshold: 2,
-  // The three standing gates cover deciding, failing and finishing. They do not
-  // cover judging — a review, an audit, a verdict on somebody else's change is
-  // exactly the work a second reader is for, and it reaches none of the three
-  // because nothing was planned, nothing failed and nothing was declared done.
+  advisorLoopThreshold: 4,
+  advisorAutoLoopGate: false,
+  advisorCompletionGate: false,
+  gateFailureMode: 'warn-and-continue',
+  advisorBlockOnBlocked: false,
+} as const;
+
+/** Where somebody takes a key back. Anything named here Graphe stops owning and
+ *  never writes again. */
+const OURS = 'graphe';
+const TAKEN_BACK = 'ownedOverrides';
+
+/** The two gates somebody can turn on from the advisor row. On or off, the key
+ *  stays Graphe's — this changes the value it writes, not who writes it. */
+export type AdvisorSwitches = { completionGate?: boolean; loopGate?: boolean };
+
+/** The keys somebody has taken back, out of `graphe.ownedOverrides`. */
+export function ownedOverrides(existing: Record<string, unknown>): readonly string[] {
+  const ours = existing[OURS];
+  if (typeof ours !== 'object' || ours === null || Array.isArray(ours)) return [];
+  const listed = (ours as Record<string, unknown>)[TAKEN_BACK];
+  if (!Array.isArray(listed)) return [];
+  return listed.filter((key): key is string => typeof key === 'string' && key !== '');
+}
+
+function ownedValues(switches?: AdvisorSwitches): Record<string, unknown> {
+  return {
+    ...GRAPHE_OWNED,
+    advisorCompletionGate: switches?.completionGate ?? GRAPHE_OWNED.advisorCompletionGate,
+    advisorAutoLoopGate: switches?.loopGate ?? GRAPHE_OWNED.advisorAutoLoopGate,
+  };
+}
+
+/**
+ * The file with the owned keys put right and everything else untouched.
+ *
+ * `changed` is what actually moved, so a caller can say what it corrected.
+ */
+export function reconcile(
+  existing: Record<string, unknown>,
+  switches?: AdvisorSwitches,
+): { settings: Record<string, unknown>; changed: readonly string[] } {
+  const settings: Record<string, unknown> = { ...existing };
+  const theirs = new Set(ownedOverrides(existing));
+  const changed: string[] = [];
+  for (const [key, value] of Object.entries(ownedValues(switches))) {
+    if (theirs.has(key)) continue;
+    if (!(key in existing) || existing[key] !== value) changed.push(key);
+    settings[key] = value;
+  }
+  return { settings, changed };
+}
+
+/**
+ * What the advisor is given once, if the file has no answer of its own.
+ *
+ * Not owned: the three standing gates cover deciding, failing and finishing, and
+ * miss judging — a review, an audit, a verdict on somebody else's change reaches
+ * none of them, because nothing was planned, nothing failed and nothing was
+ * declared done. A sentence somebody has since rewritten is theirs.
+ */
+const WHEN_UNSAID: Readonly<Record<string, unknown>> = {
   advisorCustomInvocation:
     'you are giving a verdict on code — a review, an audit, or a judgement on somebody else’s change; before a change that touches many files or would be hard to undo; and when what you are about to say rests on an assumption about this project you have not actually checked.',
 };
 
 /**
  * The settings file, with our choice in it and everything else left alone.
- *
- * The keys behind a control are always ours — somebody pressing the row is
- * answering the question again — and the rest of `WHEN_UNSAID` is written once
- * and never again. Which gates fire, how much of the working tree travels, how
- * many calls a sitting may make — those belong to whoever opened this file, and
- * rewriting them would be us overruling a decision somebody made deliberately.
  *
  * `advisorEffort` is the package's own name for how hard the advisor thinks,
  * and it takes the same ladder of levels the rest of the app uses. Left unsaid,
@@ -138,17 +210,19 @@ export function advisorSettings(
     advises: ModelChoice | null;
     does: ModelChoice | null;
     advisorThinks?: ThinkingLevel | undefined;
+    switches?: AdvisorSwitches | undefined;
   },
 ): Record<string, unknown> {
   const kept =
     typeof existing === 'object' && existing !== null && !Array.isArray(existing)
       ? { ...(existing as Record<string, unknown>) }
       : {};
+  const { settings } = reconcile(kept, choice.switches);
 
-  if (choice.advises === null) return { ...kept, alwaysOn: false };
+  if (choice.advises === null) return { ...settings, alwaysOn: false };
 
   const next: Record<string, unknown> = {
-    ...kept,
+    ...settings,
     advisor: modelRef(choice.advises),
     alwaysOn: true,
   };

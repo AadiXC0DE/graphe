@@ -2264,34 +2264,48 @@ export function pageTools(cwd?: string): ToolDefinition[] {
 export type AskFirst = (questions: unknown) => Promise<string>;
 
 /**
- * Tick one thing off the list on screen.
+ * Move one step of the list on screen.
  *
  * The list used to move on its own, one step per reply. That works for a list
  * of jobs done a reply at a time and for nothing else — a list of six things
  * the model meant to do inside one reply could never get past the first, so
- * somebody watched real work happen beside a checklist reading nought.
+ * somebody watched real work happen beside a checklist reading nought. Worse,
+ * it moved on a guess: a reply that only read files and wrote a paragraph
+ * ticked a step, and a failing test failed one.
  *
- * Whoever is doing the work says when a thing is done. Answers with how far
- * along it now is, so the model can see its own list rather than guess.
+ * Whoever is doing the work says which step moved, by its number. Every one of
+ * these answers with how far along the list now is and what is next, because a
+ * tool that answers "ok" teaches the model nothing about the list it is
+ * working through.
  */
-export type StepDone = (note: string | null) => Promise<string>;
+export type StepMove = {
+  kind: 'done' | 'started' | 'failed' | 'skipped' | 'dropped' | 'inserted';
+  n: number | null;
+  why?: string;
+  title?: string;
+};
+
+export type StepMoved = (op: StepMove) => Promise<string>;
 
 /** Cancel the checklist the person can see. Wired by the shell, so the file is
  *  found by the project it is stored under and deleted where the plan queue
  *  can see it — never from here, where neither of those is true. */
 export type CancelBuild = () => Promise<string>;
 
-/** Write that checklist, or add to it. Same wiring, same reason. */
-export type MakeChecklist = (titles: readonly string[]) => Promise<string>;
+/** Write that checklist, replace it, or add to it. Same wiring, same reason. */
+export type MakeChecklist = (
+  titles: readonly string[],
+  mode: 'append' | 'replace',
+) => Promise<string>;
 
 const makeChecklistTool = (make: MakeChecklist): ToolDefinition => ({
   name: 'make_checklist',
   label: 'Writing the checklist',
   description:
-    'Put the steps this job breaks into on screen as a checklist the person can watch, and tick off with step_done as each one lands. Use it when a request has several parts, when you are working toward a goal and there is no checklist yet, or when you find work along the way that was not on the list. Called again, it adds to the list rather than replacing it.',
-  promptSnippet: 'make_checklist(steps) — put the steps on screen as a checklist',
+    'Put the steps this job breaks into on screen as a checklist the person can watch, and tick off with step_done(n) as each one lands. Use it when a request has several parts, when you are working toward a goal and there is no checklist yet, or when you find work along the way that was not on the list. `mode` is "append" by default; "replace" writes the list again from scratch and keeps the tick on any step whose words are unchanged.',
+  promptSnippet: 'make_checklist(steps, mode) — put the steps on screen as a checklist',
   promptGuidelines: [
-    'Work with more than two or three parts to it gets a checklist first, before the first change. It is what the person watches, and what a later session resumes from.',
+    'Work with more than two separately finishable parts gets a checklist before the first change. It is what the person watches, and what a later session resumes from.',
     'One step per thing that is separately finishable. Not "build the feature", and not every file you will touch.',
     'Working toward a goal with no checklist on screen, write one for the goal before anything else.',
   ],
@@ -2300,21 +2314,50 @@ const makeChecklistTool = (make: MakeChecklist): ToolDefinition => ({
       description: 'The steps, in the order they should happen, in plain words.',
       minItems: 1,
     }),
+    mode: Type.Optional(
+      Type.Union([Type.Literal('append'), Type.Literal('replace')], {
+        description:
+          'Add to the list ("append", the default) or write it again from scratch ("replace").',
+      }),
+    ),
   }),
   executionMode: 'sequential',
-  execute: async (_callId, params: { steps: readonly string[] }): ToolResult => {
-    const said = await make(params.steps);
+  execute: async (
+    _callId,
+    params: { steps: readonly string[]; mode?: 'append' | 'replace' },
+  ): ToolResult => {
+    const said = await make(params.steps, params.mode === 'replace' ? 'replace' : 'append');
     return { content: [{ type: 'text', text: said }], details: {} };
   },
 });
 
-const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
+/** Which step. Required whenever more than one is still open: a model that
+ *  finishes step 6 before step 5 used to tick step 5. */
+const whichStep = Type.Optional(
+  Type.Integer({
+    minimum: 1,
+    description:
+      'The number of the step, as the checklist lists it. Required when more than one step is still open.',
+  }),
+);
+
+function moveNumber(params: { n?: number }): number | null {
+  return typeof params.n === 'number' && Number.isFinite(params.n) ? Math.trunc(params.n) : null;
+}
+
+async function answered(move: StepMoved, op: StepMove): ToolResult {
+  const said = await move(op);
+  return { content: [{ type: 'text', text: said }], details: {} };
+}
+
+const stepDoneTool = (moved: StepMoved): ToolDefinition => ({
   name: 'step_done',
   label: 'Ticking one off the list',
   description:
-    "Tick the thing you have just finished off the checklist the person can see. Call it once for each item, the moment that item is genuinely done — not at the end, and never for something you have only started. If there is no checklist it says so and costs nothing.",
-  promptSnippet: 'step_done(note) — tick the thing you just finished off the checklist',
+    'Tick the step you have just finished off the checklist the person can see. Say which step by its number. Call it once for each step, the moment that step is genuinely done — not at the end, and never for something you have only started. If there is no checklist it says so and costs nothing.',
+  promptSnippet: 'step_done(n, note) — tick step n off the checklist',
   parameters: Type.Object({
+    n: whichStep,
     note: Type.Optional(
       Type.String({ description: 'One line on what came of it. Left out is fine.' }),
     ),
@@ -2323,12 +2366,89 @@ const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
      batch run one after another, so a tick sent alongside a fan-out would turn
      six helpers working at once into six waiting their turn. Two ticks racing
      is safe on its own account — the list is only ever touched one at a time
-     where it is written. */
+     where it is written, and each names the step it means. */
   executionMode: 'parallel',
-  execute: async (_callId, params: { note?: string }): ToolResult => {
-    const said = await stepDone(typeof params.note === 'string' ? params.note : null);
-    return { content: [{ type: 'text', text: said }], details: {} };
-  },
+  execute: async (_callId, params: { n?: number; note?: string }): ToolResult =>
+    answered(moved, {
+      kind: 'done',
+      n: moveNumber(params),
+      ...(typeof params.note === 'string' ? { why: params.note } : {}),
+    }),
+});
+
+const stepStartedTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'step_started',
+  label: 'Picking one up',
+  description:
+    'Say which step of the checklist you are working on now, so the person can see where you are. Optional — the list shows the first unticked step as current on its own.',
+  promptSnippet: 'step_started(n) — say which step you are on',
+  parameters: Type.Object({ n: whichStep }),
+  executionMode: 'parallel',
+  execute: async (_callId, params: { n?: number }): ToolResult =>
+    answered(moved, { kind: 'started', n: moveNumber(params) }),
+});
+
+const stepFailedTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'step_failed',
+  label: 'Marking one as not working',
+  description:
+    'Say a step did not work and why. It stays on the list as work still owed, so the run does not finish with it quietly unticked.',
+  promptSnippet: 'step_failed(n, why) — say step n did not work',
+  parameters: Type.Object({
+    n: whichStep,
+    why: Type.String({ minLength: 1, description: 'What went wrong, in one line.' }),
+  }),
+  executionMode: 'parallel',
+  execute: async (_callId, params: { n?: number; why: string }): ToolResult =>
+    answered(moved, { kind: 'failed', n: moveNumber(params), why: params.why }),
+});
+
+const stepSkippedTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'step_skipped',
+  label: 'Skipping one',
+  description:
+    'Say a step is not going to be done, and why. Settled work rather than owed, so the list can finish without it.',
+  promptSnippet: 'step_skipped(n, why) — say step n is not going to be done',
+  parameters: Type.Object({
+    n: whichStep,
+    why: Type.String({ minLength: 1, description: 'Why it is not being done, in one line.' }),
+  }),
+  executionMode: 'parallel',
+  execute: async (_callId, params: { n?: number; why: string }): ToolResult =>
+    answered(moved, { kind: 'skipped', n: moveNumber(params), why: params.why }),
+});
+
+const dropStepTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'drop_step',
+  label: 'Taking one off the list',
+  description:
+    'Take a step off the checklist entirely — it was wrong, or it was two steps, or the job changed. The other steps keep the numbers they had.',
+  promptSnippet: 'drop_step(n, why) — take step n off the list',
+  parameters: Type.Object({
+    n: Type.Integer({ minimum: 1, description: 'The number of the step to remove.' }),
+    why: Type.String({ minLength: 1, description: 'Why it is off the list, in one line.' }),
+  }),
+  executionMode: 'sequential',
+  execute: async (_callId, params: { n: number; why: string }): ToolResult =>
+    answered(moved, { kind: 'dropped', n: Math.trunc(params.n), why: params.why }),
+});
+
+const insertStepTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'insert_step',
+  label: 'Adding one to the list',
+  description:
+    'Put a new step on the checklist straight after another one — work found along the way that belongs in the middle rather than at the end.',
+  promptSnippet: 'insert_step(after, title) — put a new step after step n',
+  parameters: Type.Object({
+    after: Type.Integer({
+      minimum: 1,
+      description: 'The number of the step the new one goes after.',
+    }),
+    title: Type.String({ minLength: 1, description: 'What the new step is, in plain words.' }),
+  }),
+  executionMode: 'sequential',
+  execute: async (_callId, params: { after: number; title: string }): ToolResult =>
+    answered(moved, { kind: 'inserted', n: Math.trunc(params.after), title: params.title }),
 });
 
 const cancelBuildTool = (cancelBuild: CancelBuild): ToolDefinition => ({
@@ -2409,7 +2529,7 @@ export const grapheTools = (
   putOnBoard?: PutOnBoard,
   noted?: ChecksNoted,
   askFirst?: AskFirst | null,
-  stepDone?: StepDone | null,
+  stepMoved?: StepMoved | null,
   cancelBuild?: CancelBuild | null,
   makeChecklist?: MakeChecklist | null,
   /** Whether this project's browser keeps what it is signed in to. Asked each
@@ -2437,8 +2557,17 @@ export const grapheTools = (
   // run nobody is watching both get no tool at all, rather than a tool that
   // always answers "there is nobody here".
   if (askFirst !== undefined && askFirst !== null) tools.push(askFirstTool(askFirst));
-  // Only where there is a list to tick. A helper has no checklist of its own.
-  if (stepDone !== undefined && stepDone !== null) tools.push(stepDoneTool(stepDone));
+  // Only where there is a list to move. A helper has no checklist of its own.
+  if (stepMoved !== undefined && stepMoved !== null) {
+    tools.push(
+      stepDoneTool(stepMoved),
+      stepStartedTool(stepMoved),
+      stepFailedTool(stepMoved),
+      stepSkippedTool(stepMoved),
+      dropStepTool(stepMoved),
+      insertStepTool(stepMoved),
+    );
+  }
   // Same reach as the ticking: wherever a checklist can exist, saying no to it
   // must exist too, and it comes from the shell so it lands on the right file.
   if (cancelBuild !== undefined && cancelBuild !== null) tools.push(cancelBuildTool(cancelBuild));

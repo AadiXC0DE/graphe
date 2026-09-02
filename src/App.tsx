@@ -43,7 +43,7 @@ import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
 import { drainStarted, withoutOurs } from "./lib/queue";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
-import type { BuildPlan, ConnectedState } from "./lib/ipc";
+import type { ConnectedState, ContinuationNotice } from "./lib/ipc";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Connected from "./components/Connected";
 import Palette from "./components/Palette";
@@ -90,18 +90,9 @@ import {
   parseGoalCommand,
   readStoredGoal,
   ROUNDS,
-  baselineFor,
-  goalWords,
-  verifyGoal,
   withElapsed,
   type Goal,
 } from "./work/goal";
-import {
-  carryOnPrompt,
-  freshCarryOn,
-  nextMove,
-  type CarryOn,
-} from "./work/carryon";
 import { quietWords, wentQuiet } from "./work/board";
 import { ADVISOR_PACKAGE } from "./agent/advisor";
 import {
@@ -506,11 +497,6 @@ function Conversation() {
   const [goal, setGoal] = useState<Goal | null>(null);
   const goalNow = useRef(goal);
   goalNow.current = goal;
-  const goalRuns = useRef(new Set<string>());
-  /* Goals that have already been asked to lay out their steps. Asked once: a
-     goal that cannot be broken into a checklist twice over is one to stop on,
-     not to keep asking. */
-  const askedForAList = useRef(new Set<string>());
   /* Which project the goal in hand belongs to. The goal itself is one value for
      the window, so without this a run landing for another folder is verified
      against — and continued toward — a goal that is not its own. */
@@ -570,12 +556,9 @@ function Conversation() {
       // Null for a project with no goal — never keep the last project's.
       setGoal(loaded === null ? null : withElapsed(loaded));
       goalProject.current = loaded === null ? null : project;
-      if (loaded !== null && loaded.status === 'active') {
-        // Coming back to a goal that was still going: any conversation in this
-        // folder carries it on, and the chip has to say that it is going.
-        goalRuns.current.add(`${project}\u0000`);
-        setPlans('goal');
-      }
+      // Coming back to a goal that was still going: the chip has to say so.
+      // Which conversation carries it on is the shell's, not the window's.
+      if (loaded !== null && loaded.status === 'active') setPlans('goal');
     });
   }, [desks.current]);
   /** What was asked for while a plan is being made, so approving it can send
@@ -2064,104 +2047,19 @@ function Conversation() {
     // changes, and this is a first paint rather than a subscription to that.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Where each conversation has got to in working its list down. Kept off
-     state: it changes inside the event subscription, and a re-render per round
-     would rebuild the subscription mid-run. */
-  const carryOn = useRef<Record<string, CarryOn>>({});
+  /* Messages the app queued for itself — carrying a list on, going round again
+     toward a goal, taking in what finished on the board. Kept per conversation
+     so the waiting line can leave them out: drawn there they read as something
+     somebody typed and is waiting for, and they are neither.
 
-  /* Conversations somebody pressed Escape on, until their run settles. The
-     settle still arrives, and without this the list would ask for its next step
-     immediately after being stopped. */
-  const stoppedByHand = useRef<Record<string, boolean>>({});
-
-  /**
-   * Ask for the next step when a settled reply has left some unticked.
-   *
-   * The model finishes a step and ends its reply; without this the list waits
-   * for somebody to type "continue", once per step. What stops it is the
-   * interesting half — see work/carryon.ts — and every way out says so, because
-   * a loop that goes quiet is the bug it was written to fix wearing a hat.
-   */
-  /* Messages this app queued for itself — carrying on through a list, going
-     round again toward a goal. Kept per conversation so the waiting line can
-     leave them out: drawn there they read as something somebody typed and is
-     waiting for, and they are neither. */
+     The decision to send one is not made here any more. One module in the shell
+     decides, for every reason there might be, and says what it decided — see
+     work/continuation.ts. The window draws it. */
   const oursInLine = useRef<Record<string, readonly string[]>>({});
 
-  /**
-   * Send one of those, exactly as a person's message would be sent.
-   *
-   * Not through `deliver`, which reads the composer and the box in front of
-   * it — but everything `deliver` does that the screen depends on has to
-   * happen anyway. The first of those is `doing`: without it the run has no
-   * job against it, the tab stops spinning, and a conversation that is very
-   * much working looks stopped.
-   */
-  const nudgeOn = useCallback(
-    (project: string, conversation: string | null, text: string) => {
-      const owner = `${project}\u0000${conversation ?? ''}`;
-      oursInLine.current = {
-        ...oursInLine.current,
-        [owner]: [...(oursInLine.current[owner] ?? []), text],
-      };
-      const started = { task: sizeUp(text), startedAt: Date.now() };
-      setDesks((current) =>
-        changeDesk(current, project, (one) => {
-          if (conversation !== null && conversation !== one.address) {
-            const parked = one.parked[conversation];
-            if (parked === undefined) return one;
-            return {
-              ...one,
-              parked: { ...one.parked, [conversation]: { ...parked, doing: parked.doing ?? started } },
-            };
-          }
-          return { ...one, doing: one.doing ?? started };
-        }),
-      );
-      void bridge.prompt(
-        text,
-        [],
-        { queue: 'followUp' },
-        { project, ...(conversation === null ? {} : { conversation }) },
-      );
-    },
-    [],
-  );
-
-  const carryOnWith = useCallback(
-    (project: string, conversation: string | null, runKey: string, plan: BuildPlan | null) => {
-      if (stoppedByHand.current[runKey] === true) {
-        const going = { ...stoppedByHand.current };
-        delete going[runKey];
-        stoppedByHand.current = going;
-        return;
-      }
-      if (plan === null || plan.next === null) {
-        const without = { ...carryOn.current };
-        delete without[runKey];
-        carryOn.current = without;
-        return;
-      }
-      const next = plan.tasks.find((one) => one.n === plan.next)?.title ?? null;
-      const move = nextMove(carryOn.current[runKey] ?? freshCarryOn(), {
-        done: plan.done,
-        total: plan.total,
-        next,
-      });
-      if (move.kind === 'rest') return;
-      if (move.kind === 'stop') {
-        const without = { ...carryOn.current };
-        delete without[runKey];
-        carryOn.current = without;
-        say(move.said);
-        return;
-      }
-      carryOn.current = { ...carryOn.current, [runKey]: move.state };
-      say(move.said);
-      nudgeOn(project, conversation, carryOnPrompt(next ?? 'the next step', plan.done, plan.total));
-    },
-    [say, nudgeOn],
-  );
+  /** Where each conversation has got to carrying its job on by itself, as the
+   *  shell reports it. Drawn as the one line under the reply. */
+  const [carryingOn, setCarryingOn] = useState<Readonly<Record<string, ContinuationNotice>>>({});
 
   /* Everything the agent does, in order. Subscribed once for the life of the
      window: the bridge outlives any one prompt, and re-subscribing per send
@@ -2241,20 +2139,9 @@ function Conversation() {
             runStartedAt.current = { ...runStartedAt.current, [runKey]: Date.now() };
             // A new run makes the old footer's measure history.
             setFinishedRun((was) => (was !== null && was.owner === runKey ? null : was));
-            // Real work has begun on a build that still has tasks: the tracker
-            // picks the next one up as the one being worked on.
-            const plan = buildPlanNow.current;
-            if (plan !== null && plan.path === key && plan.plan.next !== null) {
-              void bridge.buildAdvance({ kind: 'start' }, key === '' ? undefined : { project: key })
-                .then((answer) => {
-                  if (answer.ok && answer.value !== null) {
-                    setBuildPlan({ path: key, plan: answer.value });
-                  } else if (!answer.ok) {
-                    void refreshBuildPlan(key);
-                  }
-                })
-                .catch(() => refreshBuildPlan(key));
-            }
+            /* Nothing picks a step up here any more. Which step is in hand is
+               the model's to say — step_started(n) — and the panel shows the
+               first unticked one as current without anything being written. */
           }
         }
         setDesks((current) => receive(current, notice));
@@ -2301,45 +2188,16 @@ function Conversation() {
             project: where,
             ...(notice.conversation == null ? {} : { conversation: notice.conversation }),
           });
-          // A settle with real work behind it advances the build tracker one
-          // task: the turn either finished the task it was on, or it got stuck.
-          // Either way the plan on disk is the truth the next session resumes
-          // from. A settle with no tool work in it is an answer to a question,
-          // and an answer must not move the build.
+          /* Nothing here moves the list any more. The window used to close a
+             step at every reply boundary, on a guess about how the reply went:
+             a turn that read three files and wrote a paragraph ticked a step,
+             a failing test failed one, and a reply that stopped to ask the
+             advisor ticked the step it had not finished. The model says which
+             step moved, and the shell decides whether to carry on. */
           const didWork = didWorkSinceSettle.current[runKey] === true;
           if (didWork) {
             didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [runKey]: false };
-            // The conversation that settled, not whichever is in front. A
-            // background tab's turns live in `parked`, so reading `turns` here
-            // marked its step done or failed on the evidence of a different
-            // conversation entirely.
-            const settledIn = desksNow.current.byPath[where];
-            const said =
-              notice.conversation != null && notice.conversation !== settledIn?.address
-                ? settledIn?.parked[notice.conversation]?.turns
-                : settledIn?.turns;
-            // Nothing known about it is not the same as it having gone well, so
-            // the build is left where it is rather than advanced on a guess.
-            if (said !== undefined) {
-              void bridge
-                .buildAdvance({ kind: 'finish', ok: settledWell(said) }, { project: where })
-                .then((answer) => {
-                  if (answer.ok) {
-                    setBuildPlan(answer.value === null ? null : { path: where, plan: answer.value });
-                    // A list with steps left asks for the next one itself. Goal
-                    // Mode runs its own round of this, so it is left to do it
-                    // rather than both asking and the conversation getting two.
-                    const goalHasIt =
-                      goalNow.current !== null &&
-                      goalNow.current.status === 'active' &&
-                      where === goalProject.current;
-                    if (!goalHasIt) carryOnWith(where, notice.conversation ?? null, runKey, answer.value);
-                  } else {
-                    void refreshBuildPlan(where);
-                  }
-                })
-                .catch(() => refreshBuildPlan(where));
-            }
+            void refreshBuildPlan(where);
             // Work that is finished is work to be looked at: when a live
             // preview is already being served, the page turns itself on so
             // there is somewhere to see it. Plain answers leave the pane alone.
@@ -2348,6 +2206,7 @@ function Conversation() {
               movePane('split');
             }
           }
+
           // A canvas moves on when its turn settles. The whole of what makes a
           // flow a flow: one block, then the next, in the same conversation.
           if (notice.conversation != null) {
@@ -2399,105 +2258,8 @@ function Conversation() {
               }
             }
           }
-
-          // Goal Mode: after every round with real work, verify whether the objective is met.
-          if (goalNow.current !== null && goalNow.current.status === 'active') {
-            const activeGoal = goalNow.current;
-            const goalOwner = `${where}\u0000${notice.conversation ?? ''}`;
-            const isGoalRun =
-              where === goalProject.current &&
-              (goalRuns.current.has(goalOwner) || goalRuns.current.has(`${where}\u0000`));
-            if (isGoalRun && didWork) {
-              const planForVerify = buildPlanNow.current?.path === where ? buildPlanNow.current.plan : null;
-              const settledInForGoal = desksNow.current.byPath[where];
-              const turnsForVerify =
-                notice.conversation != null && notice.conversation !== settledInForGoal?.address
-                  ? settledInForGoal?.parked[notice.conversation]?.turns ?? []
-                  : settledInForGoal?.turns ?? [];
-              const verdict = verifyGoal(planForVerify, turnsForVerify, activeGoal.objective, activeGoal.planBaselineN);
-              if (!verdict.met) {
-                // No owned tasks for this goal → no signal to auto-verify.
-                // Use the plan shape, not a string match on the reason.
-                const ownedCount =
-                  planForVerify === null
-                    ? 0
-                    : planForVerify.tasks.filter((t) => t.n > activeGoal.planBaselineN).length;
-                if (ownedCount === 0) {
-                  /* A goal is a sentence, not a checklist, and asking somebody
-                     to go and write one before their goal will run is the
-                     wrong way round. It asks for the list instead — once. If a
-                     round goes by and there is still none, it stands down
-                     rather than going round forever on nothing to check. */
-                  if (!askedForAList.current.has(goalOwner)) {
-                    askedForAList.current.add(goalOwner);
-                    goalRuns.current.add(goalOwner);
-                    say(goalWords.workingOutTheSteps);
-                    nudgeOn(where, notice.conversation ?? null, goalWords.askForTheSteps(activeGoal.objective));
-                  } else {
-                    say(goalWords.noStepsEither);
-                    askedForAList.current.delete(goalOwner);
-                    goalRuns.current.delete(goalOwner);
-                  }
-                } else if (activeGoal.iterations < ROUNDS) {
-                  askedForAList.current.delete(goalOwner);
-                  const nextGoal: Goal = { ...withElapsed(activeGoal), iterations: activeGoal.iterations + 1 };
-                  setGoalFor(nextGoal, where);
-                  goalRuns.current.add(goalOwner);
-                  say(`Iteration ${String(nextGoal.iterations)} · Goal not met, task continues — ${verdict.reason}`);
-                  nudgeOn(
-                    where,
-                    notice.conversation ?? null,
-                    `Continue toward the goal: ${activeGoal.objective}. ${verdict.reason}`,
-                  );
-                } else {
-                  say(`Goal paused after ${String(activeGoal.iterations)} iterations (budget reached). /goal resume to carry on.`);
-                  const pausedLim: Goal = { ...withElapsed(activeGoal), status: 'paused' };
-                  setGoalFor(pausedLim, where);
-                  goalRuns.current.delete(goalOwner);
-                }
-              } else {
-                // All owned tasks done — run real checks (typecheck) before declaring met
-                void bridge.goalVerify({ project: where }).then((checked) => {
-                  const still = goalNow.current;
-                  if (still === null || still.id !== activeGoal.id || still.status !== 'active') return;
-                  const skipped = checked.ok && checked.value.reason.includes('did not run');
-                  if (checked.ok && !checked.value.passed && !skipped) {
-                    const reason = checked.value.reason;
-                    if (still.iterations < ROUNDS) {
-                      const nextGoal: Goal = { ...withElapsed(still), iterations: still.iterations + 1 };
-                      setGoalFor(nextGoal, where);
-                      goalRuns.current.add(goalOwner);
-                      say(`Iteration ${String(nextGoal.iterations)} · Goal not yet met — checks failed: ${reason}`);
-                      nudgeOn(
-                        where,
-                        notice.conversation ?? null,
-                        `Continue toward the goal: ${still.objective}. Checks failed: ${reason}`,
-                      );
-                    } else {
-                      say(`Goal paused after ${String(still.iterations)} iterations (budget reached, checks still failing). /goal resume to carry on.`);
-                      const paused: Goal = { ...withElapsed(still), status: 'paused' };
-                      setGoalFor(paused, where);
-                      goalRuns.current.delete(goalOwner);
-                    }
-                    return;
-                  }
-                  if (!checked.ok || !checked.value.passed || skipped) {
-                    // Verification did not run or was skipped (no tsconfig, tsc missing) — not evidence of done, and not a failing test to loop on.
-                    const why = checked.ok ? checked.value.reason : 'the shell did not answer';
-                    say(`Goal not yet met — checks did not run: ${why}. Say /goal clear when you are satisfied it is done.`);
-                    goalRuns.current.delete(goalOwner);
-                    return;
-                  }
-                  const finishedGoal: Goal = { ...withElapsed(still), iterations: still.iterations + 1, status: 'done' };
-                  setGoalFor(finishedGoal, where);
-                  say(`Iteration ${String(finishedGoal.iterations)} · Goal met, task finished — ${verdict.reason} Checks passed.`);
-                  goalRuns.current.delete(goalOwner);
-                  goalRuns.current.delete(`${where}\u0000`);
-                });
-              }
-            }
-          }
         }
+
         // Pi tidies on its own as well as when asked, and the ring says the
         // same thing either way — from where somebody is sitting it is one
         // event.
@@ -2589,8 +2351,6 @@ function Conversation() {
       say,
       setGoalFor,
       persistGoal,
-      carryOnWith,
-      nudgeOn,
     ],
   );
 
@@ -2718,20 +2478,18 @@ function Conversation() {
       const owner = `${desk.path}\u0000${desk.address ?? ''}`;
       setHolding((current) => ({ ...current, [owner]: false }));
       /* Stop means stop. A list still being worked down must not ask for its
-         next step the moment this run settles, or Escape reads as a pause. */
-      if (carryOn.current[owner] !== undefined) {
-        const without = { ...carryOn.current };
-        delete without[owner];
-        carryOn.current = without;
-      }
-      stoppedByHand.current = { ...stoppedByHand.current, [owner]: true };
+         next step the moment this run settles, or Escape reads as a pause. The
+         shell holds that now, so it is told rather than remembered here. */
+      void bridge.continuationStop({
+        project: desk.path,
+        ...(desk.address == null ? {} : { conversation: desk.address }),
+      });
+      void owner;
     }
     // Stopping a running goal also pauses it so it doesn't quietly keep running.
     if (goalNow.current !== null && goalNow.current.status === 'active') {
-      const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
       const pausedHalt: Goal = goalNow.current === null ? (null as unknown as Goal) : { ...withElapsed(goalNow.current), status: 'paused' };
       if (pausedHalt !== null) { setGoal(pausedHalt); if (desk !== null) persistGoal(pausedHalt, desk.path); }
-      if (owner !== null) goalRuns.current.delete(owner);
       say('Goal paused — Esc stopped the run. /goal resume to carry on.');
     }
     void bridge.stop({
@@ -2996,19 +2754,9 @@ function Conversation() {
       };
       const owner = desk === null ? null : `${desk.path}\u0000${desk.address ?? ''}`;
       /* Somebody has said something, so the run that was working a list down
-         starts its rounds again from zero. The ceiling is there to stop a loop
-         nobody is watching, not to ration a person who is. */
-      if (owner !== null && carryOn.current[owner] !== undefined) {
-        const without = { ...carryOn.current };
-        delete without[owner];
-        carryOn.current = without;
-      }
-      // And a new message is not the stopped run: the flag was for that one.
-      if (owner !== null && stoppedByHand.current[owner] === true) {
-        const going = { ...stoppedByHand.current };
-        delete going[owner];
-        stoppedByHand.current = going;
-      }
+         starts its rounds again from zero, and whatever they stopped is behind
+         them. The shell holds both — it is what sends the rounds. */
+      void owner;
       // What is in the box at the moment of sending — never a snapshot from
       // whenever this callback was last rebuilt (see `attachmentsNow`).
       const inTheBox = attachmentsNow.current;
@@ -3187,7 +2935,6 @@ function Conversation() {
       }
       if (parsedGoal !== null) {
         const ownerDesk = currentDesk(desksNow.current);
-        const owner = ownerDesk === null ? null : `${ownerDesk.path}\u0000${ownerDesk.address ?? ''}`;
         if (parsedGoal.kind === 'show') {
           const showing = goalNow.current;
           say(
@@ -3203,13 +2950,11 @@ function Conversation() {
             say('Say what done looks like after /goal — one sentence, checkable.');
             return;
           }
-          const baseline = baselineFor(buildPlanNow.current?.plan.tasks);
-          const created = createGoal(objective, 'doing', baseline);
+          const created = createGoal(objective, 'doing');
           const withTime = withElapsed(created);
           setGoal(withTime);
           persistGoal(withTime, ownerDesk?.path ?? desksNow.current.current ?? null);
           setPlans('goal');
-          if (owner !== null) goalRuns.current.add(owner);
           if (howFar !== 'doing') {
             setHowFarHere('doing');
             const where: Where = {
@@ -3227,7 +2972,6 @@ function Conversation() {
             const paused: Goal = { ...withElapsed(goalNow.current), status: 'paused' };
             setGoal(paused);
             persistGoal(paused, ownerDesk?.path ?? null);
-            if (owner !== null) goalRuns.current.delete(owner);
             say('Goal paused — rounds kept, files kept. /goal resume to carry on.');
           } else {
             say('No active goal to pause.');
@@ -3247,7 +2991,6 @@ function Conversation() {
             setGoal(resumed);
             persistGoal(resumed, ownerDesk?.path ?? null);
             setPlans('goal');
-            if (owner !== null) goalRuns.current.add(owner);
             if (howFar !== 'doing') {
               setHowFarHere('doing');
               const where: Where = {
@@ -3270,7 +3013,6 @@ function Conversation() {
             setGoal(null);
             persistGoal(null, ownerDesk?.path ?? null);
             setPlans('auto');
-            if (owner !== null) goalRuns.current.delete(owner);
             say(`Goal cleared — was: ${was}`);
           } else {
             say('No goal to clear.');
@@ -3299,14 +3041,10 @@ function Conversation() {
       // becomes the objective itself.
       if (plans === 'goal' && goalNow.current === null && text.trim() !== '' && !text.trim().startsWith('/')) {
         const objective = text.trim();
-        const baseline = baselineFor(buildPlanNow.current?.plan.tasks);
-        const created = createGoal(objective, 'doing', baseline);
+        const created = createGoal(objective, 'doing');
         const withTime2 = withElapsed(created);
         setGoal(withTime2);
         persistGoal(withTime2, currentDesk(desksNow.current)?.path ?? null);
-        const ownerDesk = currentDesk(desksNow.current);
-        const owner = ownerDesk === null ? null : `${ownerDesk.path}\u0000${ownerDesk.address ?? ''}`;
-        if (owner !== null) goalRuns.current.add(owner);
         await deliver(objective, priced.task, { lookFirst: false });
         return;
       }
@@ -3452,20 +3190,16 @@ function Conversation() {
           return;
         }
         if (plans === 'goal') {
-          const owner = `${desk.path}\u0000${desk.address ?? ''}`;
           if (goalNow.current === null && text.trim() !== '' && !text.trim().startsWith('/')) {
-            const baseline = baselineFor(buildPlanNow.current?.plan.tasks);
-            const created = createGoal(text.trim(), 'doing', baseline);
+            const created = createGoal(text.trim(), 'doing');
             const withTimeH = withElapsed(created);
             setGoal(withTimeH);
             persistGoal(withTimeH, desk.path);
-            goalRuns.current.add(owner);
             void deliver(text, sizeUp(text), { lookFirst: false, queue: 'followUp' });
             return;
           }
           // Already have a goal — queue a nudge toward it with full access.
           if (goalNow.current !== null) {
-            goalRuns.current.add(owner);
           }
           void deliver(text, sizeUp(text), { lookFirst: false, queue: 'followUp' });
           return;
@@ -4475,7 +4209,15 @@ function Conversation() {
         // hears things between steps, and this is not that.
         if (desk !== undefined && desk.doing == null) {
           say(`Background work finished — ${String(over.length)} to look at.`);
-          nudgeOn(notice.project, desk.address ?? null, quietWords(over));
+          void bridge.prompt(
+            quietWords(over),
+            [],
+            { queue: 'followUp' },
+            {
+              project: notice.project,
+              ...(desk.address == null ? {} : { conversation: desk.address }),
+            },
+          );
         }
       }
       setAway((current) => ({ ...current, [notice.project]: notice.away }));
@@ -4486,9 +4228,21 @@ function Conversation() {
     const stopPlan = bridge.onBuildPlan((notice) => {
       setBuildPlan(notice.plan === null ? null : { path: notice.project, plan: notice.plan });
     });
+    /* Where the shell has got to carrying a job on by itself. Drawn, never
+       decided: the window used to hold three loops that each thought they were
+       the one deciding, and none of them knew the other two existed. */
+    const stopCarryingOn = bridge.onContinuation((notice) => {
+      const owner = `${notice.project}\u0000${notice.address}`;
+      setCarryingOn((current) =>
+        notice.resting
+          ? Object.fromEntries(Object.entries(current).filter(([key]) => key !== owner))
+          : { ...current, [owner]: notice },
+      );
+    });
     return () => {
       stopAway();
       stopPlan();
+      stopCarryingOn();
     };
   }, []);
 
@@ -5978,7 +5732,22 @@ function Conversation() {
                 steps have, and nothing about the build is lost if the window
                 closes — the plan is written down and reopened. */}
             {buildPlan !== null && buildPlan.path === desk?.path && buildPlan.plan.total > 0 ? (
-              <BuildProgress plan={buildPlan.plan} running={frontBusy} project={buildPlan.path} />
+              <BuildProgress
+                plan={buildPlan.plan}
+                running={frontBusy}
+                project={buildPlan.path}
+                carryingOn={
+                  carryingOn[`${buildPlan.path}\u0000${buildPlan.plan.address}`] ?? null
+                }
+                onStopCarryingOn={() => {
+                  void bridge.continuationStop({
+                    project: buildPlan.path,
+                    ...(buildPlan.plan.address === ''
+                      ? {}
+                      : { conversation: buildPlan.plan.address }),
+                  });
+                }}
+              />
             ) : null}
 
             {/* Both bands sit above the composer rather than in the panel on

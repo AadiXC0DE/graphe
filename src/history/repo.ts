@@ -181,6 +181,60 @@ const NEVER_SAVE = [
   '!.env.example',
 ];
 
+/** Files that hold keys.
+ *
+ *  `.gitignore` belongs to the project, and a repository Graphe did not set up
+ *  has whatever it came with — so the automatic save carries its own list and
+ *  never stages one of these whatever the folder says. */
+export const CREDENTIAL_GLOBS: readonly string[] = [
+  '.env',
+  '.env.*',
+  '*.pem',
+  '*.key',
+  'id_rsa*',
+  'id_ed25519*',
+  '.npmrc',
+  '.netrc',
+  'credentials.json',
+  '*.p12',
+  '*.pfx',
+  'service-account*.json',
+  '.aws/credentials',
+];
+
+/** The list as arguments to `git add`, matching at every depth. */
+export function excludePathspecs(): readonly string[] {
+  return CREDENTIAL_GLOBS.map((glob) => `:(exclude,glob)**/${glob}`);
+}
+
+/** The same list the other way round, for asking git which of them it has. */
+function credentialPathspecs(): readonly string[] {
+  return CREDENTIAL_GLOBS.map((glob) => `:(glob)**/${glob}`);
+}
+
+/** What one invocation came back with. */
+export type Attempt = { code: number; stdout: string; stderr: string };
+
+/** Git as this module runs it, so the credential check can be used against a
+ *  folder that has no `ProjectHistory` around it yet. */
+export type GitRunner = (args: readonly string[], cwd: string) => Promise<Attempt>;
+
+/** Credential files this project is already saving. Reported, never acted on:
+ *  taking one out rewrites a history somebody may already have pushed, and that
+ *  is their decision rather than ours. */
+export async function trackedCredentials(dir: string, run: GitRunner): Promise<readonly string[]> {
+  const listed = await run(['ls-files', '-z', '--cached', '--', ...credentialPathspecs()], dir);
+  if (listed.code !== 0) return [];
+  return listed.stdout.split('\u0000').filter((one) => one !== '');
+}
+
+export const leftOutWords = {
+  one: (file: string): string =>
+    `Left ${file} out of the version — it holds keys, and a version can end up somewhere public.`,
+  already: (file: string): string =>
+    `${file} is already saved in this project’s history, so I have left it exactly as it is.`,
+} as const;
+
 /** Configuration forced on every single invocation. Command-line settings beat
  *  anything the folder or the machine has, which is the point. */
 const FORCED_SETTINGS = [
@@ -222,6 +276,7 @@ export class ProjectHistory {
   private readonly identity: Identity;
   private readonly neverSave: readonly string[] | false;
   private ready = false;
+  private saved: readonly string[] = [];
 
   constructor(root: string, options: ProjectHistoryOptions = {}) {
     if (!root || !path.isAbsolute(root)) {
@@ -423,8 +478,14 @@ export class ProjectHistory {
     const text = message.trim();
     if (!text) throw new TypeError('A version needs a title.');
 
-    const staged = await this.attempt(['add', '--all', '--', '.']);
+    const staged = await this.attempt(['add', '--all', '--', '.', ...excludePathspecs()]);
     if (staged.code !== 0) throw new HistoryError(historyProblems.saveFailed, detailsOf(staged));
+
+    // A merge stages what it brought with it, so a credential file can reach the
+    // index without ever going through `add`. Anything the project was not
+    // already saving comes straight back out; the file on disk is never touched.
+    await this.unstageNewCredentials();
+    this.saved = await this.trackedCredentials();
 
     if (!options.evenIfNothingChanged) {
       const anything = await this.attempt(['diff', '--cached', '--quiet']);
@@ -444,6 +505,17 @@ export class ProjectHistory {
     const id = await this.currentVersion();
     if (!id) throw new HistoryError(historyProblems.saveFailed, detailsOf(saved));
     return id;
+  }
+
+  /** Credential files this project is already saving, as the last snapshot
+   *  found them. Said once in the timeline; nothing is ever done about them. */
+  get savedCredentials(): readonly string[] {
+    return this.saved;
+  }
+
+  /** The same question asked directly, without saving anything. */
+  async trackedCredentials(): Promise<readonly string[]> {
+    return trackedCredentials(this.root, (args) => this.attempt(args));
   }
 
   /** Attach a name to a version that already exists. Nothing already saved is
@@ -836,6 +908,25 @@ export class ProjectHistory {
     throw new HistoryError(historyProblems.notSetUp);
   }
 
+  /** Credential paths the index picked up that HEAD does not already carry.
+   *  Reset, not removed — the working tree keeps the file exactly as it is. */
+  private async unstageNewCredentials(): Promise<void> {
+    if (!(await this.hasVersions())) return;
+    const added = await this.attempt([
+      'diff',
+      '--cached',
+      '--name-only',
+      '-z',
+      '--diff-filter=A',
+      '--',
+      ...credentialPathspecs(),
+    ]);
+    if (added.code !== 0) return;
+    const files = added.stdout.split('\u0000').filter((one) => one !== '');
+    if (files.length === 0) return;
+    await this.attempt(['reset', '--quiet', 'HEAD', '--', ...files.map((one) => `:(literal)${one}`)]);
+  }
+
   private relative(filePath: string): string {
     const resolved = path.resolve(this.root, filePath);
     const relative = path.relative(this.root, resolved);
@@ -928,8 +1019,6 @@ export class ProjectHistory {
     };
   }
 }
-
-type Attempt = { code: number; stdout: string; stderr: string };
 
 const LOG_FORMAT =
   ['%H', '%at', '%an', '%ae', '%B', '%N', '%P', '%D'].join(FIELD) + RECORD;

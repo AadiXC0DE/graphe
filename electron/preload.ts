@@ -64,6 +64,7 @@ import {
   type Workflow,
   type BuildPlan,
   type BuildAdvance,
+  type ContinuationNotice,
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
@@ -1085,11 +1086,11 @@ const api: GrapheApi = {
   },
 
   onBuildPlan(
-    listener: (notice: { project: string; plan: BuildPlan | null }) => void,
+    listener: (notice: { project: string; address: string; plan: BuildPlan | null }) => void,
   ): () => void {
     const forward = (
       _source: IpcRendererEvent,
-      notice: { project: string; plan: BuildPlan | null },
+      notice: { project: string; address: string; plan: BuildPlan | null },
     ): void => {
       listener(notice);
     };
@@ -1097,6 +1098,20 @@ const api: GrapheApi = {
     return () => {
       ipcRenderer.off(CHANNEL.buildPlanChanged, forward);
     };
+  },
+
+  onContinuation(listener: (notice: ContinuationNotice) => void): () => void {
+    const forward = (_source: IpcRendererEvent, notice: ContinuationNotice): void => {
+      listener(notice);
+    };
+    ipcRenderer.on(CHANNEL.continuation, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.continuation, forward);
+    };
+  },
+
+  continuationStop(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.continuationStop, where);
   },
 
   inStep(where?: Where): Promise<Result<InStep>> {

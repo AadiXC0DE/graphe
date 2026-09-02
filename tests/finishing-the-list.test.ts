@@ -1,8 +1,9 @@
-/** The window wiring behind "it does one step and stops".
+/** "It does one step and stops."
  *
- * Everything these check is in App.tsx, where a unit test cannot reach — so
- * they read the wiring out of the source the way the other wired tests here do.
- * They are the tripwire for somebody removing a guard while renaming things.
+ * These used to read App.tsx as text, because the loops that decided whether to
+ * carry on lived in the window where a unit test could not reach them. They do
+ * not live there any more: one module decides, in the main process, and it is
+ * pure — so these are the behaviour now, run rather than grepped.
  */
 
 import { readFileSync } from 'node:fs';
@@ -10,197 +11,236 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  decide,
+  freshContinuation,
+  MOST_ROUNDS,
+  MOST_STUCK,
+  personSpoke,
+  type Facts,
+  type State,
+} from '../src/work/continuation';
+import { listForGoal } from '../src/work/goal';
+
 const read = (rel: string): string =>
   readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
 const APP = read('../src/App.tsx');
-const GOAL = read('../src/work/goal.ts');
+
+function facts(over: Partial<Facts> = {}): Facts {
+  return {
+    list: null,
+    goal: null,
+    endedHow: 'finished',
+    boardFinished: [],
+    extensionAsked: null,
+    ...over,
+  };
+}
+
+const list = (done: number, total: number): Facts['list'] => ({
+  done,
+  total,
+  next: done >= total ? null : `Step ${String(done + 1)}`,
+  finished: done >= total,
+});
+
+/** Run rounds until it stops asking, so the whole loop can be inspected rather
+ *  than one turn of it. `ticks` says how many steps each round gets done. */
+function through(
+  start: State,
+  each: Facts,
+  ticks: (round: number) => number,
+): { sends: number; last: ReturnType<typeof decide> } {
+  let state = start;
+  let sends = 0;
+  let done = each.list?.done ?? 0;
+  for (let round = 1; round <= MOST_ROUNDS + 4; round += 1) {
+    const total = each.list?.total ?? 0;
+    const move = decide(state, { ...each, list: total === 0 ? null : list(done, total) });
+    if (move.kind !== 'send') return { sends, last: move };
+    sends += 1;
+    state = move.state;
+    done = Math.min(total, done + ticks(round));
+  }
+  throw new Error('the loop never stopped');
+}
 
 describe('FL-01 a list with steps left asks for the next one', () => {
-  it('asks once the tracker has been advanced, not before', () => {
-    const at = APP.indexOf("buildAdvance({ kind: 'finish'");
-    expect(at).toBeGreaterThan(-1);
-    const block = APP.slice(at, at + 1200);
-    expect(block).toContain('carryOnWith(where, notice.conversation ?? null, runKey, answer.value)');
+  it('asks, names the step, and counts the round', () => {
+    const move = decide(freshContinuation(), facts({ list: list(3, 12) }));
+    expect(move.kind).toBe('send');
+    if (move.kind !== 'send') return;
+    expect(move.why).toBe('checklist');
+    expect(move.said).toContain('Step 4');
+    expect(move.state.rounds).toBe(1);
   });
 
-  /* Goal Mode runs its own round of this. Both asking would send the
-     conversation two messages for one settle. */
-  it('stands down where Goal Mode is already doing it', () => {
-    const at = APP.indexOf('carryOnWith(where,');
-    const block = APP.slice(Math.max(0, at - 700), at);
-    expect(block).toContain('goalNow.current.status === \'active\'');
-    expect(block).toContain('where === goalProject.current');
-    expect(APP).toContain('if (!goalHasIt) carryOnWith(');
+  it('rests the moment the list is finished, and says so rather than going quiet', () => {
+    const move = decide(freshContinuation(), facts({ list: list(12, 12) }));
+    expect(move.kind).toBe('rest');
+    if (move.kind !== 'rest') return;
+    expect(move.said ?? '').not.toBe('');
   });
 
-  it('goes out the same way every nudge does', () => {
-    const at = APP.indexOf('carryOnPrompt(next ?? ');
-    expect(at).toBeGreaterThan(-1);
-    expect(APP.slice(at - 60, at + 120)).toContain('nudgeOn(project, conversation,');
-  });
-
-  /* Everything the app queues for itself goes through one place, so the two
-     things the screen depends on cannot be forgotten at one call site and not
-     another: the job that makes the tab spin, and staying out of the line. */
-  it('behind the run, in the conversation that settled, spinning, and not in the line', () => {
-    const at = APP.indexOf('const nudgeOn = useCallback(');
-    expect(at).toBeGreaterThan(-1);
-    const block = APP.slice(at, at + 1800);
-    expect(block).toContain("queue: 'followUp'");
-    expect(block).toContain('conversation === null ? {} : { conversation }');
-    expect(block).toContain('doing: one.doing ?? started');
-    expect(block).toContain('oursInLine.current');
+  it('works a twelve-step list down without being asked again', () => {
+    const ran = through(freshContinuation(), facts({ list: list(0, 12) }), () => 4);
+    expect(ran.sends).toBeGreaterThan(0);
+    expect(ran.last.kind).toBe('rest');
   });
 });
 
 describe('FL-02 every way it stops', () => {
-  it('stops when the person presses Escape, rather than treating it as a pause', () => {
-    expect(APP).toContain('stoppedByHand.current = { ...stoppedByHand.current, [owner]: true }');
-    const at = APP.indexOf('const carryOnWith = useCallback(');
-    const block = APP.slice(at, at + 700);
-    expect(block).toContain('stoppedByHand.current[runKey] === true');
+  it('stops after two rounds that tick nothing off, out loud', () => {
+    const ran = through(freshContinuation(), facts({ list: list(2, 9) }), () => 0);
+    expect(ran.sends).toBe(MOST_STUCK);
+    expect(ran.last.kind).toBe('stop');
+    if (ran.last.kind !== 'stop') return;
+    expect(ran.last.said).not.toBe('');
   });
 
-  it('starts its rounds again from zero when the person says something', () => {
-    const at = APP.indexOf('const deliver = useCallback(');
-    const block = APP.slice(at, at + 2600);
-    expect(block).toContain('delete without[owner]');
-    expect(block).toContain('carryOn.current = without');
+  it('stops when the round budget is spent, out loud', () => {
+    const ran = through(freshContinuation(), facts({ list: list(0, 500) }), () => 1);
+    expect(ran.sends).toBe(MOST_ROUNDS);
+    expect(ran.last.kind).toBe('stop');
+    if (ran.last.kind !== 'stop') return;
+    expect(ran.last.said).toContain(String(MOST_ROUNDS));
   });
 
-  it('says out loud whichever way it stopped', () => {
-    const at = APP.indexOf('const carryOnWith = useCallback(');
-    const block = APP.slice(at, at + 1800);
-    expect(block).toContain("if (move.kind === 'stop')");
-    expect(block).toContain('say(move.said)');
+  it('never asks again once somebody has pressed Escape', () => {
+    const stopped: State = { ...freshContinuation(), stopped: true };
+    expect(decide(stopped, facts({ list: list(1, 8) })).kind).toBe('rest');
+  });
+
+  it('never nudges somebody who is being asked a question', () => {
+    expect(decide(freshContinuation(), facts({ list: list(1, 8), endedHow: 'asked-person' })).kind).toBe(
+      'rest',
+    );
+    const waiting: State = { ...freshContinuation(), waitingOnPerson: true };
+    expect(decide(waiting, facts({ list: list(1, 8) })).kind).toBe('rest');
+  });
+
+  it('never nudges into a session an add-on has stopped', () => {
+    const move = decide(freshContinuation(), facts({ list: list(1, 8), endedHow: 'blocked-by-addon' }));
+    expect(move.kind).toBe('stop');
+  });
+
+  it('starts the budget again when the person says something', () => {
+    const spent: State = { ...freshContinuation(), rounds: MOST_ROUNDS, stuckRounds: 2, stopped: true };
+    const after = personSpoke(spent);
+    expect(after.rounds).toBe(0);
+    expect(after.stopped).toBe(false);
+    expect(decide(after, facts({ list: list(1, 8) })).kind).toBe('send');
   });
 });
 
-describe('FL-03 a goal inherits the list it was set on', () => {
-  /* The baseline skipped past every task that already existed, so setting a
-     goal on a plan already being worked left it with nothing to check — it ran
-     one round, said there was no checklist, and stood down. */
-  it('reads the baseline from the plan rather than taking its highest number', () => {
-    expect(APP).not.toMatch(/tasks\.reduce\(\(m, t\) => Math\.max\(m, t\.n\), 0\)/);
-    expect(APP.match(/baselineFor\(buildPlanNow\.current\?\.plan\.tasks\)/g)).toHaveLength(3);
+describe('FL-03 a goal has a list to be measured against', () => {
+  it('gets one of its own written when the model could not write one', () => {
+    expect(listForGoal('make the tests pass')).toEqual(['Reach: make the tests pass']);
   });
 
-  it('skips past a finished list and inherits an unfinished one', () => {
-    const at = GOAL.indexOf('export function baselineFor');
-    const block = GOAL.slice(at, at + 500);
-    expect(block).toContain("one.status !== 'done'");
-    expect(block).toContain('if (anyLeft) return 0');
+  it('no longer skips past a list belonging to another conversation', () => {
+    // Lists are the conversation's own now, so there is no baseline to get
+    // wrong — see RC-14.
+    expect(read('../src/work/goal.ts')).not.toContain('planBaselineN');
+    expect(APP).not.toContain('baselineFor');
+  });
+
+  it('carries on toward an unmet goal, naming it', () => {
+    const move = decide(
+      freshContinuation(),
+      facts({ goal: { met: false, reason: '2 of 5 steps settled.', objective: 'ship it' } }),
+    );
+    expect(move.kind).toBe('send');
+    if (move.kind !== 'send') return;
+    expect(move.why).toBe('goal');
+    expect(move.text).toContain('ship it');
+  });
+
+  it('rests once the goal is met', () => {
+    const move = decide(
+      freshContinuation(),
+      facts({ goal: { met: true, reason: 'all settled', objective: 'ship it' } }),
+    );
+    expect(move.kind).toBe('rest');
   });
 });
 
-describe('FL-04 what the model is told while a list is live', () => {
-  const PLAN = read('../src/work/buildplan.ts');
-
-  it('says an advisor verdict does not end an unfinished list', () => {
-    const at = PLAN.indexOf('export function planStanding');
-    const block = PLAN.slice(at, at + 900);
-    expect(block).toContain('advisor');
-    expect(block).toContain('never permission to leave the list unfinished');
-  });
-
-  it('asks for the whole list rather than one step per reply', () => {
-    const at = PLAN.indexOf('export function planStanding');
-    expect(PLAN.slice(at, at + 900)).toContain('Work through the whole list in this reply');
+describe('FL-04 one continuation per settle, whatever the reasons', () => {
+  it('does not send twice when a list, a goal and the board all want a turn', () => {
+    const move = decide(
+      freshContinuation(),
+      facts({
+        list: list(1, 6),
+        goal: { met: false, reason: 'not yet', objective: 'ship it' },
+        boardFinished: [{ id: 'a', title: 'The header' }],
+      }),
+    );
+    expect(move.kind).toBe('send');
+    if (move.kind !== 'send') return;
+    expect(move.state.rounds).toBe(1);
   });
 });
 
 describe('FL-05 the board tells the conversation it has finished', () => {
-  it('reads what the board looked like a moment ago, outside the state updater', () => {
-    const at = APP.indexOf('const stopAway = bridge.onAway(');
-    const block = APP.slice(at, at + 1400);
-    expect(block).toContain('wentQuiet(awayNow.current[notice.project]?.pieces, notice.away.pieces)');
-    // A message sent from inside a state updater would be sent twice.
-    expect(block.indexOf('wentQuiet(')).toBeLessThan(block.indexOf('setAway((current)'));
-  });
-
-  it('only into a conversation with nothing already going', () => {
-    const at = APP.indexOf('const stopAway = bridge.onAway(');
-    expect(APP.slice(at, at + 1400)).toContain('desk.doing == null');
+  it('takes finished pieces in, naming them', () => {
+    const move = decide(
+      freshContinuation(),
+      facts({ boardFinished: [{ id: 'a', title: 'The header' }] }),
+    );
+    expect(move.kind).toBe('send');
+    if (move.kind !== 'send') return;
+    expect(move.why).toBe('board');
+    expect(move.text).toContain('The header');
   });
 });
 
-describe('FL-06 the file tree keeps up with the work', () => {
-  it('is read as steps finish rather than only when the reply settles', () => {
-    expect(APP).toContain("if (notice.event.type === 'tool-end' && notice.project !== null)");
-    expect(APP).toContain('refreshFilesSoon(notice.project)');
-  });
-
-  it('is throttled, so a step writing forty files does not walk the folder forty times', () => {
-    const at = APP.indexOf('const refreshFilesSoon = useCallback(');
-    const block = APP.slice(at, at + 600);
-    expect(block).toContain('FILES_APART');
-    expect(block).toContain('filesReadAt.current');
-  });
-});
-
-describe('FL-07 changing a plan asks again rather than starting', () => {
-  it('sends the changes back as another look rather than putting the words in the box', () => {
-    const at = APP.indexOf('PLAN_WORDS.planAgain');
-    expect(at).toBeGreaterThan(-1);
-    const block = APP.slice(at - 600, at + 300);
-    expect(block).toContain('decidedMessage(chosen.decision)');
-    expect(block).toContain('lookFirst: true');
-  });
-
-  it('still falls back to the box when nothing was actually changed', () => {
-    const at = APP.indexOf('PLAN_WORDS.planAgain');
-    const block = APP.slice(at - 700, at + 300);
-    expect(block).toContain('setDraft(text)');
+describe('FL-06 an add-on that asks for a turn is one of ours, and is named', () => {
+  it('is attributed, counted against the budget, and sent once', () => {
+    const move = decide(
+      freshContinuation(),
+      facts({ extensionAsked: { from: 'an add-on', text: 'Continue objective: ship it' } }),
+    );
+    expect(move.kind).toBe('send');
+    if (move.kind !== 'send') return;
+    expect(move.why).toBe('extension');
+    expect(move.said).toContain('an add-on');
+    expect(move.state.rounds).toBe(1);
+    // Consumed by the owner, so the same ask cannot send twice.
+    expect(decide(move.state, facts()).kind).toBe('rest');
   });
 });
 
-describe('FL-08 a line taken back leaves the conversation', () => {
-  it('comes out of the thread as well as going into the box', () => {
-    const at = APP.indexOf('bridge.takeBackQueue(');
-    const block = APP.slice(at, at + 1200);
-    expect(block).toContain('intoTheBox(was, words)');
-    expect(block).toContain('withoutTakenBack(one.turns, words)');
+describe('FL-07 a run that failed is picked up once, never twice', () => {
+  it('tries once', () => {
+    const move = decide(freshContinuation(), facts({ endedHow: 'failed' }));
+    expect(move.kind).toBe('send');
+    if (move.kind !== 'send') return;
+    expect(move.why).toBe('recovery');
+  });
+
+  it('does not try the same failure again', () => {
+    const stuck: State = { ...freshContinuation(), stuckRounds: 1 };
+    expect(decide(stuck, facts({ endedHow: 'failed' })).kind).not.toBe('send');
   });
 });
 
-describe('FL-09 a run the app kept going still looks like it is running', () => {
-  /* The loop worked and the tab stopped spinning, because everything that made
-     the screen say "working" lived in `deliver` and these do not go through it. */
-  it('goal mode goes round through the same nudge', () => {
-    expect(APP).toContain('Continue toward the goal: ${activeGoal.objective}');
-    const at = APP.indexOf('Continue toward the goal: ${activeGoal.objective}');
-    expect(APP.slice(at - 200, at)).toContain('nudgeOn(');
+describe('FL-08 the window no longer decides any of this', () => {
+  it('has no loop of its own left in it', () => {
+    for (const gone of [
+      'carryOnWith(',
+      'const carryOn = useRef',
+      'const stoppedByHand = useRef',
+      'goalRuns.current',
+      "buildAdvance({ kind: 'finish'",
+      "buildAdvance({ kind: 'start' }",
+    ]) {
+      expect(APP).not.toContain(gone);
+    }
   });
 
-  it('so does the board when it goes quiet', () => {
-    expect(APP).toContain('nudgeOn(notice.project, desk.address ?? null, quietWords(over))');
-  });
-
-  it('and none of the three are drawn as somebody waiting in line', () => {
-    const at = APP.indexOf("if (notice.event.type === 'queued')");
-    expect(APP.slice(at, at + 700)).toContain('withoutOurs(words, oursInLine.current[owner] ?? [])');
-  });
-});
-
-describe('FL-10 a goal makes its own checklist', () => {
-  it('asks for one instead of telling the person to go and write it', () => {
-    const at = APP.indexOf('if (ownedCount === 0)');
-    const block = APP.slice(at, at + 900);
-    expect(block).toContain('goalWords.askForTheSteps');
-    expect(block).not.toContain('Not auto-continuing');
-  });
-
-  it('asks once, then stops rather than going round on nothing to check', () => {
-    const at = APP.indexOf('if (ownedCount === 0)');
-    const block = APP.slice(at, at + 900);
-    expect(block).toContain('askedForAList.current.has(goalOwner)');
-    expect(block).toContain('goalWords.noStepsEither');
-  });
-
-  it('and there is a tool that can actually write one', () => {
-    const TOOLS = read('../src/agent/pi/tools.ts');
-    expect(TOOLS).toContain("name: 'make_checklist'");
-    expect(TOOLS).toContain('makeChecklistTool(makeChecklist)');
+  it('never closes a step on the strength of how a reply read', () => {
+    expect(APP).not.toContain('settledWell(said)');
+    expect(read('../electron/main.ts')).not.toContain('tickedThisTurn');
   });
 });

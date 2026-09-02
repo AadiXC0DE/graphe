@@ -40,7 +40,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
@@ -196,23 +196,39 @@ import { preparePrWorktree } from './prWorktree';
 import { RUNTIME_SCRATCH, keepOutOfCommits } from './excludes';
 import {
   addTasks,
-  finishTask,
-  inHand,
-  isFinished,
+  dropStep,
+  failStep,
+  insertStep,
+  needsWhich,
   nextOf,
-  note as noteOn,
-  planStanding,
   progress,
-  readPlan,
-  setStatus,
-  startTask,
+  readStored,
+  replaceKeepingTicks,
+  skipStep,
+  toMarkdown,
+  startStep,
+  tickStep,
+  unfinished,
+  type Moved,
+  type StoredPlan,
   type Task,
 } from '../src/work/buildplan';
+import { keyOf } from '../src/work/owner';
+import { writeAtomically } from '../src/lib/atomic';
 import { GoalFile } from '../src/projects/goals';
+import { continuationOwner } from './continuation-owner';
+import { MOST_ROWS, standingBlock } from '../src/agent/pi/standing';
 import { FlowFile } from '../src/projects/flows';
 import { readFlow, withFlow, withoutFlow, type Flow } from '../src/work/canvas';
 import { notHere, runHelper } from '../src/share/run';
-import { readStoredGoal, type Goal } from '../src/work/goal';
+import {
+  goalWords,
+  listForGoal,
+  readStoredGoal,
+  verifyGoal,
+  withElapsed,
+  type Goal,
+} from '../src/work/goal';
 import { openingFor, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
@@ -2428,14 +2444,68 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // running in the background is NOT brought back — that is what keeps two
     // parallel tabs from silently overwriting each other's files.
     if (said.type === 'settled') {
-      // An agent may have switched branch through its shell. Keep the durable
-      // checkout row in step before this folder is ever put away; otherwise a
-      // reopened conversation recreates the old branch while the panel claims
-      // the switch worked.
+      /* One decision, once, for every reason there might be to carry on. Taken
+         before the housekeeping below, because whether the job is over is what
+         decides whether the housekeeping runs at all. */
+      const how = said.how ?? 'finished';
+      void continuations
+        .settled(path, from.address ?? '', how)
+        .catch(() => undefined)
+        .then(() => {
+          /* The checkout is applied, the pictures are taken and "always do this
+             at the end" runs when the JOB rests — not at the end of every round
+             of a loop working a list down. On a large repository each of those
+             is seconds, and doing them per round is how a twelve-step list
+             spent longer on housekeeping than on work. */
+          if (!continuations.resting(path, from.address ?? '')) return;
+          if (how !== 'finished' && how !== 'failed') return;
+          settleUpTheJob(path, held, from);
+        });
+      // A ceiling notice and the page's own bookkeeping are cheap and belong to
+      // every settle, not only to the last one.
       if (from.address !== null) void syncCheckoutBranch(path, held, from.address);
       sayIfCeilingIsBlind(path, from.address ?? undefined);
       clearNotesOnPage();
       showTheWorkOnPage();
+    }
+
+    if (said.type === 'needs-confirmation' || said.type === 'asked-first') {
+      continuations.waiting(path, from.address ?? '', true);
+    }
+    if (said.type === 'settled') {
+      continuations.waiting(path, from.address ?? '', false);
+    }
+
+    // Against the ceiling as well as into the ledger. This is the conversation
+    // somebody is sitting in front of, so it is never registered as something
+    // the ceiling may stop — it finishes and is saved, and what is refused is
+    // the next thing asked for.
+    if (said.type === 'spend') fleet.spent(null, said.amount);
+
+    // Recorded whether or not there is a window to tell: a reload must not lose
+    // money that was already spent.
+    for (const also of held.spend.observe(said)) {
+      send(path, also, from.address ?? undefined);
+      // What a sitting came to is worth keeping beside the project's name, so
+      // opening it again is not the first time anybody finds out.
+      if (also.type === 'spend-summary') {
+        void recents().then((list) => list.recordSpend(path, also.summary.total));
+      }
+    }
+  };
+}
+
+/**
+ * The work carried home, and the pictures taken of it.
+ *
+ * Once per job. A conversation's work runs in its own checkout; the one in
+ * front is the one the folder the window reads belongs to, so when its job
+ * comes to rest the work is carried home before the screenshots take it in. A
+ * tab running in the background is NOT brought back — that is what keeps two
+ * parallel tabs from silently overwriting each other's files.
+ */
+function settleUpTheJob(path: string, held: Held, from: Speaking): void {
+  {
       const inFront = held.sessions.current?.path === from.address;
       const checkout =
         !inFront ||
@@ -2473,25 +2543,7 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
           look(path, held);
         })
         .catch(() => look(path, held));
-    }
-
-    // Against the ceiling as well as into the ledger. This is the conversation
-    // somebody is sitting in front of, so it is never registered as something
-    // the ceiling may stop — it finishes and is saved, and what is refused is
-    // the next thing asked for.
-    if (said.type === 'spend') fleet.spent(null, said.amount);
-
-    // Recorded whether or not there is a window to tell: a reload must not lose
-    // money that was already spent.
-    for (const also of held.spend.observe(said)) {
-      send(path, also, from.address ?? undefined);
-      // What a sitting came to is worth keeping beside the project's name, so
-      // opening it again is not the first time anybody finds out.
-      if (also.type === 'spend-summary') {
-        void recents().then((list) => list.recordSpend(path, also.summary.total));
-      }
-    }
-  };
+  }
 }
 
 /**
@@ -2755,6 +2807,9 @@ async function checkItFirst(
   try {
     inside = await createSession({
       projectRoot: waiting.folder,
+      // A copy checking one message is not a conversation, so an add-on that
+      // starts turns of its own has no business in it.
+      sessionKind: 'helper',
       onEvent: forwardHeld(open.path, held, from),
       timeline: await Timeline.open(waiting.folder),
       model: (await preferences()).all().model,
@@ -3427,10 +3482,32 @@ async function syncCheckoutBranch(project: string, held: Held, address: string):
  *  to a dash maps `/x/a-b`, `/x/a.b` and `/x/a b` to one file, and finishing one
  *  project's checklist would take another's down with it. A short digest of the
  *  real path breaks the ties. */
-function buildPlanFile(project: string): string {
+function buildPlanFile(project: string, address: string): string {
+  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+  const digest = createHash('sha256')
+    .update(`${resolve(project)}\u0000${address}`)
+    .digest('hex')
+    .slice(0, 8);
+  return join(app.getPath('userData'), 'builds', `${key}-${digest}.json`);
+}
+
+/** Where a project's one shared list used to live. A project has as many
+ *  conversations as it has tabs, and one list between them was advanced from
+ *  whichever happened to settle; the old file is read into the conversation in
+ *  front once, then left alone. */
+function oldBuildPlanFile(project: string): string {
   const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
   const digest = createHash('sha256').update(resolve(project)).digest('hex').slice(0, 8);
   return join(app.getPath('userData'), 'builds', `${key}-${digest}.json`);
+}
+
+/** Every list this project is holding, so the panel can say how many other
+ *  conversations have one. */
+async function buildPlanFilesFor(project: string): Promise<readonly string[]> {
+  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+  const folder = join(app.getPath('userData'), 'builds');
+  const names = await readdir(folder).catch(() => [] as string[]);
+  return names.filter((one) => one.startsWith(`${key}-`) && one.endsWith('.json'));
 }
 
 /** Opens asked for and not yet answered, by folder. Two requests for the same
@@ -3569,16 +3646,28 @@ async function startConversationUnlocked(
       // must not be able to fill the board they are running on.
       putOnBoard: (doing, after, ways) =>
         keepGoing(open.path, basename(open.path), doing, after, false, ways ?? null),
-      // Whoever is doing the work says when a thing is done, rather than the
-      // window guessing from where one reply ends and the next begins.
-      stepDone: (note) => tickOneOff(open.path, note),
-      // And can be told to stand the whole list down. Keyed to this project
-      // here, so the tool cannot guess a path that does not match where plans
-      // are kept.
-      cancelBuild: () => cancelThePlan(open.path),
+      // Whoever is doing the work says which step moved, rather than the window
+      // guessing from where one reply ends and the next begins. `from.address`
+      // is filled the moment this conversation has a name, which is before any
+      // tool of its own can run.
+      stepMoved: (op) => stepMoved(open.path, from.address ?? '', op),
+      // And can be told to stand the whole list down. Keyed to this project and
+      // conversation here, so the tool cannot guess a path that does not match
+      // where lists are kept.
+      cancelBuild: () => cancelThePlan(open.path, from.address ?? ''),
       // And can write one. A model that can tick a list off but never make one
       // leaves every list to be typed by somebody.
-      makeChecklist: (titles) => layOutThePlan(open.path, titles),
+      makeChecklist: (titles, mode) =>
+        layOutThePlan(open.path, from.address ?? '', titles, mode),
+      /* What Graphe says on every model call, not only on the ones somebody
+         typed. A steer used to carry the checklist and a retry after a rate
+         limit did not, which is exactly the turn where a long job forgets it
+         had a list. */
+      standing: () => standingBlockFor(open.path, from.address ?? ''),
+      sessionKind: 'conversation',
+      // The housekeeping at the end of a turn belongs to the end of the job,
+      // not to the end of every round of a loop working a list down.
+      jobAtRest: () => continuations.resting(open.path, from.address ?? ''),
       keepsBrowserLogins: () => keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path),
       planMode: held.planMode,
       // One folder of transcripts for all projects, under the app's own data
@@ -4025,32 +4114,200 @@ type AwayDesk = {
  * built elsewhere, so the two meet here. Answers plainly before `register` has
  * run: a conversation with no checklist is the ordinary case, not a failure.
  */
-let tickOneOff: (project: string, note: string | null) => Promise<string> = () =>
+/** One step of the model's own hand on its list, by number. `n` is null only
+ *  when a single step is still open — anything else and the model is asked
+ *  which it means rather than the app picking one. */
+export type StepMove = {
+  kind: 'done' | 'started' | 'failed' | 'skipped' | 'dropped' | 'inserted';
+  n: number | null;
+  why?: string;
+  title?: string;
+};
+
+let stepMoved: (project: string, address: string, op: StepMove) => Promise<string> = () =>
   Promise.resolve(NO_LIST_TO_TICK);
 
 /** What a list the model wrote for itself is called at the top of the panel. */
 const WHAT_THE_MODEL_CALLED_IT = 'What this needs';
 
 const NO_LIST_TO_TICK =
-  'There is no checklist on screen for this project, so there was nothing to tick. Carry on.';
+  'There is no checklist on screen for this conversation, so there was nothing to move. Carry on.';
 
 /** Cancelling the checklist, from inside a tool call. Same story as
- *  `tickOneOff`: the session is built elsewhere and the plan helpers live in
+ *  `stepMoved`: the session is built elsewhere and the plan helpers live in
  *  `register`, so they meet through these lets. */
-let cancelThePlan: (project: string) => Promise<string> = () =>
+let cancelThePlan: (project: string, address: string) => Promise<string> = () =>
   Promise.resolve(NO_LIST_TO_TICK);
 
 /** Writing the checklist in the first place. Without this the model could tick
  *  a list off and stand it down but never make one, so anything that wanted a
  *  list — Goal Mode most of all — could only ask a person to write it. */
-let layOutThePlan: (project: string, titles: readonly string[]) => Promise<string> = () =>
-  Promise.resolve('There is nowhere to put a checklist for this project yet.');
+let layOutThePlan: (
+  project: string,
+  address: string,
+  titles: readonly string[],
+  mode: 'append' | 'replace',
+) => Promise<string> = () =>
+  Promise.resolve('There is nowhere to put a checklist for this conversation yet.');
 
-/** Projects whose checklist the model has moved itself this turn. The window
- *  advances one step per reply for a plan worked a reply at a time; when the
- *  model has said where it is, its word is the better one and the reply-boundary
- *  guess must not move it a second time. */
-const tickedThisTurn = new Set<string>();
+/** The list as it stands, for the standing block the system prompt carries. */
+let listNow: (project: string, address: string) => Promise<StoredPlan | null> = () =>
+  Promise.resolve(null);
+
+/* -------------------------------------------------------------------------- */
+/* Carrying on                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The one thing allowed to send a message nobody typed.
+ *
+ * There used to be three — a carry-on loop in the window, a goal loop beside it
+ * keyed three different ways, and whatever an add-on decided on its own. Each
+ * fired on the same settle and none knew the other two existed.
+ */
+const continuations = continuationOwner({
+  send: (project, address, text) => {
+    void sendOnTheirBehalf(project, address, text);
+  },
+  say: (project, address, text) => {
+    if (text === '') return;
+    const at = address === '' ? undefined : address;
+    send(project, { type: 'message-delta', text: `\n\n${text}` }, at);
+    send(project, { type: 'message-end' }, at);
+  },
+  tell: (one) => {
+    if (mainWindow === null || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send(CHANNEL.continuation, one);
+  },
+  list: async (project, address) => {
+    const stored = await listNow(project, address);
+    if (stored === null) return null;
+    const how = progress(stored.tasks);
+    return {
+      done: how.done,
+      total: how.total,
+      next: nextOf(stored.tasks)?.title ?? null,
+      finished: stored.finished,
+    };
+  },
+  goal: async (project, address) => {
+    const goal = await GoalFile.read(project, app.getPath('userData'), address).catch(() => null);
+    if (goal === null || goal.status !== 'active') return null;
+    const stored = await listNow(project, address);
+    /* Round 0 of a goal writes its own list. If the model could not, the app
+       writes one of one step so the loop has something to check against —
+       a goal that stood down for want of a checklist is a goal that did
+       nothing. */
+    if (stored === null || stored.tasks.length === 0) {
+      await layOutThePlan(project, address, listForGoal(goal.objective), 'replace');
+      return { met: false, reason: goalWords.noStepsEither, objective: goal.objective };
+    }
+    const how = progress(stored.tasks);
+    const plan = { done: how.done, total: how.total, next: nextOf(stored.tasks)?.title ?? null };
+    // The checks only matter once the list is settled, and they are slow, so
+    // they are not run on every round to be thrown away.
+    const checks = how.done < how.total ? null : await runProjectChecks(project, address);
+    const verdict = verifyGoal(plan, checks, goal.objective);
+    if (verdict.met) {
+      await GoalFile.write(
+        project,
+        app.getPath('userData'),
+        { ...withElapsed(goal), status: 'done' },
+        address,
+      );
+    } else {
+      await GoalFile.write(
+        project,
+        app.getPath('userData'),
+        { ...withElapsed(goal), iterations: goal.iterations + 1 },
+        address,
+      );
+    }
+    return { ...verdict, objective: goal.objective };
+  },
+});
+
+/**
+ * The one path a message the person did not type goes out by.
+ *
+ * Everything the screen depends on happens here and nowhere else: the job is
+ * set so the tab keeps spinning, the words are recorded as the app's own so the
+ * waiting line leaves them out, and it goes in behind whatever is running
+ * rather than interrupting it.
+ */
+async function sendOnTheirBehalf(project: string, address: string, text: string): Promise<void> {
+  const open = projectAt({ project });
+  if (open === null) return;
+  const where = address === '' ? {} : { conversation: address };
+  const session = sessionAt(open, where);
+  if (session === null) return;
+  ours.set(keyOf(project, address), [...(ours.get(keyOf(project, address)) ?? []), text]);
+  try {
+    await session.prompt(text, [], { queue: 'followUp' });
+  } catch {
+    // A conversation that will not take another message is a conversation that
+    // has ended. The line said out loud before this is the answer either way.
+  }
+}
+
+/** Messages this app queued for itself, per conversation. Drawn in the waiting
+ *  line they read as something somebody typed and is waiting for, and they are
+ *  neither. */
+const ours = new Map<string, readonly string[]>();
+
+/**
+ * The project's own checks, for a goal to be measured against.
+ *
+ * What the project already says about itself: `run_checks` where there is a
+ * checks file, its typecheck where there is a tsconfig, and an honest "no
+ * checks" where there is neither. A check that did not run is never a check
+ * that passed.
+ */
+async function runProjectChecks(
+  project: string,
+  address: string,
+): Promise<{ passed: boolean; reason: string } | null> {
+  const open = projectAt({ project });
+  if (open === null) return null;
+  const folder = folderFor(open, address === '' ? {} : { conversation: address });
+  const entries = await readdir(folder).catch(() => [] as string[]);
+  const hasTs = entries.includes('tsconfig.json') || entries.includes('tsconfig.base.json');
+  if (!hasTs) return null;
+  const ran = await runHelper('npx', ['--no-install', 'tsc', '--noEmit'], {
+    folder,
+    patience: 90_000,
+  });
+  if (notHere(ran)) return null;
+  if (ran.code === 0) return { passed: true, reason: 'the typecheck passed.' };
+  return { passed: false, reason: ran.said.trim().slice(0, 2000) || 'the typecheck failed.' };
+}
+
+/**
+ * Graphe's own block, built fresh for the turn that is about to run.
+ *
+ * The checklist as it stands, the goal it is working toward, the rules that
+ * hold whatever else is installed, and the two notes most worth carrying. Never
+ * captured once and reused: the list moves during a turn, and a block captured
+ * when the conversation opened is wrong by the second reply.
+ */
+async function standingBlockFor(project: string, address: string): Promise<string | null> {
+  const stored = await listNow(project, address).catch(() => null);
+  const goal = await GoalFile.read(project, app.getPath('userData'), address).catch(() => null);
+  const how = stored === null ? null : progress(stored.tasks);
+  return standingBlock({
+    list:
+      stored === null || how === null || how.total === 0
+        ? null
+        : {
+            markdown: toMarkdown(stored.tasks.slice(0, MOST_ROWS)),
+            done: how.done,
+            total: how.total,
+            rows: stored.tasks.length,
+          },
+    goal: goal !== null && goal.status === 'active' ? goal.objective : null,
+    notes: [],
+  });
+}
 
 const awayDesks = new Map<string, AwayDesk>();
 
@@ -4466,6 +4723,9 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
   try {
     session = await createSession({
       projectRoot: folder,
+      // A piece on the board is not a conversation. Four of them each loading
+      // an add-on that starts turns of its own is four loops nobody asked for.
+      sessionKind: 'board',
       // Nobody is sitting in front of this, so it is never given the tool that
       // stops to ask. A run that waited for an answer nobody is there to give
       // would be a night spent on a question.
@@ -7286,64 +7546,85 @@ function register(): void {
 
   /* -------------------------------------------------- document to build */
   /* The document that started a build, kept so a resumed session knows what it
-     was building, and the plan that turns it into tasks. Stored outside the
-     project so nothing it contains appears in the folder the person watches. */
-  async function readBuildPlan(project: string): Promise<import('../src/lib/ipc').BuildPlan | null> {
-    const raw = await readFile(buildPlanFile(project), 'utf8').catch(() => null);
-    if (raw === null) return null;
-    try {
-      const stored = JSON.parse(raw) as {
-        source: string;
-        tasks?: unknown;
-      };
-      if (typeof stored?.source !== 'string') return null;
-      const tasks = readPlan(stored.tasks);
-      // Everything built is nothing left to say. Kept, it sits above the next
-      // conversation reading 4/4 for ever, which is what it used to do.
-      if (isFinished(tasks)) return null;
-      const next = tasks.find((one) => one.status !== 'done')?.n ?? null;
-      return {
-        source: stored.source,
-        tasks: tasks.map(toWindowTask),
-        next,
-        done: tasks.filter((one) => one.status === 'done').length,
-        total: tasks.length,
-      };
-    } catch {
-      return null;
-    }
+     was building, and the checklist that turns it into steps. Stored outside the
+     project so nothing it contains appears in the folder the person watches.
+
+     One list per conversation, not per project: every tab runs in its own
+     checkout, and a list shared between them was advanced by whichever tab
+     happened to settle. */
+
+  /** How many of this project's other conversations are holding a list. */
+  async function otherListsIn(project: string, address: string): Promise<number> {
+    const mine = basename(buildPlanFile(project, address));
+    const all = await buildPlanFilesFor(project);
+    return all.filter((one) => one !== mine).length;
   }
 
-  /** The stored plan whole: its source name and the real task list, so a step
-   *  can be advanced and written back without losing anything the window shape
-   *  leaves out. */
-  async function readStoredTasks(project: string): Promise<{ source: string; tasks: readonly Task[] } | null> {
-    const raw = await readFile(buildPlanFile(project), 'utf8').catch(() => null);
-    if (raw === null) return null;
-    try {
-      const stored = JSON.parse(raw) as { source?: unknown; tasks?: unknown };
-      if (typeof stored?.source !== 'string') return null;
-      const tasks = readPlan(stored.tasks);
-      if (tasks.length === 0) return null;
-      return { source: stored.source, tasks };
-    } catch {
-      return null;
+  /** The stored list, whole, with the one-per-project file read in once for a
+   *  conversation that has none of its own. */
+  async function readStoredPlan(project: string, address: string): Promise<StoredPlan | null> {
+    const file = buildPlanFile(project, address);
+    const raw = await readFile(file, 'utf8').catch(() => null);
+    if (raw !== null) {
+      try {
+        return readStored(JSON.parse(raw));
+      } catch {
+        return null;
+      }
     }
+    // Nothing of this conversation's own. The one list the project used to
+    // share moves into whichever conversation asks for it first, once.
+    const old = oldBuildPlanFile(project);
+    if (old === file) return null;
+    const before = await readFile(old, 'utf8').catch(() => null);
+    if (before === null) return null;
+    let stored: StoredPlan | null = null;
+    try {
+      stored = readStored(JSON.parse(before));
+    } catch {
+      stored = null;
+    }
+    if (stored === null) return null;
+    await writeBuildPlan(project, address, stored.source, stored.tasks);
+    await rm(old, { force: true }).catch(() => undefined);
+    return stored;
   }
 
-  /** One at a time, per project.
+  /** The list as the window draws it. A finished list comes back finished
+   *  rather than as nothing: it stays on screen, saying so, until somebody
+   *  clears it. */
+  async function readBuildPlan(
+    project: string,
+    address: string,
+  ): Promise<import('../src/lib/ipc').BuildPlan | null> {
+    const stored = await readStoredPlan(project, address);
+    if (stored === null) return null;
+    const how = progress(stored.tasks);
+    return {
+      source: stored.source,
+      tasks: stored.tasks.map(toWindowTask),
+      next: nextOf(stored.tasks)?.n ?? null,
+      done: how.done,
+      total: how.total,
+      finished: stored.finished,
+      address,
+      elsewhere: await otherListsIn(project, address),
+    };
+  }
+
+  /** One at a time, per conversation.
    *
-   *  Three of these handlers read the plan, change it and write it back, and
-   *  the window fires them from two places that can be in flight together — a
-   *  step starting while another settles. Last write wins is how a finishing
-   *  step deletes a plan that had just been written, so they queue instead. */
+   *  Several of these handlers read the list, change it and write it back, and
+   *  the model can call two step tools in one batch. Last write wins is how one
+   *  tick undoes another, so they queue instead. */
   const planQueue = new Map<string, Promise<unknown>>();
-  function onePlanAtATime<T>(project: string, work: () => Promise<T>): Promise<T> {
-    const after = (planQueue.get(project) ?? Promise.resolve()).then(work, work);
+  function onePlanAtATime<T>(project: string, address: string, work: () => Promise<T>): Promise<T> {
+    const key = keyOf(project, address);
+    const after = (planQueue.get(key) ?? Promise.resolve()).then(work, work);
     // Never left holding a rejection: the next caller waits on the turn, not on
     // whether the last one succeeded.
     planQueue.set(
-      project,
+      key,
       after.then(
         () => undefined,
         () => undefined,
@@ -7353,103 +7634,127 @@ function register(): void {
   }
 
   /**
-   * Tick the thing in hand off, and say how far along that leaves it.
+   * Every way the model moves its own list.
    *
-   * The one place the model can move its own list. Everything it needs to know
-   * comes back in the sentence — how many are done, and what is next — because
-   * a tool that answers "ok" teaches the model nothing about the list it is
-   * working through.
+   * The one hand on the checklist. The app never guesses which step a reply was
+   * for — a turn that read three files and wrote a paragraph used to tick one,
+   * and a failing test used to fail one. Everything it needs to know comes back
+   * in the sentence, because a tool that answers "ok" teaches the model nothing
+   * about the list it is working through.
    */
-  tickOneOff = async (project: string, note: string | null): Promise<string> =>
-    onePlanAtATime(project, async () => {
-      const stored = await readStoredTasks(project);
+  async function moveTheList(
+    project: string,
+    address: string,
+    move: (plan: readonly Task[]) => Moved,
+  ): Promise<string> {
+    return onePlanAtATime(project, address, async () => {
+      const stored = await readStoredPlan(project, address);
       if (stored === null) return NO_LIST_TO_TICK;
-      const was = inHand(stored.tasks);
-      if (was === null) return NO_LIST_TO_TICK;
+      const { plan, said } = move(stored.tasks);
+      if (plan === stored.tasks) return said;
+      await writeBuildPlan(project, address, stored.source, plan);
+      pushBuildPlan(project, address, await readBuildPlan(project, address));
+      return said;
+    });
+  }
 
-      let tasks = setStatus(stored.tasks, was.n, 'done');
-      if (note !== null && note.trim() !== '') tasks = noteOn(tasks, was.n, note.trim());
-      // Its word, not the reply boundary's guess.
-      tickedThisTurn.add(project);
+  /** Which step, when the model did not say. One still owed can only be that
+   *  one; two or more and a bare call is a guess the app must not make. */
+  function whichStep(plan: readonly Task[], n: number | null): number | null {
+    if (n !== null) return n;
+    if (needsWhich(plan)) return null;
+    return nextOf(plan)?.n ?? null;
+  }
 
-      const how = progress(tasks);
-      if (isFinished(tasks)) {
-        await rm(buildPlanFile(project), { force: true }).catch(() => undefined);
-        pushBuildPlan(project, null);
-        return `“${was.title}” is ticked off. That was the last of ${String(how.total)} — the list is done and is gone from the screen.`;
+  function mustSayWhich(plan: readonly Task[]): string {
+    const owed = unfinished(plan)
+      .map((one) => `${String(one.n)}. ${one.title}`)
+      .join(' · ');
+    return `Say which step. Still open: ${owed}.`;
+  }
+
+  listNow = async (project: string, address: string): Promise<StoredPlan | null> =>
+    readStoredPlan(project, address);
+
+  stepMoved = async (project, address, op): Promise<string> =>
+    moveTheList(project, address, (plan) => {
+      const n = whichStep(plan, op.n);
+      if (n === null) return { plan, said: mustSayWhich(plan) };
+      switch (op.kind) {
+        case 'done':
+          return tickStep(plan, n, op.why ?? null);
+        case 'started':
+          return startStep(plan, n);
+        case 'failed':
+          return failStep(plan, n, op.why ?? '');
+        case 'skipped':
+          return skipStep(plan, n, op.why ?? '');
+        case 'dropped':
+          return dropStep(plan, n, op.why ?? '');
+        case 'inserted':
+          return insertStep(plan, n, op.title ?? '');
       }
-      await writeBuildPlan(project, stored.source, tasks);
-      pushBuildPlan(project, await readBuildPlan(project));
-      const next = nextOf(tasks);
-      return `“${was.title}” is ticked off — ${String(how.done)} of ${String(how.total)} done.${
-        next === null ? '' : ` Next on the list: “${next.title}”.`
-      }`;
     });
 
   /**
    * Write the checklist, or add to the one already there.
    *
-   * Same queue as every other plan change, and the same file — so a list the
-   * model wrote is the list the person sees, ticks off and resumes from, with
-   * nothing to reconcile.
+   * Same queue as every other change, and the same file — so a list the model
+   * wrote is the list the person sees, ticks off and resumes from, with nothing
+   * to reconcile. `replace` keeps the ticks of any step whose title survives.
    */
-  layOutThePlan = async (project: string, titles: readonly string[]): Promise<string> =>
-    onePlanAtATime(project, async () => {
+  layOutThePlan = async (project, address, titles, mode): Promise<string> =>
+    onePlanAtATime(project, address, async () => {
       const wanted = titles.map((one) => one.trim()).filter((one) => one !== '');
       if (wanted.length === 0) return 'A checklist needs at least one step.';
-      const stored = await readStoredTasks(project);
-      if (stored === null) {
-        const tasks = wanted.map((title, at) => ({
-          n: at + 1,
-          title,
-          acceptance: '',
-          test: null,
-          status: 'pending' as const,
-          note: null,
-        }));
-        await writeBuildPlan(project, WHAT_THE_MODEL_CALLED_IT, tasks);
-        pushBuildPlan(project, await readBuildPlan(project));
-        return `The checklist is on screen — ${String(tasks.length)} steps, starting with “${String(
-          tasks[0]?.title,
-        )}”. Tick each one off with step_done as it lands.`;
-      }
-      const tasks = addTasks(stored.tasks, wanted);
-      await writeBuildPlan(project, stored.source, tasks);
-      pushBuildPlan(project, await readBuildPlan(project));
-      return `Added ${String(wanted.length)} to the checklist, which now has ${String(
-        tasks.length,
-      )}. Tick each one off with step_done as it lands.`;
+      const stored = await readStoredPlan(project, address);
+      const source = stored?.source ?? WHAT_THE_MODEL_CALLED_IT;
+      const before = stored?.tasks ?? [];
+      const tasks =
+        mode === 'replace' || before.length === 0
+          ? replaceKeepingTicks(before, wanted)
+          : addTasks(before, wanted);
+      await writeBuildPlan(project, address, source, tasks);
+      pushBuildPlan(project, address, await readBuildPlan(project, address));
+      const first = nextOf(tasks);
+      return `The checklist has ${String(tasks.length)} steps${
+        first === null ? '' : `, starting with ${String(first.n)}. “${first.title}”`
+      }. Tick each one off with step_done as it lands.`;
     });
 
-  /** Cancel the checklist. Through the same queue as every other plan change:
-   *  a bare delete beside an in-flight tick would race the write that follows
-   *  it and the list would walk back onto the screen mid-cancel. Says plainly
-   *  when there was nothing to cancel rather than claiming a success. */
-  cancelThePlan = async (project: string): Promise<string> =>
-    onePlanAtATime(project, async () => {
-      const stored = await readStoredTasks(project);
+  /** Cancel the checklist. Through the same queue as every other change: a bare
+   *  delete beside an in-flight tick would race the write that follows it and
+   *  the list would walk back onto the screen mid-cancel. Says plainly when
+   *  there was nothing to cancel rather than claiming a success. */
+  cancelThePlan = async (project: string, address: string): Promise<string> =>
+    onePlanAtATime(project, address, async () => {
+      const stored = await readStoredPlan(project, address);
       if (stored === null) return NO_LIST_TO_TICK;
-      await rm(buildPlanFile(project), { force: true }).catch(() => undefined);
-      pushBuildPlan(project, null);
+      await rm(buildPlanFile(project, address), { force: true }).catch(() => undefined);
+      pushBuildPlan(project, address, null);
       return `The checklist “${stored.source}” is cancelled and gone from the screen.`;
     });
 
   /** Say the checklist moved, so it moves on screen while the reply is still
    *  going rather than catching up once nobody is watching. */
-  function pushBuildPlan(project: string, plan: import('../src/lib/ipc').BuildPlan | null): void {
+  function pushBuildPlan(
+    project: string,
+    address: string,
+    plan: import('../src/lib/ipc').BuildPlan | null,
+  ): void {
     if (mainWindow === null || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send(CHANNEL.buildPlanChanged, { project, plan });
+    mainWindow.webContents.send(CHANNEL.buildPlanChanged, { project, address, plan });
   }
 
-  async function writeBuildPlan(project: string, source: string, tasks: readonly Task[]): Promise<void> {
-    const file = buildPlanFile(project);
+  async function writeBuildPlan(
+    project: string,
+    address: string,
+    source: string,
+    tasks: readonly Task[],
+  ): Promise<void> {
+    const file = buildPlanFile(project, address);
     await mkdir(dirname(file), { recursive: true });
-    // Written beside it and moved into place, because a half-written file here
-    // is unreadable json, and unreadable json is reported as having no plan at
-    // all — the tracker disappears mid-build with nothing to say why.
-    const beside = `${file}.writing`;
-    await writeFile(beside, `${JSON.stringify({ source, tasks }, null, 2)}\n`, 'utf8');
-    await rename(beside, file);
+    await writeAtomically(file, `${JSON.stringify({ source, tasks }, null, 2)}\n`);
   }
 
   function toWindowTask(one: Task): import('../src/lib/ipc').BuildTask {
@@ -7463,9 +7768,19 @@ function register(): void {
     };
   }
 
+  /** Which conversation's list. A project has as many as it has tabs, so a
+   *  request that names none means the one in front. */
+  function listAddress(open: Workspace<Held>, where: Where): string | null {
+    const found = conversationAt(open.held, where);
+    return found === null ? null : addressOf(found.held);
+  }
+
   handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildPlan, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    return done(open === null ? null : await readBuildPlan(open.path));
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done(null);
+    const address = listAddress(open, where);
+    return done(address === null ? null : await readBuildPlan(open.path, address));
   });
 
   handle<{ name: string; text: string } | null>(CHANNEL.chooseDocument, async (_event, _args) => {
@@ -7487,110 +7802,102 @@ function register(): void {
 
   handle<import('../src/lib/ipc').BuildPlan>(CHANNEL.buildStart, async (_event, args) => {
     const [sourceRaw] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    return onePlanAtATime(open.path, async () => {
+    const address = listAddress(open, where);
+    if (address === null) return fail(NOTHING_OPEN);
+    return onePlanAtATime(open.path, address, async () => {
       if (typeof sourceRaw !== 'object' || sourceRaw === null) return fail(NOTHING_OPEN);
       const source = sourceRaw as { name?: unknown; text?: unknown; instruction?: unknown };
       const name = typeof source.name === 'string' ? source.name : 'A document';
       if (typeof source.text !== 'string') return fail(NOTHING_OPEN);
       // Start the plan empty — the planning turn that fills it runs in the
       // conversation, where its steps show themselves before anything changes.
-      await writeBuildPlan(open.path, name, []);
-      const read = await readBuildPlan(open.path);
-      return done(read ?? { source: name, tasks: [], next: null, done: 0, total: 0 });
+      // Empty is a list being worked out, not the absence of one, which is why
+      // it now reads back rather than looking like nothing.
+      await writeBuildPlan(open.path, address, name, []);
+      const read = await readBuildPlan(open.path, address);
+      return done(
+        read ?? {
+          source: name,
+          tasks: [],
+          next: null,
+          done: 0,
+          total: 0,
+          finished: false,
+          address,
+          elsewhere: 0,
+        },
+      );
     });
   });
 
   handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildSave, async (_event, args) => {
     const [stepsRaw] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    return onePlanAtATime(open.path, async () => {
+    const address = listAddress(open, where);
+    if (address === null) return fail(NOTHING_OPEN);
+    return onePlanAtATime(open.path, address, async () => {
       // A document-to-build brings its own plan; a plan approved in the
       // conversation creates one of its own when there is none yet — a normal
       // long task gets the same checklist above the box.
-      const prior = await readBuildPlan(open.path);
+      const prior = await readStoredPlan(open.path, address);
       const source = prior?.source ?? 'The plan';
       const steps = Array.isArray(stepsRaw)
-        ? (stepsRaw as { title?: unknown; acceptance?: unknown }[])
+        ? (stepsRaw as { title?: unknown }[])
         : [];
-      /** What a step already was, when the plan is being revised rather than
-       *  made. Matched on the words, and only "done" is carried: a step that
-       *  failed is one to try again, and a title reused for different work should
-       *  not inherit a tick. */
-      const before = (title: string, acceptance: string): Task['status'] => {
-        const was = prior?.tasks.find(
-          (one) => one.title.trim() === title.trim() && one.acceptance.trim() === acceptance.trim(),
-        );
-        return was?.status === 'done' ? 'done' : 'pending';
-      };
-      const tasks: Task[] = steps
-        .map((one, index) => {
-          const title = typeof one.title === 'string' ? one.title : 'A step';
-          const acceptance = typeof one.acceptance === 'string' ? one.acceptance : '';
-          return {
-            n: index + 1,
-            title,
-            acceptance,
-            test: null,
-            status: before(title, acceptance),
-            note: null,
-          };
-        })
-        .filter((one) => one.title.trim() !== '');
-      if (tasks.length === 0) return done(prior);
-      await writeBuildPlan(open.path, source, tasks);
-      return done(await readBuildPlan(open.path));
+      const titles = steps
+        .map((one) => (typeof one.title === 'string' ? one.title : ''))
+        .filter((one) => one.trim() !== '');
+      if (titles.length === 0) return done(await readBuildPlan(open.path, address));
+      // A step whose words survive keeps its tick; one that failed comes back as
+      // still to do, because a failure is work owed.
+      const tasks = replaceKeepingTicks(prior?.tasks ?? [], titles);
+      await writeBuildPlan(open.path, address, source, tasks);
+      pushBuildPlan(open.path, address, await readBuildPlan(open.path, address));
+      return done(await readBuildPlan(open.path, address));
     });
   });
 
-  /* The tracker's own step, as the run goes: close the task a settled turn
-     finished, or add tasks for requirements found while building. */
+  /* Steps found while building. The only thing left of the old tracker: the
+     window never closes a step any more — the model says which one moved, and
+     `step_done` is the one hand on the list. */
   handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildAdvance, async (_event, args) => {
     const [opRaw] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    return onePlanAtATime(open.path, async () => {
-      const stored = await readStoredTasks(open.path);
+    const address = listAddress(open, where);
+    if (address === null) return fail(NOTHING_OPEN);
+    return onePlanAtATime(open.path, address, async () => {
+      const stored = await readStoredPlan(open.path, address);
       if (stored === null) return fail(NOTHING_OPEN);
       const op = opRaw as import('../src/lib/ipc').BuildAdvance | null;
-      if (op === null || typeof op !== 'object') return fail(NOTHING_OPEN);
-      let tasks: readonly Task[] = stored.tasks;
-      if (op.kind === 'start') {
-        // A new reply, so whatever the model said last time is spent.
-        tickedThisTurn.delete(open.path);
-        tasks = startTask(stored.tasks);
-      } else if (op.kind === 'finish') {
-        // The window moves the list on one step per reply, which is right for a
-        // plan worked a reply at a time. When the model has ticked its own
-        // items off, its word is the better one and this must not move it
-        // again — six items done inside one reply is six, not seven.
-        if (tickedThisTurn.has(open.path)) {
-          tickedThisTurn.delete(open.path);
-          return done(await readBuildPlan(open.path));
-        }
-        tasks = finishTask(stored.tasks, op.ok !== false);
-      } else if (op.kind === 'add' && Array.isArray(op.titles)) {
-        tasks = addTasks(stored.tasks, op.titles.filter((one) => typeof one === 'string'));
+      if (op === null || typeof op !== 'object' || op.kind !== 'add' || !Array.isArray(op.titles)) {
+        return done(await readBuildPlan(open.path, address));
       }
-      if (isFinished(tasks)) {
-        // Nothing left to build, so nothing left to track. Taken away here rather
-        // than only hidden, or it comes back with the next project that opens.
-        await rm(buildPlanFile(open.path), { force: true }).catch(() => undefined);
-        return done(null);
-      }
-      await writeBuildPlan(open.path, stored.source, tasks);
-      return done(await readBuildPlan(open.path));
+      const tasks = addTasks(
+        stored.tasks,
+        op.titles.filter((one) => typeof one === 'string'),
+      );
+      await writeBuildPlan(open.path, address, stored.source, tasks);
+      pushBuildPlan(open.path, address, await readBuildPlan(open.path, address));
+      return done(await readBuildPlan(open.path, address));
     });
   });
 
   handle<null>(CHANNEL.buildCancel, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return done(null);
-    return onePlanAtATime(open.path, async () => {
-      await rm(buildPlanFile(open.path), { force: true }).catch(() => undefined);
-      pushBuildPlan(open.path, null);
+    const address = listAddress(open, where);
+    if (address === null) return done(null);
+    return onePlanAtATime(open.path, address, async () => {
+      await rm(buildPlanFile(open.path, address), { force: true }).catch(() => undefined);
+      pushBuildPlan(open.path, address, null);
       return done(null);
     });
   });
@@ -7619,6 +7926,17 @@ function register(): void {
     if (open === null || typeof id !== 'string') return fail(NOTHING_OPEN);
     const held = await FlowFile.read(open.path, app.getPath('userData'));
     await FlowFile.write(open.path, app.getPath('userData'), withoutFlow(held, id));
+    return done(null);
+  });
+
+  /* Stop carrying on. Escape and the Stop beside the line it draws both land
+     here: the loop is in the shell now, so the window says so rather than
+     remembering it. */
+  handle<null>(CHANNEL.continuationStop, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done(null);
+    continuations.stopped(open.path, listAddress(open, where) ?? '');
     return done(null);
   });
 
@@ -7732,6 +8050,11 @@ function register(): void {
       const said = limitReached(ceiling);
       return fail({ what: said.title, because: said.body, actionLabel: 'Got it' });
     }
+    /* Somebody has said something, so the rounds the app was allowed to send by
+       itself start again from zero and whatever they stopped is behind them.
+       The ceiling is there to stop a loop nobody is watching, not to ration a
+       person who is. */
+    continuations.spoke(open.path, addressOf(conversation.held));
     // Their own words, kept for the sentence beside the pictures. The same
     // sentence the version timeline writes for the same moment — see
     // src/diff/summary.ts.
@@ -7744,11 +8067,12 @@ function register(): void {
       // than in the window: the extraction is Node's, and the same reader
       // already serves `webfetch`.
       const papers = await paperWords(attachments);
-      // The plan lives outside the project, so it reaches the model — and the
-      // advisor reading this conversation — only if the turn carries it.
-      const stored = await readStoredTasks(open.path);
-      const plan = stored === null ? null : planStanding(stored.tasks);
-      const asked = [text, papers, plan ?? ''].filter((one) => one !== '').join('\n\n');
+      // The checklist used to be appended here, to the person's own words. A
+      // steer carried it, a retry after a rate limit did not, and neither did
+      // anything after the conversation was tidied up — which are exactly the
+      // turns where a long job forgets it had a list. It is in the system
+      // prompt now, on every call, through `standing.ts`.
+      const asked = [text, papers].filter((one) => one !== '').join('\n\n');
       const lookFirst =
         ways !== null && typeof ways === 'object' && (ways as PromptOptions).lookFirst === true;
       const queue =

@@ -12,9 +12,12 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
+  CARD_STEPS,
+  MAX_STEPS,
   PLAN_WORDS,
   decideOn,
   decidedMessage,
+  forTheCard,
   moved,
   parseProposal,
   readOnlyTools,
@@ -89,6 +92,13 @@ describe('readOnlyTools', () => {
     expect(writing.map((one) => one.name), 'writes, and the Guard calls it a read').toEqual([]);
   });
 });
+
+/** A plan of `many` steps, written the way a model writes one. */
+function numbered(many: number): string {
+  return Array.from({ length: many }, (_, at) => `${String(at + 1)}. Step ${String(at + 1)}`).join(
+    '\n',
+  );
+}
 
 describe('parseProposal', () => {
   it('reads a markdown numbered list', () => {
@@ -181,17 +191,28 @@ describe('parseProposal', () => {
     ]);
   });
 
-  it('caps the list at twelve and says how many are left', () => {
-    const long = Array.from({ length: 15 }, (_, index) => `${index + 1}. Step ${index + 1}`).join('\n');
+  /* A twenty-step plan used to arrive as twelve steps and a sentence nobody
+     acted on, and the checklist finished with eight steps of the job undone.
+     What the card can hold and what the plan is are two different numbers. */
+  it('reads all twenty steps of a twenty-step plan', () => {
+    const long = numbered(20);
     const { steps, caveats } = parseProposal(long);
-    expect(steps).toHaveLength(12);
-    expect(steps[11]).toBe('Step 12');
-    expect(caveats).toEqual(['There are 3 more steps after these.']);
+    expect(steps).toHaveLength(20);
+    expect(steps[19]).toBe('Step 20');
+    expect(caveats).toEqual([]);
   });
 
-  it('says "one more step" when exactly one is left over', () => {
-    const long = Array.from({ length: 13 }, (_, index) => `- Step ${index + 1}`).join('\n');
-    expect(parseProposal(long).caveats).toEqual(['There is one more step after these.']);
+  it('caps a plan nobody wrote on purpose, and says how much it is not holding', () => {
+    const { steps, caveats } = parseProposal(numbered(70));
+    expect(steps).toHaveLength(MAX_STEPS);
+    expect(steps[59]).toBe('Step 60');
+    expect(caveats).toEqual(['There are 10 more steps after these.']);
+  });
+
+  it('says "one more step" when exactly one is past the cap', () => {
+    expect(parseProposal(numbered(MAX_STEPS + 1)).caveats).toEqual([
+      'There is one more step after these.',
+    ]);
   });
 
   it('keeps a sentence that qualifies the plan', () => {
@@ -213,6 +234,58 @@ describe('parseProposal', () => {
   it('does not mistake ordinary prose around the list for a caveat', () => {
     const { caveats } = parseProposal('Here is the plan.\n\n1. Read the page\n2. Change the title\n\nThat is all of it.');
     expect(caveats).toEqual([]);
+  });
+});
+
+/* ========================================================================== */
+/* The card is short; the plan is not                                          */
+/* ========================================================================== */
+
+describe('what the card shows of a long plan', () => {
+  it('shows a screenful and reports the rest, without losing any of it', () => {
+    const { steps } = parseProposal(numbered(20));
+    const { shown, more } = forTheCard(steps);
+
+    expect(shown).toHaveLength(CARD_STEPS);
+    expect(shown[11]).toBe('Step 12');
+    expect(more).toBe(8);
+    // The steps themselves are untouched: what runs is all twenty.
+    expect(steps).toHaveLength(20);
+  });
+
+  it('shows a short plan whole and reports nothing', () => {
+    const { steps } = parseProposal(numbered(3));
+    expect(forTheCard(steps)).toEqual({ shown: steps, more: 0 });
+    expect(forTheCard([])).toEqual({ shown: [], more: 0 });
+  });
+
+  it('shows exactly the card’s worth without offering more', () => {
+    const { steps } = parseProposal(numbered(CARD_STEPS));
+    expect(forTheCard(steps).more).toBe(0);
+  });
+
+  it('keeps the card shorter than the cap, or the split does nothing', () => {
+    expect(CARD_STEPS).toBeLessThan(MAX_STEPS);
+  });
+});
+
+describe('a reply with no plan in it', () => {
+  it('has nothing to show, rather than a card of one empty step', () => {
+    expect(parseProposal('').steps).toEqual([]);
+    expect(parseProposal('   \n\n  ').steps).toEqual([]);
+    // Everything the model said was a question, so there is nothing to agree to.
+    expect(parseProposal('Questions:\n- Which page?\n- Which colour?').steps).toEqual([]);
+  });
+
+  it('has the words for the card that says so, and the way out of it', () => {
+    expect(PLAN_WORDS.noSteps).toBe('I couldn’t read a plan out of that.');
+    expect(PLAN_WORDS.askAgain).toBe('Ask me to lay it out as a numbered list');
+  });
+
+  /* One sentence describing one change is a plan of one thing, and always has
+     been. The no-plan card is for a reply with nothing in it at all. */
+  it('still reads a single sentence as a plan of one step', () => {
+    expect(parseProposal('I would change the button colour.').steps).toHaveLength(1);
   });
 });
 
@@ -350,6 +423,11 @@ describe('PLAN_WORDS', () => {
     PLAN_WORDS.alternative,
     PLAN_WORDS.more(1),
     PLAN_WORDS.more(4),
+    PLAN_WORDS.showRest(1),
+    PLAN_WORDS.showRest(8),
+    PLAN_WORDS.showFewer,
+    PLAN_WORDS.noSteps,
+    PLAN_WORDS.askAgain,
   ];
 
   it('never raises its voice', () => {
@@ -589,7 +667,16 @@ describe('what the plan card is allowed to do', () => {
   /* A label written into the markup is a label nothing can check the language
      of, and this app checks the language of all of them. */
   it('reads every word it says out of the words object', () => {
-    for (const word of ['PLAN_WORDS.up', 'PLAN_WORDS.down', 'PLAN_WORDS.say', 'PLAN_WORDS.questions(']) {
+    for (const word of [
+      'PLAN_WORDS.up',
+      'PLAN_WORDS.down',
+      'PLAN_WORDS.say',
+      'PLAN_WORDS.questions(',
+      'PLAN_WORDS.showRest(',
+      'PLAN_WORDS.showFewer',
+      'PLAN_WORDS.noSteps',
+      'PLAN_WORDS.askAgain',
+    ]) {
       expect(CARD).toContain(word);
     }
     for (const inline of ['Move up', 'Move down', 'Say something about this']) {
@@ -618,7 +705,10 @@ describe('what the plan card is allowed to do', () => {
   it('leaves every decision to the pure side rather than deciding here', () => {
     expect(CARD).toContain('decideOn(');
     expect(CARD).toContain('moved(');
+    expect(CARD).toContain('forTheCard(');
     expect(CARD).not.toMatch(/\.splice\(/);
+    // How much fits on a card is one number, and it is not written down here.
+    expect(CARD).not.toMatch(/slice\(0,\s*\d/);
   });
 });
 
@@ -635,6 +725,10 @@ describe('the words on the card', () => {
     PLAN_WORDS.answersTo,
     PLAN_WORDS.inThisOrder,
     PLAN_WORDS.nowAt(2, 4),
+    PLAN_WORDS.showRest(8),
+    PLAN_WORDS.showFewer,
+    PLAN_WORDS.noSteps,
+    PLAN_WORDS.askAgain,
   ];
 
   it('uses no word a designer has no reason to know', () => {

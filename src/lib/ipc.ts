@@ -873,13 +873,24 @@ export type Workflow = {
   source: 'global' | 'project';
 };
 
+/** Where the app has got to carrying a job on by itself. `why` is null once it
+ *  has come to rest. */
+export type ContinuationNotice = {
+  project: string;
+  address: string;
+  round: number;
+  why: 'checklist' | 'goal' | 'board' | 'extension' | 'recovery' | null;
+  said: string;
+  resting: boolean;
+};
+
 /** One step of a document-to-build plan, as the window draws it. */
 export type BuildTask = {
   n: number;
   title: string;
   acceptance: string;
   test: string | null;
-  status: 'pending' | 'doing' | 'done' | 'failed';
+  status: 'pending' | 'doing' | 'done' | 'failed' | 'skipped';
   note: string | null;
 };
 
@@ -892,6 +903,16 @@ export type BuildPlan = {
   next: number | null;
   done: number;
   total: number;
+  /** Every step settled. A finished list stays on screen, and says so, until
+   *  somebody clears it — deleting it on the spot is how a list that finished
+   *  by mistake vanished with nothing to resume from. */
+  finished: boolean;
+  /** Which conversation the list belongs to. A project has as many lists as it
+   *  has conversations; one shared between them advanced from whichever tab
+   *  happened to settle. */
+  address: string;
+  /** How many other conversations in this project are holding a list. */
+  elsewhere: number;
 };
 
 /** One step the tracker takes as the build runs — picking up the next task,
@@ -1336,6 +1357,10 @@ export const CHANNEL = {
   forgetRepeat: 'graphe:forget-repeat',
   awayChanged: 'graphe:away-changed',
   buildPlanChanged: 'graphe:build-plan-changed',
+  /** Where the app has got to carrying a job on by itself. */
+  continuation: 'graphe:continuation',
+  /** Stop it carrying on. Escape, and the Stop beside the line it draws. */
+  continuationStop: 'graphe:continuation-stop',
   inStep: 'graphe:in-step',
   followDesign: 'graphe:follow-design',
   lookAgain: 'graphe:look-again',
@@ -1781,7 +1806,15 @@ export type GrapheApi = {
   /** The checklist moved while a reply was still going — the model ticked
    *  something off. Without this the list only catches up when the reply ends,
    *  which is exactly when nobody is still watching it. */
-  onBuildPlan(listener: (notice: { project: string; plan: BuildPlan | null }) => void): () => void;
+  onBuildPlan(
+    listener: (notice: { project: string; address: string; plan: BuildPlan | null }) => void,
+  ): () => void;
+
+  /** Where the app has got to carrying a job on by itself, drawn as the one
+   *  line under the reply with a Stop beside it. */
+  onContinuation(listener: (notice: ContinuationNotice) => void): () => void;
+  /** Stop it carrying on, from that Stop or from Escape. */
+  continuationStop(where?: Where): Promise<Result<null>>;
 
   /* ----------------------------------------------- staying in step with Figma */
 

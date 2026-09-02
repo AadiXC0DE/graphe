@@ -10,13 +10,17 @@
  * fake store and the rest is pure.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  PINNED,
   REACHABLE,
   SAID,
   describeStart,
+  pinnedVersion,
   readReach,
   readStored,
   readValues,
@@ -90,6 +94,79 @@ describe('the curated shelf', () => {
   it('names each of them once', () => {
     expect(new Set(REACHABLE.map((one) => one.id)).size).toBe(REACHABLE.length);
     expect(new Set(REACHABLE.map((one) => one.name.toLowerCase())).size).toBe(REACHABLE.length);
+  });
+});
+
+/* ========================================================================== */
+/* R-0V what a start line will actually fetch                                  */
+/* ========================================================================== */
+
+const SOURCE = fileURLToPath(new URL('../src', import.meta.url));
+
+function sourceFiles(dir: string = SOURCE): readonly string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const here = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...sourceFiles(here));
+    else if (/\.(ts|tsx)$/.test(entry.name)) found.push(here);
+  }
+  return found;
+}
+
+/** An `npx` line as it is written anywhere: the flags, then what it fetches. */
+const FETCHES = /\bnpx\s+((?:-{1,2}[\w-]+\s+)*)([^\s'"`,\]]+)/g;
+
+describe('what a start line will actually fetch', () => {
+  it('pins every program we vouch for to an exact version', () => {
+    for (const one of REACHABLE) {
+      if (one.start.how !== 'program') continue;
+      expect(pinnedVersion(one.start.args), one.id).not.toBeNull();
+      for (const arg of one.start.args) expect(arg, one.id).not.toContain('@latest');
+    }
+  });
+
+  it('keeps every one of those versions in the one place', () => {
+    for (const one of REACHABLE) {
+      if (one.start.how !== 'program') continue;
+      for (const arg of one.start.args) {
+        if (arg.startsWith('-')) continue;
+        const at = arg.lastIndexOf('@');
+        expect(at, `${one.id} starts ${arg}`).toBeGreaterThan(0);
+        expect(PINNED[arg.slice(0, at)], `${one.id} starts ${arg}`).toBe(arg.slice(at + 1));
+      }
+    }
+  });
+
+  /** "Whatever is newest" is a decision a stranger makes after we ship, and it
+   *  is also nothing at all when this computer is offline. */
+  it('never fetches whatever is newest, anywhere in the app', () => {
+    for (const file of sourceFiles()) {
+      const text = readFileSync(file, 'utf8');
+      const where = file.slice(SOURCE.length + 1);
+      for (const found of text.matchAll(FETCHES)) {
+        const [, flags, spec] = found;
+        const line = text.slice(found.index, found.index + 80);
+        // A line that reads its version out of the map is pinned by construction.
+        const fromMap = /pinnedSpec\(['"]([^'"]+)['"]\)/.exec(line);
+        if (fromMap !== null) {
+          expect(PINNED[fromMap[1] ?? ''], `${where} starts ${fromMap[1]}`).toBeDefined();
+          continue;
+        }
+        expect(spec, `${where} starts ${spec}`).not.toContain('@latest');
+        // Without one of these it runs what is already installed; with one it
+        // fetches, and what it fetches has to be named exactly.
+        if (/-y|--yes/.test(flags ?? '')) {
+          expect(spec, `${where} fetches ${spec}`).toMatch(/@\d/);
+        }
+      }
+    }
+  });
+
+  it('shows the version on the row, for somebody who wants to know', () => {
+    const browser = REACHABLE.find((one) => one.id === 'browser');
+    expect(browser).toBeDefined();
+    const shown = describeStart(browser!.start).find((line) => line.label === SAID.labelVersion);
+    expect(shown?.value).toBe(PINNED['@playwright/mcp']);
   });
 });
 
@@ -473,11 +550,20 @@ describe('show me how it starts', () => {
     ]);
   });
 
-  it('shows the program and its words, exactly', () => {
-    const reach = reachOf({ name: 'A', where: 'npx -y thing@1' });
+  it('shows the program, its words and the version it will run, exactly', () => {
+    const reach = reachOf({ name: 'A', where: 'npx -y thing@1.2.3' });
     expect(describeStart(reach.start)).toEqual([
       { label: SAID.labelProgram, value: 'npx' },
-      { label: SAID.labelWords, value: '-y thing@1' },
+      { label: SAID.labelWords, value: '-y thing@1.2.3' },
+      { label: SAID.labelVersion, value: '1.2.3' },
+    ]);
+  });
+
+  it('says nothing about a version where the line carries none', () => {
+    const reach = reachOf({ name: 'A', where: 'my-own-program --stay' });
+    expect(describeStart(reach.start).map((line) => line.label)).toEqual([
+      SAID.labelProgram,
+      SAID.labelWords,
     ]);
   });
 

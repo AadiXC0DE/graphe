@@ -14,6 +14,8 @@
  * argued with without opening the app.
  */
 
+import { parseProposal } from './plan';
+
 /** Every word this mode puts on screen. */
 export const researchWords = {
   /** On the chip, when it is the way of working in force. */
@@ -257,6 +259,35 @@ export function implementationPlanFromResearch(report: string): string | null {
   if (found === null) return null;
   const after = report.slice(found.index + found[0].length).trim();
   return after === '' ? null : after;
+}
+
+/** A line that opens with its own number. Bullets are deliberately not here: a
+ *  report is full of them, and a numbered run is the shape of a plan. */
+const NUMBERED = /^[ \t]*\d+[.)][ \t]+\S/;
+
+/** Where the steps came from, so the card can say so and nothing has to guess. */
+export type StepSource = 'heading' | 'numbered' | 'none';
+
+/**
+ * The steps a research report offers, however it wrote them.
+ *
+ * The heading the brief asked for first, because that is the model saying "this
+ * is the plan". Failing that, the report's own numbered list — a report that
+ * laid its steps out plainly should not lose them to a missing heading. Failing
+ * both, nothing, and the card says so rather than the app inventing a list.
+ */
+export function stepsFromReport(report: string): { steps: readonly string[]; from: StepSource } {
+  const section = implementationPlanFromResearch(report);
+  if (section !== null) {
+    const { steps } = parseProposal(section);
+    if (steps.length > 0) return { steps, from: 'heading' };
+  }
+  const numbered = report.split(/\r?\n/).filter((line) => NUMBERED.test(line));
+  if (numbered.length > 0) {
+    const { steps } = parseProposal(numbered.join('\n'));
+    if (steps.length > 0) return { steps, from: 'numbered' };
+  }
+  return { steps: [], from: 'none' };
 }
 
 /** How the plan says it was longer than the list that came out of it. */

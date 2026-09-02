@@ -36,7 +36,7 @@ export const SAYS = {
   namePlaceholder: 'my-database',
   command: 'Where to find it',
   commandHint: 'The command that starts it, or the address it already answers on.',
-  commandPlaceholder: 'npx -y @playwright/mcp@latest, or http://127.0.0.1:3845/mcp',
+  commandPlaceholder: 'npx -y @playwright/mcp@0.0.80, or http://127.0.0.1:3845/mcp',
   unknown: 'Not checked',
   working: 'Answering',
   broken: 'Would not start',

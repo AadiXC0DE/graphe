@@ -299,6 +299,10 @@ export function withTrouble(turns: readonly Turn[], trouble: Trouble): readonly 
 
 export const STOPPED_PART_WAY = 'I stopped part way through.';
 
+/** What a step that was still running says once the run it belonged to was
+ *  ended rather than finished. */
+export const STEP_WAS_STOPPED = 'stopped';
+
 /** The looking-around pass has no tool call behind it, so it borrows one id.
  *  Nothing else may use it. */
 const LOOKING = 'graphe:looking';
@@ -581,7 +585,19 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
     case 'spend-summary':
     case 'model-reading':
     case 'running':
+    case 'busy':
+    case 'prompt-size':
       return turns;
+
+    /* Something about the app rather than about this conversation. Said in the
+       thread as a line, never as trouble: a ceiling reached is not a turn that
+       failed, and painting the conversation red for it is the app blaming the
+       work for its own housekeeping. */
+    case 'notice':
+      return [
+        ...turns,
+        said('graphe', event.because === undefined ? event.what : `${event.what} ${event.because}`),
+      ];
 
     /* Everything has stopped, so anything still waiting on a person is waiting
        for an answer that can no longer reach anybody. The window works out that
@@ -600,12 +616,21 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
          everything stopped, opening a fresh streaming turn that no message-end
          will ever reach. Settled is the reckoning that closes it, or Stop's
          own quiet mark stays out for the rest of the sitting. */
-      const stranded = turns.some(
-        (turn) =>
-          ((turn.kind === 'asked' || turn.kind === 'asked-first') && turn.answered === null) ||
-          (turn.kind === 'holding' && turn.state === 'running') ||
-          (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming),
-      );
+      /* A run that was ended rather than one that ended leaves steps mid-flight.
+         Only `finished` leaves them alone: a stop, a failure or an add-on that
+         refused everything has steps that will never report, and the window
+         reads a step still running as "this is still working" — which is how
+         Stop left the composer showing Queue/Interrupt for the rest of the
+         sitting. */
+      const ended = event.how !== undefined && event.how !== 'finished';
+      const stranded =
+        ended ||
+        turns.some(
+          (turn) =>
+            ((turn.kind === 'asked' || turn.kind === 'asked-first') && turn.answered === null) ||
+            (turn.kind === 'holding' && turn.state === 'running') ||
+            (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming),
+        );
       if (!stranded) return turns;
       // Whatever was being asked, the turn it belonged to is over and nothing
       // it says can reach anything. A form still drawn reads as answerable and
@@ -618,10 +643,16 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
           return { ...turn, answered: 'withdrawn' as const };
         }
         if (turn.kind === 'holding' && turn.state === 'running') {
-          return { ...turn, state: 'done' as const };
+          return { ...turn, state: ended ? ('failed' as const) : ('done' as const) };
         }
         if (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) {
           return { ...turn, streaming: false };
+        }
+        if (ended && turn.kind === 'did' && turn.state === 'running') {
+          return { ...turn, state: 'failed' as const, detail: STEP_WAS_STOPPED };
+        }
+        if (ended && turn.kind === 'tidying' && turn.state === 'running') {
+          return { ...turn, state: 'failed' as const };
         }
         return turn;
       });

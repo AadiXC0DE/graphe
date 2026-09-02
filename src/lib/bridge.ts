@@ -1893,6 +1893,14 @@ let previewPlanMode = false;
       return () => undefined;
     },
 
+    onContinuation(): () => void {
+      return () => undefined;
+    },
+
+    continuationStop(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
     onAway(): () => void {
       return () => {};
     },
@@ -2196,6 +2204,8 @@ function connect(): Bridge {
     forgetRepeat: (id, where) => api.forgetRepeat(id, where),
     onAway: (listener) => api.onAway(listener),
     onBuildPlan: (listener) => api.onBuildPlan(listener),
+    onContinuation: (listener) => api.onContinuation(listener),
+    continuationStop: (where) => api.continuationStop(where),
     inStep: (where) => api.inStep(where),
     followDesign: (address, where) => api.followDesign(address, where),
     lookAgain: (where) => api.lookAgain(where),

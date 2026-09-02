@@ -740,7 +740,7 @@ export default function Overview({
       {/* One card per conversation working in its own copy. Under Git because
           it is the same question one step out: not what this folder has, but
           what every copy of it has, and which of them wants a person. */}
-      {several ? null : <Checkouts branch={git?.branch ?? null} busy={busy} />}
+      {git === null || several ? null : <Checkouts branch={git.branch} busy={busy} />}
 
       {/* A folder holding several projects keeps its own commit press: the band
           above is one project's, and there is no folder-level branch to be on. */}

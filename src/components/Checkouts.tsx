@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { parseDiff } from '../diff/hunks';
 import { bridge } from '../lib/bridge';
@@ -50,9 +51,16 @@ const CHECKOUTS = {
   count: (waiting: number): string => `${String(waiting)} for you`,
   changed: (branch: string): string => `What ${branch} changed`,
   nothingInIt: 'Nothing changed on this branch yet.',
+  /** On the press that moves the folder itself. */
+  front: (branch: string): string =>
+    `The project folder moves onto ${branch}. Its copy is given back first.`,
+  read: (branch: string, base: string): string =>
+    `Read what ${branch} changed, against ${base}.`,
+  landing: (base: string): string =>
+    `Bring this copy's work into ${base} and give the copy back.`,
 } as const;
 
-/** The state words a card is drawn by, as class names. */
+/** The state a card is drawn by, as a class name. */
 function stateClass(one: Workspace): string {
   return one.state.replace(/ /g, '-');
 }
@@ -87,10 +95,7 @@ export default function Checkouts({ branch = null, busy = false, project }: Prop
   );
   const waiting = useMemo(() => needingYou(cards), [cards]);
 
-  const press = (
-    address: string,
-    run: () => Promise<Result<readonly WorkspaceFacts[]>>,
-  ): void => {
+  const press = (address: string, run: () => Promise<Result<readonly WorkspaceFacts[]>>): void => {
     if (working !== null) return;
     setWorking(address);
     setTrouble(null);
@@ -126,6 +131,31 @@ export default function Checkouts({ branch = null, busy = false, project }: Prop
     return () => window.removeEventListener('keydown', onKey, true);
   }, [looking]);
 
+  const sheet =
+    looking === null ? null : (
+      <section className="sheet" aria-label={CHECKOUTS.changed(looking.branch)}>
+        <header className="sheet__top">
+          <div className="sheet__titles">
+            <h1 className="sheet__title">{CHECKOUTS.changed(looking.branch)}</h1>
+            <p className="copies__sheetsub">
+              {diff === null ? CHECKOUTS.comparing : workspaceWords.files(files.length)}
+            </p>
+          </div>
+          <button type="button" className="sheet__close" onClick={() => setLooking(null)}>
+            {CHECKOUTS.close}
+            <kbd className="sheet__key">Esc</kbd>
+          </button>
+        </header>
+        <div className="sheet__body scroll--auto">
+          {diff !== null && files.length === 0 ? (
+            <p className="copies__empty">{CHECKOUTS.nothingInIt}</p>
+          ) : (
+            <DiffView files={files} busy={busy} />
+          )}
+        </div>
+      </section>
+    );
+
   return (
     <section className="overview__block">
       <div className="copies__top">
@@ -145,10 +175,7 @@ export default function Checkouts({ branch = null, busy = false, project }: Prop
             const onIt = branch !== null && branch === card.branch;
             const here = spreadOut.has(card.address);
             return (
-              <li
-                key={card.address}
-                className={`copies__one copies__one--${stateClass(card)}`}
-              >
+              <li key={card.address} className={`copies__one copies__one--${stateClass(card)}`}>
                 <div className="copies__head">
                   <span className="copies__name">{says.head}</span>
                   <code className="copies__branch">{card.branch}</code>
@@ -163,7 +190,7 @@ export default function Checkouts({ branch = null, busy = false, project }: Prop
                       className="copies__act"
                       disabled={busy || working !== null}
                       aria-busy={working === card.address}
-                      title={`The project folder moves onto ${card.branch}. Its copy is given back first.`}
+                      title={CHECKOUTS.front(card.branch)}
                       onClick={() =>
                         press(card.address, () => bridge.checkoutFront(card.address, where))
                       }
@@ -176,7 +203,7 @@ export default function Checkouts({ branch = null, busy = false, project }: Prop
                       type="button"
                       className="copies__act"
                       disabled={busy}
-                      title={`Read what ${card.branch} changed, against ${card.base}.`}
+                      title={CHECKOUTS.read(card.branch, card.base)}
                       onClick={() => compare(card)}
                     >
                       {CHECKOUTS.compare}
@@ -188,7 +215,7 @@ export default function Checkouts({ branch = null, busy = false, project }: Prop
                       className="copies__act copies__act--land"
                       disabled={busy || working !== null}
                       aria-busy={working === card.address}
-                      title={`Bring this copy's work into ${card.base} and give the copy back.`}
+                      title={CHECKOUTS.landing(card.base)}
                       onClick={() =>
                         press(card.address, () => bridge.checkoutLand(card.address, where))
                       }
@@ -223,29 +250,9 @@ export default function Checkouts({ branch = null, busy = false, project }: Prop
 
       {trouble === null ? null : <p className="copies__trouble">{trouble}</p>}
 
-      {looking === null ? null : (
-        <section className="sheet" aria-label={CHECKOUTS.changed(looking.branch)}>
-          <header className="sheet__top">
-            <div className="sheet__titles">
-              <h1 className="sheet__title">{CHECKOUTS.changed(looking.branch)}</h1>
-              <p className="copies__sheetsub">
-                {diff === null ? CHECKOUTS.comparing : workspaceWords.files(files.length)}
-              </p>
-            </div>
-            <button type="button" className="sheet__close" onClick={() => setLooking(null)}>
-              {CHECKOUTS.close}
-              <kbd className="sheet__key">Esc</kbd>
-            </button>
-          </header>
-          <div className="sheet__body scroll--auto">
-            {diff !== null && files.length === 0 ? (
-              <p className="copies__empty">{CHECKOUTS.nothingInIt}</p>
-            ) : (
-              <DiffView files={files} busy={busy} />
-            )}
-          </div>
-        </section>
-      )}
+      {/* Out to the body: the panel is its own stacking context, and a sheet
+          drawn inside it would sit under the regions beside it. */}
+      {sheet === null ? null : createPortal(sheet, document.body)}
     </section>
   );
 }

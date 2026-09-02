@@ -3795,8 +3795,13 @@ async function tallyOnBranch(repo: string, base: string, branch: string): Promis
   return { changed: rows.length, ...parseNumstat(counted.out ?? '') };
 }
 
-/** Whether this branch is already in the line the project is on. */
-async function alreadyLanded(repo: string, branch: string): Promise<boolean> {
+/** Whether this copy's branch has already arrived in the line the project is
+ *  on. A branch that has committed nothing of its own sits exactly where it
+ *  started, and reading that as landed hides a copy somebody is working in. */
+async function alreadyLanded(repo: string, branch: string, base: string | null): Promise<boolean> {
+  if (base === null) return false;
+  const tip = await gitRun(repo, ['rev-parse', branch]);
+  if (tip.code !== 0 || (tip.out ?? '').trim() === base) return false;
   const { code } = await gitRun(repo, ['merge-base', '--is-ancestor', branch, 'HEAD']);
   return code === 0;
 }
@@ -3848,7 +3853,7 @@ async function copiesOfProject(open: Workspace<Held>): Promise<readonly Workspac
         : session?.held.working === true
           ? 'running'
           : 'settled',
-      landed: await alreadyLanded(repo, one.branch),
+      landed: await alreadyLanded(repo, one.branch, base),
       away: !here,
       holdsWork: here && (await holdsWork(gitRunHereFor(), one.folder)),
     });

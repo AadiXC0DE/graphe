@@ -478,7 +478,7 @@ describe('a real refusal', () => {
     lookAgain();
     const look = await boundaryHere();
     if (!look.ok) {
-      expect(look.why).toMatch(/no-boundary-here|piece-missing|not-holding/);
+      expect(look.why).toMatch(/no-boundary-here|piece-missing|not-holding|boundary-refused/);
       return;
     }
 

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { memo, useState, type ReactNode } from 'react';
 import type { SentPicture } from '../lib/thread';
 import { useCopying } from '../lib/copying';
 import Clipped, { howMuch } from './Clipped';
@@ -108,7 +108,7 @@ function Sent({ picture }: { picture: SentPicture }) {
  * composer people stop trusting with anything technical. What you typed is what
  * is shown.
  */
-export default function Message({ from, children, streaming, aside, isLast, pictures, copy }: Props) {
+function Message({ from, children, streaming, aside, isLast, pictures, copy }: Props) {
   const mine = from === 'you';
   // Named for what it copies: one message, not the conversation.
   const copying = useCopying({ idle: 'Copy this message' });
@@ -185,3 +185,10 @@ export default function Message({ from, children, streaming, aside, isLast, pict
     </article>
   );
 }
+
+/* The most frequent thing in the app, and a reply arriving is a state change
+   per commit — so without this every token relaid out every turn in the
+   conversation, Markdown and all. Every prop here is a value or a reference the
+   turn already owns, so React's own comparison is the right one: a hand-written
+   list of fields would go quietly stale the first time this takes another. */
+export default memo(Message);

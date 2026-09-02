@@ -13,12 +13,21 @@ release — the reasoning is short and it explains why several of these steps lo
 ## The short version
 
 ```bash
-npm run check            # if the project has one; otherwise: npm test && npm run typecheck
-npm run package          # builds, licences, packages, and verifies
+npm version patch --no-git-tag-version   # bump, commit
+git tag v<version> && git push origin v<version>
 ```
 
-Then upload `release/Graphe-<version>-{arm64,x64}.{dmg,zip}` to a GitHub release tagged `v<version>`,
-and update the cask.
+The tag is the whole instruction. `.github/workflows/release.yml` packages on a macOS runner,
+verifies the bundles, uploads the four artifacts and their checksums to the GitHub release, and
+opens the cask pull request against the tap. Everything below is what that workflow does, in order,
+and how to do it by hand when you need to.
+
+Building locally is still how you look at the app before tagging:
+
+```bash
+npm run check            # typecheck and tests
+npm run package          # builds, licences, packages, and verifies
+```
 
 ---
 
@@ -91,11 +100,36 @@ Drag it to Applications, open it from there, and:
 
 Then throw that copy away, because it is not the one anybody else will install.
 
+**Once per release, the Intel bundle too.** `verify-package.mjs` proves both are there and signed;
+nothing proves the x64 one launches. On Apple silicon, Rosetta is enough:
+
+```bash
+open release/Graphe-<version>-x64.dmg
+arch -x86_64 open /Volumes/Graphe\ <version>-x64/Graphe.app
+```
+
+Record it here, with the version and the date, before publishing:
+
+| Version | Checked on | By |
+| --- | --- | --- |
+| — | — | — |
+
 ## 4. Tag and publish
 
 ```bash
 git tag v<version>
 git push origin v<version>
+```
+
+That is it. The release workflow refuses a tag that does not match `package.json`, runs the
+typecheck and the tests, packages both architectures, verifies them, writes
+`Graphe-<version>-checksums.txt`, keeps this build's source maps as a workflow artifact, and creates
+the release with all five files on it.
+
+**If you have to do it by hand** — the workflow is down, or you are publishing from a machine
+without a runner:
+
+```bash
 gh release create v<version> \
   release/Graphe-<version>-arm64.dmg \
   release/Graphe-<version>-arm64.zip \
@@ -116,13 +150,17 @@ about what changed for somebody using it.
 The cask lives in the tap repository, `AadiXC0DE/homebrew-tap`. `Casks/graphe.rb` in this
 repository is the template it is copied from.
 
+The release workflow opens that pull request for you when the `TAP_TOKEN` secret is set — a
+fine-grained personal access token with contents and pull-request write on the tap. Without it the
+workflow says so and the release still publishes; then do it by hand:
+
 ```bash
 shasum -a 256 release/Graphe-<version>-arm64.zip
 shasum -a 256 release/Graphe-<version>-x64.zip
 ```
 
-In the tap's `Casks/graphe.rb`, update `version` and both `sha256` values. Then, from a clean
-machine or after `brew uninstall --cask graphe`:
+In the tap's `Casks/graphe.rb`, update `version` and both `sha256` values. Either way, review and
+merge the pull request, then, from a clean machine or after `brew uninstall --cask graphe`:
 
 ```bash
 brew tap AadiXC0DE/tap
@@ -159,7 +197,7 @@ xattr -p com.apple.quarantine /Applications/Graphe.app   # present on Homebrew 6
   that dies.
 - `CSC_IDENTITY_AUTO_DISCOVERY=false` is set by the packaging script so that a machine which happens
   to have a Developer ID in its keychain does not quietly produce a differently-signed build from
-  the one CI produces.
+  the one the release workflow produces.
 
 None of this is notarization. A browser download will still be quarantined and will still send the
 user to System Settings. That is the known cost of the free route, and the reason the alpha's
@@ -174,14 +212,17 @@ should be deleted rather than left in as a fallback.
 ## Third-party licences
 
 `THIRD-PARTY-LICENSES.md` is generated from the real dependency tree by
-`scripts/third-party-licenses.mjs`, and packaging regenerates it every time. It is committed so the
-repository and the shipped app agree, and CI should run:
+`scripts/third-party-licenses.mjs`. It carries the fingerprint of the `package-lock.json` it was
+generated from, and a run whose lockfile still matches writes nothing — so it no longer shows up as
+a change after every release. `--force` rebuilds it anyway. It is committed so the repository and
+the shipped app agree, and CI runs:
 
 ```bash
 npm run licenses:check
 ```
 
-which fails if the file on disk no longer matches the tree. The generated file and
+which fails if the file on disk was generated from a different lockfile, or no longer matches the
+tree. The generated file and
 `THIRD-PARTY-NOTICES.md` are both copied into the app bundle at `Contents/Resources/`.
 
 ## Windows and Linux

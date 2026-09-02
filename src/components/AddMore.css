@@ -561,3 +561,13 @@
     animation-duration: 1.4s;
   }
 }
+
+/* What an add-on will actually do, derived by asking it rather than from a list
+   of names. Under the row it belongs to, quiet, because most add-ons do none of
+   it and the line is only there when there is something to say. */
+.addmore__does {
+  display: block;
+  margin-top: var(--space-1, 4px);
+  font-size: 0.75rem;
+  color: var(--text-quiet, #6b7280);
+}

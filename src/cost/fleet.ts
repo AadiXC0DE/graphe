@@ -29,6 +29,7 @@ import {
 } from './estimate';
 import { Allotment, createLimit, type LimitStatus, type SpendLimit } from './limits';
 import { formatMoney, fromMajor, money, normaliseCurrency } from './money';
+import { capsNow } from '../work/capacity';
 
 /** What kind of thing is running. Each has its own idea of how big a run of it
  *  usually is, which is what its share of the ceiling is worked out from. */
@@ -73,11 +74,10 @@ export const ceilingWords = {
   },
 };
 
-/** Showcase ceiling — twenty helpers in one fan-out for filming. A hard
- *  concurrent cap for now (simplest, no queue); if a machine strains under it,
- *  this is the one number to bring down, and `howManyFit` is where a
- *  system-aware gate would go. */
-export const HELPER_TOTAL_MAX = 20;
+/** Helpers in one fan-out, as many as this machine can carry. A hard concurrent
+ *  cap, no queue: a run refused costs nothing, and one started on a machine with
+ *  no memory left costs the machine. */
+export const HELPER_TOTAL_MAX = capsNow().helpers;
 
 /**
  * How many of each kind run at once.
@@ -89,8 +89,8 @@ export const HELPER_TOTAL_MAX = 20;
  * keeps its own four, set where the board is.
  */
 export const MOST_AT_ONCE: Readonly<Record<RunKind, number>> = {
-  /* The showcase fan-out. One number, and HELPER_TOTAL_MAX is it: the cap and
-     the constant cannot drift apart, because they are the same constant. */
+  /* One number, and HELPER_TOTAL_MAX is it: the cap and the constant cannot
+     drift apart, because they are the same constant. */
   helper: HELPER_TOTAL_MAX,
   // Background work is already capped per project by the board that holds it,
   // and this fleet is one for the whole app: capping it here as well would mean

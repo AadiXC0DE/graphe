@@ -56,7 +56,7 @@ import { mapFrom, saysMap, type SourceFile } from '../../files/map';
 import type { MemoryStore } from '../memory';
 import * as debug from './debug';
 import { connectingTool } from './mcp';
-import { roleSpec, type HelperRole } from './child';
+import { helperBrief, roleSpec, type HelperRole } from './child';
 import { arxivId, arxivMeta, readPdfPages, slicePages } from './pdf';
 import { REVIEW_ANGLES, reviewRequestFor, trimDiff } from './review';
 import {
@@ -88,20 +88,72 @@ import type { LivePage, Money, PageAct, PageReading, SpendReason } from '../type
 type ToolResult = Promise<AgentToolResult<unknown>>;
 
 /**
- * How long one helper may go without saying anything before it is ended.
+ * How long one helper may go with nothing coming out of it at all.
  *
- * Quiet, not total: what this is for is a provider that stalls the stream, and
- * a helper doing real work says something as it goes. An absolute deadline
- * would end a healthy one mid-sentence for the crime of having a lot to say.
- * Background work gets four hours because nobody is waiting; a helper runs
- * inside somebody's turn and they are sitting there.
+ * Any sign of it counts, not words alone: its own noise, a step it is running,
+ * whatever that step is printing. A builder running a long test suite writes
+ * nothing for twenty minutes and is working the whole time, and a clock that
+ * only watched for words killed it and told the parent it had stalled.
  */
 export const HELPER_PATIENCE_MS = 5 * 60 * 1000;
+
+/** The ceiling, whatever it is saying. Quiet is a stall; an hour of steady
+ *  progress on one piece of work is a piece of work too big for one helper. */
+export const HELPER_WALL_CLOCK_MS = 30 * 60 * 1000;
 
 /** What the model is told when one runs out of time. Written for the model:
  *  one that understands it was cut off asks a smaller question next. */
 export const HELPER_TOOK_TOO_LONG =
-  'This helper was ended after five minutes without a word. Do not send the same piece of work again. Either split it into smaller pieces, or do it yourself.';
+  'This helper was ended after five minutes with nothing at all coming out of it — no words, no steps, no output. Do not send the same piece of work again. Either split it into smaller pieces, or do it yourself.';
+
+export const HELPER_RAN_TOO_LONG =
+  'This helper was ended after half an hour. It was working the whole time, so the piece of work is too big for one helper. Split it into smaller pieces, or do it yourself.';
+
+/** How often the two clocks are looked at. Close enough that an ending lands
+ *  within a few seconds of when it is due, coarse enough to cost nothing. */
+const HELPER_CLOCK_EVERY_MS = 5000;
+
+/** Why a helper should be ended now, or null while it may carry on.
+ *
+ *  Two answers rather than one, because they ask the model for opposite things:
+ *  a helper that went quiet should be split up and sent again, and one that
+ *  worked for half an hour was handed too much in the first place. */
+export function whyEndHelper(facts: {
+  startedAt: number;
+  lastSign: number;
+  now: number;
+}): string | null {
+  if (facts.now - facts.startedAt >= HELPER_WALL_CLOCK_MS) return HELPER_RAN_TOO_LONG;
+  if (facts.now - facts.lastSign >= HELPER_PATIENCE_MS) return HELPER_TOOK_TOO_LONG;
+  return null;
+}
+
+/** The two clocks over one helper.
+ *
+ *  `stirred` is any sign of the child at all — words, its own noise, a step it
+ *  is running — and it puts off the quiet clock and only that one. */
+export function helperClocks(
+  ended: (why: string) => void,
+  now: () => number = Date.now,
+): { stirred: () => void; stop: () => void } {
+  const startedAt = now();
+  let lastSign = startedAt;
+  const tick = setInterval(() => {
+    const why = whyEndHelper({ startedAt, lastSign, now: now() });
+    if (why === null) return;
+    clearInterval(tick);
+    ended(why);
+  }, HELPER_CLOCK_EVERY_MS);
+  tick.unref?.();
+  return {
+    stirred: (): void => {
+      lastSign = now();
+    },
+    stop: (): void => {
+      clearInterval(tick);
+    },
+  };
+}
 
 /** The results the child keeps on its own. Plain data; nothing crosses the wire
  *  except this. */
@@ -124,6 +176,10 @@ export type SubagentLine =
    *  from it — it exists so that a helper sitting out a wobble is not mistaken
    *  for one that has stopped saying anything and killed for it. */
   | { type: 'waiting' }
+  /** What the helper is doing right now, and what that is printing. A builder
+   *  running a test suite says nothing for as long as it takes; this is the
+   *  same work, said out loud. */
+  | { type: 'step'; text: string }
   | { type: 'done'; outcome: SubagentOutcome };
 
 /* -------------------------------------------------------------------------- */
@@ -948,7 +1004,29 @@ const STDERR_TAIL = 4000;
  *  per token for nothing anybody can read that fast. */
 const PROGRESS_EVERY_MS = 400;
 
-type TaskParams = { task: string; cwd?: string; role?: HelperRole };
+/** Where a piece of work runs. `now` answers inside this tool call, which is
+ *  what a helper has always done; `background` puts it on the board and comes
+ *  straight back. */
+export type TaskMode = 'now' | 'background';
+
+/** The mode a call asked for. Only the exact word sends work away, the same
+ *  way an unfamiliar role falls back to the plain helper. */
+export function taskMode(asked: string | undefined): TaskMode {
+  return asked === 'background' ? 'background' : 'now';
+}
+
+type TaskParams = { task: string; cwd?: string; role?: HelperRole; mode?: string };
+
+/** What comes back when work is sent to the board instead of run here. */
+export const TASK_BACKGROUND_WORDS = {
+  went: (role: HelperRole): string =>
+    `That is on the board now, as a ${role}, in its own copy of the project. It carries on whether or not this conversation does, and the person can watch or stop it there. Do not wait for it: say what you set going and carry on.`,
+  refused: (because: string): string => `It did not go on the board: ${because}`,
+  /** A helper, or a piece already running on the board, has no board of its
+   *  own to put anything on. Said plainly rather than quietly run here. */
+  noBoard:
+    'There is no board here, so nothing can be sent to the background from this run. Leave the mode out and the work runs inside this call instead.',
+} as const;
 
 /** The session owns the helper's folder. A helper may be asked to look beneath
  * it, but model-supplied `cwd` must never replace the project it was launched
@@ -1102,6 +1180,7 @@ async function runSubagent(
   signal: AbortSignal | undefined,
   onProgress: (text: string) => void,
   watching?: Watching,
+  onStep?: (text: string) => void,
 ): Promise<Ran> {
   const missing = whyNoHelper();
   const cwd = job.cwd ?? process.cwd();
@@ -1142,22 +1221,19 @@ async function runSubagent(
 
     // A helper that never answers used to hold the whole turn open: it resolves
     // on a report, a close, an error, a stop or the person's own abort, and a
-    // provider that stalls the stream is none of those. Background work has had
-    // a wall clock all along; this is the same idea at the size of one helper.
+    // provider that stalls the stream is none of those.
     //
-    // Started before `finish` exists so that `finish` can always clear it — the
-    // fleet can stop this run on the way in, before the clock would otherwise
-    // have been set. The callback only ever runs later, by which time `finish`
-    // is there.
-    const patience = setTimeout(() => {
-      finish({ ok: false, error: HELPER_TOOK_TOO_LONG });
-    }, HELPER_PATIENCE_MS);
-    patience.unref?.();
+    // Started before `finish` exists so that `finish` can always clear them —
+    // the fleet can stop this run on the way in, before the clocks would
+    // otherwise have been set. The callback only ever runs later, by which time
+    // `finish` is there.
+    const clocks = helperClocks((why) => finish({ ok: false, error: why }));
+    const stirred = clocks.stirred;
 
     const finish = (outcome: SubagentOutcome): void => {
       if (done) return;
       done = true;
-      clearTimeout(patience);
+      clocks.stop();
       resolve({ outcome, boundary });
       // Never leave a live child behind a resolved promise: the helper may not
       // have noticed its own report arrived.
@@ -1175,7 +1251,7 @@ async function runSubagent(
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (data: string) => {
-      patience.refresh();
+      stirred();
       buffer += data;
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
@@ -1188,6 +1264,7 @@ async function runSubagent(
           continue;
         }
         if (received.type === 'delta') onProgress(received.text);
+        if (received.type === 'step') onStep?.(received.text);
         if (received.type === 'boundary') boundary.observed = received.held;
         if (received.type === 'spend') watching?.spent(received);
         if (received.type === 'done') finish(received.outcome);
@@ -1201,6 +1278,8 @@ async function runSubagent(
     let noise = '';
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (data: string) => {
+      // A child writing here is a child that is alive, whatever it is saying.
+      stirred();
       noise = `${noise}${data}`.slice(-STDERR_TAIL);
     });
 
@@ -1252,6 +1331,7 @@ export const taskTool = (
   model: HelperModel | (() => HelperModel) = null,
   thinking?: HelperPace | (() => HelperPace | undefined),
   projectRoot?: string,
+  putOnBoard?: PutOnBoard,
 ): ToolDefinition => ({
   name: 'task',
   label: 'Task',
@@ -1269,7 +1349,7 @@ export const taskTool = (
     'Split the work so no helper needs another helper\'s answer. Anything that has to happen in order belongs in one helper, or in a second round after the first answers.',
     'A helper reports and changes nothing — ask it for findings, not fixes. The one exception is a builder, which is given its own copy of the project, makes the change there, and hands back what it changed.',
     'A small piece of work is not worth the help: the helper reads the same files and searches the same web you would.',
-    'This helper answers inside the current tool call, so the conversation waits for its findings. If the person wants work to carry on in the background while the conversation remains free, use set_going instead.',
+    'This helper answers inside the current tool call, so the conversation waits for its findings. For work that should carry on in the background while the conversation stays free, pass mode: \'background\' — it goes on the board, with the same role, and you are told at once where it went.',
     "To have work checked, send it to a 'reviewer' helper and ask it to find genuine problems with file and line references. To gather facts, send a 'researcher'. A helper that needs a decision stops and says what it needs, starting with 'To continue I need to know:' — pass that question to the person, then send the work again with the answer.",
   ],
   parameters: Type.Object({
@@ -1278,6 +1358,11 @@ export const taskTool = (
     role: Type.Optional(
       Type.String({
         description: "What kind of helper: 'reviewer' finds problems in the work with file and line references; 'researcher' gathers facts from the web and the project; 'builder' makes one self-contained change in its own copy of the project and hands the change back; anything else is a general helper.",
+      }),
+    ),
+    mode: Type.Optional(
+      Type.String({
+        description: "'now' (the default) runs the helper inside this call and answers with what it found. 'background' puts the work on the board instead and returns at once; it carries on whether or not this conversation does, and the person watches it there.",
       }),
     ),
   }),
@@ -1297,6 +1382,18 @@ export const taskTool = (
     // The role is the helper's remit: who it is, which tools it may hold, and
     // the instructions it reads first. Anything unfamiliar is the plain helper.
     const spec = roleSpec(params.role as HelperRole);
+
+    // The board is where the person is already watching, so work sent there is
+    // visible and stoppable from where their hand already is. Only the exact
+    // word: anything else is the helper this tool has always been.
+    if (taskMode(params.mode) === 'background') {
+      const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
+      if (putOnBoard === undefined) return say(TASK_BACKGROUND_WORDS.noBoard);
+      const answer = await putOnBoard(helperBrief(spec, params.task), null);
+      if (!answer.ok) return say(TASK_BACKGROUND_WORDS.refused(answer.because));
+      return say(TASK_BACKGROUND_WORDS.went(spec.name));
+    }
+
     // Asked before anything is spawned: a helper refused costs nothing, and one
     // refused halfway through has already been paid for.
     // The project this helper's spending belongs to. The model's `cwd` is a
@@ -1323,8 +1420,16 @@ export const taskTool = (
     // The child's progress goes out as Pi's partial tool result, which is the
     // only way anything a custom tool learns mid-run can reach the session.
     let progress = '';
+    let step = '';
     let sentAt = 0;
     let built = '';
+    const show = (): void => {
+      const now = Date.now();
+      if (now - sentAt < PROGRESS_EVERY_MS) return;
+      sentAt = now;
+      const text = step === '' ? progress : `${progress}${progress === '' ? '' : '\n\n'}${step}`;
+      onUpdate?.({ content: [{ type: 'text', text }], details: {} });
+    };
     let ran: Ran;
     try {
       const currentModel = typeof model === 'function' ? model() : model;
@@ -1338,14 +1443,15 @@ export const taskTool = (
         signal,
         (text) => {
           progress += text;
-          const now = Date.now();
-          if (now - sentAt < PROGRESS_EVERY_MS) return;
-          sentAt = now;
-          onUpdate?.({ content: [{ type: 'text', text: progress }], details: {} });
+          show();
         },
         {
           begun: (stop) => fleet.watch(callId, stop),
           spent: (line) => fleet.spentUnseen(callId, { ...line, project }),
+        },
+        (text) => {
+          step = text;
+          show();
         },
       );
     } finally {
@@ -2540,7 +2646,7 @@ export const grapheTools = (
     websearchTool,
     webfetchTool,
     readDocumentTool,
-    taskTool(agentDir, model, thinking, projectRoot),
+    taskTool(agentDir, model, thinking, projectRoot, putOnBoard),
     scoreCandidatesTool,
     // A browser of its own, on from the first turn. Every other agent ships one
     // and hides it behind a plugin; this one is simply there, and the program

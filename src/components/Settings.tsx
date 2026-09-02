@@ -34,6 +34,18 @@ type Props = {
   onToggleHoldBack: () => void;
   onToggleKeepLogins: () => void;
   onGo: (link: SettingsLink) => void;
+  /** Which build this is, so a report can say. Nothing in the window said it
+   *  before, and a friend on an old build had no way to find out. */
+  version?: string;
+  /** How much room this app is taking, and what could be cleared. Asked when
+   *  the sheet opens — it walks folders, and this is open for seconds. */
+  storage?: { says: string; couldClear: number; because: string } | null;
+  onClearFinishedWork?: () => void;
+  /** Everything worth sending when somebody says "it stopped", on the
+   *  clipboard. Never a conversation, never a key. */
+  onCopyDiagnostics?: () => void;
+  /** What this machine will do at once, derived from the machine. */
+  caps?: string;
 };
 
 /** The screens this one leads to. Places rather than preferences, so they sit
@@ -69,6 +81,8 @@ type Row =
   | { id: 'hold-back'; name: string; note: string; kind: 'hold-back' }
   | { id: 'keep-logins'; name: string; note: string; kind: 'keep-logins' }
   | { id: 'always'; name: string; note: string; kind: 'always' }
+  | { id: 'diagnostics'; name: string; note: string; kind: 'diagnostics' }
+  | { id: 'storage'; name: string; note: string; kind: 'storage' }
   | { id: SettingsLink; name: string; note: string; kind: 'go' };
 
 /** Named bands, so a wide window has something to lay out. The theme picker
@@ -134,6 +148,24 @@ const GROUPS: readonly { id: string; title: string; rows: readonly Row[] }[] = [
       },
     ],
   },
+  {
+    id: 'app',
+    title: 'This app',
+    rows: [
+      {
+        id: 'diagnostics',
+        name: 'Copy diagnostics',
+        note: 'Everything worth sending when something goes wrong: the version, this machine, the add-ons, the last lines of the log and why the last job stopped. No conversations and no keys.',
+        kind: 'diagnostics',
+      },
+      {
+        id: 'storage',
+        name: 'Clear finished work',
+        note: 'Copies of finished conversations, board pieces already taken in, and old transcripts. Nothing holding work you have not taken in is ever cleared.',
+        kind: 'storage',
+      },
+    ],
+  },
   { id: 'theme', title: THEME_WORDS.name, rows: [] },
 ];
 
@@ -159,6 +191,11 @@ export default function Settings({
   onToggleKeepLogins,
   always,
   onGo,
+  version,
+  storage = null,
+  onClearFinishedWork,
+  onCopyDiagnostics,
+  caps,
 }: Props) {
   useEffect(() => {
     if (!open) return;
@@ -185,6 +222,47 @@ export default function Settings({
         <span className="settings__note">{one.note}</span>
       </span>
     );
+
+    if (one.kind === 'diagnostics') {
+      return (
+        <li key={one.id}>
+          <button
+            type="button"
+            className="settings__row"
+            onClick={() => onCopyDiagnostics?.()}
+            disabled={onCopyDiagnostics === undefined}
+          >
+            {text}
+            <span className="settings__meta">{version === undefined ? '' : version}</span>
+          </button>
+        </li>
+      );
+    }
+
+    if (one.kind === 'storage') {
+      return (
+        <li key={one.id}>
+          <button
+            type="button"
+            className="settings__row"
+            onClick={() => onClearFinishedWork?.()}
+            disabled={onClearFinishedWork === undefined || (storage?.couldClear ?? 0) === 0}
+          >
+            <span className="settings__text">
+              <span className="settings__name">{one.name}</span>
+              <span className="settings__note">
+                {storage === null ? one.note : `${storage.says} ${storage.because}`}
+              </span>
+            </span>
+            <span className="settings__meta">
+              {storage === null || storage.couldClear === 0
+                ? 'Nothing to clear'
+                : `${String(storage.couldClear)} to clear`}
+            </span>
+          </button>
+        </li>
+      );
+    }
 
     if (one.kind === 'always') {
       return (
@@ -342,6 +420,13 @@ export default function Settings({
                 <section key={group.id} className={`settings__group settings__group--${group.id}`}>
                   <h2 className="settings__grouptitle">{group.title}</h2>
                   <ul className="settings__rows">{group.rows.map(row)}</ul>
+                  {/* What this machine will do at once, worked out from the
+                      machine rather than written down. Quiet, under the rows it
+                      explains — a technical user goes looking for it, and
+                      nobody else has to read it. */}
+                  {group.id === 'app' && caps !== undefined ? (
+                    <p className="settings__machine">{caps}</p>
+                  ) : null}
                 </section>
               ),
             )}

@@ -27,8 +27,10 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
+  Menu,
   Notification,
   safeStorage,
   session,
@@ -39,7 +41,7 @@ import {
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
@@ -214,9 +216,22 @@ import {
   type Task,
 } from '../src/work/buildplan';
 import { keyOf } from '../src/work/owner';
-import { writeAtomically } from '../src/lib/atomic';
+import { writeAtomically, writeAtomicallySync } from '../src/lib/atomic';
 import { GoalFile } from '../src/projects/goals';
 import { continuationOwner } from './continuation-owner';
+import {
+  measureFolders,
+  npmOnPath,
+  saysStorage,
+  sweep,
+  whatToSweep,
+  type Sweepable,
+} from '../src/work/storage';
+import { sizeOf, TOO_MANY_BYTES, TOO_MANY_FILES, verdictFor } from '../src/history/opening';
+import { openLog } from './log';
+import { addonProcesses, ledger } from './processes';
+import { MENU_IDS, menuTemplate, type MenuItem } from './menu';
+import { gather, saysDiagnostics } from './diagnostics';
 import { MOST_ROWS, standingBlock } from '../src/agent/pi/standing';
 import { FlowFile } from '../src/projects/flows';
 import { readFlow, withFlow, withoutFlow, type Flow } from '../src/work/canvas';
@@ -253,7 +268,7 @@ import {
 } from '../src/agent/pi/mcp';
 import { fetchHelper } from '../src/agent/pi/helper';
 import { REACHABLE } from '../src/agent/pi/reach';
-import { SecretFile } from '../src/projects/secrets';
+import { SecretFile, writeProviderAuth } from '../src/projects/secrets';
 import { holdsBack } from '../src/projects/heldback';
 import { keepsLogins } from '../src/projects/logins';
 import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
@@ -904,6 +919,16 @@ function makePageView(): WebContentsView | null {
   // Nothing the page does opens a second window, and nothing it links to takes
   // the app somewhere. It is somebody's own site, not a browser.
   view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  /* The pane has a keyboard of its own and swallows what lands in it, so Escape
+     pressed while it holds focus never reached the window — and a menu that
+     will not close traps the hand. Escape belongs to the window around it. */
+  view.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.key !== 'Escape') return;
+    event.preventDefault();
+    if (mainWindow !== null && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(CHANNEL.paneKey, { key: 'Escape' });
+    }
+  });
   // Every document, because the page is somebody's own site and they navigate
   // around it. Inert until the button it puts on the page is pressed.
   view.webContents.on('dom-ready', () => {
@@ -1542,12 +1567,14 @@ function rememberPicture(looking: Looking, versionId: string, picture: string): 
  * How many conversations one project may have live at once.
  *
  * Each one is a whole context window sitting in memory, so this is a product
- * decision rather than a detail: three is as many as anybody holds in their head
- * at once, and the fourth is better put down and picked up again than paid for
- * all afternoon. Putting one down loses nothing — it is written down, and
- * opening it again carries on.
+ * decision rather than a detail. Three was as many as anybody holds in their
+ * head at once — but a conversation working a checklist down is not one
+ * somebody is holding in their head, it is one they walked away from, and three
+ * meant a fourth tab silently put away the idle one that was mid-list. Putting
+ * one down loses nothing — it is written down, and opening it again carries
+ * on — but it must never be one with work still owed.
  */
-const CONVERSATIONS = 3;
+const CONVERSATIONS = 6;
 
 type Held = {
   /** The project's saved work, or null when this folder is a plain folder
@@ -1626,16 +1653,45 @@ function conversationsIn(project: string): Workspaces<GrapheSession> {
     // The limit is a memory preference, not permission to abort a turn. If all
     // older conversations are active, keep them until a later adoption finds
     // one idle rather than making a new tab stop an old stuck-looking one.
+    /* A conversation with work still owed is never the one put down. The limit
+       is a memory preference, not permission to abandon a list mid-way — and a
+       list is exactly what a conversation somebody walked away from is holding.
+       If every older one is busy or owes work, `adopt` keeps them all rather
+       than picking one to close. */
     mayEvict: (session) =>
-      !session.working && !session.listening && session.awaitingAnswer.length === 0,
+      !session.working &&
+      !session.listening &&
+      session.awaitingAnswer.length === 0 &&
+      !owesWork(project, session),
     close: (session) => session.dispose(),
     evicted: (one) => {
+      // Which was put down, and why. It used to be one line about no
+      // conversation in particular.
       send(project, { type: 'message-delta', text: setDownWords.said }, one.path);
       send(project, { type: 'message-end' }, one.path);
       const held = workspaces.find(project)?.held;
       if (held !== undefined) void putAwayCheckoutAt(project, held, one.path);
     },
   });
+}
+
+/**
+ * Whether a conversation is holding a list with steps still open.
+ *
+ * Read from the file rather than kept in memory, so it is right after a restart
+ * too. Synchronous on purpose: the eviction decision is taken inside
+ * `Workspaces.adopt`, which has no room to await, and the file is small.
+ */
+function owesWork(project: string, session: GrapheSession): boolean {
+  const address = session.conversation;
+  if (address === null) return false;
+  try {
+    const raw = readFileSync(buildPlanFile(project, address), 'utf8');
+    const stored = readStored(JSON.parse(raw));
+    return stored !== null && stored.tasks.length > 0 && !stored.finished;
+  } catch {
+    return false;
+  }
 }
 
 const workspaces = new Workspaces<Held>({
@@ -1731,6 +1787,16 @@ async function openTheSignIns(): Promise<void> {
       decrypt: (sealed) => safeStorage.decryptString(sealed),
     });
     signInThrough({ keeps, opens: (url) => void shell.openExternal(url.href) });
+    // The same store holds the credentials the app itself needs — the Figma
+    // token most of all, which used to work only for somebody who launched from
+    // a terminal.
+    kept_secrets = keeps;
+    /* Provider credentials live in Pi's own `auth.json` — mode 0600, but a
+       plain file holding OAuth tokens and an API key. Anything mirrored into
+       the keychain is written back out to a file under this app's data folder
+       and handed to Pi as its `authPath`, so the keychain is the store and the
+       file is a copy Pi can read. */
+    providerAuthPath = await writeProviderAuth(app.getPath('userData'), keeps).catch(() => null);
   } catch {
     // No store, no signing in. A server that wants one says so when it is
     // pressed, which is better than an app that will not start.
@@ -2469,11 +2535,17 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       showTheWorkOnPage();
     }
 
-    if (said.type === 'needs-confirmation' || said.type === 'asked-first') {
+    /* Anything on screen waiting on a person holds the loop back. A plan card
+       counts: it is a card somebody is reading and about to answer, and the app
+       used to send the next step out underneath it. Cleared not by the settle —
+       these cards outlive the turn that drew them — but by the person saying
+       something, which is what answering one does. */
+    if (
+      said.type === 'needs-confirmation' ||
+      said.type === 'asked-first' ||
+      (said.type === 'planned' && said.steps.length > 0)
+    ) {
       continuations.waiting(path, from.address ?? '', true);
-    }
-    if (said.type === 'settled') {
-      continuations.waiting(path, from.address ?? '', false);
     }
 
     // Against the ceiling as well as into the ledger. This is the conversation
@@ -2815,6 +2887,7 @@ async function checkItFirst(
       model: (await preferences()).all().model,
       advisor: (await preferences()).all().advisor,
       advisorThinking: (await preferences()).all().advisorThinking,
+      advisorGates: (await preferences()).all().advisorGates,
       thinking: thinkingFor((await preferences()).all()),
       // This is the message somebody just sent, run in a copy because they
       // asked to see it first. Plan gates that message wherever it runs.
@@ -3279,7 +3352,7 @@ function readNotedServers(): NotedServer[] {
 
 function writeNotedServers(all: readonly NotedServer[]): void {
   try {
-    writeFileSync(serversNoted(), JSON.stringify(all), 'utf8');
+    writeAtomicallySync(serversNoted(), JSON.stringify(all));
   } catch {
     // A note we cannot write costs a port after a crash, which is worth far
     // less than the turn this would otherwise interrupt.
@@ -3419,7 +3492,10 @@ async function saveCheckouts(project: string, held: Held): Promise<void> {
   const rows = Object.fromEntries(
     [...held.checkouts].map(([address, one]) => [checkoutKey(held, address), one]),
   );
-  await writeFile(file, JSON.stringify(rows), 'utf8');
+  // Beside it and moved into place: a half-written index orphans every
+  // checkout of the project, and there is nothing left that knows where the
+  // work was.
+  await writeAtomically(file, JSON.stringify(rows));
 }
 
 /** What a conversation is asked for by once it has been written down. An
@@ -3629,6 +3705,8 @@ async function startConversationUnlocked(
       model: prefs.model,
       advisor: prefs.advisor,
       advisorThinking: prefs.advisorThinking,
+      advisorGates: prefs.advisorGates,
+      addonsChosen: prefs.addons,
       thinking: thinkingFor(prefs),
       trusts: await trustsIn(open.path),
       running: held.running,
@@ -3684,6 +3762,7 @@ async function startConversationUnlocked(
       ...(asked !== undefined
         ? { sessionPath: asked }
         : { sessionDir: sessionsFolder(), ...(how.kind === 'fresh' ? { fresh: true } : {}) }),
+      ...(providerAuthPath === null ? {} : { authPath: providerAuthPath }),
     });
   } catch (cause) {
     if (madeCheckout && checkout !== null) {
@@ -3754,6 +3833,19 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   // their folder was one project. With two or more child repositories the
   // parent keeps its hands off, and each child is read where it lives.
   const children = await childRepos(path);
+
+  /* And a folder that is not a project at all. Somebody opening their Desktop —
+     the most natural thing for this audience to do — used to get `git init` and
+     a first turn that committed everything on it. A folder that is already a
+     repository opens as it always did, whatever it is. */
+  const verdict = await verdictFor(path, {
+    home: app.getPath('home'),
+    isRepo: existsSync(join(path, '.git')),
+    count: () => sizeOf(path, { files: TOO_MANY_FILES, bytes: TOO_MANY_BYTES }),
+  });
+  if (verdict.kind === 'refuse') {
+    return fail({ what: verdict.because, because: verdict.offer, actionLabel: 'Got it' });
+  }
 
   let timeline: Timeline | null = null;
   if (children.length < SEVERAL_CHILDREN) {
@@ -4012,7 +4104,10 @@ function watchTheCeiling(): void {
     const said = limitReached(status);
     for (const desk of awayDesks.values()) pushAway(desk.path);
     const open = workspaces.current;
-    if (open !== null) send(open.path, { type: 'error', message: `${said.title}. ${said.body}` });
+    /* A notice, not an error. The ceiling is the app's own housekeeping, and
+       an error paints the conversation red and marks every step it was running
+       as failed — for something the conversation did not do. */
+    if (open !== null) send(open.path, { type: 'notice', what: said.title, because: said.body });
     const where = open?.path ?? [...awayDesks.keys()][0] ?? null;
     if (where !== null) tellThem(said.title, said.body, where);
   });
@@ -4307,6 +4402,262 @@ async function standingBlockFor(project: string, address: string): Promise<strin
     goal: goal !== null && goal.status === 'active' ? goal.objective : null,
     notes: [],
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* When something goes wrong on our side                                       */
+/* -------------------------------------------------------------------------- */
+
+/** Everything this app writes down about itself. Secrets masked before a line
+ *  reaches disk; never a transcript, never a key. */
+const log = openLog(join(app.getPath('userData'), 'logs'));
+
+/** Every process this app starts, so quitting takes them with it. */
+const spawned = ledger();
+
+/** The window is reloaded once after it stops, never in a loop. */
+let reloadedAlready = false;
+
+/** Whether `npm` is on the path. Add-ons install through Pi's package manager,
+ *  which shells out to it; helpers do not need it. Null until asked. */
+let npmIsHere: boolean | null = null;
+
+/** One calm card, and something to send. Said as a notice rather than an error
+ *  on a conversation: nothing the person asked for went wrong. */
+function sayWentWrong(message: string): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  send(null, {
+    type: 'notice',
+    what: WENT_WRONG,
+    because: plainMessage(message),
+    actions: [{ id: 'copy-diagnostics', label: 'Copy diagnostics' }],
+  });
+}
+
+const WENT_WRONG = 'Something went wrong on my side. Nothing you asked for was lost.';
+
+/** Everything the diagnostics bundle needs from this process. */
+async function diagnosticsNow(): Promise<string> {
+  return saysDiagnostics(
+    await gather({
+      version: app.getVersion(),
+      userData: app.getPath('userData'),
+      versions: {
+        electron: process.versions.electron,
+        node: process.versions.node,
+        chromium: process.versions.chrome,
+      },
+      extensions: [],
+      whyStopped: whyStopped(),
+      recent: log.recent,
+    }),
+  );
+}
+
+/**
+ * Why the last job stopped, on one screen.
+ *
+ * The last continuation decision, how the run ended, what the add-ons are, and
+ * anything that ran past its hook budget. When a friend says "it stopped", this
+ * is the thing worth sending.
+ */
+function whyStopped(): string {
+  const lines: string[] = [];
+  for (const one of workspaces.open) {
+    for (const conversation of one.held.sessions.open) {
+      const address = conversation.path;
+      const last = continuations.lastMove(one.path, address);
+      if (last === null) continue;
+      lines.push(
+        `${basename(one.path)} · ${address}: ${last.move.kind}${
+          last.move.kind === 'send' ? ` (${last.move.why})` : ''
+        } — ${last.move.kind === 'rest' ? (last.move.said ?? 'nothing to say') : last.move.said}`,
+      );
+      lines.push(`  rounds ${String(last.move.state.rounds)}, stuck ${String(last.move.state.stuckRounds)}`);
+      for (const addon of conversation.held.addons) {
+        lines.push(`  add-on ${addon.name}: ${addon.says} · ${addon.policy}`);
+      }
+      for (const over of conversation.held.hookOverruns) {
+        lines.push(`  ${over.extension} ran past its budget on ${over.event} (${String(over.ms)}ms)`);
+      }
+    }
+  }
+  return lines.length === 0 ? 'Nothing has stopped yet this sitting.' : lines.join('\n');
+}
+
+/** The menu is data; the presses are here. Attached by id so the template stays
+ *  something a test can read without Electron. */
+function withMenuClicks(template: readonly MenuItem[]): readonly MenuItem[] {
+  const press = (id: string): (() => void) | undefined => {
+    if (id === MENU_IDS.openFolder) {
+      return () => {
+        if (mainWindow !== null && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(CHANNEL.fromMenu, { id });
+        }
+      };
+    }
+    if (id === MENU_IDS.newConversation) {
+      return () => {
+        if (mainWindow !== null && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(CHANNEL.fromMenu, { id });
+        }
+      };
+    }
+    if (id === MENU_IDS.diagnostics) {
+      return () => {
+        void diagnosticsNow().then((text) => clipboard.writeText(text));
+      };
+    }
+    if (id === MENU_IDS.releaseNotes) {
+      return () => {
+        void shell.openExternal(RELEASE_NOTES);
+      };
+    }
+    return undefined;
+  };
+  const walk = (items: readonly MenuItem[]): MenuItem[] =>
+    items.map((one) => {
+      const click = one.id === undefined ? undefined : press(one.id);
+      return {
+        ...one,
+        ...(click === undefined ? {} : { click }),
+        ...(one.submenu === undefined ? {} : { submenu: walk(one.submenu) }),
+      } as MenuItem;
+    });
+  return walk(template);
+}
+
+const RELEASE_NOTES = 'https://github.com/AadiXC0DE/graphe/releases';
+
+/* -------------------------------------------------------------------------- */
+/* What this machine has, and what is newer than it                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Whether git is here at all.
+ *
+ * A fresh Mac has no command line tools, and the first `git init` puts Apple's
+ * installer dialog on screen from inside "open folder" — where it reads as the
+ * app failing. Asked once, at launch, with a short patience: a `git` that does
+ * not answer in three seconds is one to say something about, not to wait on.
+ */
+let gitIsHere: boolean | null = null;
+
+const GIT_MISSING = {
+  what: 'This Mac does not have git yet, and I keep every version of your work in it.',
+  because:
+    'macOS installs it with the command line tools. Press Install and macOS will ask; I will wait.',
+  actionLabel: 'Install',
+} as const;
+
+async function probeGit(): Promise<boolean> {
+  if (gitIsHere !== null) return gitIsHere;
+  const ran = await runHelper('git', ['--version'], { folder: homedir(), patience: 3_000 }).catch(
+    () => null,
+  );
+  gitIsHere = ran !== null && !notHere(ran) && ran.code === 0;
+  log.line('info', 'git', { here: gitIsHere });
+  return gitIsHere;
+}
+
+/** Once a day, and never in the way. A failure is silent: whether somebody is
+ *  on the newest build is not worth an error card. */
+const LOOK_FOR_A_NEWER_ONE_EVERY = 24 * 60 * 60 * 1000;
+
+async function newerRelease(): Promise<string | null> {
+  try {
+    const answer = await fetch('https://api.github.com/repos/AadiXC0DE/graphe/releases/latest', {
+      signal: AbortSignal.timeout(5_000),
+      headers: { accept: 'application/vnd.github+json' },
+    });
+    if (!answer.ok) return null;
+    const body = (await answer.json()) as { tag_name?: unknown };
+    const tag = typeof body.tag_name === 'string' ? body.tag_name.replace(/^v/, '') : '';
+    if (tag === '' || tag === app.getVersion()) return null;
+    return isNewer(tag, app.getVersion()) ? tag : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Plain three-number comparison. Anything it cannot read is not newer, which
+ *  is the safe way round for a banner. */
+function isNewer(candidate: string, mine: string): boolean {
+  const parts = (one: string): number[] =>
+    one.split('.').map((piece) => Number.parseInt(piece, 10) || 0);
+  const [a, b] = [parts(candidate), parts(mine)];
+  for (let at = 0; at < 3; at += 1) {
+    const left = a[at] ?? 0;
+    const right = b[at] ?? 0;
+    if (left !== right) return left > right;
+  }
+  return false;
+}
+
+function watchForANewerOne(): void {
+  const look = (): void => {
+    void newerRelease().then((tag) => {
+      if (tag === null) return;
+      send(null, {
+        type: 'notice',
+        what: `${tag} is out.`,
+        because: 'Upgrade with brew upgrade --cask graphe.',
+        actions: [{ id: 'release-notes', label: 'What changed' }],
+      });
+    });
+  };
+  look();
+  setInterval(look, LOOK_FOR_A_NEWER_ONE_EVERY).unref();
+}
+
+/* -------------------------------------------------------------------------- */
+/* What this has left lying around                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Everything under the app's own folder that could be swept, and whether it is
+ * holding work.
+ *
+ * Nothing pruned this before: on the machine this was written on the folder had
+ * grown to 3.4 GB — worktrees 1.7, board copies 1.5 — and the only sweep that
+ * existed removed checkouts of projects that no longer exist. A checkout with
+ * unlanded work in it is never swept, whatever its age.
+ */
+async function whatIsLyingAround(): Promise<readonly Sweepable[]> {
+  const userData = app.getPath('userData');
+  const all: Sweepable[] = [];
+  const walk = async (folder: string, kind: Sweepable['kind']): Promise<void> => {
+    const names = await readdir(folder, { withFileTypes: true }).catch(() => []);
+    for (const one of names) {
+      const path = join(folder, one.name);
+      const when = await stat(path).catch(() => null);
+      if (when === null) continue;
+      all.push({ path, kind, at: when.mtimeMs, holdsWork: await holdsWorkIn(path, kind) });
+    }
+  };
+  // Worktrees are two deep — one folder per project, one per conversation.
+  const projects = await readdir(join(userData, 'worktrees'), { withFileTypes: true }).catch(
+    () => [],
+  );
+  for (const one of projects) {
+    if (one.isDirectory()) await walk(join(join(userData, 'worktrees'), one.name), 'checkout');
+  }
+  await walk(join(userData, 'copies'), 'copy');
+  await walk(join(userData, 'kept-aside'), 'kept-aside');
+  await walk(sessionsFolder(), 'transcript');
+  await walk(join(userData, 'builds'), 'build');
+  return all;
+}
+
+/** Whether anything under this folder is work nobody has taken in yet. Asked of
+ *  git for a checkout; a copy or a kept-aside folder is work by definition
+ *  until somebody has looked at it. */
+async function holdsWorkIn(path: string, kind: Sweepable['kind']): Promise<boolean> {
+  if (kind === 'transcript' || kind === 'build') return false;
+  if (kind === 'kept-aside') return true;
+  if (!existsSync(join(path, '.git'))) return false;
+  const ran = await gitRunHereFor()(['status', '--porcelain'], { cwd: path }).catch(() => null);
+  return ran !== null && ran.code === 0 && (ran.out ?? '').trim() !== '';
 }
 
 const awayDesks = new Map<string, AwayDesk>();
@@ -4738,6 +5089,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       model: (await preferences()).all().model,
       advisor: (await preferences()).all().advisor,
       advisorThinking: (await preferences()).all().advisorThinking,
+      advisorGates: (await preferences()).all().advisorGates,
       thinking: thinkingFor((await preferences()).all()),
       // The board is held before a piece gets this far, so this only catches
       // Plan arriving while the copy was being made.
@@ -5440,9 +5792,33 @@ function followed(): Promise<FollowedFile> {
  */
 /** The credential this computer has for Figma, or nothing. Read in one place
  *  so the panel and the agent are never connected to different things. */
+/**
+ * The Figma token, from the keychain first and the environment second.
+ *
+ * It used to be read from `process.env` alone, and `widenPath` widens PATH and
+ * nothing else — so an app launched from the Dock inherits launchd's
+ * environment, which has neither variable in it, and Figma worked only for
+ * somebody who started the app from a terminal. Connect → Figma puts it in the
+ * keychain; the environment stays as an override for anybody who prefers it.
+ */
 function figmaCredential(): string {
+  const kept = kept_secrets?.get(FIGMA_SECRET) ?? null;
+  if (kept !== null && kept.trim() !== '') return kept.trim();
   return (process.env['FIGMA_TOKEN'] ?? process.env['FIGMA_ACCESS_TOKEN'] ?? '').trim();
 }
+
+/** What the Figma token is filed under. */
+const FIGMA_SECRET = 'figma';
+
+/** The keychain-backed store, once the app is ready. Null until then, and null
+ *  on a machine whose keychain will not answer — in which case nothing is kept
+ *  and the panel says so rather than writing a token in the clear. */
+let kept_secrets: SecretFile | null = null;
+
+/** Where Pi is told to read provider credentials from, when the keychain is
+ *  holding any. Null when it holds none, because handing Pi an empty file reads
+ *  as being signed out of everything. */
+let providerAuthPath: string | null = null;
 
 function figmaReading(): ReadDesign | null {
   const credential = figmaCredential();
@@ -5682,7 +6058,7 @@ function register(): void {
           }
         }
       }
-      for (const [where, css] of perFile) await writeFile(where, css, 'utf8');
+      for (const [where, css] of perFile) await writeAtomically(where, css);
       await timeline.snapshot({ boundary: 'user-asked', by: 'you' });
       return done(await versionsOf(timeline));
     } catch (cause) {
@@ -6073,7 +6449,7 @@ function register(): void {
     });
     if (where.canceled || where.filePath === undefined) return done(null);
     try {
-      await writeFile(where.filePath, reviewPage(review), 'utf8');
+      await writeAtomically(where.filePath, reviewPage(review));
       shell.showItemInFolder(where.filePath);
       return done(where.filePath);
     } catch (cause) {
@@ -7010,6 +7386,16 @@ function register(): void {
   handle<readonly Pack[]>(CHANNEL.addPackage, async (_event, args) => {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
+    /* Add-ons install through Pi's package manager, which shells out to npm.
+       Saying so beats letting the press fail with the shell's own words. */
+    npmIsHere ??= await npmOnPath();
+    if (!npmIsHere) {
+      return fail({
+        what: 'Adding an add-on needs npm, and this Mac does not have it on the path.',
+        because: 'Install Node, or start Graphe from a terminal that has it.',
+        actionLabel: 'Got it',
+      });
+    }
     const shelved = await theShelf();
     const added = await shelved.add(id);
     if (!added.ok) {
@@ -7510,6 +7896,8 @@ function register(): void {
         model: prefs.model,
         advisor: prefs.advisor,
       advisorThinking: prefs.advisorThinking,
+      advisorGates: prefs.advisorGates,
+      addonsChosen: prefs.addons,
         thinking: thinkingFor(prefs),
         trusts: await trustsIn(open.path),
         running: open.held.running,
@@ -7938,6 +8326,61 @@ function register(): void {
     if (open === null) return done(null);
     continuations.stopped(open.path, listAddress(open, where) ?? '');
     return done(null);
+  });
+
+  handle<string>(CHANNEL.diagnostics, async () => done(await diagnosticsNow()));
+
+  handle<string>(CHANNEL.appVersion, async () => done(app.getVersion()));
+
+  handle<{ says: Readonly<Record<string, string>>; running: number }>(
+    CHANNEL.addons,
+    async (_event, args) => {
+      const open = projectAt(whereIn(args));
+      const says: Record<string, string> = {};
+      for (const one of open?.held.sessions.open ?? []) {
+        for (const addon of one.held.addons) says[addon.name] = addon.says;
+      }
+      const running = await addonProcesses(
+        process.pid,
+        spawned.all().map((one) => one.pid),
+      ).catch(() => 0);
+      return done({ says, running });
+    },
+  );
+
+  handle<{ says: string; couldClear: number; because: string }>(CHANNEL.storage, async () => {
+    const folders = await measureFolders(app.getPath('userData'));
+    const { sweep: could, because } = whatToSweep(await whatIsLyingAround(), Date.now());
+    return done({ says: saysStorage(folders), couldClear: could.length, because });
+  });
+
+  handle<{ removed: number; freed: number; says: string }>(
+    CHANNEL.clearFinishedWork,
+    async () => {
+      const { sweep: picked } = whatToSweep(await whatIsLyingAround(), Date.now());
+      const gone = await sweep(picked);
+      log.line('info', 'cleared finished work', gone);
+      return done({
+        ...gone,
+        says: saysStorage(await measureFolders(app.getPath('userData'))),
+      });
+    },
+  );
+
+  handle<{ ok: boolean; why?: string }>(CHANNEL.keepCredential, async (_event, args) => {
+    const [name, value] = args;
+    if (typeof name !== 'string' || typeof value !== 'string') return fail(NOTHING_OPEN);
+    if (kept_secrets === null) {
+      return done({ ok: false, why: 'This machine will not let me keep a credential.' });
+    }
+    const kept = await kept_secrets.keep(name, value);
+    return done(kept.ok ? { ok: true } : { ok: false, why: kept.why });
+  });
+
+  handle<{ canKeep: boolean; held: readonly string[] }>(CHANNEL.credentialsKept, async () => {
+    if (kept_secrets === null) return done({ canKeep: false, held: [] });
+    const held = [FIGMA_SECRET].filter((one) => kept_secrets?.has(one) === true);
+    return done({ canKeep: kept_secrets.canKeep(), held });
   });
 
   handle<Goal | null>(CHANNEL.goalLoad, async (_event, args) => {
@@ -8461,6 +8904,32 @@ function register(): void {
     return done(saved);
   });
 
+  /* Both off unless somebody says otherwise. Turning one on rewrites the
+     advisor's own settings file for every conversation, which is the only place
+     that gate is actually read. */
+  handle<Preferences>(CHANNEL.setAdvisorGate, async (_event, args) => {
+    const [which, on] = args;
+    const prefs = await preferences();
+    if (which !== 'completionGate' && which !== 'loopGate') return done(prefs.all());
+    const gates = { ...prefs.all().advisorGates, [which]: on === true };
+    const saved = await prefs.change({ advisorGates: gates });
+    const open = projectAt(whereIn(args));
+    for (const one of open?.held.sessions.open ?? []) {
+      await one.held.useAdvisor(saved.advisor, saved.advisorThinking ?? undefined);
+    }
+    return done(saved);
+  });
+
+  /* Off keeps an add-on's tools and drops its hooks; it takes effect on the
+     next conversation, because what an extension registered is decided while
+     the session is being built. */
+  handle<Preferences>(CHANNEL.setAddons, async (_event, args) => {
+    const [choice] = args;
+    const prefs = await preferences();
+    if (choice !== 'on' && choice !== 'tools-only') return done(prefs.all());
+    return done(await prefs.change({ addons: choice }));
+  });
+
   handle<Preferences>(CHANNEL.setThinking, async (_event, args) => {
     const [providerId, modelId, level] = args;
     const prefs = await preferences();
@@ -8687,7 +9156,58 @@ if (!app.requestSingleInstanceLock()) {
   // contents that ever exists, not only the one we remembered to wire up.
   app.on('web-contents-created', (_event, contents) => guardNavigation(contents));
 
+  /**
+   * Something went wrong on our side.
+   *
+   * There were no handlers at all before this, and thirty-four fire-and-forget
+   * promises in this file, so a rejection in any of them was an unhandled
+   * rejection and a crash nobody could report. Nothing here quits: the window
+   * stays, the log gets a line, and the person gets one calm card with
+   * something they can send.
+   */
+  process.on('uncaughtException', (cause: unknown) => {
+    const said = cause instanceof Error ? cause.message : String(cause);
+    log.line('error', 'uncaught', { because: said });
+    sayWentWrong(said);
+  });
+  process.on('unhandledRejection', (cause: unknown) => {
+    const said = cause instanceof Error ? cause.message : String(cause);
+    log.line('error', 'unhandled rejection', { because: said });
+    sayWentWrong(said);
+  });
+  app.on('render-process-gone', (_event, _contents, details) => {
+    log.line('error', 'the window stopped', { reason: details.reason });
+    // Once. A window that reloads itself in a loop is worse than one that is
+    // gone, because it never settles long enough to be read.
+    if (reloadedAlready) return;
+    reloadedAlready = true;
+    if (mainWindow !== null && !mainWindow.isDestroyed()) mainWindow.reload();
+  });
+  app.on('child-process-gone', (_event, details) => {
+    log.line('warn', 'a child process stopped', { kind: details.type, reason: details.reason });
+  });
+
   void app.whenReady().then(async () => {
+    log.line('info', 'started', {
+      version: app.getVersion(),
+      electron: process.versions.electron,
+      node: process.versions.node,
+    });
+    /* Graphe's own menu. Electron's default ships View → Reload, and ⌘R
+       reloads the window mid-run: the run carries on in this process and the
+       window comes back showing steps that will never close. */
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate(
+        withMenuClicks(
+          menuTemplate({
+            appName: app.getName(),
+            version: app.getVersion(),
+            debug: process.env['GRAPHE_DEBUG'] === '1',
+            onMac: process.platform === 'darwin',
+          }),
+        ) as Electron.MenuItemConstructorOptions[],
+      ),
+    );
     // The skills the app brought with it. A checkout has them beside the source;
     // a packaged app has them beside the licences.
     // Signing in to a tool that lives on somebody else's computer. The keychain
@@ -8714,6 +9234,20 @@ if (!app.requestSingleInstanceLock()) {
     await endStrayServers().catch(() => 0);
     // And the copies of the project those conversations were working in.
     await sweepStrayCheckouts().catch(() => 0);
+    /* And everything else this app leaves behind. Only the safe categories,
+       only past their keep-days, and never a copy still holding work. */
+    void whatIsLyingAround()
+      .then((all) => sweep(whatToSweep(all, Date.now()).sweep))
+      .then((gone) => {
+        if (gone.removed > 0) log.line('info', 'swept', gone);
+      })
+      .catch(() => undefined);
+    // Add-ons install through Pi's package manager, which shells out to npm.
+    // Saying so on the page beats failing on the press.
+    void npmOnPath().then((here) => {
+      npmIsHere = here;
+      log.line('info', 'npm', { here });
+    });
     // And the copy kept ready for work checked before it lands. Warm is worth
     // having for as long as the app is up, not for as long as it is installed.
     await rm(join(workFolder(), 'kept'), { recursive: true, force: true }).catch(
@@ -8727,6 +9261,10 @@ if (!app.requestSingleInstanceLock()) {
     // that came round while this was shut is done once — see whenNext.
     await standingFile().catch(() => null);
     watchTheClock();
+    // A fresh Mac has no git, and finding that out inside "open folder" reads
+    // as the app failing rather than as one thing missing.
+    if (!(await probeGit())) send(null, { type: 'notice', ...GIT_MISSING, because: GIT_MISSING.because });
+    watchForANewerOne();
   });
 
   /**
@@ -8758,5 +9296,11 @@ if (!app.requestSingleInstanceLock()) {
     // this process is, or it outlives the app that started it with nobody left
     // who can stop it. The ordinary stop leans on a timer there is no time for.
     for (const one of workspaces.open) one.held.running.stopAllNow();
+    // Everything else this app started — helpers, checks, language servers,
+    // browsers, the servers an add-on's tool spawned. None of them used to be
+    // written down anywhere, and none of them died with the app.
+    spawned.killAllNow();
+    log.line('info', 'quit');
+    log.close();
   });
 }

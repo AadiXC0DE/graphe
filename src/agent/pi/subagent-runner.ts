@@ -29,7 +29,7 @@
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { mayRun, roleSpec, safeChildWords, type HelperRole } from './child';
+import { helperBrief, mayRun, roleSpec, safeChildWords, saysOutput, saysStep, type HelperRole } from './child';
 import { CARRY_ON, HELPER_WAITS_MS, isTransientStreamError } from './transient';
 import { patchWorkerThreads } from './node-shim';
 import type { HelperPace } from './tools';
@@ -89,6 +89,47 @@ async function waitOut(ms: number): Promise<void> {
 
 function report(payload: unknown): void {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
+}
+
+/** How often a step that is saying nothing says it is still there. Well under
+ *  the parent's patience, so a build or a test suite never reads as a stall. */
+const STEP_BEAT_MS = 20_000;
+
+/** A step's own liveness, kept here because a step is the one thing a helper
+ *  does that can take twenty silent minutes. Read off Pi's own start and end of
+ *  a tool call, which the relay deliberately drops (events.ts says why). */
+function stepWatch(): {
+  saw: (event: unknown) => void;
+  stop: () => void;
+} {
+  let doing: string | null = null;
+  let beat: ReturnType<typeof setInterval> | null = null;
+
+  const stop = (): void => {
+    doing = null;
+    if (beat !== null) clearInterval(beat);
+    beat = null;
+  };
+
+  return {
+    saw: (event: unknown): void => {
+      const fields = event as { type?: unknown; toolName?: unknown; input?: unknown };
+      if (fields.type === 'tool_execution_start') {
+        doing = saysStep({
+          name: typeof fields.toolName === 'string' ? fields.toolName : '',
+          input: (fields.input ?? {}) as Record<string, unknown>,
+        });
+        report({ type: 'step', text: doing });
+        beat ??= setInterval(() => {
+          if (doing !== null) report({ type: 'step', text: doing });
+        }, STEP_BEAT_MS);
+        beat.unref?.();
+        return;
+      }
+      if (fields.type === 'tool_execution_end') stop();
+    },
+    stop,
+  };
 }
 
 /**
@@ -319,6 +360,12 @@ async function work(
       spoken += event.text;
       report({ type: 'delta', text: safeChildWords(event.text) });
     }
+    // A builder's own shell output, one line at a time. The step is what is
+    // taking the time, so the step is what is worth watching.
+    if (event.type === 'tool-progress') {
+      const line = saysOutput(event.text);
+      if (line !== '') report({ type: 'step', text: line });
+    }
     // Nobody else can see this. The helper calls the account from its own
     // process, so unless it says what a turn cost, a fan-out to six helpers is
     // money that never reaches a meter or a ceiling.
@@ -366,11 +413,15 @@ async function work(
       resourceLoader: loader,
     });
     session = created.session;
-    const unsubscribe = created.session.subscribe((event) => relay.fromPi(event));
+    const steps = stepWatch();
+    const unsubscribe = created.session.subscribe((event) => {
+      steps.saw(event);
+      relay.fromPi(event);
+    });
 
     // A busy provider settles the turn with the failure on it rather than
     // throwing, so both endings are read the same way and waited the same way.
-    let words = `${spec.spoken}\n\n${job.task.trim()}`;
+    let words = helperBrief(spec, job.task);
     for (let attempt = 0; ; attempt += 1) {
       heldBackTrouble = null;
       waitsLeft = HELPER_WAITS_MS.length - attempt;
@@ -401,6 +452,7 @@ async function work(
       finish(said === '' ? { ok: false, error: nothingSaid() } : { ok: true, text: said });
     }
     unsubscribe();
+    steps.stop();
   } catch (cause) {
     finish({ ok: false, error: messageOf(cause) });
   }

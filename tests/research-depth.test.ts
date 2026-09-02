@@ -11,6 +11,7 @@ import {
   asResearch,
   chooseDepth,
   chosenDepth,
+  DEEPEST_SPLIT,
   DEFAULT_DEPTH,
   DEPTHS,
   howDeep,
@@ -19,6 +20,7 @@ import {
   researchBrief,
   researchWords,
 } from '../src/agent/research';
+import { capsNow } from '../src/work/capacity';
 
 describe('how far it goes', () => {
   it('is three settings, and each one asks for more work than the last', () => {
@@ -96,19 +98,27 @@ describe('a split that will actually start', () => {
   /* A fan-out refused on the way out costs the turn and answers nothing, so the
      number asked for is checked against the two ceilings that can refuse it. */
   it('never asks for more helpers than are admitted at once', () => {
-    expect(MOST_TOGETHER).toBeLessThan(MOST_AT_ONCE.helper);
-    expect(MOST_TOGETHER).toBeLessThanOrEqual(MOST_APART);
+    expect(MOST_TOGETHER).toBeLessThanOrEqual(MOST_AT_ONCE.helper);
+    expect(DEEPEST_SPLIT).toBeLessThanOrEqual(MOST_APART);
     for (const one of DEPTHS) {
-      expect(one.atOnce).toBeLessThanOrEqual(MOST_TOGETHER);
+      expect(one.atOnce).toBeLessThanOrEqual(DEEPEST_SPLIT);
     }
   });
 
-  it('tells the run its own ceiling, so it does not ask for what will be turned away', () => {
+  /* The ladder is drawn in a window that cannot read the machine, so the rung
+     and the brief say one static number and the fleet does the clamping. What
+     is not allowed is the two disagreeing with each other. */
+  it('says one number on the rung and the same one in the brief', () => {
     for (const one of DEPTHS) {
       expect(researchBrief(one.id)).toContain(
-        `Never put more than ${String(MOST_TOGETHER)} out at one time`,
+        `Never put more than ${String(DEEPEST_SPLIT)} out at one time`,
       );
+      expect(researchBrief(one.id)).toContain(`so ${String(one.atOnce)} are working at once`);
     }
+  });
+
+  it('reads the machine for what may actually go out together', () => {
+    expect(MOST_TOGETHER).toBe(capsNow().research);
   });
 
   it('asks for the split first and the helpers together, which is the whole method', () => {
@@ -123,7 +133,7 @@ describe('a split that will actually start', () => {
     expect(tools).toContain('At most ${String(MOST_AT_ONCE.helper)} helpers work at once');
   });
 
-  it('keeps the helper ceiling at the showcase total, and away uncapped', () => {
+  it('keeps the helper ceiling at the one total, and away uncapped', () => {
     // One number, not two: the cap IS the total, so they cannot drift apart.
     // This guards against a future raise sneaking past HELPER_TOTAL_MAX, and
     // against someone re-capping `away` and stalling a second project.

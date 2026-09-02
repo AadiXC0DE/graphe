@@ -22,12 +22,25 @@ const PRELOAD = readFileSync(new URL('../electron/preload.ts', import.meta.url),
 describe('the parent never becomes a repository', () => {
   it('looks for children before any history is opened', () => {
     const at = MAIN.indexOf('async function openTheProject');
-    const block = MAIN.slice(at, at + 2200);
+    const block = MAIN.slice(at, at + 3600);
     expect(block).toContain('await childRepos(path)');
     expect(block).toContain('children.length < SEVERAL_CHILDREN');
     // The git-init lives inside Timeline.open; for a several-projects folder
     // it must never run.
     expect(block).toContain('timeline = await Timeline.open(path)');
+  });
+
+  /* And nor does it run for a folder that is not a project at all. Somebody
+     opening their Desktop used to get a repository and a first turn that
+     committed everything on it. */
+  it('refuses a home or system folder before any history is opened', () => {
+    const at = MAIN.indexOf('async function openTheProject');
+    const block = MAIN.slice(at, at + 3600);
+    const refuses = block.indexOf('await verdictFor(path');
+    const opens = block.indexOf('timeline = await Timeline.open(path)');
+    expect(refuses).toBeGreaterThan(-1);
+    expect(refuses).toBeLessThan(opens);
+    expect(block).toContain("verdict.kind === 'refuse'");
   });
 
   it('carries the detection on the project, empty for an ordinary folder', () => {

@@ -24,7 +24,17 @@
 //
 // `--check` writes nothing and fails if the file on disk is out of date, which
 // is what CI should run.
+//
+// ## Why the lockfile fingerprint is in the file
+//
+// The tree only changes when the lockfile changes, so anything else in here
+// changing is noise — and it used to rewrite the date on every package, which
+// showed up as a modified file after every release and taught everybody to
+// commit it without reading it. The fingerprint of the lockfile it was
+// generated from travels in the file; a run whose lockfile still matches writes
+// nothing at all. `--force` rebuilds anyway.
 
+import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +42,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const outFile = join(root, 'THIRD-PARTY-LICENSES.md');
 const check = process.argv.includes('--check');
+const force = process.argv.includes('--force');
 
 /* -------------------------------------------------------------------------- */
 /* Finding packages the way Node finds them                                    */
@@ -201,12 +212,25 @@ Graphe is not a fork of any of these projects. We depend on them as published pa
 not modified their source. Their names and marks belong to their respective owners.
 `;
 
-export function render(collected, at = new Date()) {
+/** The lockfile, as one short string. Missing counts as "unknown", which is
+ *  never equal to anything and so always rebuilds. */
+export async function lockFingerprint(rootDir = root) {
+  const text = await readFile(join(rootDir, 'package-lock.json'), 'utf8').catch(() => null);
+  if (text === null) return 'unknown';
+  return createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+
+/** The fingerprint a generated file says it was built from. */
+export function fingerprintIn(text) {
+  return /^\d+ packages, generated .* from package-lock\.json ([0-9a-f]+|unknown)\.$/m.exec(text)?.[1] ?? null;
+}
+
+export function render(collected, at = new Date(), lock = 'unknown') {
   const { packages, missing } = collected;
   const lines = [PREAMBLE];
 
   lines.push(
-    `${packages.length} packages, generated ${at.toISOString().slice(0, 10)}.`,
+    `${packages.length} packages, generated ${at.toISOString().slice(0, 10)} from package-lock.json ${lock}.`,
     '',
     '## Summary',
     '',
@@ -256,25 +280,38 @@ export function render(collected, at = new Date()) {
 /* -------------------------------------------------------------------------- */
 
 if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) {
-  const collected = await collect();
-  // The date is the only part that changes without the tree changing, so
-  // `--check` compares everything else.
-  const undated = (text) => text.replace(/^\d+ packages, generated .*$/m, '');
+  const lock = await lockFingerprint();
+  const existing = await readFile(outFile, 'utf8').catch(() => '');
+  const sameTree = fingerprintIn(existing) === lock;
 
-  const rendered = render(collected);
   if (check) {
-    const existing = await readFile(outFile, 'utf8').catch(() => '');
-    if (undated(existing) !== undated(rendered)) {
+    if (!sameTree) {
+      console.error(
+        'THIRD-PARTY-LICENSES.md was generated from a different package-lock.json. Run `npm run licenses` and commit the result.',
+      );
+      process.exit(1);
+    }
+    // The fingerprint says the tree; this says the file actually describes it.
+    const collected = await collect();
+    const undated = (text) => text.replace(/^\d+ packages, generated .*$/m, '');
+    if (undated(existing) !== undated(render(collected, new Date(), lock))) {
       console.error(
         'THIRD-PARTY-LICENSES.md is out of date. Run `npm run licenses` and commit the result.',
       );
       process.exit(1);
     }
     console.log(`THIRD-PARTY-LICENSES.md is up to date (${collected.packages.length} packages).`);
-  } else {
-    await writeFile(outFile, rendered);
-    console.log(`wrote THIRD-PARTY-LICENSES.md — ${collected.packages.length} packages`);
+    process.exit(0);
   }
+
+  if (sameTree && !force) {
+    console.log(`THIRD-PARTY-LICENSES.md already describes package-lock.json ${lock} — nothing to do`);
+    process.exit(0);
+  }
+
+  const collected = await collect();
+  await writeFile(outFile, render(collected, new Date(), lock));
+  console.log(`wrote THIRD-PARTY-LICENSES.md — ${collected.packages.length} packages`);
 
   const undeclared = collected.packages.filter((one) => one.licence === null && one.texts.length === 0);
   if (undeclared.length > 0) {

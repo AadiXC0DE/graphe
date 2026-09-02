@@ -59,6 +59,20 @@ export type Preferences = {
    */
   advisor: ModelChoice | null;
   advisorThinking: ThinkingLevel | null;
+  /**
+   * The two gates the advisor can hold, both off unless somebody turns them on.
+   *
+   * Asking a second model before saying a job is done turns "finish" into
+   * "report" — the model does the work, is handed a list of everything not yet
+   * proven, and writes a status update instead of finishing. Asking every time
+   * a command repeats fires on running the tests three times. Neither was ever
+   * somebody's decision; both are theirs now.
+   */
+  advisorGates: { completionGate: boolean; loopGate: boolean };
+  /** Whether add-ons that start turns of their own keep their hooks. Off keeps
+   *  their tools and drops the hooks; Graphe is already deciding when a turn
+   *  begins, and two of those is the bug. */
+  addons: 'on' | 'tools-only';
   /** How much time each model should take before it answers. The map is keyed
    * by its provider and model id because different models support different
    * choices. */
@@ -136,11 +150,22 @@ export type Preferences = {
   theme: Theme;
 };
 
+/** Both gates off unless the file says otherwise, and anything unreadable is
+ *  off too: a gate that turns itself on because a file was half-written is the
+ *  failure this exists to stop. */
+function asGates(raw: unknown): { completionGate: boolean; loopGate: boolean } {
+  if (typeof raw !== 'object' || raw === null) return { completionGate: false, loopGate: false };
+  const one = raw as Record<string, unknown>;
+  return { completionGate: one['completionGate'] === true, loopGate: one['loopGate'] === true };
+}
+
 export const defaultPreferences: Preferences = {
   showMe: false,
   model: null,
   advisor: null,
   advisorThinking: null,
+  advisorGates: { completionGate: false, loopGate: false },
+  addons: 'tools-only',
   thinking: {},
   kept: {},
   trusted: {},
@@ -185,6 +210,8 @@ function asPreferences(value: unknown): Preferences {
         : null,
     advisor: asAdvisor(record['advisor']),
     advisorThinking: asAdvisorThinking(record['advisorThinking']),
+    advisorGates: asGates(record['advisorGates']),
+    addons: record['addons'] === 'on' ? 'on' : 'tools-only',
     thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
@@ -280,6 +307,9 @@ export class PreferenceFile {
       next.model?.modelId === this.#preferences.model?.modelId &&
       sameAdvisor(next.advisor, this.#preferences.advisor) &&
       next.advisorThinking === this.#preferences.advisorThinking &&
+      next.advisorGates.completionGate === this.#preferences.advisorGates.completionGate &&
+      next.advisorGates.loopGate === this.#preferences.advisorGates.loopGate &&
+      next.addons === this.#preferences.addons &&
       sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted) &&

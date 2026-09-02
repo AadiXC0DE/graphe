@@ -28,6 +28,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import { portEnv } from '../work/ports';
+import { capsNow } from '../work/capacity';
 import { worthShowing, type Answered } from '../lib/showable';
 import { hold } from './sandbox';
 import type { Bounds } from './sandbox/profile';
@@ -188,11 +189,10 @@ export type StartOptions = {
   onChange?: () => void;
 };
 
-/** As many servers as one project has a use for. A front end and two back ends
- *  is ordinary; past this it is not a project running, it is a machine filling
- *  up. A development server holds most of a gigabyte, and the way people find
- *  out this number was missing is the machine running out of memory. */
-export const MOST_RUNNING = 4;
+/** As many servers as one project has a use for. A development server holds most
+ *  of a gigabyte, and the way people find out this number was missing is the
+ *  machine running out of memory. */
+export const MOST_RUNNING = capsNow().running;
 
 /** The same command asked for twice. Whitespace only — anything cleverer would
  *  start claiming `npm run dev` and `npm run dev -- --host` are one thing. */

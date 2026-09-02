@@ -103,6 +103,54 @@ export function roleSpec(role: HelperRole | null | undefined): RoleSpec {
 }
 
 /* -------------------------------------------------------------------------- */
+/* What a helper is doing, said out loud                                       */
+/* -------------------------------------------------------------------------- */
+
+/** The most of one step line that travels back. Progress, not a transcript. */
+const STEP_MOST = 200;
+
+function shorten(text: string): string {
+  const one = text.replace(/\s+/g, ' ').trim();
+  return one.length <= STEP_MOST ? one : `${one.slice(0, STEP_MOST - 1)}\u2026`;
+}
+
+/** What a helper is doing right now, in one line.
+ *
+ *  A builder running a test suite writes nothing for as long as it takes, and
+ *  the clock above it used to read that quiet as a stall. The step is the
+ *  progress. */
+export function saysStep(call: { name: string; input?: Record<string, unknown> }): string {
+  const said = (key: string): string | null => {
+    const value = call.input?.[key];
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+  };
+  const command = said('command');
+  if (command !== null) return shorten(`Running ${command}`);
+  const path = said('path') ?? said('file_path') ?? said('filePath');
+  if (path !== null) return shorten(`Reading ${path}`);
+  const looking = said('pattern') ?? said('query');
+  if (looking !== null) return shorten(`Looking for ${looking}`);
+  return 'Working';
+}
+
+/** The last thing a step printed, safe to read as text. Its own output is the
+ *  only honest sign that a long step is getting somewhere. */
+export function saysOutput(text: string): string {
+  const lines = safeChildWords(text)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  return shorten(lines[lines.length - 1] ?? '');
+}
+
+/** A helper's piece of work, written for an agent that has never seen this
+ *  conversation: the role's own instructions in front of the job. Read by the
+ *  helper process, and by a board piece when the work is sent there instead. */
+export function helperBrief(spec: RoleSpec, task: string): string {
+  return `${spec.spoken}\n\n${task.trim()}`;
+}
+
+/* -------------------------------------------------------------------------- */
 /* What a helper is allowed to run                                             */
 /* -------------------------------------------------------------------------- */
 

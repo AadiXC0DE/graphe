@@ -12,17 +12,37 @@
  */
 
 import { spawn } from 'node:child_process';
+import { availableParallelism, freemem, totalmem } from 'node:os';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   HELPER_PATIENCE_MS,
+  HELPER_RAN_TOO_LONG,
   HELPER_TOOK_TOO_LONG,
+  HELPER_WALL_CLOCK_MS,
+  helperClocks,
   stopChild,
   taskTool,
+  whyEndHelper,
 } from '../src/agent/pi/tools';
+import { capsFor, capsNow } from '../src/work/capacity';
+import { AT_A_TIME } from '../src/work/board';
+import { CHECKS_AT_A_TIME } from '../src/agent/pi/checks';
+import { MOST_RUNNING } from '../src/agent/running';
+import { MOST_TOGETHER } from '../src/agent/research';
 import type { Money } from '../src/agent/types';
-import { ceilingWords, Fleet, fleet, MOST_AT_ONCE, readCeiling, type UnseenSpend } from '../src/cost/fleet';
+import {
+  ceilingWords,
+  Fleet,
+  fleet,
+  HELPER_TOTAL_MAX,
+  MOST_AT_ONCE,
+  readCeiling,
+  type UnseenSpend,
+} from '../src/cost/fleet';
 import { Allotment, createLimit } from '../src/cost/limits';
 import { fromMajor, money } from '../src/cost/money';
 
@@ -34,6 +54,10 @@ function usd(major: number): Money {
 function ceilingOf(major: number) {
   return createLimit(usd(major), 'session');
 }
+
+/** The top of one helper's band before anything about it has been measured —
+ *  what a fresh fleet reserves for each one. */
+const EACH_HELPER_MAJOR = 2.5;
 
 /** A process that will happily run forever, so the only reason it can end is
  *  that something ended it. */
@@ -111,18 +135,23 @@ describe('one ceiling, several runs', () => {
 
 describe('a fan-out that runs out', () => {
   it('starts as many helpers as the ceiling covers, and refuses the next', () => {
+    // A ceiling that runs out one helper before the machine's own cap does, so
+    // what refuses the next one is the money rather than the count.
+    const room = MOST_AT_ONCE.helper - 1;
     const many = new Fleet();
-    many.hold(ceilingOf(10));
+    many.hold(ceilingOf(EACH_HELPER_MAJOR * room));
 
     // With nothing measured yet a helper is given the top of its band, which is
     // the direction a ceiling has to be wrong in.
-    const admitted = [1, 2, 3, 4, 5, 6].map((n) =>
+    const admitted = Array.from({ length: room + 1 }, (_, n) =>
       many.begin({ id: `helper-${String(n)}`, kind: 'helper', stop: () => {} }),
     );
 
-    expect(admitted.filter((one) => one.ok)).toHaveLength(4);
+    expect(admitted.filter((one) => one.ok)).toHaveLength(room);
     const refused = admitted.find((one) => !one.ok);
-    expect(refused?.ok === false && refused.because).toContain('$10');
+    expect(refused?.ok === false && refused.because).toBe(
+      ceilingWords.refused(usd(EACH_HELPER_MAJOR * room)),
+    );
   });
 
   it('binds no money at all when nobody has set a ceiling', () => {
@@ -426,9 +455,145 @@ describe('a helper that never answers', () => {
     expect(HELPER_PATIENCE_MS).toBeLessThan(4 * 60 * 60 * 1000);
   });
 
+  it('has a second clock that no amount of noise can put off', () => {
+    expect(HELPER_WALL_CLOCK_MS).toBeGreaterThan(HELPER_PATIENCE_MS);
+    expect(HELPER_WALL_CLOCK_MS).toBe(30 * 60 * 1000);
+  });
+
   it('tells the model what to do instead of trying again', () => {
     expect(HELPER_TOOK_TOO_LONG).toMatch(/not send the same piece of work again/i);
     expect(HELPER_TOOK_TOO_LONG).toMatch(/smaller pieces|yourself/i);
+  });
+
+  it('says which of the two clocks ran out, because they mean opposite things', () => {
+    expect(HELPER_TOOK_TOO_LONG).toMatch(/nothing at all/i);
+    expect(HELPER_RAN_TOO_LONG).toMatch(/working the whole time/i);
+    expect(HELPER_RAN_TOO_LONG).not.toBe(HELPER_TOOK_TOO_LONG);
+  });
+});
+
+/* A builder running a long test suite writes nothing anybody was watching for,
+   and was killed for it with "the helper took too long" — which reads as a
+   stall when what happened was work. */
+describe('a helper that is quiet, and a helper that is long', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function watch(): { endings: string[]; clocks: ReturnType<typeof helperClocks> } {
+    const endings: string[] = [];
+    return { endings, clocks: helperClocks((why) => endings.push(why)) };
+  }
+
+  it('lets a step run ten silent minutes as long as something says it is there', () => {
+    const { endings, clocks } = watch();
+    // A test suite: nothing on the answer channel, a line of its own output
+    // every half minute.
+    for (let at = 0; at < 20; at += 1) {
+      vi.advanceTimersByTime(30_000);
+      clocks.stirred();
+    }
+    expect(endings).toEqual([]);
+    clocks.stop();
+  });
+
+  it('ends one that has shown no sign of itself at all', () => {
+    const { endings, clocks } = watch();
+    vi.advanceTimersByTime(HELPER_PATIENCE_MS + 10_000);
+    expect(endings).toEqual([HELPER_TOOK_TOO_LONG]);
+    clocks.stop();
+  });
+
+  it('ends one still going at the wall clock, however busy it has been', () => {
+    const { endings, clocks } = watch();
+    for (let at = 0; at * 30_000 < HELPER_WALL_CLOCK_MS + 60_000; at += 1) {
+      vi.advanceTimersByTime(30_000);
+      clocks.stirred();
+    }
+    expect(endings).toEqual([HELPER_RAN_TOO_LONG]);
+    clocks.stop();
+  });
+
+  it('ends once and then stops looking', () => {
+    const { endings, clocks } = watch();
+    vi.advanceTimersByTime(HELPER_WALL_CLOCK_MS * 2);
+    expect(endings).toHaveLength(1);
+    clocks.stop();
+  });
+
+  it('is stopped by a run that finished, so nothing fires behind it', () => {
+    const { endings, clocks } = watch();
+    clocks.stop();
+    vi.advanceTimersByTime(HELPER_WALL_CLOCK_MS * 2);
+    expect(endings).toEqual([]);
+  });
+
+  it('reads the two deadlines the same way whichever came first', () => {
+    expect(whyEndHelper({ startedAt: 0, lastSign: 0, now: 1000 })).toBeNull();
+    expect(whyEndHelper({ startedAt: 0, lastSign: 0, now: HELPER_PATIENCE_MS })).toBe(
+      HELPER_TOOK_TOO_LONG,
+    );
+    expect(
+      whyEndHelper({
+        startedAt: 0,
+        lastSign: HELPER_WALL_CLOCK_MS - 1000,
+        now: HELPER_WALL_CLOCK_MS,
+      }),
+    ).toBe(HELPER_RAN_TOO_LONG);
+  });
+
+  it('counts the child\'s own noise as a sign of life, not only its answer', () => {
+    const tools = readFileSync(new URL('../src/agent/pi/tools.ts', import.meta.url), 'utf8');
+    const at = tools.indexOf("child.stderr.on('data'");
+    expect(at).toBeGreaterThan(-1);
+    expect(tools.slice(at, at + 300)).toContain('stirred()');
+  });
+});
+
+/* ------------------------------------------------------- one set of caps */
+
+/* Five files used to hold five numbers and none of them knew about the others.
+   The point of the check is not any one value; it is that there is one place
+   the values come from, and that it is this machine. */
+describe('the caps every file runs on', () => {
+  it('is the machine\'s fan-out, not a number of its own', () => {
+    expect(MOST_AT_ONCE.helper).toBe(capsNow().helpers);
+    expect(MOST_AT_ONCE.helper).toBeGreaterThanOrEqual(2);
+    expect(MOST_AT_ONCE.helper).toBeLessThanOrEqual(6);
+  });
+
+  it('is one answer, and all five agree with it', () => {
+    const caps = capsNow();
+    expect(HELPER_TOTAL_MAX).toBe(caps.helpers);
+    expect(MOST_TOGETHER).toBe(caps.research);
+    expect(AT_A_TIME).toBe(caps.board);
+    expect(CHECKS_AT_A_TIME).toBe(caps.checks);
+    expect(MOST_RUNNING).toBe(caps.running);
+  });
+
+  it('is what this machine works out, rather than what a file remembered', () => {
+    expect(capsNow()).toEqual(
+      capsFor({
+        totalMemBytes: totalmem(),
+        freeMemBytes: freemem(),
+        cores: availableParallelism(),
+      }),
+    );
+  });
+
+  it('never sends more research out than the fan-out will admit', () => {
+    expect(MOST_TOGETHER).toBeLessThanOrEqual(HELPER_TOTAL_MAX);
+  });
+
+  it('follows the machine down: a small one carries fewer helpers than a large one', () => {
+    const small = capsFor({ totalMemBytes: 8 * 1024 ** 3, freeMemBytes: 0, cores: 4 });
+    const large = capsFor({ totalMemBytes: 64 * 1024 ** 3, freeMemBytes: 0, cores: 16 });
+    expect(small.helpers).toBeLessThan(large.helpers);
+    expect(small.research).toBeLessThanOrEqual(small.helpers);
+    expect(large.research).toBeLessThanOrEqual(large.helpers);
   });
 });
 

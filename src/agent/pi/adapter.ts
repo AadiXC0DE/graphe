@@ -83,6 +83,7 @@ import { McpRegistry, inProject, mcpTool, readMcpConfig } from './mcp';
 import { parseReview } from './review';
 import { askWords, cannotAsk, saysAnswers, tidyQuestions, type Answers } from '../asking';
 import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
+import { maskToolResult } from './redact';
 import { cachedProbe, extensionPathsIn, saysCard, type CapabilityCard } from './extension-probe';
 
 import { recentOverruns, withHookBudget } from './hook-budget';
@@ -698,11 +699,19 @@ export type CreateSessionOptions = {
    * second reply.
    */
   standing?: () => Promise<string | null>;
+  /** Where provider credentials are read from, when the shell has written them
+   *  out of the login keychain. Left out, Pi's own file is used — a plain file
+   *  holding OAuth tokens and an API key. */
+  authPath?: string;
   /** What kind of session this is, so an add-on that starts turns of its own is
    *  not loaded into a board piece or a helper. */
   sessionKind?: SessionKind;
   /** The person's own answer for this conversation, when they have given one. */
   addonsChosen?: Policy;
+  /** The two gates the advisor can hold, both off unless somebody turned one
+   *  on. Written into the advisor's own settings file every session start, so
+   *  an existing file stops overriding what Graphe intends. */
+  advisorGates?: { completionGate: boolean; loopGate: boolean };
   /**
    * Whether the job — not the round — is over.
    *
@@ -1080,12 +1089,20 @@ async function lookAgainFor(runtime: PiRuntime): Promise<void> {
   }
 }
 
-function runtimeFor(agentDir: string): Promise<PiRuntime> {
+/**
+ * Where provider credentials are read from.
+ *
+ * Pi's own `auth.json` is a plain file holding OAuth tokens and an API key —
+ * user-only, but plain. Given an `authPath` the shell wrote out of the login
+ * keychain, that is the one used instead; given none, Pi's own is where it has
+ * always been.
+ */
+function runtimeFor(agentDir: string, authPath?: string): Promise<PiRuntime> {
   const already = runtimes.get(agentDir);
   if (already !== undefined) return already;
   const pending = loadPi().then((pi) =>
     pi.ModelRuntime.create({
-      authPath: join(agentDir, 'auth.json'),
+      authPath: authPath ?? join(agentDir, 'auth.json'),
       modelsPath: join(agentDir, 'models.json'),
       // False on purpose, and it is not what "look again" depends on: the
       // refresh below passes `allowNetwork` itself, which wins over this. So
@@ -1304,6 +1321,7 @@ async function keepAdvisorSettings(
   advises: ModelChoice | null,
   does: ModelChoice | null,
   advisorThinks?: ThinkingLevel | undefined,
+  switches?: { completionGate: boolean; loopGate: boolean } | undefined,
 ): Promise<void> {
   const file = join(agentDir, ADVISOR_SETTINGS_FILE);
   let existing: unknown = null;
@@ -1312,7 +1330,12 @@ async function keepAdvisorSettings(
   } catch {
     // No file yet, or one nobody can parse. Either way there is nothing to keep.
   }
-  const next = advisorSettings(existing, { advises, does, advisorThinks });
+  const next = advisorSettings(existing, {
+    advises,
+    does,
+    advisorThinks,
+    ...(switches === undefined ? {} : { switches }),
+  });
   if (JSON.stringify(existing) === JSON.stringify(next)) return;
   try {
     await mkdir(agentDir, { recursive: true });
@@ -2103,7 +2126,7 @@ const MOST_AFTER_SAYINGS = 3;
     workBegan,
   });
 
-  const runtime = await runtimeFor(agentDir);
+  const runtime = await runtimeFor(agentDir, options.authPath);
   /** Filled while the loader runs, which is before anything below can read it. */
   let carried: readonly Carried[] = [];
   /**
@@ -2155,6 +2178,26 @@ const MOST_AFTER_SAYINGS = 3;
         name: 'graphe-guard',
         factory: (api) => {
           api.on('tool_call', async (event) => review(asToolCall(event)));
+          /*
+           * A transcript is kept for ever and holds whatever the tools read —
+           * file contents, command output, web pages — in the clear. The Guard
+           * refuses to read a credential file, but full-access shell output is
+           * nobody's to filter, and this is the last place before Pi appends
+           * the result to the file on disk.
+           */
+          api.on('tool_result', (event) => {
+            const before = event as { content?: readonly unknown[] };
+            if (!Array.isArray(before.content)) return undefined;
+            let found = 0;
+            const content = before.content.map((one) => {
+              const part = one as { type?: string; text?: string };
+              if (part.type !== 'text' || typeof part.text !== 'string') return one;
+              const masked = maskToolResult(part.text);
+              found += masked.found;
+              return { ...part, text: masked.text };
+            });
+            return found === 0 ? undefined : ({ content } as never);
+          });
         },
       },
       /*
@@ -2241,8 +2284,10 @@ const MOST_AFTER_SAYINGS = 3;
      conversation chose at the moment it is about to be used. */
   let advises = options.advisor ?? null;
   let advisorThinks = options.advisorThinking ?? undefined;
+  /** Named once here, because `prompt` shadows `options` with its own. */
+  const gates = options.advisorGates;
   if (advisorTools.length > 0) {
-    await keepAdvisorSettings(agentDir, advises, options.model ?? null, advisorThinks);
+    await keepAdvisorSettings(agentDir, advises, options.model ?? null, advisorThinks, gates);
   }
   if (subagentsLoaded(loadedExtensions)) await keepSubagentSettings(agentDir);
 
@@ -2712,7 +2757,11 @@ const MOST_AFTER_SAYINGS = 3;
       // Before the turn, not only when the choice changed: the file is shared
       // with every other conversation, and the last one to write it wins.
       if (advisorTools.length > 0) {
-        await keepAdvisorSettings(agentDir, advises, inUse, advisorThinks).catch(() => undefined);
+        // `gates` rather than `options.advisorGates`: inside `prompt` the name
+        // `options` is the call's own, not the session's.
+        await keepAdvisorSettings(agentDir, advises, inUse, advisorThinks, gates).catch(
+          () => undefined,
+        );
       }
       const looking = options?.lookFirst === true;
       if (looking) {
@@ -2880,7 +2929,9 @@ const MOST_AFTER_SAYINGS = 3;
       advisorThinks = thinks;
       // Not into the middle of a reply: the next turn opens with it instead.
       if (!session.isStreaming) sayAdvisorStuck();
-      if (advisorTools.length > 0) await keepAdvisorSettings(agentDir, next, inUse, thinks);
+      if (advisorTools.length > 0) {
+        await keepAdvisorSettings(agentDir, next, inUse, thinks, gates);
+      }
     },
 
     async useModel(next): Promise<boolean> {

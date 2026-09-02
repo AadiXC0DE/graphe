@@ -9,6 +9,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { AT_A_TIME, countWord } from '../src/work/board';
+
 import {
   APART_WORDS,
   MOST_APART,
@@ -169,6 +171,17 @@ describe('SG-03 what it tells the model', () => {
 
   it('tells it not to sit and wait, because the board is where they are watched', () => {
     expect(APART_WORDS.dontWait).toMatch(/Do not wait for them/i);
+  });
+
+  /* The number in the sentence and the number the board runs on are now worked
+     out in different places, and a sentence promising four while the board runs
+     two is a promise the model passes on to the person. */
+  it('promises the number of pieces the board actually runs at once', () => {
+    const word = countWord(AT_A_TIME).toLowerCase();
+    expect(APART_WORDS.went(3).toLowerCase()).toContain(`${word} run at a time`);
+    expect(
+      setGoingTool(() => Promise.resolve({ ok: true as const, id: 'work-1' })).description.toLowerCase(),
+    ).toContain(`${word} run at a time`);
   });
 
   it('keeps the machinery out of what a person could end up reading', () => {

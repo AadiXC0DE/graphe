@@ -706,6 +706,8 @@ let previewPlanMode = false;
     model: null,
     advisor: null,
     advisorThinking: null,
+    advisorGates: { completionGate: false, loopGate: false },
+    addons: 'tools-only',
     thinking: {},
     kept: {},
     showFiles: true,
@@ -1526,6 +1528,22 @@ let previewPlanMode = false;
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setAdvisorGate(
+      which: 'completionGate' | 'loopGate',
+      on: boolean,
+    ): Promise<Result<Preferences>> {
+      preferred = {
+        ...preferred,
+        advisorGates: { ...preferred.advisorGates, [which]: on },
+      };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    setAddons(choice: 'on' | 'tools-only'): Promise<Result<Preferences>> {
+      preferred = { ...preferred, addons: choice };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
     setThinking(choice: ModelChoice, level: ThinkingLevel): Promise<Result<Preferences>> {
       preferred = { ...preferred, thinking: { ...preferred.thinking, [modelKey(choice)]: level } };
       return Promise.resolve(done({ ...preferred }));
@@ -1901,6 +1919,42 @@ let previewPlanMode = false;
       return Promise.resolve(done(null));
     },
 
+    onMenu(): () => void {
+      return () => undefined;
+    },
+
+    onPaneKey(): () => void {
+      return () => undefined;
+    },
+
+    diagnostics(): Promise<Result<string>> {
+      return Promise.resolve(done('There is no shell behind this window.'));
+    },
+
+    keepCredential(): Promise<Result<{ ok: boolean; why?: string }>> {
+      return Promise.resolve(done({ ok: false, why: 'There is no keychain behind this window.' }));
+    },
+
+    credentialsKept(): Promise<Result<{ canKeep: boolean; held: readonly string[] }>> {
+      return Promise.resolve(done({ canKeep: false, held: [] }));
+    },
+
+    appVersion(): Promise<Result<string>> {
+      return Promise.resolve(done('preview'));
+    },
+
+    addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>> {
+      return Promise.resolve(done({ says: {}, running: 0 }));
+    },
+
+    storage(): Promise<Result<{ says: string; couldClear: number; because: string }>> {
+      return Promise.resolve(done({ says: 'Nothing kept behind this window.', couldClear: 0, because: '' }));
+    },
+
+    clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>> {
+      return Promise.resolve(done({ removed: 0, freed: 0, says: 'Nothing to clear.' }));
+    },
+
     onAway(): () => void {
       return () => {};
     },
@@ -2137,6 +2191,7 @@ function connect(): Bridge {
     show: (at, point, where) => api.show(at, point, where),
     variationsServe: (parts, where) => api.variationsServe(parts, where),
     onPointed: (listener) => api.onPointed(listener),
+    onPaneKey: (listener) => api.onPaneKey(listener),
     pages: (where) => api.pages(where),
     shareReview: (where) => api.shareReview(where),
     checkWidths: (where) => api.checkWidths(where),
@@ -2162,6 +2217,8 @@ function connect(): Bridge {
     selectModel: (choice, where) => api.selectModel(choice, where),
     selectAdvisor: (choice, where) => api.selectAdvisor(choice, where),
     setAdvisorThinking: (level, where) => api.setAdvisorThinking(level, where),
+    setAdvisorGate: (which, on, where) => api.setAdvisorGate(which, on, where),
+    setAddons: (choice, where) => api.setAddons(choice, where),
     setThinking: (choice, level, where) => api.setThinking(choice, level, where),
     closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
     startAfter: (text, after, where) => api.startAfter(text, after, where),
@@ -2206,6 +2263,14 @@ function connect(): Bridge {
     onBuildPlan: (listener) => api.onBuildPlan(listener),
     onContinuation: (listener) => api.onContinuation(listener),
     continuationStop: (where) => api.continuationStop(where),
+    onMenu: (listener) => api.onMenu(listener),
+    diagnostics: () => api.diagnostics(),
+    keepCredential: (name, value) => api.keepCredential(name, value),
+    credentialsKept: () => api.credentialsKept(),
+    appVersion: () => api.appVersion(),
+    addons: () => api.addons(),
+    storage: () => api.storage(),
+    clearFinishedWork: () => api.clearFinishedWork(),
     inStep: (where) => api.inStep(where),
     followDesign: (address, where) => api.followDesign(address, where),
     lookAgain: (where) => api.lookAgain(where),

@@ -1,0 +1,135 @@
+# Builds a release from a tag, on a Mac, and publishes it.
+#
+# Until this existed, every release was built on one developer's laptop: the
+# artifacts anybody downloaded came from a machine nobody else could inspect,
+# with whatever was in its keychain and its PATH at the time. A tag is now the
+# whole instruction.
+#
+# It does not sign with a Developer ID — there is no paid account (see
+# RELEASING.md). `scripts/adhoc-sign.mjs` puts the ad-hoc signature on, exactly
+# as it does locally, and `verify:package` refuses to go on without it.
+#
+# The tap pull request needs a token that can write to another repository, which
+# the built-in one cannot: add a fine-grained personal access token with content
+# and pull-request write on AadiXC0DE/homebrew-tap as the `TAP_TOKEN` secret. If
+# it is absent the release still publishes and the cask step says what to do by
+# hand.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+# Hoisted so the two steps below can ask whether it is there. A secret cannot be
+# read from a step's `if` directly.
+env:
+  TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+
+jobs:
+  release:
+    name: Package and publish
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      # The tag is the version. A tag that does not match package.json would
+      # publish artifacts whose names disagree with the release they are on.
+      - name: Check the tag against package.json
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          declared="$(node -p "require('./package.json').version")"
+          if [ "$tagged" != "$declared" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json $declared"
+            exit 1
+          fi
+          echo "VERSION=$declared" >> "$GITHUB_ENV"
+
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run package
+      - run: npm run verify:package
+
+      # What a person checks a download against, and what the cask reads.
+      - name: Write the checksums
+        run: |
+          cd release
+          shasum -a 256 \
+            "Graphe-$VERSION-arm64.dmg" "Graphe-$VERSION-arm64.zip" \
+            "Graphe-$VERSION-x64.dmg" "Graphe-$VERSION-x64.zip" \
+            > "Graphe-$VERSION-checksums.txt"
+          cat "Graphe-$VERSION-checksums.txt"
+
+      # The source maps for this exact build, kept so a stack trace from a
+      # diagnostics bundle can still be read months later.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-maps-${{ env.VERSION }}
+          path: release/maps/${{ env.VERSION }}
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="$(git log --oneline "$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD)"
+          gh release create "$GITHUB_REF_NAME" \
+            "release/Graphe-$VERSION-arm64.dmg" \
+            "release/Graphe-$VERSION-arm64.zip" \
+            "release/Graphe-$VERSION-x64.dmg" \
+            "release/Graphe-$VERSION-x64.zip" \
+            "release/Graphe-$VERSION-checksums.txt" \
+            --title "Graphe $VERSION" \
+            --notes "$notes"
+
+      # The cask points at the zips and carries their checksums, so it can only
+      # be written after they exist.
+      - name: Open the Homebrew tap pull request
+        if: ${{ env.TAP_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ env.TAP_TOKEN }}
+        run: |
+          arm="$(shasum -a 256 "release/Graphe-$VERSION-arm64.zip" | cut -d' ' -f1)"
+          intel="$(shasum -a 256 "release/Graphe-$VERSION-x64.zip" | cut -d' ' -f1)"
+
+          git clone "https://x-access-token:$GH_TOKEN@github.com/AadiXC0DE/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          # The template beside the source is the one true copy of the cask. Its
+          # preamble is instructions for whoever edits it here and has no business
+          # in the tap, so the copy starts at the cask itself; only the version and
+          # the two checksums are filled in.
+          sed -n '/^cask "graphe" do/,$p' Casks/graphe.rb \
+            | sed \
+              -e "s/^  version \".*\"/  version \"$VERSION\"/" \
+              -e "s/^  sha256 arm:   \".*\",/  sha256 arm:   \"$arm\",/" \
+              -e "s/^         intel: \".*\"/         intel: \"$intel\"/" \
+            > tap/Casks/graphe.rb
+
+          cd tap
+          git config user.name "graphe-release"
+          git config user.email "noreply@github.com"
+          git checkout -b "graphe-$VERSION"
+          git add Casks/graphe.rb
+          git commit -m "graphe $VERSION"
+          git push -u origin "graphe-$VERSION"
+          gh pr create --repo AadiXC0DE/homebrew-tap \
+            --title "graphe $VERSION" \
+            --body "Cask for Graphe $VERSION. Built and published by the release workflow in AadiXC0DE/graphe."
+
+      - name: Say what is left to do by hand
+        if: ${{ env.TAP_TOKEN == '' }}
+        run: |
+          echo "No TAP_TOKEN secret, so the cask was not opened as a pull request."
+          echo "Update Casks/graphe.rb in AadiXC0DE/homebrew-tap — RELEASING.md step 5."

@@ -543,3 +543,10 @@ button.settings__row {
     transform: none;
   }
 }
+
+/* What this machine will do at once. Quiet, under the rows it explains. */
+.settings__machine {
+  margin: var(--space-2, 8px) 0 0;
+  font-size: 0.75rem;
+  color: var(--text-quiet, #6b7280);
+}

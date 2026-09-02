@@ -15,8 +15,8 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { decidedMessage, type PlanDecision } from '../src/agent/plan';
-import { planned } from '../src/lib/thread';
+import { PLAN_WORDS, decidedMessage, type PlanDecision } from '../src/agent/plan';
+import { applyEvent, planned, type Turn } from '../src/lib/thread';
 
 const STEPS = ['Read the tokens', 'Rebuild the header', 'Check every width'];
 
@@ -75,6 +75,67 @@ describe('a plan that asked something', () => {
     const turn = planned('x', { steps: STEPS, caveats: [] });
     if (turn.kind !== 'plan') return;
     expect(turn.questions).toEqual([]);
+  });
+});
+
+/* ========================================================================== */
+/* Nothing readable came back                                                  */
+/* ========================================================================== */
+
+/**
+ * Plan mode's dead end.
+ *
+ * A reply the parser could read no list out of used to add no card at all, so
+ * plan mode ended with prose on screen, the writes still held back, and nothing
+ * to press. The card is the way forward: it says so, and offers the one press
+ * that asks for the same plan as a list.
+ */
+describe('a plan with nothing in it', () => {
+  const nothingRead = { type: 'planned', steps: [], caveats: [], questions: [] } as const;
+
+  function afterLooking(): readonly Turn[] {
+    return applyEvent(applyEvent([], { type: 'planning' }), nothingRead);
+  }
+
+  it('still puts a card in the conversation', () => {
+    const card = afterLooking().find((turn) => turn.kind === 'plan');
+    expect(card).toBeDefined();
+    expect(card).toMatchObject({ steps: [], answered: null });
+  });
+
+  it('closes the looking-around line either way', () => {
+    const looking = afterLooking().find((turn) => turn.kind === 'did');
+    expect(looking).toMatchObject({ state: 'done' });
+  });
+
+  it('has the words for it, and a press that asks again', () => {
+    expect(PLAN_WORDS.noSteps).not.toBe('');
+    expect(PLAN_WORDS.askAgain).not.toBe('');
+    // The press sends the same instruction the looking-around pass carries, so
+    // a second try is the same request rather than a new one.
+    expect(PLAN_WORDS.asked).toContain('numbered list');
+  });
+
+  /* A pass that was stopped or broke has already said why. */
+  it('says nothing more where the run had already gone wrong', () => {
+    const broken = applyEvent(applyEvent([], { type: 'planning' }), {
+      type: 'error',
+      message: 'The service stopped.',
+    });
+    const after = applyEvent(broken, nothingRead);
+    expect(after.some((turn) => turn.kind === 'plan')).toBe(false);
+  });
+
+  it('keeps whatever it did say alongside, rather than replacing it', () => {
+    const turns = applyEvent(
+      applyEvent(applyEvent([], { type: 'planning' }), {
+        type: 'message-delta',
+        text: 'I had a look and it is mostly fine.',
+      }),
+      nothingRead,
+    );
+    expect(turns.some((turn) => turn.kind === 'said')).toBe(true);
+    expect(turns.some((turn) => turn.kind === 'plan')).toBe(true);
   });
 });
 

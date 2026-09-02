@@ -53,7 +53,7 @@ describe('what a bound command may read', () => {
     const look = await boundaryHere();
     if (!look.ok) {
       // Nothing to prove on a machine with no boundary; the reason is the test.
-      expect(look.why).toMatch(/no-boundary-here|piece-missing|not-holding/);
+      expect(look.why).toMatch(/no-boundary-here|piece-missing|not-holding|boundary-refused/);
       return;
     }
 
@@ -111,7 +111,7 @@ describe("the project's own environment file, under the boundary", () => {
   it('opens .env.local at the root and nested, and still refuses one outside', async () => {
     const look = await boundaryHere();
     if (!look.ok) {
-      expect(look.why).toMatch(/no-boundary-here|piece-missing|not-holding/);
+      expect(look.why).toMatch(/no-boundary-here|piece-missing|not-holding|boundary-refused/);
       return;
     }
 

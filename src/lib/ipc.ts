@@ -446,6 +446,15 @@ export type Preferences = {
    *  model. Not in `thinking`: that is keyed by model, and the same model can
    *  be doing the work in one place and advising in another. */
   advisorThinking: ThinkingLevel | null;
+  /** The two gates the advisor can hold, both off unless somebody turns one on.
+   *  Asking a second model before saying a job is done turns "finish" into
+   *  "report"; asking it every time a command repeats fires on running the
+   *  tests three times. */
+  advisorGates: { completionGate: boolean; loopGate: boolean };
+  /** Whether add-ons that start turns of their own keep their hooks. Off keeps
+   *  their tools and drops the hooks — Graphe is already deciding when a turn
+   *  begins, and two of those is the bug. */
+  addons: 'on' | 'tools-only';
   /** How much time each chosen model should take before answering. Kept per
    *  provider/model pair because the names and available choices differ. */
   thinking: Readonly<Record<string, ThinkingLevel>>;
@@ -1238,6 +1247,8 @@ export const CHANNEL = {
   showProgress: 'graphe:show-progress',
   windowState: 'graphe:window-state',
   pointed: 'graphe:pointed',
+  /** A key the native page pane swallowed, handed back to the window. */
+  paneKey: 'graphe:pane-key',
   /** The page beside the conversation, saying what was clicked in it. Its own
    *  channel because it comes from the page's own world rather than the
    *  window's, and the two must never be mistaken for each other. */
@@ -1318,6 +1329,10 @@ export const CHANNEL = {
   selectModel: 'graphe:select-model',
   selectAdvisor: 'graphe:select-advisor',
   setAdvisorThinking: 'graphe:set-advisor-thinking',
+  /** The two gates the advisor can hold, and whether add-ons that start work of
+   *  their own keep their hooks. Both live behind the model chip. */
+  setAdvisorGate: 'graphe:set-advisor-gate',
+  setAddons: 'graphe:set-addons',
   setThinking: 'graphe:set-thinking',
   spendSplit: 'graphe:spend-split',
   tokenUsage: 'graphe:token-usage',
@@ -1359,6 +1374,21 @@ export const CHANNEL = {
   buildPlanChanged: 'graphe:build-plan-changed',
   /** Where the app has got to carrying a job on by itself. */
   continuation: 'graphe:continuation',
+  /** A press in the app's own menu that the window is the one to act on. */
+  fromMenu: 'graphe:from-menu',
+  /** Everything worth sending when somebody says "it stopped". */
+  diagnostics: 'graphe:diagnostics',
+  /** Which build this is. */
+  appVersion: 'graphe:app-version',
+  /** What each installed add-on will actually do, and how much it is running. */
+  addons: 'graphe:addons',
+  /** Keep a credential the app itself needs in the login keychain. */
+  keepCredential: 'graphe:keep-credential',
+  /** How much room this app is taking, and clearing the finished work. */
+  storage: 'graphe:storage',
+  clearFinishedWork: 'graphe:clear-finished-work',
+  /** Which of those are held, and whether this machine can hold any. */
+  credentialsKept: 'graphe:credentials-kept',
   /** Stop it carrying on. Escape, and the Stop beside the line it draws. */
   continuationStop: 'graphe:continuation-stop',
   inStep: 'graphe:in-step',
@@ -1567,6 +1597,9 @@ export type GrapheApi = {
   /** Somebody clicked an element, in their own browser or in the page beside
    *  the conversation. Read against the project before it gets here. */
   onPointed(listener: (at: PointedAt) => void): () => void;
+  /** A key the native page pane swallowed. Escape only, and only because a
+   *  menu that will not close traps the hand. */
+  onPaneKey(listener: (press: { key: string }) => void): () => void;
   /** The screens this project has, for the rail. Empty when the shape of the
    *  folder is not one we recognise — a guess would send people nowhere. */
   pages(where?: Where): Promise<Result<readonly Page[]>>;
@@ -1661,6 +1694,15 @@ export type GrapheApi = {
    *  next one. */
   selectAdvisor(choice: ModelChoice | null, where?: Where): Promise<Result<Preferences>>;
   setAdvisorThinking(level: ThinkingLevel, where?: Where): Promise<Result<Preferences>>;
+  /** Turn one of the advisor's two gates on or off. Both off by default: a
+   *  second opinion is advice on the work, never permission to stop. */
+  setAdvisorGate(
+    which: 'completionGate' | 'loopGate',
+    on: boolean,
+    where?: Where,
+  ): Promise<Result<Preferences>>;
+  /** Whether add-ons that start turns of their own keep their hooks here. */
+  setAddons(choice: 'on' | 'tools-only', where?: Where): Promise<Result<Preferences>>;
   /** Let this exact model take more or less time before it answers. */
   setThinking(choice: ModelChoice, level: ThinkingLevel, where?: Where): Promise<Result<Preferences>>;
   /** Where the money went in this project, asked for rather than waited for.
@@ -1815,6 +1857,44 @@ export type GrapheApi = {
   onContinuation(listener: (notice: ContinuationNotice) => void): () => void;
   /** Stop it carrying on, from that Stop or from Escape. */
   continuationStop(where?: Where): Promise<Result<null>>;
+
+  /** A press in the app's own menu the window is the one to act on. */
+  onMenu(listener: (notice: { id: string }) => void): () => void;
+  /** Everything worth sending when somebody says "it stopped". Copyable, and
+   *  it never carries a conversation or a key. */
+  diagnostics(): Promise<Result<string>>;
+
+  /**
+   * A credential the app itself needs — the Figma token today.
+   *
+   * Kept in the login keychain, never in a file in the clear. Reading it back
+   * is never offered: what a person needs to know is whether one is held, which
+   * is what `credentialsKept` answers.
+   */
+  keepCredential(name: string, value: string): Promise<Result<{ ok: boolean; why?: string }>>;
+  credentialsKept(): Promise<Result<{ canKeep: boolean; held: readonly string[] }>>;
+
+  /**
+   * How much room this app is taking, per folder, and what could be cleared.
+   *
+   * Nothing pruned any of it before, and it grows for as long as the app is
+   * installed. Never counted as clearable: a copy still holding work nobody has
+   * taken in.
+   */
+  /** Which build this is. Nothing in the window said it before, so a friend on
+   *  an old build had no way to find out and no way to say which. */
+  appVersion(): Promise<Result<string>>;
+  /**
+   * What each installed add-on will actually do, and how many processes they
+   * have running.
+   *
+   * Derived by asking each add-on rather than from a list of package names, so
+   * one published tomorrow is described on the same evidence as one installed
+   * today.
+   */
+  addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>>;
+  storage(): Promise<Result<{ says: string; couldClear: number; because: string }>>;
+  clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>>;
 
   /* ----------------------------------------------- staying in step with Figma */
 

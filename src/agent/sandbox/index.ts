@@ -48,6 +48,7 @@ export type Why =
   | 'no-boundary-here'
   | 'piece-missing'
   | 'not-holding'
+  | 'boundary-refused'
   | 'nowhere-to-bind';
 
 export type Held =
@@ -69,11 +70,12 @@ export type Held =
 
 /** What a person is told when the work ran with only the Guard watching. One
  *  sentence each, and none of them name a mechanism. */
-const SENTENCE: Record<Why, string> = {
+export const SENTENCE: Record<Why, string> = {
   'turned-off': 'The extra boundary around work is switched off on this computer, so only the Guard is watching.',
   'no-boundary-here': 'This computer has no boundary of its own to put around the work, so only the Guard is watching.',
   'piece-missing': 'The part of this computer that holds work inside a folder is not installed, so only the Guard is watching.',
   'not-holding': 'This computer offered to hold work inside a folder and then let a change through anyway, so I am not counting on it. Only the Guard is watching.',
+  'boundary-refused': 'This version of macOS no longer holds work inside a folder for me, so only the Guard is watching.',
   'nowhere-to-bind': 'I could not work out which folder to hold the work inside, so only the Guard is watching.',
 };
 
@@ -113,6 +115,12 @@ async function findBoundary(): Promise<Look> {
     if (!existsSync(SANDBOX_EXEC)) {
       return { ok: false, why: 'piece-missing', detail: `no ${SANDBOX_EXEC}` };
     }
+    // Apple has called this deprecated since 10.10 and could stop honouring it.
+    // Asking the smallest possible profile first separates "the day it goes" from
+    // every command failing for reasons nobody can read.
+    if (!(await appliesAnything())) {
+      return { ok: false, why: 'boundary-refused', detail: `${SANDBOX_EXEC} would not apply a profile` };
+    }
     return prove('seatbelt', SANDBOX_EXEC);
   }
   if (os === 'linux') {
@@ -123,6 +131,30 @@ async function findBoundary(): Promise<Look> {
     return prove('bubblewrap', tool);
   }
   return { ok: false, why: 'no-boundary-here', detail: `${os} has no boundary we know how to ask for` };
+}
+
+/** The smallest profile there is, applied to the smallest command there is.
+ *  It permits everything, so a machine that still does this is only saying the
+ *  mechanism is there — `prove` is what decides whether it holds. */
+async function appliesAnything(): Promise<boolean> {
+  const ran = await runOnce({
+    command: SANDBOX_EXEC,
+    args: ['-p', '(version 1)(allow default)', '/usr/bin/true'],
+  });
+  return ran.ok;
+}
+
+/** Can this computer hold work inside a folder at all? Asked once at launch, so
+ *  the window can say it is running with less around it than usual before
+ *  anybody presses anything. */
+export async function sandboxWorks(): Promise<boolean> {
+  return (await boundaryHere()).ok;
+}
+
+/** Why not, in a sentence, or null when there is nothing to say. */
+export async function sandboxSaying(): Promise<string | null> {
+  const look = await boundaryHere();
+  return look.ok ? null : SENTENCE[look.why];
 }
 
 /**

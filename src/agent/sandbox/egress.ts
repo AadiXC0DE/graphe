@@ -123,6 +123,36 @@ export function reachableHosts(extra: readonly string[] = []): string[] {
   return list;
 }
 
+/**
+ * Every address work may reach, given the providers this computer is signed in
+ * to.
+ *
+ * The list above is kept by hand, so a provider somebody added themselves is a
+ * provider whose model call is turned down with a sentence about the network —
+ * which is the wrong sentence, in the one place a person cannot act on it. The
+ * addresses the providers actually answer at are already written down in the
+ * models file; this reads them from there rather than waiting to be told.
+ */
+export function hostsFor(providerBaseUrls: readonly string[]): readonly string[] {
+  return reachableHosts(providerBaseUrls.flatMap(hostOf));
+}
+
+/** The name out of a base address, however it was written down. A bare host is
+ *  taken as one; anything that is not an address at all is dropped. */
+function hostOf(baseUrl: string): string[] {
+  const said = baseUrl.trim();
+  if (said === '') return [];
+  for (const candidate of [said, `https://${said}`]) {
+    try {
+      const host = tidyHost(new URL(candidate).hostname);
+      if (host !== null) return [host];
+    } catch {
+      /* try it as a bare name, then give up on it */
+    }
+  }
+  return [];
+}
+
 /** One address, in the one spelling everything here compares. */
 function tidyHost(candidate: string): string | null {
   const host = candidate.trim().toLowerCase().replace(/\.$/, '');

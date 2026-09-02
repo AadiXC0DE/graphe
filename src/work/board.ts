@@ -9,14 +9,16 @@
  * minute later never disagrees with the one a test drew.
  */
 
+import { capsNow } from './capacity';
+
 /** `needs-you` is a run that hit a question only a person can answer and stopped
  *  there. It is not going and it is not over — it is holding, which is a
  *  different thing to say and a different thing to draw. */
 export type WorkState = 'waiting' | 'running' | 'needs-you' | 'done' | 'failed';
 
-/** How many copies of a project run side by side. Four fills a sheet and leaves
- *  the machine usable; every extra one is another whole copy on disk. */
-export const AT_A_TIME = 4;
+/** How many copies of a project run side by side; every extra one is another
+ *  whole copy on disk. */
+export const AT_A_TIME = capsNow().board;
 
 /** The least the board needs to know about one piece of work. */
 export type OnBoard = {

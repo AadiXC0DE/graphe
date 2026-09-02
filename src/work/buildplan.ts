@@ -110,28 +110,6 @@ export function inHand(plan: readonly Task[]): Task | null {
   return plan.find((one) => one.status === 'doing') ?? nextOf(plan) ?? null;
 }
 
-/** Mark the next task as the one being worked on now. A task already in hand is
- *  left alone, so a run that starts twice in a row only marks once.
- *
- *  @deprecated The app guesses which step a reply was for. Use `startStep(n)`. */
-export function startTask(plan: readonly Task[]): readonly Task[] {
-  const current = inHand(plan);
-  if (current === null || current.status === 'doing') return plan;
-  return setStatus(plan, current.n, 'doing');
-}
-
-/** Close off the task a turn just finished: `ok` marks the current one done,
- *  otherwise failed. Nothing left to do leaves the plan alone, so a turn that
- *  settles with the build already finished disturbs nothing.
- *
- *  @deprecated The app guesses which step a reply was for. Use `tickStep(n)`,
- *  `failStep(n, why)` or `skipStep(n, why)` — the model says which. */
-export function finishTask(plan: readonly Task[], ok: boolean): readonly Task[] {
-  const current = inHand(plan);
-  if (current === null) return plan;
-  return setStatus(plan, current.n, ok ? 'done' : 'failed');
-}
-
 /** New requirements found while building get their own rows, appended after the
  *  existing ones (the plan's own numbering keeps them ordered). */
 export function addTasks(plan: readonly Task[], titles: readonly string[]): readonly Task[] {

@@ -66,3 +66,45 @@ jobs:
       # before anything is said to work.
       - run: npm run build
       - run: npm run app:build
+      # The licence manifest has to describe the tree that is about to ship.
+      - run: npm run licenses:check
+
+  e2e:
+    name: End to end
+    # The fake model runs the real shell, and the boundary it runs behind only
+    # exists on macOS.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Nothing to run until the suite lands, and a job that fails for being
+      # early teaches everybody to ignore a red build.
+      - name: Run the end-to-end suite
+        run: |
+          if [ -d tests/e2e ]; then
+            npx vitest run tests/e2e
+          else
+            echo "tests/e2e does not exist yet — nothing to run"
+          fi
+
+  package:
+    name: Package
+    # A build nobody packages is a build that fails on the day of a release.
+    # This is the same run RELEASING.md does by hand, on the same platform.
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run package
+      # Opens what was built: the agent runtime is inside it, and it is signed.
+      - run: npm run verify:package

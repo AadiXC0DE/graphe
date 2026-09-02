@@ -82,6 +82,13 @@ type Props = {
    * have.
    */
   draft?: string;
+  /** The project this box belongs to. A half-written message is kept against
+   *  it, so a reload, a crash or a switch to another conversation and back
+   *  leaves the sentence where it was. Absent in the gallery, and then nothing
+   *  is kept. */
+  project?: string;
+  /** Which conversation in that project, so two open at once are two drafts. */
+  conversation?: string | null;
   /** Who can think for this computer, for the chip in the row below the box. */
   connection?: ConnectionState | null;
   /** Whether a message gets a looking-around pass first. */
@@ -94,6 +101,14 @@ type Props = {
   onAdvisor?: (choice: ModelChoice | null) => void;
   advisorThinking?: ThinkingLevel | null;
   onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
+  /** The two advisor gates and the add-ons switch, all behind the model chip
+   *  because that is where the hand already is. */
+  advisorGates?: { completionGate: boolean; loopGate: boolean };
+  onAdvisorGate?: (which: 'completionGate' | 'loopGate', on: boolean) => void;
+  addons?: 'on' | 'tools-only' | 'off';
+  onAddons?: (choice: 'on' | 'tools-only' | 'off') => void;
+  /** How heavy the system prompt has become, in characters. */
+  promptSize?: number | null;
   onConnect?: () => void;
   /** How long the chosen model should take before answering. */
   onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
@@ -129,6 +144,36 @@ type Props = {
  *  them. The drop and paste paths accept the same things and say so themselves
  *  — see src/lib/attachments.ts. */
 const ACCEPT = 'image/*,application/pdf';
+
+/** Where a half-written message is kept. Per project and per conversation:
+ *  one key for both would hand somebody the sentence they were writing
+ *  somewhere else. */
+export function draftKey(project: string, conversation?: string | null): string {
+  return `graphe:draft:${project}\u0000${conversation ?? ''}`;
+}
+
+/** How long the typing has to stop before the box is written down. */
+const KEEP_AFTER = 400;
+
+/* Both sides behind a try: a private window, or site data turned off, refuses
+   storage outright, and a composer that throws on a keystroke is worse than one
+   that forgets. */
+function keptDraft(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function keepDraft(key: string, text: string): void {
+  try {
+    if (text === '') localStorage.removeItem(key);
+    else localStorage.setItem(key, text);
+  } catch {
+    /* Nothing kept. The box still works. */
+  }
+}
 
 let counter = 0;
 function newId(): string {
@@ -193,6 +238,8 @@ export default function Composer({
   attachments = [],
   onAttachmentsChange,
   draft,
+  project,
+  conversation,
   connection,
   plans,
   onPlans,
@@ -201,6 +248,11 @@ export default function Composer({
   onAdvisor,
   advisorThinking,
   onAdvisorThinking,
+  advisorGates,
+  onAdvisorGate,
+  addons,
+  onAddons,
+  promptSize,
   onConnect,
   onThinking,
   anywhere = true,
@@ -299,6 +351,31 @@ export default function Composer({
     },
     [onAttachmentsChange],
   );
+
+  /** Where this box's draft is kept, or null where nothing is kept. */
+  const keptAt = project === undefined || project === '' ? null : draftKey(project, conversation);
+
+  /* What is in the box this instant, for the write on the way out: an effect
+     cleaning up cannot read state it closed over a render ago. */
+  const valueNow = useRef(value);
+  valueNow.current = value;
+
+  /* Put back what was being written here, and hand it on when the box moves to
+     another conversation or the window goes away. */
+  useEffect(() => {
+    if (keptAt === null) return;
+    const kept = keptDraft(keptAt);
+    setValue(kept ?? '');
+    requestAnimationFrame(() => resize(areaRef.current));
+    return () => keepDraft(keptAt, valueNow.current);
+  }, [keptAt]);
+
+  /* Written down once the typing pauses rather than on every keystroke. */
+  useEffect(() => {
+    if (keptAt === null) return;
+    const timer = setTimeout(() => keepDraft(keptAt, value), KEEP_AFTER);
+    return () => clearTimeout(timer);
+  }, [keptAt, value]);
 
   /* Seeded from outside, with the cursor left at the end of it so the next
      keystroke continues the sentence rather than landing in the middle of it. */
@@ -839,6 +916,11 @@ export default function Composer({
             {...(onAdvisor === undefined ? {} : { onAdvisor })}
             {...(advisorThinking == null ? {} : { advisorThinking })}
             {...(onAdvisorThinking === undefined ? {} : { onAdvisorThinking })}
+            {...(advisorGates === undefined ? {} : { advisorGates })}
+            {...(onAdvisorGate === undefined ? {} : { onAdvisorGate })}
+            {...(addons === undefined ? {} : { addons })}
+            {...(onAddons === undefined ? {} : { onAddons })}
+            {...(promptSize == null ? {} : { promptSize })}
           />
         )}
 

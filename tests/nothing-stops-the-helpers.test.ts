@@ -16,6 +16,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+import { HELPER_PATIENCE_MS, HELPER_TOOK_TOO_LONG, whyEndHelper } from '../src/agent/pi/tools';
+
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const shell = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 
@@ -104,5 +106,36 @@ describe('trusting an extension does not end the sentence it is in', () => {
     expect(body.indexOf('file.change(')).toBeLessThan(body.indexOf('was.held.working'));
     // And nothing is closed after it.
     expect(body.indexOf('was.held.working')).toBeLessThan(body.indexOf('sessions.close('));
+  });
+});
+
+/* A fourth of the same shape, found later: the clock over a helper. It watched
+   for words, and a builder running a test suite has none to give — so the app
+   killed a helper that was working and told the model it had stalled. */
+describe('a clock is not a fourth way to end work nobody asked to end', () => {
+  it('leaves a helper alone while anything at all is coming out of it', () => {
+    const startedAt = 0;
+    // Ten minutes of a test suite: a line of its own output every half minute.
+    for (let at = 30_000; at <= 10 * 60_000; at += 30_000) {
+      expect(whyEndHelper({ startedAt, lastSign: at, now: at + 1000 })).toBeNull();
+    }
+  });
+
+  it('still ends one that has shown no sign of itself at all', () => {
+    expect(whyEndHelper({ startedAt: 0, lastSign: 0, now: HELPER_PATIENCE_MS })).toBe(
+      HELPER_TOOK_TOO_LONG,
+    );
+  });
+
+  it('counts the helper\'s own noise and its steps, not only its answer', () => {
+    const tools = readFileSync(new URL('../src/agent/pi/tools.ts', import.meta.url), 'utf8');
+    for (const channel of ["child.stdout.on('data'", "child.stderr.on('data'"]) {
+      const at = tools.indexOf(channel);
+      expect(at, channel).toBeGreaterThan(-1);
+      expect(tools.slice(at, at + 300), channel).toContain('stirred()');
+    }
+    // And the child says what step it is on, so a long step is not silence.
+    const runner = readFileSync(new URL('../src/agent/pi/subagent-runner.ts', import.meta.url), 'utf8');
+    expect(runner).toContain("report({ type: 'step', text: doing })");
   });
 });

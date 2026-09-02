@@ -9,9 +9,15 @@
  * a person to answer, and a person is allowed to take their time.
  */
 
-/** Long enough for a handler doing real work, short enough that nobody watches
- *  a still screen wondering whether the run died. */
-export const HOOK_BUDGET_MS = 3000;
+/**
+ * Long enough for a handler doing real work, short enough that a settle still
+ * reaches the window inside two seconds of the model's last token — which is
+ * the difference between an app that finished and an app that looks stopped.
+ *
+ * `GRAPHE_HOOK_BUDGET_MS` raises it for anybody who wants to give an add-on
+ * more room.
+ */
+export const HOOK_BUDGET_MS = 1500;
 
 export const BUDGETED_EVENTS: readonly string[] = [
   'agent_end',

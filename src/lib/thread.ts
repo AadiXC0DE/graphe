@@ -210,40 +210,6 @@ export function askingYou(turns: readonly Turn[]): boolean {
   }
 }
 
-/** Close off the most recent activity for a call. Returns the same array when
- *  there was nothing to close, which is how `blocked` tells the difference
- *  between "stopped something that had started" and "stopped it before it
- *  started" — the Guard does the latter, and there is no line to update. */
-function closeActivity(
-  turns: readonly Turn[],
-  callId: string,
-  state: ActivityState,
-  detail?: string,
-  shown?: ImageCard,
-): readonly Turn[] {
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index];
-    if (turn === undefined) continue;
-    if (turn.kind !== 'did' || turn.callId !== callId || turn.state !== 'running') continue;
-    const next = [...turns];
-    // The advisor's reply is what it said, not what it was asked, so it goes
-    // where a helper's findings go and the question stays on the turn beside
-    // it. The line then says the second model answered rather than only that
-    // it was asked, which is the half somebody would otherwise never see.
-    const answered = state === 'done' && detail !== undefined && turn.label === ADVISOR_LABEL;
-    next[index] = {
-      ...turn,
-      state,
-      ...(answered
-        ? { label: ADVISOR_ANSWERED, progress: detail }
-        : { detail: detail ?? turn.detail }),
-      ...(shown === undefined ? {} : { shown }),
-    };
-    return shown === undefined ? next : onlyTheNewestPictures(next);
-  }
-  return turns;
-}
-
 /**
  * The most pictures a conversation keeps.
  *
@@ -255,21 +221,53 @@ function closeActivity(
 export const MOST_PICTURES = 6;
 
 /** Drop the bytes from all but the newest few, leaving every line intact. */
-function onlyTheNewestPictures(turns: readonly Turn[]): readonly Turn[] {
+function capPictures(turns: Turn[]): void {
   const at: number[] = [];
   for (let index = 0; index < turns.length; index += 1) {
     const turn = turns[index];
     if (turn?.kind === 'did' && turn.shown !== undefined) at.push(index);
   }
-  if (at.length <= MOST_PICTURES) return turns;
-  const next = [...turns];
+  if (at.length <= MOST_PICTURES) return;
   for (const index of at.slice(0, at.length - MOST_PICTURES)) {
-    const turn = next[index];
+    const turn = turns[index];
     if (turn?.kind !== 'did') continue;
     const { shown: _dropped, ...rest } = turn;
-    next[index] = rest;
+    turns[index] = rest;
   }
-  return next;
+}
+
+/** Close off the most recent activity for a call. False when there was nothing
+ *  to close, which is how `blocked` tells the difference between "stopped
+ *  something that had started" and "stopped it before it started" — the Guard
+ *  does the latter, and there is no line to update. */
+function closeInto(
+  turns: Turn[],
+  callId: string,
+  state: ActivityState,
+  detail?: string,
+  shown?: ImageCard,
+): boolean {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn === undefined) continue;
+    if (turn.kind !== 'did' || turn.callId !== callId || turn.state !== 'running') continue;
+    // The advisor's reply is what it said, not what it was asked, so it goes
+    // where a helper's findings go and the question stays on the turn beside
+    // it. The line then says the second model answered rather than only that
+    // it was asked, which is the half somebody would otherwise never see.
+    const answered = state === 'done' && detail !== undefined && turn.label === ADVISOR_LABEL;
+    turns[index] = {
+      ...turn,
+      state,
+      ...(answered
+        ? { label: ADVISOR_ANSWERED, progress: detail }
+        : { detail: detail ?? turn.detail }),
+      ...(shown === undefined ? {} : { shown }),
+    };
+    if (shown !== undefined) capPictures(turns);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -281,7 +279,7 @@ function onlyTheNewestPictures(turns: readonly Turn[]): readonly Turn[] {
  * identical cards stacked on top of each other reads as two things having gone
  * wrong, which is exactly the impression the error copy is written to avoid.
  */
-export function withTrouble(turns: readonly Turn[], trouble: Trouble): readonly Turn[] {
+function troubleInto(turns: Turn[], trouble: Trouble): boolean {
   const from = Math.max(0, turns.length - 3);
   for (let index = turns.length - 1; index >= from; index -= 1) {
     const turn = turns[index];
@@ -289,12 +287,17 @@ export function withTrouble(turns: readonly Turn[], trouble: Trouble): readonly 
     if (turn.trouble.because !== trouble.because) continue;
     // Same failure. The two tellings of it can differ in one way that matters:
     // only one carries the raw text for whoever wants to read it. Keep that one.
-    if (turn.trouble.details !== undefined || trouble.details === undefined) return turns;
-    const next = [...turns];
-    next[index] = { ...turn, trouble };
-    return next;
+    if (turn.trouble.details !== undefined || trouble.details === undefined) return false;
+    turns[index] = { ...turn, trouble };
+    return true;
   }
-  return [...turns, { kind: 'trouble', id: newId(), trouble }];
+  turns.push({ kind: 'trouble', id: newId(), trouble });
+  return true;
+}
+
+export function withTrouble(turns: readonly Turn[], trouble: Trouble): readonly Turn[] {
+  const next = [...turns];
+  return troubleInto(next, trouble) ? next : turns;
 }
 
 export const STOPPED_PART_WAY = 'I stopped part way through.';
@@ -323,108 +326,137 @@ export function planned(
   };
 }
 
-export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly Turn[] {
+/**
+ * Fold one event into a thread that is being built, in place.
+ *
+ * Returns whether anything changed. Rehydrating a long conversation folds
+ * thousands of events, and a fresh copy of the whole thread per event is the
+ * seconds it takes to open one; `applyEvent` copies once and calls this, so
+ * both paths fold by exactly the same rules.
+ *
+ * A turn is never edited where it lies — the slot is replaced. The window keeps
+ * older arrays of these around (a parked conversation, the last render), and a
+ * turn changed underneath one of them would change a thread nobody touched.
+ */
+export function applyEventInto(turns: Turn[], event: AgentEvent): boolean {
   switch (event.type) {
     case 'message-delta': {
-      const last = turns[turns.length - 1];
+      const at = turns.length - 1;
+      const last = turns[at];
       if (last !== undefined && last.kind === 'said' && last.from === 'graphe' && last.streaming) {
-        return [...turns.slice(0, -1), { ...last, text: last.text + event.text }];
+        turns[at] = { ...last, text: last.text + event.text };
+        return true;
       }
-      return [
-        ...turns,
-        { kind: 'said', id: newId(), from: 'graphe', text: event.text, streaming: true },
-      ];
+      turns.push({ kind: 'said', id: newId(), from: 'graphe', text: event.text, streaming: true });
+      return true;
     }
 
-    case 'message-end':
-      return turns.map((turn) =>
-        turn.kind === 'said' && turn.streaming ? { ...turn, streaming: false } : turn,
-      );
+    case 'message-end': {
+      let changed = false;
+      for (let index = 0; index < turns.length; index += 1) {
+        const turn = turns[index];
+        if (turn?.kind !== 'said' || !turn.streaming) continue;
+        turns[index] = { ...turn, streaming: false };
+        changed = true;
+      }
+      return changed;
+    }
 
     case 'tool-start': {
       // Notes kept between sittings are the app's own bookkeeping. Nothing in
       // the project moved, so the conversation says nothing about it.
-      if (isNoteKeeping(event.call.name)) return turns;
+      if (isNoteKeeping(event.call.name)) return false;
       const described = describeCall(event.call);
-      return [
-        ...turns,
-        {
-          kind: 'did',
-          id: newId(),
-          callId: event.call.id,
-          state: 'running',
-          at: Date.now(),
-          label: described.label,
-          detail: described.detail,
-          // Recorded whether or not "Show me" is on, so that turning it on
-          // explains the conversation you already had rather than only the one
-          // you are about to have. A history that starts when you ask for it is
-          // no use for working out what just happened.
-          real: realWords(event.call),
-        },
-      ];
+      turns.push({
+        kind: 'did',
+        id: newId(),
+        callId: event.call.id,
+        state: 'running',
+        at: Date.now(),
+        label: described.label,
+        detail: described.detail,
+        // Recorded whether or not "Show me" is on, so that turning it on
+        // explains the conversation you already had rather than only the one
+        // you are about to have. A history that starts when you ask for it is
+        // no use for working out what just happened.
+        real: realWords(event.call),
+      });
+      return true;
     }
 
     /* Waiting between steps because somebody asked it to. Nothing is added to
        the conversation: the run has not ended and nothing has happened, so a
        line saying so would be a line about the button they just pressed. */
     case 'waiting-for-you':
-      return turns;
+      return false;
 
-    case 'tool-progress':
-      return turns.map((turn) =>
-        turn.kind === 'did' && turn.callId === event.id && turn.state === 'running'
-          ? { ...turn, progress: event.text }
-          : turn,
-      );
+    case 'tool-progress': {
+      let changed = false;
+      for (let index = 0; index < turns.length; index += 1) {
+        const turn = turns[index];
+        if (turn?.kind !== 'did' || turn.callId !== event.id || turn.state !== 'running') continue;
+        turns[index] = { ...turn, progress: event.text };
+        changed = true;
+      }
+      return changed;
+    }
 
     case 'tool-end':
-      return closeActivity(turns, event.id, event.ok ? 'done' : 'failed', event.detail, event.shown);
+      return closeInto(turns, event.id, event.ok ? 'done' : 'failed', event.detail, event.shown);
 
     case 'blocked': {
-      const closed = closeActivity(turns, event.call.id, 'failed', event.reason);
-      if (closed !== turns) return closed;
-      if (isNoteKeeping(event.call.name)) return turns;
-      return [
-        ...turns,
-        {
-          kind: 'did',
-          id: newId(),
-          callId: event.call.id,
-          state: 'failed',
-          label: describeCall(event.call).label,
-          detail: event.reason,
-          real: realWords(event.call),
-        },
-      ];
+      if (closeInto(turns, event.call.id, 'failed', event.reason)) return true;
+      if (isNoteKeeping(event.call.name)) return false;
+      turns.push({
+        kind: 'did',
+        id: newId(),
+        callId: event.call.id,
+        state: 'failed',
+        label: describeCall(event.call).label,
+        detail: event.reason,
+        real: realWords(event.call),
+      });
+      return true;
     }
 
     case 'needs-confirmation':
-      return [
-        ...turns,
-        {
-          kind: 'asked',
-          id: newId(),
-          callId: event.call.id,
-          question: event.verdict.question,
-          detail: event.verdict.detail,
-          consequence: event.verdict.consequence,
-          real: realWords(event.call),
-          answered: null,
-        },
-      ];
+      turns.push({
+        kind: 'asked',
+        id: newId(),
+        callId: event.call.id,
+        question: event.verdict.question,
+        detail: event.verdict.detail,
+        consequence: event.verdict.consequence,
+        real: realWords(event.call),
+        answered: null,
+      });
+      return true;
 
     /* A question nobody can answer any more. It is marked refused rather than
        removed: it happened, the person saw it, and a card that vanishes leaves
        them wondering whether it went through. */
     case 'questions-withdrawn': {
       const gone = new Set(event.callIds);
-      return turns.map((turn) =>
-        turn.kind === 'asked' && turn.answered === null && gone.has(turn.callId)
-          ? { ...turn, answered: 'no' as const }
-          : turn,
-      );
+      let changed = false;
+      for (let index = 0; index < turns.length; index += 1) {
+        const turn = turns[index];
+        if (turn?.kind !== 'asked' || turn.answered !== null || !gone.has(turn.callId)) continue;
+        turns[index] = { ...turn, answered: 'no' };
+        changed = true;
+      }
+      return changed;
     }
+
+    /* Held by the window beside the composer, not folded into the thread: a
+       message waiting its turn is not something that has happened yet. */
+    case 'queued':
+      return false;
+
+    /* The agent has begun on one of the queued messages. The waiting line
+       beside the composer hears this directly — it must not depend on Pi's
+       own bookkeeping removal, which is exact-text and can silently no-op. */
+    case 'message-started':
+      return false;
 
     /* A reply that failed part way through has still ended. The shell sends
        `error` *instead of* `message-end` when the failure arrives on the
@@ -432,147 +464,140 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
        closes it: left open, it stayed marked as still streaming forever, which
        read as "something is running" and put out the quiet mark for the rest of
        the sitting. */
-    /* Held by the window beside the composer, not folded into the thread: a
-       message waiting its turn is not something that has happened yet. */
-    case 'queued':
-      return turns;
-
-    /* The agent has begun on one of the queued messages. The waiting line
-       beside the composer hears this directly — it must not depend on Pi's
-       own bookkeeping removal, which is exact-text and can silently no-op. */
-    case 'message-started':
-      return turns;
-
-    case 'error':
-      return withTrouble(
-        turns.map((turn) => {
-          // Everything that was still going is over. A failure can arrive mid
-          // sentence, mid tool call or mid tidy, and each of those reads as
-          // "something is running" to the quiet mark — so closing only the
-          // sentence left the other two latched on for the rest of the sitting.
-          if (turn.kind === 'said' && turn.streaming) return { ...turn, streaming: false };
-          if (turn.kind === 'did' && turn.state === 'running') return { ...turn, state: 'failed' as const };
-          if (turn.kind === 'tidying' && turn.state === 'running') {
-            return { ...turn, state: 'failed' as const };
-          }
-          if (turn.kind === 'holding' && turn.state === 'running') {
-            return { ...turn, state: 'failed' as const };
-          }
-          if (turn.kind === 'asked-first' && turn.answered === null) {
-            return { ...turn, answered: 'withdrawn' as const };
-          }
-          return turn;
-        }),
-        {
-          what: STOPPED_PART_WAY,
-          because: event.message,
-          actionLabel: 'Got it',
-        },
-      );
+    case 'error': {
+      // Everything that was still going is over. A failure can arrive mid
+      // sentence, mid tool call or mid tidy, and each of those reads as
+      // "something is running" to the quiet mark — so closing only the
+      // sentence left the other two latched on for the rest of the sitting.
+      for (let index = 0; index < turns.length; index += 1) {
+        const turn = turns[index];
+        if (turn === undefined) continue;
+        if (turn.kind === 'said' && turn.streaming) turns[index] = { ...turn, streaming: false };
+        else if (turn.kind === 'did' && turn.state === 'running') {
+          turns[index] = { ...turn, state: 'failed' };
+        } else if (turn.kind === 'tidying' && turn.state === 'running') {
+          turns[index] = { ...turn, state: 'failed' };
+        } else if (turn.kind === 'holding' && turn.state === 'running') {
+          turns[index] = { ...turn, state: 'failed' };
+        } else if (turn.kind === 'asked-first' && turn.answered === null) {
+          turns[index] = { ...turn, answered: 'withdrawn' };
+        }
+      }
+      troubleInto(turns, {
+        what: STOPPED_PART_WAY,
+        because: event.message,
+        actionLabel: 'Got it',
+      });
+      return true;
+    }
 
     // The person's own words, replayed when a saved conversation comes back
     // (BACKLOG B1.1). During a live sitting the window writes these itself and
     // the shell never sends them; here they arrive as ordinary events, so a
     // rehydrated thread folds the same way a live one does.
     case 'user-said':
-      return [...turns, said('you', event.text)];
+      turns.push(said('you', event.text));
+      return true;
 
     // Looking around before touching anything, said once and closed off by
     // whatever the pass came back with.
     case 'planning': {
-      const already = turns.some((turn) => turn.kind === 'did' && turn.callId === LOOKING);
-      return already
-        ? turns
-        : [
-            ...turns,
-            {
-              kind: 'did',
-              id: newId(),
-              callId: LOOKING,
-              state: 'running',
-              label: PLAN_WORDS.working,
-            },
-          ];
+      if (turns.some((turn) => turn.kind === 'did' && turn.callId === LOOKING)) return false;
+      turns.push({
+        kind: 'did',
+        id: newId(),
+        callId: LOOKING,
+        state: 'running',
+        label: PLAN_WORDS.working,
+      });
+      return true;
     }
 
+    /* Nothing readable came back is still something to answer. The card says so
+       and offers the one press that asks again — without it plan mode ends in
+       prose with no way forward. */
     case 'planned': {
-      const closed = closeActivity(turns, LOOKING, 'done');
-      // Nothing proposed is not a plan to approve — whatever it did say is
-      // already in the thread above this.
-      if (event.steps.length === 0) return closed;
-      return [
-        ...closed,
-        {
-          kind: 'plan',
-          id: newId(),
-          text: '',
-          steps: event.steps,
-          caveats: event.caveats,
-          questions: event.questions,
-          answered: null,
-        },
-      ];
+      const closed = closeInto(turns, LOOKING, 'done');
+      // Unless the pass was stopped or broke, which has already said why. A
+      // card blaming the reply for that would be a second, wrong explanation.
+      const last = turns[turns.length - 1];
+      if (event.steps.length === 0 && last?.kind === 'trouble') return closed;
+      turns.push({
+        kind: 'plan',
+        id: newId(),
+        text: '',
+        steps: event.steps,
+        caveats: event.caveats,
+        questions: event.questions,
+        answered: null,
+      });
+      return true;
     }
 
     case 'tidying': {
       // Once. Pi can retry its own summarisation, and each attempt announces
       // itself; three copies of "we've covered a lot in here" would be an app
       // fretting rather than an app tidying.
-      const already = turns.some((turn) => turn.kind === 'tidying' && turn.state === 'running');
-      return already ? turns : [...turns, { kind: 'tidying', id: newId(), state: 'running' }];
+      if (turns.some((turn) => turn.kind === 'tidying' && turn.state === 'running')) return false;
+      turns.push({ kind: 'tidying', id: newId(), state: 'running' });
+      return true;
     }
 
-    case 'asked-first': {
-      return [
-        ...turns,
-        { kind: 'asked-first', id: event.id, questions: event.questions, answers: {}, answered: null },
-      ];
-    }
+    case 'asked-first':
+      turns.push({
+        kind: 'asked-first',
+        id: event.id,
+        questions: event.questions,
+        answers: {},
+        answered: null,
+      });
+      return true;
 
     case 'asking-withdrawn': {
       const gone = new Set(event.ids);
-      return turns.map((turn) =>
-        turn.kind === 'asked-first' && turn.answered === null && gone.has(turn.id)
-          ? { ...turn, answered: 'withdrawn' as const }
-          : turn,
-      );
+      let changed = false;
+      for (let index = 0; index < turns.length; index += 1) {
+        const turn = turns[index];
+        if (turn?.kind !== 'asked-first' || turn.answered !== null || !gone.has(turn.id)) continue;
+        turns[index] = { ...turn, answered: 'withdrawn' };
+        changed = true;
+      }
+      return changed;
     }
 
     case 'holding': {
       // Once per wait, and never stacked: four waits in a row are four lines,
       // but a second announcement of the same one is an app fretting.
-      const already = turns.some((turn) => turn.kind === 'holding' && turn.state === 'running');
-      if (already) return turns;
-      return [...turns, { kind: 'holding', id: newId(), state: 'running', seconds: event.seconds }];
+      if (turns.some((turn) => turn.kind === 'holding' && turn.state === 'running')) return false;
+      turns.push({ kind: 'holding', id: newId(), state: 'running', seconds: event.seconds });
+      return true;
     }
 
     case 'held': {
       const index = turns.findLastIndex(
         (turn) => turn.kind === 'holding' && turn.state === 'running',
       );
-      if (index === -1) return turns;
-      const next = [...turns];
-      const was = turns[index];
-      if (was?.kind !== 'holding') return turns;
-      next[index] = { ...was, state: event.ok ? 'done' : 'failed' };
-      return next;
+      const was = index === -1 ? undefined : turns[index];
+      if (was?.kind !== 'holding') return false;
+      turns[index] = { ...was, state: event.ok ? 'done' : 'failed' };
+      return true;
     }
 
-    case 'reviewed': {
-      return [...turns, { kind: 'review', id: newId(), verdict: event.verdict, asked: false }];
-    }
+    case 'reviewed':
+      turns.push({ kind: 'review', id: newId(), verdict: event.verdict, asked: false });
+      return true;
 
     case 'tidied': {
       const index = turns.findLastIndex(
         (turn) => turn.kind === 'tidying' && turn.state === 'running',
       );
-      if (index === -1) return turns;
-      const next = [...turns];
+      const was = index === -1 ? undefined : turns[index];
+      if (was?.kind !== 'tidying') return false;
       // A compaction can discover there is not enough settled conversation yet.
       // Do not leave behind a claim that notes were shortened when they were
       // not: the completed line says plainly that the conversation stayed put.
-      next[index] = { kind: 'tidying', id: turns[index]!.id, state: event.ok ? 'done' : 'failed' };
-      return next;
+      turns[index] = { kind: 'tidying', id: was.id, state: event.ok ? 'done' : 'failed' };
+      return true;
     }
 
     // Money says nothing in the thread. It is furniture in the corner, and the
@@ -587,17 +612,17 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
     case 'running':
     case 'busy':
     case 'prompt-size':
-      return turns;
+      return false;
 
     /* Something about the app rather than about this conversation. Said in the
        thread as a line, never as trouble: a ceiling reached is not a turn that
        failed, and painting the conversation red for it is the app blaming the
        work for its own housekeeping. */
     case 'notice':
-      return [
-        ...turns,
+      turns.push(
         said('graphe', event.because === undefined ? event.what : `${event.what} ${event.because}`),
-      ];
+      );
+      return true;
 
     /* Everything has stopped, so anything still waiting on a person is waiting
        for an answer that can no longer reach anybody. The window works out that
@@ -631,31 +656,33 @@ export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly 
             (turn.kind === 'holding' && turn.state === 'running') ||
             (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming),
         );
-      if (!stranded) return turns;
+      if (!stranded) return false;
       // Whatever was being asked, the turn it belonged to is over and nothing
       // it says can reach anything. A form still drawn reads as answerable and
       // comes back with the history.
-      return turns.map((turn) => {
+      for (let index = 0; index < turns.length; index += 1) {
+        const turn = turns[index];
+        if (turn === undefined) continue;
         if (turn.kind === 'asked' && turn.answered === null) {
-          return { ...turn, answered: 'no' as const };
+          turns[index] = { ...turn, answered: 'no' };
+        } else if (turn.kind === 'asked-first' && turn.answered === null) {
+          turns[index] = { ...turn, answered: 'withdrawn' };
+        } else if (turn.kind === 'holding' && turn.state === 'running') {
+          turns[index] = { ...turn, state: ended ? 'failed' : 'done' };
+        } else if (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) {
+          turns[index] = { ...turn, streaming: false };
+        } else if (ended && turn.kind === 'did' && turn.state === 'running') {
+          turns[index] = { ...turn, state: 'failed', detail: STEP_WAS_STOPPED };
+        } else if (ended && turn.kind === 'tidying' && turn.state === 'running') {
+          turns[index] = { ...turn, state: 'failed' };
         }
-        if (turn.kind === 'asked-first' && turn.answered === null) {
-          return { ...turn, answered: 'withdrawn' as const };
-        }
-        if (turn.kind === 'holding' && turn.state === 'running') {
-          return { ...turn, state: ended ? ('failed' as const) : ('done' as const) };
-        }
-        if (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) {
-          return { ...turn, streaming: false };
-        }
-        if (ended && turn.kind === 'did' && turn.state === 'running') {
-          return { ...turn, state: 'failed' as const, detail: STEP_WAS_STOPPED };
-        }
-        if (ended && turn.kind === 'tidying' && turn.state === 'running') {
-          return { ...turn, state: 'failed' as const };
-        }
-        return turn;
-      });
+      }
+      return true;
     }
   }
+}
+
+export function applyEvent(turns: readonly Turn[], event: AgentEvent): readonly Turn[] {
+  const next = [...turns];
+  return applyEventInto(next, event) ? next : turns;
 }

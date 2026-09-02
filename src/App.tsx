@@ -1,10 +1,11 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import { Shown } from "./components/Shown";
 import AskFirst from "./components/AskFirst";
 import type { Attachment } from "./components/Attachments";
 import BuildProgress from "./components/BuildProgress";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Composer from "./components/Composer";
 import ConfirmChange from "./components/ConfirmChange";
 import ConnectModal from "./components/ConnectModal";
@@ -42,6 +43,9 @@ import { holdsBack } from "./projects/heldback";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
 import { drainStarted, withoutOurs } from "./lib/queue";
+import { foldEvents } from "./lib/hydrate";
+import { coalescer, type Coalescer } from "./lib/streaming";
+import { capsNow, saysCaps } from "./work/capacity";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
 import type { ConnectedState, ContinuationNotice } from "./lib/ipc";
 import Settings, { type SettingsLink } from "./components/Settings";
@@ -72,14 +76,13 @@ import {
   sessionSummary,
 } from "./cost/phrasing";
 import { sizeUp } from "./cost/sizing";
-import { parseProposal, shouldLookFirst } from "./agent/plan";
+import { shouldLookFirst } from "./agent/plan";
 import {
   asLinesOfEnquiry,
   asResearch,
   chosenDepth,
-  implementationPlanFromResearch,
+  stepsFromReport,
   lookingInto,
-  stepsNotOnTheList,
 } from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
 import {
@@ -189,7 +192,6 @@ import {
   folderCalled,
 } from "./lib/projects";
 import {
-  applyEvent,
   askingYou,
   estimated,
   said,
@@ -206,7 +208,12 @@ import "./App.css";
 
 /** /?gallery renders every component on one page instead of the app, so the UI
  *  can be screenshotted and reviewed in both themes. Read once, at module load. */
-const showGallery = new URLSearchParams(window.location.search).has("gallery");
+/* A dev surface, and only ever one. Harmless — it holds no data — but a shipped
+   app should not answer a query string with its component gallery. Read off the
+   page rather than off `import.meta.env`, which this project does not type. */
+const inDevelopment = window.location.port !== '' || window.location.protocol === 'http:';
+const showGallery =
+  inDevelopment && new URLSearchParams(window.location.search).has("gallery");
 
 /** /?open=<name> opens one of the preview's own projects on load, so the states
  *  that only exist once a folder is open — the version rail, the strip with the
@@ -220,7 +227,15 @@ const openOnLoad = new URLSearchParams(window.location.search).get("open");
 const FILES_APART = 1_200;
 
 export default function App() {
-  return showGallery ? <Gallery /> : <Conversation />;
+  if (showGallery) return <Gallery />;
+  // One thrown render used to turn the whole window white, with nothing said
+  // and nothing to send. Each large view gets its own, so a view that falls
+  // over takes only itself down.
+  return (
+    <ErrorBoundary what="Graphe">
+      <Conversation />
+    </ErrorBoundary>
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -230,6 +245,19 @@ export default function App() {
 /** Said once, calmly, above anything Graphe did not write. */
 const SOMEBODY_ELSES =
   'These are made by other people, and adding one runs their code on your computer alongside your work. Only add things you recognise.';
+
+/** Said once, after the press. What was copied matters more than that it was. */
+const DIAGNOSTICS_COPIED =
+  'Copied. It carries the version, this machine, the add-ons, the last lines of the log and why the last job stopped — no conversations and no keys.';
+
+/** What the sweep came to. Said in what it freed, because that is the thing
+ *  somebody pressed it for. */
+function clearedWords(removed: number, freed: number): string {
+  if (removed === 0) return 'Nothing needed clearing.';
+  const megabytes = Math.round(freed / (1024 * 1024));
+  const what = removed === 1 ? '1 finished copy' : `${String(removed)} finished copies`;
+  return `Cleared ${what}${megabytes > 0 ? `, freeing about ${String(megabytes)} MB` : ''}. Nothing holding work you had not taken in was touched.`;
+}
 
 const NO_FOLDER_YET =
   "Before I can start I need to know which folder your project lives in. Send that again when you have picked one.";
@@ -595,6 +623,8 @@ function Conversation() {
     model: null,
     advisor: null,
     advisorThinking: null,
+    advisorGates: { completionGate: false, loopGate: false },
+    addons: 'tools-only',
     thinking: {},
     kept: {},
     showFiles: false,
@@ -1353,6 +1383,18 @@ function Conversation() {
     });
   }, []);
 
+  const setAdvisorGate = useCallback((which: 'completionGate' | 'loopGate', on: boolean) => {
+    void bridge.setAdvisorGate(which, on).then((answer) => {
+      if (answer.ok) setPreferences(answer.value);
+    });
+  }, []);
+
+  const setAddons = useCallback((choice: 'on' | 'tools-only' | 'off') => {
+    void bridge.setAddons(choice === 'on' ? 'on' : 'tools-only').then((answer) => {
+      if (answer.ok) setPreferences(answer.value);
+    });
+  }, []);
+
   const selectAdvisor = useCallback(
     (choice: ModelChoice | null) => {
       void (async () => {
@@ -1744,10 +1786,10 @@ function Conversation() {
               : [...one.order, opened.value.address],
         }));
         if (desk.turns.length > 0) return named;
-        const revived = opened.value.history.reduce(
-          (turns, event) => applyEvent(turns, event),
-          desk.turns,
-        );
+        // One fold with one accumulator. Folding event by event copied the
+        // whole array each time, so a ten-thousand-event transcript took
+        // seconds to open with the window doing nothing else.
+        const revived = foldEvents(opened.value.history);
         if (revived.length === 0) return named;
         return changeDesk(named, opened.value.path, (one) => ({ ...one, turns: revived }));
       });
@@ -1828,10 +1870,7 @@ function Conversation() {
       // Another tab/project choice won the race while this conversation was
       // opening. It is live in the shell, but must not replace the newer choice.
       if (desksNow.current.current !== opened.value.path) return;
-      const turns = opened.value.history.reduce(
-        (sofar, event) => applyEvent(sofar, event),
-        [] as readonly Turn[],
-      );
+      const turns = foldEvents(opened.value.history);
       // A conversation that was written down but reads back as nothing is a
       // fault, not an empty conversation. Blanking the desk would look like the
       // conversation had been lost, so the desk stays and the reason is said.
@@ -2061,6 +2100,33 @@ function Conversation() {
    *  shell reports it. Drawn as the one line under the reply. */
   const [carryingOn, setCarryingOn] = useState<Readonly<Record<string, ContinuationNotice>>>({});
 
+  /** What each installed add-on will actually do, worked out by asking it. Read
+   *  when the shelf opens: the answer changes only when something is added. */
+  const [addonSays, setAddonSays] = useState<Readonly<Record<string, string>>>({});
+  const [addonsRunning, setAddonsRunning] = useState<number | null>(null);
+
+  /** Which build this is. Nothing in the window said it before, so a friend on
+   *  an old build had no way to find out and no way to say which. */
+  const [version, setVersion] = useState<string | null>(null);
+
+  /** How much room this app is taking. Asked when the sheet opens: it walks
+   *  folders, and the sheet is open for seconds. */
+  const [storage, setStorage] = useState<{
+    says: string;
+    couldClear: number;
+    because: string;
+  } | null>(null);
+
+  /* One gatherer per conversation, so a reply landing in a background tab does
+     not commit into the one in front. */
+  const streams = useRef(new Map<string, Coalescer>());
+
+  /* How heavy the system prompt has become. Pi's own text, forty tools'
+     guidelines, an add-on's five-kilobyte tool description, AGENTS.md, skills
+     and memory all land in the same window as the work — and the chip is where
+     somebody can see it before a small model stops coping. */
+  const [promptSize, setPromptSize] = useState<number | null>(null);
+
   /* Everything the agent does, in order. Subscribed once for the life of the
      window: the bridge outlives any one prompt, and re-subscribing per send
      would drop events that arrive between them. Each event carries the folder
@@ -2091,38 +2157,37 @@ function Conversation() {
           const withoutThis = { ...researchReports.current };
           delete withoutThis[runKey];
           researchReports.current = withoutThis;
-          const planText = implementationPlanFromResearch(report);
+          /* A card to approve, never a checklist written behind somebody's
+             back. Research used to save one on the spot, and then the first
+             tool call marked step one as started and the first settle ticked
+             it — so the app began executing a plan nobody had said yes to. */
+          const found = stepsFromReport(report);
           const project = notice.project;
-          const proposal = planText === null ? null : parseProposal(planText);
-          const steps = proposal?.steps ?? [];
-          if (planText !== null && project !== null && steps.length > 0) {
-            void bridge
-              .buildSave(
-                steps.map((title) => ({ title, acceptance: '' })),
-                { project },
-              )
-              .then((answer) => {
-                if (!answer.ok) return;
-                void refreshBuildPlan(project);
-                // A list that stops short and says nothing reads as the whole
-                // plan, which is the one thing it is not.
-                const missed = stepsNotOnTheList(proposal?.caveats ?? []);
-                if (missed === null) return;
-                setDesks((current) =>
-                  changeDesk(current, project, (one) => ({
-                    ...one,
-                    turns: [...one.turns, said('graphe', missed)],
-                  })),
-                );
-              });
+          if (project !== null && found.steps.length > 0) {
+            setDesks((current) =>
+              changeDesk(current, project, (one) => ({
+                ...one,
+                turns: [
+                  ...one.turns,
+                  {
+                    kind: 'plan' as const,
+                    id: `research-${String(Date.now())}`,
+                    text: '',
+                    steps: found.steps,
+                    caveats: [],
+                    questions: [],
+                    answered: null,
+                  },
+                ],
+              })),
+            );
           }
           // Whether "now build it" gets a checklist depends on what came back.
-          // Research that wrote one leaves it standing, and the answer works
-          // through it. Research that wrote none leaves nothing to work
-          // through, so the answer is judged like any other message and a big
-          // one still earns its own look-around. Exempting it either way is how
-          // a large job ends up running with nothing tracking it.
-          if (steps.length === 0) justLookedFirst.current = false;
+          // Research that laid out steps leaves a card to say yes to. Research
+          // that laid out none leaves nothing to work through, so the answer is
+          // judged like any other message and a big one still earns its own
+          // look-around.
+          if (found.steps.length === 0) justLookedFirst.current = false;
         }
         // How long the active run is going for, so a long one ends with a quiet
         // "worked for" line rather than silence. The clock starts on the first
@@ -2133,6 +2198,7 @@ function Conversation() {
         if (notice.event.type === 'tool-end' && notice.project !== null) {
           refreshFilesSoon(notice.project);
         }
+        if (notice.event.type === 'prompt-size') setPromptSize(notice.event.characters);
         if (notice.event.type === 'tool-start') {
           didWorkSinceSettle.current = { ...didWorkSinceSettle.current, [runKey]: true };
           if (runStartedAt.current[runKey] === undefined) {
@@ -2143,6 +2209,31 @@ function Conversation() {
                the model's to say — step_started(n) — and the panel shows the
                first unticked one as current without anything being written. */
           }
+        }
+        /* Text arrives a token at a time, and every one of them used to copy the
+           whole turn array and redraw every row. Gathered instead and committed
+           at most every frame; flushed the moment the message ends, because the
+           end arm closes the turn and an unflushed tail would be lost. */
+        if (notice.event.type === 'message-delta') {
+          const at = runKey;
+          let gathering = streams.current.get(at);
+          if (gathering === undefined) {
+            gathering = coalescer((text) => {
+              setDesks((current) =>
+                receive(current, { ...notice, event: { type: 'message-delta', text } }),
+              );
+            });
+            streams.current.set(at, gathering);
+          }
+          gathering.push(notice.event.text);
+          return;
+        }
+        if (
+          notice.event.type === 'message-end' ||
+          notice.event.type === 'error' ||
+          notice.event.type === 'settled'
+        ) {
+          streams.current.get(runKey)?.flush();
         }
         setDesks((current) => receive(current, notice));
         // A sitting that has settled is a sitting that has been saved, so the
@@ -2354,7 +2445,53 @@ function Conversation() {
     ],
   );
 
+  useEffect(() => {
+    void bridge.appVersion().then((answer) => {
+      if (answer.ok) setVersion(answer.value);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!addMore) return;
+    void bridge.addons().then((answer) => {
+      if (!answer.ok) return;
+      setAddonSays(answer.value.says);
+      setAddonsRunning(answer.value.running);
+    });
+  }, [addMore]);
+
+  /* Only while the sheet is open, and once each time it opens. */
+  useEffect(() => {
+    if (!settingsOpen) return;
+    void bridge.storage().then((answer) => {
+      if (answer.ok) setStorage(answer.value);
+    });
+  }, [settingsOpen]);
+
   useEffect(() => bridge.onShowProgress(setProgress), []);
+
+  /* Escape pressed while the native page pane holds focus. The pane has a
+     keyboard of its own and swallows it, so the shell hands it back and it is
+     re-dispatched here where every other press already lands. */
+  useEffect(
+    () =>
+      bridge.onPaneKey(({ key }) => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+      }),
+    [],
+  );
+
+  /* The app's own menu. The presses that belong to the window rather than to
+     the shell arrive here — Open folder and New conversation are the same two
+     actions the screen already offers, reached from where a Mac user looks. */
+  useEffect(
+    () =>
+      bridge.onMenu((notice) => {
+        if (notice.id === 'open-folder') void browse();
+        if (notice.id === 'new-conversation') void swapConversation(null);
+      }),
+    [browse, swapConversation],
+  );
 
   /* A before and after has been worked out. Pinned to whatever the conversation
      had last said for that project at the moment it arrived — see `Pinned`. */
@@ -3319,7 +3456,7 @@ function Conversation() {
         }
         if (navigation.current !== request || currentDesk(desksNow.current)?.path !== project || opened === null || prFolder === null) return;
         // Put the new PR-rooted conversation on screen, like swapConversation does.
-        const turns = opened.history.reduce((sofar: readonly import("./lib/thread").Turn[], event) => applyEvent(sofar, event), [] as readonly import("./lib/thread").Turn[]);
+        const turns = foldEvents(opened.history);
         if (opened.history.length > 0 && turns.length === 0) {
           troubleHere(swapWords.unreadable);
           return;
@@ -3676,8 +3813,22 @@ function Conversation() {
     // A plan that asked something must never answer itself. Asking two
     // questions and then answering them yourself is worse than never asking.
     if (waiting.questions.length > 0) return;
+    // Nothing to get on with. A card with no steps is one asking for a list,
+    // not one asking for approval — answering it sends "do these: nothing".
+    if (waiting.steps.length === 0) return;
     answerPlan(waiting.id, true);
   }, [desk, preferences.heldBack, answerPlan, howFar]);
+
+  /** The model answered in prose. The card says so; this is the press under it,
+   *  which asks again in the same words the look-around uses rather than
+   *  leaving somebody to work out how to phrase it. */
+  const askForAPlanAgain = useCallback(
+    (turnId: string) => {
+      answerPlan(turnId, false);
+      void deliver(PLAN_WORDS.asked, sizeUp(PLAN_WORDS.asked), { lookFirst: true });
+    },
+    [answerPlan, deliver],
+  );
 
   const respond = useCallback(
     (turnId: string, callId: string, decision: Decision) => {
@@ -5531,6 +5682,25 @@ function Conversation() {
           changeKeepLogins(!keepsLogins(preferences.keptLogins, desk?.path))
         }
         onGo={openSettingsLink}
+        version={version ?? undefined}
+        storage={storage}
+        onCopyDiagnostics={() => {
+          void bridge.diagnostics().then((answer) => {
+            if (!answer.ok) return;
+            void navigator.clipboard.writeText(answer.value).then(
+              () => say(DIAGNOSTICS_COPIED),
+              () => undefined,
+            );
+          });
+        }}
+        onClearFinishedWork={() => {
+          void bridge.clearFinishedWork().then((answer) => {
+            if (!answer.ok) return;
+            setStorage((was) => (was === null ? was : { ...was, says: answer.value.says, couldClear: 0 }));
+            say(clearedWords(answer.value.removed, answer.value.freed));
+          });
+        }}
+        caps={saysCaps(capsNow())}
       />
 
       <Usage
@@ -5652,6 +5822,7 @@ function Conversation() {
                     onDismiss={dismiss}
                     onAnswerEstimate={answerEstimate}
                     onAnswerPlan={answerPlan}
+                    onAskForAPlanAgain={askForAPlanAgain}
                     onFixReview={fixReview}
                     onPostReview={postReview}
                     showMe={preferences.showMe}
@@ -5803,6 +5974,7 @@ function Conversation() {
               onTidy={tidyNow}
               howFar={howFar}
               onHowFar={setHowFar}
+              {...(desk === null ? {} : { project: desk.path, conversation: desk.address })}
               onComposerPopoverOpenChange={setComposerPopoverOpen}
               plans={plans}
               onPlans={handlePlans}
@@ -5811,6 +5983,11 @@ function Conversation() {
               onAdvisor={selectAdvisor}
               advisorThinking={preferences.advisorThinking}
               onAdvisorThinking={setAdvisorThinking}
+              advisorGates={preferences.advisorGates}
+              onAdvisorGate={setAdvisorGate}
+              addons={preferences.addons}
+              onAddons={setAddons}
+              promptSize={promptSize}
               onConnect={openConnect}
               onThinking={changeThinking}
               skills={skills}
@@ -6131,6 +6308,8 @@ function Conversation() {
         warning={SOMEBODY_ELSES}
         explaining={explaining}
         explanations={explanations}
+        capabilities={addonSays}
+        addonProcesses={addonsRunning}
         onClose={() => setAddMore(false)}
         /* The vouched-for tools — a real browser among them — with whichever
            this project already has marked as connected. Without these the
@@ -6259,13 +6438,26 @@ function saying(turn: Extract<Turn, { kind: "did" }>): string | undefined {
   return isAdvisor(turn.label) ? opening(turn.progress) : lastSaid(turn.progress);
 }
 
-function Turnstile({
+/**
+ * One row of the conversation.
+ *
+ * Memoised, and on identity rather than a deep comparison: every arm of the
+ * fold replaces the slot rather than editing the turn, so a turn that is the
+ * same object is a turn that has not changed. Without this, a token landing in
+ * the last turn redrew every row above it — three thousand of them, sixty times
+ * a second, on a long conversation.
+ *
+ * The callbacks are rebuilt on every render of the window and never change what
+ * a row draws, so comparing them would defeat the whole thing.
+ */
+const Turnstile = memo(function Turnstile({
   turn,
   onRespond,
   onAnswerAsked,
   onDismiss,
   onAnswerEstimate,
   onAnswerPlan,
+  onAskForAPlanAgain,
   onFixReview,
   onPostReview,
   showMe,
@@ -6285,6 +6477,9 @@ function Turnstile({
       decision?: PlanDecision;
     },
   ) => void;
+  /** The model answered in prose rather than a list. Asks again, in the same
+   *  words the look-around uses, rather than leaving the card as a dead end. */
+  onAskForAPlanAgain: (turnId: string) => void;
   onFixReview: (turnId: string) => void;
   onPostReview: (verdict: ReviewVerdict) => Promise<boolean>;
   /** Name the real command, path or operation under each step (BACKLOG D1).
@@ -6374,6 +6569,7 @@ function Turnstile({
             onAnswerPlan(turn.id, true, { kept, dropped, decision })
           }
           onChange={() => onAnswerPlan(turn.id, false)}
+          onAskAgain={() => onAskForAPlanAgain(turn.id)}
         />
       );
 
@@ -6456,4 +6652,7 @@ function Turnstile({
         />
       );
   }
-}
+}, (before, after) =>
+  before.turn === after.turn &&
+  before.showMe === after.showMe &&
+  before.isLast === after.isLast);

@@ -262,7 +262,7 @@ export function saysMoved(moved: Moved): string {
 export function saysInStep(name: string, moves: readonly Move[]): string {
   if (moves.length === 0) return `Nothing in ${name} has moved since this was built.`;
   const many = moves.length === 1 ? 'one thing differs' : `${counted(moves.length)} things differ`;
-  return `Your ${name} in Figma has moved on since this was built — ${many}.`;
+  return `Your ${name} in Figma has moved on since this was built: ${many}.`;
 }
 
 /** Nothing is being followed yet, and this is how you would say so. */
@@ -462,15 +462,15 @@ function detailOf(name: string, was: string | null, now: string | null): string 
 function asksFor(move: Omit<Move, 'asks'>, name: string): string {
   const where = `In ${name} in Figma`;
   if (move.what === 'gone') {
-    return `${where}, ${move.thing} is gone — it was ${move.was ?? ''}. Find where this project still uses it and tell me what should take its place.`;
+    return `${where}, ${move.thing} is gone; it was ${move.was ?? ''}. Find where this project still uses it and tell me what should take its place.`;
   }
   if (move.what === 'new') {
-    return `${where}, ${move.thing} is new — it is ${move.now ?? ''}. Add it to this project's own values where it belongs.`;
+    return `${where}, ${move.thing} is new; it is ${move.now ?? ''}. Add it to this project's own values where it belongs.`;
   }
   if (move.what === 'renamed') {
     return `${where}, ${move.was ?? ''} is called ${move.now ?? ''} now. Rename it through this project so the two agree.`;
   }
-  return `${where}, ${move.thing} is ${move.now ?? ''} now — it was ${move.was ?? ''} when this was built. Find where this project uses it and update it to match.`;
+  return `${where}, ${move.thing} is ${move.now ?? ''} now; it was ${move.was ?? ''} when this was built. Find where this project uses it and update it to match.`;
 }
 
 type Row = {

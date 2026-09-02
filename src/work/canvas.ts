@@ -186,13 +186,13 @@ export const canvasWords = {
   whicheverNote: (model: string | null): string =>
     model === null
       ? 'Whatever this canvas’s conversation is set to.'
-      : `Whatever this canvas’s conversation is set to — ${model} right now.`,
+      : `Whatever this canvas’s conversation is set to: ${model} right now.`,
   waitsFor: 'Runs after',
   /** Only where the project holds several. */
   which: 'Works in',
   everyBlock: 'Every block runs on this unless it names its own',
   whichNote: 'Which project inside this folder the whole flow works in',
-  nothing: 'Nothing — it starts the flow',
+  nothing: 'Nothing (it starts the flow)',
   /** In the picker, above the blocks it could be made to wait for. */
   afterWhich: 'Runs after all of these',
   shows: 'Shows it',
@@ -242,7 +242,7 @@ export const canvasWords = {
   startsHere: 'Starts here',
   waitsHere: 'Waits for the block before it',
   ends: 'Ends here',
-  endsNote: 'Nothing follows this yet — drag from here to add what does',
+  endsNote: 'Nothing follows this yet. Drag from here to add what does',
   /** Over what a block came to. */
   came: 'What it came to',
   /** Along the foot while it is going. A block can run for twenty minutes, and
@@ -392,7 +392,7 @@ export function goalWords(about: string): string {
 }
 
 export function carryOnWords(about: string, why: string): string {
-  return `Not there yet — ${why} Carry on toward: ${about.trim()}`;
+  return `Not there yet. ${why} Carry on toward: ${about.trim()}`;
 }
 
 /** What a subagents block is asked. Written here rather than in the view so the

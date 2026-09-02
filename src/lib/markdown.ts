@@ -163,7 +163,7 @@ const NAMED: Readonly<Record<string, string>> = {
   apos: "'",
   nbsp: ' ',
   hellip: '...',
-  mdash: '—',
+  mdash: '\u2014',
   ndash: '–',
   colon: ':',
   Tab: '\t',

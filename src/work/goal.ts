@@ -51,7 +51,7 @@ export const goalWords = {
 
   chip: 'Goal',
   name: 'Work toward a goal',
-  note: 'Keep working toward one sentence until it is done — checks after every round and carries on by itself. Full access while it lasts.',
+  note: 'Keep working toward one sentence until it is done, checking after every round and carrying on by itself. Full access while it lasts.',
   paused: 'Goal paused',
   resumed: 'Goal resumed',
   cleared: 'Goal cleared',

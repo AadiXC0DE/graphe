@@ -139,7 +139,7 @@ export function saysHowItHolds(
   if (degree === 'fits') return null;
   const over = overflowsBy(width, contentWidth);
   if (degree === 'badly') return saysOverflow(name, over);
-  return `Something on the page sits ${over}px past the edge of ${article(name)} ${lower(name)} — a hair, but it scrolls sideways.`;
+  return `Something on the page sits ${over}px past the edge of ${article(name)} ${lower(name)}: a hair, but it scrolls sideways.`;
 }
 
 /** What goes on the picture itself. A width nobody could photograph and a width
@@ -485,7 +485,7 @@ export function sizesFor(sheets: readonly string[]): readonly Width[] {
 export const responsive = {
   button: 'Does this work on a phone?',
   working: 'Having a look at every size…',
-  empty: 'No pictures yet — ask, and I’ll look at it at all three widths.',
+  empty: 'No pictures yet. Ask, and I’ll look at it at all three widths.',
   again: 'Look again',
   /** What the press does, said before anybody presses it: a button with no
    *  sentence over it is a button nobody presses twice. */
@@ -493,7 +493,7 @@ export const responsive = {
     'Serves the project, opens the page at every width you design for and photographs each one. Anything sitting past the edge of the screen comes back flagged, with how many pixels over it is.',
   /** And where the widths come from, for somebody who wants different ones. */
   where:
-    'The widths are the ones your own stylesheets already ask for — at most four, and always with a phone and a full-width look among them. Write another into the stylesheet and the next look uses it.',
+    'The widths are the ones your own stylesheets already ask for: at most four, and always with a phone and a full-width look among them. Write another into the stylesheet and the next look uses it.',
   /** On the picture, where the fault is. */
   flagged: 'Doesn’t fit',
   missing: 'Didn’t come out',

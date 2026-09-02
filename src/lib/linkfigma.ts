@@ -45,5 +45,5 @@ export function stepsInWords(): string {
  *  always because the piece inside that app is not running. A timeout is a fact
  *  about a socket; this is a fact somebody can act on. */
 export function notRunning(app: string): string {
-  return `${app} did not answer. The helper is probably not open in it — that is the usual reason. ${stepsInWords()}`;
+  return `${app} did not answer. The helper is probably not open in it; that is the usual reason. ${stepsInWords()}`;
 }

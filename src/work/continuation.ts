@@ -96,7 +96,7 @@ export const continuationWords = {
     const said = named(objective);
     return [
       said === null ? 'Carry on toward the goal.' : `Carry on toward this goal: ${said}.`,
-      `It is not met yet — ${reason}`,
+      `It is not met yet: ${reason}`,
       'Work the next thing that moves it toward done. Do not stop to report progress while it is still unmet.',
     ].join(' ');
   },

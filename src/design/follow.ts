@@ -25,7 +25,7 @@ export type Following = {
 };
 
 const NOT_A_LINK =
-  'That is not a Figma link I can follow. Copy the address out of Figma itself — the one with the file in it — and I will try again.';
+  'That is not a Figma link I can follow. Copy the address out of Figma itself, the one with the file in it, and I will try again.';
 
 /**
  * A reading, through a connected Figma account.

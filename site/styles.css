@@ -1232,6 +1232,92 @@ a {
   margin-bottom: 26px;
 }
 
+/* How it compares. A table because it is one; the wrapper scrolls so the
+   narrow end of the page never pushes the whole layout sideways. */
+.vs {
+  max-width: var(--full);
+  margin: 0 auto;
+  overflow-x: auto;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-lg);
+  background: var(--night);
+}
+
+.vs__table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.vs__table th,
+.vs__table td {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--edge);
+}
+
+.vs__table tbody tr:last-child th,
+.vs__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.vs__table thead th {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--haze-dim);
+  vertical-align: bottom;
+}
+
+.vs__table tbody th {
+  font-size: 1rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.vs__table td {
+  color: var(--haze-dim);
+  font-size: 1.125rem;
+  text-align: center;
+  width: 15%;
+}
+
+.vs__table thead th + th {
+  text-align: center;
+}
+
+.vs__us {
+  background: var(--coral-soft);
+}
+
+.vs__us th {
+  color: var(--coral);
+}
+
+.vs__yes {
+  color: var(--coral);
+}
+
+/* Named for the reader who is not looking at it. */
+.vs__off {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.vs__note {
+  max-width: var(--measure);
+  margin: 20px auto 0;
+  font-size: 0.75rem;
+  line-height: 1.7;
+  color: var(--haze-dim);
+}
+
 /* A peek at the real thing, framed rather than bled. These are crops of an
    interface that already has its own edges and padding; running them to the
    card's edge put one of their margins against nothing and the other against

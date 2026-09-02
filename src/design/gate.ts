@@ -116,7 +116,7 @@ export const gateWords = {
   missing: 'Not checked',
   /** The answer that takes the work and moves the mark it is measured against,
    *  so the same change is never questioned twice. */
-  take: 'That’s right — let it in',
+  take: 'That’s right, let it in',
   letIn: 'Let it in',
   setAside: 'Set it aside',
   /** Said under the pictures when the gate stopped the work. */

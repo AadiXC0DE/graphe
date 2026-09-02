@@ -93,7 +93,7 @@ export const tabsWords = {
     many === 1 ? 'One problem on this page.' : `${String(many)} problems on this page.`,
   /** On a failure chip. */
   saysFailure: (one: Failure): string =>
-    one.status === null ? `Never answered — ${one.url}` : `${String(one.status)} — ${one.url}`,
+    one.status === null ? `Never answered: ${one.url}` : `${String(one.status)}: ${one.url}`,
   full: `That is ${String(MOST_TABS)} tabs, which is as many as fit. Close one first.`,
 } as const;
 

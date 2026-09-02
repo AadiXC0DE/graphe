@@ -264,7 +264,7 @@ export async function hintForLargeRepo(dir: string, run: GitRunner): Promise<str
 
 export const leftOutWords = {
   one: (file: string): string =>
-    `Left ${file} out of the version — it holds keys, and a version can end up somewhere public.`,
+    `Left ${file} out of the version: it holds keys, and a version can end up somewhere public.`,
   already: (file: string): string =>
     `${file} is already saved in this project’s history, so I have left it exactly as it is.`,
 } as const;

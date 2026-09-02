@@ -460,7 +460,7 @@ function clip(text: string, max: number): string {
   const cut = flat.slice(0, max - 1);
   const space = cut.lastIndexOf(' ');
   const kept = space > max / 2 ? cut.slice(0, space) : cut;
-  return `${kept.replace(/[,;:.\-—]+$/, '')}…`;
+  return `${kept.replace(/[,;:.\-\u2014]+$/, '')}…`;
 }
 
 /** The user's own sentence, turned into something that reads as a record of what

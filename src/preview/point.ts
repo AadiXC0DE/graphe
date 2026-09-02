@@ -333,7 +333,7 @@ function judgement() {
     const cut = text.slice(0, LABEL_MAX);
     const space = cut.lastIndexOf(' ');
     const kept = space >= LABEL_MAX / 2 ? cut.slice(0, space) : cut.slice(0, LABEL_MAX - 1);
-    return `${kept.replace(/[\s,;:.–—-]+$/, '')}…`;
+    return `${kept.replace(/[\s,;:.\u2013\u2014-]+$/, '')}…`;
   }
 
   function kindOf(el: { tagName: string; role?: string }): string {

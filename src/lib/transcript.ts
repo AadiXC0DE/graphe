@@ -85,13 +85,13 @@ export function asMarkdown(turns: readonly Turn[], options: TranscriptOptions = 
 
       case 'did': {
         if (options.steps !== true) break;
-        const detail = turn.detail === undefined ? '' : ` — ${turn.detail}`;
+        const detail = turn.detail === undefined ? '' : `: ${turn.detail}`;
         blocks.push(`- ${turn.label}${detail}`);
         break;
       }
 
       case 'plan': {
-        const lines = ['**Graphe** — the plan', ''];
+        const lines = ['**Graphe**: the plan', ''];
         turn.steps.forEach((step, index) => lines.push(`${String(index + 1)}. ${step}`));
         if (turn.caveats.length > 0) lines.push('', ...turn.caveats.map((one) => `- ${one}`));
         if (turn.questions.length > 0) lines.push('', ...turn.questions.map((one) => `- ${one}`));
@@ -121,14 +121,14 @@ export function asMarkdown(turns: readonly Turn[], options: TranscriptOptions = 
       }
 
       case 'review': {
-        const lines = [`**Graphe** — review`, '', `${verdictWords(turn.verdict.kind)}: ${turn.verdict.summary}`];
+        const lines = [`**Graphe**: review`, '', `${verdictWords(turn.verdict.kind)}: ${turn.verdict.summary}`];
         if (turn.verdict.findings.length > 0) lines.push('', ...turn.verdict.findings.map(finding));
         blocks.push(lines.join('\n'));
         break;
       }
 
       case 'trouble':
-        blocks.push(`**Graphe** — ${turn.trouble.what} ${turn.trouble.because}`.trim());
+        blocks.push(`**Graphe**: ${turn.trouble.what} ${turn.trouble.because}`.trim());
         break;
 
       // Machinery with nothing to read: an estimate nobody answered, the

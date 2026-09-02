@@ -97,7 +97,7 @@ export function whatToSweep(
 function whyThat(going: number, holding: number, recent: number): string {
   if (going === 0) {
     if (holding > 0) return `Nothing to clear. ${saysCount(holding)} still holding work you have not brought in.`;
-    return 'Nothing to clear — everything here is still in use.';
+    return 'Nothing to clear. Everything here is still in use.';
   }
   const stays: string[] = [];
   if (holding > 0) stays.push(`${saysCount(holding)} still holding work`);
@@ -123,7 +123,7 @@ export function saysStorage(folders: readonly Folder[]): string {
   const parts = [...real]
     .sort((a, b) => b.bytes - a.bytes)
     .map((one) => `${one.name} ${saysBytes(one.bytes)}`);
-  return `${saysBytes(total)} on this computer — ${parts.join(', ')}.`;
+  return `${saysBytes(total)} on this computer: ${parts.join(', ')}.`;
 }
 
 /** Sizes the way a person reads them, not the way a disk reports them. */

@@ -171,11 +171,11 @@ export type Landing = { how: 'squash' | 'every-version'; message?: string };
 export const landingWords = {
   squash: 'One commit, your message',
   every: 'Keep every version',
-  note: 'One commit runs your pre-commit hooks and is signed the way your other commits are. Keeping every version brings the conversation’s automatic saves across as they were made — unsigned, and past your hooks.',
+  note: 'One commit runs your pre-commit hooks and is signed the way your other commits are. Keeping every version brings the conversation’s automatic saves across as they were made: unsigned, and past your hooks.',
   /** When nobody typed one. Reads as a commit subject, because it is one. */
   message: (branch: string): string => `Work from ${branch.replace(/^graphe\//, '')}`,
   failed:
-    'Your work is here, but the commit did not go through — a pre-commit hook turned it down, or the signing did. The changes are staged, so you can commit them yourself.',
+    'Your work is here, but the commit did not go through. A pre-commit hook turned it down, or the signing did. The changes are staged, so you can commit them yourself.',
 } as const;
 
 /**

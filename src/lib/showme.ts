@@ -291,7 +291,7 @@ export function saysWhyStopped(one: WhyStopped): string {
       ? '  decided: nothing yet this sitting'
       : `  decided: ${one.decided.kind}${
           one.decided.why === null ? '' : ` (${one.decided.why})`
-        } — ${one.decided.said === '' ? 'nothing said' : one.decided.said}`,
+        }, ${one.decided.said === '' ? 'nothing said' : one.decided.said}`,
   );
   lines.push(`  ended: ${one.endedHow ?? 'unknown'}`);
   lines.push(
@@ -306,7 +306,7 @@ export function saysWhyStopped(one: WhyStopped): string {
   }
   if (one.blockedStreak !== null && one.blockedStreak.count > 0) {
     lines.push(
-      `  blocked: ${String(one.blockedStreak.count)} in a row — ${one.blockedStreak.reason}`,
+      `  blocked: ${String(one.blockedStreak.count)} in a row, ${one.blockedStreak.reason}`,
     );
   }
   if (one.promptCharacters !== null) {

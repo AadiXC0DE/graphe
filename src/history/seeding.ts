@@ -65,7 +65,7 @@ export const seedWords = {
     return [
       `This conversation works in its own git checkout of the project, made with \`git worktree add\`. It holds the tracked files and ${has}.`,
       'Dependencies are not installed here. Install them in this folder before running anything that needs them, and do not touch the project folder to do it.',
-      `A \`${WORKTREE_INCLUDE}\` at the project root — \`.gitignore\` syntax — names any other gitignored file to carry into every checkout. Say so if the person asks why something is missing.`,
+      `A \`${WORKTREE_INCLUDE}\` at the project root, in \`.gitignore\` syntax, names any other gitignored file to carry into every checkout. Say so if the person asks why something is missing.`,
     ].join(' ');
   },
 } as const;

@@ -85,7 +85,7 @@ export const terminalWords = {
   /** On the agent's tab, where the prompt would be. */
   readingOnly: 'This one is a record of what the agent ran. Type in yours instead.',
   /** On a server's tab, same place: its input was never connected to anything. */
-  noPrompt: 'Nothing to type into — this is a server talking, not a shell.',
+  noPrompt: 'Nothing to type into: this is a server talking, not a shell.',
   newTab: 'New terminal',
   close: 'Close',
   /** Closing a tab that owns a process ends the process, and closing one that

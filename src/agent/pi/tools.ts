@@ -625,7 +625,7 @@ export const runChecksTool = (
   name: 'run_checks',
   label: 'Running this project’s checks',
   description:
-    "Hold a change up against the checks this project has written down for itself. One reviewer takes each check, all at the same time, and brings back what every one of them found. Targets are the same as read_diff: 'working', 'version' with an id, or 'line' with a name. A project that has written no checks costs nothing here and sends nobody.",
+    "Hold a change up against the checks this project has written down for itself. One reviewer takes each check, all at the same time, and brings back what it found. Targets are the same as read_diff: 'working', 'version' with an id, or 'line' with a name. A project that has written no checks costs nothing here and sends nobody.",
   promptSnippet: 'run_checks(target): run the project’s own checks against a change, one reviewer each',
   promptGuidelines: [
     'After reading a change with read_diff, run the project’s own checks against the same target with run_checks. Every check gets its own reviewer and they all look at once.',
@@ -1346,9 +1346,10 @@ export const taskTool = (
   name: 'task',
   label: 'Task',
   description:
-    'Send a piece of work to a helper agent with its own fresh context window. Most helpers read the project and search the web and cannot change anything; a builder is handed its own copy of the project, makes one self-contained change in it, and hands back the change for you to look at and apply. Use it for research, fact-checking, or a second pass that would otherwise crowd your own context. Call it several times in one reply to put several helpers on separate pieces of work at the same time. A helper can be asked to act as a reviewer (finding problems with file and line references) or a researcher (gathering facts), or left as a general helper.',
+    'Send a piece of work to a helper agent with its own fresh context window. Most helpers read the project and search the web and change nothing; a builder gets its own copy, makes one self-contained change, and hands it back for you to apply. Call it several times in one reply to put helpers on separate pieces.',
   promptSnippet: 'task(task, role?): send a piece of work to a helper; a builder makes the change, the rest report',
   promptGuidelines: [
+    'Use it for research, fact-checking, or a second pass that would otherwise crowd your own context.',
     'Give the helper one whole piece of work: a question it can answer without this conversation.',
     // Without this the model sends one helper, waits for its answer, and sends
     // the next — which is a queue wearing a fan-out's clothes.
@@ -1918,7 +1919,7 @@ export const setGoingTool = (put: PutOnBoard): ToolDefinition => ({
   name: 'set_going',
   label: 'Setting work going',
   description:
-    'Put several separate pieces of work on the board at once. Each gets its own copy of the project and its own agent, four run at a time, and they carry on whether or not this conversation does. Use it when a request genuinely breaks into pieces that touch different files, one piece per area, rather than one long list you walk yourself. A piece can be told to wait for an earlier one in the same call.',
+    'Put several pieces of work on the board at once. Each gets its own copy and its own agent, four run at a time, and they carry on without this conversation. Use it when a request breaks into pieces touching different files, one per area, rather than one list you walk yourself. A piece can wait for an earlier one.',
   promptSnippet: 'set_going(pieces): put several pieces of work on the board, each in its own copy',
   promptGuidelines: [
     'Use it when a request breaks into pieces that touch different files. Two pieces changing one file will collide, and only one of them can be kept.',
@@ -2082,7 +2083,7 @@ export const tryWaysTool = (put: PutOnBoard): ToolDefinition => ({
   name: 'try_ways',
   label: 'Trying it more than one way',
   description:
-    'Make the same thing two or three different ways at once, so they can be compared side by side and one of them kept. Use it when the request has taste in it and there is no single right answer (a layout, a colour, a piece of writing, the shape of a page) rather than when there is a correct result to arrive at. Each way runs in its own copy of the project; keeping one throws the others away.',
+    'Make the same thing two or three ways, side by side, and keep one. Use it when the request has taste in it and no single right answer: a layout, a colour, a piece of writing, a page\'s shape. Not for a request with one correct result. Each way runs in its own copy; keeping one discards the rest.',
   promptSnippet: 'try_ways(doing, ways): make the same thing two or three ways, and compare them',
   promptGuidelines: [
     'Use it where taste decides and there is no single right answer. Where there is one correct result, generate candidates separately and use score_candidates on the same objective checks.',
@@ -2411,7 +2412,7 @@ const makeChecklistTool = (make: MakeChecklist): ToolDefinition => ({
   name: 'make_checklist',
   label: 'Writing the checklist',
   description:
-    'Put the steps this job breaks into on screen as a checklist the person can watch, and tick off with step_done(n) as each one lands. Use it when a request has several parts, when you are working toward a goal and there is no checklist yet, or when you find work along the way that was not on the list. `mode` is "append" by default; "replace" writes the list again from scratch and keeps the tick on any step whose words are unchanged.',
+    'Put this job\'s steps on screen as a checklist, ticked off with step_done(n) as each one lands. Use it when a request has several parts, when a goal has no checklist yet, or when you find work along the way. `mode` defaults to "append"; "replace" rewrites the list, keeping the tick on any step whose words are unchanged.',
   promptSnippet: 'make_checklist(steps, mode): put the steps on screen as a checklist',
   promptGuidelines: [
     'Work with more than two separately finishable parts gets a checklist before the first change. It is what the person watches, and what a later session resumes from.',
@@ -2578,9 +2579,14 @@ const askFirstTool = (askFirst: AskFirst): ToolDefinition => ({
   name: 'ask_first',
   label: 'Asking before starting',
   description:
-    "Ask the person up to four multiple-choice questions before you start, when the job genuinely has more than one sensible shape and picking wrong would waste real work: which framework, which of two designs, how far to take it, what to leave alone. Use it ONCE, at the very beginning, before you change anything. If they ask you to check with them first, or to ask before starting, use it: that request is exactly what this is for and is reason enough on its own. Otherwise do not use it for things you can find out by looking at the project, for permission (you are asked for that separately), or for anything you could reasonably decide yourself. If you are already working, decide and say what you assumed instead.",
+    'Ask the person up to four multiple-choice questions before you start, when the job has more than one sensible shape and picking wrong would waste real work: which framework, which of two designs, how far to take it, what to leave alone. Use it ONCE, at the very beginning, before you change anything.',
   promptSnippet:
     'ask_first(questions): put a few either/or questions to the person before starting, once, at the top',
+  promptGuidelines: [
+    'If they ask you to check with them first, or to ask before starting, use it: that request is exactly what this is for and is reason enough on its own.',
+    'Do not use it for things you can find out by looking at the project, for permission (you are asked for that separately), or for anything you could reasonably decide yourself.',
+    'If you are already working, decide and say what you assumed instead.',
+  ],
   parameters: Type.Object({
     questions: Type.Array(
       Type.Object({

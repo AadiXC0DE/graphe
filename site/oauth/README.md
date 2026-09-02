@@ -1,7 +1,7 @@
 # Who Graphe says it is
 
 `client.json` is how Graphe identifies itself to a tool server that asks
-somebody to sign in — a Client ID Metadata Document (SEP-991). The URL of this
+somebody to sign in: a Client ID Metadata Document (SEP-991). The URL of this
 file *is* the client id: a server that supports it fetches this document instead
 of handing out a fresh registration, so there is one Graphe rather than one per
 machine, and a server operator has something stable to recognise.

@@ -1926,6 +1926,10 @@ let previewPlanMode = false;
       return () => undefined;
     },
 
+    onNewerVersion(): () => void {
+      return () => undefined;
+    },
+
     continuationStop(): Promise<Result<null>> {
       return Promise.resolve(done(null));
     },
@@ -2283,6 +2287,7 @@ function connect(): Bridge {
     onAway: (listener) => api.onAway(listener),
     onBuildPlan: (listener) => api.onBuildPlan(listener),
     onContinuation: (listener) => api.onContinuation(listener),
+    onNewerVersion: (listener) => api.onNewerVersion?.(listener) ?? (() => undefined),
     continuationStop: (where) => api.continuationStop(where),
     onMenu: (listener) => api.onMenu(listener),
     onEvents: (listener) => api.onEvents(listener),

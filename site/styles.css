@@ -1296,8 +1296,9 @@ a {
   color: var(--coral);
 }
 
-.vs__yes {
+.vs__table td.vs__yes {
   color: var(--coral);
+  font-size: 1.25rem;
 }
 
 /* Named for the reader who is not looking at it. */
@@ -1310,9 +1311,14 @@ a {
   white-space: nowrap;
 }
 
+.vs__foot {
+  max-width: var(--full);
+  margin: 20px auto 0;
+}
+
 .vs__note {
   max-width: var(--measure);
-  margin: 20px auto 0;
+  margin: 0;
   font-size: 0.75rem;
   line-height: 1.7;
   color: var(--haze-dim);

@@ -1,5 +1,6 @@
-import { Fragment, useMemo, useState } from 'react';
-import type { Conversation, RecentProject } from '../lib/ipc';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { bridge } from '../lib/bridge';
+import type { Conversation, NewerVersion, RecentProject } from '../lib/ipc';
 import { ago } from '../lib/when';
 import type { Reference } from '../lib/projects';
 import { byDay, matching, needsDayLabels, needsSearch } from '../lib/shelf';
@@ -336,6 +337,7 @@ export default function Sidebar({
           {onAsk === undefined && onDesign === undefined && onCanvas === undefined && onHistory === undefined &&
             onReviews === undefined && onAddMore === undefined && onSkills === undefined && onSettings === undefined ? null : (
             <div className="shelf__foot">
+              <NewerBuild />
               {onAsk === undefined ? null : (
                 <button
                   type="button"
@@ -706,5 +708,41 @@ export default function Sidebar({
         </div>
       )}
     </aside>
+  );
+}
+
+/**
+ * A build newer than this one, said once and quietly.
+ *
+ * It used to arrive as a line in whichever conversation happened to be open,
+ * and with no project open it went nowhere at all. This is a row: what is out,
+ * what changed, and the one command to get it, ready to copy.
+ */
+function NewerBuild() {
+  const [out, setOut] = useState<NewerVersion | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => bridge.onNewerVersion(setOut), []);
+  if (out === null) return null;
+  return (
+    <div className="shelf__newer">
+      <span className="shelf__newername">{out.version} is out</span>
+      <a
+        className="shelf__newerlink"
+        href={`https://github.com/AadiXC0DE/graphe/releases/tag/v${out.version}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        What changed
+      </a>
+      <button
+        type="button"
+        className="shelf__newerlink"
+        onClick={() => {
+          void navigator.clipboard.writeText(out.upgrade).then(() => setCopied(true));
+        }}
+      >
+        {copied ? 'Copied' : `Copy ${out.upgrade}`}
+      </button>
+    </div>
   );
 }

@@ -42,12 +42,15 @@ brew install --cask graphe
 
 or download the disk image from the [latest release](https://github.com/AadiXC0DE/graphe/releases).
 
+This is 1.0.0. There are still rough edges, mine to find and yours to report:
+[open an issue](https://github.com/AadiXC0DE/graphe/issues).
+
 > Graphe is ad-hoc signed but not notarized yet, so on first launch macOS may ask you to allow
 > it, "Open Anyway" in System Settings > Privacy & Security, or right-click the app in Finder
 > and choose Open. See [RELEASING.md](RELEASING.md) for how it is signed.
 
 macOS is the only build today. Graphe is an Electron app and the source is open, so Windows and
-Linux can be built from it — but `electron-builder.js` has no target for either, nothing has been
+Linux can be built from it, but `electron-builder.js` has no target for either, nothing has been
 tried there, and at least the "open in your editor" press is macOS-only.
 
 ---
@@ -189,7 +192,7 @@ npm run typecheck
 npm run package      # macOS release: dmg + zip, arm64 and x64 (see RELEASING.md)
 ```
 
-`npm run package` builds for macOS only — that is the whole of `electron-builder.js`.
+`npm run package` builds for macOS only; that is the whole of `electron-builder.js`.
 
 ---
 
@@ -231,7 +234,7 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Releasing: [RELEASING.md](RELE
 | `~/.pi/agent` | The agent runtime's own folder: the provider you connected, installed add-ons, and the project memory |
 | Your project folder | Ordinary git. Every version Graphe makes is a real commit in your repository |
 
-**What leaves the machine.** Three things, all of them yours to start:
+**What leaves the machine.** Four things:
 
 - **Model calls**, to the provider you connected, on your key. Your prompt, the files the agent
   read and what it wrote go to that provider under their terms, which is what a coding agent is.
@@ -240,6 +243,8 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Releasing: [RELEASING.md](RELE
   to fetch it.
 - **GitHub**, through the `gh` command you already have signed in, when you ask for a pull request
   or a review of one.
+- **One request a day to `api.github.com`**, asking whether a newer Graphe has been released. It
+  sends nothing but the request, and it is the only call the app makes on its own.
 
 That is the list. No account, no telemetry, no analytics, no crash reporting, no server of ours in
 the middle. The diagnostics you copy from the Help menu go to your clipboard and nowhere else, and

@@ -67,6 +67,7 @@ import {
   type BuildPlan,
   type BuildAdvance,
   type ContinuationNotice,
+  type NewerVersion,
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
@@ -1155,6 +1156,16 @@ const api: GrapheApi = {
     ipcRenderer.on(CHANNEL.continuation, forward);
     return () => {
       ipcRenderer.off(CHANNEL.continuation, forward);
+    };
+  },
+
+  onNewerVersion(listener: (one: NewerVersion) => void): () => void {
+    const forward = (_source: IpcRendererEvent, one: NewerVersion): void => {
+      listener(one);
+    };
+    ipcRenderer.on(CHANNEL.newerVersion, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.newerVersion, forward);
     };
   },
 

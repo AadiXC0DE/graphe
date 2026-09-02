@@ -890,6 +890,10 @@ export type Workflow = {
 
 /** Where the app has got to carrying a job on by itself. `why` is null once it
  *  has come to rest. */
+/** A build newer than this one, and how to get it. Said once a day at most,
+ *  and never as trouble: being on last week's build is not an error. */
+export type NewerVersion = { version: string; upgrade: string };
+
 export type ContinuationNotice = {
   project: string;
   address: string;
@@ -1389,6 +1393,8 @@ export const CHANNEL = {
   buildPlanChanged: 'graphe:build-plan-changed',
   /** Where the app has got to carrying a job on by itself. */
   continuation: 'graphe:continuation',
+  /** A newer build is out. Once a day, and never in the way. */
+  newerVersion: 'graphe:newer-version',
   /** A press in the app's own menu that the window is the one to act on. */
   fromMenu: 'graphe:from-menu',
   /** Everything that happened, a frame's worth at a time. One trip across the
@@ -1897,6 +1903,7 @@ export type GrapheApi = {
   /** Where the app has got to carrying a job on by itself, drawn as the one
    *  line under the reply with a Stop beside it. */
   onContinuation(listener: (notice: ContinuationNotice) => void): () => void;
+  onNewerVersion(listener: (one: NewerVersion) => void): () => void;
   /** Stop it carrying on, from that Stop or from Escape. */
   continuationStop(where?: Where): Promise<Result<null>>;
 

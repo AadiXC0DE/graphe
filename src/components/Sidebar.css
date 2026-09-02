@@ -713,3 +713,34 @@
   font-weight: 500;
   color: var(--text-faint);
 }
+
+/* A newer build, above the foot's own rows. Quiet: being on last week's build
+   is not an error, and a card for it would read as one. */
+.shelf__newer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.shelf__newername {
+  color: var(--text-muted);
+}
+
+.shelf__newerlink {
+  padding: 0;
+  color: var(--text-faint);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.shelf__newerlink:hover {
+  color: var(--text);
+}

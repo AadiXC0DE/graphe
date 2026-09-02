@@ -4816,14 +4816,23 @@ function isNewer(candidate: string, mine: string): boolean {
   return false;
 }
 
+/** How somebody on this build gets the next one. The one command, so a row can
+ *  offer it to be copied rather than describing it. */
+const UPGRADE = 'brew upgrade --cask graphe';
+
 function watchForANewerOne(): void {
   const look = (): void => {
     void newerRelease().then((tag) => {
       if (tag === null) return;
+      // A row of its own, not a line in whichever conversation happens to be
+      // open. With no project open the thread line went nowhere at all.
+      if (mainWindow !== null && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(CHANNEL.newerVersion, { version: tag, upgrade: UPGRADE });
+      }
       send(null, {
         type: 'notice',
         what: `${tag} is out.`,
-        because: 'Upgrade with brew upgrade --cask graphe.',
+        because: `Upgrade with ${UPGRADE}.`,
         actions: [{ id: 'release-notes', label: 'What changed' }],
       });
     });

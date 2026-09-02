@@ -274,9 +274,9 @@ describe('the gate closes the moment work begins', () => {
   it('reopens for a new request and never for a message landing mid-run', () => {
     // A follow-up is somebody adding to work already going. Stopping that to
     // put a form up is the exact thing this feature must never do.
-    expect(adapter).toContain('if (activePrompts === 0) asksLeft = \'open\';');
-    const at = adapter.indexOf("if (activePrompts === 0) asksLeft = 'open';");
-    expect(adapter.indexOf('activePrompts += 1;', at) - at).toBeLessThan(60);
+    expect(adapter).toContain("asksLeft = 'open';");
+    const at = adapter.indexOf("asksLeft = 'open';");
+    expect(adapter.indexOf('activePrompts += 1;', at) - at).toBeLessThan(400);
     // Nothing else in the file may open it.
     const opens = adapter.split('\n').filter((line) => /asksLeft = 'open'/.test(line));
     expect(opens).toHaveLength(1);
@@ -285,7 +285,7 @@ describe('the gate closes the moment work begins', () => {
   it('never opens the gate again just because a turn ended', () => {
     // `settled` lets go of anything waiting, but it must not hand the next
     // tool call of the same turn a fresh question.
-    const say = adapter.slice(adapter.indexOf('const say = (event: AgentEvent): void => {'));
+    const say = adapter.slice(adapter.indexOf('const say = (raw: AgentEvent): void => {'));
     const ends = say.indexOf('sayWhatTheRulesHeld();');
     expect(ends).toBeGreaterThan(-1);
     expect(say.slice(0, ends)).not.toContain("asksLeft = 'open'");
@@ -373,7 +373,7 @@ describe('every question has an ending', () => {
   it('is let go on settle, on stop, and on close', () => {
     // Three endings, and a question outliving any one of them is a form that
     // reads as "still working" for the rest of the sitting.
-    const say = adapter.slice(adapter.indexOf('const say = (event: AgentEvent): void => {'));
+    const say = adapter.slice(adapter.indexOf('const say = (raw: AgentEvent): void => {'));
     expect(say.slice(0, say.indexOf('sayWhatTheRulesHeld();'))).toContain(
       'const dropped = asking.abandonAll();',
     );

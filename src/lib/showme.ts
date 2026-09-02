@@ -251,3 +251,70 @@ export const showMeCopy = {
   label: 'Show me what you’re doing',
   hint: 'Adds the real command, file path or operation under each step.',
 } as const;
+
+/* -------------------------------------------------------------------------- */
+/* Why it stopped                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One screen, copyable, for the question this whole app is judged on.
+ *
+ * When a friend says "it stopped", there is one thing worth having: what the
+ * app last decided, how the run ended, what was refusing steps, how heavy the
+ * prompt had become, and which add-ons were in the room. This is that screen —
+ * a machinery view, so it prints the real names the way the graph prints short
+ * ids and the design view prints token names.
+ */
+export type WhyStopped = {
+  /** What the continuation authority last decided, and why. */
+  decided: { kind: 'send' | 'rest' | 'stop'; why: string | null; said: string } | null;
+  /** How the run ended, as the adapter reported it. */
+  endedHow: string | null;
+  /** The list, if there is one. */
+  list: { done: number; total: number; finished: boolean } | null;
+  /** Rounds sent by the app, and rounds that ticked nothing off. */
+  rounds: { sent: number; stuck: number } | null;
+  /** Consecutive tool calls refused with the same reason. */
+  blockedStreak: { reason: string; count: number } | null;
+  /** How heavy the system prompt was, in characters. */
+  promptCharacters: number | null;
+  /** What each add-on will do, and what was done about it. */
+  addons: readonly { name: string; says: string; policy: string }[];
+  /** Lifecycle handlers that ran past their budget. */
+  overruns: readonly { extension: string; event: string; ms: number }[];
+};
+
+export function saysWhyStopped(one: WhyStopped): string {
+  const lines: string[] = ['why it stopped'];
+  lines.push(
+    one.decided === null
+      ? '  decided: nothing yet this sitting'
+      : `  decided: ${one.decided.kind}${
+          one.decided.why === null ? '' : ` (${one.decided.why})`
+        } — ${one.decided.said === '' ? 'nothing said' : one.decided.said}`,
+  );
+  lines.push(`  ended: ${one.endedHow ?? 'unknown'}`);
+  lines.push(
+    one.list === null
+      ? '  list: none'
+      : `  list: ${String(one.list.done)}/${String(one.list.total)}${
+          one.list.finished ? ' (finished)' : ''
+        }`,
+  );
+  if (one.rounds !== null) {
+    lines.push(`  rounds: ${String(one.rounds.sent)} sent, ${String(one.rounds.stuck)} stuck`);
+  }
+  if (one.blockedStreak !== null && one.blockedStreak.count > 0) {
+    lines.push(
+      `  blocked: ${String(one.blockedStreak.count)} in a row — ${one.blockedStreak.reason}`,
+    );
+  }
+  if (one.promptCharacters !== null) {
+    lines.push(`  prompt: ${String(one.promptCharacters)} characters`);
+  }
+  for (const addon of one.addons) lines.push(`  add-on ${addon.name}: ${addon.says} · ${addon.policy}`);
+  for (const over of one.overruns) {
+    lines.push(`  ${over.extension} ran past its budget on ${over.event} (${String(over.ms)}ms)`);
+  }
+  return lines.join('\n');
+}

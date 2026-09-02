@@ -283,25 +283,6 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
   const done = drawn.filter((one) => one.state === 'done').length;
   const busy = drawn.filter((one) => one.state === 'running').length;
 
-  /* Escape peels one layer: the panel first, then the way it is filling the
-     window. It never closes the canvas — that is the tab's own x. */
-  useEffect(() => {
-    const key = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (picked !== null) {
-        event.stopPropagation();
-        setPicked(null);
-        return;
-      }
-      if (full) {
-        event.stopPropagation();
-        onFull(false);
-      }
-    };
-    window.addEventListener('keydown', key, true);
-    return () => window.removeEventListener('keydown', key, true);
-  }, [picked, full, onFull]);
-
   useEffect(() => {
     if (refused === null) return;
     const timer = setTimeout(() => setRefused(null), 3600);
@@ -382,24 +363,49 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
     });
   }, []);
 
-  /* The keys a board is expected to answer. Only ever when the hand is not in
-     a field: Backspace in a textarea is a character, not a card. */
+  /**
+   * The keys a board is expected to answer.
+   *
+   * One handler rather than three, on the window and in the capture phase, so
+   * it hears the press wherever the hand is — including inside the name field
+   * at the top, where a menu that will not close on Escape traps the hand.
+   *
+   * The one place it cannot hear is the browser pane, which is a native view
+   * with its own keyboard: the shell watches that one and sends the press back
+   * here as a keydown on the window, which lands in this same handler.
+   *
+   * Escape peels one layer at a time — the picker, then a half-drawn join, then
+   * the panel, then the way it is filling the window. It never closes the
+   * canvas; that is the tab's own x.
+   */
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      const on = event.target as Element | null;
-      if (on?.closest('input, textarea, select, [contenteditable]') != null) return;
       if (event.key === 'Escape') {
         if (pickerOpen) {
+          event.preventDefault();
           setPickerOpen(false);
           setPickerRound((was) => was + 1);
-          event.preventDefault();
           return;
         }
-        if (joining !== null) { setJoining(null); return; }
-        if (picked !== null) { setPicked(null); event.stopPropagation(); }
+        if (joining !== null) {
+          setJoining(null);
+          return;
+        }
+        if (picked !== null) {
+          event.stopPropagation();
+          setPicked(null);
+          return;
+        }
+        if (full) {
+          event.stopPropagation();
+          onFull(false);
+        }
         return;
       }
       if (event.key !== 'Backspace' && event.key !== 'Delete') return;
+      // Backspace in a field is a character, not a card.
+      const on = event.target as Element | null;
+      if (on?.closest('input, textarea, select, [contenteditable]') != null) return;
       if (going) return;
       if (chosenLine !== null) {
         event.preventDefault();
@@ -412,9 +418,9 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
       onFlow(remove(flow, picked));
       setPicked(null);
     };
-    document.addEventListener('keydown', key);
-    return () => document.removeEventListener('keydown', key);
-  });
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, [pickerOpen, joining, picked, full, onFull, going, chosenLine, flow, onFlow]);
 
   /* Natively, and not passively: pinching over a canvas means this canvas, and
      left alone the window itself zooms underneath it. */
@@ -580,18 +586,7 @@ export default function CanvasView({ flow, onFlow, onStart, onStop, onCarryOn, c
 
   return (
     <section className={`canvas ${full ? 'canvas--full' : ''}`} aria-label={flow.name}>
-      {/* Escape, caught here rather than on the document: over a full-window
-          canvas the picker's own listener does not always see it, and a menu
-          that will not close on Escape is a menu that traps the hand. */}
-      <header
-        className="canvas__bar"
-        onKeyDownCapture={(event) => {
-          if (event.key !== 'Escape' || !pickerOpen) return;
-          event.preventDefault();
-          setPickerOpen(false);
-          setPickerRound((was) => was + 1);
-        }}
-      >
+      <header className="canvas__bar">
         <input
           className="canvas__title"
           value={flow.name}

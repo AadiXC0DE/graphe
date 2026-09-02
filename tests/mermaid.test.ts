@@ -7,9 +7,12 @@
  *  comes back as inert shapes or nothing at all — never as a script or a link
  *  that could run. */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { diagramTheme, isDarkBackground, renderMermaid } from '../src/lib/mermaid';
+
+/* Loading mermaid and drawing a diagram in jsdom takes seconds of its own. */
+vi.setConfig({ testTimeout: 30_000 });
 
 /* jsdom has no constructable stylesheets; mermaid builds its diagram CSS with
    one. The polyfill only carries rule text, which is all mermaid reads back. */

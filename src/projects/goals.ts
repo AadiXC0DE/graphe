@@ -5,25 +5,32 @@
  * disk is read back on the way in.
  */
 
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { readFile, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 
+import { writeAtomically } from '../lib/atomic';
 import { readStoredGoal, type Goal } from '../work/goal';
 
-function goalFileFor(project: string, base: string): string {
+/** One goal per conversation, not per project. A project has as many tabs as
+ *  it has conversations, and one goal between them belonged to whichever
+ *  happened to settle. */
+function goalFileFor(project: string, base: string, address = ''): string {
   const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
-  const digest = createHash('sha256').update(resolve(project)).digest('hex').slice(0, 8);
+  const digest = createHash('sha256')
+    .update(`${resolve(project)}\u0000${address}`)
+    .digest('hex')
+    .slice(0, 8);
   return join(base, 'goals', `${key}-${digest}.json`);
 }
 
 export class GoalFile {
-  static pathFor(project: string, userData: string): string {
-    return goalFileFor(project, userData);
+  static pathFor(project: string, userData: string, address = ''): string {
+    return goalFileFor(project, userData, address);
   }
 
-  static async read(project: string, userData: string): Promise<Goal | null> {
-    const file = goalFileFor(project, userData);
+  static async read(project: string, userData: string, address = ''): Promise<Goal | null> {
+    const file = goalFileFor(project, userData, address);
     try {
       const raw = await readFile(file, 'utf8');
       // The same parse the window uses, so a half-written file cannot be
@@ -34,16 +41,19 @@ export class GoalFile {
     }
   }
 
-  static async write(project: string, userData: string, goal: Goal): Promise<void> {
-    const file = goalFileFor(project, userData);
-    await mkdir(dirname(file), { recursive: true });
-    const beside = join(dirname(file), `.${basename(file)}.writing`);
-    await writeFile(beside, `${JSON.stringify(goal, null, 2)}\n`, 'utf8');
-    await rename(beside, file);
+  static async write(
+    project: string,
+    userData: string,
+    goal: Goal,
+    address = '',
+  ): Promise<void> {
+    await writeAtomically(
+      goalFileFor(project, userData, address),
+      `${JSON.stringify(goal, null, 2)}\n`,
+    );
   }
 
-  static async clear(project: string, userData: string): Promise<void> {
-    const file = goalFileFor(project, userData);
-    await rm(file, { force: true }).catch(() => undefined);
+  static async clear(project: string, userData: string, address = ''): Promise<void> {
+    await rm(goalFileFor(project, userData, address), { force: true }).catch(() => undefined);
   }
 }

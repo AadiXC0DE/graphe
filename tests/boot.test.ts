@@ -57,6 +57,6 @@ describe('the model the meaning engine downloads', () => {
     // is a read-only archive — so it is downloaded again on every launch, and
     // nothing says so, because every embedding failure is the word path.
     expect(MEMORY).toContain('env.cacheDir = cacheDir');
-    expect(ADAPTER).toContain("defaultEmbedder(join(agentDir, 'model'))");
+    expect(ADAPTER).toContain("defaultEmbedder(join(agentDir, 'model')");
   });
 });

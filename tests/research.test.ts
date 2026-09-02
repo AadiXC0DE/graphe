@@ -1,6 +1,7 @@
 /** The research brief: what goes out in front of somebody's question when they
  *  ask for the question to be researched rather than answered. */
 
+import { lookFirstStore } from '../src/lib/lookfirst';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +14,7 @@ import {
   researchBrief,
   researchWords,
   RESEARCH_BRIEF,
+  stepsFromReport,
 } from '../src/agent/research';
 
 describe('what research sends', () => {
@@ -90,12 +92,18 @@ describe('what research sends', () => {
     expect(app).not.toMatch(/classifyResearch|researchCases|PROCEED_RE/);
   });
 
-  it('turns only the model-written implementation section into the build checklist', () => {
-    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-    expect(app).toContain('implementationPlanFromResearch(report)');
-    expect(app).toContain('parseProposal(planText)');
-    expect(app).toContain('const steps = proposal?.steps ?? []');
-    expect(app).toContain('.buildSave(');
+  it('reads the plan the model wrote and nothing it did not', () => {
+    const report = [
+      'Findings: three ways to do it.',
+      '',
+      'IMPLEMENTATION PLAN',
+      '1. Move the reader',
+      '2. Wire the panel',
+    ].join('\n');
+    expect(stepsFromReport(report)).toEqual({
+      steps: ['Move the reader', 'Wire the panel'],
+      from: 'heading',
+    });
   });
 
   /* The same sweep every other word bank in the app stands: plain words on the
@@ -122,15 +130,12 @@ describe('the answer to a look-around is built, not looked at again', () => {
     // "now implement the redesign" carries the same words that made it look
     // around in the first place, so judging it by the same rule plans the plan.
     expect(worthPlanning('now implement the redesign')).toBe(true);
-    expect(app).toContain('const justLookedFirst = useRef(false)');
   });
 
   it('turns the look-around off for the message that answers it', () => {
     // Both send paths, and every one-shot that comes back as a report to
-    // answer rather than a request to look around again.
-    expect(app.match(/const answering = justLookedFirst\.current;/g)?.length).toBe(2);
-    expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(4);
-    // The rule itself lives where it can be tested, and both paths call it.
+    // answer rather than a request to look around again. The rule itself lives
+    // where it can be tested, and both paths call it.
     expect(app.match(/shouldLookFirst\(\{ plans, answering, text \}\)/g)?.length).toBe(2);
   });
 
@@ -154,44 +159,104 @@ describe('the answer to a look-around is built, not looked at again', () => {
     expect(app).not.toContain("howFar !== 'doing' &&\n          (plans ===");
   });
 
+  /* It used to be one boolean for the whole window, so a look-around in one tab
+     exempted the next message in another — and the answer to a plan planned the
+     plan again. It belongs to the conversation that asked. */
+  it('is remembered per conversation, not once for the window', () => {
+    const one = lookFirstStore();
+    one.asked('/work/site', 'a');
+    expect(one.answering('/work/site', 'b')).toBe(false);
+    expect(one.answering('/work/site', 'a')).toBe(true);
+  });
+
   it('judges the message after that one fresh', () => {
-    // Cleared on read, so only the immediate answer is exempt.
-    const at = app.indexOf('const answering = justLookedFirst.current;');
-    expect(app.slice(at, at + 120)).toContain('justLookedFirst.current = false;');
+    const one = lookFirstStore();
+    one.asked('/work/site', 'a');
+    expect(one.answering('/work/site', 'a')).toBe(true);
+    // Cleared on reading, so only the immediate answer is exempt.
+    expect(one.answering('/work/site', 'a')).toBe(false);
+  });
+
+  it('keeps what was asked for, so approving a plan sends that sentence again', () => {
+    const one = lookFirstStore();
+    one.remember('/work/site', 'a', 'redo the header');
+    expect(one.said('/work/site', 'a')).toBe('redo the header');
+    expect(one.said('/work/site', 'b')).toBe('');
+  });
+
+  it('tells apart two projects with a conversation of the same name', () => {
+    const one = lookFirstStore();
+    one.asked('/work/one', 'a');
+    expect(one.answering('/work/other', 'a')).toBe(false);
+    expect(one.answering('/work/one', 'a')).toBe(true);
   });
 });
 
-describe('research, the checklist, and the answer to it', () => {
-  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+/* ========================================================================== */
+/* The steps a report offers, and where they came from                         */
+/* ========================================================================== */
 
-  it('turns the plan research wrote into the checklist, when it wrote one', () => {
+describe('what a research report offers to do next', () => {
+  it('takes the section the brief asked for, when the model wrote it', () => {
     const report = [
       'Findings: three ways to do it.',
       '',
-      'IMPLEMENTATION PLAN',
+      '## Implementation Plan',
       '1. Move the reader',
       '2. Wire the panel',
       '3. Cover it with a test',
     ].join('\n');
-    const found = implementationPlanFromResearch(report);
-    expect(found).not.toBeNull();
-    expect(parseProposal(found ?? '').steps.length).toBe(3);
+    const found = stepsFromReport(report);
+    expect(found.from).toBe('heading');
+    expect(found.steps).toHaveLength(3);
+    expect(found.steps[0]).toBe('Move the reader');
   });
 
-  it('has nothing to build from when research wrote no plan', () => {
+  /* A report that laid its steps out plainly used to lose all of them to a
+     heading it did not happen to write. The steps are the point; the heading is
+     only the easiest way to find them. */
+  it('falls back to the report’s own numbered list when there is no heading', () => {
+    const report = [
+      'Three things would have to change:',
+      '',
+      '1. Move the reader out of the window',
+      '2. Wire the panel to it',
+      '3. Cover both with a test',
+      '',
+      'The first is the one that carries risk.',
+    ].join('\n');
+    const found = stepsFromReport(report);
+    expect(found.from).toBe('numbered');
+    expect(found.steps).toEqual([
+      'Move the reader out of the window',
+      'Wire the panel to it',
+      'Cover both with a test',
+    ]);
+  });
+
+  it('prefers the heading over a numbered list somewhere else in the report', () => {
+    const report = [
+      'Sources:',
+      '1. The router',
+      '2. The old ticket',
+      '',
+      'IMPLEMENTATION PLAN',
+      '1. Move the reader',
+    ].join('\n');
+    expect(stepsFromReport(report)).toEqual({ steps: ['Move the reader'], from: 'heading' });
+  });
+
+  it('offers nothing at all for a report that is only prose', () => {
+    const report =
+      'The behaviour is confirmed and the cause is the router. Nothing here needs building yet.';
+    expect(stepsFromReport(report)).toEqual({ steps: [], from: 'none' });
+    expect(stepsFromReport('')).toEqual({ steps: [], from: 'none' });
+  });
+
+  it('leaves the older reader working, so a caller can still ask for the section itself', () => {
+    const report = 'Findings.\n\nIMPLEMENTATION PLAN\n1. Move the reader';
+    expect(implementationPlanFromResearch(report)).toBe('1. Move the reader');
     expect(implementationPlanFromResearch('Findings, and no plan section at all.')).toBeNull();
-  });
-
-  it('only exempts the answer when there is a checklist to answer with', () => {
-    // Research that produced steps leaves the exemption standing, so "now build
-    // it" builds them. Research that produced none clears it, so the same words
-    // earn their own look-around and the big job is still tracked.
-    expect(app).toContain('if (steps.length === 0) justLookedFirst.current = false;');
-  });
-
-  it('creates the checklist when research settles, not on a later message', () => {
-    const at = app.indexOf('implementationPlanFromResearch(report)');
-    const near = app.slice(Math.max(0, at - 400), at);
-    expect(near).toContain("notice.event.type === 'settled'");
+    expect(parseProposal(implementationPlanFromResearch(report) ?? '').steps).toHaveLength(1);
   });
 });

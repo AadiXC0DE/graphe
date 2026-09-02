@@ -37,3 +37,45 @@
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
+
+/* The token half. A credential is never shown back — what somebody needs to
+   know is whether one is held, not what it is. */
+.letin__token {
+  margin-top: var(--space-3, 12px);
+  padding-top: var(--space-3, 12px);
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+
+.letin__tokenrow {
+  display: flex;
+  gap: var(--space-2, 8px);
+  align-items: center;
+  margin-top: var(--space-2, 8px);
+}
+
+.letin__field {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2, 8px);
+  font: inherit;
+  color: var(--text, inherit);
+  background: var(--field, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-1, 6px);
+}
+
+.letin__keep {
+  flex: 0 0 auto;
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  font: inherit;
+  color: var(--text, inherit);
+  background: var(--field, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-1, 6px);
+  cursor: pointer;
+}
+
+.letin__keep:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

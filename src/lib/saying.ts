@@ -30,6 +30,9 @@ export type Listening = {
   onresult: ((event: Said) => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
+  /** Only the probe listens for this: it is the difference between a recogniser
+   *  that started and one that will fail a moment later. */
+  onstart?: (() => void) | null;
 };
 
 /** What comes back each time more has been made out. Array-like, both levels. */
@@ -190,4 +193,82 @@ export function wordsFor(error: string | null | undefined): {
     default:
       return { because: SAYING.trouble, keepOffering: true };
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Whether it works here at all                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Asking the machine, rather than asking whether the constructor exists.
+ *
+ * The constructor exists in every Chromium, and inside an Electron app the
+ * recognition behind it needs a speech service Electron does not ship — so the
+ * microphone appeared for everybody, asked for the microphone, and failed with
+ * `network` a moment later. That is a broken promise, and worse than no button.
+ *
+ * So it is tried once, quietly, and the answer is remembered: a machine that
+ * cannot do this is not asked again on every launch.
+ */
+export const LISTENING_ANSWER = 'graphe:listening-works';
+
+/** What a remembered answer looks like. Anything else is "nobody has asked". */
+export function rememberedListening(read: (key: string) => string | null): boolean | null {
+  const said = read(LISTENING_ANSWER);
+  if (said === 'yes') return true;
+  if (said === 'no') return false;
+  return null;
+}
+
+/** One quiet attempt. Resolves false the moment recognition says it cannot, and
+ *  true once it has started without complaint. Never throws, and never leaves a
+ *  recogniser running. */
+export function probeListening(scope: unknown, patience = 2_000): Promise<boolean> {
+  const Ears = earsIn(scope);
+  if (Ears === null) return Promise.resolve(false);
+  return new Promise<boolean>((answer) => {
+    let settled = false;
+    const done = (works: boolean): void => {
+      if (settled) return;
+      settled = true;
+      answer(works);
+    };
+    let ears: Listening | null = null;
+    try {
+      ears = new Ears();
+      ears.continuous = false;
+      ears.interimResults = false;
+      ears.onerror = (event) => {
+        // `not-allowed` is somebody saying no to the microphone, which is an
+        // answer about this moment rather than about this machine.
+        done(event.error === 'not-allowed');
+        try {
+          ears?.abort();
+        } catch {
+          // Already gone.
+        }
+      };
+      ears.onstart = () => {
+        done(true);
+        try {
+          ears?.abort();
+        } catch {
+          // Already gone.
+        }
+      };
+      ears.start();
+    } catch {
+      done(false);
+      return;
+    }
+    // A recogniser that neither starts nor complains is one that does not work.
+    setTimeout(() => {
+      done(false);
+      try {
+        ears?.abort();
+      } catch {
+        // Already gone.
+      }
+    }, patience);
+  });
 }

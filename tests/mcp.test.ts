@@ -27,7 +27,14 @@ import {
   savingFrom,
   writeMcpConfig,
 } from '../src/agent/pi/mcp';
-import { REACHABLE, SAID, alreadyReached, asServer, type Reach } from '../src/agent/pi/reach';
+import {
+  PINNED,
+  REACHABLE,
+  SAID,
+  alreadyReached,
+  asServer,
+  type Reach,
+} from '../src/agent/pi/reach';
 import { grapheTools } from '../src/agent/pi/tools';
 import type { Connected } from '../src/lib/ipc';
 
@@ -343,7 +350,7 @@ describe('a tool somebody picked off the shelf', () => {
     const read = await readMcpConfig(folder);
     expect(read.servers[0]?.name).toBe('browser');
     expect(read.servers[0]?.command).toBe('npx');
-    expect(read.servers[0]?.args).toEqual(['-y', '@playwright/mcp@latest']);
+    expect(read.servers[0]?.args).toEqual(['-y', `@playwright/mcp@${PINNED['@playwright/mcp']}`]);
   });
 
   /* Made up rather than taken off the shelf: what is on the shelf changes with

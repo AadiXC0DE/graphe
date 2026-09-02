@@ -21,7 +21,9 @@ export type Task = {
   /** The command that must pass before this step is marked done, if there is
    *  one. Lowercased once so `NPM RUN` and `npm run` are the same answer. */
   test: string | null;
-  status: 'pending' | 'doing' | 'done' | 'failed';
+  /** Only the model writes this. `skipped` is settled work the model decided
+   *  not to do; `failed` is work still owed. */
+  status: 'pending' | 'doing' | 'done' | 'failed' | 'skipped';
   /** What came of the last run, in a sentence. */
   note: string | null;
 };
@@ -35,7 +37,14 @@ export const buildWords = {
   doing: 'Working on',
   pending: 'Still to do',
   failed: 'Needs another try',
+  skipped: 'Skipped',
 } as const;
+
+/** Settled work: done, or deliberately skipped. Both are off the list of what
+ *  is still owed, and only these two count towards a finished plan. */
+function settled(one: Task): boolean {
+  return one.status === 'done' || one.status === 'skipped';
+}
 
 /** A task title trimmed to a length a row can hold. */
 function tied(title: string): string {
@@ -62,26 +71,27 @@ export function taskFrom(line: string, n: number): Task | null {
   return { n, title, acceptance: '', test: null, status: 'pending', note: null };
 }
 
-/** Whether one task is finished, so a resumed run knows where to begin. */
+/** What is still owed, so a resumed run knows where to begin. */
 export function unfinished(plan: readonly Task[]): readonly Task[] {
-  return plan.filter((one) => one.status !== 'done');
+  return plan.filter((one) => !settled(one));
 }
 
 /** Whether there is nothing left to build. A tracker that has finished has said
  *  everything it has to say; kept, it sits above every later conversation in
  *  the project reading 4/4. An empty plan is not finished, it is not a plan. */
 export function isFinished(plan: readonly Task[]): boolean {
-  return plan.length > 0 && plan.every((one) => one.status === 'done');
+  return plan.length > 0 && plan.every(settled);
 }
 
-/** The next task to work on: the first not-yet-done, or nothing. */
+/** The next task to work on: the first still owed, or nothing. */
 export function nextOf(plan: readonly Task[]): Task | null {
-  return plan.find((one) => one.status !== 'done') ?? null;
+  return plan.find((one) => !settled(one)) ?? null;
 }
 
-/** How far the plan has got. */
+/** How far the plan has got. A skipped step counts towards the total settled,
+ *  or a finished list would read 4 of 5. */
 export function progress(plan: readonly Task[]): PlanProgress {
-  return { done: plan.filter((one) => one.status === 'done').length, total: plan.length };
+  return { done: plan.filter(settled).length, total: plan.length };
 }
 
 /** Mark one task moving or done, leaving the rest alone. */
@@ -98,23 +108,6 @@ export function note(plan: readonly Task[], n: number, said: string): readonly T
  *  a settled turn just finished, or failed. */
 export function inHand(plan: readonly Task[]): Task | null {
   return plan.find((one) => one.status === 'doing') ?? nextOf(plan) ?? null;
-}
-
-/** Mark the next task as the one being worked on now. A task already in hand is
- *  left alone, so a run that starts twice in a row only marks once. */
-export function startTask(plan: readonly Task[]): readonly Task[] {
-  const current = inHand(plan);
-  if (current === null || current.status === 'doing') return plan;
-  return setStatus(plan, current.n, 'doing');
-}
-
-/** Close off the task a turn just finished: `ok` marks the current one done,
- *  otherwise failed. Nothing left to do leaves the plan alone, so a turn that
- *  settles with the build already finished disturbs nothing. */
-export function finishTask(plan: readonly Task[], ok: boolean): readonly Task[] {
-  const current = inHand(plan);
-  if (current === null) return plan;
-  return setStatus(plan, current.n, ok ? 'done' : 'failed');
 }
 
 /** New requirements found while building get their own rows, appended after the
@@ -137,11 +130,17 @@ export function addTasks(plan: readonly Task[], titles: readonly string[]): read
 
 /** How many are done and how many are stuck, for the one line under the open
  *  panel. */
-export function standing(plan: readonly Task[]): { done: number; total: number; failed: number } {
+export function standing(plan: readonly Task[]): {
+  done: number;
+  total: number;
+  failed: number;
+  skipped: number;
+} {
   return {
     done: plan.filter((one) => one.status === 'done').length,
     total: plan.length,
     failed: plan.filter((one) => one.status === 'failed').length,
+    skipped: plan.filter((one) => one.status === 'skipped').length,
   };
 }
 
@@ -149,9 +148,11 @@ export function standing(plan: readonly Task[]): { done: number; total: number; 
  *  checklist a person can edit by hand and the resume can scrape. */
 export function toMarkdown(plan: readonly Task[]): string {
   const lines = plan.map((one) => {
-    const box = one.status === 'done' ? '[x]' : '[ ]';
+    const box = one.status === 'done' ? '[x]' : one.status === 'skipped' ? '[-]' : '[ ]';
     const test = one.test === null ? '' : ` (runs \`${one.test}\`)`;
-    return `- ${box} ${one.title}${test}`;
+    // The number is how the model names the step it is changing, so it is on
+    // every row rather than left to be counted.
+    return `- ${box} ${String(one.n)}. ${one.title}${test}`;
   });
   return lines.join('\n');
 }
@@ -196,7 +197,10 @@ export function readPlan(raw: unknown): readonly Task[] {
     const title = typeof one['title'] === 'string' ? one['title'] : '';
     if (n <= 0 || title === '') continue;
     const status =
-      one['status'] === 'done' || one['status'] === 'doing' || one['status'] === 'failed'
+      one['status'] === 'done' ||
+      one['status'] === 'doing' ||
+      one['status'] === 'failed' ||
+      one['status'] === 'skipped'
         ? one['status']
         : 'pending';
     out.push({
@@ -209,4 +213,175 @@ export function readPlan(raw: unknown): readonly Task[] {
     });
   }
   return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* The model's own hand on the list                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The list as it was stored, whole.
+ *
+ * `finished` rather than a missing file: a list that reads as finished used to
+ * be deleted on the spot, so a list falsely completed mid-job vanished with
+ * nothing to resume from. It stays until somebody clears it.
+ */
+export type StoredPlan = {
+  source: string;
+  tasks: readonly Task[];
+  finished: boolean;
+};
+
+/** Whether the model must say which step it means. One step still owed can only
+ *  be that one; two or more and a bare tick is a guess. */
+export function needsWhich(plan: readonly Task[]): boolean {
+  return unfinished(plan).length > 1;
+}
+
+/** The step a number names, or nothing. */
+function stepAt(plan: readonly Task[], n: number): Task | null {
+  return plan.find((one) => one.n === n) ?? null;
+}
+
+/** Where the list stands, in the sentence a step tool answers with. A tool that
+ *  answers "ok" teaches the model nothing about the list it is working. */
+export function saysList(plan: readonly Task[], touched: Task | null, what: string): string {
+  const how = progress(plan);
+  const next = nextOf(plan);
+  const named = touched === null ? '' : `“${touched.title}” ${what}. `;
+  if (isFinished(plan)) {
+    return `${named}That was the last of ${String(how.total)} — the list is finished.`;
+  }
+  return `${named}${String(how.done)} of ${String(how.total)} settled.${
+    next === null ? '' : ` Next on the list: ${String(next.n)}. “${next.title}”.`
+  }`;
+}
+
+/** What every step operation answers with: the list as it now stands, and the
+ *  sentence that says what moved. */
+export type Moved = { plan: readonly Task[]; said: string };
+
+/** No such step. Said rather than silently ignored, or a model that mistypes a
+ *  number believes it ticked something. */
+function noSuchStep(plan: readonly Task[], n: number): Moved {
+  const owed = unfinished(plan)
+    .map((one) => String(one.n))
+    .join(', ');
+  return {
+    plan,
+    said: `There is no step ${String(n)} on this checklist.${
+      owed === '' ? '' : ` Still open: ${owed}.`
+    }`,
+  };
+}
+
+function moveTo(
+  plan: readonly Task[],
+  n: number,
+  status: Task['status'],
+  what: string,
+  why: string | null,
+): Moved {
+  const was = stepAt(plan, n);
+  if (was === null) return noSuchStep(plan, n);
+  let next = setStatus(plan, n, status);
+  if (why !== null && why.trim() !== '') next = note(next, n, why.trim());
+  return { plan: next, said: saysList(next, was, what) };
+}
+
+/** The model ticks one off, by number. */
+export function tickStep(plan: readonly Task[], n: number, why?: string | null): Moved {
+  return moveTo(plan, n, 'done', 'is ticked off', why ?? null);
+}
+
+/** The model says one is being worked on now. */
+export function startStep(plan: readonly Task[], n: number): Moved {
+  return moveTo(plan, n, 'doing', 'is the one in hand', null);
+}
+
+/** The model says one did not work. Still owed: a failed step is one to try
+ *  again, which is why it does not count towards a finished list. */
+export function failStep(plan: readonly Task[], n: number, why: string): Moved {
+  return moveTo(plan, n, 'failed', 'did not work', why);
+}
+
+/** The model says one is not going to be done, and why. Settled, not owed. */
+export function skipStep(plan: readonly Task[], n: number, why: string): Moved {
+  return moveTo(plan, n, 'skipped', 'is skipped', why);
+}
+
+/** Take one off the list entirely. The numbers of the rest are left as they
+ *  were: a step somebody has been reading as "7" must not become "6" under
+ *  them. */
+export function dropStep(plan: readonly Task[], n: number, why: string): Moved {
+  const was = stepAt(plan, n);
+  if (was === null) return noSuchStep(plan, n);
+  const next = plan.filter((one) => one.n !== n);
+  const because = why.trim() === '' ? '' : ` (${why.trim()})`;
+  return {
+    plan: next,
+    said: `“${was.title}” is off the list${because}. ${saysList(next, null, '')}`.trim(),
+  };
+}
+
+/** Put a new step in after another, with a number of its own. */
+export function insertStep(plan: readonly Task[], after: number, title: string): Moved {
+  const clean = tied(title);
+  if (clean === '') return { plan, said: 'A step needs a title.' };
+  const at = plan.findIndex((one) => one.n === after);
+  if (at < 0 && plan.length > 0) return noSuchStep(plan, after);
+  const free = plan.reduce((most, one) => Math.max(most, one.n), 0) + 1;
+  const added: Task = {
+    n: free,
+    title: clean,
+    acceptance: '',
+    test: null,
+    status: 'pending',
+    note: null,
+  };
+  const next = [...plan.slice(0, at + 1), added, ...plan.slice(at + 1)];
+  return { plan: next, said: `“${clean}” is on the list as step ${String(free)}. ${saysList(next, null, '')}`.trim() };
+}
+
+/**
+ * Write the list again, keeping what has already been settled.
+ *
+ * Matched on the words: a step that was ticked and is still on the new list is
+ * still ticked, and a title reused for different work does not inherit one. A
+ * failed step comes back as still to do, because a failure is work owed.
+ */
+export function replaceKeepingTicks(
+  plan: readonly Task[],
+  titles: readonly string[],
+): readonly Task[] {
+  const wanted = titles.map((one) => tied(one)).filter((one) => one !== '');
+  return wanted.map((title, index) => {
+    const was = plan.find((one) => one.title.trim() === title.trim());
+    const status: Task['status'] =
+      was?.status === 'done' || was?.status === 'skipped' ? was.status : 'pending';
+    return {
+      n: index + 1,
+      title,
+      acceptance: was?.acceptance ?? '',
+      test: was?.test ?? null,
+      status,
+      note: status === 'pending' ? null : (was?.note ?? null),
+    };
+  });
+}
+
+/**
+ * A stored list read back off disk.
+ *
+ * An empty list is a list being worked out, not the absence of one — returning
+ * nothing for it is why "make the checklist" could overwrite the name of the
+ * thing being built. A finished list is returned finished rather than as
+ * nothing, so it stays on screen until somebody clears it.
+ */
+export function readStored(raw: unknown): StoredPlan | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const stored = raw as { source?: unknown; tasks?: unknown };
+  if (typeof stored.source !== 'string') return null;
+  const tasks = readPlan(stored.tasks);
+  return { source: stored.source, tasks, finished: isFinished(tasks) };
 }

@@ -66,10 +66,6 @@ export const CURATED: readonly { id: string; why: string }[] = [
     why: 'Lets me see how the pieces of your project connect before I change one, so renaming something reaches every place that mentions it.',
   },
   {
-    id: 'pi-subagents',
-    why: 'Lets me split a long job between several helpers working at once, so a big change finishes in one sitting.',
-  },
-  {
     id: 'pi-advisor-flow',
     why: 'The advisor: a stronger model asked before a plan, when I keep getting something wrong, and before I tell you a thing is finished.',
   },

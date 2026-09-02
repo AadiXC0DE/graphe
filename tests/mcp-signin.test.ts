@@ -59,13 +59,23 @@ describe('the door the browser comes back to', () => {
 
   it('registers without a port, because the next launch will have another', async () => {
     const one = await signIn();
-    // Port-less, and the same pair the hosted document names: the operating
-    // system picks a different port every launch.
+    // Port-less: the operating system picks a different one every launch.
     expect(one.clientMetadata.redirect_uris).toEqual([
       'http://127.0.0.1/callback',
       'http://localhost/callback',
     ]);
     expect(one.redirectUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback$/);
+    one.done();
+  });
+
+  it('says who it is out of the app, so no sign-in waits on a web host', async () => {
+    const one = await signIn();
+    expect(one.clientMetadataUrl).toBeUndefined();
+    expect(one.clientMetadata.client_name).toBe('Graphe');
+    // Loopback only. Anything else would be an address off this machine.
+    for (const where of one.clientMetadata.redirect_uris) {
+      expect(new URL(where).hostname).toMatch(/^(127\.0\.0\.1|localhost)$/);
+    }
     one.done();
   });
 

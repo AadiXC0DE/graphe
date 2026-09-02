@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import {
   PLAN_WORDS,
   decideOn,
+  forTheCard,
   moved,
   type PlanDecision,
 } from '../agent/plan';
@@ -25,6 +26,10 @@ type Props = {
     decision: PlanDecision,
   ) => void;
   onChange: () => void;
+  /** Pressed when nothing could be read out of the reply: ask for the same plan
+   *  again, as a list. Falls back to `onChange` where a caller has no separate
+   *  path for it. */
+  onAskAgain?: () => void;
 };
 
 /**
@@ -43,7 +48,15 @@ type Props = {
  * Every decision here is made in agent/plan.ts; this holds what somebody left
  * behind and hands it over.
  */
-export default function PlanCard({ steps, caveats, questions = [], answered, onGo, onChange }: Props) {
+export default function PlanCard({
+  steps,
+  caveats,
+  questions = [],
+  answered,
+  onGo,
+  onChange,
+  onAskAgain,
+}: Props) {
   /** Where each proposed step now sits. The steps themselves are never
    *  rewritten, so a step put back is identical to one never moved. */
   const [order, setOrder] = useState<readonly number[]>(() => steps.map((_, at) => at));
@@ -54,12 +67,35 @@ export default function PlanCard({ steps, caveats, questions = [], answered, onG
   const [writing, setWriting] = useState<number | null>(null);
   /** Said out loud after a move, for somebody who cannot see the list shift. */
   const [heard, setHeard] = useState('');
+  /** A long plan is read a screenful at a time; all of it runs either way. */
+  const [showingAll, setShowingAll] = useState(false);
   const noteBox = useRef<HTMLTextAreaElement | null>(null);
+
+  /* Nothing to agree to is still something to say. Without this the card does
+     not appear at all, and plan mode ends with no way forward. */
+  if (steps.length === 0) {
+    return (
+      <section className="plan" aria-label="What I would do">
+        <h2 className="plan__heading">{PLAN_WORDS.noSteps}</h2>
+        <div className="plan__actions">
+          <button
+            type="button"
+            className="plan__button plan__button--go"
+            onClick={onAskAgain ?? onChange}
+          >
+            {PLAN_WORDS.askAgain}
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   const settled = answered !== null;
   const decision = decideOn(steps, order, dropped, notes, questions, answers);
   const kept = decision.kept.map((one) => one.step);
   const nothingLeft = kept.length === 0 && steps.length > 0;
+  const { shown, more } = forTheCard(steps);
+  const onScreen = showingAll ? order : order.slice(0, shown.length);
 
   const toggle = (at: number): void => {
     setDropped((was) => {
@@ -114,7 +150,7 @@ export default function PlanCard({ steps, caveats, questions = [], answered, onG
       <h2 className="plan__heading">{PLAN_WORDS.heading}</h2>
 
       <ol className="plan__steps">
-        {order.map((at, place) => {
+        {onScreen.map((at, place) => {
           const step = steps[at];
           if (step === undefined) return null;
           const out = dropped.has(at);
@@ -220,6 +256,19 @@ export default function PlanCard({ steps, caveats, questions = [], answered, onG
           );
         })}
       </ol>
+
+      {more === 0 ? null : (
+        <p className="plan__left">
+          <button
+            type="button"
+            className="plan__done"
+            aria-expanded={showingAll}
+            onClick={() => setShowingAll(!showingAll)}
+          >
+            {showingAll ? PLAN_WORDS.showFewer : PLAN_WORDS.showRest(more)}
+          </button>
+        </p>
+      )}
 
       <p className="plan__hidden" aria-live="polite">
         {heard}

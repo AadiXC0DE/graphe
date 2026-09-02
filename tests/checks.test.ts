@@ -23,6 +23,7 @@ import {
   usualChecks,
   type ProjectCheck,
 } from '../src/agent/pi/checks';
+import { capsNow } from '../src/work/capacity';
 import { ProjectHistory } from '../src/history/repo';
 import { REVIEW_ANGLES, parseReview } from '../src/agent/pi/review';
 import { grapheTools, readDiffTool, reviewerBriefs, runChecksTool } from '../src/agent/pi/tools';
@@ -247,6 +248,10 @@ describe('CH-05 the checks actually run', () => {
     expect(verdicts).toHaveLength(20);
     expect(most).toBeLessThanOrEqual(CHECKS_AT_A_TIME);
     expect(most).toBe(CHECKS_AT_A_TIME);
+  });
+
+  it('takes its number of lanes from the one place the caps are worked out', () => {
+    expect(CHECKS_AT_A_TIME).toBe(capsNow().checks);
   });
 
   it('lets one reviewer fall over without losing the answers of the others', async () => {

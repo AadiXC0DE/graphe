@@ -56,7 +56,7 @@ import {
 } from '../../work/always';
 import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, withheldWhilePlanning } from '../plan';
-import type { AgentEvent, ImageCard, ToolCall, Verdict } from '../types';
+import type { AgentEvent, ImageCard, SettledHow, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
 import { EventRelay } from './events';
 import { RepairCoordinator, repairPrompt } from './repair';
@@ -74,7 +74,7 @@ import {
 import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
 import { browserFolder, closeBrowser } from './computer';
-import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepDone, type CancelBuild, type MakeChecklist, type HelperModel, type HelperPace } from './tools';
+import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepMoved, type CancelBuild, type MakeChecklist, type HelperModel, type HelperPace } from './tools';
 import { lspTool } from './lsp';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
@@ -83,8 +83,42 @@ import { McpRegistry, inProject, mcpTool, readMcpConfig } from './mcp';
 import { parseReview } from './review';
 import { askWords, cannotAsk, saysAnswers, tidyQuestions, type Answers } from '../asking';
 import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
+import { maskToolResult } from './redact';
+import { cachedProbe, extensionPathsIn, saysCard, type CapabilityCard } from './extension-probe';
 
-import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
+import { recentOverruns, withHookBudget } from './hook-budget';
+import {
+  dropsEntirely,
+  dropsLifecycleHooks,
+  policyFor,
+  type Policy,
+  type SessionKind,
+} from './extension-policy';
+
+/** The folder an add-on lives in, which is what its author called it. */
+function nameFromPath(where: string): string {
+  const parts = where.split(/[\\/]/).filter((part) => part !== '');
+  return parts[parts.length - 1] ?? 'an add-on';
+}
+
+/** The hooks that let an add-on end, extend or restart a turn. Dropped for one
+ *  that starts turns of its own; its tools still work. */
+const LIFECYCLE_HOOKS: readonly string[] = [
+  'agent_end',
+  'agent_settled',
+  'turn_end',
+  'turn_start',
+  'session_compact',
+  'before_agent_start',
+];
+
+/** What the window is told when something outside Graphe is refusing every
+ *  step. Said as a notice rather than an error: the conversation did nothing
+ *  wrong, and painting it red for an add-on's decision is the app blaming the
+ *  work for its own housekeeping. */
+const ADDON_BLOCKED = 'An add-on has stopped every step of this run.';
+
+import { defaultEmbedder, memoryFileName, memoryWords, openMemory, type MemoryStore } from '../memory';
 import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
 import { Running, type RunningPiece } from '../running';
 import {
@@ -656,8 +690,38 @@ export type CreateSessionOptions = {
    *  what keeps a run on the board from filling the board it is running on. */
   putOnBoard?: PutOnBoard;
   /** Tick one thing off the checklist the person can see. */
-  stepDone?: StepDone;
-  /** Cancel that checklist. Same reach as `stepDone`, so it only exists where
+  stepMoved?: StepMoved;
+  /**
+   * Graphe's own standing block, asked for at the top of every model call.
+   *
+   * A function rather than a string: the checklist moves during a turn, and a
+   * block captured when the conversation opened is a block that is wrong by the
+   * second reply.
+   */
+  standing?: () => Promise<string | null>;
+  /** Where provider credentials are read from, when the shell has written them
+   *  out of the login keychain. Left out, Pi's own file is used — a plain file
+   *  holding OAuth tokens and an API key. */
+  authPath?: string;
+  /** What kind of session this is, so an add-on that starts turns of its own is
+   *  not loaded into a board piece or a helper. */
+  sessionKind?: SessionKind;
+  /** The person's own answer for this conversation, when they have given one. */
+  addonsChosen?: Policy;
+  /** The two gates the advisor can hold, both off unless somebody turned one
+   *  on. Written into the advisor's own settings file every session start, so
+   *  an existing file stops overriding what Graphe intends. */
+  advisorGates?: { completionGate: boolean; loopGate: boolean };
+  /**
+   * Whether the job — not the round — is over.
+   *
+   * "Always do this at the end" used to run at the end of every round of a
+   * carrying-on loop. The shell knows when the whole job has come to rest;
+   * this asks it. Left out, every settle is a job ending, which is what it was
+   * before there were rounds.
+   */
+  jobAtRest?: () => boolean;
+  /** Cancel that checklist. Same reach as `stepMoved`, so it only exists where
    *  a list could. */
   cancelBuild?: CancelBuild;
   /** Write that checklist in the first place. */
@@ -784,6 +848,33 @@ export type GrapheSession = {
    *  and post-turn tidying have all completed. Used only to prevent cache
    *  eviction from aborting live work. */
   readonly working: boolean;
+  /**
+   * What each installed add-on will actually do, and what was done about it.
+   *
+   * Derived by asking the add-on, never from a list of names — the Add-ons page
+   * draws its line straight from this, so an add-on published tomorrow is
+   * described on the same evidence as one installed today.
+   */
+  readonly addons: readonly {
+    name: string;
+    says: string;
+    policy: Policy;
+    startsTurns: boolean;
+    runsBackgroundWork: boolean;
+    rewritesSystemPrompt: boolean;
+  }[];
+  /** Lifecycle handlers that ran past their budget, for the diagnostics. */
+  readonly hookOverruns: readonly { extension: string; event: string; ms: number }[];
+  /**
+   * The notes this conversation would find most relevant, for the standing
+   * block the system prompt carries.
+   *
+   * They used to be prepended to the first message of a sitting and nothing
+   * else, so after the conversation was tidied up they were gone — and a long
+   * job is exactly the one that gets tidied. Never throws: a memory that will
+   * not answer is a memory not worth a sentence.
+   */
+  recall(about: string, most: number): Promise<readonly { content: string }[]>;
   /** Take everything waiting behind the run back out of the queue and hand it
    *  over, so it can be put back in the box and rewritten. Nothing is left
    *  queued afterwards — unless the answer says it did not come back, which is
@@ -1008,12 +1099,20 @@ async function lookAgainFor(runtime: PiRuntime): Promise<void> {
   }
 }
 
-function runtimeFor(agentDir: string): Promise<PiRuntime> {
+/**
+ * Where provider credentials are read from.
+ *
+ * Pi's own `auth.json` is a plain file holding OAuth tokens and an API key —
+ * user-only, but plain. Given an `authPath` the shell wrote out of the login
+ * keychain, that is the one used instead; given none, Pi's own is where it has
+ * always been.
+ */
+function runtimeFor(agentDir: string, authPath?: string): Promise<PiRuntime> {
   const already = runtimes.get(agentDir);
   if (already !== undefined) return already;
   const pending = loadPi().then((pi) =>
     pi.ModelRuntime.create({
-      authPath: join(agentDir, 'auth.json'),
+      authPath: authPath ?? join(agentDir, 'auth.json'),
       modelsPath: join(agentDir, 'models.json'),
       // False on purpose, and it is not what "look again" depends on: the
       // refresh below passes `allowNetwork` itself, which wins over this. So
@@ -1172,10 +1271,16 @@ function nameOfExtension(root: string, where: string): string {
  * Whatever is dropped is written down rather than discarded, because an
  * extension that silently does not load is a bug nobody can see.
  */
-function theirsAndTrusted(
+function theirsTrustedAndPolicied(
   projectRoot: string,
   trusts: (id: string) => boolean,
   seen: (carried: readonly Carried[]) => void,
+  policy: {
+    kind: SessionKind;
+    chosen?: Policy | undefined;
+    cards: Map<string, CapabilityCard | null>;
+    dropped: (one: { where: string; policy: Policy; card: CapabilityCard | null }) => void;
+  },
 ) {
   const root = projectRoot.endsWith(sep) ? projectRoot : projectRoot + sep;
   return <T extends { extensions: readonly { resolvedPath?: string; path?: string }[] }>(
@@ -1185,6 +1290,20 @@ function theirsAndTrusted(
     const kept = base.extensions.filter((one) => {
       const where = one.resolvedPath ?? one.path ?? '';
       if (where === '') return false;
+
+      /* What this extension will do, worked out by asking it rather than by
+         knowing its name. A card that was read and came back empty is treated
+         as the riskiest kind; one that was never looked at at all is left
+         alone, because "we did not check" is not evidence. */
+      if (policy.cards.has(where)) {
+        const card = policy.cards.get(where) ?? null;
+        const verdict = policyFor(card, policy.kind, policy.chosen);
+        if (dropsEntirely(verdict)) {
+          policy.dropped({ where, policy: verdict, card });
+          return false;
+        }
+      }
+
       if (!where.startsWith(root)) return true;
 
       const name = nameOfExtension(root, where);
@@ -1212,6 +1331,7 @@ async function keepAdvisorSettings(
   advises: ModelChoice | null,
   does: ModelChoice | null,
   advisorThinks?: ThinkingLevel | undefined,
+  switches?: { completionGate: boolean; loopGate: boolean } | undefined,
 ): Promise<void> {
   const file = join(agentDir, ADVISOR_SETTINGS_FILE);
   let existing: unknown = null;
@@ -1220,7 +1340,12 @@ async function keepAdvisorSettings(
   } catch {
     // No file yet, or one nobody can parse. Either way there is nothing to keep.
   }
-  const next = advisorSettings(existing, { advises, does, advisorThinks });
+  const next = advisorSettings(existing, {
+    advises,
+    does,
+    advisorThinks,
+    ...(switches === undefined ? {} : { switches }),
+  });
   if (JSON.stringify(existing) === JSON.stringify(next)) return;
   try {
     await mkdir(agentDir, { recursive: true });
@@ -1616,8 +1741,49 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
    */
   let heldBackTrouble: string | null = null;
   let waitsLeft = 0;
-  const say = (event: AgentEvent): void => {
+  /** Ask loops still holding patience, innermost last. Two prompts can be in
+   *  flight — a person's queued follow-up behind a carry-on round — and a
+   *  failure belongs to whichever is actually streaming. */
+  const holdingBack: number[] = [];
+  let holdToken = 0;
+  /**
+   * How this run is ending, when something already knows.
+   *
+   * A settle used to say nothing about how it came about, so the synthetic one
+   * Stop makes reached every reader looking exactly like success: the list
+   * advanced, the checkout was applied, screenshots were taken. Set by whoever
+   * ended it and read once, at the settle.
+   */
+  let endingHow: SettledHow | null = null;
+  /** Whether this run has already reported a failure, so a settle after one is
+   *  not called finished. */
+  let failedThisRun = false;
+  /** Which run the events belong to, so a failure held back for one loop is
+   *  never spent on another. */
+  let runNumber = 0;
+  /** How this run ended, worked out once. */
+  const howItEnded = (): SettledHow => {
+    if (endingHow !== null) return endingHow;
+    if (addonBlockedRun) return 'blocked-by-addon';
+    if (confirmations.pending.length > 0 || asking.pending.length > 0) return 'asked-person';
+    if (failedThisRun) return 'failed';
+    return 'finished';
+  };
+  const say = (raw: AgentEvent): void => {
+    const event: AgentEvent =
+      raw.type === 'settled' && raw.how === undefined
+        ? { ...raw, how: howItEnded(), run: `r${String(runNumber)}` }
+        : raw;
     if (event.type === 'tool-start') didSomething = true;
+    if (event.type === 'error') failedThisRun = true;
+    /* A step refused by something outside Graphe. Graphe's own refusals never
+       reach here as a tool result — they are said as `blocked`, with a reason
+       the person has already read. This is a hook somebody installed saying no,
+       which the model sees only as a step that failed. */
+    if (event.type === 'tool-end' && !event.ok && event.detail !== undefined) {
+      if (/\bblocked\b/i.test(event.detail)) sawBlocked(event.detail);
+      else blockedStreak = { reason: '', count: 0 };
+    }
     if (event.type === 'tidied' && event.ok) shortened += 1;
     if (unwatched) {
       // What it costs is never hidden, whoever asked for the turn.
@@ -1650,9 +1816,49 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       const dropped = asking.abandonAll();
       if (dropped.length > 0) options.onEvent({ type: 'asking-withdrawn', ids: dropped });
       sayWhatTheRulesHeld();
-      void runAlways('whenItFinishes', []);
+      // Only at the end of the job, not at the end of every round. With a loop
+      // carrying a list on, "always do this at the end" used to run once per
+      // round — see the shell, which decides when the job is at rest.
+      if (event.how === 'finished' && options.jobAtRest?.() !== false) {
+        void runAlways('whenItFinishes', []);
+      }
+      endingHow = null;
+      failedThisRun = false;
+      addonBlockedRun = false;
+      blockedStreak = { reason: '', count: 0 };
     }
   };
+
+  /**
+   * An add-on refusing every step.
+   *
+   * A blocked tool call is an ordinary error result to the model: it keeps
+   * going, sees tool after tool refused, and eventually gives up and writes
+   * prose. That is what a "randomly stopped" run looks like when something has
+   * blocked the session, and nothing in the window said so.
+   */
+  let blockedStreak = { reason: '', count: 0 };
+  let addonBlockedRun = false;
+  /** Three in a row with the same reason is a rule, not a coincidence. */
+  const BLOCKS_BEFORE_SAYING = 3;
+  function sawBlocked(reason: string): void {
+    const same = reason.trim();
+    blockedStreak =
+      same === blockedStreak.reason
+        ? { reason: same, count: blockedStreak.count + 1 }
+        : { reason: same, count: 1 };
+    if (blockedStreak.count !== BLOCKS_BEFORE_SAYING) return;
+    addonBlockedRun = true;
+    options.onEvent({
+      type: 'notice',
+      what: ADDON_BLOCKED,
+      because: same,
+      actions: [
+        { id: 'reset-addon', label: 'Reset it for this conversation' },
+        { id: 'addons-off', label: 'Turn it off here' },
+      ],
+    });
+  }
 
   /** How many turns have ended with the project's rules unsatisfied. Bounded on
    *  purpose: a rule naming a check that never passes would otherwise say the
@@ -1930,9 +2136,24 @@ const MOST_AFTER_SAYINGS = 3;
     workBegan,
   });
 
-  const runtime = await runtimeFor(agentDir);
+  const runtime = await runtimeFor(agentDir, options.authPath);
   /** Filled while the loader runs, which is before anything below can read it. */
   let carried: readonly Carried[] = [];
+  /**
+   * What each installed extension will do, asked of the extension itself.
+   *
+   * Never a list of package names: a rule written against one package is a rule
+   * that stops holding the moment somebody installs a different one. The probe
+   * instantiates each factory once against a stub that records and does
+   * nothing, and the card it produces drives the policy, the Add-ons line and
+   * the prompt budget alike.
+   */
+  const cards = new Map<string, CapabilityCard | null>();
+  const leftOut: { where: string; policy: Policy; card: CapabilityCard | null }[] = [];
+  const cardsFolder = join(agentDir, 'graphe-extension-cards');
+  for (const where of await extensionPathsIn(agentDir, options.projectRoot)) {
+    cards.set(where, await cachedProbe(where, cardsFolder).catch(() => null));
+  }
   const agentsPrompt = agentsMdNote === null ? [] : [`<agents_md>\n${agentsMdNote}\n</agents_md>`];
   const allNotes = [...(options.contextNotes ?? []), ...agentsPrompt];
   const loader = new pi.DefaultResourceLoader({
@@ -1946,11 +2167,19 @@ const MOST_AFTER_SAYINGS = 3;
     // installed into the session, so it is the one place a rule like that can
     // be enforced — see `onlyTheirs` for what it keeps.
     noExtensions: false,
-    extensionsOverride: theirsAndTrusted(
+    extensionsOverride: theirsTrustedAndPolicied(
       options.projectRoot,
       options.trusts ?? (() => false),
       (found) => {
         carried = found;
+      },
+      {
+        kind: options.sessionKind ?? 'conversation',
+        ...(options.addonsChosen === undefined ? {} : { chosen: options.addonsChosen }),
+        cards,
+        dropped: (one) => {
+          leftOut.push(one);
+        },
       },
     ),
     noThemes: true,
@@ -1959,6 +2188,53 @@ const MOST_AFTER_SAYINGS = 3;
         name: 'graphe-guard',
         factory: (api) => {
           api.on('tool_call', async (event) => review(asToolCall(event)));
+          /*
+           * A transcript is kept for ever and holds whatever the tools read —
+           * file contents, command output, web pages — in the clear. The Guard
+           * refuses to read a credential file, but full-access shell output is
+           * nobody's to filter, and this is the last place before Pi appends
+           * the result to the file on disk.
+           */
+          api.on('tool_result', (event) => {
+            const before = event as { content?: readonly unknown[] };
+            if (!Array.isArray(before.content)) return undefined;
+            let found = 0;
+            const content = before.content.map((one) => {
+              const part = one as { type?: string; text?: string };
+              if (part.type !== 'text' || typeof part.text !== 'string') return one;
+              const masked = maskToolResult(part.text);
+              found += masked.found;
+              return { ...part, text: masked.text };
+            });
+            return found === 0 ? undefined : ({ content } as never);
+          });
+        },
+      },
+      /*
+       * Graphe's own standing block, appended last so it is the end of the
+       * system prompt whatever else is installed.
+       *
+       * The checklist used to travel with the person's typed message, so a
+       * steer carried it and a retry after a rate limit did not — exactly the
+       * turns where a long job forgets it had a list. Add-ons write into the
+       * system prompt too, and on a small model the system prompt wins over
+       * anything in a user message.
+       */
+      {
+        name: 'graphe-standing',
+        factory: (api) => {
+          api.on('before_agent_start', async (_event, ctx) => {
+            const block = await options.standing?.().catch(() => null);
+            const before = (ctx as { getSystemPrompt?: () => string }).getSystemPrompt?.() ?? '';
+            // Said whether or not there is a block, so the chip can show how
+            // heavy the prompt has become before a small model stops coping.
+            options.onEvent({
+              type: 'prompt-size',
+              characters: before.length + (block?.length ?? 0),
+            });
+            if (block === null || block === undefined || block === '') return undefined;
+            return { systemPrompt: `${before}\n\n${block}` };
+          });
         },
       },
     ],
@@ -1978,6 +2254,36 @@ const MOST_AFTER_SAYINGS = 3;
   // ever call. The Guard still sees every one of these calls, and a name it has
   // no row for still stops to ask.
   const loadedExtensions = loader.getExtensions().extensions as readonly LoadedExtension[];
+  /*
+   * Two rules that hold for anything installed, now or later.
+   *
+   * A lifecycle handler gets a budget: Pi awaits `agent_end` before it will say
+   * the run has settled, so one add-on draining its own background work held
+   * every settle in this app hostage for up to half an hour. Past the budget
+   * the handler is let go of and the event carries on.
+   *
+   * And an add-on classified as one that starts turns of its own keeps its
+   * tools but loses its hooks in an ordinary conversation, because Graphe is
+   * already deciding when a turn begins and two of those is the bug.
+   */
+  withHookBudget(loader.getExtensions(), (over) => {
+    options.onEvent({
+      type: 'notice',
+      what: `${over.extension} took too long on ${over.event} and was left to it.`,
+    });
+  });
+  for (const one of loadedExtensions) {
+    const where = (one as { resolvedPath?: string; path?: string }).resolvedPath ?? '';
+    if (!cards.has(where)) continue;
+    const card = cards.get(where) ?? null;
+    if (!dropsLifecycleHooks(policyFor(card, options.sessionKind ?? 'conversation', options.addonsChosen))) {
+      continue;
+    }
+    const handlers = (one as { handlers?: Map<string, unknown[]> }).handlers;
+    if (!(handlers instanceof Map)) continue;
+    for (const event of LIFECYCLE_HOOKS) handlers.delete(event);
+    leftOut.push({ where, policy: 'tools-only', card });
+  }
   const extensionTools = extensionToolNames(loadedExtensions);
   /** The advisor's own tools, kept apart because a chip turns them on and off
    *  without rebuilding the conversation. */
@@ -1988,8 +2294,10 @@ const MOST_AFTER_SAYINGS = 3;
      conversation chose at the moment it is about to be used. */
   let advises = options.advisor ?? null;
   let advisorThinks = options.advisorThinking ?? undefined;
+  /** Named once here, because `prompt` shadows `options` with its own. */
+  const gates = options.advisorGates;
   if (advisorTools.length > 0) {
-    await keepAdvisorSettings(agentDir, advises, options.model ?? null, advisorThinks);
+    await keepAdvisorSettings(agentDir, advises, options.model ?? null, advisorThinks, gates);
   }
   if (subagentsLoaded(loadedExtensions)) await keepSubagentSettings(agentDir);
 
@@ -2074,7 +2382,7 @@ const MOST_AFTER_SAYINGS = 3;
         desk.noting,
         // Nobody to answer means no tool, rather than a tool that always says so.
         options.unattended === true ? null : askFirst,
-        options.stepDone,
+        options.stepMoved,
         options.cancelBuild,
         options.makeChecklist,
         options.keepsBrowserLogins,
@@ -2119,7 +2427,12 @@ const MOST_AFTER_SAYINGS = 3;
     try {
       memory = await openMemory({
         dbPath: join(agentDir, 'memory', memoryFileName(options.projectRoot)),
-        embedder: defaultEmbedder(join(agentDir, 'model')),
+        /* Said once, and only when there is really something to wait for: the
+           model is 23 MB off Hugging Face, and a silent minute on first recall
+           reads as the app having stopped. */
+        embedder: defaultEmbedder(join(agentDir, 'model'), () => {
+          options.onEvent({ type: 'notice', what: memoryWords.downloading });
+        }),
       });
       customTools.push(...memoryTools(memory));
     } catch {
@@ -2447,12 +2760,23 @@ const MOST_AFTER_SAYINGS = 3;
       // A new request may ask again; a follow-up landing mid-run may not. The
       // second is somebody adding to work already going, and stopping that to
       // put a form up is exactly what this must never do.
-      if (activePrompts === 0) asksLeft = 'open';
+      if (activePrompts === 0) {
+        asksLeft = 'open';
+        runNumber += 1;
+        // Said rather than inferred. The window used to work out that it was
+        // busy from the shape of the turns, so a step left running by a stop
+        // kept the composer a spinner for the rest of the sitting.
+        say({ type: 'busy', on: true });
+      }
       activePrompts += 1;
       // Before the turn, not only when the choice changed: the file is shared
       // with every other conversation, and the last one to write it wins.
       if (advisorTools.length > 0) {
-        await keepAdvisorSettings(agentDir, advises, inUse, advisorThinks).catch(() => undefined);
+        // `gates` rather than `options.advisorGates`: inside `prompt` the name
+        // `options` is the call's own, not the session's.
+        await keepAdvisorSettings(agentDir, advises, inUse, advisorThinks, gates).catch(
+          () => undefined,
+        );
       }
       const looking = options?.lookFirst === true;
       if (looking) {
@@ -2511,13 +2835,20 @@ const MOST_AFTER_SAYINGS = 3;
         const askUntilItAnswers = async (promptText: string, opts: unknown): Promise<void> => {
           let words = promptText;
           let how = opts;
+          /** This loop's own token, so a failure is spent by whichever loop is
+           *  actually running rather than by whichever asked first. */
+          const mine = ++holdToken;
           for (let attempt = 0; ; attempt += 1) {
             heldBackTrouble = null;
-            // Only ever one loop holding a failure back. A second prompt in
-            // flight — the composer's queued follow-up — would otherwise
-            // swallow this one's failure and let the turn end as though it had
-            // worked.
-            waitsLeft = activePrompts > 1 ? 0 : WAITS_MS.length - attempt;
+            /* Patience belongs to the run, not to how many prompts are in
+               flight. A carry-on round or a person's queued follow-up made
+               `activePrompts` two, so a rate limit mid-list ended the turn with
+               an error instead of waiting it out — which is the failure a long
+               job is most likely to meet. The guard against one loop swallowing
+               another's failure is the token below: only the innermost loop
+               still holding patience takes it. */
+            waitsLeft = WAITS_MS.length - attempt;
+            holdingBack.push(mine);
             try {
               await (session.prompt as (text: string, opts?: unknown) => Promise<void>)(
                 words,
@@ -2528,6 +2859,8 @@ const MOST_AFTER_SAYINGS = 3;
               heldBackTrouble = plainly(cause);
             } finally {
               waitsLeft = 0;
+              const at = holdingBack.lastIndexOf(mine);
+              if (at >= 0) holdingBack.splice(at, 1);
             }
 
             const trouble = heldBackTrouble;
@@ -2600,6 +2933,7 @@ const MOST_AFTER_SAYINGS = 3;
         // the conversation really has grown long, and it never throws.
         await tidyIfItHasGrownLong();
         activePrompts = Math.max(0, activePrompts - 1);
+        if (activePrompts === 0) say({ type: 'busy', on: false });
       }
     },
 
@@ -2610,7 +2944,9 @@ const MOST_AFTER_SAYINGS = 3;
       advisorThinks = thinks;
       // Not into the middle of a reply: the next turn opens with it instead.
       if (!session.isStreaming) sayAdvisorStuck();
-      if (advisorTools.length > 0) await keepAdvisorSettings(agentDir, next, inUse, thinks);
+      if (advisorTools.length > 0) {
+        await keepAdvisorSettings(agentDir, next, inUse, thinks, gates);
+      }
     },
 
     async useModel(next): Promise<boolean> {
@@ -2670,8 +3006,12 @@ const MOST_AFTER_SAYINGS = 3;
       await session.abort();
       // The run is over whatever pi did with the abort. Saying so is what puts
       // the composer back to Send; waiting for an event that may not come is
-      // how the button stayed a spinner.
-      say({ type: 'settled' });
+      // how the button stayed a spinner. `stopped` rather than a bare settle:
+      // a stop that reads as success advances the list, applies the checkout
+      // and takes screenshots for work nobody finished.
+      endingHow = 'stopped';
+      say({ type: 'settled', how: 'stopped', run: `r${String(runNumber)}` });
+      say({ type: 'busy', on: false });
     },
 
     /** Wait between steps, or carry on. Holding is not stopping: the turn stays
@@ -2813,6 +3153,43 @@ const MOST_AFTER_SAYINGS = 3;
 
     get carried(): readonly Carried[] {
       return carried;
+    },
+
+    get addons(): readonly {
+      name: string;
+      says: string;
+      policy: Policy;
+      startsTurns: boolean;
+      runsBackgroundWork: boolean;
+      rewritesSystemPrompt: boolean;
+    }[] {
+      const kind = options.sessionKind ?? 'conversation';
+      return [...cards.entries()].flatMap(([where, card]) => {
+        if (card === null) return [];
+        return [
+          {
+            name: card.id === '' ? nameFromPath(where) : card.id,
+            says: saysCard(card),
+            policy: policyFor(card, kind, options.addonsChosen),
+            startsTurns: card.startsTurns,
+            runsBackgroundWork: card.runsBackgroundWork,
+            rewritesSystemPrompt: card.rewritesSystemPrompt,
+          },
+        ];
+      });
+    },
+
+    get hookOverruns(): readonly { extension: string; event: string; ms: number }[] {
+      return recentOverruns();
+    },
+
+    async recall(about: string, most: number): Promise<readonly { content: string }[]> {
+      if (closed || memory === null) return [];
+      try {
+        return await memory.recall(about, { limit: most });
+      } catch {
+        return [];
+      }
     },
 
     async tidyNow(): Promise<boolean> {

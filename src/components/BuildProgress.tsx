@@ -11,6 +11,12 @@ type Props = {
    *  the front tab has moved; left out, it cancels whatever is in front, which
    *  is the same thing whenever the tracker is on screen. */
   project?: string;
+  /** What the app is doing carrying this job on by itself, when it is. Drawn
+   *  under the count so a second reply nobody typed is never a mystery. */
+  carryingOn?: { said: string; round: number } | null;
+  /** Stop it carrying on. Separate from Stop-the-todo: one ends the loop, the
+   *  other ends the list. */
+  onStopCarryingOn?: () => void;
 };
 
 export const SAYS = {
@@ -30,10 +36,27 @@ export const SAYS = {
   stop: 'Stop',
   stopTitle:
     'Stops this todo: the list comes off the screen and stays gone. A run already going is not interrupted.',
+  /* A finished list stays on screen saying so. It used to delete itself the
+     moment it read as complete, which meant a list that finished by mistake
+     vanished with nothing to resume from. */
+  finished: 'All done',
+  clear: 'Clear',
+  clearTitle: 'Takes the finished list off the screen.',
+  skipped: 'Skipped',
+  /** How many other conversations in this project are holding a list. */
+  elsewhere: (n: number) =>
+    n === 1 ? '1 other list in this project' : `${n} other lists in this project`,
+  /** The Stop beside the carrying-on line. */
+  rest: 'Stop carrying on',
+  restTitle: 'Stops the app sending itself the next step. The run in flight finishes.',
 } as const;
 
 function glyph(status: BuildPlan['tasks'][number]['status']): string {
-  return status === 'done' ? '✓' : status === 'doing' ? '●' : status === 'failed' ? '!' : '○';
+  if (status === 'done') return '✓';
+  if (status === 'doing') return '●';
+  if (status === 'failed') return '!';
+  if (status === 'skipped') return '–';
+  return '○';
 }
 
 /**
@@ -43,13 +66,20 @@ function glyph(status: BuildPlan['tasks'][number]['status']): string {
  * source of truth, so the line survives whatever happened to the window and a
  * resumed build simply picks it up.
  */
-export default function BuildProgress({ plan, running = false, project }: Props) {
+export default function BuildProgress({
+  plan,
+  running = false,
+  project,
+  carryingOn = null,
+  onStopCarryingOn,
+}: Props) {
   const [open, setOpen] = useState(false);
   const failed = plan.tasks.filter((one) => one.status === 'failed').length;
-  const head = failed > 0
-    ? `${plan.done}/${plan.total} complete · ${SAYS.failed(failed)}`
-    : `${plan.done}/${plan.total} ${SAYS.done}`;
-  const canCancel = plan.done < plan.total;
+  const head = plan.finished
+    ? `${SAYS.finished} · ${plan.done}/${plan.total}`
+    : failed > 0
+      ? `${plan.done}/${plan.total} complete · ${SAYS.failed(failed)}`
+      : `${plan.done}/${plan.total} ${SAYS.done}`;
 
   return (
     <section className={`buildprogress ${open ? 'buildprogress--open' : ''}`} aria-label="Progress">
@@ -78,20 +108,34 @@ export default function BuildProgress({ plan, running = false, project }: Props)
             </svg>
           </span>
         </button>
-        {canCancel ? (
-          <button
-            type="button"
-            className="buildprogress__cancel"
-            onClick={() => {
-              void bridge.buildCancel(project === undefined ? undefined : { project });
-            }}
-            aria-label={`${SAYS.stop} todo`}
-            title={SAYS.stopTitle}
-          >
-            {SAYS.stop}
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="buildprogress__cancel"
+          onClick={() => {
+            void bridge.buildCancel(project === undefined ? undefined : { project });
+          }}
+          aria-label={plan.finished ? `${SAYS.clear} todo` : `${SAYS.stop} todo`}
+          title={plan.finished ? SAYS.clearTitle : SAYS.stopTitle}
+        >
+          {plan.finished ? SAYS.clear : SAYS.stop}
+        </button>
       </div>
+
+      {carryingOn !== null ? (
+        <div className="buildprogress__carrying">
+          <span className="buildprogress__carryingsaid">{carryingOn.said}</span>
+          {onStopCarryingOn === undefined ? null : (
+            <button
+              type="button"
+              className="buildprogress__cancel"
+              onClick={onStopCarryingOn}
+              title={SAYS.restTitle}
+            >
+              {SAYS.rest}
+            </button>
+          )}
+        </div>
+      ) : null}
 
       {open ? (
         <ul className="buildprogress__list">
@@ -108,9 +152,19 @@ export default function BuildProgress({ plan, running = false, project }: Props)
                 <span className="buildprogress__tag">{SAYS.working}</span>
               ) : task.status === 'failed' ? (
                 <span className="buildprogress__tag">{SAYS.stuck}</span>
+              ) : task.status === 'skipped' ? (
+                <span className="buildprogress__tag">{SAYS.skipped}</span>
               ) : null}
             </li>
           ))}
+          {plan.elsewhere > 0 ? (
+            <li className="buildprogress__row buildprogress__row--elsewhere">
+              <span className="buildprogress__glyph" aria-hidden="true">
+                ·
+              </span>
+              <span className="buildprogress__title">{SAYS.elsewhere(plan.elsewhere)}</span>
+            </li>
+          ) : null}
         </ul>
       ) : null}
     </section>

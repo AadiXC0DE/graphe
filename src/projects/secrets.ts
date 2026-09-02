@@ -97,6 +97,12 @@ export class SecretFile {
     return [...this.#values.values()];
   }
 
+  /** What is being held, by name only. Reading a group of them — every provider
+   *  sign-in, say — needs the names and nothing else. */
+  names(): string[] {
+    return [...this.#values.keys()];
+  }
+
   async keep(name: string, value: string): Promise<Kept> {
     const secret = value.trim();
     if (secret === '') return { ok: false, why: SAY.blank };
@@ -170,5 +176,99 @@ export class SecretFile {
     } catch {
       return false;
     }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Provider sign-ins                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The keys that pay for the work, kept the same way as everything else here.
+ *
+ * The agent runtime keeps its own `auth.json` — user-only, but in the clear —
+ * and that is where an OAuth refresh token and an API key sit today. Mirrored
+ * here they are behind the login keychain like every other credential this app
+ * holds, and `writeProviderAuth` hands the runtime a file it can read for the
+ * length of a launch.
+ *
+ * The name is the provider's own id, because that is the key the runtime looks
+ * the credential up by and a translation table between the two would be one
+ * more thing to get wrong.
+ */
+const PROVIDER = 'provider:';
+
+export function providerKey(provider: string): string {
+  return `${PROVIDER}${provider}`;
+}
+
+/** What this needs of the store. `SecretFile` is one; a test is another. */
+export type HoldsProviders = {
+  canKeep(): boolean;
+  get(name: string): string | null;
+  keep(name: string, value: string): Promise<Kept>;
+  forget(name: string): Promise<void>;
+  names(): string[];
+};
+
+/** Keep one provider's credential, exactly as the runtime wrote it. */
+export async function keepProviderCredential(
+  secrets: HoldsProviders,
+  provider: string,
+  credential: unknown,
+): Promise<Kept> {
+  return secrets.keep(providerKey(provider), JSON.stringify(credential));
+}
+
+export async function forgetProviderCredential(secrets: HoldsProviders, provider: string): Promise<void> {
+  await secrets.forget(providerKey(provider));
+}
+
+/** Every provider sign-in being held, in the shape `auth.json` is read in.
+ *  Anything that will not parse is left out rather than written back as text a
+ *  runtime would choke on. */
+export function providerCredentials(secrets: HoldsProviders): Record<string, unknown> {
+  const all: Record<string, unknown> = {};
+  for (const name of secrets.names()) {
+    if (!name.startsWith(PROVIDER)) continue;
+    const kept = secrets.get(name);
+    if (kept === null) continue;
+    try {
+      all[name.slice(PROVIDER.length)] = JSON.parse(kept);
+    } catch {
+      /* not ours to repair */
+    }
+  }
+  return all;
+}
+
+/** Where the runtime is pointed at, when there is anything to point it at. */
+export function authPathIn(userData: string): string {
+  return join(userData, 'pi', 'auth.json');
+}
+
+/**
+ * Write the runtime its credentials at launch, and answer with the path.
+ *
+ * Null when nothing is mirrored yet, which is the signal to leave the runtime
+ * on its own default — an empty file handed over would read as "signed out of
+ * everything" and lose somebody their account for the length of a session.
+ */
+export async function writeProviderAuth(
+  userData: string,
+  secrets: HoldsProviders,
+): Promise<string | null> {
+  const all = providerCredentials(secrets);
+  if (Object.keys(all).length === 0) return null;
+
+  const file = authPathIn(userData);
+  const temporary = join(dirname(file), `.${basename(file)}.writing`);
+  try {
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(temporary, `${JSON.stringify(all, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    await rename(temporary, file);
+    return file;
+  } catch {
+    return null;
   }
 }

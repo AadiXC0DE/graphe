@@ -36,12 +36,12 @@
  * that touches Pi is inside this one folder.
  */
 
+import { scratchFolder } from '../../work/copies';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { readdir, readFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // One line on purpose: the boundary test in tests/adapter.test.ts reads the
 // line that names Pi and expects `import type` on it.
@@ -56,7 +56,7 @@ import { mapFrom, saysMap, type SourceFile } from '../../files/map';
 import type { MemoryStore } from '../memory';
 import * as debug from './debug';
 import { connectingTool } from './mcp';
-import { roleSpec, type HelperRole } from './child';
+import { helperBrief, roleSpec, type HelperRole } from './child';
 import { arxivId, arxivMeta, readPdfPages, slicePages } from './pdf';
 import { REVIEW_ANGLES, reviewRequestFor, trimDiff } from './review';
 import {
@@ -88,20 +88,72 @@ import type { LivePage, Money, PageAct, PageReading, SpendReason } from '../type
 type ToolResult = Promise<AgentToolResult<unknown>>;
 
 /**
- * How long one helper may go without saying anything before it is ended.
+ * How long one helper may go with nothing coming out of it at all.
  *
- * Quiet, not total: what this is for is a provider that stalls the stream, and
- * a helper doing real work says something as it goes. An absolute deadline
- * would end a healthy one mid-sentence for the crime of having a lot to say.
- * Background work gets four hours because nobody is waiting; a helper runs
- * inside somebody's turn and they are sitting there.
+ * Any sign of it counts, not words alone: its own noise, a step it is running,
+ * whatever that step is printing. A builder running a long test suite writes
+ * nothing for twenty minutes and is working the whole time, and a clock that
+ * only watched for words killed it and told the parent it had stalled.
  */
 export const HELPER_PATIENCE_MS = 5 * 60 * 1000;
+
+/** The ceiling, whatever it is saying. Quiet is a stall; an hour of steady
+ *  progress on one piece of work is a piece of work too big for one helper. */
+export const HELPER_WALL_CLOCK_MS = 30 * 60 * 1000;
 
 /** What the model is told when one runs out of time. Written for the model:
  *  one that understands it was cut off asks a smaller question next. */
 export const HELPER_TOOK_TOO_LONG =
-  'This helper was ended after five minutes without a word. Do not send the same piece of work again. Either split it into smaller pieces, or do it yourself.';
+  'This helper was ended after five minutes with nothing at all coming out of it — no words, no steps, no output. Do not send the same piece of work again. Either split it into smaller pieces, or do it yourself.';
+
+export const HELPER_RAN_TOO_LONG =
+  'This helper was ended after half an hour. It was working the whole time, so the piece of work is too big for one helper. Split it into smaller pieces, or do it yourself.';
+
+/** How often the two clocks are looked at. Close enough that an ending lands
+ *  within a few seconds of when it is due, coarse enough to cost nothing. */
+const HELPER_CLOCK_EVERY_MS = 5000;
+
+/** Why a helper should be ended now, or null while it may carry on.
+ *
+ *  Two answers rather than one, because they ask the model for opposite things:
+ *  a helper that went quiet should be split up and sent again, and one that
+ *  worked for half an hour was handed too much in the first place. */
+export function whyEndHelper(facts: {
+  startedAt: number;
+  lastSign: number;
+  now: number;
+}): string | null {
+  if (facts.now - facts.startedAt >= HELPER_WALL_CLOCK_MS) return HELPER_RAN_TOO_LONG;
+  if (facts.now - facts.lastSign >= HELPER_PATIENCE_MS) return HELPER_TOOK_TOO_LONG;
+  return null;
+}
+
+/** The two clocks over one helper.
+ *
+ *  `stirred` is any sign of the child at all — words, its own noise, a step it
+ *  is running — and it puts off the quiet clock and only that one. */
+export function helperClocks(
+  ended: (why: string) => void,
+  now: () => number = Date.now,
+): { stirred: () => void; stop: () => void } {
+  const startedAt = now();
+  let lastSign = startedAt;
+  const tick = setInterval(() => {
+    const why = whyEndHelper({ startedAt, lastSign, now: now() });
+    if (why === null) return;
+    clearInterval(tick);
+    ended(why);
+  }, HELPER_CLOCK_EVERY_MS);
+  tick.unref?.();
+  return {
+    stirred: (): void => {
+      lastSign = now();
+    },
+    stop: (): void => {
+      clearInterval(tick);
+    },
+  };
+}
 
 /** The results the child keeps on its own. Plain data; nothing crosses the wire
  *  except this. */
@@ -124,6 +176,10 @@ export type SubagentLine =
    *  from it — it exists so that a helper sitting out a wobble is not mistaken
    *  for one that has stopped saying anything and killed for it. */
   | { type: 'waiting' }
+  /** What the helper is doing right now, and what that is printing. A builder
+   *  running a test suite says nothing for as long as it takes; this is the
+   *  same work, said out loud. */
+  | { type: 'step'; text: string }
   | { type: 'done'; outcome: SubagentOutcome };
 
 /* -------------------------------------------------------------------------- */
@@ -948,7 +1004,29 @@ const STDERR_TAIL = 4000;
  *  per token for nothing anybody can read that fast. */
 const PROGRESS_EVERY_MS = 400;
 
-type TaskParams = { task: string; cwd?: string; role?: HelperRole };
+/** Where a piece of work runs. `now` answers inside this tool call, which is
+ *  what a helper has always done; `background` puts it on the board and comes
+ *  straight back. */
+export type TaskMode = 'now' | 'background';
+
+/** The mode a call asked for. Only the exact word sends work away, the same
+ *  way an unfamiliar role falls back to the plain helper. */
+export function taskMode(asked: string | undefined): TaskMode {
+  return asked === 'background' ? 'background' : 'now';
+}
+
+type TaskParams = { task: string; cwd?: string; role?: HelperRole; mode?: string };
+
+/** What comes back when work is sent to the board instead of run here. */
+export const TASK_BACKGROUND_WORDS = {
+  went: (role: HelperRole): string =>
+    `That is on the board now, as a ${role}, in its own copy of the project. It carries on whether or not this conversation does, and the person can watch or stop it there. Do not wait for it: say what you set going and carry on.`,
+  refused: (because: string): string => `It did not go on the board: ${because}`,
+  /** A helper, or a piece already running on the board, has no board of its
+   *  own to put anything on. Said plainly rather than quietly run here. */
+  noBoard:
+    'There is no board here, so nothing can be sent to the background from this run. Leave the mode out and the work runs inside this call instead.',
+} as const;
 
 /** The session owns the helper's folder. A helper may be asked to look beneath
  * it, but model-supplied `cwd` must never replace the project it was launched
@@ -1102,6 +1180,7 @@ async function runSubagent(
   signal: AbortSignal | undefined,
   onProgress: (text: string) => void,
   watching?: Watching,
+  onStep?: (text: string) => void,
 ): Promise<Ran> {
   const missing = whyNoHelper();
   const cwd = job.cwd ?? process.cwd();
@@ -1142,22 +1221,19 @@ async function runSubagent(
 
     // A helper that never answers used to hold the whole turn open: it resolves
     // on a report, a close, an error, a stop or the person's own abort, and a
-    // provider that stalls the stream is none of those. Background work has had
-    // a wall clock all along; this is the same idea at the size of one helper.
+    // provider that stalls the stream is none of those.
     //
-    // Started before `finish` exists so that `finish` can always clear it — the
-    // fleet can stop this run on the way in, before the clock would otherwise
-    // have been set. The callback only ever runs later, by which time `finish`
-    // is there.
-    const patience = setTimeout(() => {
-      finish({ ok: false, error: HELPER_TOOK_TOO_LONG });
-    }, HELPER_PATIENCE_MS);
-    patience.unref?.();
+    // Started before `finish` exists so that `finish` can always clear them —
+    // the fleet can stop this run on the way in, before the clocks would
+    // otherwise have been set. The callback only ever runs later, by which time
+    // `finish` is there.
+    const clocks = helperClocks((why) => finish({ ok: false, error: why }));
+    const stirred = clocks.stirred;
 
     const finish = (outcome: SubagentOutcome): void => {
       if (done) return;
       done = true;
-      clearTimeout(patience);
+      clocks.stop();
       resolve({ outcome, boundary });
       // Never leave a live child behind a resolved promise: the helper may not
       // have noticed its own report arrived.
@@ -1175,7 +1251,7 @@ async function runSubagent(
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (data: string) => {
-      patience.refresh();
+      stirred();
       buffer += data;
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
@@ -1188,6 +1264,7 @@ async function runSubagent(
           continue;
         }
         if (received.type === 'delta') onProgress(received.text);
+        if (received.type === 'step') onStep?.(received.text);
         if (received.type === 'boundary') boundary.observed = received.held;
         if (received.type === 'spend') watching?.spent(received);
         if (received.type === 'done') finish(received.outcome);
@@ -1201,6 +1278,8 @@ async function runSubagent(
     let noise = '';
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (data: string) => {
+      // A child writing here is a child that is alive, whatever it is saying.
+      stirred();
       noise = `${noise}${data}`.slice(-STDERR_TAIL);
     });
 
@@ -1252,6 +1331,7 @@ export const taskTool = (
   model: HelperModel | (() => HelperModel) = null,
   thinking?: HelperPace | (() => HelperPace | undefined),
   projectRoot?: string,
+  putOnBoard?: PutOnBoard,
 ): ToolDefinition => ({
   name: 'task',
   label: 'Task',
@@ -1269,7 +1349,7 @@ export const taskTool = (
     'Split the work so no helper needs another helper\'s answer. Anything that has to happen in order belongs in one helper, or in a second round after the first answers.',
     'A helper reports and changes nothing — ask it for findings, not fixes. The one exception is a builder, which is given its own copy of the project, makes the change there, and hands back what it changed.',
     'A small piece of work is not worth the help: the helper reads the same files and searches the same web you would.',
-    'This helper answers inside the current tool call, so the conversation waits for its findings. If the person wants work to carry on in the background while the conversation remains free, use set_going instead.',
+    'This helper answers inside the current tool call, so the conversation waits for its findings. For work that should carry on in the background while the conversation stays free, pass mode: \'background\' — it goes on the board, with the same role, and you are told at once where it went.',
     "To have work checked, send it to a 'reviewer' helper and ask it to find genuine problems with file and line references. To gather facts, send a 'researcher'. A helper that needs a decision stops and says what it needs, starting with 'To continue I need to know:' — pass that question to the person, then send the work again with the answer.",
   ],
   parameters: Type.Object({
@@ -1278,6 +1358,11 @@ export const taskTool = (
     role: Type.Optional(
       Type.String({
         description: "What kind of helper: 'reviewer' finds problems in the work with file and line references; 'researcher' gathers facts from the web and the project; 'builder' makes one self-contained change in its own copy of the project and hands the change back; anything else is a general helper.",
+      }),
+    ),
+    mode: Type.Optional(
+      Type.String({
+        description: "'now' (the default) runs the helper inside this call and answers with what it found. 'background' puts the work on the board instead and returns at once; it carries on whether or not this conversation does, and the person watches it there.",
       }),
     ),
   }),
@@ -1297,6 +1382,18 @@ export const taskTool = (
     // The role is the helper's remit: who it is, which tools it may hold, and
     // the instructions it reads first. Anything unfamiliar is the plain helper.
     const spec = roleSpec(params.role as HelperRole);
+
+    // The board is where the person is already watching, so work sent there is
+    // visible and stoppable from where their hand already is. Only the exact
+    // word: anything else is the helper this tool has always been.
+    if (taskMode(params.mode) === 'background') {
+      const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
+      if (putOnBoard === undefined) return say(TASK_BACKGROUND_WORDS.noBoard);
+      const answer = await putOnBoard(helperBrief(spec, params.task), null);
+      if (!answer.ok) return say(TASK_BACKGROUND_WORDS.refused(answer.because));
+      return say(TASK_BACKGROUND_WORDS.went(spec.name));
+    }
+
     // Asked before anything is spawned: a helper refused costs nothing, and one
     // refused halfway through has already been paid for.
     // The project this helper's spending belongs to. The model's `cwd` is a
@@ -1323,8 +1420,16 @@ export const taskTool = (
     // The child's progress goes out as Pi's partial tool result, which is the
     // only way anything a custom tool learns mid-run can reach the session.
     let progress = '';
+    let step = '';
     let sentAt = 0;
     let built = '';
+    const show = (): void => {
+      const now = Date.now();
+      if (now - sentAt < PROGRESS_EVERY_MS) return;
+      sentAt = now;
+      const text = step === '' ? progress : `${progress}${progress === '' ? '' : '\n\n'}${step}`;
+      onUpdate?.({ content: [{ type: 'text', text }], details: {} });
+    };
     let ran: Ran;
     try {
       const currentModel = typeof model === 'function' ? model() : model;
@@ -1338,14 +1443,15 @@ export const taskTool = (
         signal,
         (text) => {
           progress += text;
-          const now = Date.now();
-          if (now - sentAt < PROGRESS_EVERY_MS) return;
-          sentAt = now;
-          onUpdate?.({ content: [{ type: 'text', text: progress }], details: {} });
+          show();
         },
         {
           begun: (stop) => fleet.watch(callId, stop),
           spent: (line) => fleet.spentUnseen(callId, { ...line, project }),
+        },
+        (text) => {
+          step = text;
+          show();
         },
       );
     } finally {
@@ -1393,14 +1499,7 @@ const NO_COPY_TO_BUILD_IN =
  * builders never share one.
  */
 export function builderFolder(project: string, id: string): string {
-  const safe = (text: string, most: number): string =>
-    text.replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, most);
-  const whose = safe(basename(resolve(project)), 24) || 'project';
-  const which = safe(id, 24) || 'one';
-  // The whole path, shortened, so two folders of the same name in different
-  // places cannot land on one copy.
-  const where = createHash('sha1').update(resolve(project)).digest('hex').slice(0, 8);
-  return join(tmpdir(), 'graphe-builders', `${whose}-${where}`, which);
+  return scratchFolder(tmpdir(), project, id);
 }
 
 export type BuilderCopy = {
@@ -2264,34 +2363,48 @@ export function pageTools(cwd?: string): ToolDefinition[] {
 export type AskFirst = (questions: unknown) => Promise<string>;
 
 /**
- * Tick one thing off the list on screen.
+ * Move one step of the list on screen.
  *
  * The list used to move on its own, one step per reply. That works for a list
  * of jobs done a reply at a time and for nothing else — a list of six things
  * the model meant to do inside one reply could never get past the first, so
- * somebody watched real work happen beside a checklist reading nought.
+ * somebody watched real work happen beside a checklist reading nought. Worse,
+ * it moved on a guess: a reply that only read files and wrote a paragraph
+ * ticked a step, and a failing test failed one.
  *
- * Whoever is doing the work says when a thing is done. Answers with how far
- * along it now is, so the model can see its own list rather than guess.
+ * Whoever is doing the work says which step moved, by its number. Every one of
+ * these answers with how far along the list now is and what is next, because a
+ * tool that answers "ok" teaches the model nothing about the list it is
+ * working through.
  */
-export type StepDone = (note: string | null) => Promise<string>;
+export type StepMove = {
+  kind: 'done' | 'started' | 'failed' | 'skipped' | 'dropped' | 'inserted';
+  n: number | null;
+  why?: string;
+  title?: string;
+};
+
+export type StepMoved = (op: StepMove) => Promise<string>;
 
 /** Cancel the checklist the person can see. Wired by the shell, so the file is
  *  found by the project it is stored under and deleted where the plan queue
  *  can see it — never from here, where neither of those is true. */
 export type CancelBuild = () => Promise<string>;
 
-/** Write that checklist, or add to it. Same wiring, same reason. */
-export type MakeChecklist = (titles: readonly string[]) => Promise<string>;
+/** Write that checklist, replace it, or add to it. Same wiring, same reason. */
+export type MakeChecklist = (
+  titles: readonly string[],
+  mode: 'append' | 'replace',
+) => Promise<string>;
 
 const makeChecklistTool = (make: MakeChecklist): ToolDefinition => ({
   name: 'make_checklist',
   label: 'Writing the checklist',
   description:
-    'Put the steps this job breaks into on screen as a checklist the person can watch, and tick off with step_done as each one lands. Use it when a request has several parts, when you are working toward a goal and there is no checklist yet, or when you find work along the way that was not on the list. Called again, it adds to the list rather than replacing it.',
-  promptSnippet: 'make_checklist(steps) — put the steps on screen as a checklist',
+    'Put the steps this job breaks into on screen as a checklist the person can watch, and tick off with step_done(n) as each one lands. Use it when a request has several parts, when you are working toward a goal and there is no checklist yet, or when you find work along the way that was not on the list. `mode` is "append" by default; "replace" writes the list again from scratch and keeps the tick on any step whose words are unchanged.',
+  promptSnippet: 'make_checklist(steps, mode) — put the steps on screen as a checklist',
   promptGuidelines: [
-    'Work with more than two or three parts to it gets a checklist first, before the first change. It is what the person watches, and what a later session resumes from.',
+    'Work with more than two separately finishable parts gets a checklist before the first change. It is what the person watches, and what a later session resumes from.',
     'One step per thing that is separately finishable. Not "build the feature", and not every file you will touch.',
     'Working toward a goal with no checklist on screen, write one for the goal before anything else.',
   ],
@@ -2300,21 +2413,50 @@ const makeChecklistTool = (make: MakeChecklist): ToolDefinition => ({
       description: 'The steps, in the order they should happen, in plain words.',
       minItems: 1,
     }),
+    mode: Type.Optional(
+      Type.Union([Type.Literal('append'), Type.Literal('replace')], {
+        description:
+          'Add to the list ("append", the default) or write it again from scratch ("replace").',
+      }),
+    ),
   }),
   executionMode: 'sequential',
-  execute: async (_callId, params: { steps: readonly string[] }): ToolResult => {
-    const said = await make(params.steps);
+  execute: async (
+    _callId,
+    params: { steps: readonly string[]; mode?: 'append' | 'replace' },
+  ): ToolResult => {
+    const said = await make(params.steps, params.mode === 'replace' ? 'replace' : 'append');
     return { content: [{ type: 'text', text: said }], details: {} };
   },
 });
 
-const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
+/** Which step. Required whenever more than one is still open: a model that
+ *  finishes step 6 before step 5 used to tick step 5. */
+const whichStep = Type.Optional(
+  Type.Integer({
+    minimum: 1,
+    description:
+      'The number of the step, as the checklist lists it. Required when more than one step is still open.',
+  }),
+);
+
+function moveNumber(params: { n?: number }): number | null {
+  return typeof params.n === 'number' && Number.isFinite(params.n) ? Math.trunc(params.n) : null;
+}
+
+async function answered(move: StepMoved, op: StepMove): ToolResult {
+  const said = await move(op);
+  return { content: [{ type: 'text', text: said }], details: {} };
+}
+
+const stepDoneTool = (moved: StepMoved): ToolDefinition => ({
   name: 'step_done',
   label: 'Ticking one off the list',
   description:
-    "Tick the thing you have just finished off the checklist the person can see. Call it once for each item, the moment that item is genuinely done — not at the end, and never for something you have only started. If there is no checklist it says so and costs nothing.",
-  promptSnippet: 'step_done(note) — tick the thing you just finished off the checklist',
+    'Tick the step you have just finished off the checklist the person can see. Say which step by its number. Call it once for each step, the moment that step is genuinely done — not at the end, and never for something you have only started. If there is no checklist it says so and costs nothing.',
+  promptSnippet: 'step_done(n, note) — tick step n off the checklist',
   parameters: Type.Object({
+    n: whichStep,
     note: Type.Optional(
       Type.String({ description: 'One line on what came of it. Left out is fine.' }),
     ),
@@ -2323,12 +2465,89 @@ const stepDoneTool = (stepDone: StepDone): ToolDefinition => ({
      batch run one after another, so a tick sent alongside a fan-out would turn
      six helpers working at once into six waiting their turn. Two ticks racing
      is safe on its own account — the list is only ever touched one at a time
-     where it is written. */
+     where it is written, and each names the step it means. */
   executionMode: 'parallel',
-  execute: async (_callId, params: { note?: string }): ToolResult => {
-    const said = await stepDone(typeof params.note === 'string' ? params.note : null);
-    return { content: [{ type: 'text', text: said }], details: {} };
-  },
+  execute: async (_callId, params: { n?: number; note?: string }): ToolResult =>
+    answered(moved, {
+      kind: 'done',
+      n: moveNumber(params),
+      ...(typeof params.note === 'string' ? { why: params.note } : {}),
+    }),
+});
+
+const stepStartedTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'step_started',
+  label: 'Picking one up',
+  description:
+    'Say which step of the checklist you are working on now, so the person can see where you are. Optional — the list shows the first unticked step as current on its own.',
+  promptSnippet: 'step_started(n) — say which step you are on',
+  parameters: Type.Object({ n: whichStep }),
+  executionMode: 'parallel',
+  execute: async (_callId, params: { n?: number }): ToolResult =>
+    answered(moved, { kind: 'started', n: moveNumber(params) }),
+});
+
+const stepFailedTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'step_failed',
+  label: 'Marking one as not working',
+  description:
+    'Say a step did not work and why. It stays on the list as work still owed, so the run does not finish with it quietly unticked.',
+  promptSnippet: 'step_failed(n, why) — say step n did not work',
+  parameters: Type.Object({
+    n: whichStep,
+    why: Type.String({ minLength: 1, description: 'What went wrong, in one line.' }),
+  }),
+  executionMode: 'parallel',
+  execute: async (_callId, params: { n?: number; why: string }): ToolResult =>
+    answered(moved, { kind: 'failed', n: moveNumber(params), why: params.why }),
+});
+
+const stepSkippedTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'step_skipped',
+  label: 'Skipping one',
+  description:
+    'Say a step is not going to be done, and why. Settled work rather than owed, so the list can finish without it.',
+  promptSnippet: 'step_skipped(n, why) — say step n is not going to be done',
+  parameters: Type.Object({
+    n: whichStep,
+    why: Type.String({ minLength: 1, description: 'Why it is not being done, in one line.' }),
+  }),
+  executionMode: 'parallel',
+  execute: async (_callId, params: { n?: number; why: string }): ToolResult =>
+    answered(moved, { kind: 'skipped', n: moveNumber(params), why: params.why }),
+});
+
+const dropStepTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'drop_step',
+  label: 'Taking one off the list',
+  description:
+    'Take a step off the checklist entirely — it was wrong, or it was two steps, or the job changed. The other steps keep the numbers they had.',
+  promptSnippet: 'drop_step(n, why) — take step n off the list',
+  parameters: Type.Object({
+    n: Type.Integer({ minimum: 1, description: 'The number of the step to remove.' }),
+    why: Type.String({ minLength: 1, description: 'Why it is off the list, in one line.' }),
+  }),
+  executionMode: 'sequential',
+  execute: async (_callId, params: { n: number; why: string }): ToolResult =>
+    answered(moved, { kind: 'dropped', n: Math.trunc(params.n), why: params.why }),
+});
+
+const insertStepTool = (moved: StepMoved): ToolDefinition => ({
+  name: 'insert_step',
+  label: 'Adding one to the list',
+  description:
+    'Put a new step on the checklist straight after another one — work found along the way that belongs in the middle rather than at the end.',
+  promptSnippet: 'insert_step(after, title) — put a new step after step n',
+  parameters: Type.Object({
+    after: Type.Integer({
+      minimum: 1,
+      description: 'The number of the step the new one goes after.',
+    }),
+    title: Type.String({ minLength: 1, description: 'What the new step is, in plain words.' }),
+  }),
+  executionMode: 'sequential',
+  execute: async (_callId, params: { after: number; title: string }): ToolResult =>
+    answered(moved, { kind: 'inserted', n: Math.trunc(params.after), title: params.title }),
 });
 
 const cancelBuildTool = (cancelBuild: CancelBuild): ToolDefinition => ({
@@ -2409,7 +2628,7 @@ export const grapheTools = (
   putOnBoard?: PutOnBoard,
   noted?: ChecksNoted,
   askFirst?: AskFirst | null,
-  stepDone?: StepDone | null,
+  stepMoved?: StepMoved | null,
   cancelBuild?: CancelBuild | null,
   makeChecklist?: MakeChecklist | null,
   /** Whether this project's browser keeps what it is signed in to. Asked each
@@ -2420,7 +2639,7 @@ export const grapheTools = (
     websearchTool,
     webfetchTool,
     readDocumentTool,
-    taskTool(agentDir, model, thinking, projectRoot),
+    taskTool(agentDir, model, thinking, projectRoot, putOnBoard),
     scoreCandidatesTool,
     // A browser of its own, on from the first turn. Every other agent ships one
     // and hides it behind a plugin; this one is simply there, and the program
@@ -2437,8 +2656,17 @@ export const grapheTools = (
   // run nobody is watching both get no tool at all, rather than a tool that
   // always answers "there is nobody here".
   if (askFirst !== undefined && askFirst !== null) tools.push(askFirstTool(askFirst));
-  // Only where there is a list to tick. A helper has no checklist of its own.
-  if (stepDone !== undefined && stepDone !== null) tools.push(stepDoneTool(stepDone));
+  // Only where there is a list to move. A helper has no checklist of its own.
+  if (stepMoved !== undefined && stepMoved !== null) {
+    tools.push(
+      stepDoneTool(stepMoved),
+      stepStartedTool(stepMoved),
+      stepFailedTool(stepMoved),
+      stepSkippedTool(stepMoved),
+      dropStepTool(stepMoved),
+      insertStepTool(stepMoved),
+    );
+  }
   // Same reach as the ticking: wherever a checklist can exist, saying no to it
   // must exist too, and it comes from the shell so it lands on the right file.
   if (cancelBuild !== undefined && cancelBuild !== null) tools.push(cancelBuildTool(cancelBuild));

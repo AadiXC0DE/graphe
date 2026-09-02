@@ -168,6 +168,16 @@ export const PLAN_WORDS = {
       ? 'There is one more step after these.'
       : `There are ${extra} more steps after these.`;
   },
+  /** The rest of a long plan, on the card. The steps are all there either way;
+   *  only how many are on screen changes. */
+  showRest(hidden: number): string {
+    return hidden === 1 ? 'Show the other one' : `Show the other ${String(hidden)}`;
+  },
+  showFewer: 'Show fewer',
+  /** When nothing could be read out of the reply. A card that says so is the
+   *  difference between a dead end and a second try. */
+  noSteps: 'I couldn’t read a plan out of that.',
+  askAgain: 'Ask me to lay it out as a numbered list',
 } as const;
 
 /* -------------------------------------------------------------------------- */
@@ -184,8 +194,23 @@ export type Proposal = {
   questions: readonly string[];
 };
 
-/** Long enough to be a plan, short enough to be read. */
-const MAX_STEPS = 12;
+/** How many steps the card shows before it offers the rest. */
+export const CARD_STEPS = 12;
+
+/**
+ * The hard parse cap.
+ *
+ * What a card can hold and what a plan actually is are two different numbers.
+ * Cutting the parse to the first is how twenty steps of work becomes a
+ * checklist that finishes with eight of them still owed.
+ */
+export const MAX_STEPS = 60;
+
+/** The card's share of a plan, and how much of it is off screen. Everything
+ *  downstream still gets all of the steps. */
+export function forTheCard(steps: readonly string[]): { shown: readonly string[]; more: number } {
+  return { shown: steps.slice(0, CARD_STEPS), more: Math.max(0, steps.length - CARD_STEPS) };
+}
 
 /** Three at the very most. Past that it stops being two sharp questions and
  *  becomes a form, and a form is worse than a plan built on a guess. */
@@ -578,6 +603,8 @@ export function shouldLookFirst(options: {
   return !answering && worthPlanning(text);
 }
 
+/** Decides only whether the look-first card appears. Whether there is a
+ *  checklist at all is the model's own call, through make_checklist. */
 export function worthPlanning(text: string): boolean {
   const said = text.trim();
   if (said === '') return false;

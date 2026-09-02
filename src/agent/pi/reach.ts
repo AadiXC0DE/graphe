@@ -102,12 +102,48 @@ export const SAID = {
   labelAddress: 'Answers at',
   labelProgram: 'Starts',
   labelWords: 'With',
+  labelVersion: 'Version',
   hidden: '••••••••',
 } as const;
 
 /* -------------------------------------------------------------------------- */
 /* The ones we vouch for                                                       */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * The exact version of every program we start.
+ *
+ * One place, because "latest" is a decision a stranger makes after we ship: an
+ * unpinned line fetches whatever is newest at the moment somebody presses it,
+ * and fails outright with nothing to fetch from. Moving one of these is a
+ * deliberate change, made here.
+ */
+export const PINNED: Readonly<Record<string, string>> = {
+  // Held to the helper we fetch and unpack: the two are one piece.
+  '@figwright/mcp': '0.4.0',
+  'pencil-mcp': '1.0.5',
+  '@playwright/mcp': '0.0.80',
+  'ts-language-mcp': '2.1.0',
+  // Not a tool the agent reaches for, but the same rule: what leaves this
+  // computer is decided once, here, rather than by whatever npm published this
+  // morning.
+  vercel: '59.11.2',
+};
+
+/** A program with its version on it, the way the line that starts it is written. */
+export function pinnedSpec(name: string): string {
+  const version = PINNED[name];
+  return version === undefined ? name : `${name}@${version}`;
+}
+
+/** The version out of a start line, for the row that shows what will run. */
+export function pinnedVersion(args: readonly string[]): string | null {
+  for (const arg of args) {
+    const at = arg.lastIndexOf('@');
+    if (at > 0 && /^\d/.test(arg.slice(at + 1))) return arg.slice(at + 1);
+  }
+  return null;
+}
 
 /**
  * The short list, described by what each one lets you do.
@@ -140,9 +176,7 @@ export const REACHABLE: readonly Reach[] = [
     start: {
       how: 'program',
       command: 'npx',
-      // Pinned. This runs on somebody's machine with their designs in front of
-      // it, and "latest" is a decision made by a stranger after we shipped.
-      args: ['-y', '@figwright/mcp@0.4.0'],
+      args: ['-y', pinnedSpec('@figwright/mcp')],
       values: {},
     },
     curated: true,
@@ -155,7 +189,7 @@ export const REACHABLE: readonly Reach[] = [
     needs: 'Keep Pencil open on this computer while I work.',
     // Pencil's own start line — worth checking against their instructions when
     // they change it, because a wrong one fails silently until it is pressed.
-    start: { how: 'program', command: 'npx', args: ['-y', 'pencil-mcp'], values: {} },
+    start: { how: 'program', command: 'npx', args: ['-y', pinnedSpec('pencil-mcp')], values: {} },
     curated: true,
     added: false,
   },
@@ -167,7 +201,12 @@ export const REACHABLE: readonly Reach[] = [
     // a different way, for the sites where the built-in one gets stuck.
     what: 'Lets me fall back on a second browser, driven a different way, for the odd site the built-in one cannot get through.',
     needs: null,
-    start: { how: 'program', command: 'npx', args: ['-y', '@playwright/mcp@latest'], values: {} },
+    start: {
+      how: 'program',
+      command: 'npx',
+      args: ['-y', pinnedSpec('@playwright/mcp')],
+      values: {},
+    },
     curated: true,
     added: false,
   },
@@ -179,7 +218,12 @@ export const REACHABLE: readonly Reach[] = [
     name: 'A read of your code',
     what: 'Lets me jump straight to where something is really defined, find every place it is used, rename it everywhere at once and see the errors your editor sees, instead of searching the text and hoping I caught them all.',
     needs: 'Works on TypeScript and JavaScript projects.',
-    start: { how: 'program', command: 'npx', args: ['-y', 'ts-language-mcp'], values: {} },
+    start: {
+      how: 'program',
+      command: 'npx',
+      args: ['-y', pinnedSpec('ts-language-mcp')],
+      values: {},
+    },
     curated: true,
     added: false,
   },
@@ -464,11 +508,13 @@ function isPrivate(name: string): boolean {
  */
 export function describeStart(start: Start): readonly { label: string; value: string }[] {
   if (start.how === 'address') return [{ label: SAID.labelAddress, value: start.address }];
+  const version = pinnedVersion(start.args);
   return [
     { label: SAID.labelProgram, value: start.command },
     ...(start.args.length === 0
       ? []
       : [{ label: SAID.labelWords, value: start.args.map(quoted).join(' ') }]),
+    ...(version === null ? [] : [{ label: SAID.labelVersion, value: version }]),
     ...Object.entries(start.values).map(([name, value]) => ({
       label: name,
       value: isPrivate(name) ? SAID.hidden : value,

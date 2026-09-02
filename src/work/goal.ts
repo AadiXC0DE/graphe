@@ -8,9 +8,6 @@
  */
 
 import type { HowFar } from '../agent/guard/policy';
-import type { BuildPlan } from '../lib/ipc';
-import type { Turn } from '../lib/thread';
-
 export type GoalStatus = 'active' | 'paused' | 'done';
 
 /** How many rounds a goal runs unattended before it stops and says so. Not a
@@ -33,8 +30,6 @@ export type Goal = {
   howFar: HowFar;
   /** Epoch ms, for elapsed. */
   startedAt: number;
-  /** Max task n of the build plan at creation — only tasks with larger n belong to this goal. */
-  planBaselineN: number;
 };
 
 export const goalWords = {
@@ -50,7 +45,9 @@ export const goalWords = {
     ].join(' '),
   /** When a round has gone by and there is still no list to check against. */
   noStepsEither:
-    'I could not break this goal into steps to check against, so I have stopped rather than going round on nothing. Say what done looks like in a few concrete steps, or /goal clear if it is already done.',
+    'I could not break this goal into steps to check against, so I have written it down as one step and will work toward it. Say what done looks like in a few concrete steps if you would rather be specific.',
+  /** When there is nothing on screen to check the goal against yet. */
+  noListYet: 'There is no checklist for this goal yet.',
 
   chip: 'Goal',
   name: 'Work toward a goal',
@@ -73,29 +70,8 @@ function nextId(): string {
   return `goal-${String(Date.now())}-${String(counter)}`;
 }
 
-/**
- * Which tasks a new goal inherits.
- *
- * A leftover list from earlier work must not report a new goal done before it
- * has started, which is what the baseline is for. But a list still being worked
- * when the goal is set is not leftover — it is the checklist for exactly the
- * thing being asked for, and excluding it left the goal with nothing to verify
- * against, so it ran one round and stood down.
- *
- * So: a finished list is history and is skipped past; an unfinished one is the
- * goal's own.
- */
-export function baselineFor(
-  tasks: readonly { n: number; status: string }[] | null | undefined,
-): number {
-  if (tasks === null || tasks === undefined || tasks.length === 0) return 0;
-  const anyLeft = tasks.some((one) => one.status !== 'done');
-  if (anyLeft) return 0;
-  return tasks.reduce((most, one) => Math.max(most, one.n), 0);
-}
-
 /** One goal from a sentence, active and counting from now. */
-export function createGoal(objective: string, howFar: HowFar = 'doing', planBaselineN = 0): Goal {
+export function createGoal(objective: string, howFar: HowFar = 'doing'): Goal {
   const said = objective.trim();
   return {
     id: nextId(),
@@ -105,8 +81,14 @@ export function createGoal(objective: string, howFar: HowFar = 'doing', planBase
     elapsed: 0,
     howFar,
     startedAt: Date.now(),
-    planBaselineN,
   };
+}
+
+/** The one-step list a goal gets when the model could not write one for it.
+ *  A goal with nothing to check against ran one round and stood down; a list of
+ *  one is still a list, and the loop can run against it. */
+export function listForGoal(objective: string): readonly string[] {
+  return [`Reach: ${objective.trim()}`];
 }
 
 /** Seconds since the goal was set. */
@@ -151,41 +133,42 @@ export function parseGoalCommand(text: string): ParsedGoal | null {
   return { kind: 'set', objective: rest };
 }
 
-/** Is the objective met?
+/**
+ * Is the objective met?
  *
- * Hard rule: only tasks created for this goal count — leftover plans from
- * earlier work are ignored via planBaselineN. Without a plan belonging to this
- * goal, no heuristic string match counts as done.
+ * Two things, both of them evidence rather than assertion: every step of the
+ * conversation's checklist settled, and the project's own checks passing. A
+ * model saying it is done is neither.
+ *
+ * The list is the conversation's own now, so there is no baseline to skip past
+ * — a list belonging to a different tab cannot reach this one.
  */
 export function verifyGoal(
-  plan: BuildPlan | null,
-  turns: readonly Turn[],
+  plan: { done: number; total: number; next: string | null } | null,
+  checks: { passed: boolean; reason: string } | null,
   objective: string,
-  planBaselineN = 0,
 ): { met: boolean; reason: string } {
   const said = objective.trim();
   // A blank objective has not been met — nothing was asked for, so nothing can
   // report done and finish the goal on its own.
   if (said === '') return { met: false, reason: 'No objective set, so there is nothing to check.' };
 
-  if (plan !== null) {
-    // Only tasks with n > baseline belong to this goal
-    const owned = plan.tasks.filter((t) => t.n > planBaselineN);
-    if (owned.length === 0) {
-      return { met: false, reason: 'No checklist for this goal yet — add tasks to the build plan or say /goal clear when done.' };
-    }
-    const total = owned.length;
-    const done = owned.filter((t) => t.status === 'done').length;
-    if (done < total) {
-      const next = owned.find((t) => t.status !== 'done');
-      const hint = next !== undefined ? `Next: ${next.title}.` : '';
-      return { met: false, reason: `${String(done)}/${String(total)} tasks done. ${hint}`.trim() };
-    }
-    return { met: true, reason: `All ${String(total)} tasks for this goal done.` };
+  if (plan === null || plan.total === 0) {
+    return { met: false, reason: goalWords.noListYet };
   }
-
-  void turns;
-  return { met: false, reason: 'No checklist for this goal — add tasks to the build plan or say /goal clear when done.' };
+  if (plan.done < plan.total) {
+    const next = plan.next === null ? '' : ` Next: ${plan.next}.`;
+    return {
+      met: false,
+      reason: `${String(plan.done)} of ${String(plan.total)} steps settled.${next}`.trim(),
+    };
+  }
+  // Every step settled. The checks are what turn that into done.
+  if (checks === null) {
+    return { met: true, reason: `All ${String(plan.total)} steps settled; no checks to run.` };
+  }
+  if (!checks.passed) return { met: false, reason: `Checks failed: ${checks.reason}` };
+  return { met: true, reason: `All ${String(plan.total)} steps settled and ${checks.reason}` };
 }
 
 /** Update elapsed in place, for display. */
@@ -206,7 +189,6 @@ export function readStoredGoal(raw: unknown): Goal | null {
   if (typeof g['id'] !== 'string' || typeof g['objective'] !== 'string') return null;
   if (g['status'] !== 'active' && g['status'] !== 'paused' && g['status'] !== 'done') return null;
   if (typeof g['iterations'] !== 'number' || typeof g['startedAt'] !== 'number') return null;
-  if (typeof g['planBaselineN'] !== 'number') return null;
   return {
     id: g['id'] as string,
     objective: g['objective'] as string,
@@ -215,7 +197,6 @@ export function readStoredGoal(raw: unknown): Goal | null {
     elapsed: typeof g['elapsed'] === 'number' ? Math.max(0, g['elapsed'] as number) : 0,
     howFar: isHowFar(g['howFar']) ? g['howFar'] : 'doing',
     startedAt: g['startedAt'] as number,
-    planBaselineN: Math.max(0, Math.floor(g['planBaselineN'] as number)),
   };
 }
 

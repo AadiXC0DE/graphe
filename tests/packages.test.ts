@@ -20,6 +20,7 @@ import {
   type Pack,
   type PackageHost,
 } from '../src/agent/pi/packages';
+import { cardFrom } from '../src/agent/pi/extension-probe';
 
 /* -------------------------------------------------------------------------- */
 /* What a catalogue actually sends back                                        */
@@ -231,7 +232,7 @@ describe('the order additions are offered in', () => {
   it('puts the ones we vouch for first, in our order, however unpopular', () => {
     const packs = readCatalog([
       { package: { name: 'pi-famous' }, downloads: { monthly: 5_000_000 } },
-      { package: { name: 'pi-subagents' }, downloads: { monthly: 3 } },
+      { package: { name: 'pi-something' }, downloads: { monthly: 3 } },
       { package: { name: 'pi-mcp-adapter' }, downloads: { monthly: 1 } },
       { package: { name: 'pi-lens' }, downloads: { monthly: 2 } },
       { package: { name: 'pi-web-access' } },
@@ -242,6 +243,7 @@ describe('the order additions are offered in', () => {
       ...CURATED.map((one) => one.id),
       'pi-famous',
       'pi-advisor',
+      'pi-something',
     ]);
   });
 
@@ -352,9 +354,30 @@ describe('CURATED', () => {
       'pi-mcp-adapter',
       'pi-web-access',
       'pi-lens',
-      'pi-subagents',
       'pi-advisor-flow',
     ]);
+  });
+
+  /** Graphe already splits work up, runs it and follows it up. A second thing
+   *  doing the same has different rules and both end up in one prompt, so the
+   *  shelf is checked by what an entry would do, not by the name it goes by. */
+  it('offers nothing that would run work beside the conversation', () => {
+    for (const one of CURATED) {
+      const card = cardFrom({
+        id: one.id,
+        hooks: [],
+        tools: [{ name: one.id, description: one.why }],
+        commands: [],
+        sentTurns: false,
+        source: one.why,
+      });
+      expect(card.orchestrating, one.id).toBe(false);
+      expect(card.runsBackgroundWork, one.id).toBe(false);
+      expect(card.startsTurns, one.id).toBe(false);
+      // And the sentence may not promise it either, which is how one of these
+      // got onto the shelf in the first place.
+      expect(one.why, one.id).not.toMatch(/\b(helpers?|several|at once|in parallel|on its own)\b/i);
+    }
   });
 
   it('says what each one lets you do, in one sentence', () => {

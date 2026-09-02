@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 /** A build plan — the tasks, the progress, the resume. */
 
 import { describe, expect, it } from 'vitest';
@@ -5,7 +6,6 @@ import { describe, expect, it } from 'vitest';
 import {
   addTasks,
   buildWords,
-  finishTask,
   nextOf,
   note,
   numberFrom,
@@ -16,7 +16,7 @@ import {
   resumeFrom,
   setStatus,
   standing,
-  startTask,
+  startStep,
   taskFrom,
   toMarkdown,
   unfinished,
@@ -71,16 +71,14 @@ describe('progress and next', () => {
     expect(said[0]?.note).toBe('tests pass');
   });
 
-  it('closes off the task a turn just finished', () => {
-    expect(finishTask(plan, true)[0]?.status).toBe('done');
-    expect(finishTask(plan, false)[0]?.status).toBe('failed');
-    // A task mid-work is the one finished, not the first pending.
-    const working = setStatus(plan, 1, 'doing' as const);
-    expect(finishTask(working, true)[0]?.status).toBe('done');
-    expect(finishTask(working, false)[0]?.status).toBe('failed');
-    // Once done, a settle disturbs nothing.
-    const allDone = plan.map((one) => ({ ...one, status: 'done' as const }));
-    expect(finishTask(allDone, true)).toBe(allDone);
+  /* The app used to close a step off at every reply boundary, on a guess about
+     how the reply had gone — so a turn that read three files and wrote a
+     paragraph ticked one, and a failing test failed one. Both helpers are gone;
+     the model says which step moved, by number. */
+  it('has no way left for the app to close a step on a guess', () => {
+    const source = readFileSync('src/work/buildplan.ts', 'utf8');
+    expect(source).not.toContain('export function finishTask');
+    expect(source).not.toContain('export function startTask');
   });
 
   it('adds newly discovered requirements as their own tasks', () => {
@@ -93,30 +91,26 @@ describe('progress and next', () => {
   });
 
   it('counts what is done, what remains and what is stuck', () => {
-    expect(standing(plan)).toEqual({ done: 0, total: 2, failed: 0 });
+    expect(standing(plan)).toEqual({ done: 0, total: 2, failed: 0, skipped: 0 });
     const mixed = [
       { n: 1, title: 'A', acceptance: '', test: null, status: 'done' as const, note: null },
       { n: 2, title: 'B', acceptance: '', test: null, status: 'failed' as const, note: null },
       { n: 3, title: 'C', acceptance: '', test: null, status: 'pending' as const, note: null },
     ];
-    expect(standing(mixed)).toEqual({ done: 1, total: 3, failed: 1 });
+    expect(standing(mixed)).toEqual({ done: 1, total: 3, failed: 1, skipped: 0 });
   });
 
-  it('picks up the next task as the one being worked on', () => {
-    const started = startTask(plan);
-    expect(started[0]?.status).toBe('doing');
-    expect(started[1]?.status).toBe('pending');
-    // Already in hand is left alone — a run starting twice marks once.
-    expect(startTask(started)).toBe(started);
-    // A finished run has nothing left to pick up.
-    const allDone = plan.map((one) => ({ ...one, status: 'done' as const }));
-    expect(startTask(allDone)).toBe(allDone);
+  it('picks a step up only when the model says which', () => {
+    const started = startStep(plan, 1);
+    expect(started.plan[0]?.status).toBe('doing');
+    expect(started.plan[1]?.status).toBe('pending');
+    expect(started.said).toContain('in hand');
   });
 
-  it('picks up a failed task again, so a retry is the current work', () => {
+  it('picks a failed step up again, because a failure is work still owed', () => {
     const failed = setStatus(plan, 1, 'failed' as const);
-    const retried = startTask(failed);
-    expect(retried[0]?.status).toBe('doing');
+    expect(nextOf(failed)?.n).toBe(1);
+    expect(startStep(failed, 1).plan[0]?.status).toBe('doing');
   });
 });
 
@@ -127,8 +121,8 @@ describe('toMarkdown / readPlan — a plan that survives a restart', () => {
       { n: 2, title: 'Footer', acceptance: '', test: 'npm test', status: 'pending' as const, note: null },
     ];
     const md = toMarkdown(plan);
-    expect(md).toContain('- [x] Header');
-    expect(md).toContain('- [ ] Footer (runs `npm test`)');
+    expect(md).toContain('- [x] 1. Header');
+    expect(md).toContain('- [ ] 2. Footer (runs `npm test`)');
 
     const back = readPlan(plan);
     expect(back).toHaveLength(2);
@@ -198,8 +192,8 @@ describe('planStanding — the plan the turn carries', () => {
 
   it('names every step and which of them are still open', () => {
     const said = planStanding(half);
-    expect(said).toContain('- [x] Header');
-    expect(said).toContain('- [ ] Changelog');
+    expect(said).toContain('- [x] 1. Header');
+    expect(said).toContain('- [ ] 2. Changelog');
   });
 
   it('counts them, so a reader does not have to', () => {

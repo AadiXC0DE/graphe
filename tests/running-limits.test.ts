@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { MOST_RUNNING, Running, sameCommand } from '../src/agent/running';
+import { capsNow } from '../src/work/capacity';
 
 const runFile = promisify(execFile);
 const PARTS = { shell: '/bin/sh', args: ['-c'] } as const;
@@ -128,6 +129,10 @@ describe('RL-01 the same command twice', () => {
 });
 
 describe('RL-02 a ceiling on how many at once', () => {
+  it('takes its ceiling from the one place the caps are worked out', () => {
+    expect(MOST_RUNNING).toBe(capsNow().running);
+  });
+
   it('refuses past the ceiling, and names what is already up', async () => {
     const running = register();
     const { folder } = folderWithServer();

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { advisorWords, worthHaving } from '../agent/advisor';
+import { advisorSwitchWords, advisorWords, worthHaving } from '../agent/advisor';
+import { policyWords, type Policy } from '../agent/pi/extension-policy';
+import { saysPromptSize } from '../agent/pi/standing';
 import type { ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
 import { thinkingLevels } from '../lib/thinking';
@@ -24,6 +26,20 @@ type Props = {
    *  answer yet, which leaves that model's own setting standing. */
   advisorThinking?: ThinkingLevel | undefined;
   onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
+  /** The two gates the advisor can hold, both off by default. Asking a second
+   *  model before saying a job is done turns "finish" into "report"; asking it
+   *  every time a command repeats fires on running the tests three times. */
+  advisorGates?: { completionGate: boolean; loopGate: boolean };
+  onAdvisorGate?: (which: 'completionGate' | 'loopGate', on: boolean) => void;
+  /** Whether add-ons that start work of their own are on for this conversation.
+   *  Off means their tools still work and their hooks do not. */
+  addons?: Policy;
+  onAddons?: (choice: Policy) => void;
+  /** How heavy the system prompt has become, in characters. */
+  promptSize?: number | null;
+  /** What the chosen model was measured doing on a long job. Null for one
+   *  nothing has measured, which is most of them. */
+  longJobs?: string | null;
   /** Lets a native page step aside while this renderer popover is open. */
   onOpenChange?: (open: boolean) => void;
   /** Quieter, for the strip along the top where it sits beside the project's
@@ -95,6 +111,12 @@ export default function ThinkingWith({
   onAdvisor,
   advisorThinking,
   onAdvisorThinking,
+  advisorGates,
+  onAdvisorGate,
+  addons,
+  onAddons,
+  promptSize = null,
+  longJobs = null,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -404,6 +426,65 @@ export default function ThinkingWith({
                     </button>
                   ) : null}
                 </div>
+              ) : null}
+
+              {/* The two gates, behind the same control as the model that
+                  holds them. Both off: a second opinion is advice on the work,
+                  and neither of these was ever somebody's decision. */}
+              {offerAdvisor && advisorGates !== undefined && onAdvisorGate !== undefined ? (
+                <>
+                  <button
+                    type="button"
+                    className="thinking__tune thinking__tune--words"
+                    onClick={() => onAdvisorGate('completionGate', !advisorGates.completionGate)}
+                    aria-pressed={advisorGates.completionGate}
+                    title={advisorSwitchWords.completionGate.hint}
+                  >
+                    <span>{advisorSwitchWords.completionGate.label}</span>
+                    <span className="thinking__tunevalue">
+                      {advisorGates.completionGate ? 'On' : 'Off'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="thinking__tune thinking__tune--words"
+                    onClick={() => onAdvisorGate('loopGate', !advisorGates.loopGate)}
+                    aria-pressed={advisorGates.loopGate}
+                    title={advisorSwitchWords.loopGate.hint}
+                  >
+                    <span>{advisorSwitchWords.loopGate.label}</span>
+                    <span className="thinking__tunevalue">
+                      {advisorGates.loopGate ? 'On' : 'Off'}
+                    </span>
+                  </button>
+                </>
+              ) : null}
+
+              {/* And the one about add-ons, in the same place for the same
+                  reason: what starts a turn is a question about how the model
+                  runs, so it belongs beside the model. */}
+              {addons !== undefined && onAddons !== undefined ? (
+                <button
+                  type="button"
+                  className="thinking__tune thinking__tune--words"
+                  onClick={() => onAddons(addons === 'on' ? 'tools-only' : 'on')}
+                  aria-pressed={addons === 'on'}
+                  title={policyWords.note}
+                >
+                  <span>{policyWords.label}</span>
+                  <span className="thinking__tunevalue">{addons === 'on' ? 'On' : 'Off'}</span>
+                </button>
+              ) : null}
+
+              {/* What this model was measured doing on a long list, when
+                  anybody has measured it. Said before somebody starts a night's
+                  work on one known to stop early, rather than after. */}
+              {longJobs !== null || promptSize !== null ? (
+                <p className="thinking__note">
+                  {[longJobs, promptSize === null ? null : saysPromptSize(promptSize)]
+                    .filter((one) => one !== null)
+                    .join(' · ')}
+                </p>
               ) : null}
 
               <button

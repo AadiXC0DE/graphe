@@ -14,6 +14,9 @@
  * argued with without opening the app.
  */
 
+import { parseProposal } from './plan';
+import { capsNow } from '../work/capacity';
+
 /** Every word this mode puts on screen. */
 export const researchWords = {
   /** On the chip, when it is the way of working in force. */
@@ -25,13 +28,17 @@ export const researchWords = {
 } as const;
 
 /**
- * The most that go out together, whatever is asked for.
+ * How many ways the deepest setting splits a question.
  *
- * The ceiling admits eight helpers at once and background work asks from the
- * same account, so this stays under it: a split that is refused on the way out
- * is worse than a smaller one that runs.
+ * A number rather than a reading of the machine, because this one is printed on
+ * the rung and written into the brief the model reads, and the window it is
+ * drawn in cannot see the machine. Anything past what the machine can carry is
+ * turned away by the fleet, which is the one place that knows.
  */
-export const MOST_TOGETHER = 6;
+export const DEEPEST_SPLIT = 6;
+
+/** The most helpers research may actually have out at once here. */
+export const MOST_TOGETHER = capsNow().research;
 
 /** The first line of every helper's work, and the words somebody watching sees
  *  instead of the paragraph underneath them. */
@@ -80,7 +87,7 @@ export const DEPTHS: readonly HowDeep[] = [
     id: 'exhaustive',
     name: 'Leave nothing out',
     note: 'Splits it six ways, wants four sources behind each answer, and goes back over what is left unsettled up to three times.',
-    atOnce: MOST_TOGETHER,
+    atOnce: DEEPEST_SPLIT,
     sources: 4,
     again: 3,
   },
@@ -129,7 +136,7 @@ export function researchBrief(depth: Depth = DEFAULT_DEPTH): string {
     'Treat this as research rather than a change.',
     '',
     `1. Break the question into at least ${many} separate things that would have to be true, and say what they are before you start. Fewer than ${many} is the same question in different words.`,
-    `2. Send a helper after each one, several at the same time rather than one after another — all of them in the same reply, so ${many} are working at once. Give each a whole question it can answer without the others. Never put more than ${String(MOST_TOGETHER)} out at one time; any beyond that will not start.`,
+    `2. Send a helper after each one, several at the same time rather than one after another — all of them in the same reply, so ${many} are working at once. Give each a whole question it can answer without the others. Never put more than ${String(DEEPEST_SPLIT)} out at one time; any beyond that will not start.`,
     `3. Begin each helper's work with a line reading "${LOOKING_INTO} " and a few plain words for the one thing it is settling. Those words are what somebody watching sees while it works.`,
     '4. Read this project as well as the web. What the code already does is evidence, and it outranks anything written about what it should do.',
     `5. Hold nothing as settled on one source alone: ${String(how.sources)} that agree, found separately, before any part of the answer is written as fact.`,
@@ -257,6 +264,35 @@ export function implementationPlanFromResearch(report: string): string | null {
   if (found === null) return null;
   const after = report.slice(found.index + found[0].length).trim();
   return after === '' ? null : after;
+}
+
+/** A line that opens with its own number. Bullets are deliberately not here: a
+ *  report is full of them, and a numbered run is the shape of a plan. */
+const NUMBERED = /^[ \t]*\d+[.)][ \t]+\S/;
+
+/** Where the steps came from, so the card can say so and nothing has to guess. */
+export type StepSource = 'heading' | 'numbered' | 'none';
+
+/**
+ * The steps a research report offers, however it wrote them.
+ *
+ * The heading the brief asked for first, because that is the model saying "this
+ * is the plan". Failing that, the report's own numbered list — a report that
+ * laid its steps out plainly should not lose them to a missing heading. Failing
+ * both, nothing, and the card says so rather than the app inventing a list.
+ */
+export function stepsFromReport(report: string): { steps: readonly string[]; from: StepSource } {
+  const section = implementationPlanFromResearch(report);
+  if (section !== null) {
+    const { steps } = parseProposal(section);
+    if (steps.length > 0) return { steps, from: 'heading' };
+  }
+  const numbered = report.split(/\r?\n/).filter((line) => NUMBERED.test(line));
+  if (numbered.length > 0) {
+    const { steps } = parseProposal(numbered.join('\n'));
+    if (steps.length > 0) return { steps, from: 'numbered' };
+  }
+  return { steps: [], from: 'none' };
 }
 
 /** How the plan says it was longer than the list that came out of it. */

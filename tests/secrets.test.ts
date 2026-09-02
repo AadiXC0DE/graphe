@@ -10,7 +10,15 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { SecretFile, type Cipher } from '../src/projects/secrets';
+import {
+  SecretFile,
+  authPathIn,
+  keepProviderCredential,
+  providerCredentials,
+  providerKey,
+  writeProviderAuth,
+  type Cipher,
+} from '../src/projects/secrets';
 
 const FIGMA_TOKEN = 'figd_9xKQ2mVnR4tL7wZpA3sB6cD8eF0gH1iJ2kL3mN4o';
 
@@ -196,6 +204,51 @@ describe('the file on disk', () => {
       const secrets = await SecretFile.open(file, workingLock());
       expect(secrets.get('figma')).toBe(FIGMA_TOKEN);
       expect(secrets.get('somewhere')).toBe(null);
+    });
+  });
+});
+
+/* ========================================================================== */
+/* Provider sign-ins                                                           */
+/* ========================================================================== */
+
+describe('the keys that pay for the work', () => {
+  it('keeps a provider credential behind the same lock as everything else', async () => {
+    await inATemporaryFolder(async (folder) => {
+      const file = join(folder, 'secrets.json');
+      const secrets = await SecretFile.open(file, workingLock());
+      expect(await keepProviderCredential(secrets, 'anthropic', { type: 'api', key: 'sk-x' })).toEqual({
+        ok: true,
+      });
+
+      // On disk, and not in the clear.
+      expect(await readFile(file, 'utf8')).not.toContain('sk-x');
+      const again = await SecretFile.open(file, workingLock());
+      expect(providerCredentials(again)).toEqual({ anthropic: { type: 'api', key: 'sk-x' } });
+      expect(again.names()).toContain(providerKey('anthropic'));
+    });
+  });
+
+  it('writes the runtime a file of its own, readable by this login only', async () => {
+    await inATemporaryFolder(async (folder) => {
+      const secrets = await SecretFile.open(join(folder, 'secrets.json'), workingLock());
+      await keepProviderCredential(secrets, 'xai', { type: 'oauth', refresh: 'r' });
+      await secrets.keep('figma', FIGMA_TOKEN);
+
+      const written = await writeProviderAuth(folder, secrets);
+      expect(written).toBe(authPathIn(folder));
+      const text = await readFile(authPathIn(folder), 'utf8');
+      // Only the provider sign-ins, under their own ids.
+      expect(JSON.parse(text)).toEqual({ xai: { type: 'oauth', refresh: 'r' } });
+      expect(text).not.toContain(FIGMA_TOKEN);
+    });
+  });
+
+  it('hands back nothing rather than an empty file when none is held', async () => {
+    await inATemporaryFolder(async (folder) => {
+      const secrets = await SecretFile.open(join(folder, 'secrets.json'), workingLock());
+      expect(await writeProviderAuth(folder, secrets)).toBe(null);
+      await expect(readFile(authPathIn(folder), 'utf8')).rejects.toThrow();
     });
   });
 });

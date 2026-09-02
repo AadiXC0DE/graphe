@@ -25,7 +25,7 @@ import { Type } from 'typebox';
 
 import { findSecret } from '../guard/policy';
 
-import { REACHABLE, readReach, whereOf, type Read } from './reach';
+import { REACHABLE, pinnedSpec, readReach, whereOf, type Read } from './reach';
 
 export type McpServerConfig = {
   name: string;
@@ -775,7 +775,7 @@ export function connectingTool(projectRoot: string): ToolDefinition {
       where: Type.Optional(
         Type.String({
           description:
-            'One line: the command that starts it, such as "npx -y @playwright/mcp@latest", or the address it already answers on, such as "http://127.0.0.1:3845/mcp".',
+            `One line: the command that starts it, with the exact version on it, such as "npx -y ${pinnedSpec('@playwright/mcp')}", or the address it already answers on, such as "http://127.0.0.1:3845/mcp".`,
         }),
       ),
     }),

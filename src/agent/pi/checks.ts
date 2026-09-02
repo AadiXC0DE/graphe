@@ -14,6 +14,7 @@ import { basename, join } from 'node:path';
 
 import type { Checked } from '../hooks';
 import { REVIEW_ANGLES } from './review';
+import { capsNow } from '../../work/capacity';
 
 export type ProjectCheck = {
   /** Stable name for the reviewer sent to it, from the file name. */
@@ -126,11 +127,9 @@ export const CHECK_WORDS = {
  *
  * Every check a project writes down runs; what is capped is how many are in
  * the air together, because a project with twenty of them would otherwise
- * start twenty processes on somebody's laptop inside one turn. Four is what
- * background work allows itself and half of what one turn's helpers may hold,
- * so a review never fills the fleet and leaves the agent nothing to send.
+ * start twenty processes on somebody's laptop inside one turn.
  */
-export const CHECKS_AT_A_TIME = 4;
+export const CHECKS_AT_A_TIME = capsNow().checks;
 
 /** How much of one reviewer's answer is kept. Twenty checks each writing an
  *  essay is a context window spent on prose rather than findings. */

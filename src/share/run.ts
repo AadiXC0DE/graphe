@@ -6,6 +6,7 @@
  * catching things.
  */
 
+import * as noted from './spawned';
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -105,6 +106,10 @@ export function runHelper(
         finished({ code, out, errors, said });
       },
     );
+    // Written down while it runs, so quitting can take it with it. A helper
+    // that outlives the app spends until it is done with nobody watching.
+    noted.started({ pid: child.pid, what: tool, kind: 'helper' });
+    child.once('exit', () => noted.ended(child.pid));
     if (options.input !== undefined) {
       child.stdin?.on('error', () => undefined);
       child.stdin?.end(options.input);

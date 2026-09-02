@@ -221,6 +221,49 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Releasing: [RELEASING.md](RELE
 
 ---
 
+## Where your data lives, and what leaves the machine
+
+**On this computer, and nowhere else.**
+
+| | |
+|---|---|
+| `~/Library/Application Support/Graphe` | Checkouts and board copies of your projects, conversation transcripts, the version timeline's working copies, logs, preferences and the recent-projects shelf. Credentials Graphe holds are sealed by the login keychain, never written in the clear |
+| `~/.pi/agent` | The agent runtime's own folder: the provider you connected, installed add-ons, and the project memory |
+| Your project folder | Ordinary git. Every version Graphe makes is a real commit in your repository |
+
+**What leaves the machine.** Three things, all of them yours to start:
+
+- **Model calls**, to the provider you connected, on your key. Your prompt, the files the agent
+  read and what it wrote go to that provider under their terms, which is what a coding agent is.
+- **A 23 MB embedding model**, downloaded once from Hugging Face the first time project memory is
+  recalled. There is a word-overlap fallback if the download fails, and nothing of yours is sent
+  to fetch it.
+- **GitHub**, through the `gh` command you already have signed in, when you ask for a pull request
+  or a review of one.
+
+That is the list. No account, no telemetry, no analytics, no crash reporting, no server of ours in
+the middle. The diagnostics you copy from the Help menu go to your clipboard and nowhere else, and
+they never include transcripts or keys.
+
+**How to delete everything.**
+
+```sh
+brew uninstall --zap --cask graphe      # the app, and everything under Application Support
+rm -rf ~/.pi/agent                      # the runtime's folder: sign-ins, add-ons, memory
+```
+
+Installed from the disk image instead? Drag Graphe out of Applications, then:
+
+```sh
+rm -rf ~/Library/Application\ Support/Graphe ~/Library/Caches/xyz.graphe \
+       ~/Library/Preferences/xyz.graphe.plist ~/.pi/agent
+```
+
+Your project folders are never touched by any of this. They are your work and Graphe does not
+uninstall them.
+
+---
+
 ## Principles
 
 These are load-bearing, not decoration. Pull requests are measured against them.

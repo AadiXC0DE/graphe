@@ -12,7 +12,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+
+/* Every case here shells out to a real sandbox, which is a fraction of a
+   second on an idle machine and several times that under a full parallel run. */
+vi.setConfig({ testTimeout: 30_000 });
 
 import { boundaryHere, lookAgain } from '../src/agent/sandbox';
 import { seatbeltProfile } from '../src/agent/sandbox/profile';
@@ -478,7 +482,7 @@ describe('a real refusal', () => {
     lookAgain();
     const look = await boundaryHere();
     if (!look.ok) {
-      expect(look.why).toMatch(/no-boundary-here|piece-missing|not-holding/);
+      expect(look.why).toMatch(/no-boundary-here|piece-missing|not-holding|boundary-refused/);
       return;
     }
 

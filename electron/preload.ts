@@ -64,6 +64,7 @@ import {
   type Workflow,
   type BuildPlan,
   type BuildAdvance,
+  type ContinuationNotice,
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
@@ -542,6 +543,16 @@ const api: GrapheApi = {
     };
   },
 
+  onPaneKey(listener: (press: { key: string }) => void): () => void {
+    const forward = (_source: IpcRendererEvent, press: { key: string }): void => {
+      listener(press);
+    };
+    ipcRenderer.on(CHANNEL.paneKey, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.paneKey, forward);
+    };
+  },
+
   pages(where?: Where): Promise<Result<readonly Page[]>> {
     return ipcRenderer.invoke(CHANNEL.pages, named(where)) as Promise<Result<readonly Page[]>>;
   },
@@ -746,6 +757,22 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<Preferences>('I could not tell how long you meant.'));
     }
     return ipcRenderer.invoke(CHANNEL.setAdvisorThinking, level, named(where)) as Promise<
+      Result<Preferences>
+    >;
+  },
+
+  setAdvisorGate(
+    which: 'completionGate' | 'loopGate',
+    on: boolean,
+    where?: Where,
+  ): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.setAdvisorGate, which, on, named(where)) as Promise<
+      Result<Preferences>
+    >;
+  },
+
+  setAddons(choice: 'on' | 'tools-only', where?: Where): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.setAddons, choice, named(where)) as Promise<
       Result<Preferences>
     >;
   },
@@ -1085,11 +1112,11 @@ const api: GrapheApi = {
   },
 
   onBuildPlan(
-    listener: (notice: { project: string; plan: BuildPlan | null }) => void,
+    listener: (notice: { project: string; address: string; plan: BuildPlan | null }) => void,
   ): () => void {
     const forward = (
       _source: IpcRendererEvent,
-      notice: { project: string; plan: BuildPlan | null },
+      notice: { project: string; address: string; plan: BuildPlan | null },
     ): void => {
       listener(notice);
     };
@@ -1097,6 +1124,62 @@ const api: GrapheApi = {
     return () => {
       ipcRenderer.off(CHANNEL.buildPlanChanged, forward);
     };
+  },
+
+  onContinuation(listener: (notice: ContinuationNotice) => void): () => void {
+    const forward = (_source: IpcRendererEvent, notice: ContinuationNotice): void => {
+      listener(notice);
+    };
+    ipcRenderer.on(CHANNEL.continuation, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.continuation, forward);
+    };
+  },
+
+  continuationStop(where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.continuationStop, where);
+  },
+
+  onMenu(listener: (notice: { id: string }) => void): () => void {
+    const forward = (_source: IpcRendererEvent, notice: { id: string }): void => {
+      listener(notice);
+    };
+    ipcRenderer.on(CHANNEL.fromMenu, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.fromMenu, forward);
+    };
+  },
+
+  diagnostics(): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.diagnostics);
+  },
+
+  keepCredential(name: string, value: string): Promise<Result<{ ok: boolean; why?: string }>> {
+    return ipcRenderer.invoke(CHANNEL.keepCredential, name, value);
+  },
+
+  credentialsKept(): Promise<Result<{ canKeep: boolean; held: readonly string[] }>> {
+    return ipcRenderer.invoke(CHANNEL.credentialsKept);
+  },
+
+  appVersion(): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.appVersion);
+  },
+
+  longJobs(providerId: string, modelId: string): Promise<Result<string | null>> {
+    return ipcRenderer.invoke(CHANNEL.longJobs, providerId, modelId);
+  },
+
+  addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>> {
+    return ipcRenderer.invoke(CHANNEL.addons);
+  },
+
+  storage(): Promise<Result<{ says: string; couldClear: number; because: string }>> {
+    return ipcRenderer.invoke(CHANNEL.storage);
+  },
+
+  clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>> {
+    return ipcRenderer.invoke(CHANNEL.clearFinishedWork);
   },
 
   inStep(where?: Where): Promise<Result<InStep>> {

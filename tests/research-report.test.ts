@@ -106,13 +106,18 @@ describe('the heading the plan arrives under', () => {
 });
 
 describe('a plan longer than the list that comes out of it', () => {
-  const long = Array.from({ length: 15 }, (_, at) => `${String(at + 1)}. Step ${String(at + 1)}`).join(
-    '\n',
-  );
+  const steps = (many: number): string =>
+    Array.from({ length: many }, (_, at) => `${String(at + 1)}. Step ${String(at + 1)}`).join('\n');
+
+  it('says nothing about a plan that is merely long, because all of it is on the list', () => {
+    const proposal = parseProposal(steps(20));
+    expect(proposal.steps.length).toBe(20);
+    expect(stepsNotOnTheList(proposal.caveats)).toBeNull();
+  });
 
   it('is read off what the plan itself reported, so the two cannot disagree', () => {
-    const proposal = parseProposal(long);
-    expect(proposal.steps.length).toBe(12);
+    const proposal = parseProposal(steps(63));
+    expect(proposal.steps.length).toBe(60);
     expect(stepsNotOnTheList(proposal.caveats)).toBe(
       'That plan had 3 more steps than the list holds, so they are not on it. Ask and I will add them.',
     );
@@ -127,9 +132,10 @@ describe('a plan longer than the list that comes out of it', () => {
     expect(stepsNotOnTheList(['This will need a designer to look at it.'])).toBeNull();
   });
 
-  it('is said out loud in the conversation the research happened in', () => {
-    expect(app).toContain("const missed = stepsNotOnTheList(proposal?.caveats ?? [])");
-    expect(app).toContain("said('graphe', missed)");
-    expect(app).toContain('changeDesk(current, project,');
+  it('says it in plain words, and does not raise its voice about it', () => {
+    const said = stepsNotOnTheList(parseProposal(steps(63)).caveats) ?? '';
+    expect(said).not.toContain('!');
+    expect(said).not.toMatch(/\b(commit|branch|token|prompt|context|API|parse|cap)\b/i);
+    expect(said).toMatch(/Ask and I will add them\.$/);
   });
 });

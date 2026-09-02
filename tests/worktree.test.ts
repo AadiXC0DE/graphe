@@ -11,7 +11,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   branchFor,
@@ -31,6 +31,12 @@ import {
   type RunGit,
 } from '../src/history/worktree';
 import { existsSync, readFileSync } from 'node:fs';
+
+
+/* Every case here drives real git in a real temporary folder, which is a
+   fraction of a second on an idle machine and several times that under a full
+   parallel run. */
+vi.setConfig({ testTimeout: 30_000 });
 
 const spawn = promisify(execFile);
 

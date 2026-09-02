@@ -32,9 +32,31 @@
 // and published anyway, because a direct download is what people try first — it
 // just costs them a trip through System Settings until we pay Apple.
 
+import { copyFile, mkdir, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import adhocSign from './scripts/adhoc-sign.mjs';
 import { squeezeDiskImages } from './scripts/squeeze-dmg.mjs';
 import { leaveOut, leaveOutTheLanguages } from './scripts/what-ships.mjs';
+
+/**
+ * Keep this version's source maps where a stack trace can still be read.
+ *
+ * `dist-electron/` is rewritten by the next build, so a trace posted a fortnight
+ * after a release has nothing left to resolve against. The maps are small next
+ * to the download and they are the only thing that turns a minified frame in a
+ * diagnostics bundle back into a file and a line. `scripts/symbolicate.mjs`
+ * reads them.
+ */
+async function keepTheMaps(version) {
+  const from = 'dist-electron';
+  const to = join('release', 'maps', version);
+  await mkdir(to, { recursive: true });
+  for (const name of await readdir(from).catch(() => [])) {
+    if (!name.endsWith('.map')) continue;
+    await copyFile(join(from, name), join(to, name)).catch(() => {});
+  }
+}
 
 export default async function config() {
   return {
@@ -60,8 +82,9 @@ export default async function config() {
       'dist/**/*',
       'dist-electron/**/*',
       'package.json',
-      // The shell's source maps are for reading a stack trace on this machine.
-      // Nothing in a shipped app opens them, and they are larger than the code.
+      // The shell's source maps are larger than the code and nothing in a
+      // shipped app opens them. They are kept beside the build instead — see
+      // keepTheMaps below, and scripts/symbolicate.mjs.
       '!dist-electron/*.map',
       // Pi ships its own docs, examples and changelog. They are ~4MB of Markdown
       // nobody can read from inside a packaged app.
@@ -99,6 +122,7 @@ export default async function config() {
     // After packing, before the .dmg is built. The trim has to come first: it
     // changes bytes the signature covers.
     afterPack: async (context) => {
+      await keepTheMaps(context.packager.appInfo.version);
       await leaveOutTheLanguages(context);
       await adhocSign(context);
     },

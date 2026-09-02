@@ -13,9 +13,16 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { SAID_NOTHING, saidNothingAfterRefusal } from '../src/agent/pi/subagent-runner';
+import { HELPER_PATIENCE_MS } from '../src/agent/pi/tools';
 import { REVIEWER_TEST_WORDS } from '../src/agent/pi/reviewer-test';
 
 const runner = readFileSync(new URL('../src/agent/pi/subagent-runner.ts', import.meta.url), 'utf8');
+
+/** The beat the child keeps while a step runs, read out of the child rather
+ *  than repeated here, so the two cannot drift apart. */
+const STEP_BEAT_MS_IN_RUNNER = Number(
+  /const STEP_BEAT_MS = ([\d_]+);/.exec(runner)?.[1]?.replace(/_/g, '') ?? '0',
+);
 
 describe('what a silenced helper reports', () => {
   it('carries what stopped it, word for word', () => {
@@ -63,5 +70,32 @@ describe('the join that fills it in', () => {
     // reporting the bare sentence.
     expect(runner.match(/error: nothingSaid\(\)/g)?.length).toBe(2);
     expect(runner).not.toContain('error: SAID_NOTHING');
+  });
+});
+
+/* The other kind of quiet: a helper that is working hard and saying nothing,
+   because the thing taking the time is a step rather than a sentence. */
+describe('a helper that is working and silent', () => {
+  it('says what step it started, so the quiet is not the only signal', () => {
+    expect(runner).toContain("fields.type === 'tool_execution_start'");
+    expect(runner).toContain("report({ type: 'step', text: doing })");
+  });
+
+  it('keeps saying it while the step runs', () => {
+    expect(runner).toContain('const STEP_BEAT_MS = 20_000;');
+    expect(runner).toContain('setInterval(');
+  });
+
+  it('beats well inside the patience above it, or it is not a heartbeat', () => {
+    expect(STEP_BEAT_MS_IN_RUNNER).toBeLessThan(HELPER_PATIENCE_MS / 2);
+  });
+
+  it('stops once the step ends, so a stalled provider is still caught', () => {
+    expect(runner).toContain("if (fields.type === 'tool_execution_end') stop();");
+  });
+
+  it('passes on the step\'s own output as it arrives', () => {
+    expect(runner).toContain("if (event.type === 'tool-progress')");
+    expect(runner).toContain('saysOutput(event.text)');
   });
 });

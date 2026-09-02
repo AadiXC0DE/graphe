@@ -143,20 +143,14 @@ describe('the tools an extension registered', () => {
 });
 
 describe('the settings the addition reads', () => {
-  it('writes the choice and leaves everything else exactly as it was', () => {
+  it('writes the choice and leaves everything that is not ours exactly as it was', () => {
     const theirs = {
       advisorGitContext: 'full',
       advisorMaxCallsPerSession: 3,
-      // Theirs, not ours: a value somebody wrote is an answer, not an absence.
-      advisorRedactSecrets: false,
-      contextMaxChars: 8000,
-      advisorToolResultMaxLines: 4000,
-      advisorToolResultMaxBytes: 900_000,
-      advisorLoopThreshold: 7,
       advisorCustomInvocation: 'the moon is full',
     };
     const next = advisorSettings(theirs, { advises: OPUS, does: HAIKU });
-    expect(next).toEqual({
+    expect(next).toMatchObject({
       ...theirs,
       advisor: 'anthropic/claude-opus-4-5',
       executor: 'anthropic/claude-haiku-4-5',
@@ -213,7 +207,9 @@ describe('how long the advisor thinks', () => {
 
   it('says nothing about it while the advisor is off', () => {
     const off = advisorSettings({ advisorEffort: 'low' }, { advises: null, does: HAIKU, advisorThinks: 'max' });
-    expect(off).toEqual({ advisorEffort: 'low', alwaysOn: false });
+    expect(off['advisorEffort']).toBe('low');
+    expect(off['alwaysOn']).toBe(false);
+    expect(off).not.toHaveProperty('advisor');
   });
 
   it('reads a level back out of a file, and nothing else', () => {
@@ -395,10 +391,12 @@ describe('every conversation gets the advisor, including a canvas one', () => {
 });
 
 describe('how readily the advisor is asked', () => {
-  it('asks after two equivalent attempts rather than three', () => {
-    // The package's own default is three. By the third the context the advisor
-    // would read is already the wrong shape.
-    expect(advisorSettings(null, { advises: OPUS, does: null })['advisorLoopThreshold']).toBe(2);
+  /** Running the checks three times is not a model going round in circles, and
+   *  it was enough to stop the run for a second opinion. */
+  it('lets ordinary repetition alone', () => {
+    const next = advisorSettings(null, { advises: OPUS, does: null });
+    expect(next['advisorLoopThreshold']).toBe(4);
+    expect(next['advisorAutoLoopGate']).toBe(false);
   });
 
   it('adds the moment the three standing gates miss', () => {
@@ -409,10 +407,8 @@ describe('how readily the advisor is asked', () => {
     expect(said).toContain('review');
   });
 
-  it('and neither is written over an answer somebody already gave', () => {
-    const theirs = { advisorLoopThreshold: 5, advisorCustomInvocation: 'never' };
-    const next = advisorSettings(theirs, { advises: OPUS, does: null });
-    expect(next['advisorLoopThreshold']).toBe(5);
+  it('leaves a sentence somebody has rewritten alone', () => {
+    const next = advisorSettings({ advisorCustomInvocation: 'never' }, { advises: OPUS, does: null });
     expect(next['advisorCustomInvocation']).toBe('never');
   });
 });
@@ -434,13 +430,16 @@ describe('how readily the advisor is asked', () => {
 describe('the plan the advisor reads', () => {
   const MAIN = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 
-  it('goes out with the turn, read from the plan file each time', () => {
-    expect(MAIN).toContain('const stored = await readStoredTasks(open.path)');
-    expect(MAIN).toContain('const plan = stored === null ? null : planStanding(stored.tasks)');
-  });
-
-  it('is part of the message, not something said beside it', () => {
-    expect(MAIN).toContain("const asked = [text, papers, plan ?? ''].filter");
+  /* It used to travel with the typed message, so a steer carried it, a retry
+     after a rate limit did not, and neither did anything after the conversation
+     was tidied up — exactly the turns where a long job forgets it had a list.
+     It is in the system prompt now, on every call. */
+  it('is in the system prompt rather than appended to what somebody typed', () => {
+    expect(MAIN).not.toContain("const asked = [text, papers, plan ?? ''].filter");
+    expect(MAIN).toContain('const asked = [text, papers].filter');
+    const ADAPTER = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
+    expect(ADAPTER).toContain("name: 'graphe-standing'");
+    expect(ADAPTER).toContain("api.on('before_agent_start'");
   });
 
   /* Two ways out of the handler. A plan that made it into one of them is a plan

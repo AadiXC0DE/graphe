@@ -6,6 +6,8 @@
  * wrong things at once: nobody typed it, and there is nothing to wait for.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { drainStarted, withoutOurs } from '../src/lib/queue';
@@ -48,5 +50,34 @@ describe('OL-02 and stop being ours once they have run', () => {
   it('nothing matching is not a drain', () => {
     const line = ['a'];
     expect(drainStarted(line, 'b')).toBe(line);
+  });
+});
+
+/* The window used to hold the list of its own messages, and take them out of
+   the line itself. The loop moved into the shell, so the window stopped being
+   told what was its own — and every round of a carried-on list reappeared in
+   the line as though somebody had typed it. The shell is what queued them, so
+   the shell is what takes them out. */
+describe('OL-03 the shell takes them out on the way to the window', () => {
+  const shell = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  it('filters the line where the events are forwarded', () => {
+    expect(shell).toContain('function enrichForTheWindow');
+    const at = shell.indexOf('function enrichForTheWindow');
+    const block = shell.slice(at, at + 1200);
+    expect(block).toContain("event.type === 'queued'");
+    expect(block).toContain('withoutOurs(event.steering, mine)');
+    expect(block).toContain('withoutOurs(event.followUp, mine)');
+  });
+
+  it('stops counting one of its own the moment it begins', () => {
+    const at = shell.indexOf('function enrichForTheWindow');
+    expect(shell.slice(at, at + 1200)).toContain('drainStarted(mine, event.text)');
+  });
+
+  it('and the window no longer keeps a second copy of the answer', () => {
+    expect(app).not.toContain('withoutOurs(');
+    expect(app).not.toContain('oursInLine');
   });
 });

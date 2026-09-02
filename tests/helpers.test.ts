@@ -52,6 +52,28 @@ describe('a piece of work sent to a helper', () => {
     expect(nowDoing(turns).helpers[0]?.saying).toBeNull();
   });
 
+  /* A builder running a test suite has no findings yet and is not stuck. The
+     step it is on is the only honest thing to draw. */
+  it('shows the step a helper is on before it has found anything', () => {
+    const turns = fold([
+      { type: 'tool-start', call: HELP },
+      { type: 'tool-progress', id: 'call-1', text: 'Running npm test' },
+    ]);
+    const [helper] = nowDoing(turns).helpers;
+
+    expect(helper?.state).toBe('running');
+    expect(helper?.saying).toBe('Running npm test');
+  });
+
+  it('keeps what it has found above the step it is on', () => {
+    const turns = fold([
+      { type: 'tool-start', call: HELP },
+      { type: 'tool-progress', id: 'call-1', text: 'Two pages do.\n\nRunning npm test' },
+    ]);
+
+    expect(nowDoing(turns).helpers[0]?.saying).toBe('Two pages do.\n\nRunning npm test');
+  });
+
   it('counts from when it began, not from when the board was drawn', () => {
     const before = Date.now();
     const turns = fold([{ type: 'tool-start', call: HELP }]);

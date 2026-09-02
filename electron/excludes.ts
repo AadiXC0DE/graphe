@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
+import { writeAtomically } from '../src/lib/atomic';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 /**
@@ -52,7 +53,7 @@ export async function keepOutOfCommits(
   const ending = existing === '' || existing.endsWith('\n') ? existing : `${existing}\n`;
   try {
     await mkdir(join(gitDir, 'info'), { recursive: true });
-    await writeFile(file, `${ending}${missing.join('\n')}\n`, 'utf8');
+    await writeAtomically(file, `${ending}${missing.join('\n')}\n`);
     return true;
   } catch {
     return false;

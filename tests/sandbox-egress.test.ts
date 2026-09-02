@@ -13,8 +13,8 @@ import { createServer, connect, type Server } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { boundaryHere, hold } from '../src/agent/sandbox';
-import { doorwayEnvironment, hostAllowed, openDoorway, reachableHosts } from '../src/agent/sandbox/egress';
-import { seatbeltProfile, type Bounds } from '../src/agent/sandbox/profile';
+import { doorwayEnvironment, hostAllowed, hostsFor, openDoorway, reachableHosts } from '../src/agent/sandbox/egress';
+import { bubblewrapArgs, privatePlaces, seatbeltProfile, type Bounds } from '../src/agent/sandbox/profile';
 import { heldShell } from '../src/agent/sandbox/shell';
 
 const closing: (() => Promise<void> | void)[] = [];
@@ -275,3 +275,80 @@ function ran(command: string, args: readonly string[]): Promise<string> {
     });
   });
 }
+
+/* ========================================================================== */
+/* The providers this computer is actually signed in to                        */
+/* ========================================================================== */
+
+describe('addresses read off the connected providers', () => {
+  it('adds a provider nobody has written into the list yet', () => {
+    const hosts = hostsFor(['https://api.newmodel.dev/v1', 'https://gateway.example.com/openai/v1']);
+    expect(hosts).toContain('api.newmodel.dev');
+    expect(hosts).toContain('gateway.example.com');
+    // Still everything the app itself reaches.
+    expect(hosts).toContain('registry.npmjs.org');
+  });
+
+  it('takes a base address however it was written down', () => {
+    const hosts = hostsFor(['api.bare.dev', 'HTTPS://API.SHOUTING.DEV/v1/', '  ', 'not a url at all']);
+    expect(hosts).toContain('api.bare.dev');
+    expect(hosts).toContain('api.shouting.dev');
+    expect(hosts).not.toContain('');
+  });
+
+  it('names each address once, however many providers answer at it', () => {
+    const hosts = hostsFor(['https://api.openai.com/v1', 'https://api.openai.com/v2']);
+    expect(hosts.filter((one) => one === 'api.openai.com')).toHaveLength(1);
+  });
+});
+
+/* ========================================================================== */
+/* The Linux boundary, asserted where there is no Linux                        */
+/* ========================================================================== */
+
+/* The four tests that actually spawn the boundary only run on macOS, which is
+   where the product ships. These read the arguments instead, so a change that
+   would leave a Linux build with no boundary at all fails on any machine. */
+describe('the arguments that put a command inside bubblewrap', () => {
+  const home = '/home/mira';
+  const folder = '/home/mira/project';
+  const args = (bounds: Partial<Bounds> = {}): string[] =>
+    bubblewrapArgs({ writable: [folder], reach: 'secure', private: privatePlaces(home), ...bounds }, '/bin/sh', ['-c', 'ls']);
+
+  it('binds the folder for writing and the rest of the disk read-only', () => {
+    const said = args();
+    expect(said.join(' ')).toContain('--ro-bind / /');
+    expect(said.join(' ')).toContain(`--bind ${folder} ${folder}`);
+  });
+
+  it('covers the private folders over, because there is no read denial to use', () => {
+    const said = args().join(' ');
+    for (const place of ['.ssh', '.aws', '.gnupg', '.config/gcloud']) {
+      expect(said).toContain(`--tmpfs ${home}/${place}`);
+    }
+    // Keys kept inside the project are covered on this boundary too.
+    expect(said).toContain(`--tmpfs ${folder}/.ssh`);
+  });
+
+  it('takes the network away only when nothing at all may be reached', () => {
+    expect(args({ reach: 'nothing' })).toContain('--unshare-net');
+    expect(args({ reach: 'secure' })).not.toContain('--unshare-net');
+    expect(args({ reach: 'serving' })).not.toContain('--unshare-net');
+  });
+
+  it('ends the arguments before the command, so nothing of it is read as one', () => {
+    const said = args();
+    expect(said.slice(said.indexOf('--'))).toEqual(['--', '/bin/sh', '-c', 'ls']);
+  });
+
+  it('goes away with the app and keeps its own session', () => {
+    const said = args();
+    expect(said).toContain('--die-with-parent');
+    expect(said).toContain('--new-session');
+  });
+
+  it('names a folder once, however many times it was handed in', () => {
+    const said = bubblewrapArgs({ writable: [folder, `${folder}/`, folder], reach: 'secure' }, '/bin/sh', []);
+    expect(said.filter((one) => one === folder)).toHaveLength(2);
+  });
+});

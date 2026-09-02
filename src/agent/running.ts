@@ -25,9 +25,11 @@
  * only `start` and `stop` touch a process.
  */
 
+import * as noted from '../share/spawned';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import { portEnv } from '../work/ports';
+import { capsNow } from '../work/capacity';
 import { worthShowing, type Answered } from '../lib/showable';
 import { hold } from './sandbox';
 import type { Bounds } from './sandbox/profile';
@@ -188,11 +190,10 @@ export type StartOptions = {
   onChange?: () => void;
 };
 
-/** As many servers as one project has a use for. A front end and two back ends
- *  is ordinary; past this it is not a project running, it is a machine filling
- *  up. A development server holds most of a gigabyte, and the way people find
- *  out this number was missing is the machine running out of memory. */
-export const MOST_RUNNING = 4;
+/** As many servers as one project has a use for. A development server holds most
+ *  of a gigabyte, and the way people find out this number was missing is the
+ *  machine running out of memory. */
+export const MOST_RUNNING = capsNow().running;
 
 /** The same command asked for twice. Whitespace only — anything cleverer would
  *  start claiming `npm run dev` and `npm run dev -- --host` are one thing. */
@@ -323,6 +324,10 @@ export class Running {
       detached: process.platform !== 'win32',
     });
     entry.child = child;
+    // A server outlives the turn that started it by design, so it is the one
+    // most worth writing down: quitting has to take it with it.
+    noted.started({ pid: child.pid, what: options.command, kind: 'server' });
+    child.once('exit', () => noted.ended(child.pid));
     if (child.pid !== undefined) options.noted?.began(child.pid, options.command);
     const abort = (): void => end(child, entry.ended);
     if (wasAborted()) abort();

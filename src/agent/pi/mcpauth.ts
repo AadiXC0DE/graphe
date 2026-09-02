@@ -41,23 +41,27 @@ export type Keeps = {
 /** What the shell does that this cannot: put a page in front of somebody. */
 export type OpensPages = (url: URL) => void | Promise<void>;
 
-/** Where the hosted document saying who Graphe is would be found.
+/** Who Graphe is, written down here rather than fetched.
  *
- *  Undefined until the document beside it is actually being served. A server
- *  that supports this fetches the URL and uses it as the client id, so naming
- *  one that answers 404 is worse than offering no name at all — and the file
- *  and this line ship together, so there is a moment where one is live and the
- *  other is not.
+ *  A server that supports it can be handed a URL to fetch instead, and that
+ *  would give Graphe one identity an operator recognises. It would also make
+ *  every sign-in depend on a marketing site being up, and a sign-in that fails
+ *  because a web host is having a bad morning is not a trade worth making. So
+ *  the document is the constant below, no address is offered, and servers
+ *  register us themselves — which is what every one tried against does anyway.
  *
- *  It is written and sitting in site/oauth/client.json. Once
- *  https://usegraphe.com/oauth/client.json answers, this becomes that address
- *  and the registration round trip below stops happening — which is also what
- *  gives Graphe one identity a server operator could recognise, rather than a
- *  stranger asking to be let in from every laptop.
- *
- *  Until then every server registers us itself, which is what the three tried
- *  against all do. */
-const WHO_WE_ARE: string | undefined = undefined;
+ *  Only a loopback `/callback` is ever named, which is why the door is at that
+ *  path and not one of our choosing (RFC 8252). */
+const CLIENT_METADATA: OAuthClientMetadata = {
+  client_name: 'Graphe',
+  client_uri: 'https://usegraphe.com',
+  // No port, deliberately. The operating system gives us a different one every
+  // launch; RFC 8252 §7.3 has the server accept whichever the request carries.
+  redirect_uris: ['http://127.0.0.1/callback', 'http://localhost/callback'],
+  grant_types: ['authorization_code', 'refresh_token'],
+  response_types: ['code'],
+  token_endpoint_auth_method: 'none',
+};
 
 /** How long somebody has to finish signing in before the door closes. Long
  *  enough to find the right account and a password manager; short enough that
@@ -235,28 +239,12 @@ export class BrowserSignIn {
     return this.door.redirectUrl;
   }
 
-  /** Who Graphe is, said once and hosted, rather than registered afresh on
-   *  every machine. A server that supports it fetches this and uses the URL as
-   *  the client id — so there is one Graphe, which an operator can recognise,
-   *  instead of a stranger asking to be let in from each laptop. Servers that
-   *  do not support it fall back to registering us, which still works.
-   *
-   *  It only applies to a loopback `/callback`, which is why the door is at
-   *  that path and not one of our choosing. */
-  readonly clientMetadataUrl = WHO_WE_ARE;
+  /** Never offered: the metadata below travels in the app, so no sign-in waits
+   *  on a web host. */
+  readonly clientMetadataUrl = undefined;
 
   get clientMetadata(): OAuthClientMetadata {
-    return {
-      client_name: 'Graphe',
-      client_uri: 'https://usegraphe.com',
-      // No port, deliberately, and the same pair the hosted document names. The
-      // operating system gives us a different one every launch; RFC 8252 §7.3
-      // has the server accept whichever the request carries.
-      redirect_uris: ['http://127.0.0.1/callback', 'http://localhost/callback'],
-      grant_types: ['authorization_code', 'refresh_token'],
-      response_types: ['code'],
-      token_endpoint_auth_method: 'none',
-    };
+    return CLIENT_METADATA;
   }
 
   /** Which server the token is meant for, always said (RFC 8707).

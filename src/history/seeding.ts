@@ -1,4 +1,5 @@
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, stat } from 'node:fs/promises';
+import { writeAtomically } from '../lib/atomic';
 import { dirname, join, resolve } from 'node:path';
 
 import type { RunGit } from './worktree';
@@ -196,7 +197,10 @@ async function noteSeeded(
   const at = await noteFile(run, folder);
   if (at === null) return;
   const all = [...new Set([...(await seededIn(run, folder)), ...files])].sort();
-  await writeFile(at, `${all.join('\n')}\n`, 'utf8').catch(() => undefined);
+  // Beside it and moved into place: a half-written list is a checkout that no
+  // longer knows which of its files came from the project, and those are the
+  // ones it must not take away with it.
+  await writeAtomically(at, `${all.join('\n')}\n`).catch(() => undefined);
 }
 
 /** Paths in this checkout that came from the project, so the checkout going

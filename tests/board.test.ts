@@ -29,9 +29,11 @@ import {
   saysFull,
   saysState,
   saysWhen,
+  countWord,
   type OnBoard,
   type WorkState,
 } from '../src/work/board';
+import { capsNow } from '../src/work/capacity';
 
 /* ------------------------------------------------------------ scaffolding */
 
@@ -130,6 +132,16 @@ describe('B-03 the cap and the queue', () => {
   it('bounds how many go side by side', () => {
     expect(AT_A_TIME).toBeGreaterThanOrEqual(2);
     expect(AT_A_TIME).toBeLessThanOrEqual(6);
+  });
+
+  it('takes that number from the one place the caps are worked out', () => {
+    expect(AT_A_TIME).toBe(capsNow().board);
+  });
+
+  it('says the number it actually uses', () => {
+    const word = countWord(AT_A_TIME);
+    expect(saysFull().toLowerCase()).toContain(word.toLowerCase());
+    expect(saysFull(2)).toContain('Two');
   });
 
   it('counts only what is actually going', () => {

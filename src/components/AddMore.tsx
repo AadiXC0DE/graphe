@@ -90,6 +90,17 @@ type Props = {
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
   onExplain: (id: string) => void;
+  /**
+   * What each installed add-on will actually do, by add-on id.
+   *
+   * Worked out by asking the add-on rather than from a list of names, so one
+   * published tomorrow is described on the same evidence as one installed
+   * today. Absent for an add-on nothing has looked at.
+   */
+  capabilities?: Readonly<Record<string, string>>;
+  /** How many processes add-ons have running right now. Information, not a
+   *  control: nothing here kills anything. */
+  addonProcesses?: number | null;
   /** The other half of the shelf: the places somebody's work already lives.
    *  Ours by default, ticked and extended by whatever has been added. */
   reaches?: readonly Reach[];
@@ -139,6 +150,8 @@ export default function AddMore({
   onAdd,
   onRemove,
   onExplain,
+  capabilities = {},
+  addonProcesses = null,
   reaches = REACHABLE,
   connecting = null,
   onConnect,
@@ -345,10 +358,24 @@ export default function AddMore({
                       onAdd={onAdd}
                       onRemove={onRemove}
                       onExplain={onExplain}
+                      {...(capabilities[pack.id] === undefined
+                        ? {}
+                        : { capability: capabilities[pack.id] })}
                     />
                   ))}
                 </section>
               )}
+
+              {/* What add-ons have running right now. Information: nothing on
+                  this page kills anything, and a number nobody can act on is
+                  still the difference between a slow machine and a mystery. */}
+              {addonProcesses !== null && addonProcesses > 0 ? (
+                <p className="addmore__quiet">
+                  {addonProcesses === 1
+                    ? '1 process started by an add-on is running right now.'
+                    : `${String(addonProcesses)} processes started by add-ons are running right now.`}
+                </p>
+              ) : null}
 
               <section className="addmore__group" aria-label={SAYS.restHeading}>
                 <h3 className="addmore__grouphead">{SAYS.restHeading}</h3>
@@ -369,6 +396,9 @@ export default function AddMore({
                       onAdd={onAdd}
                       onRemove={onRemove}
                       onExplain={onExplain}
+                      {...(capabilities[pack.id] === undefined
+                        ? {}
+                        : { capability: capabilities[pack.id] })}
                     />
                   ))
                 )}
@@ -396,6 +426,7 @@ function Row({
   onAdd,
   onRemove,
   onExplain,
+  capability,
 }: {
   pack: Pack;
   sentence: string;
@@ -405,6 +436,7 @@ function Row({
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
   onExplain: (id: string) => void;
+  capability?: string;
 }) {
   const working = busy === pack.id;
   const waiting = explaining === pack.id && explanation === undefined;
@@ -439,6 +471,12 @@ function Row({
         )}
         {pack.installed ? <span className="addmore__on">{SAYS.added}</span> : null}
       </div>
+
+      {/* What it will do, in its own terms. A line derived from what the add-on
+          registers, never from knowing its name. */}
+      {capability === undefined ? null : (
+        <span className="addmore__does">{capability}</span>
+      )}
 
       {/* The answer to the only question most people have, without leaving the
           screen to find a readme. */}

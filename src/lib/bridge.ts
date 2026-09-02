@@ -1923,6 +1923,10 @@ let previewPlanMode = false;
       return () => undefined;
     },
 
+    onEvents(): () => void {
+      return () => undefined;
+    },
+
     onPaneKey(): () => void {
       return () => undefined;
     },
@@ -2268,6 +2272,7 @@ function connect(): Bridge {
     onContinuation: (listener) => api.onContinuation(listener),
     continuationStop: (where) => api.continuationStop(where),
     onMenu: (listener) => api.onMenu(listener),
+    onEvents: (listener) => api.onEvents(listener),
     diagnostics: () => api.diagnostics(),
     keepCredential: (name, value) => api.keepCredential(name, value),
     credentialsKept: () => api.credentialsKept(),

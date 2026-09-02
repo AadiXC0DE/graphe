@@ -222,6 +222,7 @@ import { keyOf } from '../src/work/owner';
 import { writeAtomically, writeAtomicallySync } from '../src/lib/atomic';
 import { GoalFile } from '../src/projects/goals';
 import { continuationOwner } from './continuation-owner';
+import { batcher } from '../src/lib/batching';
 import { drainStarted, withoutOurs } from '../src/lib/queue';
 import { copiesFolder } from '../src/work/copies';
 import { checkoutWords, validateCheckouts } from '../src/history/checkouts';
@@ -733,9 +734,22 @@ let mainWindow: BrowserWindow | null = null;
 /** Every event carries the folder and the conversation it belongs to. A reply
  *  that was still arriving when somebody switched belongs where it started, and
  *  this is what lets the window put it there — see `AgentNotice`. */
+/**
+ * One trip across the wire per frame, rather than one per token.
+ *
+ * Sixty tokens a second was sixty `webContents.send` calls and sixty
+ * synchronous handlers in the window. Runs of text are welded; anything that
+ * gates the screen goes at once and takes everything queued before it, so the
+ * order a conversation is read in never changes.
+ */
+const wire = batcher((frames) => {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.events, frames);
+});
+
 function send(project: string | null, event: AgentEvent, conversation?: string): void {
   if (mainWindow === null || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(CHANNEL.event, { project, conversation: conversation ?? null, event });
+  wire.push({ project, conversation: conversation ?? null, event });
 }
 
 function tell(progress: ShowProgress): void {
@@ -9663,6 +9677,9 @@ if (!app.requestSingleInstanceLock()) {
     // this process is, or it outlives the app that started it with nobody left
     // who can stop it. The ordinary stop leans on a timer there is no time for.
     for (const one of workspaces.open) one.held.running.stopAllNow();
+    // Whatever is still waiting for its frame goes now, or the last thing said
+    // is lost between the tick and the quit.
+    wire.flush();
     // Everything else this app started — helpers, checks, language servers,
     // browsers, the servers an add-on's tool spawned. None of them used to be
     // written down anywhere, and none of them died with the app.

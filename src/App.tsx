@@ -49,7 +49,7 @@ import { drainStarted } from "./lib/queue";
 import { foldEvents } from "./lib/hydrate";
 import { capsNow, saysCaps } from "./work/capacity";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
-import type { ConnectedState, ContinuationNotice } from "./lib/ipc";
+import type { AgentNotice, ConnectedState, ContinuationNotice } from "./lib/ipc";
 import Settings, { type SettingsLink } from "./components/Settings";
 import Connected from "./components/Connected";
 import Palette from "./components/Palette";
@@ -1990,14 +1990,17 @@ function Conversation() {
      it belongs to, so a reply that was still arriving when somebody switched
      lands on the desk it started on. */
   useEffect(
-    () =>
-      bridge.onEvent((notice) => {
+    () => {
+      /* One event, handled exactly as it always was. What changed is only how
+         it arrives: the shell now sends a frame's worth at a time rather than
+         one trip across the wire per token. */
+      const handle = (notice: AgentNotice): void => {
         const key = notice.project ?? '';
         const runKey = keyOf(key, notice.conversation ?? '');
         const front = currentDesk(desksNow.current);
         const noticeIsHere =
           notice.project === front?.path &&
-          (notice.conversation == null || notice.conversation === front.address);
+          (notice.conversation == null || notice.conversation === front?.address);
 
         // "Digs deep" is one message, not a sticky interpretation of everything
         // said afterwards. Keep that one report long enough to turn the model's
@@ -2221,7 +2224,8 @@ function Conversation() {
           // is looked at. Once per address, and never over a page somebody is
           // already on: the pane is theirs once it is open.
           const up = notice.event.pieces.find(
-            (one) => one.state === 'running' && one.address !== null && one.showsAPage === true,
+            (one: RunningPiece) =>
+              one.state === 'running' && one.address !== null && one.showsAPage === true,
           );
           if (
             up?.address != null &&
@@ -2256,7 +2260,15 @@ function Conversation() {
             });
           }
         }
-      }),
+      };
+      return bridge.onEvents((frames) => {
+        for (const frame of frames) {
+          for (const event of frame.events) {
+            handle({ project: frame.project, conversation: frame.conversation, event });
+          }
+        }
+      });
+    },
     [
       refreshVersions,
       refreshOverview,

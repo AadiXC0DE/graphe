@@ -62,6 +62,7 @@ import {
   type Skill,
   type AlwaysDoes,
   type Workflow,
+  type AgentFrame,
   type BuildPlan,
   type BuildAdvance,
   type ContinuationNotice,
@@ -660,6 +661,16 @@ const api: GrapheApi = {
     ipcRenderer.on(CHANNEL.event, forward);
     return () => {
       ipcRenderer.off(CHANNEL.event, forward);
+    };
+  },
+
+  onEvents(listener: (frames: readonly AgentFrame[]) => void): () => void {
+    const forward = (_source: IpcRendererEvent, frames: readonly AgentFrame[]): void => {
+      listener(frames);
+    };
+    ipcRenderer.on(CHANNEL.events, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.events, forward);
     };
   },
 

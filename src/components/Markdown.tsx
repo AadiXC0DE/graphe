@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useRef, type ReactNode } from 'react';
 import CodeBlock from './CodeBlock';
 import MermaidBlock from './MermaidBlock';
 import {
@@ -6,7 +6,8 @@ import {
   isMermaid,
   languageLabel,
   languageOf,
-  parseMarkdown,
+  lexIncrementally,
+  type Cached,
   safeHref,
   safeImageSrc,
   type Token,
@@ -36,8 +37,13 @@ type Props = {
  * wearing a hat.
  */
 export default function Markdown({ text, caret }: Props) {
+  /* The last read, kept, so a token that lands re-reads the block it landed in
+     rather than the whole reply. A long answer was re-lexed from the top sixty
+     times a second, which is the same work as reading it sixty times. */
+  const read = useRef<Cached | null>(null);
   const blocks = useMemo(() => {
-    const tokens = parseMarkdown(text);
+    read.current = lexIncrementally(read.current, text);
+    const tokens = read.current.tokens;
     if (tokens === null) return null;
     try {
       return renderBlocks(tokens, caret);

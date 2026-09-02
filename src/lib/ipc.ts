@@ -893,6 +893,13 @@ export type ContinuationNotice = {
   resting: boolean;
 };
 
+/** A frame's worth of one conversation's events, coalesced in the shell. */
+export type AgentFrame = {
+  project: string | null;
+  conversation: string | null;
+  events: readonly AgentEvent[];
+};
+
 /** One step of a document-to-build plan, as the window draws it. */
 export type BuildTask = {
   n: number;
@@ -1376,6 +1383,9 @@ export const CHANNEL = {
   continuation: 'graphe:continuation',
   /** A press in the app's own menu that the window is the one to act on. */
   fromMenu: 'graphe:from-menu',
+  /** Everything that happened, a frame's worth at a time. One trip across the
+   *  wire per frame rather than one per token. */
+  events: 'graphe:events',
   /** Everything worth sending when somebody says "it stopped". */
   diagnostics: 'graphe:diagnostics',
   /** Which build this is. */
@@ -1666,6 +1676,16 @@ export type GrapheApi = {
 
   /** Listen to the agent. Returns the function that stops listening. */
   onEvent(listener: (notice: AgentNotice) => void): () => void;
+  /**
+   * The same events, a frame's worth at a time.
+   *
+   * One `webContents.send` per token meant sixty trips across the wire a
+   * second and sixty synchronous handlers in the window. Runs of text are
+   * welded; anything that gates the screen — a step starting, a question, a
+   * settle — goes at once, taking everything queued before it so the order a
+   * conversation is read in never changes.
+   */
+  onEvents(listener: (frames: readonly AgentFrame[]) => void): () => void;
 
   /** The full-size before and after for one change. Asked for when somebody
    *  opens the strip, and not before — see `VisualChange`. */

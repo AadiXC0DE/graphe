@@ -969,12 +969,34 @@ type PiToolCallEvent = import('@earendil-works/pi-coding-agent').ToolCallEvent;
 type PiRuntime = Awaited<ReturnType<Pi['ModelRuntime']['create']>>;
 type PiAuthInteraction = Parameters<PiRuntime['login']>[2];
 
+/**
+ * The runtime, imported once.
+ *
+ * It is 810ms of import on this machine, and it used to be paid by whoever
+ * opened the first project — so the slowest thing the app ever does was the
+ * first thing somebody asked it to do. `warmUp` moves it to the idle moment
+ * after the window is on screen; the promise is shared, so a project opened
+ * before it finishes waits on the same one rather than starting a second.
+ */
+let piLoading: Promise<Pi> | null = null;
+
 async function loadPi(): Promise<Pi> {
+  piLoading ??= import('@earendil-works/pi-coding-agent');
   try {
-    return await import('@earendil-works/pi-coding-agent');
+    return await piLoading;
   } catch (cause) {
+    // A failed import must not be remembered as the answer: the next attempt
+    // deserves its own try, and its own error.
+    piLoading = null;
     throw new AdapterError('I could not start the part of me that does the work.', { cause });
   }
+}
+
+/** Start the import now, without waiting for it. Called when the window is up
+ *  and nothing is being asked of the machine. Never throws — a warm-up that
+ *  fails is a first project open that pays for itself, as it always did. */
+export function warmUp(): void {
+  void loadPi().catch(() => undefined);
 }
 
 /* -------------------------------------------------------------------------- */

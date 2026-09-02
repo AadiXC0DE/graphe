@@ -55,6 +55,7 @@ import {
   connectToProvider,
   connection as readConnection,
   createSession,
+  warmUp,
   defaultAgentDir,
   disconnectProvider,
   discoveredAccounts,
@@ -238,6 +239,7 @@ import {
 import { sizeOf, TOO_MANY_BYTES, TOO_MANY_FILES, verdictFor } from '../src/history/opening';
 import { openLog } from './log';
 import { saysWhyStopped } from '../src/lib/showme';
+import { mark, report, saysMarks } from '../src/lib/marks';
 import { addonProcesses, ledger } from './processes';
 import { watchWhatWeStart } from '../src/share/spawned';
 import { MENU_IDS, menuTemplate, type MenuItem } from './menu';
@@ -360,6 +362,8 @@ import { knownTrouble, plainMessage, plainTrouble } from './plainly';
  * with the full story; here it just has to run first. Remove the moment
  * Electron ships a Node that has it.
  */
+// The first moment this process has any say in.
+mark('launch');
 patchWorkerThreads();
 
 /**
@@ -3987,6 +3991,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
      and the rows for them read as work waiting rather than as work put away. */
   const checked = await validateCheckouts(path, await readCheckouts(path), gitRunHereFor());
   const restoredCheckouts = checked.rows;
+  mark('project-open');
   if (checked.putAway.length > 0) {
     send(path, { type: 'notice', what: checkoutWords.putAway(checked.putAway.length) });
   }
@@ -4640,7 +4645,7 @@ async function diagnosticsNow(): Promise<string> {
  * is the thing worth sending.
  */
 function whyStopped(): string {
-  const screens: string[] = [];
+  const screens: string[] = [saysMarks(report())];
   for (const one of workspaces.open) {
     for (const conversation of one.held.sessions.open) {
       const address = conversation.path;
@@ -4669,7 +4674,9 @@ function whyStopped(): string {
       );
     }
   }
-  return screens.length === 0 ? 'Nothing has stopped yet this sitting.' : screens.join('\n\n');
+  return screens.length <= 1
+    ? `${screens[0] ?? ''}\n\nNothing has stopped yet this sitting.`.trim()
+    : screens.join('\n\n');
 }
 
 /** The menu is data; the presses are here. Attached by id so the template stays
@@ -9652,6 +9659,11 @@ if (!app.requestSingleInstanceLock()) {
     // that came round while this was shut is done once — see whenNext.
     await standingFile().catch(() => null);
     watchTheClock();
+    /* The agent runtime is 810ms of import, and it used to be paid by whoever
+       opened the first project — so the slowest thing the app does was the
+       first thing anybody asked of it. The window is up by now and nothing is
+       being asked of the machine. */
+    setImmediate(() => warmUp());
     // A fresh Mac has no git, and finding that out inside "open folder" reads
     // as the app failing rather than as one thing missing.
     if (!(await probeGit())) send(null, { type: 'notice', ...GIT_MISSING, because: GIT_MISSING.because });

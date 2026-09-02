@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import { Shown } from "./components/Shown";
@@ -8,17 +8,13 @@ import BuildProgress from "./components/BuildProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Composer from "./components/Composer";
 import ConfirmChange from "./components/ConfirmChange";
-import ConnectModal from "./components/ConnectModal";
 import CostMeter from "./components/CostMeter";
 import DesignView, { type DesignPart } from "./components/DesignView";
-import CanvasView from "./components/CanvasView";
-import HistoryView from "./components/HistoryView";
 import ReviewsView, { reviewPrompt } from "./components/ReviewsView";
 import ErrorCard from "./components/ErrorCard";
 import Files from "./components/Files";
 import FileView from "./components/FileView";
 import HelperRail from "./components/HelperRail";
-import HelpersView from "./components/HelpersView";
 import InLine from "./components/InLine";
 import Message from "./components/Message";
 import type { Outcome } from "./components/Landing";
@@ -26,7 +22,6 @@ import Overview from "./components/Overview";
 import PlanCard from "./components/PlanCard";
 import ReviewCard from "./components/ReviewCard";
 import WorkingMark from "./components/WorkingMark";
-import AddMore from "./components/AddMore";
 import ProjectMenu from "./components/ProjectMenu";
 import ProjectPicker from "./components/ProjectPicker";
 import BrowserPane from "./components/BrowserPane";
@@ -42,6 +37,7 @@ import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
+import { mark } from "./lib/marks";
 import { cssFor, defaultAppearance } from "./design/appearance";
 import { lookFirstStore } from "./lib/lookfirst";
 import { escapeMeans } from "./lib/escape";
@@ -58,15 +54,12 @@ import Changes from "./components/Changes";
 import Against from "./components/Against";
 import { parseDiff, undoOf } from "./diff/hunks";
 import { REACHABLE, alreadyReached, asServer } from "./agent/pi/reach";
-import Usage from "./components/Usage";
 import Sidebar from "./components/Sidebar";
 import Skills from "./components/Skills";
 import Tabs, { type Tab } from "./components/Tabs";
 import Steps from "./components/Steps";
 import ThinkingWith from "./components/ThinkingWith";
-import VisualDiff from "./components/VisualDiff";
 import Welcome from "./components/Welcome";
-import Gallery from "./gallery/Gallery";
 import AskAnything from "./components/AskAnything";
 import type { Found, Things } from "./lib/anything";
 import type { Task } from "./cost/estimate";
@@ -198,6 +191,18 @@ import { copyText } from "./lib/copying";
 import { markFor, themeFrom, type Theme } from "./lib/theme";
 import "./App.css";
 
+/* Reached from one place each, and none of them is on screen when the window
+   opens — so none of them belongs in the bundle somebody waits for. */
+const CanvasView = lazy(() => import("./components/CanvasView"));
+const HistoryView = lazy(() => import("./components/HistoryView"));
+const AddMore = lazy(() => import("./components/AddMore"));
+const VisualDiff = lazy(() => import("./components/VisualDiff"));
+const Gallery = lazy(() => import("./gallery/Gallery"));
+const ConnectModal = lazy(() => import("./components/ConnectModal"));
+const HelpersView = lazy(() => import("./components/HelpersView"));
+const Usage = lazy(() => import("./components/Usage"));
+
+
 /** /?gallery renders every component on one page instead of the app, so the UI
  *  can be screenshotted and reviewed in both themes. Read once, at module load. */
 /* A dev surface, and only ever one. Harmless — it holds no data — but a shipped
@@ -214,13 +219,23 @@ const showGallery =
 const openOnLoad = new URLSearchParams(window.location.search).get("open");
 
 export default function App() {
-  if (showGallery) return <Gallery />;
+  /* Nothing is drawn while a view arrives: these are all reached by a press,
+     and a spinner in place of a sheet that takes a frame to load is more
+     motion than the wait it is covering. */
+  if (showGallery)
+    return (
+      <Suspense fallback={null}>
+        <Gallery />
+      </Suspense>
+    );
   // One thrown render used to turn the whole window white, with nothing said
   // and nothing to send. Each large view gets its own, so a view that falls
   // over takes only itself down.
   return (
     <ErrorBoundary what="Graphe">
-      <Conversation />
+      <Suspense fallback={null}>
+        <Conversation />
+      </Suspense>
     </ErrorBoundary>
   );
 }
@@ -2343,6 +2358,12 @@ function Conversation() {
       if (answer.ok) setStorage(answer.value);
     });
   }, [settingsOpen]);
+
+  /* The moments the targets are written against, so "under 400ms to first
+     paint" is a number somebody can read rather than a hope. */
+  useEffect(() => {
+    requestAnimationFrame(() => mark('first-paint'));
+  }, []);
 
   useEffect(() => bridge.onShowProgress(setProgress), []);
 

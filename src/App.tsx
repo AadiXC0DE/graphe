@@ -11,6 +11,8 @@ import ConfirmChange from "./components/ConfirmChange";
 import CostMeter from "./components/CostMeter";
 import DesignView, { type DesignPart } from "./components/DesignView";
 import ReviewsView, { reviewPrompt } from "./components/ReviewsView";
+import ReviewQueue from "./components/ReviewQueue";
+import Conflict from "./components/Conflict";
 import ErrorCard from "./components/ErrorCard";
 import Files from "./components/Files";
 import FileView from "./components/FileView";
@@ -85,7 +87,7 @@ import {
   lookingInto,
 } from "./agent/research";
 import { asBuildRequest } from "./work/buildbrief";
-import { withElapsed } from "./work/goal";
+import { goalElapsed, withElapsed } from "./work/goal";
 import { keyOf, ownerOf } from "./work/owner";
 import { useResearch } from "./hooks/useResearch";
 import { useGoalChip } from "./hooks/useGoalChip";
@@ -153,8 +155,13 @@ import {
   type Trouble,
   type VisualChange,
   type Where,
+  type HowItLands,
+  type ReviewDecided,
+  type ReviewEntry,
 } from "./lib/ipc";
 import { modelKey } from "./lib/ipc";
+import { conflictWords } from "./diff/conflict";
+import { reviewWords, waiting as waitingToReview, type FileVerdict, type Verdict as QueueVerdict } from "./work/reviewqueue";
 import { usePrefersReducedMotion } from "./lib/motion";
 import { keeping } from "./projects/kept";
 import { behind } from "./lib/showme";
@@ -840,6 +847,20 @@ function Conversation() {
    *  is in flight. */
   const [repo, setRepo] = useState<RepoLook | null>(null);
   const [reviewsBusy, setReviewsBusy] = useState(false);
+  /** Finished work waiting to be looked at, before any of it touches the
+   *  folder, and whichever entry is open on the screen. */
+  const [reviewQueueOpen, setReviewQueueOpen] = useState(false);
+  const [reviewQ, setReviewQ] = useState<readonly ReviewEntry[]>([]);
+  const [reviewAt, setReviewAt] = useState<string | null>(null);
+  const [reviewDiff, setReviewDiff] = useState<string | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  /** The files a review left for somebody to settle, and the one being read. */
+  const [clashes, setClashes] = useState<{ address: string; paths: readonly string[] }>({
+    address: '',
+    paths: [],
+  });
+  const [clashPath, setClashPath] = useState<string | null>(null);
+  const [clashText, setClashText] = useState<string | null>(null);
   /** The pairing whose colour is on its way to being changed. Cleared the
    *  moment new values arrive, which is what finishing looks like from here. */
   const [fixing, setFixing] = useState<string | null>(null);
@@ -1083,6 +1104,22 @@ function Conversation() {
     setPlans(next);
   }, [plans, say, holdWrites]);
 
+  /** Which project a review call is about. The panel's own child, when the
+   *  folder holds several, so a review lands in the project it came out of. */
+  const reviewWhere = useCallback((): Where => {
+    const desk = currentDesk(desksNow.current);
+    return {
+      ...(desk === null ? {} : { project: desk.path }),
+      ...(panelRepoNow.current === null ? {} : { repo: panelRepoNow.current }),
+    };
+  }, [panelRepoNow]);
+
+  const refreshReviewQueue = useCallback(() => {
+    void bridge.reviewQueue(reviewWhere()).then((answer) => {
+      if (answer.ok) setReviewQ(answer.value);
+    });
+  }, [reviewWhere]);
+
   const troubleHere = useCallback((trouble: Trouble) => {
     // A failed connect is not a desk problem — the connect screen is the place
     // where connecting matters, so the failure sentence goes there instead of
@@ -1298,6 +1335,7 @@ function Conversation() {
         | 'graph'
         | 'canvas'
         | 'reviews'
+        | 'review'
         | 'skills'
         | 'connected'
         | 'settings'
@@ -1308,6 +1346,7 @@ function Conversation() {
       if (screen !== 'chat') setDesignAt(null);
       if (screen !== 'graph') setGraphOpen(false);
       if (screen !== 'reviews') setReviewsOpen(false);
+      if (screen !== 'review') setReviewQueueOpen(false);
       if (screen !== 'skills') setSkillsOpen(false);
       if (screen !== 'settings') setSettingsOpen(false);
       if (screen !== 'usage') setUsageOpen(false);
@@ -2182,6 +2221,7 @@ function Conversation() {
           void refreshVersions(where);
           void refreshOverview(where, notice.conversation);
           void refreshFiles(where);
+          refreshReviewQueue();
           refreshRoom({
             project: where,
             ...(notice.conversation == null ? {} : { conversation: notice.conversation }),
@@ -2349,6 +2389,7 @@ function Conversation() {
       refreshOverview,
       refreshFiles,
       refreshFilesSoon,
+      refreshReviewQueue,
       refreshRoom,
       refreshRunning,
       refreshBuildPlan,
@@ -2670,6 +2711,8 @@ function Conversation() {
       paletteOpen ||
       graphOpen ||
       reviewsOpen ||
+      reviewQueueOpen ||
+      clashPath !== null ||
       changesOpen ||
       asking ||
       helpersAt !== null ||
@@ -2824,6 +2867,8 @@ function Conversation() {
     paletteOpen,
     graphOpen,
     reviewsOpen,
+    reviewQueueOpen,
+    clashPath,
     changesOpen,
     asking,
     helpersAt,
@@ -3282,6 +3327,190 @@ function Conversation() {
         if (currentDesk(desksNow.current)?.path === project) setReviewsBusy(false);
       });
   }, [reviewsRepoNow, troubleAt]);
+
+
+  /* ------------------------------------------------- work waiting to be read */
+
+  /** Open one to read it. Opening is reading, so it stops counting as waiting
+   *  the moment the diff is asked for. */
+  const openReviewEntry = useCallback(
+    (id: string) => {
+      setReviewAt(id);
+      setReviewDiff(null);
+      void bridge.reviewOpen(id, reviewWhere()).then((answer) => {
+        if (!answer.ok) {
+          troubleHere(answer.trouble);
+          setReviewDiff('');
+          return;
+        }
+        setReviewQ(answer.value.entries);
+        setReviewDiff(answer.value.diff);
+      });
+    },
+    [reviewWhere, troubleHere],
+  );
+
+  const chooseReviewFile = useCallback(
+    (id: string, path: string, choice: FileVerdict | null) => {
+      void bridge.reviewChoose(id, path, choice, reviewWhere()).then((answer) => {
+        if (answer.ok) setReviewQ(answer.value);
+        else troubleHere(answer.trouble);
+      });
+    },
+    [reviewWhere, troubleHere],
+  );
+
+  /** What a review leaves behind: the sentence, and any file both sides changed
+   *  — which opens the resolver rather than being mentioned and dropped. */
+  const afterReview = useCallback(
+    (decided: ReviewDecided) => {
+      setReviewQ(decided.entries);
+      setReviewAt(null);
+      setReviewDiff(null);
+      say(decided.did);
+      if (decided.clashes.length === 0) return;
+      setClashes({ address: decided.address, paths: decided.clashes });
+      setClashPath(decided.clashes[0] ?? null);
+      setReviewQueueOpen(false);
+    },
+    [say],
+  );
+
+  const decideReview = useCallback(
+    (id: string, verdict: QueueVerdict) => {
+      const entry = reviewQ.find((one) => one.id === id) ?? null;
+      setReviewBusy(true);
+      void bridge
+        .reviewDecide(id, verdict, reviewWhere())
+        .then((answer) => {
+          if (!answer.ok) {
+            troubleHere(answer.trouble);
+            return;
+          }
+          afterReview(answer.value);
+          // Sent back to the conversation that made it, not to whichever one
+          // happens to be in front.
+          if (verdict === 'ask again' && entry !== null) {
+            const desk = currentDesk(desksNow.current);
+            void bridge.steer(reviewWords.asked(entry.title), {
+              ...(desk === null ? {} : { project: desk.path }),
+              conversation: entry.address,
+            });
+          }
+        })
+        .finally(() => setReviewBusy(false));
+    },
+    [reviewQ, reviewWhere, troubleHere, afterReview],
+  );
+
+  const landReview = useCallback(
+    (id: string, landing: HowItLands) => {
+      setReviewBusy(true);
+      void bridge
+        .reviewLand(id, landing, reviewWhere())
+        .then((answer) => {
+          if (answer.ok) afterReview(answer.value);
+          else troubleHere(answer.trouble);
+        })
+        .finally(() => setReviewBusy(false));
+    },
+    [reviewWhere, troubleHere, afterReview],
+  );
+
+  const openReviewPr = useCallback(
+    (id: string, summary: string) => {
+      setReviewBusy(true);
+      void bridge
+        .reviewPr(id, summary, reviewWhere())
+        .then((answer) => {
+          if (!answer.ok) {
+            troubleHere(answer.trouble);
+            return;
+          }
+          setReviewQ(answer.value.entries);
+          setReviewAt(null);
+          setReviewDiff(null);
+          say(reviewWords.prOpened(answer.value.url));
+        })
+        .finally(() => setReviewBusy(false));
+    },
+    [reviewWhere, troubleHere, say],
+  );
+
+  const mirrorReview = useCallback(
+    (id: string, on: boolean) => {
+      void bridge.reviewMirror(id, on, reviewWhere()).then((answer) => {
+        if (answer.ok) setReviewQ(answer.value);
+        else troubleHere(answer.trouble);
+      });
+    },
+    [reviewWhere, troubleHere],
+  );
+
+  /** One clash read out of the two versions. Nothing on disk is touched to
+   *  produce it, so closing the screen leaves the file as it was. */
+  const openClash = useCallback(
+    (path: string) => {
+      setClashPath(path);
+      setClashText(null);
+      void bridge.conflictLook(clashes.address, path, reviewWhere()).then((answer) => {
+        if (answer.ok) setClashText(answer.value.text);
+        else {
+          troubleHere(answer.trouble);
+          setClashText('');
+        }
+      });
+    },
+    [clashes.address, reviewWhere, troubleHere],
+  );
+
+  const settleClash = useCallback(
+    (path: string, text: string) => {
+      setReviewBusy(true);
+      void bridge
+        .conflictSettle(clashes.address, path, text, reviewWhere())
+        .then((answer) => {
+          if (!answer.ok) {
+            troubleHere(answer.trouble);
+            return;
+          }
+          say(conflictWords.wrote(path));
+          setClashes((was) => {
+            const left = was.paths.filter((one) => one !== path);
+            setClashPath(left[0] ?? null);
+            setClashText(null);
+            return { ...was, paths: left };
+          });
+        })
+        .finally(() => setReviewBusy(false));
+    },
+    [clashes.address, reviewWhere, troubleHere, say],
+  );
+
+  /** The third way out of a clash: hand both sides back to the conversation
+   *  that wrote one of them, naming the file. */
+  const askAboutClash = useCallback(
+    (path: string, places: number) => {
+      const desk = currentDesk(desksNow.current);
+      void bridge.steer(conflictWords.reconcile(path, places), {
+        ...(desk === null ? {} : { project: desk.path }),
+        ...(clashes.address === '' ? {} : { conversation: clashes.address }),
+      });
+      setClashPath(null);
+      setClashText(null);
+      setClashes((was) => ({ ...was, paths: was.paths.filter((one) => one !== path) }));
+    },
+    [clashes.address],
+  );
+
+  /** The first clash is read as soon as the resolver has one to read. */
+  useEffect(() => {
+    if (clashPath === null || clashText !== null) return;
+    openClash(clashPath);
+    // Reading one is what `openClash` does; depending on it would read it again
+    // the moment it answers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clashPath]);
 
   /** Open a fresh conversation and send the review of one pull request into
    *  it, so the agent reads the whole change on this codebase and posts its
@@ -4191,6 +4420,9 @@ function Conversation() {
         ready: here, whyNot: needsProject },
       { id: 'reviews', name: 'Read the pull requests', where: 'Project',
         run: () => { goToScreen('reviews'); refreshRepo(); }, ready: here, whyNot: needsProject },
+      { id: 'review-queue', name: 'Review finished work', where: 'Project',
+        run: () => { goToScreen('review'); setReviewQueueOpen(true); refreshReviewQueue(); },
+        ready: here, whyNot: needsProject },
       { id: 'skills', name: 'Look at the skills', where: 'Graphe',
         run: () => { goToScreen('skills'); refreshSkills(); refreshWorkflows(); setSkillsOpen(true); } },
       { id: 'connected', name: 'Other tools', where: 'Graphe',
@@ -4219,6 +4451,7 @@ function Conversation() {
     }));
   }, [
     openProject, actingRepoNow, busy, swapConversation, goToScreen, togglePane, refreshRepo,
+    refreshReviewQueue,
     refreshSkills, refreshWorkflows, refreshConnected, openAddMore, openConnect, openCanvas, browse,
     tidyNow, halt, troubleHere,
   ]);
@@ -4432,6 +4665,8 @@ function Conversation() {
     (canvasAt !== null && canvasFull) ||
     graphOpen ||
     reviewsOpen ||
+    reviewQueueOpen ||
+    clashPath !== null ||
     helpersAt !== null ||
     connectOpen ||
     addMore ||
@@ -4975,6 +5210,12 @@ function Conversation() {
             goToScreen("graph");
             setGraphOpen(true);
           }}
+          onReviewQueue={() => {
+            goToScreen("review");
+            setReviewQueueOpen(true);
+            refreshReviewQueue();
+          }}
+          reviewsWaiting={waitingToReview(reviewQ)}
           onReviews={() => {
             goToScreen("reviews");
             setReviewsOpen(true);
@@ -5404,6 +5645,27 @@ function Conversation() {
             />
             <InLine waiting={waitingHere} onTake={takeBack} />
 
+            {/* Finished work that has not touched the folder yet. One quiet row
+                where the hand already is, because a review nobody can see is a
+                review nobody does. */}
+            {waitingToReview(reviewQ) === 0 ? null : (
+              <button
+                type="button"
+                className="reviewband"
+                onClick={() => {
+                  goToScreen('review');
+                  setReviewQueueOpen(true);
+                  refreshReviewQueue();
+                }}
+              >
+                <span className="reviewband__dot" aria-hidden="true" />
+                <span className="reviewband__say">
+                  {reviewWords.badge(waitingToReview(reviewQ))}
+                </span>
+                <span className="reviewband__go">{reviewWords.openDiff}</span>
+              </button>
+            )}
+
             {/* Servers and watchers outlive the sentence that started them, so
                 they sit above the composer rather than inside the conversation. */}
             <Running
@@ -5514,6 +5776,19 @@ function Conversation() {
             elsewhere: awayElsewhere,
             project: openProject === null ? "" : folderCalled(openProject),
             clock: now,
+            /* Four numbers that were on four screens. The steps come from the
+               list the model owns, the rest from the goal file. */
+            goal:
+              goalChip.goal === null
+                ? null
+                : {
+                    objective: goalChip.goal.objective,
+                    status: goalChip.goal.status,
+                    done: buildPlan?.path === desk?.path ? (buildPlan?.plan.done ?? 0) : 0,
+                    total: buildPlan?.path === desk?.path ? (buildPlan?.plan.total ?? 0) : 0,
+                    elapsed: goalElapsed(goalChip.goal),
+                    rounds: goalChip.goal.iterations,
+                  },
           }}
           onPutBack={(versionId, repo) => void putBack(versionId, repo)}
           onName={(versionId, name, repo) => void nameVersion(versionId, name, repo)}
@@ -5539,6 +5814,19 @@ function Conversation() {
           onHowMuch={changeHowMuch}
           onHandOver={handToDeveloper}
           onOpenLink={(address) => void bridge.openLink(address)}
+          onOpenChanges={() => {
+            setChangeText(null);
+            setChangesOpen(true);
+            const repo = actingRepoNow.current;
+            void bridge.changesLook(repo === null ? undefined : { repo }).then((answer) => {
+              if (!answer.ok) {
+                setChangesOpen(false);
+                troubleHere(answer.trouble);
+                return;
+              }
+              setChangeText(answer.value);
+            });
+          }}
           onWhose={(name) => {
             panelRepoNow.current = name;
             setPanelRepo((was) => (was === name ? was : name));
@@ -5715,6 +6003,48 @@ function Conversation() {
           }}
         />
       ) : null}
+
+      {reviewQueueOpen && desk !== null ? (
+        <ReviewQueue
+          entries={reviewQ}
+          chosen={reviewAt}
+          diff={reviewDiff}
+          busy={reviewBusy}
+          onChoose={openReviewEntry}
+          onFile={chooseReviewFile}
+          onDecide={decideReview}
+          onLand={landReview}
+          onOpenPr={openReviewPr}
+          onMirror={mirrorReview}
+          onRefresh={refreshReviewQueue}
+          onClose={() => setReviewQueueOpen(false)}
+          onExplain={(file, line) => {
+            setReviewQueueOpen(false);
+            const asked = CHANGE_WORDS.explain(file, line);
+            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+          }}
+          onFix={(file, line) => {
+            setReviewQueueOpen(false);
+            const asked = CHANGE_WORDS.fix(file, line);
+            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+          }}
+        />
+      ) : null}
+
+      <Conflict
+        open={clashPath !== null}
+        paths={clashes.paths}
+        path={clashPath}
+        text={clashText}
+        busy={reviewBusy}
+        onPath={openClash}
+        onSettle={settleClash}
+        onAsk={askAboutClash}
+        onClose={() => {
+          setClashPath(null);
+          setClashText(null);
+        }}
+      />
 
       <BrowserPane
         room={pane}

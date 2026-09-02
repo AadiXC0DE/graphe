@@ -86,6 +86,13 @@ import {
   type VisualFrames,
   type VisualNotice,
   type Where,
+  type FileVerdict,
+  type HowItLands,
+  type ReviewClash,
+  type ReviewDecided,
+  type ReviewEntry,
+  type ReviewOpened,
+  type ReviewVerdict,
 } from '../src/lib/ipc';
 
 /** Refused before it reaches the wire. The shape matches everything else the
@@ -100,6 +107,9 @@ function refuse<T>(what: string): Result<T> {
     },
   };
 }
+
+/** Said when a call arrives without a usable entry or file on it. */
+const NO_ENTRY = 'I could not tell which piece of work you meant.';
 
 function isDecision(value: unknown): value is Decision {
   return value === 'yes' || value === 'no';
@@ -396,6 +406,65 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<{ folder: string; opened: OpenedProject }>('I could not tell which pull request you meant.'));
     }
     return ipcRenderer.invoke(CHANNEL.prReviewOpen, prNumber, named(where)) as Promise<Result<{ folder: string; opened: OpenedProject }>>;
+  },
+
+  reviewQueue(where?: Where): Promise<Result<readonly ReviewEntry[]>> {
+    return ipcRenderer.invoke(CHANNEL.reviewQueue, named(where)) as Promise<Result<readonly ReviewEntry[]>>;
+  },
+
+  reviewOpen(id: string, where?: Where): Promise<Result<ReviewOpened>> {
+    if (typeof id !== 'string' || id === '') {
+      return Promise.resolve(refuse<ReviewOpened>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.reviewOpen, id, named(where)) as Promise<Result<ReviewOpened>>;
+  },
+
+  reviewChoose(id: string, path: string, choice: FileVerdict | null, where?: Where): Promise<Result<readonly ReviewEntry[]>> {
+    if (typeof id !== 'string' || id === '' || typeof path !== 'string' || path === '') {
+      return Promise.resolve(refuse<readonly ReviewEntry[]>(NO_ENTRY));
+    }
+    if (choice !== null && choice !== 'take theirs' && choice !== 'keep mine') {
+      return Promise.resolve(refuse<readonly ReviewEntry[]>('I could not tell what to do with that file.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.reviewChoose, id, path, choice, named(where)) as Promise<Result<readonly ReviewEntry[]>>;
+  },
+
+  reviewDecide(id: string, verdict: ReviewVerdict, where?: Where): Promise<Result<ReviewDecided>> {
+    if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<ReviewDecided>(NO_ENTRY));
+    return ipcRenderer.invoke(CHANNEL.reviewDecide, id, verdict, named(where)) as Promise<Result<ReviewDecided>>;
+  },
+
+  reviewLand(id: string, landing: HowItLands, where?: Where): Promise<Result<ReviewDecided>> {
+    if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<ReviewDecided>(NO_ENTRY));
+    return ipcRenderer.invoke(CHANNEL.reviewLand, id, landing, named(where)) as Promise<Result<ReviewDecided>>;
+  },
+
+  reviewPr(id: string, summary: string, where?: Where): Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>> {
+    if (typeof id !== 'string' || id === '') {
+      return Promise.resolve(refuse<{ url: string; entries: readonly ReviewEntry[] }>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.reviewPr, id, summary, named(where)) as Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>>;
+  },
+
+  reviewMirror(id: string, on: boolean, where?: Where): Promise<Result<readonly ReviewEntry[]>> {
+    if (typeof id !== 'string' || id === '' || typeof on !== 'boolean') {
+      return Promise.resolve(refuse<readonly ReviewEntry[]>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.reviewMirror, id, on, named(where)) as Promise<Result<readonly ReviewEntry[]>>;
+  },
+
+  conflictLook(address: string, path: string, where?: Where): Promise<Result<ReviewClash>> {
+    if (typeof address !== 'string' || address === '' || typeof path !== 'string' || path === '') {
+      return Promise.resolve(refuse<ReviewClash>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.conflictLook, address, path, named(where)) as Promise<Result<ReviewClash>>;
+  },
+
+  conflictSettle(address: string, path: string, text: string, where?: Where): Promise<Result<null>> {
+    if (typeof address !== 'string' || address === '' || typeof path !== 'string' || path === '' || typeof text !== 'string') {
+      return Promise.resolve(refuse<null>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.conflictSettle, address, path, text, named(where)) as Promise<Result<null>>;
   },
 
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>> {

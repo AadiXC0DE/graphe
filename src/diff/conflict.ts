@@ -68,6 +68,19 @@ export const conflictWords = {
   reconcile: (path: string, clashes: number): string =>
     `${path} has ${String(clashes)} ${clashes === 1 ? 'place' : 'places'} where your changes and mine collide. Read both sides, write the version that holds, and take the markers out.`,
   places: (count: number): string => `${String(count)} ${count === 1 ? 'place' : 'places'}`,
+  /** The screen's own heading and its two ways out. */
+  screen: 'Both sides changed the same lines',
+  none: 'Nothing here needs deciding.',
+  noneDetail: 'When a review finds a file both sides changed, it opens here.',
+  keep: 'Use this version',
+  keeping: 'Writing it…',
+  /** Said while places are still carrying markers, so nothing is written half
+   *  decided. */
+  stillOpen: (count: number): string =>
+    count === 1 ? '1 place still to decide' : `${String(count)} places still to decide`,
+  /** The file list on the left. */
+  fileUnreadable: 'Left alone',
+  wrote: (path: string): string => `${path} is settled.`,
 } as const;
 
 /* -------------------------------------------------------------------------- */
@@ -271,6 +284,25 @@ export function aroundClash(
 
   if (found === null) return null;
   return { before, mine: found.mine, base: found.base, theirs: found.theirs, after };
+}
+
+/** Whether there is anything here a person can be offered a choice about.
+ *
+ * False for a file this could not read, which is the whole point: a screen that
+ * offers mine-or-theirs over markers nobody understood is offering to write a
+ * file it cannot rebuild.
+ */
+export function canDecide(file: Conflict): boolean {
+  return file.ok && file.clashes > 0;
+}
+
+/** How many places are still carrying their markers, given what has been picked
+ *  so far. Zero is the only state in which the file is worth writing back. */
+export function leftToDecide(file: Conflict, picks: ReadonlyMap<number, Take>): number {
+  if (!file.ok) return file.clashes;
+  let open = 0;
+  for (let at = 0; at < file.clashes; at += 1) if (!picks.has(at)) open += 1;
+  return open;
 }
 
 /** The header over the three panes. */

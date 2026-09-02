@@ -103,6 +103,10 @@ import {
   type VisualChange,
   type VisualFrames,
   type VisualNotice,
+  type ReviewClash,
+  type ReviewDecided,
+  type ReviewEntry,
+  type ReviewOpened,
 } from './ipc';
 
 declare global {
@@ -858,6 +862,8 @@ let previewPlanMode = false;
         git: {
           branch: previewLine,
           dirty: previewDirty,
+          added: previewDirty ? 18 : 0,
+          removed: previewDirty ? 4 : 0,
           unstaged: previewDirty ? 2 : 0,
           staged: previewDirty ? 1 : 0,
           untracked: previewDirty ? 1 : 0,
@@ -1158,6 +1164,44 @@ let previewPlanMode = false;
 
     openPrReview(): Promise<Result<{ folder: string; opened: OpenedProject }>> {
       return Promise.resolve(previewFail<{ folder: string; opened: OpenedProject }>());
+    },
+
+    /* Nothing finishes in a browser tab, so nothing is ever waiting to be
+       looked at. An empty queue is the true answer here, not a refusal. */
+    reviewQueue(): Promise<Result<readonly ReviewEntry[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    reviewOpen(): Promise<Result<ReviewOpened>> {
+      return Promise.resolve(previewFail<ReviewOpened>());
+    },
+
+    reviewChoose(): Promise<Result<readonly ReviewEntry[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    reviewDecide(): Promise<Result<ReviewDecided>> {
+      return Promise.resolve(previewFail<ReviewDecided>());
+    },
+
+    reviewLand(): Promise<Result<ReviewDecided>> {
+      return Promise.resolve(previewFail<ReviewDecided>());
+    },
+
+    reviewPr(): Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>> {
+      return Promise.resolve(previewFail<{ url: string; entries: readonly ReviewEntry[] }>());
+    },
+
+    reviewMirror(): Promise<Result<readonly ReviewEntry[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    conflictLook(): Promise<Result<ReviewClash>> {
+      return Promise.resolve(previewFail<ReviewClash>());
+    },
+
+    conflictSettle(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
     },
 
     buildStart(): Promise<Result<BuildPlan>> {
@@ -2193,6 +2237,15 @@ function connect(): Bridge {
     worktreeDrop: (where) => api.worktreeDrop(where),
     preparePrWorktree: (prNumber, where) => api.preparePrWorktree(prNumber, where),
     openPrReview: (prNumber, where) => api.openPrReview(prNumber, where),
+    reviewQueue: (where) => api.reviewQueue(where),
+    reviewOpen: (id, where) => api.reviewOpen(id, where),
+    reviewChoose: (id, path, choice, where) => api.reviewChoose(id, path, choice, where),
+    reviewDecide: (id, verdict, where) => api.reviewDecide(id, verdict, where),
+    reviewLand: (id, landing, where) => api.reviewLand(id, landing, where),
+    reviewPr: (id, summary, where) => api.reviewPr(id, summary, where),
+    reviewMirror: (id, on, where) => api.reviewMirror(id, on, where),
+    conflictLook: (address, path, where) => api.conflictLook(address, path, where),
+    conflictSettle: (address, path, text, where) => api.conflictSettle(address, path, text, where),
     buildStart: (source, where) => api.buildStart(source, where),
     buildPlan: (where) => api.buildPlan(where),
     buildAdvance: (op, where) => api.buildAdvance(op, where),

@@ -12,10 +12,10 @@ describe('the branch panel describes the addressed conversation', () => {
     // `folderFor` is that same answer with one more case in it — the named
     // project inside a folder that holds several.
     expect(block).toContain('const cwd = folderFor(open, where)');
-    expect(block).toContain('readGitStatus(cwd)');
+    expect(block).toContain('readGitStatusWithLines(cwd)');
     expect(block).toContain('readBranches(cwd)');
     expect(block).toContain('styleTokens(cwd)');
-    expect(block).not.toContain('readGitStatus(open.path)');
+    expect(block).not.toContain('readGitStatusWithLines(open.path)');
   });
 
   it('passes project and conversation through the window bridge', () => {

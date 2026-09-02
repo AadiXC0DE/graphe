@@ -29,6 +29,8 @@ import type { Page } from '../preview/pages';
 import type { Reading } from '../preview/inspect';
 import type { Pointed } from '../preview/point';
 import type { WorkState } from '../work/board';
+import type { Entry as ReviewQueued, FileVerdict, Verdict } from '../work/reviewqueue';
+import type { Landing as HowItLands } from '../history/worktree';
 import type { TokenUsageView } from '../lib/token-days';
 
 export type { TokenUsageView } from '../lib/token-days';
@@ -1123,6 +1125,12 @@ export type GitSnapshot = {
   /** Which files, by name, up to a limit. The panel names them rather than
    *  counting them: "3 files changed" is a number, `pricing.tsx` is a place. */
   files: readonly ChangedFile[];
+  /** Lines added and removed across every tracked file that has changed. Read
+   *  separately from the status: the porcelain format carries no line totals,
+   *  and "3 files" and "+734 −7" are two different answers to two different
+   *  questions. */
+  added: number;
+  removed: number;
   /** Saved work owned by this machine and not yet in the shared copy. */
   ahead: number;
   /** Saved work owned by the shared copy and not yet on this machine. */
@@ -1265,6 +1273,48 @@ export type RepoLook =
     }
   | null;
 
+/* -------------------------------------------------------------------------- */
+/* Finished work waiting to be reviewed                                       */
+/* -------------------------------------------------------------------------- */
+
+export type { FileVerdict, HowItLands };
+export type ReviewVerdict = Verdict;
+
+/**
+ * One thing waiting to be looked at, as the window draws it.
+ *
+ * The queue's own `Entry` plus the two facts only the shell can supply: the
+ * branch the work is on, which is what Land and the pull request are made from,
+ * and whether this card is still mirroring into the folder as it works.
+ */
+export type ReviewEntry = ReviewQueued & {
+  branch: string;
+  /** True while this conversation carries its files home on every settle. */
+  mirror: boolean;
+};
+
+/** An entry opened for reading: the queue as it stands, and the change itself. */
+export type ReviewOpened = {
+  entries: readonly ReviewEntry[];
+  /** Unified diff of everything the entry changed, against where it started. */
+  diff: string;
+};
+
+/** What a decision came to. `clashes` names the files both sides changed, which
+ *  are left exactly as this folder has them until somebody settles each one. */
+export type ReviewDecided = {
+  entries: readonly ReviewEntry[];
+  /** What just happened, in the words of the thing that happened. */
+  did: string;
+  clashes: readonly string[];
+  /** The conversation it came out of, so a clash can be handed back to it. */
+  address: string;
+};
+
+/** A file both sides changed, written out with markers so it can be decided
+ *  place by place. Nothing on disk is touched to produce it. */
+export type ReviewClash = { path: string; text: string };
+
 /** Channel names. Namespaced so nothing else on the wire can be mistaken for
  *  ours, and centralised so preload and main cannot drift apart. */
 export const CHANNEL = {
@@ -1332,6 +1382,15 @@ export const CHANNEL = {
   worktreeDrop: 'graphe:worktree-drop',
   prWorktreePrepare: 'graphe:pr-worktree-prepare',
   prReviewOpen: 'graphe:pr-review-open',
+  reviewQueue: 'graphe:review-queue',
+  reviewOpen: 'graphe:review-open',
+  reviewChoose: 'graphe:review-choose',
+  reviewDecide: 'graphe:review-decide',
+  reviewLand: 'graphe:review-land',
+  reviewPr: 'graphe:review-pr',
+  reviewMirror: 'graphe:review-mirror',
+  conflictLook: 'graphe:conflict-look',
+  conflictSettle: 'graphe:conflict-settle',
   buildStart: 'graphe:build-start',
   buildPlan: 'graphe:build-plan',
   buildAdvance: 'graphe:build-advance',
@@ -1616,6 +1675,27 @@ export type GrapheApi = {
   preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>>;
   /** Open a new conversation rooted at the PR worktree, so the review reads the PR's own files. */
   openPrReview(prNumber: number, where?: Where): Promise<Result<{ folder: string; opened: OpenedProject }>>;
+
+  /** Everything finished and waiting to be looked at, newest first. */
+  reviewQueue(where?: Where): Promise<Result<readonly ReviewEntry[]>>;
+  /** Open one to read it. Opening is reading, so it stops counting as waiting. */
+  reviewOpen(id: string, where?: Where): Promise<Result<ReviewOpened>>;
+  /** Say what to do with one file of it, or clear that and follow the entry. */
+  reviewChoose(id: string, path: string, choice: FileVerdict | null, where?: Where): Promise<Result<readonly ReviewEntry[]>>;
+  /** Answer a whole entry. The chosen files are carried into the folder,
+   *  uncommitted; a file both sides changed is left alone and named back. */
+  reviewDecide(id: string, verdict: ReviewVerdict, where?: Where): Promise<Result<ReviewDecided>>;
+  /** The same yes, committed. One commit unless the landing says otherwise. */
+  reviewLand(id: string, landing: HowItLands, where?: Where): Promise<Result<ReviewDecided>>;
+  /** Open a pull request from the entry's branch, with its summary as the body. */
+  reviewPr(id: string, summary: string, where?: Where): Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>>;
+  /** Carry this conversation's files home as it works, or stop doing that. */
+  reviewMirror(id: string, on: boolean, where?: Where): Promise<Result<readonly ReviewEntry[]>>;
+  /** One file both sides changed, written out with markers to decide over.
+   *  `address` is the conversation whose version is the other side. */
+  conflictLook(address: string, path: string, where?: Where): Promise<Result<ReviewClash>>;
+  /** Write the decided version of that file into the project. */
+  conflictSettle(address: string, path: string, text: string, where?: Where): Promise<Result<null>>;
   /** Full text for a library row. `id` is checked against that library first. */
   skillText(id: string, where?: Where): Promise<Result<string>>;
   /** Stop checking before things that would otherwise be asked about, or start

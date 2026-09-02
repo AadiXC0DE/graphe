@@ -43,6 +43,9 @@ type Props = {
   onHistory?: () => void;
   /** The github pull requests and issues of the project in front. */
   onReviews?: () => void;
+  /** Finished work waiting to be looked at, and how many pieces of it. */
+  onReviewQueue?: () => void;
+  reviewsWaiting?: number;
   /** Skills stay close to the work, but open as a library rather than another
       permanent section competing with conversations. */
   onSkills?: () => void;
@@ -91,6 +94,8 @@ export default function Sidebar({
   onCanvas,
   onHistory,
   onReviews,
+  onReviewQueue,
+  reviewsWaiting = 0,
   onSkills,
   onAddMore,
   onFiles,
@@ -340,7 +345,7 @@ export default function Sidebar({
           {/* The last row and never a band: it sits under the work rather than
               beside it, and stays put while the conversations scroll. */}
           {onAsk === undefined && onDesign === undefined && onCanvas === undefined && onHistory === undefined &&
-            onReviews === undefined && onAddMore === undefined && onSkills === undefined && onSettings === undefined ? null : (
+            onReviews === undefined && onReviewQueue === undefined && onAddMore === undefined && onSkills === undefined && onSettings === undefined ? null : (
             <div className="shelf__foot">
               <NewerBuild />
               {onAsk === undefined ? null : (
@@ -423,6 +428,30 @@ export default function Sidebar({
                     </svg>
                   </span>
                   <span className="shelf__rowname">History</span>
+                </button>
+              )}
+              {onReviewQueue === undefined ? null : (
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__more"
+                  onClick={onReviewQueue}
+                  title="Work that has finished and is waiting to be looked at"
+                >
+                  <span className="shelf__moremark" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M3 8.2 6 11.2l7-7"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">Review finished work</span>
+                  {reviewsWaiting === 0 ? null : (
+                    <span className="shelf__count">{String(reviewsWaiting)}</span>
+                  )}
                 </button>
               )}
               {onReviews === undefined ? null : (

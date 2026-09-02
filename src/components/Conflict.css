@@ -1,0 +1,250 @@
+/* A file both sides changed, decided place by place.
+
+   Three panes rather than a patch: what you have, what it started as, and what
+   the conversation wrote, side by side with one row of buttons over them. The
+   lines around each place stay on screen in the quiet grey, because a decision
+   about four lines is a decision about where those four lines sit.
+
+   A file whose markers could not be read gets none of this. It gets the
+   sentence saying it has been left alone, and one way on. */
+
+.clash__count {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.clash__body {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-3);
+  overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .clash__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.clash__files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+}
+
+.clash__file {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+
+.clash__file--open {
+  background: var(--bg-raised);
+  border-color: var(--border);
+}
+
+.clash__file:focus-visible,
+.clash__way:focus-visible,
+.clash__ask:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .clash__file:hover {
+    background: var(--bg-raised);
+  }
+}
+
+.clash__reading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.clash__ask {
+  align-self: flex-start;
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .clash__ask:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+.clash__ask:disabled {
+  opacity: 0.5;
+}
+
+/* ------------------------------------------------------------- one place */
+
+.clash__place {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.clash__placetop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.clash__placename {
+  margin: 0;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.clash__ways {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.clash__way {
+  min-height: 24px;
+  padding: 0 var(--space-3);
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.clash__way:first-child {
+  border-left: none;
+}
+
+.clash__way--on {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.clash__way:disabled {
+  opacity: 0.5;
+}
+
+.clash__panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.clash__panes--three {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+@media (max-width: 900px) {
+  .clash__panes,
+  .clash__panes--three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.clash__pane {
+  min-width: 0;
+  border-left: 1px solid var(--border);
+}
+
+.clash__pane:first-child {
+  border-left: none;
+}
+
+.clash__panename {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  background: var(--bg-sunken);
+}
+
+.clash__code,
+.clash__same {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.clash__empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.clash__same {
+  color: var(--text-muted);
+  max-height: 180px;
+  overflow: auto;
+}
+
+.clash__waiting {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.clash__blank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--space-4);
+  text-align: center;
+}
+
+.clash__blanktitle {
+  margin: 0;
+  max-width: 56ch;
+  font-size: var(--text-base);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.clash__blankdetail {
+  margin: 0;
+  max-width: 46ch;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}

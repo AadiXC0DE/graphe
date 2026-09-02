@@ -23,6 +23,10 @@ describe('git overview — reading git status text', () => {
       staged: 0,
       untracked: 0,
       files: [],
+      // The porcelain format carries no line totals; whoever asks for the
+      // status reads them separately.
+      added: 0,
+      removed: 0,
       ahead: 0,
       behind: 0,
     });

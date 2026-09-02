@@ -725,3 +725,171 @@
   border-color: var(--border-strong);
   color: var(--text);
 }
+
+/* ---------------------------------------------------------------------------
+   Git: one band where there were three
+
+   Where the project is, what is uncommitted, and the two presses that move
+   either. Three stacked bands answered this before, and a person had to read
+   all three to learn one thing.
+   --------------------------------------------------------------------------- */
+
+.gitband {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.gitband > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gitband__act {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.gitband__act:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.gitband__row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* The count is a press, because the answer to "what changed" is the change and
+   not the number. */
+.gitband__changes {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text);
+  text-align: left;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.gitband__changes:disabled {
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .gitband__changes:not(:disabled):hover {
+    border-color: var(--border-strong);
+  }
+}
+
+.gitband__changesname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitband__count {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gitband__commit {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--accent-text);
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.gitband__commit:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.gitband__onto {
+  font-size: var(--text-2xs);
+  opacity: 0.8;
+}
+
+.gitband__quiet {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gitband__changes {
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Goal: what the job is for, in three lines
+   --------------------------------------------------------------------------- */
+
+.goalband__what {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.goalband__how {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+}
+
+/* A word, not a colour: a panel has to be readable out loud. */
+.goalband__state {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.goalband__state--active {
+  color: var(--accent);
+}
+
+.goalband__numbers {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* What changed, in lines, beside the word. Tabular so two readings a minute
+   apart do not shuffle the row. */
+.gitband__lines {
+  margin-left: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

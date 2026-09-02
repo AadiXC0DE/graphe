@@ -77,7 +77,30 @@ export function parseGitStatus(raw: string): GitSnapshot {
     staged,
     untracked,
     files,
+    // Read separately, by whoever asked for the status: `--porcelain=v2`
+    // carries no line totals at all.
+    added: 0,
+    removed: 0,
     ahead: branchAb === null ? 0 : Number(branchAb[1] ?? 0),
     behind: branchAb === null ? 0 : Number(branchAb[2] ?? 0),
   };
+}
+
+/**
+ * The lines added and removed, from `git diff --numstat`.
+ *
+ * One line per file, `added<TAB>removed<TAB>path`, and a dash for either count
+ * on a file git read as binary. Those are counted as files rather than lines,
+ * which is the honest answer: a picture has no lines.
+ */
+export function parseNumstat(raw: string): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const line of raw.split('\n')) {
+    const parts = line.split('\t');
+    if (parts.length < 3) continue;
+    added += Number(parts[0]) || 0;
+    removed += Number(parts[1]) || 0;
+  }
+  return { added, removed };
 }

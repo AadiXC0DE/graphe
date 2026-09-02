@@ -151,10 +151,14 @@ import {
   type VisualChange,
   type VisualFrames,
   type Where,
+  type ReviewClash,
+  type ReviewDecided,
+  type ReviewEntry,
+  type ReviewOpened,
   setDownWords,
   whereIn,
 } from '../src/lib/ipc';
-import { parseGitStatus } from '../src/lib/gitstatus';
+import { parseGitStatus, parseNumstat } from '../src/lib/gitstatus';
 import { parseBranches } from '../src/lib/branches';
 import {
   capture,
@@ -189,17 +193,37 @@ import {
   bringBack,
   bringBackWords,
   createWorktree,
+  landWorktree,
+  landingWords,
   nextCheckoutName,
   renameCheckoutBranch,
   dropWorktree,
   putAwayWorktree,
   releaseWorktree,
   reopenWorktree,
+  sharedBase,
   sweepCheckouts,
   worktreeWords,
+  type Landing as HowItLands,
   type RunGit,
   type Rescue,
 } from '../src/history/worktree';
+import {
+  chooseFile,
+  decide,
+  filesToTake,
+  landsAsOneCommit,
+  markRead,
+  queueFrom,
+  reviewWords,
+  withoutEntry,
+  type Arriving,
+  type Entry as ReviewQueued,
+  type FileTally,
+  type FileVerdict,
+  type Verdict as ReviewVerdict,
+} from '../src/work/reviewqueue';
+import { conflictWords, readConflict } from '../src/diff/conflict';
 import { preparePrWorktree } from './prWorktree';
 import { RUNTIME_SCRATCH, keepOutOfCommits } from './excludes';
 import {
@@ -1716,6 +1740,12 @@ type Held = {
    *  increases: naming one after how many are open right now gives the same
    *  name to two live conversations the moment an earlier one is closed. */
   checkoutsMade: number;
+  /** Finished work waiting to be looked at, before any of it touches the
+   *  person's folder. Newest first, as the queue keeps it. */
+  review: readonly ReviewQueued[];
+  /** Conversations still carrying their work home on every settle, by address.
+   *  The per-card way back to how this behaved before the queue. */
+  mirroring: Set<string>;
   /** A conversation's own checkout, by its address. Present only for the ones
    *  running isolated in a worktree — the primary conversation works directly
    *  on the project folder. The branch is the durable half: the folder is put
@@ -2133,6 +2163,21 @@ function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
       resolve(parseGitStatus(out));
     });
   });
+}
+
+/**
+ * A status with its line totals filled in.
+ *
+ * Two calls rather than one, because git's porcelain format carries no line
+ * counts and "3 files" and "+734 −7" answer two different questions. A folder
+ * with nothing changed skips the second call entirely.
+ */
+async function readGitStatusWithLines(cwd: string): Promise<GitSnapshot | null> {
+  const git = await readGitStatus(cwd);
+  if (git === null || !git.dirty) return git;
+  const counted = await gitRun(cwd, ['diff', '--numstat', 'HEAD']);
+  if (counted.code !== 0 || counted.out === undefined) return git;
+  return { ...git, ...parseNumstat(counted.out) };
 }
 
 /** Every line of work the project keeps, from git's own listing. The format
@@ -2693,13 +2738,32 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
  */
 function settleUpTheJob(path: string, held: Held, from: Speaking): void {
   {
-      const inFront = held.sessions.current?.path === from.address;
-      const checkout =
-        !inFront ||
-        from.address === null ||
-        held.suppressCarry.has(from.address)
+      const address = from.address;
+      const known =
+        address === null || held.suppressCarry.has(address)
           ? null
-          : held.checkouts.get(from.address) ?? null;
+          : held.checkouts.get(address) ?? null;
+      const holding = known !== null && existsSync(known.folder) ? known : null;
+
+      /* Live mirror is how this behaved before the review queue, kept per card
+         for anybody who wants it: the work is carried into the folder as the
+         conversation makes it. Off, which is the default, an entry arrives on
+         the review list and nothing moves until somebody says so. Still only
+         ever the conversation in front, because a tab working in the background
+         writing over the folder on screen is the bug that rule exists for. */
+      const mirroring =
+        address !== null &&
+        held.mirroring.has(address) &&
+        held.sessions.current?.path === address;
+
+      if (holding !== null && address !== null) {
+        void noteForReview(path, held, address, holding, mirroring).catch(() => undefined);
+      }
+      if (!mirroring) {
+        void look(path, held);
+        return;
+      }
+      const checkout = holding;
       // What came back, and what did not. A file both sides changed is left as
       // this checkout has it — which is right, and used to happen in silence:
       // the person saw a finished turn and a file that had not changed.
@@ -3695,6 +3759,344 @@ async function syncCheckoutBranch(project: string, held: Held, address: string):
   await saveCheckouts(project, held).catch(() => undefined);
 }
 
+
+/* -------------------------------------------------------------------------- */
+/* Work waiting to be looked at                                                */
+/* -------------------------------------------------------------------------- */
+
+/** Where a project's review queue is written down. One file per project, hashed
+ *  the same way the checkout index is, so two projects sharing an install can
+ *  never read each other's. */
+function reviewIndexFile(project: string): string {
+  const key = createHash('sha256').update(resolve(project)).digest('hex');
+  return join(app.getPath('userData'), 'review-queue', `${key}.json`);
+}
+
+type ReviewIndex = { entries: readonly ReviewQueued[]; mirroring: readonly string[] };
+
+/** One stored row, checked field by field. Anything that does not read as an
+ *  entry is dropped rather than repaired: a half-understood row would draw a
+ *  card offering to carry files nobody can name. */
+function reviewRow(value: unknown): ReviewQueued | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const id = row['id'];
+  const title = row['title'];
+  const address = row['address'];
+  const at = row['at'];
+  const from = row['from'];
+  if (typeof id !== 'string' || id === '') return null;
+  if (typeof title !== 'string' || typeof address !== 'string') return null;
+  if (typeof at !== 'number' || !Number.isFinite(at)) return null;
+  if (from !== 'conversation' && from !== 'board' && from !== 'schedule') return null;
+  const files: FileTally[] = [];
+  for (const one of Array.isArray(row['files']) ? (row['files'] as unknown[]) : []) {
+    if (one === null || typeof one !== 'object') continue;
+    const file = one as Record<string, unknown>;
+    if (typeof file['path'] !== 'string' || file['path'] === '') continue;
+    files.push({
+      path: file['path'],
+      added: typeof file['added'] === 'number' ? file['added'] : 0,
+      removed: typeof file['removed'] === 'number' ? file['removed'] : 0,
+    });
+  }
+  if (files.length === 0) return null;
+  const choices: Record<string, FileVerdict> = {};
+  const stored = row['choices'];
+  if (stored !== null && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [path, choice] of Object.entries(stored as Record<string, unknown>)) {
+      if (choice === 'take theirs' || choice === 'keep mine') choices[path] = choice;
+    }
+  }
+  return {
+    id,
+    from,
+    title,
+    address,
+    files,
+    at,
+    read: row['read'] === true,
+    ...(Object.keys(choices).length === 0 ? {} : { choices }),
+  };
+}
+
+async function readReviewQueue(project: string): Promise<ReviewIndex> {
+  try {
+    const parsed = JSON.parse(await readFile(reviewIndexFile(project), 'utf8')) as unknown;
+    if (parsed === null || typeof parsed !== 'object') return { entries: [], mirroring: [] };
+    const held = parsed as Record<string, unknown>;
+    const rows = Array.isArray(held['entries']) ? (held['entries'] as unknown[]) : [];
+    const entries: ReviewQueued[] = [];
+    for (const row of rows) {
+      const one = reviewRow(row);
+      if (one !== null) entries.push(one);
+    }
+    const mirroring = Array.isArray(held['mirroring'])
+      ? (held['mirroring'] as unknown[]).filter((one): one is string => typeof one === 'string')
+      : [];
+    return { entries: queueFrom(entries), mirroring };
+  } catch {
+    return { entries: [], mirroring: [] };
+  }
+}
+
+async function saveReviewQueue(project: string, held: Held): Promise<void> {
+  const file = reviewIndexFile(project);
+  await mkdir(dirname(file), { recursive: true });
+  await writeAtomically(
+    file,
+    JSON.stringify({ entries: held.review, mirroring: [...held.mirroring] }),
+  );
+}
+
+/** How many lines a file has, for a tally. Capped: a generated bundle is not
+ *  something anybody counts, and reading one to count it costs the settle. */
+const TOO_BIG_TO_COUNT = 400_000;
+
+async function linesIn(file: string): Promise<number> {
+  const about = await stat(file).catch(() => null);
+  if (about === null || about.size > TOO_BIG_TO_COUNT) return 0;
+  const text = await readFile(file, 'utf8').catch(() => null);
+  if (text === null || text === '') return 0;
+  return text.endsWith('\n') ? text.split('\n').length - 1 : text.split('\n').length;
+}
+
+/** Every file a checkout changed against where it started, with its counts.
+ *
+ * Always asked for with `-z`: git quotes any path that is not plain ASCII, and
+ * a quoted name points at no file on disk.
+ */
+async function talliesFor(folder: string, base: string): Promise<readonly FileTally[]> {
+  const tallies = new Map<string, FileTally>();
+  const counted = await gitRun(folder, ['diff', '--numstat', '-z', '--no-renames', base]);
+  if (counted.code === 0) {
+    const parts = (counted.out ?? '').split('\0').filter((part) => part !== '');
+    for (let at = 0; at + 1 < parts.length; at += 2) {
+      const [added = '', removed = ''] = (parts[at] ?? '').split('\t');
+      const path = parts[at + 1] ?? '';
+      if (path === '' || path === '.') continue;
+      tallies.set(path, {
+        path,
+        added: Number.parseInt(added, 10) || 0,
+        removed: Number.parseInt(removed, 10) || 0,
+      });
+    }
+  }
+  const others = await gitRun(folder, ['ls-files', '--others', '--exclude-standard', '-z']);
+  if (others.code === 0) {
+    for (const path of (others.out ?? '').split('\0').filter((part) => part !== '')) {
+      if (tallies.has(path) || path === '.') continue;
+      tallies.set(path, { path, added: await linesIn(resolve(folder, path)), removed: 0 });
+    }
+  }
+  return [...tallies.values()].sort((one, other) => one.path.localeCompare(other.path));
+}
+
+/** A file git has never seen, written as a patch the viewer can read. */
+function patchForNew(path: string, text: string): string {
+  const lines = text.split('\n');
+  const ended = lines.length > 0 && lines[lines.length - 1] === '';
+  if (ended) lines.pop();
+  const body = lines.map((line) => `+${line}`);
+  if (!ended && lines.length > 0) body.push('\\ No newline at end of file');
+  return [
+    `diff --git a/${path} b/${path}`,
+    'new file mode 100644',
+    '--- /dev/null',
+    `+++ b/${path}`,
+    `@@ -0,0 +1,${String(lines.length)} @@`,
+    ...body,
+    '',
+  ].join('\n');
+}
+
+/** Everything a checkout changed, as one unified diff. Untracked files are
+ *  written out by hand because git has nothing to diff them against. */
+async function reviewDiff(folder: string, base: string): Promise<string> {
+  const changed = await gitRun(folder, ['diff', '--no-ext-diff', '--no-renames', base]);
+  const others = await gitRun(folder, ['ls-files', '--others', '--exclude-standard', '-z']);
+  const extras: string[] = [];
+  for (const path of (others.out ?? '').split('\0').filter((part) => part !== '')) {
+    const whole = resolve(folder, path);
+    const about = await stat(whole).catch(() => null);
+    if (about === null || about.size > TOO_BIG_TO_COUNT) continue;
+    const text = await readFile(whole, 'utf8').catch(() => null);
+    if (text === null) continue;
+    extras.push(patchForNew(path, text));
+  }
+  return [(changed.out ?? '').trim(), ...extras].filter((part) => part !== '').join('\n');
+}
+
+/**
+ * An entry for what this conversation's checkout is holding, put on the list.
+ *
+ * `queueFrom` keeps whatever a person has already done to an entry with the
+ * same id, so a conversation settling four times in a row refreshes one card
+ * rather than reopening a review somebody was halfway through. A card that is
+ * mirroring is marked read as it arrives: its files are already in the folder,
+ * so counting it as something waiting would be untrue.
+ */
+async function noteForReview(
+  project: string,
+  held: Held,
+  address: string,
+  checkout: Checkout,
+  mirrored: boolean,
+): Promise<void> {
+  // A pull request review runs in a checkout of somebody else's branch. It is
+  // read-only, and there is nothing in it anybody would land here.
+  if (checkout.branch.startsWith('graphe/pr-')) return;
+  const base = await sharedBase(gitRunHereFor(), checkout.folder, project);
+  if (base === null) return;
+  const files = await talliesFor(checkout.folder, base);
+  if (files.length === 0) return;
+  const named = held.sessions.find(address)?.name;
+  const arriving: Arriving = {
+    id: address,
+    from: 'conversation',
+    title: named === undefined || named.trim() === '' ? checkout.branch.replace(/^graphe\//, '') : named,
+    address,
+    files,
+    at: Date.now(),
+  };
+  held.review = queueFrom(held.review, [arriving]);
+  if (mirrored) held.review = markRead(held.review, address);
+  await saveReviewQueue(project, held).catch(() => undefined);
+}
+
+/**
+ * The checkout an entry's work is in, spread back out if it was put away.
+ *
+ * A copy is given back whenever nobody is in it, so a row whose folder is not
+ * on disk is an ordinary row rather than a broken one. Reading it as broken is
+ * how a review of work that is perfectly safe reports the work as gone.
+ */
+async function checkoutForReview(
+  project: string,
+  held: Held,
+  address: string,
+): Promise<Checkout | null> {
+  const one = held.checkouts.get(address);
+  if (one === undefined) return null;
+  if (existsSync(one.folder)) return one;
+  return reopenCheckout(project, one);
+}
+
+/** The queue as the window draws it: the entries plus the two facts only the
+ *  shell knows — the branch behind each, and whether it is mirroring. */
+function reviewRows(held: Held): readonly ReviewEntry[] {
+  return held.review.map((one) => ({
+    ...one,
+    branch: held.checkouts.get(one.address)?.branch ?? '',
+    mirror: held.mirroring.has(one.address),
+  }));
+}
+
+const NO_SUCH_ENTRY: Trouble = {
+  what: reviewWords.gone,
+  because: 'It may have been answered in another window, or the conversation behind it closed.',
+  actionLabel: 'Got it',
+};
+
+const REVIEW_WORK_GONE: Trouble = {
+  what: 'The work behind this is not in the project any more.',
+  because: 'Its checkout has been landed or thrown away, so there is nothing left to carry over.',
+  actionLabel: 'Got it',
+};
+
+function isFileVerdict(value: unknown): value is FileVerdict {
+  return value === 'take theirs' || value === 'keep mine';
+}
+
+function isReviewVerdict(value: unknown): value is ReviewVerdict {
+  return value === 'take it' || value === 'keep mine' || value === 'ask again' || value === 'drop it';
+}
+
+/** One path under a folder, or null when it points anywhere else. Every path in
+ *  a review arrives off the wire, so nothing here may resolve outside. */
+function insideProject(folder: string, path: string): string | null {
+  if (path === '' || path.includes('\u0000')) return null;
+  const root = resolve(folder);
+  const whole = resolve(root, path);
+  return whole === root || whole.startsWith(`${root}${sep}`) ? whole : null;
+}
+
+/** The project a review lands into: a named child, or the folder itself. Never
+ *  the checkout's own folder, which would merge a branch into itself. */
+function reviewRepo(open: Workspace<Held>, where: Where): string {
+  return childRepoFor(open, where)?.path ?? open.path;
+}
+
+/** `git merge-file`, keeping what it printed.
+ *
+ * It exits with the number of clashes it left in, so a non-zero code here is
+ * the ordinary answer rather than a failure — and the merged text with the
+ * markers in it is on stdout either way. The shared runner throws that away.
+ */
+async function mergeFileText(cwd: string, args: string[]): Promise<string | null> {
+  try {
+    const made = await execFileAsync('git', args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    return made.stdout;
+  } catch (cause) {
+    const failed = cause as { stdout?: string; code?: number };
+    if (typeof failed.stdout !== 'string') return null;
+    return typeof failed.code === 'number' && failed.code >= 0 ? failed.stdout : null;
+  }
+}
+
+/** Open a pull request from a branch and give back its address, speaking as
+ *  whoever this computer's `gh` is logged in as. The body goes through a file
+ *  so a long summary needs no quoting. */
+async function ghOpenPr(
+  cwd: string,
+  branch: string,
+  title: string,
+  body: string,
+): Promise<{ url: string } | { because: string }> {
+  const file = join(tmpdir(), `graphe-pr-${String(Date.now())}.md`);
+  try {
+    await writeAtomically(file, body);
+  } catch {
+    return { because: 'I could not write the description down before sending it.' };
+  }
+  return new Promise((settle) => {
+    const child = spawn(
+      'gh',
+      ['pr', 'create', '--head', branch, '--title', title, '--body-file', file],
+      { cwd, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let out = '';
+    let noise = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      noise = `${noise}${chunk}`.slice(-400);
+    });
+    const timeout = setTimeout(() => child.kill('SIGKILL'), GH_PATIENCE_MS);
+    const tidy = (): void => {
+      clearTimeout(timeout);
+      void rm(file, { force: true }).catch(() => undefined);
+    };
+    child.on('error', () => {
+      tidy();
+      settle({ because: GH_WORDS.noTool });
+    });
+    child.on('close', (code) => {
+      tidy();
+      const address = out.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('http')).pop();
+      if (code === 0 && address !== undefined) {
+        settle({ url: address });
+        return;
+      }
+      const said = noise.trim().split('\n').filter((line) => line.trim() !== '').pop();
+      settle({ because: said === undefined ? GH_WORDS.refused : said });
+    });
+  });
+}
+
 /** Where a project's build plan lives, so it survives the window closing.
  *
  *  The readable key is not enough on its own: flattening every non-alphanumeric
@@ -4004,6 +4406,9 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
      and the rows for them read as work waiting rather than as work put away. */
   const checked = await validateCheckouts(path, await readCheckouts(path), gitRunHereFor());
   const restoredCheckouts = checked.rows;
+  // Work waiting to be looked at outlives the sitting that made it. Quitting
+  // with a review half read must not be the same as answering it.
+  const restoredReview = await readReviewQueue(path);
   mark('project-open');
   if (checked.putAway.length > 0) {
     send(path, { type: 'notice', what: checkoutWords.putAway(checked.putAway.length) });
@@ -4023,6 +4428,8 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     snappedBeforeApply: new Set<string>(),
     checkoutsMade: restoredCheckouts.size,
     checkouts: restoredCheckouts,
+    review: restoredReview.entries,
+    mirroring: new Set(restoredReview.mirroring),
     waiting: null,
     checking: null,
     pictures: null,
@@ -6395,7 +6802,7 @@ function register(): void {
           (one): one is RepoOverview => one !== null,
         )
       : undefined;
-    const git = many ? null : await readGitStatus(cwd);
+    const git = many ? null : await readGitStatusWithLines(cwd);
     return done({
       git:
         git === null
@@ -8255,6 +8662,310 @@ function register(): void {
       await saveCheckouts(open.path, open.held).catch(() => undefined);
     }
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
+  });
+
+
+  /* ------------------------------------------------- work waiting to be read */
+
+  handle<readonly ReviewEntry[]>(CHANNEL.reviewQueue, (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(done<readonly ReviewEntry[]>([]));
+    return Promise.resolve(done(reviewRows(open.held)));
+  });
+
+  /** Open one to read it. Opening is reading, and reading is not agreeing: the
+   *  entry stops counting as waiting and nothing else about it changes. */
+  handle<ReviewOpened>(CHANNEL.reviewOpen, async (_event, args) => {
+    const [id] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string') return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    if (entry === undefined) return fail(NO_SUCH_ENTRY);
+
+    open.held.review = markRead(open.held.review, id);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, entry.address);
+    if (checkout === null) return done({ entries: reviewRows(open.held), diff: '' });
+    const base = await sharedBase(gitRunHereFor(), checkout.folder, repo);
+    return done({
+      entries: reviewRows(open.held),
+      diff: base === null ? '' : await reviewDiff(checkout.folder, base),
+    });
+  });
+
+  handle<readonly ReviewEntry[]>(CHANNEL.reviewChoose, async (_event, args) => {
+    const [id, path, choice] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || typeof path !== 'string') return fail(NO_SUCH_ENTRY);
+    if (choice !== null && !isFileVerdict(choice)) return fail(NO_SUCH_ENTRY);
+    open.held.review = chooseFile(open.held.review, id, path, choice);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    return done(reviewRows(open.held));
+  });
+
+  /**
+   * Answer a whole entry, and carry whatever it says to carry.
+   *
+   * The files arrive uncommitted, which is what makes a review reversible: a
+   * version is put down first, so the moment before somebody's folder changed
+   * is one press away. A file this folder has also changed is left exactly as
+   * it is and named back, for the resolver to settle place by place.
+   */
+  handle<ReviewDecided>(CHANNEL.reviewDecide, async (_event, args) => {
+    const [id, verdict] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || !isReviewVerdict(verdict)) return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    if (entry === undefined) return fail(NO_SUCH_ENTRY);
+
+    const repo = reviewRepo(open, where);
+    const taking = filesToTake(entry, verdict);
+    let clashes: readonly string[] = [];
+    if (taking.length > 0) {
+      const checkout = await checkoutForReview(repo, open.held, entry.address);
+      if (checkout === null) return fail(REVIEW_WORK_GONE);
+      await (await timelineFor(open, { ...where, conversation: undefined }))
+        ?.snapshot({ name: beforeBringingWorkIn, boundary: 'turn-ended' })
+        .catch(() => undefined);
+      const carried = await bringBack(gitRunHereFor(), repo, checkout.folder, taking);
+      if (!carried.ok) return fail(worktreeTrouble(carried.because));
+      clashes = carried.value.conflicted;
+    }
+
+    const after = decide(open.held.review, id, verdict);
+    open.held.review = after.entries;
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    void look(open.path, open.held);
+    return done({
+      entries: reviewRows(open.held),
+      did: clashes.length === 0 ? after.did : `${after.did} ${reviewWords.clashed(clashes)}`,
+      clashes,
+      address: entry.address,
+    });
+  });
+
+  /**
+   * The same yes, committed.
+   *
+   * One commit as the person, with their hooks and their signing, unless they
+   * asked for the conversation's own saves. Once any file is held back there is
+   * no branch to bring across, only a subset of one, so a partial landing is
+   * always the single commit and says so on the control.
+   */
+  handle<ReviewDecided>(CHANNEL.reviewLand, async (_event, args) => {
+    const [id, asked] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string') return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    if (entry === undefined) return fail(NO_SUCH_ENTRY);
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, entry.address);
+    if (checkout === null) return fail(REVIEW_WORK_GONE);
+
+    const said = asked === null || typeof asked !== 'object' ? {} : (asked as Record<string, unknown>);
+    const message = typeof said['message'] === 'string' ? said['message'] : '';
+    const everyVersion = said['how'] === 'every-version' && !landsAsOneCommit(entry);
+    const landing: HowItLands = {
+      how: everyVersion ? 'every-version' : 'squash',
+      ...(message.trim() === '' ? {} : { message }),
+    };
+
+    const taking = filesToTake(entry, 'take it');
+    if (taking.length === 0) {
+      return fail({
+        what: reviewWords.nothingChosen,
+        because: 'Take at least one file, or keep your own version and let this go.',
+        actionLabel: 'Got it',
+      });
+    }
+
+    let clashes: readonly string[] = [];
+    if (taking.length === entry.files.length) {
+      // Nothing held back, so the branch itself goes in and the copy is given
+      // back. Its conversation is put down first: the session is rooted in that
+      // folder, and left open the next thing it was asked to do would run
+      // somewhere that no longer exists.
+      await putDownCopyConversation(open, entry.address);
+      const landed = await landWorktree(gitRunHereFor(), repo, checkout.folder, landing);
+      if (!landed.ok) return fail(worktreeTrouble(landed.because));
+      open.held.checkouts.delete(entry.address);
+      await saveCheckouts(open.path, open.held).catch(() => undefined);
+    } else {
+      const carried = await bringBack(gitRunHereFor(), repo, checkout.folder, taking);
+      if (!carried.ok) return fail(worktreeTrouble(carried.because));
+      clashes = carried.value.conflicted;
+      const paths = [...carried.value.applied];
+      if (paths.length > 0) {
+        await gitRun(repo, ['add', '--', ...paths]);
+        const text = message.trim() === '' ? landingWords.message(checkout.branch) : message;
+        const committed = await gitRun(repo, ['commit', '--cleanup=verbatim', '--message', text, '--', ...paths]);
+        if (committed.code !== 0) return fail(worktreeTrouble(landingWords.failed));
+      }
+    }
+
+    open.held.review = withoutEntry(open.held.review, id);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    void look(open.path, open.held);
+    return done({
+      entries: reviewRows(open.held),
+      did: clashes.length === 0 ? reviewWords.landed(entry.title) : `${reviewWords.landed(entry.title)} ${reviewWords.clashed(clashes)}`,
+      clashes,
+      address: entry.address,
+    });
+  });
+
+  /** Send the branch and open a pull request from it, with what the
+   *  conversation said it did as the description. */
+  handle<{ url: string; entries: readonly ReviewEntry[] }>(CHANNEL.reviewPr, async (_event, args) => {
+    const [id, summary] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string') return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    if (entry === undefined) return fail(NO_SUCH_ENTRY);
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, entry.address);
+    if (checkout === null) return fail(REVIEW_WORK_GONE);
+
+    const sent = await gitRun(checkout.folder, [
+      'push',
+      '--set-upstream',
+      'origin',
+      `${checkout.branch}:${checkout.branch}`,
+    ]);
+    if (sent.code !== 0) {
+      return fail({
+        what: 'I could not send that branch to github.',
+        because: 'The project may have no github remote, or this computer is not allowed to write to it.',
+        actionLabel: 'Got it',
+      });
+    }
+    const made = await ghOpenPr(
+      repo,
+      checkout.branch,
+      entry.title,
+      typeof summary === 'string' && summary.trim() !== '' ? summary : entry.title,
+    );
+    if (!('url' in made)) {
+      return fail({ what: 'I could not open the pull request.', because: made.because, actionLabel: 'Got it' });
+    }
+    open.held.review = withoutEntry(open.held.review, id);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    return done({ url: made.url, entries: reviewRows(open.held) });
+  });
+
+  /** The way back to how this behaved before the queue, one card at a time. */
+  handle<readonly ReviewEntry[]>(CHANNEL.reviewMirror, async (_event, args) => {
+    const [id, on] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || typeof on !== 'boolean') return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    const address = entry?.address ?? id;
+    if (on) open.held.mirroring.add(address);
+    else open.held.mirroring.delete(address);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    return done(reviewRows(open.held));
+  });
+
+  /**
+   * One file both sides changed, written out with markers to decide over.
+   *
+   * Nothing on disk is touched to make it: the three versions are read, git is
+   * asked to put them together in memory, and what comes back is the text the
+   * resolver reads. So a clash somebody never settles leaves the project
+   * exactly as it was.
+   */
+  handle<ReviewClash>(CHANNEL.conflictLook, async (_event, args) => {
+    const [address, path] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof address !== 'string' || typeof path !== 'string') return fail(NO_SUCH_ENTRY);
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, address);
+    if (checkout === null) return fail(REVIEW_WORK_GONE);
+    const mine = insideProject(repo, path);
+    const theirs = insideProject(checkout.folder, path);
+    if (mine === null || theirs === null) return fail(NO_SUCH_ENTRY);
+
+    const base = await sharedBase(gitRunHereFor(), checkout.folder, repo);
+    const started = base === null ? { code: 1, out: '' } : await gitRun(repo, ['show', `${base}:${path}`]);
+    const three = join(tmpdir(), `graphe-clash-${String(Date.now())}`);
+    await mkdir(three, { recursive: true });
+    try {
+      const files = {
+        mine: join(three, 'mine'),
+        base: join(three, 'base'),
+        theirs: join(three, 'theirs'),
+      };
+      await writeAtomically(files.mine, await readFile(mine, 'utf8').catch(() => ''));
+      await writeAtomically(files.base, started.code === 0 ? (started.out ?? '') : '');
+      await writeAtomically(files.theirs, await readFile(theirs, 'utf8').catch(() => ''));
+      const text = await mergeFileText(repo, [
+        'merge-file',
+        '-p',
+        '--diff3',
+        '-L',
+        conflictWords.mine,
+        '-L',
+        conflictWords.base,
+        '-L',
+        conflictWords.theirs,
+        files.mine,
+        files.base,
+        files.theirs,
+      ]);
+      if (text === null) {
+        return fail({
+          what: 'I could not read that file’s two versions.',
+          because: conflictWords.unreadable,
+          actionLabel: 'Got it',
+        });
+      }
+      return done({ path, text });
+    } finally {
+      await rm(three, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  /** Write the decided version of one file into the project. Refused while it
+   *  still carries markers: a half-decided file is not a file. */
+  handle<null>(CHANNEL.conflictSettle, async (_event, args) => {
+    const [address, path, text] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof address !== 'string' || typeof path !== 'string' || typeof text !== 'string') {
+      return fail(NO_SUCH_ENTRY);
+    }
+    const target = insideProject(reviewRepo(open, where), path);
+    if (target === null) return fail(NO_SUCH_ENTRY);
+    const read = readConflict(text);
+    if (!read.ok || read.clashes > 0) {
+      return fail({
+        what: 'I have left that file alone.',
+        because: read.ok ? conflictWords.stillOpen(read.clashes) : conflictWords.unreadable,
+        actionLabel: 'Got it',
+      });
+    }
+    await (await timelineFor(open, { ...where, conversation: undefined }))
+      ?.snapshot({ name: beforeBringingWorkIn, boundary: 'turn-ended' })
+      .catch(() => undefined);
+    await mkdir(dirname(target), { recursive: true });
+    await writeAtomically(target, text);
+    void look(open.path, open.held);
+    return done(null);
   });
 
   handle<string>(CHANNEL.prWorktreePrepare, async (_event, args) => {

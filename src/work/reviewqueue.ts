@@ -64,6 +64,26 @@ export const reviewWords = {
    *  commit unless somebody asks for the conversation's own saves. */
   land: 'Land',
   openDiff: 'See what changed',
+  /** The two ways a landing can arrive, named as themselves. The precise one
+   *  sits behind Land rather than in a settings screen. */
+  landingHow: 'How it arrives',
+  openPr: 'Open a pull request',
+  opening: 'Opening the pull request…',
+  landing: 'Landing…',
+  /** The old behaviour, kept per card for anyone who wants it. */
+  mirror: 'Live mirror',
+  mirrorWhy:
+    'Carry this conversation’s files into your folder as it works, instead of waiting here for a review.',
+  /** A land cannot keep the conversation’s own saves once files are left out
+   *  of it, so the precise control says so rather than quietly ignoring it. */
+  heldBackNote: 'Files you kept your own version of stay out, so this arrives as one commit.',
+  nothingChosen: 'Every file here is set to keep your own version, so there is nothing to take.',
+  prOpened: (address: string): string => `Pull request opened: ${address}`,
+  landed: (title: string): string => `Landed “${title}”.`,
+  clashed: (files: readonly string[]): string =>
+    files.length === 1
+      ? `One file was changed here and in that conversation at the same time: ${files[0] ?? ''}. Decide it place by place.`
+      : `${String(files.length)} files were changed here and in that conversation at the same time. Decide them place by place.`,
   /** Where each entry came from, said on the row. */
   froms: {
     conversation: 'From a conversation',
@@ -83,6 +103,19 @@ export const reviewWords = {
   asked: (title: string): string => `Sent “${title}” back to have another go.`,
   dropped: (title: string): string => `Threw “${title}” away.`,
   gone: 'That one is no longer waiting.',
+} as const;
+
+/** How a conversation's work arrives in the person's branch, said as the two
+ *  ways it can. Squash is the default everywhere; keeping every version is for
+ *  somebody who wants the conversation's own saves in their history. */
+export const landingWords = {
+  squash: 'One commit, your message',
+  every: 'Keep every version',
+  note: 'One commit runs your pre-commit hooks and is signed the way your other commits are. Keeping every version brings the conversation’s automatic saves across as they were made: unsigned, and past your hooks.',
+  /** When nobody typed one. Reads as a commit subject, because it is one. */
+  message: (branch: string): string => `Work from ${branch.replace(/^graphe\//, '')}`,
+  failed:
+    'Your work is here, but the commit did not go through. A pre-commit hook turned it down, or the signing did. The changes are staged, so you can commit them yourself.',
 } as const;
 
 /* -------------------------------------------------------------------------- */
@@ -199,6 +232,29 @@ export function decide(
     entries: left,
     did: taking.length === 0 ? reviewWords.kept(one.title) : reviewWords.took(one.title, taking.length),
   };
+}
+
+/** How many files somebody has said to keep their own version of. */
+export function heldBack(entry: Entry): number {
+  const choices = entry.choices ?? {};
+  return entry.files.filter((one) => choices[one.path] === 'keep mine').length;
+}
+
+/** Whether a land can still keep the conversation's own saves.
+ *
+ * It cannot once any file is being left out: what would arrive then is not the
+ * branch, it is a subset of it, and a subset has no history of its own to
+ * bring across. Said out loud on the control rather than ignored underneath it.
+ */
+export function landsAsOneCommit(entry: Entry): boolean {
+  return heldBack(entry) > 0;
+}
+
+/** One entry off the list, without deciding anything about it. Used when the
+ *  work behind it has gone: a row for a conversation that no longer exists is
+ *  a review nobody can carry out. */
+export function withoutEntry(entries: readonly Entry[], id: string): readonly Entry[] {
+  return entries.filter((one) => one.id !== id);
 }
 
 /** The line under one entry: where it came from and how much there is. */

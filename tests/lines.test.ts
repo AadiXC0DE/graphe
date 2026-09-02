@@ -125,11 +125,11 @@ describe('the words', () => {
   it('is the word actually shown, not just written down', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
-    const overview = readFileSync(
-      fileURLToPath(new URL('../src/components/Overview.tsx', import.meta.url)),
-      'utf8',
-    );
-    expect(overview).toContain('LINE_WORDS.heading');
-    expect(overview).not.toContain('LINE_WORDS.plainly');
+    const read = (name: string): string =>
+      readFileSync(fileURLToPath(new URL(`../src/components/${name}`, import.meta.url)), 'utf8');
+    // The heading over the pill is the Git band's now; the pill itself still
+    // says what pressing it does.
+    expect(read('Lines.tsx')).toContain('LINE_WORDS.open');
+    expect(read('Overview.tsx')).not.toContain('LINE_WORDS.plainly');
   });
 });

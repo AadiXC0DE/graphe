@@ -565,7 +565,7 @@ function couldNotUseModel(named: string, many: number): Trouble {
       many === 1
         ? 'One conversation is still answering as the model it had.'
         : `${String(many)} conversations are still answering as the model they had.`,
-    because: `${named} could not be brought into ${many === 1 ? 'it' : 'them'} — usually the account for it is not connected. It is saved as your choice, so a new conversation will use it.`,
+    because: `${named} could not be brought into ${many === 1 ? 'it' : 'them'}, usually because the account for it is not connected. It is saved as your choice, so a new conversation will use it.`,
     actionLabel: 'Got it',
   };
 }
@@ -574,7 +574,7 @@ function couldNotUseModel(named: string, many: number): Trouble {
  *  with the folder, so it must not read as though it has. */
 const NOT_A_YES_OR_NO: Trouble = {
   what: 'That switch was not given a yes or a no.',
-  because: 'Try it again — nothing was changed.',
+  because: 'Try it again. Nothing was changed.',
   actionLabel: 'Got it',
 };
 
@@ -1343,11 +1343,11 @@ function watchPageRequests(store: Electron.Session): void {
     if (details.statusCode < 400) return;
     pageUnanswered = noteTrouble(
       pageUnanswered,
-      `${String(details.statusCode)} — ${details.method} ${details.url}`,
+      `${String(details.statusCode)} · ${details.method} ${details.url}`,
     );
   });
   store.webRequest.onErrorOccurred((details) => {
-    pageUnanswered = noteTrouble(pageUnanswered, `${details.method} ${details.url} — ${details.error}`);
+    pageUnanswered = noteTrouble(pageUnanswered, `${details.method} ${details.url} · ${details.error}`);
   });
 }
 
@@ -4974,7 +4974,7 @@ async function sayIfTheRuntimeIsNotThePinnedOne(): Promise<void> {
   send(null, {
     type: 'notice',
     what: `This is running agent runtime ${here}, and it was built against ${pinned}.`,
-    because: 'Worth knowing if something behaves oddly — it is the layer everything here sits on.',
+    because: 'Worth knowing if something behaves oddly: it is the layer everything here sits on.',
   });
 }
 

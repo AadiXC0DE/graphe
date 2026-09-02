@@ -76,7 +76,7 @@ export async function preparePrWorktree(project: string, prNumber: number): Prom
     // whose origin is somewhere else fails here and should hear that rather
     // than "could not fetch".
     throw because(
-      `I could not fetch pull request #${String(normalized)} from origin. Either it does not exist, or this project's origin is not GitHub — reviewing a pull request needs a GitHub remote.`,
+      `I could not fetch pull request #${String(normalized)} from origin. Either it does not exist, or this project's origin is not GitHub. Reviewing a pull request needs a GitHub remote.`,
       fetched.said,
     );
   }

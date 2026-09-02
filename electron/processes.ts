@@ -146,7 +146,7 @@ export function ledger(): Ledger {
         const words = KIND_WORDS[kind];
         return `${String(n)} ${n === 1 ? words[0] : words[1]}`;
       });
-      return `${said.join(' · ')} — ${mine.map((one) => String(one.pid)).join(', ')}`;
+      return `${said.join(' · ')} (${mine.map((one) => String(one.pid)).join(', ')})`;
     },
   };
 }

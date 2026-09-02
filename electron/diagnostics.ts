@@ -156,15 +156,15 @@ export function saysDiagnostics(d: Diagnostics): string {
   ];
 
   if (d.extensions.length === 0) lines.push('  none installed');
-  else for (const card of d.extensions) lines.push(`  ${card.id} — ${saysCard(card)}`);
+  else for (const card of d.extensions) lines.push(`  ${card.id}: ${saysCard(card)}`);
 
   lines.push('', 'Disk');
   if (d.folders.length === 0) lines.push('  nothing to report');
-  else for (const one of d.folders) lines.push(`  ${one.name} — ${saysBytes(one.bytes)}`);
+  else for (const one of d.folders) lines.push(`  ${one.name}: ${saysBytes(one.bytes)}`);
 
   lines.push('', 'Why the last run stopped', `  ${mask(d.whyStopped).trim() || 'not recorded'}`);
 
-  lines.push('', `Log — last ${String(d.log.length)} lines`);
+  lines.push('', `Log, last ${String(d.log.length)} lines`);
   if (d.log.length === 0) lines.push('  nothing written yet');
   else for (const line of d.log) lines.push(`  ${line}`);
 

@@ -66,8 +66,6 @@ jobs:
       # before anything is said to work.
       - run: npm run build
       - run: npm run app:build
-      # The licence manifest has to describe the tree that is about to ship.
-      - run: npm run licenses:check
 
   e2e:
     name: End to end
@@ -97,6 +95,11 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # The manifest describes the tree that is about to ship, and it is read
+      # out of the installed tree — which differs by platform, because half of
+      # what is installed is a platform's own binaries. So it is checked here,
+      # on the machine the app is actually built on, and nowhere else.
+      - run: npm run licenses:check
       - run: npm run package
       # Opens what was built: the agent runtime is inside it, and it is signed.
       - run: npm run verify:package

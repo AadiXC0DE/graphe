@@ -4857,6 +4857,48 @@ function sayThePieceIsWaiting(project: string, id: string, doing: string): void 
   if (at !== undefined) continuations.waiting(project, at, true);
 }
 
+/**
+ * Which agent runtime is actually here.
+ *
+ * The whole product is a layer over it, and it is pre-1.0 with no semver
+ * promise — three SDK-breaking changes in six weeks. The pin says which one
+ * this was built against; this says which one is running, so a mismatch is a
+ * line in the log rather than a Tuesday spent on a bug that was an upgrade.
+ */
+async function runtimeVersion(): Promise<string | null> {
+  const raw = await readFile(
+    join(app.getAppPath(), 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'),
+    'utf8',
+  ).catch(() => null);
+  if (raw === null) return null;
+  try {
+    const held = JSON.parse(raw) as { version?: unknown };
+    return typeof held.version === 'string' ? held.version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function sayIfTheRuntimeIsNotThePinnedOne(): Promise<void> {
+  const raw = await readFile(join(app.getAppPath(), 'package.json'), 'utf8').catch(() => null);
+  if (raw === null) return;
+  let pinned: string | null = null;
+  try {
+    const held = JSON.parse(raw) as { dependencies?: Record<string, string> };
+    pinned = held.dependencies?.['@earendil-works/pi-coding-agent'] ?? null;
+  } catch {
+    pinned = null;
+  }
+  const here = await runtimeVersion();
+  if (pinned === null || here === null || pinned === here) return;
+  log.line('warn', 'the agent runtime is not the pinned one', { pinned, here });
+  send(null, {
+    type: 'notice',
+    what: `This is running agent runtime ${here}, and it was built against ${pinned}.`,
+    because: 'Worth knowing if something behaves oddly — it is the layer everything here sits on.',
+  });
+}
+
 const awayDesks = new Map<string, AwayDesk>();
 
 /** Whether the folder this board belongs to is being held read-only. A board
@@ -9495,7 +9537,9 @@ if (!app.requestSingleInstanceLock()) {
       version: app.getVersion(),
       electron: process.versions.electron,
       node: process.versions.node,
+      runtime: await runtimeVersion(),
     });
+    await sayIfTheRuntimeIsNotThePinnedOne();
     /* Graphe's own menu. Electron's default ships View → Reload, and ⌘R
        reloads the window mid-run: the run carries on in this process and the
        window comes back showing steps that will never close. */

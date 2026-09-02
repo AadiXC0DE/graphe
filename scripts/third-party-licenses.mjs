@@ -22,6 +22,11 @@
 // platform-specific binary nobody on this machine loads is still being
 // redistributed.
 //
+// Which is why this and its `--check` belong on the machine the app is built
+// on and nowhere else: half of what is installed is a platform's own binaries,
+// so a manifest written on a Mac and checked on Linux disagrees about a tree
+// neither of them is describing.
+//
 // `--check` writes nothing and fails if the file on disk is out of date, which
 // is what CI should run.
 //

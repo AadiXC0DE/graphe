@@ -50,3 +50,17 @@ describe('the pinned agent runtime', () => {
     expect(scripts['postinstall']).toBeUndefined();
   });
 });
+
+/* And the app says so at launch when the two disagree — a mismatch on somebody
+   else's machine is a Tuesday spent on a bug that was an upgrade. */
+describe('the app checks it at launch', () => {
+  it('reads the version that is actually running and says when it is not the pin', async () => {
+    const shell = await readFile(new URL('../electron/main.ts', import.meta.url), 'utf8');
+    expect(shell).toContain('async function runtimeVersion()');
+    expect(shell).toContain('sayIfTheRuntimeIsNotThePinnedOne');
+    expect(shell).toContain("'the agent runtime is not the pinned one'");
+    // Said, not refused: a newer runtime that works is not a reason to keep
+    // somebody out of their own project.
+    expect(shell).not.toContain('runtime is not the pinned one\', () => app.quit');
+  });
+});

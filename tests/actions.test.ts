@@ -8,6 +8,8 @@
  * keyboard does.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -195,5 +197,38 @@ describe('AC-06 the words', () => {
     for (const where of ['anywhere', 'in a project', 'in a conversation'] as Where[]) {
       expect(ACTION_WORDS.where[where].length).toBeGreaterThan(0);
     }
+  });
+});
+
+/* The registry exists because the palette and the keyboard were two lists that
+   could disagree, and did. These are the three disagreements it settles, kept
+   as tests so they cannot come back. */
+describe('the palette and the keyboard agree', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  it('reads every chord it prints from the registry', () => {
+    // Not one hard-coded `keys: 'mod+…'` left in the palette's own list.
+    const from = app.indexOf('const everyCommand = useMemo');
+    const to = app.indexOf('\n  }, [', from);
+    expect(from).toBeGreaterThan(-1);
+    expect(app.slice(from, to)).not.toMatch(/keys: '[a-z+0-9]+'/);
+    expect(app.slice(from, to)).toContain('keysFor(');
+  });
+
+  /* The palette printed ⌘⇧N for a new conversation; the keyboard binds ⌘T to
+     it, and ⌘⇧N to going to what is waiting. */
+  it('says the key that new conversations really answer to', () => {
+    expect(chordFor('new')).toBe('mod+t');
+    expect(chordFor('needs-you')).toBe('mod+shift+n');
+  });
+
+  /* ⌘⇧F was advertised in the palette and answered by nothing. */
+  it('has a handler for the key it promises for the file tree', () => {
+    expect(chordFor('files')).toBe('mod+shift+f');
+    expect(app).toContain('event.key.toLowerCase() === "f"');
+  });
+
+  it('has no two actions answering to one chord', () => {
+    expect(clashesIn({})).toEqual([]);
   });
 });

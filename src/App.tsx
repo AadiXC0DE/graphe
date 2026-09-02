@@ -37,6 +37,8 @@ import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
+import { chordFor } from "./lib/actions";
+import { saysChord } from "./lib/keys";
 import { mark } from "./lib/marks";
 import { cssFor, defaultAppearance } from "./design/appearance";
 import { lookFirstStore } from "./lib/lookfirst";
@@ -209,6 +211,10 @@ const Usage = lazy(() => import("./components/Usage"));
    app should not answer a query string with its component gallery. Read off the
    page rather than off `import.meta.env`, which this project does not type. */
 const inDevelopment = window.location.port !== '' || window.location.protocol === 'http:';
+
+/** Whether ⌘ or Ctrl is the key this machine reaches for. Only ever used to
+ *  draw a chord — what a press means is decided from the event itself. */
+const ON_MAC = /mac/i.test(navigator.platform ?? navigator.userAgent);
 const showGallery =
   inDevelopment && new URLSearchParams(window.location.search).has("gallery");
 
@@ -2736,6 +2742,13 @@ function Conversation() {
         void swapConversation(null);
         return;
       }
+      /* Advertised in the palette and answered by nothing, until now: a key a
+         list promises and the keyboard ignores is worse than no key. */
+      if (event.shiftKey && event.key.toLowerCase() === "f" && desk !== null) {
+        event.preventDefault();
+        setFilesOpen(true);
+        return;
+      }
       // ⌘1–9 goes to what is open, not to what is remembered. Recent projects
       // are one press away in the name at the top and in "Ask for anything",
       // and a number key that jumps to a folder you cannot see is a surprise.
@@ -4088,19 +4101,30 @@ function Conversation() {
   /* Everything reachable by name. `ready` is false rather than absent when a
      thing needs a project open — an action that vanishes teaches nobody where
      it went. */
+  /* One list. The palette printed ⌘⇧N for a new conversation while the keyboard
+     bound ⌘T to it and ⌘⇧N to something else, and advertised ⌘⇧F for a key
+     nothing answered — because the palette and the handler were two lists that
+     could disagree, and did. The registry is the one place a chord is written
+     down; the palette reads it. */
   const everyCommand = useMemo(() => {
     const here = desks.current !== null;
+    const keysFor = (id: string): string | undefined => {
+      const chord = chordFor(id);
+      // The one place the window has to know which platform it is on, and it
+      // is only for how a key is drawn.
+      return chord === null ? undefined : saysChord(chord, ON_MAC);
+    };
     const needsProject = 'Open a project first.';
     const made = [
-      { id: 'new', name: 'Start a new conversation', where: 'Conversation', keys: 'mod+shift+n',
+      { id: 'new', name: 'Start a new conversation', where: 'Conversation', keys: keysFor('new'),
         run: () => void swapConversation(null), ready: here, whyNot: needsProject },
-      { id: 'design', name: 'Open the design view', where: 'Conversation', keys: 'mod+d',
+      { id: 'design', name: 'Open the design view', where: 'Conversation', keys: keysFor('design'),
         run: () => { goToScreen('design'); setDesignAt('styles'); }, ready: here, whyNot: needsProject },
-      { id: 'files', name: 'Show everything in this project', where: 'Project', keys: 'mod+shift+f',
+      { id: 'files', name: 'Show everything in this project', where: 'Project', keys: keysFor('files'),
         run: () => setFilesOpen(true), ready: here, whyNot: needsProject },
-      { id: 'page', name: 'Show the page beside the conversation', where: 'Conversation', keys: 'mod+j',
+      { id: 'page', name: 'Show the page beside the conversation', where: 'Conversation', keys: keysFor('page'),
         run: () => togglePane(), ready: here, whyNot: needsProject },
-      { id: 'shelf', name: 'Show or hide the shelf', where: 'Conversation', keys: 'mod+b',
+      { id: 'shelf', name: 'Show or hide the shelf', where: 'Conversation', keys: keysFor('shelf'),
         run: () => setShelfOpen((was) => !was) },
       { id: 'changes', name: 'Review the working diff', where: 'Project',
         run: () => {
@@ -4135,7 +4159,7 @@ function Conversation() {
       { id: 'more', name: 'Add more to Graphe', where: 'Graphe', run: () => openAddMore() },
       { id: 'model', name: 'Change which model answers', where: 'Graphe', run: () => openConnect() },
       { id: 'usage', name: 'See what this cost', where: 'Graphe', run: () => goToScreen('usage') },
-      { id: 'open', name: 'Open another project', where: 'Project', keys: 'mod+o', run: () => void browse() },
+      { id: 'open', name: 'Open another project', where: 'Project', keys: keysFor('open'), run: () => void browse() },
       { id: 'tidy', name: 'Compact the context', where: 'Conversation',
         run: () => tidyNow(), ready: here, whyNot: needsProject },
       { id: 'stop', name: 'Stop what is running', where: 'Conversation',

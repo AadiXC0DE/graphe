@@ -27,6 +27,12 @@
   --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
   /* Motion — hover and colour only */
   --ease-hover: ease;
+  /* The same two jobs, with the overshoot-free snap a sheet or a panel wants:
+     nearly all of the distance in the first third, then a long settle. */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+  /* Anything that slides in from an edge and can be dragged back out. */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 
   --dur-micro: 120ms;
   --dur-ui: 200ms;
@@ -35,6 +41,9 @@
      never given a number, so every exit in the app was running at the entrance
      speed. This is that rule, expressed once. */
   --dur-exit: 160ms;
+  /* One item after another in a list. Decorative: nothing may wait on it, so a
+     row that arrives last is still a row somebody can already click. */
+  --stagger: 40ms;
 
   /* Type. Satoshi is the face of the interface; the system list is the fallback
      while it loads and the off-machine list when it never does. */

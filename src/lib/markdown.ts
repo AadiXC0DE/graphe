@@ -36,11 +36,119 @@ export type { Token, Tokens };
  * the text as it arrived. Unreadable formatting beats a disappeared answer.
  */
 export function parseMarkdown(text: string): readonly Token[] | null {
+  return lexIncrementally(null, text).tokens;
+}
+
+function lexAll(text: string): readonly Token[] | null {
   try {
     return new Lexer({ gfm: true, breaks: true }).lex(text);
   } catch {
     return null;
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Lexing a reply that is still arriving                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a message looked like last time it was read, kept so the next token does
+ * not cost a whole re-read.
+ *
+ * A two-hundred-block reply re-lexed on every delta is the whole document,
+ * sixty times a second, for the sake of one character at the end of it. Only
+ * the end can change: everything above the last couple of blocks is settled
+ * text that no amount of typing at the bottom can rewrite. So the settled part
+ * is kept and the tail alone is read again.
+ */
+export type Cached = {
+  /** The text these tokens were read from. */
+  text: string;
+  /** Null when it could not be read at all — the caller shows it plain. */
+  tokens: readonly Token[] | null;
+  /** Characters of `text` covered by blocks that can no longer change. */
+  settled: number;
+  /** How many blocks the last call had to read. The measure the streaming
+   *  path is judged on. */
+  lexed: number;
+};
+
+/** Blocks left open at the bottom. One is enough for the cases that matter — a
+ *  paragraph growing, a fence closing, a list gaining an item — and the second
+ *  is cheap insurance against the ones nobody has thought of. */
+const OPEN = 2;
+
+/** A link definition anywhere in the tail changes how links read above it, so
+ *  its arrival is the one thing that makes the settled part unsettled. */
+const DEFINES_A_LINK = /^ {0,3}\[[^\]\n]+\]:/m;
+
+/**
+ * The token tree, reading only what the new characters could have changed.
+ *
+ * Falls back to reading the whole thing whenever the cheap path cannot be
+ * trusted: text that was edited rather than appended to, carriage returns
+ * (which the lexer rewrites, so character counts stop lining up), or a link
+ * definition arriving underneath links that already went past.
+ */
+export function lexIncrementally(before: Cached | null, text: string): Cached {
+  const whole = (): Cached => {
+    const tokens = lexAll(text);
+    return {
+      text,
+      tokens,
+      settled: tokens === null ? 0 : settledBy(tokens, text),
+      lexed: tokens?.length ?? 0,
+    };
+  };
+
+  if (
+    before === null ||
+    before.tokens === null ||
+    before.settled <= 0 ||
+    text.length <= before.text.length ||
+    !text.startsWith(before.text) ||
+    text.includes('\r')
+  ) {
+    return whole();
+  }
+
+  const tail = text.slice(before.settled);
+  if (DEFINES_A_LINK.test(tail)) return whole();
+
+  const read = lexAll(tail);
+  if (read === null) return whole();
+
+  const kept = before.tokens.slice(0, countUpTo(before.tokens, before.settled));
+  const tokens = [...kept, ...read];
+  return { text, tokens, settled: before.settled + settledBy(read, tail), lexed: read.length };
+}
+
+/**
+ * Where the settled part ends: everything but the last `OPEN` blocks.
+ *
+ * Zero unless the blocks account for every character of the source. They
+ * normally do, and when they do not the offsets this returns would cut the text
+ * in the wrong place — which is a corrupted reply, not a slow one.
+ */
+function settledBy(tokens: readonly Token[], source: string): number {
+  let all = 0;
+  for (const token of tokens) all += token.raw.length;
+  if (all !== source.length) return 0;
+  let settled = 0;
+  for (let at = 0; at < tokens.length - OPEN; at += 1) settled += tokens[at]?.raw.length ?? 0;
+  return settled;
+}
+
+/** How many blocks the first `characters` of the text cover. */
+function countUpTo(tokens: readonly Token[], characters: number): number {
+  let running = 0;
+  let count = 0;
+  for (const token of tokens) {
+    if (running >= characters) break;
+    running += token.raw.length;
+    count += 1;
+  }
+  return count;
 }
 
 /* -------------------------------------------------------------------------- */

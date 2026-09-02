@@ -5260,6 +5260,7 @@ function Conversation() {
               onConnect={openConnect}
               onThinking={changeThinking}
               skills={skills}
+              tree={desk === null ? [] : (files[desk.path] ?? []).map((one) => ({ path: one.path, folder: false }))}
               workflows={workflows}
               onAttachmentsChange={(next) => {
                 if (desks.current === null) setLoose(next);

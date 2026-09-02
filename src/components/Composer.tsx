@@ -6,6 +6,7 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
 } from 'react';
+import { offerFor, withMention, type Mentionable } from '../lib/mentions';
 import { createPortal } from 'react-dom';
 import Annotate from './Annotate';
 import Attachments, { type Attachment } from './Attachments';
@@ -141,6 +142,9 @@ type Props = {
   /** Skills the open project can use. `@` turns this quiet library into an
    * explicit per-turn choice instead of a command someone has to memorise. */
   skills?: readonly Skill[];
+  /** The project's files, so `@` can name one. Empty is fine — the list then
+   *  offers skills alone, exactly as it did before. */
+  tree?: readonly { path: string; folder: boolean }[];
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -268,6 +272,7 @@ export default function Composer({
   onHowFar,
   onComposerPopoverOpenChange,
   skills = [],
+  tree = [],
   workflows,
   waiting,
   onWait,
@@ -369,19 +374,23 @@ export default function Composer({
     setMentionAt(0);
   };
 
-  const mentions = mention === null ? [] : skills
-    .filter((skill) => `${skill.name} ${skill.handle}`.toLowerCase().includes(mention.query.toLowerCase()))
-    .slice(0, 6);
+  /* Files and folders as well as skills. Naming a file used to mean typing its
+     path correctly from memory — and a path typed by hand is a path the Guard
+     has to refuse when it is wrong, which is the app arguing about spelling. */
+  const mentions =
+    mention === null
+      ? []
+      : offerFor(mention.query, {
+          files: tree.map((one) => ({ path: one.path, folder: one.folder })),
+          skills: skills.map((one) => ({ name: one.name, handle: one.handle, says: one.description })),
+        });
 
-  const chooseMention = (skill: Skill) => {
+  const chooseMention = (one: Mentionable) => {
     const current = mention;
     if (current === null) return;
-    const before = value.slice(0, current.from);
-    const after = value.slice(areaRef.current?.selectionStart ?? value.length);
-    const next = `${before}@${skill.handle} ${after}`;
-    const caretAt = before.length + skill.handle.length + 2;
-    setValue(next);
-    setCaret(caretAt);
+    const put = withMention(value, current, one);
+    setValue(put.text);
+    setCaret(put.caret);
     setMention(null);
     setMentionAt(0);
   };
@@ -881,9 +890,21 @@ export default function Composer({
       {mention === null || mentions.length === 0 ? null : (
         <div className="composer__skills" role="listbox" aria-label="Skills">
           <p><span>@</span> Use a skill for this turn</p>
-          {mentions.map((skill, index) => (
-            <button key={skill.id} type="button" role="option" aria-selected={index === mentionAt} className={index === mentionAt ? 'composer__skill--active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseMention(skill)}>
-              <span><strong>{skill.name}</strong><small>@{skill.handle}</small></span><em>{skill.source === 'project' ? 'This project' : 'Your computer'}</em>
+          {mentions.map((one, index) => (
+            <button
+              key={`${one.kind}:${one.insert}`}
+              type="button"
+              role="option"
+              aria-selected={index === mentionAt}
+              className={index === mentionAt ? 'composer__skill--active' : ''}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => chooseMention(one)}
+            >
+              <span>
+                <strong>{one.name}</strong>
+                {one.kind === 'skill' ? <small>{one.insert}</small> : null}
+              </span>
+              <em>{one.note}</em>
             </button>
           ))}
         </div>

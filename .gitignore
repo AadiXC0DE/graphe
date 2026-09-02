@@ -16,7 +16,12 @@ results/
 skills-lock.json
 
 # Internal working notes — strategy, research, product thinking. Not published.
-notes/
+# `notes/*` rather than `notes/`, because git never looks inside a folder it has
+# been told to ignore, so nothing under one can be let back out. Release notes
+# are let back out: they are the release body, read by the release workflow on a
+# runner that has only what is committed here.
+notes/*
+!notes/releases/
 CLAUDE.md
 
 release/

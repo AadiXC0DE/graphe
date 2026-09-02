@@ -1008,6 +1008,10 @@ let previewPlanMode = false;
       return Promise.resolve(done({ ...preferred }));
     },
 
+    ownStyles(): Promise<Result<{ css: string; file: string }>> {
+      return Promise.resolve(done({ css: '', file: '' }));
+    },
+
     /** A whole project, made up, so the panel can be opened and reviewed in a
      *  browser tab — folders inside folders, and the same files the overview
      *  says have moved. */
@@ -2161,6 +2165,7 @@ function connect(): Bridge {
     setShowFiles: (on) => api.setShowFiles(on),
     setTheme: (theme) => api.setTheme(theme),
     setAppearance: (appearance) => api.setAppearance(appearance),
+    ownStyles: () => api.ownStyles(),
     projectFiles: (where) => api.projectFiles(where),
     fileText: (path, where) => api.fileText(path, where),
     hatches: () => api.hatches(),

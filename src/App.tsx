@@ -728,6 +728,25 @@ function Conversation() {
     sheet.textContent = cssFor(preferences.appearance, on);
   }, [preferences.appearance, theme]);
 
+  /* And whatever somebody wrote themselves, after it. Read once on the way in
+     and on a press, never watched — a stylesheet that reloads under somebody
+     mid-edit is a stylesheet fighting them. */
+  const loadOwnStyles = useCallback(() => {
+    void bridge.ownStyles().then((answer) => {
+      if (!answer.ok) return;
+      let sheet = document.getElementById('own-styles');
+      if (sheet === null) {
+        sheet = document.createElement('style');
+        sheet.id = 'own-styles';
+        document.head.append(sheet);
+      }
+      sheet.textContent = answer.value.css;
+      setOwnStyles(answer.value.file);
+    });
+  }, []);
+
+  useEffect(() => loadOwnStyles(), [loadOwnStyles]);
+
   useEffect(() => {
     const mark = markFor(theme);
     // Removing it is the point of "follow this computer": the stylesheet's own
@@ -1801,6 +1820,9 @@ function Conversation() {
   /** What the chosen model was measured doing on a long job, or null for one
    *  nothing has measured — which is most of them. */
   const [longJobs, setLongJobs] = useState<string | null>(null);
+
+  /** Where somebody's own stylesheet lives, so the row can say. */
+  const [ownStyles, setOwnStyles] = useState<string | null>(null);
 
   /** Which build this is. Nothing in the window said it before, so a friend on
    *  an old build had no way to find out and no way to say which. */
@@ -5052,6 +5074,8 @@ function Conversation() {
           });
         }}
         showingDark={markFor(theme) !== null && markFor(theme) !== 'light' && markFor(theme) !== 'pink'}
+        ownStyles={ownStyles ?? undefined}
+        onReloadStyles={loadOwnStyles}
       />
 
       <Usage

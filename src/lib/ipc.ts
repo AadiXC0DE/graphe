@@ -1360,6 +1360,7 @@ export const CHANNEL = {
   setKeepLogins: 'graphe:set-keep-logins',
   setTheme: 'graphe:set-theme',
   setAppearance: 'graphe:set-appearance',
+  ownStyles: 'graphe:own-styles',
   setHowMuch: 'graphe:set-how-much',
   decideOnWork: 'graphe:decide-on-work',
   handToDeveloper: 'graphe:hand-to-developer',
@@ -1767,6 +1768,15 @@ export type GrapheApi = {
   /** Change how it looks. Every control writes a token; the whole thing is one
    *  small object, so it is set whole rather than a field at a time. */
   setAppearance(appearance: Appearance): Promise<Result<Preferences>>;
+  /**
+   * A stylesheet of somebody's own, loaded last.
+   *
+   * The precise control behind the same Appearance row: every value the
+   * builder sets is a token, and this is where somebody who wants a token the
+   * builder does not offer writes it. Returns where the file is as well as
+   * what is in it, because the answer to "where do I put this" is a path.
+   */
+  ownStyles(): Promise<Result<{ css: string; file: string }>>;
   /** Move the line a picture has to cross before the work is stopped. One of
    *  `HOW_MUCH` in `src/design/gate.ts`. Sticky. */
   setHowMuch(id: string): Promise<Result<Preferences>>;

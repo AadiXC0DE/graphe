@@ -9326,6 +9326,15 @@ function register(): void {
     return done(await prefs.change({ appearance: readAppearance(raw) }));
   });
 
+  /* Somebody's own stylesheet, loaded last so it wins. The precise control
+     behind the Appearance row: every value the builder sets is a token, and
+     this is where a token the builder does not offer gets written. */
+  handle<{ css: string; file: string }>(CHANNEL.ownStyles, async () => {
+    const file = join(app.getPath('userData'), 'graphe.css');
+    const css = await readFile(file, 'utf8').catch(() => '');
+    return done({ css, file });
+  });
+
   handle<Preferences>(CHANNEL.setThinking, async (_event, args) => {
     const [providerId, modelId, level] = args;
     const prefs = await preferences();

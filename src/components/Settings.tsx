@@ -54,6 +54,11 @@ type Props = {
   onAppearance?: (next: Appearance) => void;
   /** Which way the palette runs right now, so the preview is the real thing. */
   showingDark?: boolean;
+  /** Where somebody's own stylesheet lives. The precise control behind the
+   *  same row: every value the builder sets is a token, and this is where a
+   *  token it does not offer gets written. */
+  ownStyles?: string;
+  onReloadStyles?: () => void;
 };
 
 /** The screens this one leads to. Places rather than preferences, so they sit
@@ -208,6 +213,8 @@ export default function Settings({
   appearance,
   onAppearance,
   showingDark = false,
+  ownStyles,
+  onReloadStyles,
 }: Props) {
   useEffect(() => {
     if (!open) return;
@@ -440,11 +447,28 @@ export default function Settings({
                     <p className="settings__machine">{caps}</p>
                   ) : null}
                   {group.id === 'appearance' && appearance !== undefined && onAppearance !== undefined ? (
-                    <AppearanceBand
-                      appearance={appearance}
-                      onChange={onAppearance}
-                      on={showingDark ? 'dark' : 'light'}
-                    />
+                    <>
+                      <AppearanceBand
+                        appearance={appearance}
+                        onChange={onAppearance}
+                        on={showingDark ? 'dark' : 'light'}
+                      />
+                      {ownStyles === undefined || ownStyles === '' ? null : (
+                        <p className="settings__machine">
+                          Write your own tokens in <code>{ownStyles}</code>. It loads last, so it
+                          wins.{' '}
+                          {onReloadStyles === undefined ? null : (
+                            <button
+                              type="button"
+                              className="settings__inline"
+                              onClick={onReloadStyles}
+                            >
+                              Read it again
+                            </button>
+                          )}
+                        </p>
+                      )}
+                    </>
                   ) : null}
                 </section>
               ),

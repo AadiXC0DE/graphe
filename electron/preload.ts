@@ -936,6 +936,10 @@ const api: GrapheApi = {
     >;
   },
 
+  ownStyles(): Promise<Result<{ css: string; file: string }>> {
+    return ipcRenderer.invoke(CHANNEL.ownStyles) as Promise<Result<{ css: string; file: string }>>;
+  },
+
   setHowMuch(id: string): Promise<Result<Preferences>> {
     if (typeof id !== 'string' || id.trim() === '') {
       return Promise.resolve(refuse<Preferences>('I could not tell which line that was.'));

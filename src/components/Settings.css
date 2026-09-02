@@ -550,3 +550,16 @@ button.settings__row {
   font-size: 0.75rem;
   color: var(--text-quiet, #6b7280);
 }
+
+/* A press inside a sentence. Underlined rather than boxed: it belongs to the
+   line it is in, and a button drawn as a button would read as the row's own. */
+.settings__inline {
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}

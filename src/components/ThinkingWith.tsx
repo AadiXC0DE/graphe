@@ -37,6 +37,9 @@ type Props = {
   onAddons?: (choice: Policy) => void;
   /** How heavy the system prompt has become, in characters. */
   promptSize?: number | null;
+  /** What the chosen model was measured doing on a long job. Null for one
+   *  nothing has measured, which is most of them. */
+  longJobs?: string | null;
   /** Lets a native page step aside while this renderer popover is open. */
   onOpenChange?: (open: boolean) => void;
   /** Quieter, for the strip along the top where it sits beside the project's
@@ -113,6 +116,7 @@ export default function ThinkingWith({
   addons,
   onAddons,
   promptSize = null,
+  longJobs = null,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -472,8 +476,15 @@ export default function ThinkingWith({
                 </button>
               ) : null}
 
-              {promptSize !== null ? (
-                <p className="thinking__note">{saysPromptSize(promptSize)}</p>
+              {/* What this model was measured doing on a long list, when
+                  anybody has measured it. Said before somebody starts a night's
+                  work on one known to stop early, rather than after. */}
+              {longJobs !== null || promptSize !== null ? (
+                <p className="thinking__note">
+                  {[longJobs, promptSize === null ? null : saysPromptSize(promptSize)]
+                    .filter((one) => one !== null)
+                    .join(' · ')}
+                </p>
               ) : null}
 
               <button

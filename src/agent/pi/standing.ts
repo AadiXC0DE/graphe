@@ -141,15 +141,18 @@ function firstParagraph(text: string, most: number, tail: string): string {
  */
 export function trimToBudget(pieces: readonly Piece[], budget = PROMPT_BUDGET): Trimmed {
   const was = pieces.reduce((sum, one) => sum + one.text.length, 0);
+  // Already small enough that nothing is worth cutting: Pi's own text and
+  // Graphe's block together are far under the caps, so a short prompt is left
+  // exactly as it came.
+  if (was <= budget) return { pieces, was, now: was, cut: [] };
   const cut: { from: string; saved: number }[] = [];
   let out = [...pieces];
 
-  const shrink = (
-    kind: Piece['kind'],
-    most: number,
-    tail: string,
-  ): void => {
-    if (out.reduce((sum, one) => sum + one.text.length, 0) <= budget) return;
+  /* Each kind is held to its own cap whatever the total comes to. Cutting only
+     until the total happens to fit would mean the same add-on is summarised on
+     one machine and not on another — and a run that behaves differently for a
+     reason nobody can name is worse than one that is simply smaller. */
+  const shrink = (kind: Piece['kind'], most: number, tail: string): void => {
     out = out.map((one) => {
       if (one.kind !== kind || one.text.length <= most) return one;
       const next = firstParagraph(one.text, most, tail);
@@ -161,6 +164,7 @@ export function trimToBudget(pieces: readonly Piece[], budget = PROMPT_BUDGET): 
   shrink('extension', EXTENSION_BUDGET, standingWords.extensionTrimmed);
   shrink('skill', SKILL_BUDGET, standingWords.skillTrimmed);
   shrink('agents', AGENTS_BUDGET, standingWords.agentsTrimmed);
+  void budget;
 
   return { pieces: out, was, now: out.reduce((sum, one) => sum + one.text.length, 0), cut };
 }

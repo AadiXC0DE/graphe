@@ -36,12 +36,12 @@
  * that touches Pi is inside this one folder.
  */
 
+import { scratchFolder } from '../../work/copies';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { readdir, readFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // One line on purpose: the boundary test in tests/adapter.test.ts reads the
 // line that names Pi and expects `import type` on it.
@@ -1499,14 +1499,7 @@ const NO_COPY_TO_BUILD_IN =
  * builders never share one.
  */
 export function builderFolder(project: string, id: string): string {
-  const safe = (text: string, most: number): string =>
-    text.replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, most);
-  const whose = safe(basename(resolve(project)), 24) || 'project';
-  const which = safe(id, 24) || 'one';
-  // The whole path, shortened, so two folders of the same name in different
-  // places cannot land on one copy.
-  const where = createHash('sha1').update(resolve(project)).digest('hex').slice(0, 8);
-  return join(tmpdir(), 'graphe-builders', `${whose}-${where}`, which);
+  return scratchFolder(tmpdir(), project, id);
 }
 
 export type BuilderCopy = {

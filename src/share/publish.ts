@@ -22,6 +22,7 @@
  * to, and the address is exactly where somebody would find it.
  */
 
+import { pinnedSpec } from '../agent/pi/reach';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -35,7 +36,7 @@ import { notHere, runHelper } from './run';
  *  demand is only ever done inside a press that already said something would
  *  leave this computer. */
 const HOST = 'vercel';
-const FETCH = ['--yes', 'vercel@latest'];
+const FETCH = ['--yes', pinnedSpec('vercel')];
 
 /** Files worth reading before any of them go public. Anything else is bytes. */
 const WORDS = new Set(['.html', '.htm', '.js', '.mjs', '.cjs', '.css', '.json', '.txt', '.svg', '.md', '.xml', '.map']);

@@ -1943,6 +1943,10 @@ let previewPlanMode = false;
       return Promise.resolve(done('preview'));
     },
 
+    longJobs(): Promise<Result<string | null>> {
+      return Promise.resolve(done(null));
+    },
+
     addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>> {
       return Promise.resolve(done({ says: {}, running: 0 }));
     },
@@ -2268,6 +2272,7 @@ function connect(): Bridge {
     keepCredential: (name, value) => api.keepCredential(name, value),
     credentialsKept: () => api.credentialsKept(),
     appVersion: () => api.appVersion(),
+    longJobs: (providerId, modelId) => api.longJobs(providerId, modelId),
     addons: () => api.addons(),
     storage: () => api.storage(),
     clearFinishedWork: () => api.clearFinishedWork(),

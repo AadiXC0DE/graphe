@@ -32,6 +32,7 @@ import {
   ipcMain,
   Menu,
   Notification,
+  screen,
   safeStorage,
   session,
   shell,
@@ -180,6 +181,7 @@ import { seedCheckout, seedWords } from '../src/history/seeding';
 import { renameTo } from '../src/history/naming';
 import {
   branchNames,
+  beforeBringingWorkIn,
   bringBack,
   bringBackWords,
   createWorktree,
@@ -219,6 +221,8 @@ import { keyOf } from '../src/work/owner';
 import { writeAtomically, writeAtomicallySync } from '../src/lib/atomic';
 import { GoalFile } from '../src/projects/goals';
 import { continuationOwner } from './continuation-owner';
+import { copiesFolder } from '../src/work/copies';
+import { checkoutWords, validateCheckouts } from '../src/history/checkouts';
 import {
   measureFolders,
   npmOnPath,
@@ -1433,10 +1437,62 @@ ipcMain.on(CHANNEL.pagePointed, (event, pointed: Pointed) => {
   sayPointed(pageProject, pointed);
 });
 
+/** Where the window was last, and how big. Always the same 1100×780 before
+ *  this, so somebody who sized it once sized it every launch. */
+function windowBoundsFile(): string {
+  return join(app.getPath('userData'), 'window.json');
+}
+
+type Bounds = { x?: number; y?: number; width: number; height: number; fullScreen?: boolean };
+
+function readWindowBounds(): Bounds | null {
+  try {
+    const raw = JSON.parse(readFileSync(windowBoundsFile(), 'utf8')) as Record<string, unknown>;
+    const width = typeof raw['width'] === 'number' ? raw['width'] : 0;
+    const height = typeof raw['height'] === 'number' ? raw['height'] : 0;
+    if (width < 620 || height < 520) return null;
+    /* Clamped to a display that is actually here. A window remembered on a
+       second monitor that has been unplugged is a window off screen. */
+    const on = screen.getDisplayMatching({
+      x: typeof raw['x'] === 'number' ? raw['x'] : 0,
+      y: typeof raw['y'] === 'number' ? raw['y'] : 0,
+      width,
+      height,
+    }).workArea;
+    const x = typeof raw['x'] === 'number' ? Math.max(on.x, Math.min(raw['x'], on.x + on.width - 200)) : undefined;
+    const y = typeof raw['y'] === 'number' ? Math.max(on.y, Math.min(raw['y'], on.y + on.height - 100)) : undefined;
+    return {
+      width: Math.min(width, on.width),
+      height: Math.min(height, on.height),
+      ...(x === undefined ? {} : { x }),
+      ...(y === undefined ? {} : { y }),
+      fullScreen: raw['fullScreen'] === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function rememberWindowBounds(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  try {
+    const where = win.getNormalBounds();
+    writeAtomicallySync(
+      windowBoundsFile(),
+      JSON.stringify({ ...where, fullScreen: win.isFullScreen() }),
+    );
+  } catch {
+    // Where the window was is not worth failing a quit over.
+  }
+}
+
 function createWindow(): void {
+  const was = readWindowBounds();
   const win = new BrowserWindow({
-    width: 1100,
-    height: 780,
+    width: was?.width ?? 1100,
+    height: was?.height ?? 780,
+    ...(was?.x === undefined ? {} : { x: was.x }),
+    ...(was?.y === undefined ? {} : { y: was.y }),
     minWidth: 620,
     minHeight: 520,
     // The window is painted before React is, and a white flash on a dark desktop
@@ -1468,6 +1524,11 @@ function createWindow(): void {
   };
   win.on('enter-full-screen', sayHowItSits);
   win.on('leave-full-screen', sayHowItSits);
+  if (was?.fullScreen === true) win.setFullScreen(true);
+  // Written down as it moves rather than only on quit, so a crash does not cost
+  // somebody the window they arranged.
+  win.on('resize', () => rememberWindowBounds(win));
+  win.on('move', () => rememberWindowBounds(win));
   win.webContents.on('did-finish-load', sayHowItSits);
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
@@ -1614,6 +1675,10 @@ type Held = {
    *  and it does persist until somebody resolves it — is mentioned once rather
    *  than at the end of every turn from then on. */
   saidHeldBack: string;
+  /** Conversations whose job has already had a version put down before its
+   *  first apply. One per job: a version before every round would be a rail of
+   *  identical entries. */
+  snappedBeforeApply: Set<string>;
   /** How many parallel checkouts this project has ever opened. Only ever
    *  increases: naming one after how many are open right now gives the same
    *  name to two live conversations the moment an earlier one is closed. */
@@ -2280,7 +2345,7 @@ async function ghComment(
   return new Promise((resolve) => {
     const dir = tmpdir();
     const file = join(dir, `graphe-review-${String(Date.now())}.md`);
-    void writeFile(file, body, 'utf8')
+    void writeAtomically(file, body)
       .then(() => {
         const child = spawn(
           'gh',
@@ -2595,12 +2660,26 @@ function settleUpTheJob(path: string, held: Held, from: Speaking): void {
       // opposite of that: applying its files here would land one line of work on
       // top of another, which is how a folder ends up holding a branch's changes
       // it never asked for. Landing it is still one press, and says which line.
+      /* A version before the first apply of a job, so the moment before
+         somebody's files were changed is one press away. Once per job: a
+         version before every round would be a rail of identical entries. */
+      const who = from.address ?? '';
+      const first =
+        checkout === null || held.snappedBeforeApply.has(who)
+          ? Promise.resolve()
+          : (held.snappedBeforeApply.add(who),
+            held.timeline
+              ?.snapshot({ name: beforeBringingWorkIn, boundary: 'turn-ended' })
+              .then(() => undefined)
+              .catch(() => undefined) ?? Promise.resolve());
       const carried =
         checkout === null || !existsSync(checkout.folder)
           ? null
-          : onTheSameLine(path, checkout.folder).then((sameLine) =>
-              sameLine ? bringBack(gitRunHereFor(), path, checkout.folder) : null,
-            );
+          : first
+              .then(() => onTheSameLine(path, checkout.folder))
+              .then((sameLine) =>
+                sameLine ? bringBack(gitRunHereFor(), path, checkout.folder) : null,
+              );
       void (carried ?? Promise.resolve(null))
         .then((outcome) => {
           if (outcome !== null && outcome.ok && outcome.value.conflicted.length > 0) {
@@ -3402,9 +3481,23 @@ async function endStrayServers(): Promise<number> {
   return stray.length;
 }
 
+/**
+ * Where this project's conversation checkouts live.
+ *
+ * Flattening every awkward character to a dash maps `/x/a-b`, `/x/a.b` and
+ * `/x/a b` onto one folder, so two projects could share a root and one
+ * conversation's checkout could land on another's. The shared derivation adds a
+ * digest of the real path, which breaks the tie.
+ *
+ * A folder already there under the old name is still the one used: renaming it
+ * would orphan work somebody has not taken in, which is the one thing this must
+ * never do.
+ */
 function worktreesFolder(project: string): string {
-  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
-  return join(app.getPath('userData'), 'worktrees', key);
+  const base = join(app.getPath('userData'), 'worktrees');
+  const before = join(base, project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-'));
+  if (existsSync(before)) return before;
+  return copiesFolder(app.getPath('userData'), 'worktrees', project);
 }
 
 /** Where writing carried out of a copy is kept. Somewhere ordinary and findable
@@ -3858,7 +3951,14 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     }
   }
 
-  const restoredCheckouts = await readCheckouts(path);
+  /* And whether the copies it names are still there. A project that was moved
+     re-creates worktrees against a repository that is no longer at that path,
+     and the rows for them read as work waiting rather than as work put away. */
+  const checked = await validateCheckouts(path, await readCheckouts(path), gitRunHereFor());
+  const restoredCheckouts = checked.rows;
+  if (checked.putAway.length > 0) {
+    send(path, { type: 'notice', what: checkoutWords.putAway(checked.putAway.length) });
+  }
   const held: Held = {
     timeline,
     childRepos: children,
@@ -3871,6 +3971,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     looking: nothingSeenYet(),
     suppressCarry: new Set(),
     saidHeldBack: '',
+    snappedBeforeApply: new Set<string>(),
     checkoutsMade: restoredCheckouts.size,
     checkouts: restoredCheckouts,
     waiting: null,
@@ -4402,7 +4503,11 @@ async function standingBlockFor(project: string, address: string): Promise<strin
             rows: stored.tasks.length,
           },
     goal: goal !== null && goal.status === 'active' ? goal.objective : null,
-    notes: [],
+    /* The two notes most worth carrying. They used to be prepended to the first
+       message of a sitting and nothing else, so after the conversation was
+       tidied up they were gone — and a long job is exactly the one that gets
+       tidied. Bounded on purpose: memory is not the job. */
+    notes: await notesFor(project, address),
   });
 }
 
@@ -4676,6 +4781,51 @@ async function holdsWorkIn(path: string, kind: Sweepable['kind']): Promise<boole
   if (!existsSync(join(path, '.git'))) return false;
   const ran = await gitRunHereFor()(['status', '--porcelain'], { cwd: path }).catch(() => null);
   return ran !== null && ran.code === 0 && (ran.out ?? '').trim() !== '';
+}
+
+/** What this conversation would find worth remembering, for the standing block.
+ *  Two at most, and never a reason to fail a turn. */
+async function notesFor(project: string, address: string): Promise<readonly string[]> {
+  const open = projectAt({ project });
+  const session = open === null ? null : sessionAt(open, address === '' ? {} : { conversation: address });
+  if (session === null) return [];
+  try {
+    return (await session.recall('', 2)).map((one) => one.content);
+  } catch {
+    // A memory that will not answer is a memory not worth a sentence.
+    return [];
+  }
+}
+
+/** Pieces the conversation has already been told are parked. Once each: a
+ *  piece that asks twice is one question, not two. */
+const saidItIsWaiting = new Set<string>();
+
+/**
+ * A piece on the board is waiting on a person.
+ *
+ * Correct behaviour on the board's part — a question is always asked before the
+ * thing it is about happens — but the conversation that set it going never
+ * heard, so it read as work that had gone quiet. Said once, as a notice rather
+ * than an error: nothing failed.
+ */
+function sayThePieceIsWaiting(project: string, id: string, doing: string): void {
+  if (saidItIsWaiting.has(id)) return;
+  saidItIsWaiting.add(id);
+  const open = projectAt({ project });
+  const at = open?.held.sessions.current?.path;
+  send(
+    project,
+    {
+      type: 'notice',
+      what: `“${doing}” is waiting for your answer on the board.`,
+      because: 'It has stopped where it is until you say. Nothing else has changed.',
+    },
+    at,
+  );
+  // And the loop stands down: somebody is being asked, which is holding rather
+  // than stalling.
+  if (at !== undefined) continuations.waiting(project, at, true);
 }
 
 const awayDesks = new Map<string, AwayDesk>();
@@ -4972,7 +5122,10 @@ function makeSureThereIsAWindow(): void {
 /** One sentence on somebody's screen. Pressing it brings them back to the thing
  *  it is about. Silent where the system has no way to show one. */
 function tellThem(title: string, body: string, path: string): void {
-  if (!Notification.isSupported()) return;
+  if (!Notification.isSupported()) {
+    sayNotificationsAreOff(title, body);
+    return;
+  }
   try {
     const notice = new Notification({ title, body });
     notice.on('click', () => {
@@ -4981,8 +5134,25 @@ function tellThem(title: string, body: string, path: string): void {
     });
     notice.show();
   } catch {
-    // A machine that will not show one is not a reason to stop the work.
+    // A machine that will not show one is not a reason to stop the work — but
+    // somebody who walked away expecting to be told deserves to know they were
+    // not going to be.
+    sayNotificationsAreOff(title, body);
   }
+}
+
+/** Once a sitting. macOS may refuse to deliver a notification from a bundle it
+ *  has not been told to trust, and silence reads as nothing having happened. */
+let saidNotificationsAreOff = false;
+function sayNotificationsAreOff(title: string, body: string): void {
+  if (saidNotificationsAreOff) return;
+  saidNotificationsAreOff = true;
+  send(null, {
+    type: 'notice',
+    what: `${title} ${body}`,
+    because:
+      'This Mac is not letting me send notifications, so I said it here instead. System Settings → Notifications turns them on.',
+  });
 }
 
 /* ------------------------------------------------------------- doing one */
@@ -5044,11 +5214,20 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       makeSureThereIsAWindow();
       const notice = saysNotice(desk.name, { doing: piece.doing, state: 'needs-you' });
       tellThem(notice.title, notice.body, desk.path);
+      /* And the conversation that started it hears once. Only the board knew a
+         piece was parked, so a conversation waiting on work that was itself
+         waiting on a person looked stalled with nothing said. */
+      sayThePieceIsWaiting(desk.path, piece.id, piece.doing);
     }
     if ((event.type === 'tool-start' || event.type === 'blocked') && piece.state === 'needs-you') {
       if (!held.isWaiting) {
         piece.state = 'running';
         moved = true;
+        // Answered, so the conversation is no longer waiting on anybody, and
+        // the next time this piece asks is a new question.
+        saidItIsWaiting.delete(piece.id);
+        const at = projectAt({ project: desk.path })?.held.sessions.current?.path;
+        if (at !== undefined) continuations.waiting(desk.path, at, false);
       }
     }
 
@@ -5611,12 +5790,46 @@ const IGNORED: Trouble = {
   actionLabel: 'Got it',
 };
 
+/**
+ * Channels that never start a program, so they never wait for the login shell.
+ *
+ * Widening PATH asks `$SHELL -lc`, which can take up to ten seconds on a shell
+ * with a slow profile — and every call went through it, so the first thing
+ * somebody did after launch stalled for no reason. Only what spawns waits.
+ */
+const NEEDS_NO_PROGRAMS = new Set<string>([
+  CHANNEL.preferences,
+  CHANNEL.setShowMe,
+  CHANNEL.setTheme,
+  CHANNEL.setThinking,
+  CHANNEL.setAdvisorThinking,
+  CHANNEL.setAdvisorGate,
+  CHANNEL.setAddons,
+  CHANNEL.appVersion,
+  CHANNEL.diagnostics,
+  CHANNEL.credentialsKept,
+  CHANNEL.keepCredential,
+  CHANNEL.buildPlan,
+  CHANNEL.buildSave,
+  CHANNEL.buildAdvance,
+  CHANNEL.buildCancel,
+  CHANNEL.continuationStop,
+  CHANNEL.goalLoad,
+  CHANNEL.goalSave,
+  CHANNEL.goalClear,
+  CHANNEL.flowLoad,
+  CHANNEL.flowSave,
+  CHANNEL.flowForget,
+]);
+
 function handle<T>(channel: string, run: (event: IpcMainInvokeEvent, args: unknown[]) => Promise<Result<T>>): void {
   ipcMain.handle(channel, async (event, ...args: unknown[]): Promise<Result<T>> => {
     if (!fromOurWindow(event)) return fail<T>(IGNORED);
     try {
-      // Nothing anybody presses should reach for `gh` before we know where it is.
-      await pathIsWide();
+      // Nothing anybody presses should reach for `gh` before we know where it
+      // is — but a preference does not reach for anything, and used to wait
+      // just the same.
+      if (!NEEDS_NO_PROGRAMS.has(channel)) await pathIsWide();
       return await run(event, args);
     } catch (cause) {
       // Nothing below is expected to throw. If one does, the window still gets a
@@ -5652,6 +5865,19 @@ function thinkingFor(preferences: Preferences): ThinkingLevel | undefined {
   return choice === null ? undefined : preferences.thinking[modelKey(choice)];
 }
 
+/** The one a catalogue calls its default, or its balanced tier — never the top
+ *  of the list, which is as often the priciest as it is the sensible one. */
+function balancedModel(
+  models: readonly { id: string; available: boolean; tier?: string; recommended?: boolean }[],
+): { id: string } | undefined {
+  const here = models.filter((one) => one.available);
+  return (
+    here.find((one) => one.recommended === true) ??
+    here.find((one) => one.tier === 'balanced' || one.tier === 'default') ??
+    undefined
+  );
+}
+
 async function chooseAModelIfNoneIs(): Promise<void> {
   const prefs = await preferences();
   const providers = await readConnection(await defaultAgentDir());
@@ -5669,7 +5895,11 @@ async function chooseAModelIfNoneIs(): Promise<void> {
 
   for (const provider of providers) {
     if (!provider.connected) continue;
-    const first = provider.models.find((model) => model.available);
+    /* Not simply the first model this provider lists — that can be the most
+       expensive one, and picking it for somebody who has never chosen is a
+       decision nobody made. A model the catalogue marks as the balanced or
+       default one, where there is one; the first available otherwise. */
+    const first = balancedModel(provider.models) ?? provider.models.find((model) => model.available);
     if (first === undefined) continue;
     await prefs.change({ model: { providerId: provider.providerId, modelId: first.id } });
     // Every conversation live in the project in front, not only the one on
@@ -8350,6 +8580,28 @@ function register(): void {
 
   handle<string>(CHANNEL.appVersion, async () => done(app.getVersion()));
 
+  /* What a model was actually measured doing on a long job. Written by
+     `scripts/long-horizon-bench.mjs`, read here, said in the model chip — so a
+     model known to stop early says so before somebody starts a night's work on
+     it rather than after. */
+  handle<string | null>(CHANNEL.longJobs, async (_event, args) => {
+    const [providerId, modelId] = args;
+    if (typeof providerId !== 'string' || typeof modelId !== 'string') return done(null);
+    const id = `${providerId}--${modelId}`.replace(/[^a-zA-Z0-9._-]+/g, '-');
+    const raw = await readFile(
+      join(app.getPath('userData'), 'models', `${id}.json`),
+      'utf8',
+    ).catch(() => null);
+    if (raw === null) return done(null);
+    try {
+      const held = JSON.parse(raw) as { longHorizon?: { says?: unknown } };
+      const says = held.longHorizon?.says;
+      return done(typeof says === 'string' ? says : null);
+    } catch {
+      return done(null);
+    }
+  });
+
   handle<{ says: Readonly<Record<string, string>>; running: number }>(
     CHANNEL.addons,
     async (_event, args) => {
@@ -8516,6 +8768,8 @@ function register(): void {
        The ceiling is there to stop a loop nobody is watching, not to ration a
        person who is. */
     continuations.spoke(open.path, addressOf(conversation.held));
+    // A new job, so the next apply puts a version down again.
+    open.held.snappedBeforeApply.delete(addressOf(conversation.held));
     // Their own words, kept for the sentence beside the pictures. The same
     // sentence the version timeline writes for the same moment — see
     // src/diff/summary.ts.

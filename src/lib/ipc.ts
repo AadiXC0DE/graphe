@@ -1380,6 +1380,8 @@ export const CHANNEL = {
   diagnostics: 'graphe:diagnostics',
   /** Which build this is. */
   appVersion: 'graphe:app-version',
+  /** What a model was measured doing on a long job. */
+  longJobs: 'graphe:long-jobs',
   /** What each installed add-on will actually do, and how much it is running. */
   addons: 'graphe:addons',
   /** Keep a credential the app itself needs in the login keychain. */
@@ -1884,6 +1886,15 @@ export type GrapheApi = {
   /** Which build this is. Nothing in the window said it before, so a friend on
    *  an old build had no way to find out and no way to say which. */
   appVersion(): Promise<Result<string>>;
+  /**
+   * What this model was measured doing on a long job, or null for one nothing
+   * has measured.
+   *
+   * Written by the bench script, read here, said in the model chip — so a model
+   * known to stop early says so before somebody starts a night's work on it
+   * rather than after.
+   */
+  longJobs(providerId: string, modelId: string): Promise<Result<string | null>>;
   /**
    * What each installed add-on will actually do, and how many processes they
    * have running.

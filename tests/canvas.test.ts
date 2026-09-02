@@ -9,6 +9,8 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { heldWrites, HOLD_MS } from '../src/lib/heldwrites';
+
 import {
   asksOf,
   carryOnWords,
@@ -824,9 +826,10 @@ describe('a folder that holds several projects', () => {
 
   it('the window sends every block to the folder the flow names', () => {
     const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-    expect(app).toContain('...(flow.repo === null ? {} : { repo: flow.repo }),');
-    // Both the conversation it opens and every turn it sends.
-    expect(app.match(/\.\.\.\(flow\.repo === null \? \{\} : \{ repo: flow\.repo \}\),/g)?.length).toBe(2);
+    // Both the conversation it opens and every turn it sends. A flow that opens
+    // in one folder and then talks to another is two halves of a job in two
+    // places, and neither half says so.
+    expect(app.match(/repo: flow\.repo/g)?.length).toBe(2);
   });
 });
 
@@ -1141,19 +1144,95 @@ describe('what a line between two blocks is doing', () => {
 });
 
 describe('canvases are saved one at a time, not one instead of another', () => {
-  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  /** A clock the test drives, so what this promises is run rather than waited
+   *  for. */
+  function clock() {
+    let at = 0;
+    const due = new Map<number, { when: number; run: () => void }>();
+    let next = 1;
+    return {
+      clock: {
+        after: (ms: number, run: () => void) => {
+          const id = next++;
+          due.set(id, { when: at + ms, run });
+          return id;
+        },
+        stop: (timer: unknown) => {
+          due.delete(timer as number);
+        },
+      },
+      tick: (ms: number) => {
+        at += ms;
+        for (const [id, one] of [...due.entries()]) {
+          if (one.when > at) continue;
+          due.delete(id);
+          one.run();
+        }
+      },
+    };
+  }
 
-  it('holds a timer per canvas', () => {
-    // One shared timer meant a touch on the second canvas cancelled the first
-    // one's write, and that edit was gone until something else happened to it.
-    expect(app).toContain('const savingFlows = useRef(new Map<string');
-    expect(app).toContain('savingFlows.current.get(next.id)');
-    expect(app).toContain('savingFlows.current.set(next.id,');
-    expect(app).not.toContain('const savingFlow = useRef<ReturnType<typeof setTimeout>');
+  /* One shared timer meant a touch on the second canvas cancelled the first
+     one's write, and that edit was gone until something else happened to it. */
+  it('holds one write per canvas, so a touch on one never cancels another', () => {
+    const time = clock();
+    const held = heldWrites(HOLD_MS, time.clock);
+    const written: string[] = [];
+    held.soon('a', () => written.push('a'));
+    time.tick(HOLD_MS / 2);
+    held.soon('b', () => written.push('b'));
+    time.tick(HOLD_MS);
+    expect(written.sort()).toEqual(['a', 'b']);
+  });
+
+  it('writes the later change to one canvas, not both', () => {
+    const time = clock();
+    const held = heldWrites(HOLD_MS, time.clock);
+    const written: string[] = [];
+    held.soon('a', () => written.push('first'));
+    held.soon('a', () => written.push('second'));
+    time.tick(HOLD_MS);
+    expect(written).toEqual(['second']);
+  });
+
+  it('writes nothing before its moment', () => {
+    const time = clock();
+    const held = heldWrites(HOLD_MS, time.clock);
+    const written: string[] = [];
+    held.soon('a', () => written.push('a'));
+    time.tick(HOLD_MS - 1);
+    expect(written).toEqual([]);
+    expect(held.waiting()).toBe(1);
   });
 
   it('writes what is still waiting when the window goes, rather than dropping it', () => {
-    expect(app).toContain('for (const held of savingFlows.current.values())');
-    expect(app).toContain('held.write();');
+    const time = clock();
+    const held = heldWrites(HOLD_MS, time.clock);
+    const written: string[] = [];
+    held.soon('a', () => written.push('a'));
+    held.soon('b', () => written.push('b'));
+    held.now();
+    expect(written.sort()).toEqual(['a', 'b']);
+    expect(held.waiting()).toBe(0);
+  });
+
+  it('never writes the same waiting change twice', () => {
+    const time = clock();
+    const held = heldWrites(HOLD_MS, time.clock);
+    const written: string[] = [];
+    held.soon('a', () => written.push('a'));
+    held.now();
+    time.tick(HOLD_MS * 4);
+    held.now();
+    expect(written).toEqual(['a']);
+  });
+
+  /* And the window really uses it, rather than keeping a second copy of the
+     same idea beside it. */
+  it('is what the window saves canvases with', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    expect(app).toContain('savingFlows.current.soon(next.id');
+    expect(app).toContain('savingFlows.current.now()');
+    expect(app).not.toContain('const savingFlow = useRef<ReturnType<typeof setTimeout>');
   });
 });

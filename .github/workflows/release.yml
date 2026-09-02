@@ -80,11 +80,19 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+      # Written for people who install it, when somebody wrote them. A list of
+      # commit subjects is a list of commit subjects, and nobody downloading an
+      # app is reading one.
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="$(git log --oneline "$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD)"
+          written="notes/releases/$VERSION.md"
+          if [ -f "$written" ]; then
+            notes="$(cat "$written")"
+          else
+            notes="$(git log --oneline "$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD)"
+          fi
           gh release create "$GITHUB_REF_NAME" \
             "release/Graphe-$VERSION-arm64.dmg" \
             "release/Graphe-$VERSION-arm64.zip" \

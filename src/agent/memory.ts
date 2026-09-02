@@ -17,9 +17,9 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import initSqlJs, { type Database } from 'sql.js';
 
@@ -40,7 +40,14 @@ export const noEmbedder: Embedder = async () => null;
  *  cache after that. Any failure is the word path, never an error. */
 let embeddingPromise: Promise<Embedder> | null = null;
 
-async function loadTransformers(cacheDir: string | null): Promise<Embedder> {
+export const memoryWords = {
+  downloading: 'Downloading a small model for memory (23 MB). This happens once.',
+} as const;
+
+async function loadTransformers(
+  cacheDir: string | null,
+  onFirstDownload?: () => void,
+): Promise<Embedder> {
   const { env, pipeline } = (await import('@huggingface/transformers')) as {
     env?: { backends?: { onnx?: { backend?: string } }; cacheDir?: string };
     pipeline: (task: string, model: string, options: unknown) => Promise<unknown>;
@@ -66,6 +73,9 @@ async function loadTransformers(cacheDir: string | null): Promise<Embedder> {
   let extractor: Extractor | null = null;
   return async (text: string) => {
     try {
+      if (extractor === null && onFirstDownload !== undefined && !(await modelIsHere(cacheDir))) {
+        onFirstDownload();
+      }
       extractor ??= (await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
         dtype: 'q8',
       })) as unknown as Extractor;
@@ -81,9 +91,25 @@ async function loadTransformers(cacheDir: string | null): Promise<Embedder> {
  *
  *  `cacheDir` is where the model lives after its first download. It belongs
  *  beside the app's other data; the caller is the one that knows where that is. */
-export function defaultEmbedder(cacheDir: string | null = null): Embedder {
-  embeddingPromise ??= loadTransformers(cacheDir).catch(() => noEmbedder);
+export function defaultEmbedder(
+  cacheDir: string | null = null,
+  onFirstDownload?: () => void,
+): Embedder {
+  embeddingPromise ??= loadTransformers(cacheDir, onFirstDownload).catch(() => noEmbedder);
   return (text: string) => embeddingPromise!.then((embed) => embed(text));
+}
+
+/** Whether the model is already on this machine. Only the first ask can be
+ *  waiting on a download, and saying so when nothing is downloading is worse
+ *  than saying nothing. */
+async function modelIsHere(cacheDir: string | null): Promise<boolean> {
+  if (cacheDir === null) return false;
+  try {
+    await stat(join(cacheDir, 'Xenova', 'all-MiniLM-L6-v2'));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -205,7 +231,13 @@ export type MemoryStore = {
 /** The sql.js database, plus the embedding engine and the file it persists to.
  *  Persistence is whole-file and atomic: export the database and swap it in,
  *  so a crash mid-write cannot leave a half-written memory. */
-export async function openMemory(options: { dbPath: string | null; embedder?: Embedder }): Promise<MemoryStore> {
+export async function openMemory(options: {
+  dbPath: string | null;
+  embedder?: Embedder;
+  /** Said once, before the engine is first asked for anything — the ask that
+   *  can be waiting on the model coming down. */
+  onFirstDownload?: () => void;
+}): Promise<MemoryStore> {
   const SQL = await initSqlJs();
   let db: Database;
   let exists = false;
@@ -233,7 +265,17 @@ export async function openMemory(options: { dbPath: string | null; embedder?: Em
   )`);
   if (!exists) await save();
 
-  const embedder = options.embedder ?? noEmbedder;
+  const given = options.embedder ?? noEmbedder;
+  // The word path downloads nothing, so it has nothing to announce.
+  const engine = options.embedder !== undefined && options.embedder !== noEmbedder;
+  let said = options.onFirstDownload === undefined || !engine;
+  const embedder: Embedder = (text) => {
+    if (!said) {
+      said = true;
+      options.onFirstDownload?.();
+    }
+    return given(text);
+  };
   const vectors = new Map<string, Promise<number[] | null>>();
 
   async function save(): Promise<void> {

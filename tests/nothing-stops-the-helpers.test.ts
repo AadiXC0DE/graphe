@@ -19,26 +19,68 @@ import { describe, expect, it } from 'vitest';
 import { HELPER_PATIENCE_MS, HELPER_TOOK_TOO_LONG, whyEndHelper } from '../src/agent/pi/tools';
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+import { escapeMeans } from '../src/lib/escape';
 const shell = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 
 /** The one Escape handler, from the key to the end of the branch. */
 const escape = (): string => {
   const at = app.indexOf('if (event.key === "Escape") {');
   expect(at).toBeGreaterThan(-1);
-  return app.slice(at, at + 700);
+  return app.slice(at, at + 1200);
 };
 
 describe('Escape backs out of what is in front, before it stops anything', () => {
+  /** Nothing up, nothing open, nothing running. */
+  const quiet = {
+    answeredAlready: false,
+    connectOpen: false,
+    connectBusy: false,
+    switching: false,
+    overlayUp: false,
+    busy: false,
+  };
+
+  /* The order is the whole of it, and it is run rather than read: a press meant
+     to close a panel that stops a job instead is the loudest way this app can
+     misread somebody. */
   it('leaves the run alone while any panel is up', () => {
+    expect(escapeMeans({ ...quiet, overlayUp: true, busy: true })).toBe('let-the-sheet-have-it');
+  });
+
+  it('stops the run only when Escape can mean nothing else', () => {
+    expect(escapeMeans({ ...quiet, busy: true })).toBe('stop');
+  });
+
+  it('closes the connect sheet before anything else, and cancels it mid-flight', () => {
+    expect(escapeMeans({ ...quiet, connectOpen: true, busy: true })).toBe('close-connect');
+    expect(escapeMeans({ ...quiet, connectOpen: true, connectBusy: true, busy: true })).toBe(
+      'cancel-connect',
+    );
+  });
+
+  it('closes the switcher before it reaches a panel or the run', () => {
+    expect(escapeMeans({ ...quiet, switching: true, overlayUp: true, busy: true })).toBe(
+      'close-switcher',
+    );
+  });
+
+  it('does nothing at all when there is nothing to back out of', () => {
+    expect(escapeMeans(quiet)).toBe('nothing');
+  });
+
+  it('is what the window actually presses', () => {
     const branch = escape();
-    expect(branch).toContain('if (overlayUp()) return;');
-    // And the stop is reached only after that, never before.
-    expect(branch.indexOf('overlayUp()')).toBeLessThan(branch.indexOf('halt()'));
+    expect(branch).toContain('escapeMeans({');
+    expect(branch).toContain("case 'stop':");
+    expect(branch).toContain('halt();');
   });
 
   it('counts every panel that can be in front', () => {
     const at = app.indexOf('const overlayUp = (): boolean =>');
     expect(at).toBeGreaterThan(-1);
+    // Which sheets exist is a fact about this window and nowhere else, so this
+    // half stays a reading of it. What Escape does about them is run, above.
     const list = app.slice(at, app.indexOf(';', at));
     for (const panel of [
       'settingsOpen',
@@ -59,13 +101,13 @@ describe('Escape backs out of what is in front, before it stops anything', () =>
   it('stands aside for anything nearer the key that already answered', () => {
     // The composer's own mention menu answers Escape in React, which runs
     // before this listener. Without this, dismissing it stopped the run.
-    expect(escape()).toContain('if (event.defaultPrevented) return;');
-    const branch = escape();
-    expect(branch.indexOf('defaultPrevented')).toBeLessThan(branch.indexOf('halt()'));
+    expect(escapeMeans({ ...quiet, answeredAlready: true, busy: true })).toBe('nothing');
+    // And the window really passes that on rather than deciding it itself.
+    expect(escape()).toContain('answeredAlready: event.defaultPrevented');
   });
 
   it('still stops the run when nothing is in front of it', () => {
-    expect(escape()).toContain('else if (busy) halt();');
+    expect(escapeMeans({ ...quiet, busy: true })).toBe('stop');
   });
 
   it('watches the panels it reads, or it would read them stale', () => {

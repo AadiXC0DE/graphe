@@ -1,6 +1,7 @@
 /** The research brief: what goes out in front of somebody's question when they
  *  ask for the question to be researched rather than answered. */
 
+import { lookFirstStore } from '../src/lib/lookfirst';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -129,15 +130,12 @@ describe('the answer to a look-around is built, not looked at again', () => {
     // "now implement the redesign" carries the same words that made it look
     // around in the first place, so judging it by the same rule plans the plan.
     expect(worthPlanning('now implement the redesign')).toBe(true);
-    expect(app).toContain('const justLookedFirst = useRef(false)');
   });
 
   it('turns the look-around off for the message that answers it', () => {
     // Both send paths, and every one-shot that comes back as a report to
-    // answer rather than a request to look around again.
-    expect(app.match(/const answering = justLookedFirst\.current;/g)?.length).toBe(2);
-    expect(app.match(/justLookedFirst\.current = true;/g)?.length).toBe(4);
-    // The rule itself lives where it can be tested, and both paths call it.
+    // answer rather than a request to look around again. The rule itself lives
+    // where it can be tested, and both paths call it.
     expect(app.match(/shouldLookFirst\(\{ plans, answering, text \}\)/g)?.length).toBe(2);
   });
 
@@ -161,10 +159,36 @@ describe('the answer to a look-around is built, not looked at again', () => {
     expect(app).not.toContain("howFar !== 'doing' &&\n          (plans ===");
   });
 
+  /* It used to be one boolean for the whole window, so a look-around in one tab
+     exempted the next message in another — and the answer to a plan planned the
+     plan again. It belongs to the conversation that asked. */
+  it('is remembered per conversation, not once for the window', () => {
+    const one = lookFirstStore();
+    one.asked('/work/site', 'a');
+    expect(one.answering('/work/site', 'b')).toBe(false);
+    expect(one.answering('/work/site', 'a')).toBe(true);
+  });
+
   it('judges the message after that one fresh', () => {
-    // Cleared on read, so only the immediate answer is exempt.
-    const at = app.indexOf('const answering = justLookedFirst.current;');
-    expect(app.slice(at, at + 120)).toContain('justLookedFirst.current = false;');
+    const one = lookFirstStore();
+    one.asked('/work/site', 'a');
+    expect(one.answering('/work/site', 'a')).toBe(true);
+    // Cleared on reading, so only the immediate answer is exempt.
+    expect(one.answering('/work/site', 'a')).toBe(false);
+  });
+
+  it('keeps what was asked for, so approving a plan sends that sentence again', () => {
+    const one = lookFirstStore();
+    one.remember('/work/site', 'a', 'redo the header');
+    expect(one.said('/work/site', 'a')).toBe('redo the header');
+    expect(one.said('/work/site', 'b')).toBe('');
+  });
+
+  it('tells apart two projects with a conversation of the same name', () => {
+    const one = lookFirstStore();
+    one.asked('/work/one', 'a');
+    expect(one.answering('/work/other', 'a')).toBe(false);
+    expect(one.answering('/work/one', 'a')).toBe(true);
   });
 });
 

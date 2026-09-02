@@ -47,6 +47,7 @@
  * "Show technical details" disclosure that FEATURES.md 4.10 puts everywhere and
  * requires nowhere. */
 
+import { writeAtomically } from '../lib/atomic';
 import { execFile } from 'node:child_process';
 import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { devNull } from 'node:os';
@@ -226,6 +227,39 @@ export async function trackedCredentials(dir: string, run: GitRunner): Promise<r
   const listed = await run(['ls-files', '-z', '--cached', '--', ...credentialPathspecs()], dir);
   if (listed.code !== 0) return [];
   return listed.stdout.split('\u0000').filter((one) => one !== '');
+}
+
+/** Past this many tracked files, the scan git does before every save is what a
+ *  person is waiting on, and it is worth saying so once. */
+const A_LARGE_REPO = 20_000;
+
+/** Counted once per folder for the life of the process: the count is only ever
+ *  used to decide whether to say a sentence. */
+const counted = new Map<string, number>();
+
+/** Two settings that make git's own scan of a large project fast, printed as
+ *  the commands they are — somebody reading this went looking for them.
+ *
+ *  Never set here. This is the person's repository configuration, and a tool
+ *  that quietly rewrites it is a tool they cannot predict. */
+export async function hintForLargeRepo(dir: string, run: GitRunner): Promise<string | null> {
+  let files = counted.get(dir);
+  if (files === undefined) {
+    const listed = await run(['ls-files', '-z'], dir);
+    if (listed.code !== 0) return null;
+    files = 0;
+    const out = listed.stdout;
+    for (let at = out.indexOf('\u0000'); at !== -1; at = out.indexOf('\u0000', at + 1)) {
+      files += 1;
+    }
+    counted.set(dir, files);
+  }
+  if (files < A_LARGE_REPO) return null;
+  return [
+    `This project has ${files.toLocaleString('en-US')} files, so git takes a moment to look at them before each save. These two make it faster:`,
+    '  git config core.untrackedCache true',
+    '  git config core.fsmonitor true',
+  ].join('\n');
 }
 
 export const leftOutWords = {
@@ -609,12 +643,12 @@ export class ProjectHistory {
     if (patch.trim() === '') return { ok: true };
     // Through a file rather than a pipe: a patch is arbitrarily long and the
     // runner here does not carry standard input.
-    const { mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { mkdtemp, rm } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
     const folder = await mkdtemp(path.join(tmpdir(), 'graphe-patch-'));
     const file = path.join(folder, 'part.patch');
     try {
-      await writeFile(file, patch.endsWith('\n') ? patch : `${patch}\n`, 'utf8');
+      await writeAtomically(file, patch.endsWith('\n') ? patch : `${patch}\n`);
       const could = await this.attempt(['apply', '--reverse', '--check', file]);
       if (could.code !== 0) return { ok: false, because: historyProblems.goBackFailed };
       const done = await this.attempt(['apply', '--reverse', file]);

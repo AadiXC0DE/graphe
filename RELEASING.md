@@ -22,6 +22,10 @@ verifies the bundles, uploads the four artifacts and their checksums to the GitH
 opens the cask pull request against the tap. Everything below is what that workflow does, in order,
 and how to do it by hand when you need to.
 
+Write `notes/releases/<version>.md` before you tag. That file becomes the release body — for people
+who are about to install this, not for people reading the log. Without it the release carries a list
+of commit subjects, which is honest and useless.
+
 Building locally is still how you look at the app before tagging:
 
 ```bash

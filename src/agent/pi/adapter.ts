@@ -118,7 +118,7 @@ const LIFECYCLE_HOOKS: readonly string[] = [
  *  work for its own housekeeping. */
 const ADDON_BLOCKED = 'An add-on has stopped every step of this run.';
 
-import { defaultEmbedder, memoryFileName, openMemory, type MemoryStore } from '../memory';
+import { defaultEmbedder, memoryFileName, memoryWords, openMemory, type MemoryStore } from '../memory';
 import { heldShell, loginShell, shellBounds } from '../sandbox/shell';
 import { Running, type RunningPiece } from '../running';
 import {
@@ -865,6 +865,16 @@ export type GrapheSession = {
   }[];
   /** Lifecycle handlers that ran past their budget, for the diagnostics. */
   readonly hookOverruns: readonly { extension: string; event: string; ms: number }[];
+  /**
+   * The notes this conversation would find most relevant, for the standing
+   * block the system prompt carries.
+   *
+   * They used to be prepended to the first message of a sitting and nothing
+   * else, so after the conversation was tidied up they were gone — and a long
+   * job is exactly the one that gets tidied. Never throws: a memory that will
+   * not answer is a memory not worth a sentence.
+   */
+  recall(about: string, most: number): Promise<readonly { content: string }[]>;
   /** Take everything waiting behind the run back out of the queue and hand it
    *  over, so it can be put back in the box and rewritten. Nothing is left
    *  queued afterwards — unless the answer says it did not come back, which is
@@ -2417,7 +2427,12 @@ const MOST_AFTER_SAYINGS = 3;
     try {
       memory = await openMemory({
         dbPath: join(agentDir, 'memory', memoryFileName(options.projectRoot)),
-        embedder: defaultEmbedder(join(agentDir, 'model')),
+        /* Said once, and only when there is really something to wait for: the
+           model is 23 MB off Hugging Face, and a silent minute on first recall
+           reads as the app having stopped. */
+        embedder: defaultEmbedder(join(agentDir, 'model'), () => {
+          options.onEvent({ type: 'notice', what: memoryWords.downloading });
+        }),
       });
       customTools.push(...memoryTools(memory));
     } catch {
@@ -3166,6 +3181,15 @@ const MOST_AFTER_SAYINGS = 3;
 
     get hookOverruns(): readonly { extension: string; event: string; ms: number }[] {
       return recentOverruns();
+    },
+
+    async recall(about: string, most: number): Promise<readonly { content: string }[]> {
+      if (closed || memory === null) return [];
+      try {
+        return await memory.recall(about, { limit: most });
+      } catch {
+        return [];
+      }
     },
 
     async tidyNow(): Promise<boolean> {

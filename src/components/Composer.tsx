@@ -36,6 +36,9 @@ import {
   SAYING,
   around,
   canSay,
+  LISTENING_ANSWER,
+  probeListening,
+  rememberedListening,
   earsIn,
   fold,
   gather,
@@ -109,6 +112,8 @@ type Props = {
   onAddons?: (choice: 'on' | 'tools-only' | 'off') => void;
   /** How heavy the system prompt has become, in characters. */
   promptSize?: number | null;
+  /** What the chosen model was measured doing on a long job. */
+  longJobs?: string | null;
   onConnect?: () => void;
   /** How long the chosen model should take before answering. */
   onThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
@@ -253,6 +258,7 @@ export default function Composer({
   addons,
   onAddons,
   promptSize,
+  longJobs,
   onConnect,
   onThinking,
   anywhere = true,
@@ -271,9 +277,47 @@ export default function Composer({
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
-  /* Asked once, and again only if listening turns out not to work here. A
-     control that is visible and does nothing is worse than no control. */
-  const [canListen, setCanListen] = useState(() => canSay(globalThis));
+  /* Asked once, and remembered. The constructor exists in every Chromium and
+     the recognition behind it needs a service this app does not ship, so the
+     button used to appear for everybody, ask for the microphone, and fail a
+     moment later. A control that is visible and does nothing is worse than no
+     control — and worse still if it asks for a microphone first. */
+  const [canListen, setCanListen] = useState(() => {
+    if (!canSay(globalThis)) return false;
+    try {
+      return rememberedListening((key) => localStorage.getItem(key)) !== false;
+    } catch {
+      // A window that will not hold a preference still gets the button, and
+      // still gets the honest answer the first time it is pressed.
+      return true;
+    }
+  });
+
+  /* The one quiet attempt. Only where nobody has asked yet, and never again
+     once there is an answer. */
+  useEffect(() => {
+    if (!canListen) return;
+    let answered: boolean | null = null;
+    try {
+      answered = rememberedListening((key) => localStorage.getItem(key));
+    } catch {
+      answered = null;
+    }
+    if (answered !== null) return;
+    let stillHere = true;
+    void probeListening(globalThis).then((works) => {
+      if (!stillHere) return;
+      try {
+        localStorage.setItem(LISTENING_ANSWER, works ? 'yes' : 'no');
+      } catch {
+        // Not being able to remember costs one probe next time, nothing more.
+      }
+      if (!works) setCanListen(false);
+    });
+    return () => {
+      stillHere = false;
+    };
+  }, [canListen]);
   /** Why the last thing was turned away. One sentence, and never the user's
    *  fault. Cleared as soon as anything else happens. */
   const [refused, setRefused] = useState<string | null>(null);
@@ -688,7 +732,17 @@ export default function Composer({
     listener.onerror = (event) => {
       const { because, keepOffering } = wordsFor(event?.error);
       if (because !== null) setRefused(because);
-      if (!keepOffering) setCanListen(false);
+      if (!keepOffering) {
+        setCanListen(false);
+        // Remembered, so the next launch does not offer it again and ask for a
+        // microphone it cannot use.
+        try {
+          localStorage.setItem(LISTENING_ANSWER, 'no');
+        } catch {
+          // Then it is offered once more, and refused once more. Honest either
+          // way.
+        }
+      }
       setListening(false);
     };
     listener.onend = () => setListening(false);
@@ -921,6 +975,7 @@ export default function Composer({
             {...(addons === undefined ? {} : { addons })}
             {...(onAddons === undefined ? {} : { onAddons })}
             {...(promptSize == null ? {} : { promptSize })}
+            {...(longJobs == null ? {} : { longJobs })}
           />
         )}
 

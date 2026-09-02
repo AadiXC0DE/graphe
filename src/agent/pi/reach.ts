@@ -124,6 +124,10 @@ export const PINNED: Readonly<Record<string, string>> = {
   'pencil-mcp': '1.0.5',
   '@playwright/mcp': '0.0.80',
   'ts-language-mcp': '2.1.0',
+  // Not a tool the agent reaches for, but the same rule: what leaves this
+  // computer is decided once, here, rather than by whatever npm published this
+  // morning.
+  vercel: '59.11.2',
 };
 
 /** A program with its version on it, the way the line that starts it is written. */

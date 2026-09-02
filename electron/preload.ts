@@ -1166,6 +1166,10 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.appVersion);
   },
 
+  longJobs(providerId: string, modelId: string): Promise<Result<string | null>> {
+    return ipcRenderer.invoke(CHANNEL.longJobs, providerId, modelId);
+  },
+
   addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>> {
     return ipcRenderer.invoke(CHANNEL.addons);
   },

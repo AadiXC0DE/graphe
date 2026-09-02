@@ -9,9 +9,13 @@
  *  does not compile in has to arrive as files. Anything it does compile in must
  *  not arrive twice. */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RUNTIME, carriedAlong, leaveOut } from '../scripts/what-ships.mjs';
+
+/* Every assertion here walks node_modules, which is seconds of real disk on
+   an idle machine and several times that under a full parallel run. */
+vi.setConfig({ testTimeout: 30_000 });
 
 describe('what travels with the app', () => {
   it('carries everything the shell leaves for the runtime to resolve', async () => {

@@ -1,6 +1,7 @@
-import { copyFile, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import { writeAtomically } from '../lib/atomic';
 import { seededIn } from './seeding';
 
 /** One conversation, its own checkout.
@@ -70,6 +71,10 @@ export type Result = { ok: true; value: Worktree | null } | { ok: false; because
 
 const ok = (value: Worktree | null = null): Result => ({ ok: true, value });
 const no = (because: string): Result => ({ ok: false, because });
+
+/** The version to take before a conversation's work first reaches the project,
+ *  so the whole apply is one step back. Written as a version title. */
+export const beforeBringingWorkIn = 'Before bringing work in';
 
 export const bringBackWords = {
   notRepo: 'This folder is not a git repository, so a conversation cannot bring its work back here.',
@@ -158,31 +163,80 @@ async function branchAt(run: RunGit, folder: string): Promise<string | null> {
   return name === '' || name === 'HEAD' ? null : name;
 }
 
+/** How a conversation's work arrives in the person's branch, and under what
+ *  message. Squash is the default everywhere; `every-version` is for somebody
+ *  who wants the conversation's own saves in their history. */
+export type Landing = { how: 'squash' | 'every-version'; message?: string };
+
+export const landingWords = {
+  squash: 'One commit, your message',
+  every: 'Keep every version',
+  note: 'One commit runs your pre-commit hooks and is signed the way your other commits are. Keeping every version brings the conversation’s automatic saves across as they were made — unsigned, and past your hooks.',
+  /** When nobody typed one. Reads as a commit subject, because it is one. */
+  message: (branch: string): string => `Work from ${branch.replace(/^graphe\//, '')}`,
+  failed:
+    'Your work is here, but the commit did not go through — a pre-commit hook turned it down, or the signing did. The changes are staged, so you can commit them yourself.',
+} as const;
+
 /**
  * Bring a conversation's checkout into the main checkout, then throw the
  * checkout away.
  *
  * Refused while the main checkout has tracked changes a merge could squash.
- * The merge is a fast-forward when it can be, and an ordinary merge otherwise —
- * the conversation carries its own history, so a real conflict is git's and is
- * left for the person rather than guessed at.
+ * A real conflict is git's and is left for the person rather than guessed at.
+ *
+ * The default is one commit. A conversation's automatic saves are made past the
+ * person's hooks and without their signature — right for the timeline, wrong
+ * for a history somebody else reads — so landing squashes them and commits once
+ * as the person, hooks and signing config included.
  */
-export async function landWorktree(run: RunGit, repo: string, folder: string): Promise<Result> {
+export async function landWorktree(
+  run: RunGit,
+  repo: string,
+  folder: string,
+  landing: Landing = { how: 'squash' },
+): Promise<Result> {
   const branch = await branchAt(run, folder);
   if (branch === null) return no(worktreeWords.noWorktree);
   if (await isDirty(run, repo)) return no(worktreeWords.dirty);
 
-  const merged = await run(['merge', '--no-edit', branch], { cwd: repo });
+  const squash = landing.how !== 'every-version';
+  const merged = await run(squash ? ['merge', '--squash', branch] : ['merge', '--no-edit', branch], {
+    cwd: repo,
+  });
   if (merged.code !== 0) {
     // Put the repository back before saying anything. A failed merge leaves it
     // half-merged with markers in the files, and the sentence people used to
     // get — "you have unsaved work" — sent them looking for the wrong thing
     // entirely while the project sat in a state they had not asked for.
-    await run(['merge', '--abort'], { cwd: repo });
+    await backOutOfTheMerge(run, repo);
     return no(worktreeWords.clashed);
   }
+
+  if (squash) {
+    // A squash merge stages and stops. Nothing staged is a conversation that
+    // changed nothing, and an empty commit is not worth a line in anyone's log.
+    const staged = await run(['diff', '--cached', '--quiet'], { cwd: repo });
+    if (staged.code !== 0) {
+      const text = (landing.message ?? '').trim() || landingWords.message(branch);
+      const committed = await run(['commit', '--cleanup=verbatim', '--message', text], {
+        cwd: repo,
+      });
+      // A hook that says no is the person's own rule, so the work stays staged
+      // and the checkout stays where it is rather than being thrown away.
+      if (committed.code !== 0) return no(landingWords.failed);
+    }
+  }
+
   await dropWorktree(run, repo, folder);
   return ok();
+}
+
+/** Undo a merge that did not finish. `--abort` is the tidy way, and a squash
+ *  merge records no merge to abort, so the fallback is the reset. */
+async function backOutOfTheMerge(run: RunGit, repo: string): Promise<void> {
+  const aborted = await run(['merge', '--abort'], { cwd: repo });
+  if (aborted.code !== 0) await run(['reset', '--hard', 'HEAD'], { cwd: repo });
 }
 
 /** Throw a conversation's checkout away, branch and all. */
@@ -512,15 +566,23 @@ async function sameFileState(
   return main !== null && copy !== null && main.equals(copy);
 }
 
-/** Copy one file from the worktree into the main checkout, or remove it. */
+/** Copy one file from the worktree into the main checkout, or remove it.
+ *
+ *  Beside it and then moved into place: this writes into the folder somebody
+ *  has open, and a file caught half-copied by a crash or a watching build is
+ *  worse than either version of it. */
 async function carryFile(repo: string, folder: string, row: { kind: 'A' | 'D' | 'M'; path: string }): Promise<void> {
   const target = resolve(repo, row.path);
   if (row.kind === 'D') {
     await rm(target, { force: true });
     return;
   }
+  const source = resolve(folder, row.path);
   await mkdir(dirname(target), { recursive: true });
-  await copyFile(resolve(folder, row.path), target);
+  await writeAtomically(target, await readFile(source));
+  // The mode travels with the file: a script carried home has to stay runnable.
+  const about = await stat(source).catch(() => null);
+  if (about !== null) await chmod(target, about.mode & 0o777).catch(() => undefined);
 }
 
 /**

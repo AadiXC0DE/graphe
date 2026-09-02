@@ -112,7 +112,9 @@ open release/Graphe-<version>-x64.dmg
 arch -x86_64 open /Volumes/Graphe\ <version>-x64/Graphe.app
 ```
 
-Record it here, with the version and the date, before publishing:
+Record it here, with the version and the date, before publishing. An empty row
+is not a pass — it is a release nobody has launched on half the machines it is
+offered to.
 
 | Version | Checked on | By |
 | --- | --- | --- |

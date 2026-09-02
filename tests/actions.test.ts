@@ -222,10 +222,12 @@ describe('the palette and the keyboard agree', () => {
     expect(chordFor('needs-you')).toBe('mod+shift+n');
   });
 
-  /* ⌘⇧F was advertised in the palette and answered by nothing. */
+  /* ⌘⇧F was advertised in the palette and answered by nothing. The keyboard
+     reads this list now, so a chord it promises is a chord it answers by
+     construction; what is still worth asserting is that something does it. */
   it('has a handler for the key it promises for the file tree', () => {
     expect(chordFor('files')).toBe('mod+shift+f');
-    expect(app).toContain('event.key.toLowerCase() === "f"');
+    expect(app).toContain("case 'files':");
   });
 
   it('has no two actions answering to one chord', () => {

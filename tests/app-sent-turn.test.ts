@@ -106,9 +106,11 @@ describe('a card answered with a click is answered', () => {
   });
 
   it('clears it for the conversation the card belongs to', () => {
-    expect(main).toContain(
-      "continuations.waiting(open.path, listAddress(open, where) ?? '', false);",
-    );
+    expect(main).toContain("holdForAnswer(open.path, listAddress(open, where) ?? '', false);");
+    // The one place the hold is set and cleared, so the flag and whatever else
+    // is being kept beside it cannot drift.
+    expect(main).toContain('function holdForAnswer(project: string, address: string, on: boolean)');
+    expect(main).toContain('continuations.waiting(project, address, on);');
   });
 
   it('clears it when a card is taken back off the screen instead', () => {

@@ -30,10 +30,14 @@ import type { Reading } from '../preview/inspect';
 import type { Pointed } from '../preview/point';
 import type { WorkState } from '../work/board';
 import type { Entry as ReviewQueued, FileVerdict, Verdict } from '../work/reviewqueue';
+import type { WorkspaceFacts } from '../work/workspaces';
 import type { Landing as HowItLands } from '../history/worktree';
 import type { TokenUsageView } from '../lib/token-days';
 
 export type { TokenUsageView } from '../lib/token-days';
+
+/** One conversation's copy of the project, as the panel's card is made from. */
+export type { WorkspaceFacts } from '../work/workspaces';
 
 export type {
   FileEntry,
@@ -202,6 +206,10 @@ export type SideOfWork = {
   /** Its own copy of the project, so the same set can be served and looked at
    *  rather than only read as a patch. Null once the copy has gone. */
   folder: string | null;
+  /** What every go in the set started from, named so the columns mean
+   *  something. The same for all of them; carried per side so the set needs no
+   *  envelope of its own. */
+  base: string;
 };
 
 export type Room = {
@@ -1380,6 +1388,11 @@ export const CHANNEL = {
   fastForward: 'graphe:fast-forward',
   worktreeLand: 'graphe:worktree-land',
   worktreeDrop: 'graphe:worktree-drop',
+  checkouts: 'graphe:checkouts',
+  checkoutFront: 'graphe:checkout-front',
+  checkoutLook: 'graphe:checkout-look',
+  checkoutLand: 'graphe:checkout-land',
+  checkoutPutAway: 'graphe:checkout-put-away',
   prWorktreePrepare: 'graphe:pr-worktree-prepare',
   prReviewOpen: 'graphe:pr-review-open',
   reviewQueue: 'graphe:review-queue',
@@ -1671,6 +1684,19 @@ export type GrapheApi = {
   worktreeLand(where?: Where): Promise<Result<null>>;
   /** Throw the front conversation's own checkout away, branch and all. */
   worktreeDrop(where?: Where): Promise<Result<null>>;
+
+  /** Every conversation with a copy of this project, one card's worth each. */
+  checkouts(where?: Where): Promise<Result<readonly WorkspaceFacts[]>>;
+  /** Move the project folder itself onto that conversation's branch. Its copy
+   *  is given back first, so the branch is only ever spread out in one place. */
+  checkoutFront(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>>;
+  /** What one copy changed, against the commit it started from, as one diff. */
+  checkoutLook(address: string, where?: Where): Promise<Result<string>>;
+  /** Bring one copy's work into the project and give the copy back. */
+  checkoutLand(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>>;
+  /** Give one copy's folder back and keep its branch. Refused while the copy
+   *  holds writing the branch does not carry. */
+  checkoutPutAway(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>>;
   /** Prepare an isolated worktree for a pull request, so the review reads the right files. */
   preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>>;
   /** Open a new conversation rooted at the PR worktree, so the review reads the PR's own files. */

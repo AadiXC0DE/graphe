@@ -149,3 +149,31 @@ describe('what changed, in lines', () => {
     expect(main).toContain('const git = many ? null : await readGitStatusWithLines(cwd);');
   });
 });
+
+describe('the two textures in the thread', () => {
+  const line = readFileSync(
+    fileURLToPath(new URL('../src/components/ActivityLine.tsx', import.meta.url)),
+    'utf8',
+  );
+  const steps = readFileSync(
+    fileURLToPath(new URL('../src/components/Steps.tsx', import.meta.url)),
+    'utf8',
+  );
+
+  /* Both audiences get the same row shape. Which of the two texts is on it is
+     the whole difference. */
+  it('leads with the command where "Show me" is on, and keeps the sentence as the tooltip', () => {
+    expect(line).toContain("const machinery = lead && real !== undefined && real !== '';");
+    expect(line).toContain('title={machinery ? label : undefined}');
+    expect(line).toContain('<code className="activity__lead">{real}</code>');
+    expect(steps).toContain('lead={showMe}');
+  });
+
+  it('never draws the command twice', () => {
+    expect(line).toContain("real !== undefined && real !== '' && !machinery ?");
+  });
+
+  it('says a step failed in a word rather than a card', () => {
+    expect(line).toContain("{state === 'failed' ? <span className=\"activity__failed\">Failed</span> : null}");
+  });
+});

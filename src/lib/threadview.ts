@@ -13,6 +13,10 @@ import type { Turn } from './thread';
 export const threadWords = {
   /** Said on the press that takes somebody back to the newest thing. */
   latest: 'Jump to latest',
+  /** The press above a long conversation's tail. Says how many, because "load
+   *  more" gives nobody any idea whether pressing it is a page or an hour. */
+  earlier: (many: number): string =>
+    many === 1 ? 'Show 1 earlier turn' : `Show ${String(many)} earlier turns`,
   found: (at: number, of: number): string => `${String(at)} of ${String(of)}`,
   nothingFound: 'Not in this conversation.',
   find: 'Find in this conversation',

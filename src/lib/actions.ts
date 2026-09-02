@@ -92,6 +92,7 @@ export const ACTIONS: readonly Action[] = [
   { id: 'send', says: 'Send', where: 'in a conversation', chord: 'enter', also: ['mod+enter'] },
   { id: 'stop', says: 'Stop what is running', where: 'in a conversation', chord: 'escape' },
   { id: 'page', says: 'Show the page beside the conversation', where: 'in a conversation', chord: 'mod+j' },
+  { id: 'find', says: 'Find in this conversation', where: 'in a conversation', chord: 'mod+f' },
   { id: 'copy', says: 'Copy the conversation', where: 'in a conversation', chord: null },
   { id: 'tidy', says: 'Compact the context', where: 'in a conversation', chord: null },
 ];

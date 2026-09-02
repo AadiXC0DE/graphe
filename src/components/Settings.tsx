@@ -5,9 +5,9 @@ import ThinkingWith from './ThinkingWith';
 import { advisorSwitchWords, advisorWords } from '../agent/advisor';
 import { policyWords, saysPolicy, type Policy } from '../agent/pi/extension-policy';
 import type { Appearance } from '../design/appearance';
-import { ACTIONS, ACTION_WORDS, chordFor, type Where } from '../lib/actions';
+import { ACTIONS, ACTION_WORDS, chordFor, clashesIn, type Bindings, type Chord, type Where } from '../lib/actions';
 import type { AddonHere, AlwaysDoes, ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
-import { saysChord } from '../lib/keys';
+import { chordOf, saysChord } from '../lib/keys';
 import { THEMES, THEME_WORDS, showing, type Theme } from '../lib/theme';
 import {
   PAGES,
@@ -83,6 +83,10 @@ type Props = {
   /** How a chord is drawn. The one thing on this screen that has to know which
    *  computer it is running on. */
   onMac?: boolean;
+  /** The chords as somebody has changed them, and the way to change one. Left
+   *  off, the list is drawn and cannot be edited. */
+  bindings?: Bindings;
+  onBind?: (id: string, chord: Chord | null) => void;
 
   /* --------------------------------------------------------------- models */
   /** Everything the model row needs: it draws the same chip the composer does,
@@ -139,8 +143,13 @@ function runs(rows: readonly Row[]): readonly [Row, ...Row[]][] {
 }
 
 const KEY_WORDS = {
-  /** The honest name for a list somebody cannot yet change. */
-  reading: 'These are the keys this window is listening for.',
+  reading: 'Press a row, then the keys you want. Escape leaves it alone; Backspace clears it.',
+  listening: 'Press the keys…',
+  clear: 'No key',
+  reset: 'Put them all back',
+  /** Two actions on one chord. Said where it happens rather than found later by
+   *  pressing it and getting the wrong one. */
+  clash: (says: readonly string[]): string => `Also ${says.join(' and ')}.`,
 } as const;
 
 /**
@@ -180,6 +189,8 @@ export default function Settings({
   ownStyles,
   onReloadStyles,
   onMac = false,
+  bindings,
+  onBind,
   connection = null,
   onSelectModel,
   onThinking,
@@ -403,7 +414,7 @@ export default function Settings({
                 {chords ? '⌄' : '›'}
               </span>
             </button>
-            {chords ? <Chords onMac={onMac} /> : null}
+            {chords ? <Chords onMac={onMac} bindings={bindings} onBind={onBind} /> : null}
           </li>
         );
 
@@ -687,8 +698,28 @@ export default function Settings({
  * a saved binding reaches the key handler a field that took a new one would be
  * a control that changes nothing.
  */
-function Chords({ onMac }: { onMac: boolean }) {
+function Chords({
+  onMac,
+  bindings = {},
+  onBind,
+}: {
+  onMac: boolean;
+  bindings?: Bindings;
+  onBind?: (id: string, chord: Chord | null) => void;
+}) {
   const wheres: readonly Where[] = ['anywhere', 'in a project', 'in a conversation'];
+  /** Which row is listening. One at a time: two rows waiting for the same press
+   *  is two rows that would both take it. */
+  const [taking, setTaking] = useState<string | null>(null);
+  const clashing = useMemo(() => clashesIn(bindings), [bindings]);
+
+  /** The other actions already on one chord, by action id. */
+  const alsoOn = (id: string): readonly string[] =>
+    clashing
+      .filter((one) => one.ids.includes(id))
+      .flatMap((one) => one.ids.filter((other) => other !== id))
+      .map((other) => ACTIONS.find((one) => one.id === other)?.says ?? other);
+
   return (
     <div className="settings__chords">
       <p className="settings__machine">{KEY_WORDS.reading}</p>
@@ -697,13 +728,60 @@ function Chords({ onMac }: { onMac: boolean }) {
           <h3 className="settings__subtitle">{ACTION_WORDS.where[where]}</h3>
           <ul className="settings__chordlist">
             {ACTIONS.filter((one) => one.where === where).map((one) => {
-              const chord = chordFor(one.id);
+              const chord = chordFor(one.id, bindings);
+              const listening = taking === one.id;
+              const also = alsoOn(one.id);
               return (
                 <li key={one.id}>
                   <span>{one.says}</span>
-                  <kbd className={chord === null ? 'settings__unbound' : ''}>
-                    {chord === null ? ACTION_WORDS.unbound : saysChord(chord, onMac)}
-                  </kbd>
+                  {also.length === 0 ? null : (
+                    <span className="settings__clash">{KEY_WORDS.clash(also)}</span>
+                  )}
+                  <button
+                    type="button"
+                    className={`settings__chordset ${listening ? 'settings__chordset--taking' : ''}`}
+                    aria-pressed={listening}
+                    disabled={onBind === undefined}
+                    onClick={() => setTaking(listening ? null : one.id)}
+                    /* The press itself is the value, so nothing else may act on
+                       it while a row is listening. */
+                    onKeyDown={(event) => {
+                      if (!listening || onBind === undefined) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (event.key === 'Escape') {
+                        setTaking(null);
+                        return;
+                      }
+                      if (event.key === 'Backspace' || event.key === 'Delete') {
+                        onBind(one.id, null);
+                        setTaking(null);
+                        return;
+                      }
+                      const pressed = chordOf(
+                        {
+                          key: event.key,
+                          metaKey: event.metaKey,
+                          ctrlKey: event.ctrlKey,
+                          shiftKey: event.shiftKey,
+                          altKey: event.altKey,
+                        },
+                        onMac,
+                      );
+                      // A modifier on its own is somebody still reaching.
+                      if (pressed === '') return;
+                      onBind(one.id, pressed);
+                      setTaking(null);
+                    }}
+                  >
+                    <kbd className={chord === null ? 'settings__unbound' : ''}>
+                      {listening
+                        ? KEY_WORDS.listening
+                        : chord === null
+                          ? ACTION_WORDS.unbound
+                          : saysChord(chord, onMac)}
+                    </kbd>
+                  </button>
                 </li>
               );
             })}

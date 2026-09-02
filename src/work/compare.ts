@@ -75,6 +75,9 @@ export const compareWords = {
   heading: 'Side by side',
   against: (base: string): string => `Each one against ${base}`,
   keep: 'Use this one',
+  /** On a file row, which opens the change itself. The counts say how much and
+   *  never what. */
+  readIt: 'Read the change',
   nothing: 'None of these changed anything.',
   changedNothing: 'Changed nothing',
   total: (files: number, added: number, removed: number): string =>
@@ -104,6 +107,10 @@ export const compareWords = {
     count === 1
       ? 'One of them is still going, so what it shows can still change.'
       : `${String(count)} of them are still going, so what they show can still change.`,
+  /** The same line before there is anything to count, which is a different
+   *  thing to say than "none of them changed anything". */
+  waitingToStart: 'Nothing has started yet. Each one fills in here as it begins.',
+  noneFinished: 'None of them has finished. This is what they have changed so far.',
 } as const;
 
 /** An attempt is a side, once it is told what it is being compared against. */
@@ -165,6 +172,25 @@ export function compare(attempts: readonly Attempt[], base: string): Comparison 
     differing,
     says: going === 0 ? counted : `${counted} ${compareWords.stillGoing(going)}`,
   };
+}
+
+/**
+ * The line under the heading, true of attempts that have not started as well as
+ * of the files they changed.
+ *
+ * Counting files is only the answer once something has been counted. Before
+ * that the honest line is about the attempts themselves: a sheet that says
+ * "none of these changed anything" about work that has not begun is wrong
+ * twice over.
+ */
+export function saysComparison(
+  attempts: readonly Attempt[],
+  comparison: Comparison,
+): string {
+  if (attempts.length === 0) return compareWords.nothing;
+  if (attempts.every((one) => one.state === 'waiting')) return compareWords.waitingToStart;
+  if (attempts.every((one) => !isFinal(one))) return compareWords.noneFinished;
+  return comparison.says;
 }
 
 /** What taking one of them means: the one to land, and the ones that go with

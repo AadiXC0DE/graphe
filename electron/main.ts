@@ -186,6 +186,7 @@ import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor, workflowWords } from '../src/work/workflows';
 import { readCheckoutIndex, type Checkout } from '../src/history/checkouts';
 import { seedCheckout, seedWords } from '../src/history/seeding';
+import { workspaceWords, type WorkspaceFacts } from '../src/work/workspaces';
 import { renameTo } from '../src/history/naming';
 import {
   branchNames,
@@ -198,6 +199,7 @@ import {
   nextCheckoutName,
   renameCheckoutBranch,
   dropWorktree,
+  holdsWork,
   putAwayWorktree,
   releaseWorktree,
   reopenWorktree,
@@ -2694,11 +2696,11 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       said.type === 'asked-first' ||
       (said.type === 'planned' && said.steps.length > 0)
     ) {
-      continuations.waiting(path, from.address ?? '', true);
+      holdForAnswer(path, from.address ?? '', true);
     }
     // A card taken back off the screen is a card nobody is going to answer.
     if (said.type === 'questions-withdrawn' || said.type === 'asking-withdrawn') {
-      continuations.waiting(path, from.address ?? '', false);
+      holdForAnswer(path, from.address ?? '', false);
     }
 
     /* An add-on started a turn of its own. It has already begun, so this is not
@@ -3757,6 +3759,101 @@ async function syncCheckoutBranch(project: string, held: Held, address: string):
   if (branch === '' || branch === 'HEAD' || branch === one.branch) return;
   one.branch = branch;
   await saveCheckouts(project, held).catch(() => undefined);
+}
+
+/* ------------------------------------------- every copy, as a card each      */
+
+/** The commit a copy's branch and the project last had in common. Asked of the
+ *  branch rather than the folder, so a copy already given back still counts. */
+async function baseOfBranch(repo: string, branch: string): Promise<string | null> {
+  const { code, out } = await gitRun(repo, ['merge-base', branch, 'HEAD']);
+  const found = (out ?? '').trim();
+  return code === 0 && found !== '' ? found : null;
+}
+
+type CopyTally = { changed: number; added: number; removed: number };
+
+const NOTHING_TALLIED: CopyTally = { changed: 0, added: 0, removed: 0 };
+
+function tallyOf(files: readonly FileTally[]): CopyTally {
+  return files.reduce<CopyTally>(
+    (sum, one) => ({
+      changed: sum.changed + 1,
+      added: sum.added + one.added,
+      removed: sum.removed + one.removed,
+    }),
+    NOTHING_TALLIED,
+  );
+}
+
+/** What a copy whose folder has been given back is holding. The branch is all
+ *  that is left of it, so the branch is what gets counted. */
+async function tallyOnBranch(repo: string, base: string, branch: string): Promise<CopyTally> {
+  const counted = await gitRun(repo, ['diff', '--numstat', '--no-renames', base, branch]);
+  if (counted.code !== 0) return NOTHING_TALLIED;
+  const rows = (counted.out ?? '').split('\n').filter((line) => line.trim() !== '');
+  return { changed: rows.length, ...parseNumstat(counted.out ?? '') };
+}
+
+/** Whether this branch is already in the line the project is on. */
+async function alreadyLanded(repo: string, branch: string): Promise<boolean> {
+  const { code } = await gitRun(repo, ['merge-base', '--is-ancestor', branch, 'HEAD']);
+  return code === 0;
+}
+
+/** When this copy last moved: the newest of what its branch carries and what
+ *  its folder was last written in. Zero where git can say neither. */
+async function lastMoved(repo: string, branch: string, folder: string | null): Promise<number> {
+  const tip = await gitRun(repo, ['log', '-1', '--format=%ct', branch]);
+  const at = tip.code === 0 ? Number.parseInt((tip.out ?? '').trim(), 10) * 1000 : 0;
+  const written = folder === null ? 0 : ((await stat(folder).catch(() => null))?.mtimeMs ?? 0);
+  return Math.max(Number.isFinite(at) ? at : 0, written);
+}
+
+/**
+ * Every conversation with a copy of this project, as the facts one card is made
+ * of. The cards themselves are `cardsFrom`, in the window, where the ordering
+ * and the words live.
+ *
+ * A copy that has been given back is still a card. Its work is on its branch,
+ * and leaving it out is how somebody decides a conversation's work has gone.
+ */
+async function copiesOfProject(open: Workspace<Held>): Promise<readonly WorkspaceFacts[]> {
+  const repo = open.path;
+  const git = await readGitStatus(repo);
+  const on = git?.branch ?? 'the project';
+  const facts: WorkspaceFacts[] = [];
+  for (const [address, one] of open.held.checkouts) {
+    const here = existsSync(one.folder);
+    const base = await baseOfBranch(repo, one.branch);
+    const tally =
+      base === null
+        ? NOTHING_TALLIED
+        : here
+          ? tallyOf(await talliesFor(one.folder, base))
+          : await tallyOnBranch(repo, base, one.branch);
+    const session = open.held.sessions.find(address);
+    facts.push({
+      address,
+      title: session?.name ?? '',
+      branch: one.branch,
+      base: on,
+      changed: tally.changed,
+      added: tally.added,
+      removed: tally.removed,
+      lastAt: await lastMoved(repo, one.branch, here ? one.folder : null),
+      cost: null,
+      run: askingSomebody.has(keyOf(repo, address))
+        ? 'asking'
+        : session?.held.working === true
+          ? 'running'
+          : 'settled',
+      landed: await alreadyLanded(repo, one.branch),
+      away: !here,
+      holdsWork: here && (await holdsWork(gitRunHereFor(), one.folder)),
+    });
+  }
+  return facts;
 }
 
 
@@ -4885,6 +4982,22 @@ const continuations = continuationOwner({
   },
 });
 
+/** Which conversations have a card on screen nobody has answered yet.
+ *
+ * The authority holds the same fact for its own budget and keeps it private.
+ * This is the readable half, so the panel can put a copy stopped on a question
+ * above the ones quietly getting on with it. */
+const askingSomebody = new Set<string>();
+
+/** Hold the loop back for an answer, and remember that it is held. Both halves
+ *  in one call: they were the same fact told twice and drifted apart. */
+function holdForAnswer(project: string, address: string, on: boolean): void {
+  continuations.waiting(project, address, on);
+  const key = keyOf(project, address);
+  if (on) askingSomebody.add(key);
+  else askingSomebody.delete(key);
+}
+
 /** One more round toward the goal, written down so a restart keeps the count. */
 async function countGoalRound(project: string, address: string): Promise<void> {
   const userData = app.getPath('userData');
@@ -5342,7 +5455,7 @@ function sayThePieceIsWaiting(project: string, id: string, doing: string): void 
   );
   // And the loop stands down: somebody is being asked, which is holding rather
   // than stalling.
-  if (at !== undefined) continuations.waiting(project, at, true);
+  if (at !== undefined) holdForAnswer(project, at, true);
 }
 
 /**
@@ -5786,7 +5899,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
         // the next time this piece asks is a new question.
         saidItIsWaiting.delete(piece.id);
         const at = projectAt({ project: desk.path })?.held.sessions.current?.path;
-        if (at !== undefined) continuations.waiting(desk.path, at, false);
+        if (at !== undefined) holdForAnswer(desk.path, at, false);
       }
     }
 
@@ -7912,6 +8025,9 @@ function register(): void {
 
     const numbering = waysNumbering(desk.bench.pieces);
     const group = desk.bench.pieces.filter((one) => one.ways === ways);
+    // Every go started from the project as it stood, so the line of work it is
+    // on is what all of these columns are held against.
+    const base = (await readGitStatus(open.path))?.branch ?? '';
     const sides: SideOfWork[] = [];
     for (const piece of group) {
       const named = numbering.get(piece.id);
@@ -7935,6 +8051,7 @@ function register(): void {
         picture: piece.picture,
         spent: spent === null ? null : formatMoney(spent),
         folder: piece.folder,
+        base,
       });
     }
     return done(sides);
@@ -8580,6 +8697,21 @@ function register(): void {
     if (open === null) return fail(NOTHING_OPEN);
     const entry = checkoutEntryFor(open, where);
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    return landTheCopy(open, where, entry);
+  });
+
+  /**
+   * Bring one conversation's copy home and give the copy back.
+   *
+   * Named apart from the handler because two presses reach it: the one in the
+   * conversation that owns the copy, and the one on that copy's card in the
+   * panel, which names a conversation that need not be in front.
+   */
+  async function landTheCopy(
+    open: Workspace<Held>,
+    where: Where,
+    entry: { address: string; folder: string; branch: string },
+  ): Promise<Result<null>> {
     // Reviews run in a pr worktree — they are read-only and must not be landed.
     if (entry.branch.startsWith('graphe/pr-')) {
       return fail({
@@ -8644,7 +8776,7 @@ function register(): void {
       await saveCheckouts(open.path, open.held).catch(() => undefined);
     }
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
-  });
+  }
 
   handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
     const where = whereIn(args);
@@ -8662,6 +8794,121 @@ function register(): void {
       await saveCheckouts(open.path, open.held).catch(() => undefined);
     }
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
+  });
+
+
+  /* ------------------------------------------ every copy of this project     */
+
+  /** The copy a card names. Read straight off the index rather than through the
+   *  open conversations, so a card still works when its conversation is not. */
+  function copyNamed(
+    open: Workspace<Held>,
+    address: unknown,
+  ): { address: string; folder: string; branch: string } | null {
+    if (typeof address !== 'string' || address === '') return null;
+    const one = open.held.checkouts.get(address);
+    return one === undefined ? null : { address, folder: one.folder, branch: one.branch };
+  }
+
+  const HOLDS_WRITING: Trouble = {
+    what: 'This copy is keeping its folder.',
+    because: `${workspaceWords.holds} Land it, or open the conversation and deal with what is in it.`,
+    actionLabel: 'Got it',
+  };
+
+  handle<readonly WorkspaceFacts[]>(CHANNEL.checkouts, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done<readonly WorkspaceFacts[]>([]);
+    return done(await copiesOfProject(open));
+  });
+
+  /**
+   * Put the project folder itself on that conversation's branch.
+   *
+   * A branch is only ever spread out in one place, so the copy is given back
+   * first. A copy holding writing its branch does not carry keeps its folder,
+   * and this says so rather than moving anything.
+   */
+  handle<readonly WorkspaceFacts[]>(CHANNEL.checkoutFront, async (_event, args) => {
+    const [address] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const one = copyNamed(open, address);
+    if (one === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    if (stillWriting(open.held)) {
+      return fail({
+        what: 'Not yet. This is still being written.',
+        because: 'Let it finish, then bring that copy to the front.',
+        actionLabel: 'Got it',
+      });
+    }
+    if (existsSync(one.folder) && (await holdsWork(gitRunHereFor(), one.folder))) {
+      return fail(HOLDS_WRITING);
+    }
+    const history = open.held.timeline;
+    if (history === null) return fail(SEVERAL_PROJECTS);
+    await history.snapshot({ boundary: 'before-going-back' }).catch(() => null);
+    await putDownCopyConversation(open, one.address);
+    await putAwayCheckoutAt(open.path, open.held, one.address);
+    if (existsSync(one.folder)) return fail(HOLDS_WRITING);
+    const switched = await gitRun(open.path, ['checkout', one.branch]);
+    if (switched.code !== 0) {
+      return fail({
+        what: 'I could not move onto that line of work.',
+        because: 'git refused the switch. Check that nothing here holds the files open.',
+        actionLabel: 'Got it',
+      });
+    }
+    return done(await copiesOfProject(open));
+  });
+
+  /** What one copy changed, against where it started. The same reading the
+   *  review queue opens, so one change is never two different diffs. */
+  handle<string>(CHANNEL.checkoutLook, async (_event, args) => {
+    const [address] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof address !== 'string' || address === '') {
+      return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    }
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, address);
+    if (checkout === null) return fail(worktreeTrouble(worktreeWords.gone));
+    const base = await sharedBase(gitRunHereFor(), checkout.folder, repo);
+    return done(base === null ? '' : await reviewDiff(checkout.folder, base));
+  });
+
+  handle<readonly WorkspaceFacts[]>(CHANNEL.checkoutLand, async (_event, args) => {
+    const [address] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const one = copyNamed(open, address);
+    if (one === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    const landed = await landTheCopy(open, where, one);
+    return landed.ok ? done(await copiesOfProject(open)) : fail(landed.trouble);
+  });
+
+  /**
+   * Give one copy's folder back and keep its branch.
+   *
+   * This is the whole of what the card offers to remove: the folder. The branch
+   * stays, and a copy holding writing no branch is carrying keeps its folder
+   * too, so there is no press here that can lose work.
+   */
+  handle<readonly WorkspaceFacts[]>(CHANNEL.checkoutPutAway, async (_event, args) => {
+    const [address] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const one = copyNamed(open, address);
+    if (one === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    if (!existsSync(one.folder)) return done(await copiesOfProject(open));
+    if (await holdsWork(gitRunHereFor(), one.folder)) return fail(HOLDS_WRITING);
+    await putDownCopyConversation(open, one.address);
+    await putAwayCheckoutAt(open.path, open.held, one.address);
+    if (existsSync(one.folder)) return fail(HOLDS_WRITING);
+    return done(await copiesOfProject(open));
   });
 
 
@@ -9299,7 +9546,7 @@ function register(): void {
   /** A card has been answered, so the loop is no longer held back by it. A
    *  click is an answer; before this only typing counted as one. */
   function answered(open: Workspace<Held>, where: Where): void {
-    continuations.waiting(open.path, listAddress(open, where) ?? '', false);
+    holdForAnswer(open.path, listAddress(open, where) ?? '', false);
   }
 
   handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildPlan, async (_event, args) => {
@@ -9677,6 +9924,7 @@ function register(): void {
        The ceiling is there to stop a loop nobody is watching, not to ration a
        person who is. */
     continuations.spoke(open.path, addressOf(conversation.held));
+    askingSomebody.delete(keyOf(open.path, addressOf(conversation.held)));
     // A new job, so the next apply puts a version down again, and whatever the
     // app had queued for itself is behind us.
     open.held.snappedBeforeApply.delete(addressOf(conversation.held));

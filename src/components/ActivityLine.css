@@ -234,3 +234,28 @@
     color: var(--text);
   }
 }
+
+/* "Show me" on: the command is what somebody is reading for, so it is the row
+   rather than a third line under a sentence that already said it. The plain
+   sentence becomes the row's tooltip; both audiences get the same shape. */
+.activity__lead {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.activity--done .activity__lead {
+  color: var(--text-muted);
+}
+
+/* The outcome as a word. A failed step is a word, never a card: painting the
+   conversation for it is the app blaming the work for its own trouble. */
+.activity__failed {
+  flex: none;
+  margin-top: 1px;
+  font-size: var(--text-2xs);
+  color: var(--accent);
+  white-space: nowrap;
+}

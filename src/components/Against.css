@@ -451,3 +451,66 @@
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   The base, and the change itself
+   --------------------------------------------------------------------------- */
+
+/* What every column is held against. Under the summary, because the summary is
+   about the files and this is about the question they answer. */
+.against__base {
+  margin: 2px 0 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* The file name is the press that opens the change, so it carries no button
+   chrome: the row already reads as a row. */
+.against__about {
+  display: block;
+  padding: 0;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.against__path,
+.against__who {
+  display: block;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .against__about:hover .against__path {
+    color: var(--accent-ink);
+  }
+}
+
+.against__about:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.against__file--open {
+  align-items: start;
+}
+
+/* The whole width of the sheet, under the row it belongs to: a diff read in one
+   column of three is a diff nobody reads. */
+.against__reading {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.against__readingname {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}

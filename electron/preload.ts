@@ -91,6 +91,7 @@ import {
   type ReviewClash,
   type ReviewDecided,
   type ReviewEntry,
+  type WorkspaceFacts,
   type ReviewOpened,
   type ReviewVerdict,
 } from '../src/lib/ipc';
@@ -110,6 +111,7 @@ function refuse<T>(what: string): Result<T> {
 
 /** Said when a call arrives without a usable entry or file on it. */
 const NO_ENTRY = 'I could not tell which piece of work you meant.';
+const NO_COPY = 'I could not tell which conversation’s copy you meant.';
 
 function isDecision(value: unknown): value is Decision {
   return value === 'yes' || value === 'no';
@@ -392,6 +394,48 @@ const api: GrapheApi = {
 
   worktreeDrop(where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.worktreeDrop, named(where)) as Promise<Result<null>>;
+  },
+
+  checkouts(where?: Where): Promise<Result<readonly WorkspaceFacts[]>> {
+    return ipcRenderer.invoke(CHANNEL.checkouts, named(where)) as Promise<
+      Result<readonly WorkspaceFacts[]>
+    >;
+  },
+
+  checkoutFront(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>> {
+    if (typeof address !== 'string' || address === '') {
+      return Promise.resolve(refuse<readonly WorkspaceFacts[]>(NO_COPY));
+    }
+    return ipcRenderer.invoke(CHANNEL.checkoutFront, address, named(where)) as Promise<
+      Result<readonly WorkspaceFacts[]>
+    >;
+  },
+
+  checkoutLook(address: string, where?: Where): Promise<Result<string>> {
+    if (typeof address !== 'string' || address === '') {
+      return Promise.resolve(refuse<string>(NO_COPY));
+    }
+    return ipcRenderer.invoke(CHANNEL.checkoutLook, address, named(where)) as Promise<
+      Result<string>
+    >;
+  },
+
+  checkoutLand(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>> {
+    if (typeof address !== 'string' || address === '') {
+      return Promise.resolve(refuse<readonly WorkspaceFacts[]>(NO_COPY));
+    }
+    return ipcRenderer.invoke(CHANNEL.checkoutLand, address, named(where)) as Promise<
+      Result<readonly WorkspaceFacts[]>
+    >;
+  },
+
+  checkoutPutAway(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>> {
+    if (typeof address !== 'string' || address === '') {
+      return Promise.resolve(refuse<readonly WorkspaceFacts[]>(NO_COPY));
+    }
+    return ipcRenderer.invoke(CHANNEL.checkoutPutAway, address, named(where)) as Promise<
+      Result<readonly WorkspaceFacts[]>
+    >;
   },
 
   preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>> {

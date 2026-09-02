@@ -1,4 +1,4 @@
-import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import { Shown } from "./components/Shown";
@@ -39,7 +39,7 @@ import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
-import { chordFor } from "./lib/actions";
+import { actionAt, chordFor, readActions, type Bindings, type Chord } from "./lib/actions";
 import { saysChord } from "./lib/keys";
 import { mark } from "./lib/marks";
 import { cssFor, defaultAppearance } from "./design/appearance";
@@ -47,7 +47,9 @@ import { lookFirstStore } from "./lib/lookfirst";
 import { escapeMeans } from "./lib/escape";
 import { heldWrites } from "./lib/heldwrites";
 import { drainStarted } from "./lib/queue";
-import { foldEvents } from "./lib/hydrate";
+import { AT_FIRST, foldEvents, lastTurns } from "./lib/hydrate";
+import FindInThread from "./components/FindInThread";
+import { threadWords } from "./lib/threadview";
 import { capsNow, saysCaps } from "./work/capacity";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
 import type { AddonHere, AgentNotice, ConnectedState, ContinuationNotice } from "./lib/ipc";
@@ -225,6 +227,10 @@ const inDevelopment = window.location.port !== '' || window.location.protocol ==
 /** Whether ⌘ or Ctrl is the key this machine reaches for. Only ever used to
  *  draw a chord — what a press means is decided from the event itself. */
 const ON_MAC = /mac/i.test(navigator.platform ?? navigator.userAgent);
+
+/** Where the chords somebody changed are kept. This machine's, because a chord
+ *  is a habit of the hands in front of it. */
+const KEYS_STORE = 'graphe:keys';
 const showGallery =
   inDevelopment && new URLSearchParams(window.location.search).has("gallery");
 
@@ -850,6 +856,51 @@ function Conversation() {
   /** Finished work waiting to be looked at, before any of it touches the
    *  folder, and whichever entry is open on the screen. */
   const [reviewQueueOpen, setReviewQueueOpen] = useState(false);
+  /** How much of this conversation is drawn. Reopening a long sitting folded
+   *  ten thousand turns into the page; it draws the tail and offers the rest.
+   *  Per conversation, so asking for more of one does not draw all of the
+   *  next. */
+  const [drawing, setDrawing] = useState(AT_FIRST);
+  /** What is being looked for in this conversation, or null when nobody is
+   *  looking. The browser's own find reaches only what is drawn, and a long
+   *  conversation draws its tail. */
+  /** The chords in force, as saved. Read through a ref by the one key handler,
+   *  which is subscribed once and must not be rebuilt every time one changes.
+   *  Kept on this machine: a chord is a habit of the hands in front of it, not
+   *  a property of the project. */
+  const [bindings, setBindings] = useState<Bindings>(() => {
+    try {
+      const raw = localStorage.getItem(KEYS_STORE);
+      return raw === null ? {} : readActions(JSON.parse(raw));
+    } catch {
+      return {};
+    }
+  });
+  const bindingsNow = useRef(bindings);
+  bindingsNow.current = bindings;
+  const bindKey = useCallback((id: string, chord: Chord | null) => {
+    setBindings((was) => {
+      const next = { ...was, [id]: chord };
+      try { localStorage.setItem(KEYS_STORE, JSON.stringify(next)); } catch { /* private mode */ }
+      return next;
+    });
+  }, []);
+  const [finding, setFinding] = useState<string | null>(null);
+  const [foundAt, setFoundAt] = useState<number | null>(null);
+  /** The turn a search landed on, by its own id, so the row can be marked and
+   *  brought into view once it has been drawn. */
+  const foundId = foundAt === null ? null : (desk?.turns[foundAt]?.id ?? null);
+  useEffect(() => {
+    if (foundId === null) return;
+    document
+      .querySelector(`.thread [data-turn="${CSS.escape(foundId)}"]`)
+      ?.scrollIntoView({ block: 'center' });
+  }, [foundId, drawing]);
+  const shownConversation = `${openProject ?? ''}\u0000${desk?.address ?? ''}`;
+  // Asking for more of one conversation must not draw all of the next.
+  useEffect(() => {
+    setDrawing(AT_FIRST);
+  }, [shownConversation]);
   const [reviewQ, setReviewQ] = useState<readonly ReviewEntry[]>([]);
   const [reviewAt, setReviewAt] = useState<string | null>(null);
   const [reviewDiff, setReviewDiff] = useState<string | null>(null);
@@ -2750,94 +2801,99 @@ function Conversation() {
         }
       }
       if (!event.metaKey && !event.ctrlKey) return;
-      // Everything this window can do, by name. Not ⌘K — "Ask for anything"
-      // has owned that since before this existed, and takes it at the document
-      // before anything here can see it. Pressed many times a day, so it opens
-      // with no animation at all.
-      if (event.shiftKey && event.key.toLowerCase() === "p") {
-        event.preventDefault();
-        setPaletteOpen((was) => !was);
-        return;
-      }
-      if (event.key === "o") {
-        event.preventDefault();
-        void browse();
-        return;
-      }
-      if (event.key === "d" && desk !== null) {
-        event.preventDefault();
-        // Design toggles on and off on the same key, like the shelf. Only a
-        // switch from another screen clears the rest.
-        setDesignAt((was) => {
-          if (was !== null) return null;
-          goToScreen("design");
-          return "styles";
-        });
-        return;
-      }
-      /* Moving between what is open. The row is the one as drawn, so these
-         land where the eye is rather than on some other order. */
-      if (event.shiftKey && (event.key === "{" || event.key === "}")) {
-        const wanted = tabRow.along(event.key === "}" ? 1 : -1);
-        if (wanted === null) return;
-        event.preventDefault();
-        tabRow.goTo(wanted);
-        return;
-      }
-      // The one worth a key of its own: whatever has stopped to ask you. It is
-      // the only state that cannot move on without a person.
-      if (event.shiftKey && event.key.toLowerCase() === "n") {
-        const wanted = tabRow.wantsYou();
-        if (wanted === null) return;
-        event.preventDefault();
-        tabRow.goTo(wanted);
-        return;
-      }
-      if (event.shiftKey && event.key.toLowerCase() === "t") {
-        event.preventDefault();
-        void browse();
-        return;
-      }
-      if (event.key === "w" && desk !== null) {
-        const wanted = tabRow.at();
-        if (wanted === null) return;
-        event.preventDefault();
-        tabRow.close(wanted);
-        return;
-      }
-      // One key between the conversation and the page, from either side, and
-      // always the same key. In the split the question does not arise.
-      if (event.key === "j" && desk !== null) {
-        event.preventDefault();
-        togglePane();
-        return;
-      }
-      if (event.key === "b" && desk !== null) {
-        event.preventDefault();
-        setShelfOpen((was) => !was);
-        return;
-      }
-      if (event.key === "t" && desk !== null) {
-        event.preventDefault();
-        void swapConversation(null);
-        return;
-      }
-      /* Advertised in the palette and answered by nothing, until now: a key a
-         list promises and the keyboard ignores is worse than no key. */
-      if (event.shiftKey && event.key.toLowerCase() === "f" && desk !== null) {
-        event.preventDefault();
-        setFilesOpen(true);
-        return;
-      }
-      // ⌘1–9 goes to what is open, not to what is remembered. Recent projects
-      // are one press away in the name at the top and in "Ask for anything",
-      // and a number key that jumps to a folder you cannot see is a surprise.
-      const nth = Number.parseInt(event.key, 10);
-      if (Number.isFinite(nth) && nth >= 1 && nth <= 9) {
-        const wanted = tabRow.nth(nth);
-        if (wanted === null) return;
-        event.preventDefault();
-        tabRow.goTo(wanted);
+
+      /* One list, read by the keyboard as well as by the palette.
+         This was a hand-written chain of key comparisons beside a registry
+         only the palette read, which is the same two-lists-that-disagree bug
+         one press further in: a chord changed in `lib/actions.ts` would have
+         moved the palette's label and left the keyboard where it was. */
+      const action = actionAt(
+        {
+          key: event.key,
+          metaKey: event.metaKey,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+        },
+        ON_MAC,
+        desk === null ? 'anywhere' : 'in a conversation',
+        bindingsNow.current,
+      );
+      if (action === null) return;
+
+      /* ⌘K belongs to "Ask for anything", which takes it at the document
+         before this listener can see it. Send and Stop belong to the composer
+         and to Escape above. */
+      if (action.id === 'ask' || action.id === 'send' || action.id === 'stop') return;
+
+      // Everything below moves something on screen, so nothing reaches the
+      // browser's own binding for the same chord.
+      event.preventDefault();
+
+      switch (action.id) {
+        case 'palette':
+          setPaletteOpen((was) => !was);
+          return;
+        case 'open':
+          void browse();
+          return;
+        case 'design':
+          // Design toggles on and off on the same key, like the shelf. Only a
+          // switch from another screen clears the rest.
+          setDesignAt((was) => {
+            if (was !== null) return null;
+            goToScreen("design");
+            return "styles";
+          });
+          return;
+        case 'next':
+        case 'previous': {
+          /* The row as drawn, so these land where the eye is rather than on
+             some other order. */
+          const wanted = tabRow.along(action.id === 'next' ? 1 : -1);
+          if (wanted !== null) tabRow.goTo(wanted);
+          return;
+        }
+        case 'needs-you': {
+          // The one worth a key of its own: the only state that cannot move on
+          // without a person.
+          const wanted = tabRow.wantsYou();
+          if (wanted !== null) tabRow.goTo(wanted);
+          return;
+        }
+        case 'close': {
+          const wanted = tabRow.at();
+          if (wanted !== null) tabRow.close(wanted);
+          return;
+        }
+        case 'page':
+          // One key between the conversation and the page, from either side,
+          // and always the same key. In the split the question does not arise.
+          togglePane();
+          return;
+        case 'shelf':
+          setShelfOpen((was) => !was);
+          return;
+        case 'find':
+          setFinding((was) => (was === null ? '' : null));
+          return;
+        case 'new':
+          void swapConversation(null);
+          return;
+        case 'files':
+          setFilesOpen(true);
+          return;
+        case 'go-nth': {
+          /* ⌘1 to ⌘9 goes to what is open, not to what is remembered. Recent
+             projects are one press away in the name at the top, and a number
+             key that jumps to a folder you cannot see is a surprise. */
+          const nth = Number.parseInt(event.key, 10);
+          const wanted = Number.isFinite(nth) ? tabRow.nth(nth) : null;
+          if (wanted !== null) tabRow.goTo(wanted);
+          return;
+        }
+        default:
+          return;
       }
     };
       window.addEventListener("keydown", onKey);
@@ -4391,6 +4447,8 @@ function Conversation() {
         run: () => togglePane(), ready: here, whyNot: needsProject },
       { id: 'shelf', name: 'Show or hide the shelf', where: 'Conversation', keys: keysFor('shelf'),
         run: () => setShelfOpen((was) => !was) },
+      { id: 'find', name: 'Find in this conversation', where: 'Conversation', keys: keysFor('find'),
+        run: () => setFinding((was) => (was === null ? '' : was)), ready: here, whyNot: needsProject },
       { id: 'changes', name: 'Review the working diff', where: 'Project',
         run: () => {
           setChangeText(null);
@@ -5400,6 +5458,8 @@ function Conversation() {
         ownStyles={ownStyles ?? undefined}
         onReloadStyles={loadOwnStyles}
         onMac={ON_MAC}
+        bindings={bindings}
+        onBind={bindKey}
         connection={connection}
         onSelectModel={selectModel}
         onThinking={changeThinking}
@@ -5508,25 +5568,67 @@ function Conversation() {
               <h1 className="workhead__name">{desk.name}</h1>
             </header>
 
+            {finding === null ? null : (
+              <FindInThread
+                turns={desk.turns}
+                term={finding}
+                at={foundAt}
+                onTerm={(next) => {
+                  setFinding(next);
+                  setFoundAt(null);
+                }}
+                onAt={(turn, showFrom) => {
+                  setFoundAt(turn);
+                  // Bringing a result into view has to draw it first.
+                  setDrawing((was) => Math.max(was, showFrom));
+                }}
+                onClose={() => {
+                  setFinding(null);
+                  setFoundAt(null);
+                }}
+              />
+            )}
+
             <div className="thread">
             {(() => {
+              /* Nobody reopens a sitting to read the top of it. A conversation
+                 of ten thousand turns draws its last few hundred, and the rest
+                 is one press away. */
+              const paged = lastTurns(desk.turns, drawing);
               // A step that took a picture stays on its own line: a picture
               // folded into a collapsed run is a picture nobody sees. So does
               // the advisor — nobody asked for a second model, so the line is
               // the only evidence it happened, and a fold hides it.
               const showing = new Set(pictures.under.keys());
-              for (const turn of desk.turns) {
+              for (const turn of paged.turns) {
                 if (turn.kind !== 'did') continue;
                 if (turn.shown !== undefined || isAdvisor(turn.label)) showing.add(turn.id);
               }
-              const all = rows(desk.turns, showing);
+              const all = rows(paged.turns, showing);
               const lastGrapheIdx = [...all].reverse().findIndex((r) => r.kind !== 'steps' && r.turn.kind === 'said' && r.turn.from === 'graphe');
               const lastIdx = lastGrapheIdx === -1 ? -1 : all.length - 1 - lastGrapheIdx;
-              return all.map((row, idx) =>
+              const earlier =
+                paged.earlier === 0 ? null : (
+                  <button
+                    key="earlier"
+                    type="button"
+                    className="thread__earlier"
+                    onClick={() => setDrawing((was) => was + AT_FIRST)}
+                  >
+                    {threadWords.earlier(paged.earlier)}
+                  </button>
+                );
+              return [
+                earlier,
+                ...all.map((row, idx) =>
               row.kind === "steps" ? (
                 <Steps key={row.id} steps={row.steps} showMe={preferences.showMe} />
               ) : (
-                <Fragment key={row.turn.id}>
+                <div
+                  key={row.turn.id}
+                  className={`thread__row ${row.turn.id === foundId ? 'thread__row--found' : ''}`}
+                  data-turn={row.turn.id}
+                >
                   <Turnstile
                     turn={row.turn}
                     onRespond={respond}
@@ -5543,9 +5645,9 @@ function Conversation() {
                   {(pictures.under.get(row.turn.id) ?? []).map((one) => (
                     <Picture key={one.change.id} change={one.change} />
                   ))}
-                </Fragment>
+                </div>
               ),
-            ); })()}
+            )]; })()}
               {frontBusy && !runningNow ? <WorkingMark /> : null}
               {pictures.last.map((one) => (
                 <Picture key={one.change.id} change={one.change} />

@@ -84,6 +84,7 @@ import {
   type Result,
   type Room,
   type SideOfWork,
+  type WorkspaceFacts,
   type Skill,
   type AlwaysDoes,
   type Workflow,
@@ -1158,6 +1159,28 @@ let previewPlanMode = false;
       return Promise.resolve(previewFail<null>());
     },
 
+    /* Nothing in a browser tab has a copy of the project, so the band draws its
+       own empty line rather than a refusal. */
+    checkouts(): Promise<Result<readonly WorkspaceFacts[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    checkoutFront(): Promise<Result<readonly WorkspaceFacts[]>> {
+      return Promise.resolve(previewFail<readonly WorkspaceFacts[]>());
+    },
+
+    checkoutLook(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
+    checkoutLand(): Promise<Result<readonly WorkspaceFacts[]>> {
+      return Promise.resolve(previewFail<readonly WorkspaceFacts[]>());
+    },
+
+    checkoutPutAway(): Promise<Result<readonly WorkspaceFacts[]>> {
+      return Promise.resolve(previewFail<readonly WorkspaceFacts[]>());
+    },
+
     preparePrWorktree(): Promise<Result<string>> {
       return Promise.resolve(previewFail<string>());
     },
@@ -1893,6 +1916,7 @@ let previewPlanMode = false;
             picture: null,
             spent: null,
             folder: null,
+            base: previewLine,
           },
           {
             id: 'way-2',
@@ -1902,6 +1926,7 @@ let previewPlanMode = false;
             picture: null,
             spent: null,
             folder: null,
+            base: previewLine,
           },
         ]),
       );
@@ -2235,6 +2260,11 @@ function connect(): Bridge {
     fastForward: (where) => api.fastForward(where),
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),
+    checkouts: (where) => api.checkouts(where),
+    checkoutFront: (address, where) => api.checkoutFront(address, where),
+    checkoutLook: (address, where) => api.checkoutLook(address, where),
+    checkoutLand: (address, where) => api.checkoutLand(address, where),
+    checkoutPutAway: (address, where) => api.checkoutPutAway(address, where),
     preparePrWorktree: (prNumber, where) => api.preparePrWorktree(prNumber, where),
     openPrReview: (prNumber, where) => api.openPrReview(prNumber, where),
     reviewQueue: (where) => api.reviewQueue(where),

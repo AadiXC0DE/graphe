@@ -23,6 +23,15 @@ type Props = {
    * escape hatch and starts being the product.
    */
   real?: string;
+  /**
+   * Lead with the machinery rather than with the plain sentence.
+   *
+   * Both audiences get the same row shape; which of the two texts is on it is
+   * the difference. With "Show me" on, the command is what somebody is reading
+   * for and the sentence becomes the tooltip, rather than the command hanging
+   * as a third line under a sentence that already said it.
+   */
+  lead?: boolean;
 };
 
 /** One thing the agent did, as a read-only feed item.
@@ -36,13 +45,14 @@ type Props = {
  * apology, "Reading your Figma file" is information (notes/strategy/UI-DESIGN.md). The
  * state is carried by icon shape as well as colour, so nothing here depends on
  * colour alone. */
-export default function ActivityLine({ state, label, detail, meta, real }: Props) {
+export default function ActivityLine({ state, label, detail, meta, real, lead = false }: Props) {
+  const machinery = lead && real !== undefined && real !== '';
   /* The one line in the feed a second model wrote. It is drawn as what it is
      rather than as another grey particular, because nobody asked for it. */
   const said = advice(label, detail);
 
   return (
-    <div className={`activity activity--${state}`}>
+    <div className={`activity activity--${state}`} title={machinery ? label : undefined}>
       {/* 1.4 on a 14-unit box, which renders as a 1.4px stroke — the same
           rendered weight as the mark on an error card, and one step above the
           1.2 the 11–13px glyphs carry. These two were at 1.6, the heaviest
@@ -76,15 +86,24 @@ export default function ActivityLine({ state, label, detail, meta, real }: Props
       </span>
 
       <span className="activity__text">
-        <span className="activity__label">{label}</span>
+        {machinery ? (
+          <code className="activity__lead">{real}</code>
+        ) : (
+          <span className="activity__label">{label}</span>
+        )}
         {said !== null ? (
           <Said said={said} />
         ) : detail ? (
           <span className="activity__detail">{detail}</span>
         ) : null}
-        {real ? <code className="activity__real">{real}</code> : null}
+        {real !== undefined && real !== '' && !machinery ? (
+          <code className="activity__real">{real}</code>
+        ) : null}
       </span>
 
+      {/* A word, not a card. A step that failed is a step that failed; painting
+          the conversation for it is the app blaming the work. */}
+      {state === 'failed' ? <span className="activity__failed">Failed</span> : null}
       {meta ? <span className="activity__meta">{meta}</span> : null}
 
       <span className="activity__sr">

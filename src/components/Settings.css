@@ -697,3 +697,35 @@ button.settings__row {
   background: transparent;
   color: var(--text-faint);
 }
+
+/* Changing a chord. The row is the control: press it, then press the keys. A
+   text field would ask somebody to spell a chord, which nobody can do. */
+.settings__chordset {
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.settings__chordset:disabled {
+  cursor: default;
+}
+
+.settings__chordset--taking kbd {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.settings__chordset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Two actions on one chord, said where it happens rather than found later by
+   pressing it and getting the wrong one. */
+.settings__clash {
+  font-size: var(--text-2xs);
+  color: var(--accent);
+}

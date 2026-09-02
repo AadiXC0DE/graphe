@@ -16,6 +16,7 @@
  * because it leaks onto the people the product exists for.
  */
 
+import { defaultAppearance } from '../src/design/appearance';
 import { describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -160,6 +161,7 @@ describe('D1 — the real name of what just happened', () => {
           advisorThinking: null,
           advisorGates: { completionGate: false, loopGate: false },
           addons: 'on',
+          appearance: defaultAppearance,
           showMe: true,
           model: null,
           thinking: {},

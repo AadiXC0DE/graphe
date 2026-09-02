@@ -222,6 +222,7 @@ import { keyOf } from '../src/work/owner';
 import { writeAtomically, writeAtomicallySync } from '../src/lib/atomic';
 import { GoalFile } from '../src/projects/goals';
 import { continuationOwner } from './continuation-owner';
+import { readAppearance } from '../src/design/appearance';
 import { batcher } from '../src/lib/batching';
 import { drainStarted, withoutOurs } from '../src/lib/queue';
 import { copiesFolder } from '../src/work/copies';
@@ -9307,6 +9308,15 @@ function register(): void {
     const prefs = await preferences();
     if (choice !== 'on' && choice !== 'tools-only') return done(prefs.all());
     return done(await prefs.change({ addons: choice }));
+  });
+
+  /* How it looks. Read forgivingly — anything unreadable falls back to the
+     shipped answer for that one field, so a hand-edited file costs the field
+     it broke rather than the whole appearance. */
+  handle<Preferences>(CHANNEL.setAppearance, async (_event, args) => {
+    const [raw] = args;
+    const prefs = await preferences();
+    return done(await prefs.change({ appearance: readAppearance(raw) }));
   });
 
   handle<Preferences>(CHANNEL.setThinking, async (_event, args) => {

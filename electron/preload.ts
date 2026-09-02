@@ -63,6 +63,7 @@ import {
   type AlwaysDoes,
   type Workflow,
   type AgentFrame,
+  type Appearance,
   type BuildPlan,
   type BuildAdvance,
   type ContinuationNotice,
@@ -927,6 +928,12 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<Preferences>('I could not tell which theme you meant.'));
     }
     return ipcRenderer.invoke(CHANNEL.setTheme, theme) as Promise<Result<Preferences>>;
+  },
+
+  setAppearance(appearance: Appearance, where?: Where): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.setAppearance, appearance, named(where)) as Promise<
+      Result<Preferences>
+    >;
   },
 
   setHowMuch(id: string): Promise<Result<Preferences>> {

@@ -12,6 +12,9 @@
  * see.
  */
 
+import type { Appearance } from '../design/appearance';
+
+export type { Appearance };
 import type { AgentEvent, Money, RunningPiece, SpendSummary } from '../agent/types';
 
 export type { RunningPiece } from '../agent/types';
@@ -455,6 +458,9 @@ export type Preferences = {
    *  their tools and drops the hooks — Graphe is already deciding when a turn
    *  begins, and two of those is the bug. */
   addons: 'on' | 'tools-only';
+  /** How the app looks, as token overrides. Five colour presets were the whole
+   *  of it before, and a preset is somebody else's taste. */
+  appearance: Appearance;
   /** How much time each chosen model should take before answering. Kept per
    *  provider/model pair because the names and available choices differ. */
   thinking: Readonly<Record<string, ThinkingLevel>>;
@@ -1353,6 +1359,7 @@ export const CHANNEL = {
   setHoldBack: 'graphe:set-hold-back',
   setKeepLogins: 'graphe:set-keep-logins',
   setTheme: 'graphe:set-theme',
+  setAppearance: 'graphe:set-appearance',
   setHowMuch: 'graphe:set-how-much',
   decideOnWork: 'graphe:decide-on-work',
   handToDeveloper: 'graphe:hand-to-developer',
@@ -1757,6 +1764,9 @@ export type GrapheApi = {
    *  it. Off keeps nothing and starts every browser clean. */
   setKeepLogins(on: boolean, where?: Where): Promise<Result<Preferences>>;
   setTheme(theme: Theme): Promise<Result<Preferences>>;
+  /** Change how it looks. Every control writes a token; the whole thing is one
+   *  small object, so it is set whole rather than a field at a time. */
+  setAppearance(appearance: Appearance): Promise<Result<Preferences>>;
   /** Move the line a picture has to cross before the work is stopped. One of
    *  `HOW_MUCH` in `src/design/gate.ts`. Sticky. */
   setHowMuch(id: string): Promise<Result<Preferences>>;

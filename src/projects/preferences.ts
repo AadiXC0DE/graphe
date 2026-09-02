@@ -17,6 +17,7 @@
  * product is that we make them.
  */
 
+import { defaultAppearance, readAppearance, type Appearance } from '../design/appearance';
 import type { Money } from '../agent/types';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -80,6 +81,10 @@ export type Preferences = {
    * same budget and names it. So it can be let through.
    */
   addons: 'on' | 'tools-only';
+  /** How the app looks, as a set of token overrides — accent, tone, contrast,
+   *  radius, density, fonts, motion. Five colour presets were the whole of it
+   *  before, and a preset is somebody else's taste. */
+  appearance: Appearance;
   /** How much time each model should take before it answers. The map is keyed
    * by its provider and model id because different models support different
    * choices. */
@@ -157,6 +162,22 @@ export type Preferences = {
   theme: Theme;
 };
 
+/** Every field, because an appearance is small and comparing it wrongly means
+ *  a change that never reaches the disk. */
+function sameAppearance(one: Appearance, other: Appearance): boolean {
+  return (
+    one.accent === other.accent &&
+    one.tone === other.tone &&
+    one.contrast === other.contrast &&
+    one.radius === other.radius &&
+    one.density === other.density &&
+    one.uiFont === other.uiFont &&
+    one.codeFont === other.codeFont &&
+    one.ligatures === other.ligatures &&
+    one.motion === other.motion
+  );
+}
+
 /** Both gates off unless the file says otherwise, and anything unreadable is
  *  off too: a gate that turns itself on because a file was half-written is the
  *  failure this exists to stop. */
@@ -173,6 +194,7 @@ export const defaultPreferences: Preferences = {
   advisorThinking: null,
   advisorGates: { completionGate: false, loopGate: false },
   addons: 'on',
+  appearance: defaultAppearance,
   thinking: {},
   kept: {},
   trusted: {},
@@ -219,6 +241,7 @@ function asPreferences(value: unknown): Preferences {
     advisorThinking: asAdvisorThinking(record['advisorThinking']),
     advisorGates: asGates(record['advisorGates']),
     addons: record['addons'] === 'tools-only' ? 'tools-only' : 'on',
+    appearance: readAppearance(record['appearance']),
     thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
@@ -317,6 +340,7 @@ export class PreferenceFile {
       next.advisorGates.completionGate === this.#preferences.advisorGates.completionGate &&
       next.advisorGates.loopGate === this.#preferences.advisorGates.loopGate &&
       next.addons === this.#preferences.addons &&
+      sameAppearance(next.appearance, this.#preferences.appearance) &&
       sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted) &&

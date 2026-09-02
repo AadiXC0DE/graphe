@@ -20,6 +20,7 @@
  * drifts away from the thing it is standing in for.
  */
 
+import { defaultAppearance, type Appearance } from '../design/appearance';
 import type { AgentEvent, RunningPiece } from '../agent/types';
 import {
   findMoved,
@@ -707,7 +708,8 @@ let previewPlanMode = false;
     advisor: null,
     advisorThinking: null,
     advisorGates: { completionGate: false, loopGate: false },
-    addons: 'tools-only',
+    addons: 'on',
+    appearance: defaultAppearance,
     thinking: {},
     kept: {},
     showFiles: true,
@@ -998,6 +1000,11 @@ let previewPlanMode = false;
 
     setTheme(theme: unknown): Promise<Result<Preferences>> {
       preferred = { ...preferred, theme: themeFrom(theme) };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    setAppearance(appearance: Appearance): Promise<Result<Preferences>> {
+      preferred = { ...preferred, appearance };
       return Promise.resolve(done({ ...preferred }));
     },
 
@@ -2153,6 +2160,7 @@ function connect(): Bridge {
     keepVersion: (versionId, keep, where) => api.keepVersion(versionId, keep, where),
     setShowFiles: (on) => api.setShowFiles(on),
     setTheme: (theme) => api.setTheme(theme),
+    setAppearance: (appearance) => api.setAppearance(appearance),
     projectFiles: (where) => api.projectFiles(where),
     fileText: (path, where) => api.fileText(path, where),
     hatches: () => api.hatches(),

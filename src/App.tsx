@@ -42,6 +42,7 @@ import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
+import { cssFor, defaultAppearance } from "./design/appearance";
 import { lookFirstStore } from "./lib/lookfirst";
 import { escapeMeans } from "./lib/escape";
 import { heldWrites } from "./lib/heldwrites";
@@ -529,7 +530,8 @@ function Conversation() {
     advisor: null,
     advisorThinking: null,
     advisorGates: { completionGate: false, loopGate: false },
-    addons: 'tools-only',
+    addons: 'on',
+    appearance: defaultAppearance,
     thinking: {},
     kept: {},
     showFiles: false,
@@ -688,6 +690,22 @@ function Conversation() {
   const [theme, setTheme] = useState<Theme>(() =>
     themeFrom(typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme')),
   );
+
+  /* The appearance, as a stylesheet. Written last in the head and matched at
+     the same weight as the theme's own block, because `:root[data-theme]` beats
+     a bare `:root` and a token that loses a specificity tie is a control that
+     does nothing. */
+  useEffect(() => {
+    const showingNow = markFor(theme);
+    const on = showingNow === null || showingNow === 'light' || showingNow === 'pink' ? 'light' : 'dark';
+    let sheet = document.getElementById('appearance');
+    if (sheet === null) {
+      sheet = document.createElement('style');
+      sheet.id = 'appearance';
+      document.head.append(sheet);
+    }
+    sheet.textContent = cssFor(preferences.appearance, on);
+  }, [preferences.appearance, theme]);
 
   useEffect(() => {
     const mark = markFor(theme);
@@ -4982,6 +5000,13 @@ function Conversation() {
           });
         }}
         caps={saysCaps(capsNow())}
+        appearance={preferences.appearance}
+        onAppearance={(next) => {
+          void bridge.setAppearance(next).then((answer) => {
+            if (answer.ok) setPreferences(answer.value);
+          });
+        }}
+        showingDark={markFor(theme) !== null && markFor(theme) !== 'light' && markFor(theme) !== 'pink'}
       />
 
       <Usage

@@ -1,0 +1,175 @@
+/* How the app looks, as a handful of choices. The preview below them is the
+   real stylesheet on real surfaces — a drawing of what a theme might look like
+   is the one thing a theme builder must not show. */
+
+.appearance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.appearance__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.appearance__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.appearance__row:last-of-type {
+  border-bottom: 0;
+}
+
+.appearance__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.appearance__name {
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.appearance__hint {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.appearance__choices {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+}
+
+.appearance__choices button,
+.appearance__row > button[role='switch'] {
+  padding: var(--space-1) var(--space-3);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-out-quart),
+    background var(--dur-micro) var(--ease-out-quart);
+}
+
+.appearance__row > button[role='switch'] {
+  flex: 0 0 auto;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+}
+
+.appearance__choices button:hover,
+.appearance__row > button[role='switch']:hover {
+  color: var(--text);
+}
+
+.appearance__on {
+  color: var(--text) !important;
+  background: var(--bg-raised) !important;
+}
+
+.appearance__choices button:active,
+.appearance__row > button[role='switch']:active {
+  transform: scale(0.97);
+}
+
+.appearance__colour {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.appearance__font {
+  flex: 0 0 auto;
+  width: 180px;
+  padding: var(--space-1) var(--space-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* The preview carries the whole token set for the appearance being considered,
+   so everything inside it is drawn the way the app would draw it. */
+.appearance__preview {
+  padding: var(--space-4);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.appearance__sample {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.appearance__sampletitle {
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+}
+
+.appearance__samplebody {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+}
+
+.appearance__samplecode {
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.appearance__sampleaccent {
+  padding: var(--space-1) var(--space-3);
+  color: var(--accent-text);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appearance__choices button,
+  .appearance__row > button[role='switch'] {
+    transition: none;
+  }
+
+  .appearance__choices button:active,
+  .appearance__row > button[role='switch']:active {
+    transform: none;
+  }
+}

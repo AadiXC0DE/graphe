@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import AppearanceBand from './AppearanceBand';
+import type { Appearance } from '../design/appearance';
 import type { AlwaysDoes } from '../lib/ipc';
 import { THEMES, THEME_WORDS, showing, type Theme } from '../lib/theme';
 import Switch from './Switch';
@@ -46,6 +48,12 @@ type Props = {
   onCopyDiagnostics?: () => void;
   /** What this machine will do at once, derived from the machine. */
   caps?: string;
+  /** How the app looks. Five colour presets were the whole of it before, and a
+   *  preset is somebody else's taste. */
+  appearance?: Appearance;
+  onAppearance?: (next: Appearance) => void;
+  /** Which way the palette runs right now, so the preview is the real thing. */
+  showingDark?: boolean;
 };
 
 /** The screens this one leads to. Places rather than preferences, so they sit
@@ -167,6 +175,7 @@ const GROUPS: readonly { id: string; title: string; rows: readonly Row[] }[] = [
     ],
   },
   { id: 'theme', title: THEME_WORDS.name, rows: [] },
+  { id: 'appearance', title: 'Make it yours', rows: [] },
 ];
 
 /**
@@ -196,6 +205,9 @@ export default function Settings({
   onClearFinishedWork,
   onCopyDiagnostics,
   caps,
+  appearance,
+  onAppearance,
+  showingDark = false,
 }: Props) {
   useEffect(() => {
     if (!open) return;
@@ -426,6 +438,13 @@ export default function Settings({
                       nobody else has to read it. */}
                   {group.id === 'app' && caps !== undefined ? (
                     <p className="settings__machine">{caps}</p>
+                  ) : null}
+                  {group.id === 'appearance' && appearance !== undefined && onAppearance !== undefined ? (
+                    <AppearanceBand
+                      appearance={appearance}
+                      onChange={onAppearance}
+                      on={showingDark ? 'dark' : 'light'}
+                    />
                   ) : null}
                 </section>
               ),

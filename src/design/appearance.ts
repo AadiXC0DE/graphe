@@ -222,8 +222,15 @@ export function asCss(tokens: Readonly<Record<string, string>>, selector = ':roo
  *
  * Ligatures are a property rather than a value, so they are the one thing that
  * cannot be a token — they land on the elements a code font is set on. */
+/**
+ * The whole appearance as one stylesheet.
+ *
+ * Matched at `:root, :root[data-theme]` rather than a bare `:root`, because a
+ * theme's own block is `:root[data-theme='graphe']` and beats a plain `:root`
+ * on specificity — a token that loses that tie is a control that does nothing.
+ */
 export function cssFor(one: Appearance, on: Base = 'light'): string {
-  const root = asCss(tokensFor(one, on));
+  const root = asCss(tokensFor(one, on), ':root, :root[data-theme]');
   if (one.ligatures) return root;
   return `${root}\ncode, pre, kbd, samp {\n  font-variant-ligatures: none;\n}`;
 }

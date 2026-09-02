@@ -3335,9 +3335,8 @@ function Conversation() {
             void deliver(text, sizeUp(text), { lookFirst: false, queue: 'followUp' });
             return;
           }
-          // Already have a goal — queue a nudge toward it with full access.
-          if (goalNow.current !== null) {
-          }
+          // Already have a goal. Which conversation carries it on is the
+          // shell's now, so this only has to send.
           void deliver(text, sizeUp(text), { lookFirst: false, queue: 'followUp' });
           return;
         }

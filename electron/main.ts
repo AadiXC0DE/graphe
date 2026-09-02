@@ -229,7 +229,9 @@ import {
 } from '../src/work/storage';
 import { sizeOf, TOO_MANY_BYTES, TOO_MANY_FILES, verdictFor } from '../src/history/opening';
 import { openLog } from './log';
+import { saysWhyStopped } from '../src/lib/showme';
 import { addonProcesses, ledger } from './processes';
+import { watchWhatWeStart } from '../src/share/spawned';
 import { MENU_IDS, menuTemplate, type MenuItem } from './menu';
 import { gather, saysDiagnostics } from './diagnostics';
 import { MOST_ROWS, standingBlock } from '../src/agent/pi/standing';
@@ -4412,8 +4414,15 @@ async function standingBlockFor(project: string, address: string): Promise<strin
  *  reaches disk; never a transcript, never a key. */
 const log = openLog(join(app.getPath('userData'), 'logs'));
 
-/** Every process this app starts, so quitting takes them with it. */
+/** Every process this app starts, so quitting takes them with it. Helpers,
+ *  servers, checks, language servers, browsers and the children an add-on's
+ *  tool spawned — none of them appeared anywhere before, and none of them died
+ *  with the app. */
 const spawned = ledger();
+watchWhatWeStart({
+  started: (one) => spawned.note({ ...one, at: Date.now() }),
+  ended: (pid) => spawned.gone(pid),
+});
 
 /** The window is reloaded once after it stops, never in a loop. */
 let reloadedAlready = false;
@@ -4462,27 +4471,36 @@ async function diagnosticsNow(): Promise<string> {
  * is the thing worth sending.
  */
 function whyStopped(): string {
-  const lines: string[] = [];
+  const screens: string[] = [];
   for (const one of workspaces.open) {
     for (const conversation of one.held.sessions.open) {
       const address = conversation.path;
       const last = continuations.lastMove(one.path, address);
       if (last === null) continue;
-      lines.push(
-        `${basename(one.path)} · ${address}: ${last.move.kind}${
-          last.move.kind === 'send' ? ` (${last.move.why})` : ''
-        } — ${last.move.kind === 'rest' ? (last.move.said ?? 'nothing to say') : last.move.said}`,
+      screens.push(
+        `${basename(one.path)} · ${address}`,
+        saysWhyStopped({
+          decided: {
+            kind: last.move.kind,
+            why: last.move.kind === 'send' ? last.move.why : null,
+            said: last.move.kind === 'rest' ? (last.move.said ?? '') : last.move.said,
+          },
+          endedHow: null,
+          list: null,
+          rounds: { sent: last.move.state.rounds, stuck: last.move.state.stuckRounds },
+          blockedStreak: null,
+          promptCharacters: null,
+          addons: conversation.held.addons.map((addon) => ({
+            name: addon.name,
+            says: addon.says,
+            policy: addon.policy,
+          })),
+          overruns: conversation.held.hookOverruns,
+        }),
       );
-      lines.push(`  rounds ${String(last.move.state.rounds)}, stuck ${String(last.move.state.stuckRounds)}`);
-      for (const addon of conversation.held.addons) {
-        lines.push(`  add-on ${addon.name}: ${addon.says} · ${addon.policy}`);
-      }
-      for (const over of conversation.held.hookOverruns) {
-        lines.push(`  ${over.extension} ran past its budget on ${over.event} (${String(over.ms)}ms)`);
-      }
     }
   }
-  return lines.length === 0 ? 'Nothing has stopped yet this sitting.' : lines.join('\n');
+  return screens.length === 0 ? 'Nothing has stopped yet this sitting.' : screens.join('\n\n');
 }
 
 /** The menu is data; the presses are here. Attached by id so the template stays

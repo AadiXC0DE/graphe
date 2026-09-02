@@ -25,6 +25,7 @@
  * only `start` and `stop` touch a process.
  */
 
+import * as noted from '../share/spawned';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import { portEnv } from '../work/ports';
@@ -323,6 +324,10 @@ export class Running {
       detached: process.platform !== 'win32',
     });
     entry.child = child;
+    // A server outlives the turn that started it by design, so it is the one
+    // most worth writing down: quitting has to take it with it.
+    noted.started({ pid: child.pid, what: options.command, kind: 'server' });
+    child.once('exit', () => noted.ended(child.pid));
     if (child.pid !== undefined) options.noted?.began(child.pid, options.command);
     const abort = (): void => end(child, entry.ended);
     if (wasAborted()) abort();

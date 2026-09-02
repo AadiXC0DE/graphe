@@ -282,6 +282,35 @@ export function render(collected, at = new Date(), lock = 'unknown') {
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
 
+/**
+ * What changed between two manifests, in the fewest lines that say it.
+ *
+ * Package names first — a package that came or went is the whole answer nine
+ * times out of ten. Only when the same packages are on both sides is it worth
+ * saying which lines moved.
+ */
+function whatDiffers(before, after) {
+  const names = (text) => new Set([...text.matchAll(/^### (\S+)/gm)].map((one) => one[1]));
+  const was = names(before);
+  const now = names(after);
+  const gone = [...was].filter((one) => !now.has(one));
+  const came = [...now].filter((one) => !was.has(one));
+  const said = [];
+  if (gone.length > 0) said.push(`no longer installed: ${gone.slice(0, 12).join(', ')}`);
+  if (came.length > 0) said.push(`newly installed: ${came.slice(0, 12).join(', ')}`);
+  if (said.length > 0) return said;
+
+  // Same packages, different text — a version or a licence moved.
+  const lines = (text) => text.split('\n');
+  const a = lines(before);
+  const b = lines(after);
+  for (let at = 0; at < Math.max(a.length, b.length) && said.length < 6; at += 1) {
+    if (a[at] === b[at]) continue;
+    said.push(`line ${String(at + 1)}: was ${JSON.stringify(a[at] ?? '')}, now ${JSON.stringify(b[at] ?? '')}`);
+  }
+  return said.length === 0 ? ['nothing this can name — the files differ in whitespace'] : said;
+}
+
 /* -------------------------------------------------------------------------- */
 
 if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) {
@@ -299,10 +328,16 @@ if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[
     // The fingerprint says the tree; this says the file actually describes it.
     const collected = await collect();
     const undated = (text) => text.replace(/^\d+ packages, generated .*$/m, '');
-    if (undated(existing) !== undated(render(collected, new Date(), lock))) {
+    const wanted = render(collected, new Date(), lock);
+    if (undated(existing) !== undated(wanted)) {
       console.error(
         'THIRD-PARTY-LICENSES.md is out of date. Run `npm run licenses` and commit the result.',
       );
+      // And what differs, because "out of date" on its own costs whoever reads
+      // it an hour working out which of four hundred packages moved.
+      for (const line of whatDiffers(undated(existing), undated(wanted))) {
+        console.error(`  ${line}`);
+      }
       process.exit(1);
     }
     console.log(`THIRD-PARTY-LICENSES.md is up to date (${collected.packages.length} packages).`);

@@ -194,7 +194,7 @@ export function reconcile(
  */
 const WHEN_UNSAID: Readonly<Record<string, unknown>> = {
   advisorCustomInvocation:
-    'you are giving a verdict on code — a review, an audit, or a judgement on somebody else’s change; before a change that touches many files or would be hard to undo; and when what you are about to say rests on an assumption about this project you have not actually checked.',
+    'you are giving a verdict on code (a review, an audit, or a judgement on somebody else’s change); before a change that touches many files or would be hard to undo; and when what you are about to say rests on an assumption about this project you have not actually checked.',
 };
 
 /**

@@ -2592,7 +2592,7 @@ const MOST_AFTER_SAYINGS = 3;
         });
         const where =
           piece.address === null
-            ? 'It has not printed an address yet — ask running() again in a moment.'
+            ? 'It has not printed an address yet. Ask running() again in a moment.'
             : `at ${piece.address}`;
         return [
           `${already ? 'That is already running' : 'Started and left running'} ${where}`,

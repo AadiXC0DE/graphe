@@ -654,7 +654,7 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
       label: 'Taking a picture of the screen',
       description:
         'Take a picture of this computer\'s screen, and say how big it is and which application is in front. The picture is the only way to see a program that is not a website, so take one before pointing at anything and again after every run of moves. Coordinates are the picture\'s own pixels, counted from its top left.',
-      promptSnippet: 'desktop_picture(app?) — a picture of the screen, and what is in front of it',
+      promptSnippet: 'desktop_picture(app?): a picture of the screen, and what is in front of it',
       promptGuidelines: [
         'Always take a picture before pointing at the screen, and another after moving, rather than assuming where things ended up.',
         'The picture is the same size as the screen, so a coordinate you read off it is the coordinate to point at.',
@@ -678,12 +678,12 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
       name: 'desktop_do',
       label: 'Working the computer',
       description:
-        "Do a run of things on this computer: press, double-press, right-press, drag, type, press keys, scroll, wait. Aim at a handle from reading what a program named — a3 — and it happens in the background, leaving the pointer where the person's hand is. Aim at a place instead and it uses the pointer, which takes the mouse away from them. Give the whole run in one call rather than one call each. A picture comes back at the end, so you can see where it got to.",
-      promptSnippet: 'desktop_do(steps) — press, type and scroll on this computer, then see the result',
+        "Do a run of things on this computer: press, double-press, right-press, drag, type, press keys, scroll, wait. Aim at a handle from reading what a program named (a3) and it happens in the background, leaving the pointer where the person's hand is. Aim at a place instead and it uses the pointer, which takes the mouse away from them. Give the whole run in one call rather than one call each. A picture comes back at the end, so you can see where it got to.",
+      promptSnippet: 'desktop_do(steps): press, type and scroll on this computer, then see the result',
       promptGuidelines: [
         'Read what the program has named first. A handle leaves the pointer alone; a place takes it.',
-        'Where there is no handle, take a picture first — coordinates guessed from memory land on the wrong thing.',
-        'Keep runs short enough to check — five or six moves, then look at the picture that comes back.',
+        'Where there is no handle, take a picture first; coordinates guessed from memory land on the wrong thing.',
+        'Keep runs short enough to check: five or six moves, then look at the picture that comes back.',
         'Never type a password or a key into a program this way.',
       ],
       parameters: Type.Object({
@@ -697,7 +697,7 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
             target: Type.Optional(
               Type.String({
                 description:
-                  "A handle such as a3 from reading what is on screen. Aiming this way leaves the pointer where it is and works in a window that is not in front — prefer it to a place whenever there is one.",
+                  "A handle such as a3 from reading what is on screen. Aiming this way leaves the pointer where it is and works in a window that is not in front, so prefer it to a place whenever there is one.",
               }),
             ),
             x: Type.Optional(Type.Number({ description: 'Across, in the picture\'s own pixels.' })),
@@ -802,8 +802,8 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
       name: 'desktop_read',
       label: 'Reading what is on screen',
       description:
-        "Read the things a program has named on screen — its buttons, boxes, tick boxes, menus and rows — each with a short handle to aim at. Prefer this to a picture wherever it answers: pressing something by its handle happens in the background, with the pointer left exactly where the person's hand is, and it works in a window that is not even in front. Read it again after every run of moves, because a window that has moved on renames everything.",
-      promptSnippet: 'desktop_read(app?) — the things a program has named, with handles to aim at',
+        "Read the things a program has named on screen (its buttons, boxes, tick boxes, menus and rows), each with a short handle to aim at. Prefer this to a picture wherever it answers: pressing something by its handle happens in the background, with the pointer left exactly where the person's hand is, and it works in a window that is not even in front. Read it again after every run of moves, because a window that has moved on renames everything.",
+      promptSnippet: 'desktop_read(app?): the things a program has named, with handles to aim at',
       promptGuidelines: [
         'Try this before taking a picture. A press on a named thing does not take the pointer; a press at a point does.',
       ],
@@ -833,7 +833,7 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
       label: 'Looking at what is open',
       description:
         'What is open on this computer right now, which one is in front, and what its windows are called. Use it to find out whether the program you need is already running before opening it, and to name a window you are about to work in.',
-      promptSnippet: 'desktop_apps() — what is open on this computer and what is in front',
+      promptSnippet: 'desktop_apps(): what is open on this computer and what is in front',
       parameters: Type.Object({}),
       executionMode: 'sequential',
       execute: async (_callId, _params, signal): ToolResult => {
@@ -860,8 +860,8 @@ export function desktopTools(projectRoot?: string, host?: DesktopHost): ToolDefi
       name: 'desktop_open',
       label: 'Opening something on the computer',
       description:
-        "Open a program on this computer by its name, or bring it to the front if it is already open. Use it before working in something that is not a website — a design tool, a mail app, a calendar. A picture of the screen comes back, so you can see it arrive.",
-      promptSnippet: 'desktop_open(app) — open a program on this computer, or bring it to the front',
+        "Open a program on this computer by its name, or bring it to the front if it is already open. Use it before working in something that is not a website: a design tool, a mail app, a calendar. A picture of the screen comes back, so you can see it arrive.",
+      promptSnippet: 'desktop_open(app): open a program on this computer, or bring it to the front',
       parameters: Type.Object({
         app: Type.String({ description: 'What the program is called on this computer.', minLength: 1 }),
       }),

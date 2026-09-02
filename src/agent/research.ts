@@ -136,7 +136,7 @@ export function researchBrief(depth: Depth = DEFAULT_DEPTH): string {
     'Treat this as research rather than a change.',
     '',
     `1. Break the question into at least ${many} separate things that would have to be true, and say what they are before you start. Fewer than ${many} is the same question in different words.`,
-    `2. Send a helper after each one, several at the same time rather than one after another — all of them in the same reply, so ${many} are working at once. Give each a whole question it can answer without the others. Never put more than ${String(DEEPEST_SPLIT)} out at one time; any beyond that will not start.`,
+    `2. Send a helper after each one, several at the same time rather than one after another, all of them in the same reply, so ${many} are working at once. Give each a whole question it can answer without the others. Never put more than ${String(DEEPEST_SPLIT)} out at one time; any beyond that will not start.`,
     `3. Begin each helper's work with a line reading "${LOOKING_INTO} " and a few plain words for the one thing it is settling. Those words are what somebody watching sees while it works.`,
     '4. Read this project as well as the web. What the code already does is evidence, and it outranks anything written about what it should do.',
     `5. Hold nothing as settled on one source alone: ${String(how.sources)} that agree, found separately, before any part of the answer is written as fact.`,

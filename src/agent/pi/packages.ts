@@ -168,7 +168,7 @@ function shorten(sentence: string): string {
   if (sentence.length <= MAX_SUMMARY) return sentence;
   const cut = sentence.slice(0, MAX_SUMMARY);
   const space = cut.lastIndexOf(' ');
-  return `${(space > 40 ? cut.slice(0, space) : cut).replace(/[,.;:—-]+$/, '')}…`;
+  return `${(space > 40 ? cut.slice(0, space) : cut).replace(/[,.;:\u2014-]+$/, '')}…`;
 }
 
 function packOf(entry: unknown): Pack | null {
@@ -294,7 +294,7 @@ export function askAbout(pack: Pack): string {
   return [
     'Explain this addition to a designer who does not write code and does not want to.',
     known,
-    'Answer in exactly two plain sentences. The first says what it would let them do — a thing they might actually want to do, not what it is or how it works. The second says plainly whether it looks risky to put on their computer, and says so straight if it does, because it will be running on their machine with reach over their files. No jargon: not one word they would have to look up, and never the name of a mechanism. If what is known above is too thin to be useful, say that instead of guessing.',
+    'Answer in exactly two plain sentences. The first says what it would let them do: a thing they might actually want to do, not what it is or how it works. The second says plainly whether it looks risky to put on their computer, and says so straight if it does, because it will be running on their machine with reach over their files. No jargon: not one word they would have to look up, and never the name of a mechanism. If what is known above is too thin to be useful, say that instead of guessing.',
   ].join('\n\n');
 }
 

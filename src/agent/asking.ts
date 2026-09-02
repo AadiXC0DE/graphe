@@ -191,7 +191,7 @@ export function saysAnswers(questions: readonly Question[], answers: Answers): s
     lines.push(`- ${one.question} → ${picked.join(', ')}`);
   }
   if (lines.length === 0) return cannotAsk.nothingWorthAsking;
-  return `They answered before you started:\n${lines.join('\n')}\n\nWork to those answers. Do not ask again — get on with it, and only say what you assumed for anything they did not settle.`;
+  return `They answered before you started:\n${lines.join('\n')}\n\nWork to those answers. Do not ask again. Get on with it, and only say what you assumed for anything they did not settle.`;
 }
 
 /** Whether every question has something against it, which is what the button

@@ -43,7 +43,7 @@ function shortened(text: string): string {
   const head = text.slice(0, LIMIT + 1);
   const space = head.lastIndexOf(' ');
   const kept = space > LIMIT / 2 ? head.slice(0, space) : head.slice(0, LIMIT);
-  return `${kept.replace(/[\s.,;:!?—–-]+$/, '')}…`;
+  return `${kept.replace(/[\s.,;:!?\u2014\u2013-]+$/, '')}…`;
 }
 
 /** What to call a conversation: the person's own opening words, or — when there

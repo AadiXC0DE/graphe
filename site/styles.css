@@ -220,7 +220,7 @@ a {
   flex: none;
 }
 
-.mark__beta {
+.mark__version {
   margin-inline-start: 2px;
   padding: 3px 7px;
   border: 1px solid rgba(224, 118, 79, 0.4);
@@ -1187,6 +1187,13 @@ a {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 20px;
+}
+
+/* Two rows of two, rather than a row of four cards too thin to read. */
+@media (min-width: 900px) {
+  .pillars {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .pillar {
@@ -2775,7 +2782,7 @@ a {
 }
 
 @media (max-width: 360px) {
-  .mark__beta {
+  .mark__version {
     margin-inline-start: 0;
     padding: 2px 5px;
     font-size: 0.5625rem;

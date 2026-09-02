@@ -187,7 +187,7 @@ export async function readDocument(path: string): Promise<Document> {
   }
   const parts = unzip(bytes);
   if (parts.size === 0) {
-    throw new Error('That file is not readable as a document — it may be the older format, or damaged.');
+    throw new Error('That file is not readable as a document. It may be the older format, or damaged.');
   }
   const pages =
     kind === 'word' ? wordText(parts) : kind === 'slides' ? slidesText(parts) : sheetText(parts);
@@ -197,7 +197,7 @@ export async function readDocument(path: string): Promise<Document> {
 /** What one document says, as the tool answers with it. */
 export function documentSaid(path: string, document: Document): string {
   if (document.pages.length === 0) {
-    return `“${path}” has no text in it to read — it is likely pictures rather than words. A screenshot of the part that matters would work.`;
+    return `“${path}” has no text in it to read; it is likely pictures rather than words. A screenshot of the part that matters would work.`;
   }
   const { text, note } = slicePages(document.pages, MOST_CHARACTERS);
   return `<document name="${path.replace(/["<>]/g, '')}" kind="${document.kind}">\n${text}${note}\n</document>`;

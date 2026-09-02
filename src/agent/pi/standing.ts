@@ -43,7 +43,7 @@ export const standingWords = {
     'Work the whole list. An unticked step is a step that is not done.',
     'Call step_done(n) as each step lands, naming the step by its number.',
     'A progress report is not a step. Do not stop to summarise while steps are still unticked.',
-    'A second opinion — an advisor verdict, a review, a list of what is not yet proven — is advice on the work. It is never permission to leave the list unfinished.',
+    'A second opinion (an advisor verdict, a review, a list of what is not yet proven) is advice on the work. It is never permission to leave the list unfinished.',
     'A step that cannot be done is step_failed(n, why) or step_skipped(n, why), said out loud, never left quietly unticked.',
   ],
   agentsTrimmed: 'The rest of this file is on disk. Read it if you need it.',

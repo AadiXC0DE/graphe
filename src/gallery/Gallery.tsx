@@ -92,7 +92,7 @@ type Theme = 'system' | 'light' | 'graphe' | 'super' | 'pink' | 'slate';
 
 /** A reply with everything in it the agent actually writes: emphasis, a
  *  numbered list, a fenced block, a table, a quote, a link, inline code. */
-const FORMATTED = `Done — the hero is built from your Figma frame, and I kept to the spacing scale.
+const FORMATTED = `Done. The hero is built from your Figma frame, and I kept to the spacing scale.
 
 **Two things worth knowing**
 
@@ -566,7 +566,7 @@ const IN_STEP = {
  *  the component and the line, its tokens, one value a hair off one of them,
  *  and an honest note about what could not be worked out. */
 const POINTED: Reading = {
-  title: 'A button — “Start a project”',
+  title: 'A button: “Start a project”',
   made: {
     how: 'stack',
     sure: 'likely',
@@ -706,7 +706,7 @@ const AWAY: AwayState = {
     },
     {
       id: 'away-w1',
-      doing: 'Rework the hero — quieter, more white space',
+      doing: 'Rework the hero: quieter, more white space',
       state: 'done',
       at: NOW - 12 * 60_000,
       picture: PAGE_SHOT,
@@ -718,7 +718,7 @@ const AWAY: AwayState = {
     },
     {
       id: 'away-w2',
-      doing: 'Rework the hero — bolder, the photograph doing the work',
+      doing: 'Rework the hero: bolder, the photograph doing the work',
       state: 'done',
       at: NOW - 12 * 60_000,
       picture: PAGE_SHOT,
@@ -1199,7 +1199,7 @@ export default function Gallery() {
         <div className="gallery__col">
           <Section
             title="The first screen"
-            note="One sentence, three real ones somebody could send, and the other way in — which sits on the list's own left margin wearing the composer's paperclip, because somebody holding a Figma file was never going to read fine print centred under a list. No cards, no illustration, no tour, and nothing on it moves: this is the screen every launch begins on."
+            note="One sentence, three real ones somebody could send, and the other way in, which sits on the list's own left margin wearing the composer's paperclip, because somebody holding a Figma file was never going to read fine print centred under a list. No cards, no illustration, no tour, and nothing on it moves: this is the screen every launch begins on."
           >
             <div className="welcome-sample">
               <Welcome onUse={setDraft} />
@@ -1213,7 +1213,7 @@ export default function Gallery() {
 
           <Section
             title="Conversation"
-            note="Never animates — it is the thing people see a hundred times a day. Streaming text simply appears, with no fade and no typewriter."
+            note="Never animates, because it is the thing people see a hundred times a day. Streaming text simply appears, with no fade and no typewriter."
           >
             <div className="thread-sample">
               <Message from="you">
@@ -1235,7 +1235,7 @@ export default function Gallery() {
 
           <Section
             title="Formatting"
-            note="Graphe's turns are read as Markdown; yours are left exactly as typed, so asterisks around a measurement stay asterisks. Code is plain first and gains its colour a moment later — the highlighter is a large thing to load and no reply waits for it."
+            note="Graphe's turns are read as Markdown; yours are left exactly as typed, so asterisks around a measurement stay asterisks. Code is plain first and gains its colour a moment later, because the highlighter is a large thing to load and no reply waits for it."
           >
             <div className="thread-sample">
               <Message from="you">
@@ -1310,7 +1310,7 @@ export default function Gallery() {
 
           <Section
             title="Point at anything and be told what it is"
-            note="A click already knew the selector, the label, the markup and the computed styles — and threw all of it away into one sentence. This is the designer's version of DevTools: which component made it, which of your tokens it is using, which values are a hair off one of them, when it last changed, and what it looks like at the other sizes."
+            note="A click already knew the selector, the label, the markup and the computed styles, and threw all of it away into one sentence. This is the designer's version of DevTools: which component made it, which of your tokens it is using, which values are a hair off one of them, when it last changed, and what it looks like at the other sizes."
           >
             <div className="gallery__rail">
               <Inspector reading={POINTED} onAsk={noop} onWidth={noop} />
@@ -1325,7 +1325,7 @@ export default function Gallery() {
 
           <Section
             title="See it before you say yes"
-            note="We already show a before-and-after after a change lands, and the timeline can take you back — but both of those are recovery. The designer's version of reading a diff is seeing the rendered result before approving it. The work happens in a copy, the copy gets photographed, and the decision arrives with the picture attached."
+            note="We already show a before-and-after after a change lands, and the timeline can take you back, but both of those are recovery. The designer's version of reading a diff is seeing the rendered result before approving it. The work happens in a copy, the copy gets photographed, and the decision arrives with the picture attached."
           >
             <div className="thread-sample">
               <SeeFirst waiting={LANDING.waiting} held={HELD} onDecide={noop} />
@@ -1339,7 +1339,7 @@ export default function Gallery() {
 
           <Section
             title="Evidence, not a diff"
-            note="Everything the app photographs otherwise is a page at rest. Real interface work lives in the states nobody screenshots — hover, focus, loading, empty, error, the third step of a form, the toast that lasts two seconds. Click through your own app with this watching and every state is captured with the thing that produced it."
+            note="Everything the app photographs otherwise is a page at rest. Real interface work lives in the states nobody screenshots: hover, focus, loading, empty, error, the third step of a form, the toast that lasts two seconds. Click through your own app with this watching and every state is captured with the thing that produced it."
           >
             <div className="thread-sample">
               <EvidenceReel recording={WALKED} openAtFirst width={260} height={180} />
@@ -1354,7 +1354,7 @@ export default function Gallery() {
 
           <Section
             title="What you have open"
-            note="A tab is a conversation or a canvas — that is the unit of work people switch between, and it is the only shape in which “two agents in one codebase” can be said at all. Two lines each: the conversation, and under it the project in quieter type. The 2px underline groups by codebase without nesting anything."
+            note="A tab is a conversation or a canvas. That is the unit of work people switch between, and it is the only shape in which “two agents in one codebase” can be said at all. Two lines each: the conversation, and under it the project in quieter type. The 2px underline groups by codebase without nesting anything."
           >
             <Tabs tabs={OPEN} at="t2" onOpen={noop} onClose={noop} onNew={noop} />
             <p className="gallery__caption">
@@ -1434,7 +1434,7 @@ export default function Gallery() {
 
           <Section
             title="Show me"
-            note="Off by default, sticky once set, and it lives under the project’s name — the same place you go to switch projects or open the folder. Turn it on here and the sections on this page change with it."
+            note="Off by default, sticky once set, and it lives under the project’s name, the same place you go to switch projects or open the folder. Turn it on here and the sections on this page change with it."
           >
             <div className="gallery__menu">
               <ProjectMenu
@@ -1509,7 +1509,7 @@ export default function Gallery() {
 
           <Section
             title="Who should I think with?"
-            note="The one screen that appears before the work does, so it is the rare moment that gets the dark treatment. Every provider and every model on the table at once — nothing is gated behind a second click, because there is no smaller step worth hiding behind. It is live: open it, close it, look again."
+            note="The one screen that appears before the work does, so it is the rare moment that gets the dark treatment. Every provider and every model on the table at once. Nothing is gated behind a second click, because there is no smaller step worth hiding behind. It is live: open it, close it, look again."
           >
             <button
               type="button"
@@ -1549,7 +1549,7 @@ export default function Gallery() {
 
           <Section
             title="A long conversation, tidied"
-            note="One sentence, said once, in the place it happened. Behind it is the agent runtime’s own tidying — we do not summarise anything ourselves."
+            note="One sentence, said once, in the place it happened. Behind it is the agent runtime’s own tidying; we do not summarise anything ourselves."
           >
             <div className="activity-feed">
               <ActivityLine
@@ -1572,7 +1572,7 @@ export default function Gallery() {
 
           <Section
             title="Cost"
-            note="Small, glanceable, corner-mounted, and it never animates — a number that moves turns awareness into anxiety."
+            note="Small, glanceable, corner-mounted, and it never animates, because a number that moves turns awareness into anxiety."
           >
             <div className="gallery__meters">
               <CostMeter spent={inr(4000)} onDetails={noop} onLimit={noop} />
@@ -1617,7 +1617,7 @@ export default function Gallery() {
         <div className="gallery__col">
           <Section
             title="The composer"
-            note="Drag a file onto it, paste a screenshot, paste a Figma link, or press the paperclip. Being dropped on turns the box it is already in into the target — no dashed rectangle drawn inside a solid one, nothing that bounces."
+            note="Drag a file onto it, paste a screenshot, paste a Figma link, or press the paperclip. Being dropped on turns the box it is already in into the target: no dashed rectangle drawn inside a solid one, nothing that bounces."
           >
             <div className="composer-sample">
               <Composer
@@ -1671,7 +1671,7 @@ export default function Gallery() {
 
           <Section
             title="Before something risky"
-            note="Rises 12px with a fade over 200ms and then stays put, beside the work. Never a modal over the preview — a dimmed backdrop is the grammar of an error, and being asked a question is ordinary."
+            note="Rises 12px with a fade over 200ms and then stays put, beside the work. Never a modal over the preview: a dimmed backdrop is the grammar of an error, and being asked a question is ordinary."
           >
             <ConfirmChange
               question="Replace the colour styles in your design system?"
@@ -1706,7 +1706,7 @@ export default function Gallery() {
 
           <Section
             title="Version timeline"
-            note="Hovering moves nothing. Scrubbing has to feel like Figma’s version history — immediate, weightless, consequence-free. Every row used to draw a grey rectangle standing in for a thumbnail nothing had rendered; five of those down a rail is a skeleton screen that never finished loading, so the row shows the honest thing instead — where this moment sits on the line."
+            note="Hovering moves nothing. Scrubbing has to feel like Figma’s version history: immediate, weightless, consequence-free. Every row used to draw a grey rectangle standing in for a thumbnail nothing had rendered; five of those down a rail is a skeleton screen that never finished loading, so the row shows the honest thing instead: where this moment sits on the line."
           >
             <ul className="version-list">
               <VersionRow
@@ -1741,7 +1741,7 @@ export default function Gallery() {
 
           <Section
             title="The rail, as it is mounted"
-            note="Appears the first time there is a second version and then stays — a fade, 200ms, once. Fixed to the right-hand edge in the app; shown here in the flow of the page so it can be read beside everything else."
+            note="Appears the first time there is a second version and then stays: a fade, 200ms, once. Fixed to the right-hand edge in the app; shown here in the flow of the page so it can be read beside everything else."
           >
             <div className="gallery__rail">
               <Versions
@@ -1762,7 +1762,7 @@ export default function Gallery() {
 
           <Section
             title="Coming back to a project"
-            note="The first screen of every launch after the first one. A list and one link, and nothing that moves — a list of places is not an event."
+            note="The first screen of every launch after the first one. A list and one link, and nothing that moves, because a list of places is not an event."
           >
             <ProjectPicker
               projects={REMEMBERED}
@@ -1780,7 +1780,7 @@ export default function Gallery() {
 
           <Section
             title="The shelf"
-            note="Appears the day a folder opens and then stays, against the left edge, under the top bar. It is the navigation — the list of places this machine remembers — so it is allowed to be a permanent region while the first screen stays one sentence. Collapsing it (the mark, or ⌘B) gives the conversation the whole window; there is no animation either way, because toggling a sidebar is a thing people do constantly."
+            note="Appears the day a folder opens and then stays, against the left edge, under the top bar. It is the navigation, the list of places this machine remembers, so it is allowed to be a permanent region while the first screen stays one sentence. Collapsing it (the mark, or ⌘B) gives the conversation the whole window; there is no animation either way, because toggling a sidebar is a thing people do constantly."
           >
             <div className="shelf-sample">
               <Sidebar
@@ -1821,7 +1821,7 @@ export default function Gallery() {
 
           <Section
             title="Back to the work"
-            note="Floats over the right edge of the conversation from the moment there is an address to go to — it earns its place only when the work is actually being served. Disabled while the serving is still on its way, so it can never be asked twice."
+            note="Floats over the right edge of the conversation from the moment there is an address to go to; it earns its place only when the work is actually being served. Disabled while the serving is still on its way, so it can never be asked twice."
           >
             <div className="gallery__pillframe">
               <button type="button" className="previewpill">
@@ -1841,7 +1841,7 @@ export default function Gallery() {
 
           <Section
             title="The overview"
-            note="Folded against the right edge, the same place the version rail used to live — the rail is now its bottom half. It appears the first time there is anything to tell and then stays: a git state the shell has seen, a search, a reference, or a second version. Everything in it is a reading of things that happened elsewhere; nothing here is a new event to respond to."
+            note="Folded against the right edge, the same place the version rail used to live. The rail is now its bottom half. It appears the first time there is anything to tell and then stays: a git state the shell has seen, a search, a reference, or a second version. Everything in it is a reading of things that happened elsewhere; nothing here is a new event to respond to."
           >
             <div className="gallery__overview">
               <Overview
@@ -1943,7 +1943,7 @@ export default function Gallery() {
 
           <Section
             title="A folder that holds several projects"
-            note="Open a working directory with backend/ and frontend/ beside each other and there is no folder-level line of work to move, no folder-level save. Each project gets its own row, its own line of work, and its own press to commit it or fetch from its origin — the same controls a folder with one project gets, said once per project."
+            note="Open a working directory with backend/ and frontend/ beside each other and there is no folder-level line of work to move, no folder-level save. Each project gets its own row, its own line of work, and its own press to commit it or fetch from its origin: the same controls a folder with one project gets, said once per project."
           >
             <div className="gallery__overview">
               <Overview
@@ -1993,7 +1993,7 @@ export default function Gallery() {
 
           <Section
             title="In step with Figma"
-            note="Every other tool reads a Figma file once, on the way in, and never looks again — the design moves on a Tuesday and nobody finds out until somebody opens the site and winces. This band holds what was read and says, in design's own words, what differs now. Each row carries the one press that puts the work back in step."
+            note="Every other tool reads a Figma file once, on the way in, and never looks again. The design moves on a Tuesday and nobody finds out until somebody opens the site and winces. This band holds what was read and says, in design's own words, what differs now. Each row carries the one press that puts the work back in step."
           >
             <div className="gallery__overview">
               <InStep
@@ -2016,7 +2016,7 @@ export default function Gallery() {
 
           <Section
             title="Running now"
-            note="Servers, watchers, anything started to stay up. It sits above the composer rather than in the conversation, because it outlives the sentence that started it — a server filed under that sentence is out of reach the moment the conversation moves on. Several at once is ordinary: a front end and two back ends. The dot pulses only while one is still coming up, which is the only moment the question is “waiting or stuck?”."
+            note="Servers, watchers, anything started to stay up. It sits above the composer rather than in the conversation, because it outlives the sentence that started it, and a server filed under that sentence is out of reach the moment the conversation moves on. Several at once is ordinary: a front end and two back ends. The dot pulses only while one is still coming up, which is the only moment the question is “waiting or stuck?”."
           >
             <Running
               pieces={[
@@ -2058,7 +2058,7 @@ export default function Gallery() {
 
           <Section
             title="Background work"
-            note="Work carries on with the window closed, on this machine — nothing is sent anywhere to be built. What comes back is a picture, a sentence and what it cost, on the same contact sheet the board already draws. A run that hits a question stops there and waits: nothing answers its own, ever, and that card is the loudest thing in the band because it is the only thing here that cannot move without a person."
+            note="Work carries on with the window closed, on this machine; nothing is sent anywhere to be built. What comes back is a picture, a sentence and what it cost, on the same contact sheet the board already draws. A run that hits a question stops there and waits: nothing answers its own, ever, and that card is the loudest thing in the band because it is the only thing here that cannot move without a person."
           >
             <div className="gallery__overview">
               <Away
@@ -2085,7 +2085,7 @@ export default function Gallery() {
 
           <Section
             title="Ready to ship"
-            note="The foot of the overview. Work checked in a copy sits until somebody answers it; both answers are undoable. Handing work to a developer never does it on one press — the confirmation says what is about to leave, in the same sentences the shell would use. Putting something online is a conversation with the agent, not a button that only works for one host."
+            note="The foot of the overview. Work checked in a copy sits until somebody answers it; both answers are undoable. Handing work to a developer never does it on one press: the confirmation says what is about to leave, in the same sentences the shell would use. Putting something online is a conversation with the agent, not a button that only works for one host."
           >
             <div className="gallery__overview">
               <Landing
@@ -2118,7 +2118,7 @@ export default function Gallery() {
           >
             <ErrorCard
               what="The build stopped before it finished."
-              because="It looks like the icon package didn’t install properly — everything else compiled."
+              because="It looks like the icon package didn’t install properly; everything else compiled."
               actionLabel="Install it again and retry"
               onAction={noop}
               technicalDetails={`npm ERR! code ERESOLVE
@@ -2131,7 +2131,7 @@ vite v6.0.5 building for production...
             />
             <ErrorCard
               what="I couldn’t open that Figma file."
-              because="The link is fine, but the file sits in a team the connected account can’t see — it probably needs sharing."
+              because="The link is fine, but the file sits in a team the connected account can’t see, so it probably needs sharing."
               actionLabel="Show me how to share it"
               onAction={noop}
             />

@@ -93,7 +93,7 @@
             </g>
           </svg>
           <span class="mark__word">Graphe</span>
-          <span class="mark__beta mono">beta</span>
+          <span class="mark__version mono">1.0.0</span>
         </a>
 
         <nav class="nav__links" aria-label="Sections">
@@ -229,7 +229,7 @@
         </figure>
       </section>
 
-      <!-- ─────────────────────────────────────────── the three things ── -->
+      <!-- ─────────────────────────────────────────── the four things ── -->
       <section class="band" id="see">
         <div class="head">
           <p class="eyebrow reveal" data-reveal>What you actually get</p>
@@ -245,12 +245,13 @@
         <div class="pillars">
           <article class="pillar reveal" data-reveal>
             <p class="pillar__no mono">01</p>
-            <h3>It works in parallel, and it keeps working</h3>
+            <h3>You draw the run, then it runs in parallel</h3>
             <p>
-              One request can become a board of pieces, each in a git worktree of its own, four
-              running at once, the rest waiting. Reviewer, researcher, and a builder that writes
-              inside a copy of its own. Set a job going and close the window: it carries on, and
-              you come back to a board of what finished, what's waiting, and what it cost.
+              Place the blocks on a canvas, join them up, press Start. Until you press it nothing
+              has been sent. One request becomes a board of pieces, each in a git worktree of its
+              own, four running at once, the rest waiting. Set it going and close the window: it
+              carries on, and you come back to a board of what finished, what's waiting, and what
+              it cost.
             </p>
             <img
               class="pillar__shot"
@@ -264,6 +265,26 @@
 
           <article class="pillar reveal" data-reveal style="--i: 1">
             <p class="pillar__no mono">02</p>
+            <h3>Nothing it does is unsafe or unrecoverable</h3>
+            <p>
+              Every command is judged before it runs, by a function with no disk, no clock and no
+              network: allow, ask you, take a restore point first, or refuse. What does run, runs
+              inside a macOS sandbox profile that writes only into the folder it was handed. Every
+              turn is a saved moment, and going back to one saves your work first, so the restore
+              is itself undoable.
+            </p>
+            <img
+              class="pillar__shot"
+              src="assets/web/app-history-dark.webp"
+              width="2880"
+              height="1800"
+              alt="The history view: eighty-seven saved moments, newest first, each with the line of work it sits on, who saved it and its short id."
+              loading="lazy"
+            />
+          </article>
+
+          <article class="pillar reveal" data-reveal style="--i: 2">
+            <p class="pillar__no mono">03</p>
             <h3>It reads your design system first</h3>
             <p>
               Colours, spacing and type are read as a spec before a file is touched, so the work
@@ -281,8 +302,8 @@
             />
           </article>
 
-          <article class="pillar reveal" data-reveal style="--i: 2">
-            <p class="pillar__no mono">03</p>
+          <article class="pillar reveal" data-reveal style="--i: 3">
+            <p class="pillar__no mono">04</p>
             <h3>You can see the bill before it lands</h3>
             <p>
               pi does real work to keep a prompt cacheable: one stable session, cache points where
@@ -322,7 +343,7 @@
             src="assets/web/app-canvas-dark.png"
             width="2880"
             height="1800"
-            alt="A canvas open as a tab in Graphe: seven blocks — Custom, Plan, Research, Subagents, Browser, Review and Goal — joined by lines into a dependency graph. The bar above it names the model and says the whole canvas has full access. The band along the foot reads: stopped, three blocks, six turns, four never ran, with a way into the conversation."
+            alt="A canvas open as a tab in Graphe: seven blocks (Custom, Plan, Research, Subagents, Browser, Review and Goal) joined by lines into a dependency graph. The bar above it names the model and says the whole canvas has full access. The band along the foot reads: stopped, three blocks, six turns, four never ran, with a way into the conversation."
             loading="lazy"
             decoding="async"
           />
@@ -371,7 +392,7 @@
           </article>
           <article class="cell">
             <h3>One decision for the whole run</h3>
-            <p>How far it may go on its own is set once, in the bar above the board. It starts at full access, because walking away from it is the point — and the row is right there for the flow that should stop and ask.</p>
+            <p>How far it may go on its own is set once, in the bar above the board. It starts at full access, because walking away from it is the point. The row is right there for the flow that should stop and ask.</p>
           </article>
           <article class="cell">
             <h3>Or take a loop whole</h3>
@@ -379,7 +400,7 @@
           </article>
           <article class="cell">
             <h3>It says where it has got to</h3>
-            <p>While a block runs, its card says what the turn is doing — twenty minutes of “going” tells you nothing — and the foot is a way straight into the conversation to watch it or answer it.</p>
+            <p>While a block runs, its card says what the turn is doing, because twenty minutes of “going” tells you nothing, and the foot is a way straight into the conversation to watch it or answer it.</p>
           </article>
           <article class="cell">
             <h3>And what it came to</h3>
@@ -1293,7 +1314,7 @@
             it ships in.
           </p>
           <p class="where__says">
-            It is in beta, and the rough edges are still mine to find and yours to report. The
+            This is 1.0.0. There are still rough edges, mine to find and yours to report. The
             difference is that you do not have to wait for me to agree with you.
           </p>
           <div class="where__row">
@@ -1325,7 +1346,7 @@
           <p class="cta__fine mono">Apple silicon and Intel · macOS · bring your own model key</p>
           <p class="cta__note">
             macOS is the only build today. Graphe is an Electron app and the source is open, so
-            Windows and Linux can be built from it — but nothing is set up for that yet, and
+            Windows and Linux can be built from it, but nothing is set up for that yet, and
             neither has been tried.
           </p>
         </div>

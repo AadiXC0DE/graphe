@@ -92,7 +92,7 @@ export const PLAN_WORDS = {
    *  again rather than start on it. The loop the card exists for: propose,
    *  change, propose again, and only then build. */
   planAgain:
-    'Do not start on this yet. Take those changes, and show me the revised plan the same way — as a short numbered list — before anything changes.',
+    'Do not start on this yet. Take those changes, and show me the revised plan the same way, as a short numbered list, before anything changes.',
   /** Beside each step. Dropping one is a decision, not a deletion — it comes
    *  straight back, so nobody has to be sure before they try it. */
   drop: 'Leave this out',
@@ -127,12 +127,12 @@ export const PLAN_WORDS = {
     const list = kept.map((step, at) => `${String(at + 1)}. ${step}`).join('\n');
     if (dropped.length === 0) return `Do these, and only these:\n\n${list}`;
     const not = dropped.map((step) => `- ${step}`).join('\n');
-    return `Do these, and only these:\n\n${list}\n\nLeave these out — I do not want them:\n\n${not}`;
+    return `Do these, and only these:\n\n${list}\n\nLeave these out. I do not want them:\n\n${not}`;
   },
   /** Sent when the steps were put in a different order to the one proposed. The
    *  numbered list already carries the order; this says the order is deliberate
    *  rather than a list rewritten carelessly. */
-  inThisOrder: 'That order is deliberate — do them in it.',
+  inThisOrder: 'That order is deliberate. Do them in it.',
   /** Above what was said about particular steps. */
   notesOn: 'About some of them:',
   /** Above the answers to what was asked before the plan ran. */
@@ -146,10 +146,10 @@ export const PLAN_WORDS = {
    * model is told the list is there.
    */
   ticking:
-    'Those steps are now a checklist the person can see. Call step_done the moment each one is genuinely finished — one call per step, as you go, not all at the end. It is the only thing that moves the list, and they are watching it to know where you are.',
+    'Those steps are now a checklist the person can see. Call step_done the moment each one is genuinely finished: one call per step, as you go, not all at the end. It is the only thing that moves the list, and they are watching it to know where you are.',
   /** Added under the person's own words on a looking-around pass. */
   asked:
-    'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet. If — and only if — something you cannot settle from the project would change that list, ask about it. Where the answer is a choice between a few sensible options, use ask_first, once, before the list — they pick and you carry on. Only where the answer could be anything, finish with a line reading "Questions:" and at most three of them, one per line. Never both. Most requests need none, and a question whose answer would not change the list is not worth asking.',
+    'Before doing any of this: look through the project and answer with a short numbered list of the steps you would take. Change nothing yet. If, and only if, something you cannot settle from the project would change that list, ask about it. Where the answer is a choice between a few sensible options, use ask_first, once, before the list; they pick and you carry on. Only where the answer could be anything, finish with a line reading "Questions:" and at most three of them, one per line. Never both. Most requests need none, and a question whose answer would not change the list is not worth asking.',
   /** Above the questions, before the list. Two sharp ones beat a plan built on
    *  a guess; a page of them is worse than either, which is why there are never
    *  more than three. */

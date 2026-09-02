@@ -22,7 +22,7 @@ export type Policy = 'on' | 'tools-only' | 'off';
  *  chip, which is where the hand already is when the run is being set up. */
 export const policyWords = {
   label: 'Add-ons that start work on their own',
-  note: 'Some add-ons ask for another turn, or carry on after a reply is finished. With this off their tools still work — only the starting stops.',
+  note: 'Some add-ons ask for another turn, or carry on after a reply is finished. With this off their tools still work; only the starting stops.',
   /** The three settings, as somebody would choose them. */
   on: 'Let them',
   toolsOnly: 'Tools only',

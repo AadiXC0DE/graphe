@@ -163,11 +163,11 @@ export const REVIEW_ANGLES: readonly { key: string; line: string }[] = [
 export function reviewRequestFor(diff: string, angle: string): string {
   return `Review the change below from one angle: ${angle}
 
-Nothing here is invented — every finding must point at a file and line that are in the diff or in the project. For each genuine problem, write exactly one line in this shape:
+Nothing here is invented. Every finding must point at a file and line that are in the diff or in the project. For each genuine problem, write exactly one line in this shape:
 
-P<priority> <file>:<line> — the problem — what it breaks — how sure you are (0-100)
+P<priority> <file>:<line> | the problem | what it breaks | how sure you are (0-100)
 
-where priority is 0 (blocks shipping), 1 (should be fixed first), 2 (can wait) or 3 (a note). Do not report style preferences or problems that would not matter. If you find nothing genuine in your angle, say so plainly — an empty finding list is a good finding.
+where priority is 0 (blocks shipping), 1 (should be fixed first), 2 (can wait) or 3 (a note). Do not report style preferences or problems that would not matter. If you find nothing genuine in your angle, say so plainly; an empty finding list is a good finding.
 
 THE CHANGE:
 ${diff}`;
@@ -177,7 +177,7 @@ ${diff}`;
  *  when it was cut. */
 export function trimDiff(diff: string, cap = 60_000): string {
   if (diff.length <= cap) return diff;
-  return `${diff.slice(0, cap)}\n\n(Only the first part of the change is here — it was longer than one review can hold. The reviewers read what they can and the rest is noted.)`;
+  return `${diff.slice(0, cap)}\n\n(Only the first part of the change is here; it was longer than one review can hold. The reviewers read what they can and the rest is noted.)`;
 }
 /* -------------------------------------------------------------------------- */
 /* Sending it back                                                            */

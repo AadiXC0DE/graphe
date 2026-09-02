@@ -51,7 +51,7 @@ cask "graphe" do
   # smaller download of the two.
   arch arm: "arm64", intel: "x64"
 
-  version "0.9.0"
+  version "1.0.0"
   sha256 arm:   "da2c6e902ad759223e02a6ae9fa9603ee4a22dddad3a8cd7c5ad827a173528c0",
          intel: "bb95505cac73019e6497f014476f93262cfe1b7d91664dbabf68360bb747dba3"
 

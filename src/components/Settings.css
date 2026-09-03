@@ -125,19 +125,21 @@
     gap: var(--space-6);
   }
 
-  /* The page list is the map: it does not move at all. */
+  /* The page list is the map: it does not move at all.
+     The row is the height of the band and no more, which is what lets the two
+     columns scroll inside it. A percentage height on the column itself is not
+     enough: the row it sits in is as tall as its content unless it is told
+     otherwise, and then there is nothing to scroll inside and everything past
+     the fold is clipped away instead. */
   .settings__inner {
     height: 100%;
     min-height: 0;
-    padding-bottom: 0;
-    /* Stretched, not started: a grid item aligned to the start is as tall as
-       its content, so `height: 100%` on the page under it resolved to nothing
-       to scroll inside and everything past the fold was clipped away. */
+    grid-template-rows: minmax(0, 1fr);
     align-items: stretch;
+    padding-bottom: 0;
   }
 
   .settings__pages {
-    align-self: stretch;
     min-height: 0;
     overflow-y: auto;
     scrollbar-width: none;
@@ -146,7 +148,6 @@
 
   .settings__page-body {
     min-height: 0;
-    height: 100%;
     overflow-y: auto;
     scrollbar-gutter: stable;
     padding-bottom: var(--space-7);

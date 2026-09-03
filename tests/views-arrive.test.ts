@@ -81,8 +81,8 @@ describe('opening a view', () => {
     expect(guilty, `these open a screen outside a transition: ${guilty.join(', ')}`).toEqual([]);
   });
 
-  it('closes the other screens in one transition too', () => {
-    const at = app.indexOf("if (screen !== 'chat') setDesignAt(null);");
+  it('closes the other screens through the same door', () => {
+    const at = app.indexOf("if (screen !== 'design') setDesignAt(null);");
     expect(at).toBeGreaterThan(0);
     expect(inTransition(at)).toBe(true);
   });
@@ -181,5 +181,33 @@ describe('warming the views', () => {
     expect(warmed.length).toBeGreaterThan(7);
     const views = lazyViews(app);
     expect(warmed.filter((one) => !views.includes(one))).toEqual([]);
+  });
+});
+
+describe('a screen closes only the others', () => {
+  /* Each line names its own screen. Design named the chat's, which was
+     invisible while the close and the open ran in one breath and the open came
+     second; a frame apart, it closed the design view it had just opened and the
+     press did nothing at all. */
+  it('never closes the screen being opened', () => {
+    const at = app.indexOf("const goToScreen = useCallback(");
+    const body = app.slice(at, at + 2200);
+    const closes = [...body.matchAll(/if \(screen !== '([a-z-]+)'(?: && screen !== '[a-z-]+')?\) set(\w+)\(/g)];
+    expect(closes.length).toBeGreaterThan(8);
+    const owns: Record<string, string> = {
+      design: 'DesignAt',
+      graph: 'GraphOpen',
+      reviews: 'ReviewsOpen',
+      review: 'ReviewQueueOpen',
+      skills: 'SkillsOpen',
+      settings: 'SettingsOpen',
+      usage: 'UsageOpen',
+      'add-more': 'AddMore',
+      helpers: 'HelpersAt',
+      canvas: 'CanvasAt',
+    };
+    for (const [, screen, setter] of closes) {
+      expect(owns[screen as string], `${String(screen)} closes ${String(setter)}`).toBe(setter);
+    }
   });
 });

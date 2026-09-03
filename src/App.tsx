@@ -1633,7 +1633,11 @@ function Conversation() {
       /* Marked as the closing half of the press, so it happens a frame after
          the new screen is up rather than in the same breath. */
       startScreen(() => {
-        if (screen !== 'chat') setDesignAt(null);
+        /* Each of these names its own screen. Design named the chat's, which
+           was invisible while the close and the open ran in one breath and the
+           open came second; a frame apart, it closed the design view it had
+           just opened and the press did nothing. */
+        if (screen !== 'design') setDesignAt(null);
         if (screen !== 'graph') setGraphOpen(false);
         if (screen !== 'reviews') setReviewsOpen(false);
         if (screen !== 'review') setReviewQueueOpen(false);

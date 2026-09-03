@@ -77,7 +77,8 @@
      open; CSS can only order renderer content. */
   z-index: 60;
   width: min(340px, calc(100vw - var(--space-5)));
-  max-height: min(440px, calc(100dvh - 72px));
+  /* How tall it may be comes from the room the window actually has, measured
+     with the rest of the placement. */
   max-width: calc(100vw - var(--space-5));
   display: flex;
   flex-direction: column;

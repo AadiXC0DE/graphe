@@ -102,6 +102,18 @@ describe('opening a view', () => {
     expect(sheet).toMatch(/\.sheet--cover \{[^}]*animation: none;/);
   });
 
+  /* Cold, the wait is a chunk off the disk and holding the screen somebody
+     pressed away from reads as a press that did nothing. Warm, it is a frame,
+     and the cover would be the only thing anybody saw. */
+  it('covers at once until every screen is here, and on a wait after that', () => {
+    expect(app).toContain('let viewsWarm = false;');
+    expect(app).toContain('        viewsWarm = true;');
+    const at = app.indexOf('if (!screenComing) {');
+    const body = app.slice(at, at + 700);
+    expect(body).toContain('if (!viewsWarm) {\n      setCovering(true);');
+    expect(body).toContain('setTimeout(() => setCovering(true), 90)');
+  });
+
   it('draws nothing while a fast press settles', () => {
     /* The cover is behind a timer rather than the pending flag itself: shown on
        the flag, every press would flash it. */
@@ -142,7 +154,7 @@ describe('warming the views', () => {
       './components/Settings',
     );
     expect(app).toContain('window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 1500))');
-    expect(app).toContain('for (const load of VIEWS) void load();');
+    expect(app).toContain('void Promise.all(VIEWS.map((load) => load())).then(() => {');
     expect(app).toContain('(window.cancelIdleCallback ?? clearTimeout)(handle as never)');
   });
 

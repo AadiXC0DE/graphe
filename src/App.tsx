@@ -307,11 +307,18 @@ const showGallery =
  *  page. Ignored by the app: a window loaded by the shell has no query string. */
 const openOnLoad = new URLSearchParams(window.location.search).get("open");
 
+/** Whether every screen's code is already here. Until it is, a press has a real
+ *  wait behind it and the ground goes up at once; after it, the wait is a frame
+ *  and covering it would be the flash rather than the fix. */
+let viewsWarm = false;
+
 export default function App() {
   useEffect(() => {
     const idle = window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 1500));
     const handle = idle(() => {
-      for (const load of VIEWS) void load();
+      void Promise.all(VIEWS.map((load) => load())).then(() => {
+        viewsWarm = true;
+      });
     });
     return () => (window.cancelIdleCallback ?? clearTimeout)(handle as never);
   }, []);
@@ -750,6 +757,14 @@ function Conversation() {
   useEffect(() => {
     if (!screenComing) {
       setCovering(false);
+      return;
+    }
+    /* Cold, the wait is a chunk off the disk and the screen somebody pressed
+       away from would sit there for a quarter of a second looking like a press
+       that did nothing. Warm, it is a frame, and a cover would be the only
+       thing anybody saw of it. */
+    if (!viewsWarm) {
+      setCovering(true);
       return;
     }
     const timer = setTimeout(() => setCovering(true), 90);

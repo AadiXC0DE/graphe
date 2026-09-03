@@ -301,7 +301,7 @@ export default function Settings({
   addons,
   onAddons,
   addonsHere = [],
-  openTo = 'last',
+  openTo = 'list',
   onOpenTo,
   shelfAtLaunch = 'remembered',
   onShelfAtLaunch,

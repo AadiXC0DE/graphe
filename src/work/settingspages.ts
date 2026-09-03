@@ -110,8 +110,11 @@ export const OPEN_TO: readonly { id: OpenTo; says: string }[] = [
   { id: 'list', says: 'The project list' },
 ];
 
+/** Nothing chosen means the list. A launch that jumps straight into the folder
+ *  it happened to be in last is a launch that has decided for you, and the one
+ *  screen where the app says what it is goes past too fast to read. */
 export function asOpenTo(raw: unknown): OpenTo {
-  return raw === 'list' ? 'list' : 'last';
+  return raw === 'last' ? 'last' : 'list';
 }
 
 /** How the shelf comes back at launch. */

@@ -50,15 +50,43 @@ describe('where a menu lands', () => {
       position: 'fixed',
       top: 128,
       right: 800,
+      maxHeight: 440,
     });
   });
 
   it('stands over a control, aligned to its left edge', () => {
-    expect(placed({ top: 700, left: 90 }, true, 'above-left')).toEqual({
+    expect(placed({ top: 700, bottom: 728, left: 90, right: 400 }, true, 'above-left')).toEqual({
       position: 'fixed',
       bottom: 108,
       left: 90,
+      maxHeight: 440,
     });
+  });
+
+  /* The side is a preference, not an instruction. The model chip asks to stand
+     over its control because that is right in the composer; asked for it at the
+     top of a settings card, standing over means starting above the top of the
+     window, which is where it was seen going. */
+  it('takes the other side when the one asked for has no room', () => {
+    const over = placed({ top: 60, bottom: 88, left: 90, right: 400 }, true, 'above-left') as {
+      top?: number;
+      bottom?: number;
+    };
+    expect(over.top).toBe(96);
+    expect(over.bottom).toBeUndefined();
+
+    const under = placed({ top: 700, bottom: 728, left: 90, right: 400 }, true, 'below-right') as {
+      top?: number;
+      bottom?: number;
+    };
+    expect(under.bottom).toBe(108);
+    expect(under.top).toBeUndefined();
+  });
+
+  /* However tall it wants to be, it stops at the room there is. */
+  it('is only as tall as the room it landed in', () => {
+    const at = placed({ bottom: 600, right: 400 }, true, 'below-right') as { maxHeight: number };
+    expect(at.maxHeight).toBe(184);
   });
 
   /* A control near the right edge would otherwise put the menu off it. */
@@ -84,6 +112,9 @@ describe('the model chip uses it', () => {
     const chip = await read('src/components/ThinkingWith.tsx');
     const styles = await read('src/components/ThinkingWith.css');
     expect(chip).toContain("useAnchored(root, open, bare === true ? 'below-right' : 'above-left')");
+    // And never drawn before it has been placed: unplaced, it is a static block
+    // at the top of the body for a frame, which is where it was seen landing.
+    expect(chip).toContain('{open && at !== null && !nothingConnected ? (');
     expect(chip).toContain('createPortal(');
     expect(chip).toContain('document.body,');
     // Nothing left to place it against an ancestor.

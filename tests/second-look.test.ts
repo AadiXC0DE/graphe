@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { PRESETS, appearanceWords, defaultAppearance, tokensFor } from '../src/design/appearance';
-import { ROWS as rows } from '../src/work/settingspages';
+import { OPEN_TO, ROWS as rows, asOpenTo } from '../src/work/settingspages';
 
 const read = (path: string): string =>
   readFileSync(fileURLToPath(new URL(`../${path}`, import.meta.url)), 'utf8');
@@ -170,5 +170,23 @@ describe('what is on this computer', () => {
   it('keeps the answer whole rather than three fields of it', () => {
     expect(app).toContain('useState<StorageNow | null>(null)');
     expect(app).toContain('void bridge.clearFolder(name).then((answer) => {');
+  });
+});
+
+describe('where a launch lands', () => {
+  /* Opening straight into whichever folder was last in front skips the one
+     screen where a person chooses, and it went past too fast to read. Nothing
+     chosen means the list; the folder is still one press, and still a
+     preference for anybody who wants it back. */
+  it('is the list until somebody says otherwise', () => {
+    expect(asOpenTo(null)).toBe('list');
+    expect(asOpenTo(undefined)).toBe('list');
+    expect(asOpenTo('nonsense')).toBe('list');
+    expect(asOpenTo('last')).toBe('last');
+    expect(asOpenTo('list')).toBe('list');
+  });
+
+  it('is still both, on the row that chooses', () => {
+    expect(OPEN_TO.map((one) => one.id)).toEqual(['last', 'list']);
   });
 });

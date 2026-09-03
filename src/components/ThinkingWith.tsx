@@ -302,7 +302,10 @@ export default function ThinkingWith({
         )}
       </button>
 
-      {open && !nothingConnected ? (
+      {/* Not until it has been measured: an unplaced menu is a static block at
+          the top of the body for one frame, which is exactly where it was seen
+          landing. */}
+      {open && at !== null && !nothingConnected ? (
         createPortal(
         <div
           className="thinking__menu"

@@ -1,0 +1,210 @@
+/* The drawer along the bottom of the window.
+
+   It spans the conversation only: the shelf, the project files and the version
+   rail all run the full height of the glass, so a drawer under them would cut
+   their own feet off, and the page beside the conversation owns the right-hand
+   edge whenever it is open. The same --*-take units the composition already
+   uses place it, and .app--commands lifts the composer by exactly its height so
+   the two never sit on top of each other. */
+
+.commands {
+  position: fixed;
+  z-index: 4;
+  bottom: 0;
+  left: calc(var(--shelf-take, 0px) + var(--files-take, 0px));
+  right: calc(var(--overview-take, 0px) + var(--browser-take, 0px));
+  height: var(--commands-height);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+}
+
+.commands__strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2);
+  height: 32px;
+  border-bottom: 1px solid var(--border);
+}
+
+.commands__spacer {
+  flex: 1 1 auto;
+}
+
+.commands__tab {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0 var(--space-2);
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+.commands__tab--here {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+.commands__press {
+  flex: none;
+  padding: 0 var(--space-2);
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+@media (hover: hover) {
+  .commands__tab:hover,
+  .commands__press:hover {
+    color: var(--text);
+    background: var(--bg-sunken);
+  }
+}
+
+/* Both bodies scroll, and both are selectable: copying a command or a stack
+   trace out of here is the reason somebody opened the drawer. */
+.commands__pane,
+.commands__tail {
+  flex: 1 1 auto;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.commands__tail {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.commands__empty {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+}
+
+.commands__line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+@media (hover: hover) {
+  .commands__line:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+.commands__cmd {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.commands__sign {
+  color: var(--text-faint);
+}
+
+.commands__ended {
+  flex: none;
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.commands__ended--failed {
+  color: var(--danger);
+}
+
+.commands__out {
+  margin: var(--space-1) 0 var(--space-2) var(--space-4);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* What the page printed. One row per message, the level said in words at the
+   left and again in the colour of the row, so an error reads as one either
+   way. */
+.commands__notes {
+  flex: 1 1 auto;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.commands__note {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 2px 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.commands__level {
+  flex: none;
+  min-width: 56px;
+  color: var(--text-faint);
+}
+
+.commands__note--warning .commands__level {
+  color: var(--accent);
+}
+
+.commands__note--problem .commands__level,
+.commands__note--problem .commands__text {
+  color: var(--danger);
+}
+
+.commands__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.commands__many,
+.commands__where {
+  flex: none;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}

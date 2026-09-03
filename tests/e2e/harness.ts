@@ -39,7 +39,7 @@ import {
   type Moved,
   type Task,
 } from '../../src/work/buildplan';
-import type { Why } from '../../src/work/continuation';
+import type { Piece, Why } from '../../src/work/continuation';
 import {
   createGoal,
   goalWords,
@@ -122,6 +122,10 @@ export type Harness = {
   /** Another conversation in the same project. */
   open: (address: string, opts?: { list?: readonly string[]; goal?: string }) => void;
   report: (address?: string) => Report;
+  /** A piece finished on the board, told to the conversation that asked. */
+  landed: (address: string, piece: Piece) => Promise<void>;
+  /** A card answered with a click rather than with typing. */
+  answered: (address?: string) => void;
   tasks: (address?: string) => readonly Task[];
   /** Take the checklist off the screen, as `cancel_build` does. */
   clear: (address?: string) => string;
@@ -148,6 +152,8 @@ type Conversation = {
   /** The app's own, out of that line. */
   ours: string[];
   waitingSeen: string[][];
+  /** Runs the authority ended because an add-on asked past the budget. */
+  halted: number;
 };
 
 function blankConversation(address: string): Conversation {
@@ -168,6 +174,7 @@ function blankConversation(address: string): Conversation {
     line: [],
     ours: [],
     waitingSeen: [],
+    halted: 0,
   };
 }
 
@@ -433,6 +440,9 @@ export function harness(opts: HarnessOpts = {}): Harness {
         : { ...withElapsed(goal), iterations: goal.iterations + 1 };
       return Promise.resolve({ ...verdict, objective: goal.objective });
     },
+    halt: (_project, address) => {
+      conv(address).halted += 1;
+    },
   });
 
   /* ---------------------------------------------------------------------- */
@@ -580,11 +590,32 @@ export function harness(opts: HarnessOpts = {}): Harness {
     ...(opts.goal === undefined ? {} : { goal: opts.goal }),
   });
 
+  /** A piece finished on the board, said exactly the way the shell says it: to
+   *  the conversation that asked for it, and settling one that is idle because
+   *  no settle of its own is coming. */
+  async function landed(address: string, piece: Piece): Promise<void> {
+    const one = conv(address);
+    one.continuations = 0;
+    one.said = [];
+    one.sends = [];
+    one.moves = [];
+    owner.landed(project, address, piece);
+    if (one.busy) return;
+    await owner.settled(project, address, 'finished');
+  }
+
+  /** A card answered with a click, which is what `CHANNEL.answer` does. */
+  function answered(address: string = front): void {
+    owner.waiting(project, address, false);
+  }
+
   return {
     run: (script, runOpts) => play(front, script, runOpts),
     runIn: (address, script, runOpts) => play(address, script, runOpts),
     open,
     report,
+    landed,
+    answered,
     tasks: (address = front) => conv(address).plan ?? [],
     clear: (address = front) => cancel(conv(address)),
     desks: () => desks,

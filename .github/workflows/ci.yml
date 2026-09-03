@@ -31,6 +31,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      # Copy a person or the model reads carries no em dashes.
+      - run: npm run copy:check
 
   test:
     name: Tests

@@ -1,6 +1,6 @@
 {
   "name": "graphe",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "private": true,
   "description": "An agentic coding platform for the desktop, built on pi",
   "license": "MIT",
@@ -29,7 +29,8 @@
     "eval": "node scripts/eval.mjs",
     "eval:json": "node scripts/eval.mjs --json",
     "lint": "eslint .",
-    "check": "npm run typecheck && npm test"
+    "copy:check": "node scripts/no-dashes.mjs",
+    "check": "npm run typecheck && npm run copy:check && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

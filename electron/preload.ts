@@ -15,7 +15,7 @@
  * never be the only thing standing between a typo and a session.
  */
 
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import {
   CHANNEL,
   type AgentNotice,
@@ -44,27 +44,37 @@ import {
   type InStep,
   type Page,
   type PointedAt,
+  type PlainPreference,
   type Preferences,
   type PromptAttachment,
   type PromptOptions,
   type RunningPiece,
+  type Said,
   type ProviderMethod,
   type PutBack,
+  type PullCheck,
+  type PullComment,
   type RepoLook,
   type RecentProject,
   type Conversation,
   type Look,
   type Pack,
   type Result,
+  type AddonReport,
   type CarriedExtension,
   type Room,
   type SideOfWork,
   type Skill,
   type AlwaysDoes,
+  type AlwaysRow,
   type Workflow,
+  type AgentFrame,
+  type Appearance,
   type BuildPlan,
   type BuildAdvance,
   type ContinuationNotice,
+  type NewerVersion,
+  type StorageNow,
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
@@ -82,6 +92,14 @@ import {
   type VisualFrames,
   type VisualNotice,
   type Where,
+  type FileVerdict,
+  type HowItLands,
+  type ReviewClash,
+  type ReviewDecided,
+  type ReviewEntry,
+  type WorkspaceFacts,
+  type ReviewOpened,
+  type ReviewVerdict,
 } from '../src/lib/ipc';
 
 /** Refused before it reaches the wire. The shape matches everything else the
@@ -96,6 +114,10 @@ function refuse<T>(what: string): Result<T> {
     },
   };
 }
+
+/** Said when a call arrives without a usable entry or file on it. */
+const NO_ENTRY = 'I could not tell which piece of work you meant.';
+const NO_COPY = 'I could not tell which conversation’s copy you meant.';
 
 function isDecision(value: unknown): value is Decision {
   return value === 'yes' || value === 'no';
@@ -129,6 +151,16 @@ function named(where?: Where): Where | undefined {
 }
 
 const api: GrapheApi = {
+  /** A folder dropped from Finder is a project; naming it is the shell's job,
+   *  because the window is only ever handed a File. */
+  pathOf(file: File): string {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
+  },
+
   openProject(path: string): Promise<Result<OpenedProject>> {
     if (typeof path !== 'string' || path.trim() === '') {
       return Promise.resolve(refuse<OpenedProject>('I did not get a folder to open.'));
@@ -239,6 +271,46 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.repoComment, number, body, named(where)) as Promise<Result<null>>;
   },
 
+  prDiff(number: number, where?: Where): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.prDiff, number, named(where)) as Promise<Result<string>>;
+  },
+
+  prChecks(number: number, where?: Where): Promise<Result<readonly PullCheck[]>> {
+    return ipcRenderer.invoke(CHANNEL.prChecks, number, named(where)) as Promise<
+      Result<readonly PullCheck[]>
+    >;
+  },
+
+  prCheckout(number: number, where?: Where): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.prCheckout, number, named(where)) as Promise<Result<string>>;
+  },
+
+  prComments(number: number, where?: Where): Promise<Result<readonly PullComment[]>> {
+    return ipcRenderer.invoke(CHANNEL.prComments, number, named(where)) as Promise<
+      Result<readonly PullComment[]>
+    >;
+  },
+
+  prComment(
+    number: number,
+    body: string,
+    path: string,
+    line: number,
+    where?: Where,
+  ): Promise<Result<readonly PullComment[]>> {
+    if (typeof body !== 'string' || body.trim() === '') {
+      return Promise.resolve(refuse<readonly PullComment[]>('There was nothing to post.'));
+    }
+    return ipcRenderer.invoke(
+      CHANNEL.prComment,
+      number,
+      body,
+      path,
+      line,
+      named(where),
+    ) as Promise<Result<readonly PullComment[]>>;
+  },
+
   putBack(versionId: string, where?: Where): Promise<Result<PutBack>> {
     if (typeof versionId !== 'string' || versionId.trim() === '') {
       return Promise.resolve(refuse<PutBack>('I could not tell which version you meant.'));
@@ -339,6 +411,11 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
   },
 
+  openSkillFile(id: string, where?: Where): Promise<Result<null>> {
+    if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<null>('I could not tell which skill to open.'));
+    return ipcRenderer.invoke(CHANNEL.openSkillFile, id, named(where)) as Promise<Result<null>>;
+  },
+
   watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>> {
     if (typeof on !== 'boolean') {
       return Promise.resolve(refuse<boolean>('I could not tell whether that was on or off.'));
@@ -354,6 +431,10 @@ const api: GrapheApi = {
 
   alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>> {
     return ipcRenderer.invoke(CHANNEL.alwaysDoes, named(where)) as Promise<Result<AlwaysDoes>>;
+  },
+
+  alwaysWrite(rows: readonly AlwaysRow[], where?: Where): Promise<Result<AlwaysDoes>> {
+    return ipcRenderer.invoke(CHANNEL.alwaysWrite, rows, named(where)) as Promise<Result<AlwaysDoes>>;
   },
 
   workflows(where?: Where): Promise<Result<readonly Workflow[]>> {
@@ -380,6 +461,48 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.worktreeDrop, named(where)) as Promise<Result<null>>;
   },
 
+  checkouts(where?: Where): Promise<Result<readonly WorkspaceFacts[]>> {
+    return ipcRenderer.invoke(CHANNEL.checkouts, named(where)) as Promise<
+      Result<readonly WorkspaceFacts[]>
+    >;
+  },
+
+  checkoutFront(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>> {
+    if (typeof address !== 'string' || address === '') {
+      return Promise.resolve(refuse<readonly WorkspaceFacts[]>(NO_COPY));
+    }
+    return ipcRenderer.invoke(CHANNEL.checkoutFront, address, named(where)) as Promise<
+      Result<readonly WorkspaceFacts[]>
+    >;
+  },
+
+  checkoutLook(address: string, where?: Where): Promise<Result<string>> {
+    if (typeof address !== 'string' || address === '') {
+      return Promise.resolve(refuse<string>(NO_COPY));
+    }
+    return ipcRenderer.invoke(CHANNEL.checkoutLook, address, named(where)) as Promise<
+      Result<string>
+    >;
+  },
+
+  checkoutLand(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>> {
+    if (typeof address !== 'string' || address === '') {
+      return Promise.resolve(refuse<readonly WorkspaceFacts[]>(NO_COPY));
+    }
+    return ipcRenderer.invoke(CHANNEL.checkoutLand, address, named(where)) as Promise<
+      Result<readonly WorkspaceFacts[]>
+    >;
+  },
+
+  checkoutPutAway(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>> {
+    if (typeof address !== 'string' || address === '') {
+      return Promise.resolve(refuse<readonly WorkspaceFacts[]>(NO_COPY));
+    }
+    return ipcRenderer.invoke(CHANNEL.checkoutPutAway, address, named(where)) as Promise<
+      Result<readonly WorkspaceFacts[]>
+    >;
+  },
+
   preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>> {
     if (typeof prNumber !== 'number' || !Number.isFinite(prNumber) || prNumber <= 0) {
       return Promise.resolve(refuse<string>('I could not tell which pull request you meant.'));
@@ -392,6 +515,65 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<{ folder: string; opened: OpenedProject }>('I could not tell which pull request you meant.'));
     }
     return ipcRenderer.invoke(CHANNEL.prReviewOpen, prNumber, named(where)) as Promise<Result<{ folder: string; opened: OpenedProject }>>;
+  },
+
+  reviewQueue(where?: Where): Promise<Result<readonly ReviewEntry[]>> {
+    return ipcRenderer.invoke(CHANNEL.reviewQueue, named(where)) as Promise<Result<readonly ReviewEntry[]>>;
+  },
+
+  reviewOpen(id: string, where?: Where): Promise<Result<ReviewOpened>> {
+    if (typeof id !== 'string' || id === '') {
+      return Promise.resolve(refuse<ReviewOpened>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.reviewOpen, id, named(where)) as Promise<Result<ReviewOpened>>;
+  },
+
+  reviewChoose(id: string, path: string, choice: FileVerdict | null, where?: Where): Promise<Result<readonly ReviewEntry[]>> {
+    if (typeof id !== 'string' || id === '' || typeof path !== 'string' || path === '') {
+      return Promise.resolve(refuse<readonly ReviewEntry[]>(NO_ENTRY));
+    }
+    if (choice !== null && choice !== 'take theirs' && choice !== 'keep mine') {
+      return Promise.resolve(refuse<readonly ReviewEntry[]>('I could not tell what to do with that file.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.reviewChoose, id, path, choice, named(where)) as Promise<Result<readonly ReviewEntry[]>>;
+  },
+
+  reviewDecide(id: string, verdict: ReviewVerdict, where?: Where): Promise<Result<ReviewDecided>> {
+    if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<ReviewDecided>(NO_ENTRY));
+    return ipcRenderer.invoke(CHANNEL.reviewDecide, id, verdict, named(where)) as Promise<Result<ReviewDecided>>;
+  },
+
+  reviewLand(id: string, landing: HowItLands, where?: Where): Promise<Result<ReviewDecided>> {
+    if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<ReviewDecided>(NO_ENTRY));
+    return ipcRenderer.invoke(CHANNEL.reviewLand, id, landing, named(where)) as Promise<Result<ReviewDecided>>;
+  },
+
+  reviewPr(id: string, summary: string, where?: Where): Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>> {
+    if (typeof id !== 'string' || id === '') {
+      return Promise.resolve(refuse<{ url: string; entries: readonly ReviewEntry[] }>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.reviewPr, id, summary, named(where)) as Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>>;
+  },
+
+  reviewMirror(id: string, on: boolean, where?: Where): Promise<Result<readonly ReviewEntry[]>> {
+    if (typeof id !== 'string' || id === '' || typeof on !== 'boolean') {
+      return Promise.resolve(refuse<readonly ReviewEntry[]>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.reviewMirror, id, on, named(where)) as Promise<Result<readonly ReviewEntry[]>>;
+  },
+
+  conflictLook(address: string, path: string, where?: Where): Promise<Result<ReviewClash>> {
+    if (typeof address !== 'string' || address === '' || typeof path !== 'string' || path === '') {
+      return Promise.resolve(refuse<ReviewClash>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.conflictLook, address, path, named(where)) as Promise<Result<ReviewClash>>;
+  },
+
+  conflictSettle(address: string, path: string, text: string, where?: Where): Promise<Result<null>> {
+    if (typeof address !== 'string' || address === '' || typeof path !== 'string' || path === '' || typeof text !== 'string') {
+      return Promise.resolve(refuse<null>(NO_ENTRY));
+    }
+    return ipcRenderer.invoke(CHANNEL.conflictSettle, address, path, text, named(where)) as Promise<Result<null>>;
   },
 
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>> {
@@ -442,6 +624,20 @@ const api: GrapheApi = {
 
   flowForget(id: string, where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.flowForget, id, named(where)) as Promise<Result<null>>;
+  },
+
+  appsHere(): Promise<Result<{ editors: readonly string[]; terminals: readonly string[] }>> {
+    return ipcRenderer.invoke(CHANNEL.appsHere) as Promise<
+      Result<{ editors: readonly string[]; terminals: readonly string[] }>
+    >;
+  },
+
+  setOpensIn(which: 'editor' | 'terminal', name: string | null): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.setOpensIn, which, name) as Promise<Result<Preferences>>;
+  },
+
+  setPreference(which: PlainPreference, value: string | boolean): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.setPreference, which, value) as Promise<Result<Preferences>>;
   },
 
   goalLoad(where?: Where): Promise<Result<import('../src/work/goal').Goal | null>> {
@@ -495,6 +691,17 @@ const api: GrapheApi = {
 
   running(where?: Where): Promise<Result<readonly RunningPiece[]>> {
     return ipcRenderer.invoke(CHANNEL.running, named(where)) as Promise<Result<readonly RunningPiece[]>>;
+  },
+
+  runningSaid(id: string, where?: Where): Promise<Result<string>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<string>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.runningSaid, id, named(where)) as Promise<Result<string>>;
+  },
+
+  pageSaid(where?: Where): Promise<Result<readonly Said[]>> {
+    return ipcRenderer.invoke(CHANNEL.pageSaid, named(where)) as Promise<Result<readonly Said[]>>;
   },
 
   stopRunning(id: string, where?: Where): Promise<Result<readonly RunningPiece[]>> {
@@ -663,6 +870,16 @@ const api: GrapheApi = {
     };
   },
 
+  onEvents(listener: (frames: readonly AgentFrame[]) => void): () => void {
+    const forward = (_source: IpcRendererEvent, frames: readonly AgentFrame[]): void => {
+      listener(frames);
+    };
+    ipcRenderer.on(CHANNEL.events, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.events, forward);
+    };
+  },
+
   visualFrames(changeId: string): Promise<Result<VisualFrames>> {
     if (typeof changeId !== 'string' || changeId.trim() === '') {
       return Promise.resolve(refuse<VisualFrames>('I could not tell which change you meant.'));
@@ -771,7 +988,7 @@ const api: GrapheApi = {
     >;
   },
 
-  setAddons(choice: 'on' | 'tools-only', where?: Where): Promise<Result<Preferences>> {
+  setAddons(choice: 'on' | 'tools-only' | 'off', where?: Where): Promise<Result<Preferences>> {
     return ipcRenderer.invoke(CHANNEL.setAddons, choice, named(where)) as Promise<
       Result<Preferences>
     >;
@@ -803,6 +1020,11 @@ const api: GrapheApi = {
 
   tokenUsage(): Promise<Result<TokenUsageView | null>> {
     return ipcRenderer.invoke(CHANNEL.tokenUsage) as Promise<Result<TokenUsageView | null>>;
+  },
+
+  exportSpend(csv: string): Promise<Result<string | null>> {
+    if (typeof csv !== 'string' || csv === '') return Promise.resolve(refuse<string | null>('There is nothing to write out yet.'));
+    return ipcRenderer.invoke(CHANNEL.exportSpend, csv) as Promise<Result<string | null>>;
   },
 
   pageAt(
@@ -918,6 +1140,16 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.setTheme, theme) as Promise<Result<Preferences>>;
   },
 
+  setAppearance(appearance: Appearance, where?: Where): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.setAppearance, appearance, named(where)) as Promise<
+      Result<Preferences>
+    >;
+  },
+
+  ownStyles(): Promise<Result<{ css: string; file: string }>> {
+    return ipcRenderer.invoke(CHANNEL.ownStyles) as Promise<Result<{ css: string; file: string }>>;
+  },
+
   setHowMuch(id: string): Promise<Result<Preferences>> {
     if (typeof id !== 'string' || id.trim() === '') {
       return Promise.resolve(refuse<Preferences>('I could not tell which line that was.'));
@@ -964,6 +1196,11 @@ const api: GrapheApi = {
   },
   changesLook(where?: Where): Promise<Result<string>> {
     return ipcRenderer.invoke(CHANNEL.changesLook, named(where)) as Promise<Result<string>>;
+  },
+  changesWider(file: string, context: number, where?: Where): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.changesWider, file, context, named(where)) as Promise<
+      Result<string>
+    >;
   },
   changesDrop(patch: string, where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.changesDrop, patch, named(where)) as Promise<Result<null>>;
@@ -1136,6 +1373,16 @@ const api: GrapheApi = {
     };
   },
 
+  onNewerVersion(listener: (one: NewerVersion) => void): () => void {
+    const forward = (_source: IpcRendererEvent, one: NewerVersion): void => {
+      listener(one);
+    };
+    ipcRenderer.on(CHANNEL.newerVersion, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.newerVersion, forward);
+    };
+  },
+
   continuationStop(where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.continuationStop, where);
   },
@@ -1170,13 +1417,18 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.longJobs, providerId, modelId);
   },
 
-  addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>> {
+  addons(): Promise<Result<AddonReport>> {
     return ipcRenderer.invoke(CHANNEL.addons);
   },
 
-  storage(): Promise<Result<{ says: string; couldClear: number; because: string }>> {
-    return ipcRenderer.invoke(CHANNEL.storage);
+  storage(): Promise<Result<StorageNow>> {
+    return ipcRenderer.invoke(CHANNEL.storage) as Promise<Result<StorageNow>>;
   },
+
+  clearFolder(name: string): Promise<Result<StorageNow>> {
+    return ipcRenderer.invoke(CHANNEL.clearFolder, name) as Promise<Result<StorageNow>>;
+  },
+
 
   clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>> {
     return ipcRenderer.invoke(CHANNEL.clearFinishedWork);

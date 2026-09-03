@@ -2,6 +2,7 @@
    begins on, and the frequency rule says the frequent things stay still. */
 
 .welcome {
+  position: relative;
   display: flex;
   flex-direction: column;
   /* Narrower than the conversation it sits in. A heading and three short lines
@@ -399,5 +400,73 @@
 @media (prefers-reduced-motion: reduce) {
   .welcome__start:active {
     transform: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The ground
+   The first thing anybody sees, so it is allowed to be more than a heading on
+   an empty page. Two layers, both painted once and neither animated: a dot
+   field masked to nothing before it reaches the words, and a single soft bloom
+   of the accent behind the question. Under the content in every sense.
+   --------------------------------------------------------------------------- */
+
+.welcome__ground {
+  position: absolute;
+  left: 50%;
+  top: -80px;
+  width: 1100px;
+  height: 620px;
+  translate: -50% 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(
+      ellipse 44% 40% at 50% 26%,
+      color-mix(in oklab, var(--accent) 14%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0);
+  background-size:
+    100% 100%,
+    26px 26px;
+  mask-image: radial-gradient(ellipse 52% 46% at 50% 30%, #000 20%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 52% 46% at 50% 30%, #000 20%, transparent 78%);
+  opacity: 0.85;
+}
+
+/* Everything real sits over it. */
+.welcome > *:not(.welcome__ground) {
+  position: relative;
+  z-index: 1;
+}
+
+/* The folder's own name, which is the one word on this screen that is about
+   this project rather than about the product. */
+.welcome__where {
+  color: var(--accent-ink);
+}
+
+/* A row that answers the pointer: the ground lifts under it and the mark at the
+   end moves the way the row is about to go. */
+@media (hover: hover) and (pointer: fine) {
+  .welcome__example:hover .welcome__chevron {
+    translate: 2px 0;
+  }
+}
+
+.welcome__chevron {
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    translate var(--dur-micro) var(--ease-out-quart);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome__chevron {
+    transition: color var(--dur-micro) var(--ease-hover);
+  }
+
+  .welcome__example:hover .welcome__chevron {
+    translate: none;
   }
 }

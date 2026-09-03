@@ -30,7 +30,7 @@ describe('roles', () => {
     // and is told plainly that a refusal is something to report, not a reason
     // to go quiet, which is what five of them did.
     expect(reviewer.spoken).toContain('read the history');
-    expect(reviewer.spoken).toContain('nothing that writes, fetches or checks anything out');
+    expect(reviewer.spoken).toContain('Nothing that writes, fetches or checks anything out');
     expect(reviewer.spoken).toContain('say what you could not check instead of going quiet');
   });
 

@@ -77,6 +77,7 @@ export default function Steps({ steps, showMe }: Props) {
               label={step.label}
               detail={step.progress === undefined ? step.detail : lastSaid(step.progress)}
               real={showMe ? step.real : undefined}
+              lead={showMe}
             />
           ))}
         </div>

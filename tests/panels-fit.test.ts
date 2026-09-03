@@ -25,8 +25,21 @@ describe('settings can be scrolled to the end', () => {
     // so the rows past the fold were not off-screen, they were gone. The head
     // keeps its height; the band under it is the one that scrolls.
     expect(block('.settings__top')).toContain('flex: none');
-    expect(block('.settings__body')).toContain('overflow: auto');
     expect(block('.settings__body')).toContain('min-height: 0');
+    // Wide, the page scrolls inside its own half and the list of pages does not
+    // move at all: sticky held it still only after it had ridden up to the top,
+    // which reads as a screen with two scrollbars. Narrow, the two are one
+    // column again and the whole band scrolls, which is right.
+    expect(block('.settings__body')).toContain('overflow: hidden');
+    expect(css).toContain('@container (max-width: 779.98px)');
+    expect(block('.settings__page-body')).toContain('overflow-y: auto');
+    expect(block('.settings__pages')).toContain('overflow-y: auto');
+    /* And nothing on the page gives up height so the page can pretend to fit.
+       The page is a flex column: the moment it became a scroller, every card
+       inside it shrank rather than overflowing, and a card hides its own
+       overflow, so the rows past the fold were clipped away with no scrollbar
+       to reach them. This is the same fault as the head above, one level in. */
+    expect(block('.settings__page-body > *')).toContain('flex: none');
   });
 
   it('still clips its own corners, which is why this was ever a problem', () => {
@@ -43,16 +56,17 @@ describe('settings can be scrolled to the end', () => {
     expect(css).toContain('@container (min-width: 780px)');
   });
 
-  it('never strands a lone tile on a row of its own', () => {
-    // Four screens to go to, so every column count it can take divides four.
+  it('stacks the page list over its page until there is room for both', () => {
+    // One column at every width the sheet can be, and the sidebar beside the
+    // page only once the container query says the room is there.
     const counts = css
-      .split('.settings__places {')
+      .split('.settings__inner {')
       .slice(1)
       .map((after) => /grid-template-columns: ([^;]+);/.exec(after.slice(0, after.indexOf('}')))?.[1]);
-    expect(counts.length).toBeGreaterThan(1);
-    for (const one of counts) {
-      expect(one).toMatch(/^(minmax\(0, 1fr\)|repeat\((2|4), minmax\(0, 1fr\)\))$/);
-    }
+    expect(counts.filter((one) => one !== undefined)).toEqual([
+      'minmax(0, 1fr)',
+      '220px minmax(0, 1fr)',
+    ]);
   });
 });
 

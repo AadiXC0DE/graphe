@@ -20,7 +20,11 @@ import {
   alwaysFrom,
   commandFor,
   isAlwaysFile,
+  alwaysText,
   quoted,
+  rowsAsGiven,
+  rowsFrom,
+  whenWords,
   worthRunning,
 } from '../src/work/always';
 
@@ -145,5 +149,89 @@ describe('opening the file before anybody has written one', () => {
   it('is written once and never over what somebody put there', () => {
     const main = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
     expect(main).toContain("writeFile(target, ALWAYS_TEMPLATE, { flag: 'wx' })");
+  });
+});
+
+/** The list as the window draws and writes it. */
+describe('the list the window edits', () => {
+  it('reads every moment in the order the file writes them', () => {
+    const rows = rowsFrom(ALWAYS_TEMPLATE);
+    expect(rows).toEqual([
+      { when: 'afterEachChange', name: 'format', run: 'npx prettier --write $FILES', on: true },
+      { when: 'whenItFinishes', name: 'tests', run: 'npm test', on: true },
+    ]);
+  });
+
+  it('has a word for each moment, so the screen and the file agree', () => {
+    expect(whenWords.afterEachChange.length).toBeGreaterThan(4);
+    expect(new Set(Object.values(whenWords)).size).toBe(3);
+  });
+
+  /* A switch has to mean something a quit survives, and losing the command was
+     not an option. */
+  it('keeps a switched-off one where nothing that runs will read it', () => {
+    const text = alwaysText([
+      { when: 'afterEachChange', name: 'format', run: 'prettier .', on: true },
+      { when: 'whenItFinishes', name: 'tests', run: 'npm test', on: false },
+    ]);
+    const running = alwaysFrom(text);
+    expect(running.trouble).toBeNull();
+    expect(running.all.afterEachChange).toEqual([{ name: 'format', run: 'prettier .' }]);
+    expect(running.all.whenItFinishes).toEqual([]);
+    expect(rowsFrom(text)).toEqual([
+      { when: 'afterEachChange', name: 'format', run: 'prettier .', on: true },
+      { when: 'whenItFinishes', name: 'tests', run: 'npm test', on: false },
+    ]);
+  });
+
+  it('writes a file the reader is happy with, ending in a newline', () => {
+    const text = alwaysText([{ when: 'whenItOpens', name: '', run: 'npm ci', on: true }]);
+    expect(text.endsWith('\n')).toBe(true);
+    expect(alwaysFrom(text).all.whenItOpens).toEqual([{ name: 'npm', run: 'npm ci' }]);
+  });
+
+  it('drops what the window sends that is not one of the three moments', () => {
+    expect(
+      rowsAsGiven([
+        { when: 'afterEachChange', name: 'format', run: '  prettier .  ' },
+        { when: 'whenever', name: 'nope', run: 'rm -rf /' },
+        { when: 'whenItFinishes', name: 'blank', run: '   ' },
+        'not a row',
+      ]),
+    ).toEqual([{ when: 'afterEachChange', name: 'format', run: 'prettier .', on: true }]);
+  });
+
+  /* The page enforced the ceiling and the reader did not, so a file edited by
+     hand showed six switched on while four ran. */
+  it('switches off what is past the ceiling rather than hiding it', () => {
+    const many = Array.from({ length: MOST_AT_ONCE + 2 }, (_, at) => ({
+      when: 'whenItFinishes' as const,
+      name: `check ${String(at)}`,
+      run: `npm run check-${String(at)}`,
+      on: true,
+    }));
+    const rows = rowsAsGiven(many);
+    expect(rows).toHaveLength(many.length);
+    expect(rows.filter((one) => one.on)).toHaveLength(MOST_AT_ONCE);
+    const back = rowsFrom(alwaysText(rows));
+    expect(back.filter((one) => one.on)).toHaveLength(MOST_AT_ONCE);
+    expect(back).toHaveLength(many.length);
+  });
+
+  it('shows what runs, where a hand-written file asks for more than runs', () => {
+    const text = JSON.stringify({
+      whenItFinishes: Array.from({ length: MOST_AT_ONCE + 1 }, (_, at) => ({
+        name: `t${String(at)}`,
+        run: `npm test ${String(at)}`,
+      })),
+    });
+    expect(rowsFrom(text).filter((one) => one.on)).toHaveLength(MOST_AT_ONCE);
+    expect(alwaysFrom(text).all.whenItFinishes).toHaveLength(MOST_AT_ONCE);
+  });
+
+  it('is nothing rather than a throw for a file that will not read', () => {
+    expect(rowsFrom('{ not json')).toEqual([]);
+    expect(rowsFrom(null)).toEqual([]);
+    expect(rowsAsGiven(null)).toEqual([]);
   });
 });

@@ -65,7 +65,7 @@ export const PORT_WORDS = {
    *  CORS allow-list written against the usual port will turn this address away
    *  with an error that points nowhere near us. */
   secondCopy:
-    'This copy serves on a port of its own rather than the one the project usually uses — anything pinned to that one (sign-in callbacks, trusted origins, CORS allow-lists) will refuse this address until it is told about this one.',
+    'This copy serves on a port of its own rather than the one the project usually uses, so anything pinned to that one (sign-in callbacks, trusted origins, CORS allow-lists) will refuse this address until it is told about this one.',
 } as const;
 
 /**

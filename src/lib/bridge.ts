@@ -20,6 +20,7 @@
  * drifts away from the thing it is standing in for.
  */
 
+import { readAppearance, type Appearance } from '../design/appearance';
 import type { AgentEvent, RunningPiece } from '../agent/types';
 import {
   findMoved,
@@ -31,6 +32,7 @@ import {
 import { howMuchBy } from '../design/gate';
 import { themeFrom } from './theme';
 import { pagesIn, type Page } from '../preview/pages';
+import type { Said } from '../preview/tabs';
 import { holdsBack } from '../projects/heldback';
 import { readFlows, withFlow, withoutFlow, type Flow } from '../work/canvas';
 import { keepsLogins } from '../projects/logins';
@@ -51,6 +53,8 @@ import {
   type ConnectedState,
   type AwayPiece,
   type EveryKind,
+  type PullCheck,
+  type PullComment,
   type Repeating,
   type ConnectOutcome,
   type ConnectStep,
@@ -72,16 +76,19 @@ import {
   type Look,
   type Overview,
   type Pack,
+  type PlainPreference,
   type Preferences,
   type PromptAttachment,
   type ProviderMethod,
   type PutBack,
   type RepoLook,
   type RecentProject,
+  type AddonReport,
   type CarriedExtension,
   type Result,
   type Room,
   type SideOfWork,
+  type WorkspaceFacts,
   type Skill,
   type AlwaysDoes,
   type Workflow,
@@ -101,6 +108,11 @@ import {
   type VisualChange,
   type VisualFrames,
   type VisualNotice,
+  type ReviewClash,
+  type ReviewDecided,
+  type ReviewEntry,
+  type ReviewOpened,
+  type StorageNow,
 } from './ipc';
 
 declare global {
@@ -232,12 +244,17 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const started = Date.now();
 
-const PREVIEW_PROJECTS: readonly { path: string; name: string; ago: number; spent: number | null }[] =
-  [
-    { path: '/Users/you/Sites/paper-street', name: 'paper-street', ago: 12 * MINUTE, spent: 62 },
-    { path: '/Users/you/Sites/atlas-studio', name: 'atlas-studio', ago: 26 * HOUR, spent: 214 },
-    { path: '/Users/you/Sites/field-notes', name: 'field-notes', ago: 5 * 24 * HOUR, spent: null },
-  ];
+const PREVIEW_PROJECTS: readonly {
+  path: string;
+  name: string;
+  ago: number;
+  spent: number | null;
+  branch: string | null;
+}[] = [
+  { path: '/Users/you/Sites/paper-street', name: 'paper-street', ago: 12 * MINUTE, spent: 62, branch: 'feat/pricing-page' },
+  { path: '/Users/you/Sites/atlas-studio', name: 'atlas-studio', ago: 26 * HOUR, spent: 214, branch: 'main' },
+  { path: '/Users/you/Sites/field-notes', name: 'field-notes', ago: 5 * 24 * HOUR, spent: null, branch: null },
+];
 
 type PreviewVersion = {
   title: string;
@@ -645,6 +662,9 @@ let previewRunning: readonly RunningPiece[] = [
   },
 ];
 
+/** What that made-up server has said so far. */
+let previewSaid = 'VITE v6.0.0  ready in 412 ms\n\n  ➜  Local:   http://localhost:5173/\n';
+
 /** Lines of work the tab can actually move between, so the switcher is a
  *  control somebody can try rather than a picture of one. */
 let previewLine = 'main';
@@ -707,7 +727,13 @@ let previewPlanMode = false;
     advisor: null,
     advisorThinking: null,
     advisorGates: { completionGate: false, loopGate: false },
-    addons: 'tools-only',
+    addons: 'on',
+    editor: null,
+    terminal: null,
+    appearance: readAppearance(
+      null,
+      typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme'),
+    ),
     thinking: {},
     kept: {},
     showFiles: true,
@@ -720,6 +746,14 @@ let previewPlanMode = false;
     // answer agrees with what painted, instead of a fresh 'system' clobbering
     // the choice back on every reload.
     theme: themeFrom(typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme')),
+    nameConversations: true,
+    askBeforeClosing: true,
+    snapBeforeApply: true,
+    replyLanguage: '',
+    whenRunFinishes: 'system',
+    whenSomethingNeedsYou: 'system',
+    notifySound: false,
+    badgeDock: true,
   };
 
   const send = (event: AgentEvent): void => {
@@ -746,6 +780,7 @@ let previewPlanMode = false;
       // more" is a state the picker has to draw and nobody would ever see it by
       // accident.
       missing: one.path === '/Users/you/Sites/field-notes',
+      branch: one.branch,
     }));
 
   /** Once, shortly after the interface starts listening. It is the one thing a
@@ -773,6 +808,9 @@ let previewPlanMode = false;
 
   return {
     desktop: false,
+
+    /** No shell to ask, so a dropped folder cannot be named here. */
+    pathOf: (): string => '',
 
     openProject(path: string): Promise<Result<OpenedProject>> {
       const known = PREVIEW_PROJECTS.find((one) => one.path === path);
@@ -855,9 +893,12 @@ let previewPlanMode = false;
         git: {
           branch: previewLine,
           dirty: previewDirty,
+          added: previewDirty ? 18 : 0,
+          removed: previewDirty ? 4 : 0,
           unstaged: previewDirty ? 2 : 0,
           staged: previewDirty ? 1 : 0,
           untracked: previewDirty ? 1 : 0,
+          changedPaths: previewDirty ? PREVIEW_CHANGED.length : 0,
           ahead: previewStandsOn().ahead,
           behind: previewStandsOn().behind,
           branches: previewLines.map((one) => ({ ...one, current: one.name === previewLine })),
@@ -924,6 +965,26 @@ let previewPlanMode = false;
 
     repoComment(): Promise<Result<null>> {
       return Promise.resolve(done(null));
+    },
+
+    prDiff(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
+    prChecks(): Promise<Result<readonly PullCheck[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    prCheckout(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
+    prComments(): Promise<Result<readonly PullComment[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    prComment(): Promise<Result<readonly PullComment[]>> {
+      return Promise.resolve(previewFail<readonly PullComment[]>());
     },
 
     putBack(versionId: string): Promise<Result<PutBack>> {
@@ -997,8 +1058,18 @@ let previewPlanMode = false;
     },
 
     setTheme(theme: unknown): Promise<Result<Preferences>> {
-      preferred = { ...preferred, theme: themeFrom(theme) };
+      const base = themeFrom(theme);
+      preferred = { ...preferred, theme: base, appearance: { ...preferred.appearance, base } };
       return Promise.resolve(done({ ...preferred }));
+    },
+
+    setAppearance(appearance: Appearance): Promise<Result<Preferences>> {
+      preferred = { ...preferred, appearance, theme: appearance.base };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    ownStyles(): Promise<Result<{ css: string; file: string }>> {
+      return Promise.resolve(done({ css: '', file: '' }));
     },
 
     /** A whole project, made up, so the panel can be opened and reviewed in a
@@ -1084,6 +1155,10 @@ let previewPlanMode = false;
       return Promise.resolve(done(''));
     },
 
+    openSkillFile(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
     watchBrowser(): Promise<Result<boolean>> {
       return Promise.resolve(done(false));
     },
@@ -1093,6 +1168,10 @@ let previewPlanMode = false;
     },
 
     alwaysDoes(): Promise<Result<AlwaysDoes>> {
+      return Promise.resolve(done({ file: '', rows: [], trouble: null }));
+    },
+
+    alwaysWrite(): Promise<Result<AlwaysDoes>> {
       return Promise.resolve(done({ file: '', rows: [], trouble: null }));
     },
 
@@ -1140,12 +1219,72 @@ let previewPlanMode = false;
       return Promise.resolve(previewFail<null>());
     },
 
+    /* Nothing in a browser tab has a copy of the project, so the band draws its
+       own empty line rather than a refusal. */
+    checkouts(): Promise<Result<readonly WorkspaceFacts[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    checkoutFront(): Promise<Result<readonly WorkspaceFacts[]>> {
+      return Promise.resolve(previewFail<readonly WorkspaceFacts[]>());
+    },
+
+    checkoutLook(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
+    checkoutLand(): Promise<Result<readonly WorkspaceFacts[]>> {
+      return Promise.resolve(previewFail<readonly WorkspaceFacts[]>());
+    },
+
+    checkoutPutAway(): Promise<Result<readonly WorkspaceFacts[]>> {
+      return Promise.resolve(previewFail<readonly WorkspaceFacts[]>());
+    },
+
     preparePrWorktree(): Promise<Result<string>> {
       return Promise.resolve(previewFail<string>());
     },
 
     openPrReview(): Promise<Result<{ folder: string; opened: OpenedProject }>> {
       return Promise.resolve(previewFail<{ folder: string; opened: OpenedProject }>());
+    },
+
+    /* Nothing finishes in a browser tab, so nothing is ever waiting to be
+       looked at. An empty queue is the true answer here, not a refusal. */
+    reviewQueue(): Promise<Result<readonly ReviewEntry[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    reviewOpen(): Promise<Result<ReviewOpened>> {
+      return Promise.resolve(previewFail<ReviewOpened>());
+    },
+
+    reviewChoose(): Promise<Result<readonly ReviewEntry[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    reviewDecide(): Promise<Result<ReviewDecided>> {
+      return Promise.resolve(previewFail<ReviewDecided>());
+    },
+
+    reviewLand(): Promise<Result<ReviewDecided>> {
+      return Promise.resolve(previewFail<ReviewDecided>());
+    },
+
+    reviewPr(): Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>> {
+      return Promise.resolve(previewFail<{ url: string; entries: readonly ReviewEntry[] }>());
+    },
+
+    reviewMirror(): Promise<Result<readonly ReviewEntry[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    conflictLook(): Promise<Result<ReviewClash>> {
+      return Promise.resolve(previewFail<ReviewClash>());
+    },
+
+    conflictSettle(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
     },
 
     buildStart(): Promise<Result<BuildPlan>> {
@@ -1184,6 +1323,20 @@ let previewPlanMode = false;
     flowForget(id: string): Promise<Result<null>> {
       keepFlows(withoutFlow(heldFlows(), id));
       return Promise.resolve(done(null));
+    },
+
+    appsHere(): Promise<Result<{ editors: readonly string[]; terminals: readonly string[] }>> {
+      return Promise.resolve(done({ editors: [], terminals: [] }));
+    },
+
+    setOpensIn(which: 'editor' | 'terminal', name: string | null): Promise<Result<Preferences>> {
+      preferred = { ...preferred, [which]: name };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    setPreference(which: PlainPreference, value: string | boolean): Promise<Result<Preferences>> {
+      preferred = { ...preferred, [which]: value };
+      return Promise.resolve(done({ ...preferred }));
     },
 
     goalLoad(): Promise<Result<import('../work/goal').Goal | null>> {
@@ -1249,6 +1402,15 @@ let previewPlanMode = false;
 
     running(): Promise<Result<readonly RunningPiece[]>> {
       return Promise.resolve(done(previewRunning));
+    },
+
+    runningSaid(id: string): Promise<Result<string>> {
+      const one = previewRunning.find((piece) => piece.id === id);
+      if (one === undefined) return Promise.resolve(done(''));
+      // A line with the clock in it, so the drawer's own reading of the tail
+      // can be watched moving without a real server anywhere.
+      previewSaid = `${previewSaid}ready in ${String(Math.round(Date.now() / 1000) % 1000)}ms\n`;
+      return Promise.resolve(done(previewSaid));
     },
 
     stopRunning(id: string): Promise<Result<readonly RunningPiece[]>> {
@@ -1539,7 +1701,7 @@ let previewPlanMode = false;
       return Promise.resolve(done({ ...preferred }));
     },
 
-    setAddons(choice: 'on' | 'tools-only'): Promise<Result<Preferences>> {
+    setAddons(choice: 'on' | 'tools-only' | 'off'): Promise<Result<Preferences>> {
       preferred = { ...preferred, addons: choice };
       return Promise.resolve(done({ ...preferred }));
     },
@@ -1561,11 +1723,37 @@ let previewPlanMode = false;
       const now = Date.now();
       const DAY = 24 * 60 * 60 * 1000;
       const shape = [0, 41_200, 0, 128_900, 64_300, 0, 12_400, 88_100, 0, 0, 152_700, 45_600, 9_800, 0];
+      const models = ['sonnet-4-6', 'gpt-5.6-terra', 'haiku-4-5'];
+      const talks = [
+        { id: 'one', title: 'Tighten the review screen', path: '/preview/one.jsonl' },
+        { id: 'two', title: 'Colour and type pass', path: '/preview/two.jsonl' },
+        { id: 'three', title: 'Why is the build slow', path: '/preview/three.jsonl' },
+      ];
       const entries = shape.flatMap((tokens, back) => {
         const at = now - (shape.length - 1 - back) * DAY - 3 * 60 * 60 * 1000;
-        return tokens === 0 ? [] : [{ at, tokens }];
+        if (tokens === 0) return [];
+        return [0, 1].map((half) => ({
+          at,
+          tokens: Math.round(tokens / 2),
+          cost: tokens / 120_000,
+          model: models[(back + half) % models.length] ?? models[0]!,
+          input: Math.round(tokens * 0.7),
+          output: Math.round(tokens * 0.1),
+          cached: Math.round(tokens * 0.2),
+          conversation: talks[(back + half) % talks.length] ?? talks[0]!,
+        }));
       });
       return Promise.resolve(done(daysFromUsage(entries)));
+    },
+
+    /** A browser tab has no Downloads folder of ours to write into. */
+    exportSpend(): Promise<Result<string | null>> {
+      send({
+        type: 'error',
+        message:
+          'This is Graphe running in a browser tab, so there is nowhere to save a file. In the app this writes a CSV you can expense.',
+      });
+      return Promise.resolve(done(null));
     },
 
     closeConversation(): Promise<Result<null>> {
@@ -1580,6 +1768,11 @@ let previewPlanMode = false;
 
     pageHidden(): Promise<Result<null>> {
       return Promise.resolve(done(null));
+    },
+
+    /** The mock has no page, so it has nothing the page said. */
+    pageSaid(): Promise<Result<readonly Said[]>> {
+      return Promise.resolve(done([]));
     },
 
     /** A browser tab has no page of ours to watch, and says so rather than
@@ -1700,6 +1893,9 @@ let previewPlanMode = false;
     },
 
     changesLook(): Promise<Result<string>> {
+      return Promise.resolve(done(''));
+    },
+    changesWider(): Promise<Result<string>> {
       return Promise.resolve(done(''));
     },
     changesDrop(): Promise<Result<null>> {
@@ -1837,6 +2033,7 @@ let previewPlanMode = false;
             picture: null,
             spent: null,
             folder: null,
+            base: previewLine,
           },
           {
             id: 'way-2',
@@ -1846,6 +2043,7 @@ let previewPlanMode = false;
             picture: null,
             spent: null,
             folder: null,
+            base: previewLine,
           },
         ]),
       );
@@ -1915,11 +2113,19 @@ let previewPlanMode = false;
       return () => undefined;
     },
 
+    onNewerVersion(): () => void {
+      return () => undefined;
+    },
+
     continuationStop(): Promise<Result<null>> {
       return Promise.resolve(done(null));
     },
 
     onMenu(): () => void {
+      return () => undefined;
+    },
+
+    onEvents(): () => void {
       return () => undefined;
     },
 
@@ -1947,12 +2153,16 @@ let previewPlanMode = false;
       return Promise.resolve(done(null));
     },
 
-    addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>> {
-      return Promise.resolve(done({ says: {}, running: 0 }));
+    addons(): Promise<Result<AddonReport>> {
+      return Promise.resolve(done({ says: {}, each: [], running: 0 }));
     },
 
-    storage(): Promise<Result<{ says: string; couldClear: number; because: string }>> {
-      return Promise.resolve(done({ says: 'Nothing kept behind this window.', couldClear: 0, because: '' }));
+    storage(): Promise<Result<StorageNow>> {
+      return Promise.resolve(done({ says: 'Nothing kept on this computer yet.', couldClear: 0, because: '', rows: [] }));
+    },
+
+    clearFolder(): Promise<Result<StorageNow>> {
+      return Promise.resolve(done({ says: 'Nothing kept on this computer yet.', couldClear: 0, because: '', rows: [] }));
     },
 
     clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>> {
@@ -2118,6 +2328,7 @@ function connect(): Bridge {
 
   return {
     desktop: true,
+    pathOf: (file) => api.pathOf(file),
     openProject: (path) => api.openProject(path),
     // The `where` is what names *which conversation* this message belongs to.
     // Dropping it — as a bare `(text, attachments) =>` call but that left them
@@ -2141,6 +2352,11 @@ function connect(): Bridge {
     versions: (where) => api.versions(where),
     repoLook: (where) => api.repoLook(where),
     repoComment: (number, body, where) => api.repoComment(number, body, where),
+    prDiff: (number, where) => api.prDiff(number, where),
+    prChecks: (number, where) => api.prChecks(number, where),
+    prCheckout: (number, where) => api.prCheckout(number, where),
+    prComments: (number, where) => api.prComments(number, where),
+    prComment: (number, body, path, line, where) => api.prComment(number, body, path, line, where),
     putBack: (versionId, where) => api.putBack(versionId, where),
     nameVersion: (versionId, name, where) => api.nameVersion(versionId, name, where),
     versionPictures: (where) => api.versionPictures(where),
@@ -2149,6 +2365,8 @@ function connect(): Bridge {
     keepVersion: (versionId, keep, where) => api.keepVersion(versionId, keep, where),
     setShowFiles: (on) => api.setShowFiles(on),
     setTheme: (theme) => api.setTheme(theme),
+    setAppearance: (appearance) => api.setAppearance(appearance),
+    ownStyles: () => api.ownStyles(),
     projectFiles: (where) => api.projectFiles(where),
     fileText: (path, where) => api.fileText(path, where),
     hatches: () => api.hatches(),
@@ -2159,8 +2377,10 @@ function connect(): Bridge {
     tidyNow: (where) => api.tidyNow(where),
     skills: (where) => api.skills(where),
     skillText: (id, where) => api.skillText(id, where),
+    openSkillFile: (id, where) => api.openSkillFile(id, where),
     workflows: (where) => api.workflows(where),
     alwaysDoes: (where) => api.alwaysDoes(where),
+    alwaysWrite: (rows, where) => api.alwaysWrite(rows, where),
     watchBrowser: (on, where) => api.watchBrowser(on, where),
     onBrowserFrame: (listener) => api.onBrowserFrame(listener),
     branchSwitch: (name, where) => api.branchSwitch(name, where),
@@ -2169,8 +2389,22 @@ function connect(): Bridge {
     fastForward: (where) => api.fastForward(where),
     worktreeLand: (where) => api.worktreeLand(where),
     worktreeDrop: (where) => api.worktreeDrop(where),
+    checkouts: (where) => api.checkouts(where),
+    checkoutFront: (address, where) => api.checkoutFront(address, where),
+    checkoutLook: (address, where) => api.checkoutLook(address, where),
+    checkoutLand: (address, where) => api.checkoutLand(address, where),
+    checkoutPutAway: (address, where) => api.checkoutPutAway(address, where),
     preparePrWorktree: (prNumber, where) => api.preparePrWorktree(prNumber, where),
     openPrReview: (prNumber, where) => api.openPrReview(prNumber, where),
+    reviewQueue: (where) => api.reviewQueue(where),
+    reviewOpen: (id, where) => api.reviewOpen(id, where),
+    reviewChoose: (id, path, choice, where) => api.reviewChoose(id, path, choice, where),
+    reviewDecide: (id, verdict, where) => api.reviewDecide(id, verdict, where),
+    reviewLand: (id, landing, where) => api.reviewLand(id, landing, where),
+    reviewPr: (id, summary, where) => api.reviewPr(id, summary, where),
+    reviewMirror: (id, on, where) => api.reviewMirror(id, on, where),
+    conflictLook: (address, path, where) => api.conflictLook(address, path, where),
+    conflictSettle: (address, path, text, where) => api.conflictSettle(address, path, text, where),
     buildStart: (source, where) => api.buildStart(source, where),
     buildPlan: (where) => api.buildPlan(where),
     buildAdvance: (op, where) => api.buildAdvance(op, where),
@@ -2180,6 +2414,9 @@ function connect(): Bridge {
     flowLoad: (whereArg) => (api.flowLoad as unknown as (where?: Where) => Promise<Result<readonly Flow[]>>)?.(whereArg) ?? Promise.resolve(done([])),
     flowSave: (flow, whereArg) => (api.flowSave as unknown as (flow: Flow, where?: Where) => Promise<Result<null>>)?.(flow, whereArg) ?? Promise.resolve(done(null)),
     flowForget: (id, whereArg) => (api.flowForget as unknown as (id: string, where?: Where) => Promise<Result<null>>)?.(id, whereArg) ?? Promise.resolve(done(null)),
+    appsHere: () => api.appsHere(),
+    setOpensIn: (which, name) => api.setOpensIn(which, name),
+    setPreference: (which, value) => api.setPreference(which, value),
     goalLoad: (whereArg) => (api.goalLoad as unknown as (where?: Where) => Promise<Result<import('../work/goal').Goal | null>>)?.(whereArg) ?? Promise.resolve(done(null)),
     goalSave: (goal, whereArg) => (api.goalSave as unknown as (goal: import('../work/goal').Goal, where?: Where) => Promise<Result<null>>)?.(goal, whereArg) ?? Promise.resolve(done(null)),
     goalClear: (whereArg) => (api.goalClear as unknown as (where?: Where) => Promise<Result<null>>)?.(whereArg) ?? Promise.resolve(done(null)),
@@ -2188,6 +2425,12 @@ function connect(): Bridge {
     goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
     setPlanMode: (on, where) => (api.setPlanMode as unknown as (on: boolean, where?: Where) => Promise<Result<boolean>>)?.(on, where) ?? Promise.resolve(done(on)),
     running: (where) => api.running(where),
+    runningSaid: (id, where) =>
+      (api.runningSaid as unknown as ((id: string, where?: Where) => Promise<Result<string>>) | undefined)?.(id, where) ??
+      Promise.resolve(done('')),
+    pageSaid: (where) =>
+      (api.pageSaid as unknown as ((where?: Where) => Promise<Result<readonly Said[]>>) | undefined)?.(where) ??
+      Promise.resolve(done([])),
     stopRunning: (id, where) => api.stopRunning(id, where),
     carried: (where) => api.carried(where),
     trustCarried: (id, trust, where) => api.trustCarried(id, trust, where),
@@ -2233,6 +2476,7 @@ function connect(): Bridge {
     watchStop: () => api.watchStop(),
     spendSplit: (where) => api.spendSplit(where),
     tokenUsage: () => api.tokenUsage(),
+    exportSpend: (csv) => api.exportSpend(csv),
     spendLimit: () => api.spendLimit(),
     setSpendLimit: (ceiling) => api.setSpendLimit(ceiling),
     onConnectStep: (listener) => api.onConnectStep(listener),
@@ -2249,6 +2493,7 @@ function connect(): Bridge {
     connectedCheck: (name, where) => api.connectedCheck(name, where),
     connectedSave: (tools, where) => api.connectedSave(tools, where),
     changesLook: (where) => api.changesLook(where),
+    changesWider: (file, context, where) => api.changesWider(file, context, where),
     changesDrop: (patch, where) => api.changesDrop(patch, where),
     takeBackQueue: (where) => api.takeBackQueue(where),
     away: (where) => api.away(where),
@@ -2266,8 +2511,10 @@ function connect(): Bridge {
     onAway: (listener) => api.onAway(listener),
     onBuildPlan: (listener) => api.onBuildPlan(listener),
     onContinuation: (listener) => api.onContinuation(listener),
+    onNewerVersion: (listener) => api.onNewerVersion?.(listener) ?? (() => undefined),
     continuationStop: (where) => api.continuationStop(where),
     onMenu: (listener) => api.onMenu(listener),
+    onEvents: (listener) => api.onEvents(listener),
     diagnostics: () => api.diagnostics(),
     keepCredential: (name, value) => api.keepCredential(name, value),
     credentialsKept: () => api.credentialsKept(),
@@ -2275,6 +2522,7 @@ function connect(): Bridge {
     longJobs: (providerId, modelId) => api.longJobs(providerId, modelId),
     addons: () => api.addons(),
     storage: () => api.storage(),
+    clearFolder: (name) => api.clearFolder(name),
     clearFinishedWork: () => api.clearFinishedWork(),
     inStep: (where) => api.inStep(where),
     followDesign: (address, where) => api.followDesign(address, where),

@@ -24,6 +24,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 
 import { findSecret } from '../guard/policy';
+import * as noted from '../../share/spawned';
 
 import { REACHABLE, pinnedSpec, readReach, whereOf, type Read } from './reach';
 
@@ -63,7 +64,7 @@ export const MCP_WORDS = {
    *  file: the file is there for anyone who wants it and is no use to anyone
    *  who does not. */
   howToAdd:
-    'They are connected from “Other tools” in this window — Figma, a browser, a debugger and a few more are one press each, and anything else can be added there too. Tell them that rather than asking them to edit a file.',
+    'They are connected from “Other tools” in this window: Figma, a browser, a debugger and a few more are one press each, and anything else can be added there too. Tell them that rather than asking them to edit a file.',
   where: 'They live in this project, in .pi/mcp.json.',
   unknown: 'Not checked yet',
   working: 'Answering',
@@ -101,6 +102,9 @@ type Session = {
   config: McpServerConfig;
   client: import('@modelcontextprotocol/sdk/client/index.js').Client;
   tools: readonly { name: string; description?: string }[];
+  /** The child, where this is a server we started. A server already listening
+   *  somewhere is somebody else's process and is not ours to write down. */
+  pid?: number;
 };
 
 import { BrowserSignIn, type Keeps, type OpensPages } from './mcpauth';
@@ -136,6 +140,10 @@ const MAX_RESULT_CHARACTERS = 20_000;
 function toolResultText(text: string): { content: [{ type: 'text'; text: string }]; details: Record<string, never> } {
   return { content: [{ type: 'text', text }], details: {} };
 }
+
+/** The ones we vouch for that are language servers rather than ordinary tool
+ *  servers, so the ledger can say which it is holding. */
+const LANGUAGE_SERVERS = new Set(['code-read']);
 
 /** A server we start ourselves, talking over its own pipes. */
 async function startedHere(config: McpServerConfig): Promise<Transport> {
@@ -312,6 +320,15 @@ export class McpRegistry {
     }
     signIn?.done();
 
+    // Written down once it is up, because only a started transport knows its
+    // child's pid. Ended when it closes, whether we closed it or it fell over.
+    const pid = here ? ((transport as { pid?: number | null }).pid ?? undefined) : undefined;
+    if (pid !== undefined) {
+      const kind = LANGUAGE_SERVERS.has(config.name) ? 'lsp' : 'mcp';
+      noted.started({ pid, what: config.name, kind });
+      client.onclose = (): void => noted.ended(pid);
+    }
+
     let listed: readonly { name: string; description?: string }[] = [];
     try {
       const result = await client.listTools();
@@ -321,7 +338,7 @@ export class McpRegistry {
       // names what it wants.
       listed = [];
     }
-    const session: Session = { config, client, tools: listed };
+    const session: Session = { config, client, tools: listed, ...(pid === undefined ? {} : { pid }) };
     this.sessions.set(config.name, session);
     return session;
   }
@@ -389,6 +406,7 @@ export class McpRegistry {
       } catch {
         // A server that will not say goodbye is still gone when its pipes close.
       }
+      noted.ended(session.pid);
     }
     this.sessions.clear();
   }
@@ -415,7 +433,7 @@ export function mcpTool(registry: McpRegistry): ToolDefinition {
     label: 'The other tools',
     description:
       'Reach the tools the project has plugged in through its .pi/mcp.json servers: list what a server offers, then call one of its tools by name. Each call starts the server if it is not running and stops nothing until the session ends.',
-    promptSnippet: 'mcp(list) or mcp(server, tool, args) — use the project\'s plugged-in tools',
+    promptSnippet: 'mcp(list) or mcp(server, tool, args): use the project\'s plugged-in tools',
     promptGuidelines: [
       'Use mcp({ "list": true }) first to see which tool servers the project has connected and what each offers.',
       'Call a tool as mcp({ server, tool, args }). The result is text: read it as you would any page.',
@@ -753,10 +771,10 @@ export function connectingTool(projectRoot: string): ToolDefinition {
     label: 'Connecting another tool',
     description:
       "Connect another tool server (MCP) to this project, so its tools become reachable through `mcp`. Give either `known` for one Graphe already vouches for, or a `name` and the `where` line that starts it. Writes the entry into the project's .pi/mcp.json and starts nothing.",
-    promptSnippet: 'connect_tool(known) or connect_tool(name, where) — plug another tool server in',
+    promptSnippet: 'connect_tool(known) or connect_tool(name, where): plug another tool server in',
     promptGuidelines: [
       'Only when the person has asked for a particular tool. Never connect one on a hunch, and never as a step in some larger errand they did not ask for.',
-      `Prefer known for one we already vouch for — its start line is checked. Those are: ${REACHABLE.map((one) => one.id).join(', ')}.`,
+      `Prefer known for one we already vouch for, because its start line is checked. Those are: ${REACHABLE.map((one) => one.id).join(', ')}.`,
       'Never put a key, a token or a password on the where line. Values a server needs are added to .pi/mcp.json by hand, not by you.',
       'It becomes reachable through mcp in the next conversation in this project, not in this one. Say so rather than trying to use it straight away.',
     ],
@@ -769,7 +787,7 @@ export function connectingTool(projectRoot: string): ToolDefinition {
       name: Type.Optional(
         Type.String({
           description:
-            'What to call it — letters, numbers, dashes. This is the name to pass as `server` to the mcp tool afterwards.',
+            'What to call it: letters, numbers, dashes. This is the name to pass as `server` to the mcp tool afterwards.',
         }),
       ),
       where: Type.Optional(

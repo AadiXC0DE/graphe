@@ -16,6 +16,7 @@ function project(name: string, minutesAgo: number, path = `/work/${name}`): Rece
     lastOpenedAt: NOW - minutesAgo * MINUTE,
     lastSpend: null,
     missing: false,
+    branch: null,
   };
 }
 

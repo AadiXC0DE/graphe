@@ -17,7 +17,7 @@ export type Spawned = {
   pid: number;
   /** One phrase: what this process is, in the words the window would use. */
   what: string;
-  kind: 'helper' | 'server' | 'check' | 'lsp' | 'browser' | 'mcp' | 'other';
+  kind: 'tool' | 'helper' | 'server' | 'check' | 'lsp' | 'browser' | 'mcp' | 'other';
   at: number;
   /** The project it belongs to, where it belongs to one. */
   project?: string;
@@ -44,6 +44,7 @@ const GRACE_MS = 2_000;
 const LOOK_EVERY_MS = 50;
 
 const KIND_WORDS: Readonly<Record<Spawned['kind'], [one: string, many: string]>> = {
+  tool: ['tool', 'tools'],
   helper: ['helper', 'helpers'],
   server: ['server', 'servers'],
   check: ['check', 'checks'],
@@ -145,7 +146,7 @@ export function ledger(): Ledger {
         const words = KIND_WORDS[kind];
         return `${String(n)} ${n === 1 ? words[0] : words[1]}`;
       });
-      return `${said.join(' · ')} — ${mine.map((one) => String(one.pid)).join(', ')}`;
+      return `${said.join(' · ')} (${mine.map((one) => String(one.pid)).join(', ')})`;
     },
   };
 }

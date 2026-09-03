@@ -29,6 +29,7 @@ function pull(over: Partial<RepoItem> = {}): RepoItem {
     baseRef: 'main',
     headRef: 'image-and-queue',
     headSha: HEAD,
+    draft: false,
     ...over,
   };
 }

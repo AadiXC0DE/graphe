@@ -117,7 +117,7 @@ export default function ConnectModal({
       <div className="connectmodal__panel">
         <header className="connectmodal__head">
           <div className="connectmodal__titlewrap">
-            <h2 className="connectmodal__title">Who should I think with?</h2>
+            <h2 className="connectmodal__title">Choose a model</h2>
             <p className="connectmodal__sub">
               One account, or a key from a service you already pay for. Open any
               of them to see its models, or change model later from the chip
@@ -137,9 +137,9 @@ export default function ConnectModal({
                 void Promise.resolve(onRefresh()).finally(() => setRefreshing(false));
               }}
               disabled={refreshing}
-              title="Look again for models added since this opened"
+              title="Look for models added since this opened"
             >
-              {refreshing ? 'Looking…' : 'Look again'}
+              {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
           )}
           <button type="button" className="connectmodal__close" onClick={() => (busy ? onCancel() : onClose())} aria-label="Close">
@@ -172,7 +172,7 @@ export default function ConnectModal({
           </div>
         )}
 
-        <div className="connectmodal__body">
+        <div className="connectmodal__body scroll--auto">
           {discovered.length > 0 ? (
             <section className="connectmodal__found" aria-label="Accounts already saved by other tools">
               <h3 className="connectmodal__foundsub">Already on this computer</h3>

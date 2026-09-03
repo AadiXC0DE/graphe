@@ -144,6 +144,23 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
   }
 }
 
+/**
+ * An add-on's own turn, the moment it begins.
+ *
+ * Pi marks a message an extension sent with `customType`; one with
+ * `triggerTurn` set starts a run nobody typed. Null for every ordinary message,
+ * which is nearly all of them.
+ */
+export function extensionTurnOf(event: unknown): AgentEvent | null {
+  const source = fieldsOf(event);
+  if (source === null || textAt(source, 'type') !== 'message_start') return null;
+  const message = nestedAt(source, 'message');
+  if (message === null || textAt(message, 'role') !== 'user') return null;
+  const from = textAt(message, 'customType');
+  if (from === null || from === '') return null;
+  return { type: 'extension-turn', from, text: textBlocks(message['content']) };
+}
+
 /** The person's own words, the moment the agent begins on them. Pi emits this
  *  for every message it processes, queued or not; only a message with words is
  *  worth telling the waiting line about — everything else is noise. */
@@ -404,6 +421,10 @@ export class EventRelay {
     // Every event, priced or not: what failed and what Pi is retrying are told
     // by events that have no money on them at all.
     const report = this.spend.fromPi(event);
+    // Said as well as, not instead of: an add-on's turn still carries words the
+    // waiting line has to know about.
+    const asked = extensionTurnOf(event);
+    if (asked !== null) this.deliver(asked);
     const translated = translatePiEvent(event);
 
     if (translated !== null && translated.type === 'settled') {

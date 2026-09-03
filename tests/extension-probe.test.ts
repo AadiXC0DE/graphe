@@ -72,7 +72,7 @@ describe('an add-on that drives', () => {
   it('says all three things it will do, in the order they matter', async () => {
     const card = await probe(at('orchestrating'));
     expect(card === null ? '' : saysCard(card)).toBe(
-      'starts turns on its own · runs work in the background · changes the system prompt',
+      'starts turns on its own · runs work in the background · changes the system prompt · 6.2k of every prompt',
     );
   });
 });

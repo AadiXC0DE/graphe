@@ -47,12 +47,18 @@
 }
 
 .tabs__tab--here {
-  background: var(--bg-sunken);
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.tabs__tab--here .tabs__open {
+  color: var(--text);
+  font-weight: 500;
 }
 
 @media (hover: hover) {
-  .tabs__tab:hover {
-    background: var(--bg-sunken);
+  .tabs__tab:not(.tabs__tab--here):hover {
+    background: color-mix(in oklab, var(--text) 7%, transparent);
   }
 }
 
@@ -284,4 +290,15 @@
   .tabs__empty:active {
     transform: none;
   }
+}
+
+/* Rearranging the row. The tab under the hand fades rather than moves, and the
+   place it would land is drawn as an edge: a row where the tabs shuffle under
+   the pointer is a row nobody can aim at. */
+.tabs__tab--lifted {
+  opacity: 0.4;
+}
+
+.tabs__tab--landing {
+  box-shadow: inset 2px 0 0 var(--accent);
 }

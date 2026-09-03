@@ -264,7 +264,7 @@ export async function hintForLargeRepo(dir: string, run: GitRunner): Promise<str
 
 export const leftOutWords = {
   one: (file: string): string =>
-    `Left ${file} out of the version — it holds keys, and a version can end up somewhere public.`,
+    `Left ${file} out of the version: it holds keys, and a version can end up somewhere public.`,
   already: (file: string): string =>
     `${file} is already saved in this project’s history, so I have left it exactly as it is.`,
 } as const;
@@ -782,6 +782,10 @@ export class ProjectHistory {
   /** The empty tree, so the very first saved version can show its whole self. */
   private static readonly EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
+  /** As wide as one press will ever ask for. A file read whole is a file read
+   *  in the reader, not in the diff. */
+  private static readonly MOST_CONTEXT = 200;
+
   /** Run one read-only git command and return its stdout, or a plain sentence
    *  when git says no. */
   private async readOnly(args: readonly string[]): Promise<string> {
@@ -807,15 +811,37 @@ export class ProjectHistory {
         const absolute = path.resolve(this.root, file);
         try {
           const size = await stat(absolute);
-          if (size.size > 200_000) return `# ${file} (new, too big to show here)`;
+          if (size.size > 200_000) return newFileDiff(file, null, 'too big to show here');
           const contents = await readFile(absolute, 'utf8');
-          return `# ${file} (new)\n${contents}`;
+          if (contents.includes('\u0000')) return newFileDiff(file, null, 'binary');
+          return newFileDiff(file, contents, null);
         } catch {
-          return `# ${file} (new, could not be read)`;
+          return newFileDiff(file, null, 'could not be read');
         }
       });
     const extras = await Promise.all(neverSaved);
     return [changed.trim(), ...extras].filter((part) => part !== '').join('\n\n');
+  }
+
+  /**
+   * One file again, with more of it around the change.
+   *
+   * git decides how much context a diff carries and three lines is not enough
+   * to see what a change sits in. This asks for the same file with a wider
+   * window rather than guessing at the lines in between, which is the only way
+   * to get lines git never sent.
+   */
+  async diffWider(file: string, context: number): Promise<string> {
+    await this.ensureReady();
+    const lines = Math.max(3, Math.min(Math.trunc(context), ProjectHistory.MOST_CONTEXT));
+    return this.readOnly([
+      'diff',
+      'HEAD',
+      '--no-ext-diff',
+      `-U${String(lines)}`,
+      '--',
+      file,
+    ]);
   }
 
   /** What one saved version changed, against the version before it. */
@@ -1056,6 +1082,15 @@ export class ProjectHistory {
 
 const LOG_FORMAT =
   ['%H', '%at', '%an', '%ae', '%B', '%N', '%P', '%D'].join(FIELD) + RECORD;
+
+/** A file git has never seen, as the unified diff `git diff` would print for it. */
+function newFileDiff(file: string, contents: string | null, why: string | null): string {
+  const head = `diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}`;
+  if (contents === null) return `${head}\n@@ -0,0 +0,0 @@\n+# ${why ?? ''}`;
+  const lines = contents.split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+  return `${head}\n@@ -0,0 +1,${String(lines.length)} @@\n${lines.map((l) => `+${l}`).join('\n')}`;
+}
 
 function detailsOf(attempt: Attempt): string {
   return [attempt.stderr, attempt.stdout].filter((part) => part.trim().length > 0).join('\n');

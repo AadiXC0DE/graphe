@@ -21,18 +21,16 @@
      the whole full-window surface every frame and read as a jitter when the
      shelf sat behind the sheet's edge, so the scale is gone and the rise is
      smaller: only transform and opacity change, both GPU-cheap. */
-  animation: sheet-arrives var(--dur-large) var(--ease-out-quart) both;
+  /* No entrance. A sheet that fades in from nothing is a sheet you can see
+     through while it arrives, and what is behind it is the screen somebody just
+     left: switch from the canvas to the history and the conversation flashes up
+     for the length of the fade. Screens are opened dozens of times an hour,
+     which is the frequency the motion rule bans animating at anyway. */
 }
 
-@keyframes sheet-arrives {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* The rectangle held while a sheet's code is still on its way. */
+.sheet--arriving {
+  background: var(--bg);
 }
 
 /* ---------------------------------------------------------------------------
@@ -119,7 +117,8 @@
 }
 
 .sheet__chip--here {
-  background: var(--bg-sunken);
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
   color: var(--text);
 }
 
@@ -245,8 +244,8 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .sheet__chip:hover {
-    background: var(--bg-sunken);
+  .sheet__chip:not(.sheet__chip--here):hover {
+    background: color-mix(in oklab, var(--text) 7%, transparent);
     color: var(--text);
   }
 
@@ -361,4 +360,13 @@
   font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--text-faint);
+}
+
+/* Held over whatever was on screen while the code for the screen being opened
+   arrives. Flat and instant: it exists so nobody reads the screen they just
+   left as the one they asked for, and anything that faded in would be a second
+   thing to watch. Only shown once the wait is long enough to notice. */
+.sheet--cover {
+  animation: none;
+  z-index: 6;
 }

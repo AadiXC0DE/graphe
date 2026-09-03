@@ -80,15 +80,27 @@ export function useProjectFiles(options: {
     [refresh],
   );
 
+  /** Which read is the current one. A second press while the first is in
+   *  flight makes the first nobody's. */
+  const openAt = useRef(0);
+
   const readFile = useCallback((path: string) => {
-    setReading({ path, text: null, trouble: null });
+    const token = (openAt.current += 1);
+    /* Nothing on screen changes until the file is here. Emptying the panel
+       first and filling it a few milliseconds later is a flicker in the panel
+       and, because the panel has a height, one in the conversation beside it;
+       pressing the file already open flickered it for no change at all. A read
+       slow enough to need saying so still says it, after a beat. */
+    const saySo = setTimeout(() => {
+      if (openAt.current === token) setReading({ path, text: null, trouble: null });
+    }, 150);
     void bridge.fileText(path).then((answer) => {
-      setReading((current) =>
-        current === null || current.path !== path
-          ? current
-          : answer.ok
-            ? { path, text: answer.value, trouble: null }
-            : { path, text: null, trouble: answer.trouble.because },
+      clearTimeout(saySo);
+      if (openAt.current !== token) return;
+      setReading(
+        answer.ok
+          ? { path, text: answer.value, trouble: null }
+          : { path, text: null, trouble: answer.trouble.because },
       );
     });
   }, []);

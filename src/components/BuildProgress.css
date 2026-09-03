@@ -119,6 +119,14 @@
   color: var(--accent);
 }
 
+/* A step that is done reads as done at a glance, without anybody counting the
+   ticks. The current step stays plain, because it is the one being read. */
+.buildprogress__row--done .buildprogress__title,
+.buildprogress__row--skipped .buildprogress__title {
+  text-decoration: line-through;
+  text-decoration-color: var(--border-strong);
+}
+
 .buildprogress__row--doing {
   background: var(--bg-sunken);
   color: var(--text);

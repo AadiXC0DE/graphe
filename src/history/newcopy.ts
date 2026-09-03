@@ -183,7 +183,9 @@ export async function carryOver(from: string, to: string): Promise<string[]> {
         if (!info.isFile() || info.isSymbolicLink() || info.size > BIGGEST) continue;
         if (await isThere(target)) continue;
         await mkdir(path.dirname(target), { recursive: true });
-        await copyFile(source, target, constants.COPYFILE_EXCL);
+        // Cloned where the filesystem can: on APFS the bytes are shared until
+        // one side is written to. `EXCL` still refuses to write over anything.
+        await copyFile(source, target, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
         carried.push(relative);
       } catch {
         // One file we could not carry is not a reason to abandon the rest.

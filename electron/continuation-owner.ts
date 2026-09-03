@@ -15,6 +15,7 @@
 
 import {
   decide,
+  extensionOverBudget,
   freshContinuation,
   personSpoke,
   type EndedHow,
@@ -70,6 +71,9 @@ export type OwnerHooks = {
   list: (project: string, address: string) => Promise<ListNow | null>;
   /** The goal as it stands, or null when there is none. */
   goal: (project: string, address: string) => Promise<GoalNow | null>;
+  /** Stop the run that is going. Only an add-on's turn needs this: it has
+   *  already begun, so refusing it means ending it. */
+  halt: (project: string, address: string) => void;
 };
 
 export type ContinuationOwner = {
@@ -173,9 +177,29 @@ export function continuationOwner(hooks: OwnerHooks): ContinuationOwner {
     },
 
     extensionAsked(project, address, from, text): void {
+      const one = heldFor(project, address);
+      // The turn has already begun, so the budget is checked here rather than
+      // on the settle: an add-on that loops would otherwise spend it all first
+      // and be told afterwards.
+      const over = extensionOverBudget(one.state);
+      if (over !== null) {
+        one.state = over.state;
+        atRest.add(keyOf(project, address));
+        hooks.say(project, address, over.said);
+        hooks.tell({
+          project,
+          address,
+          round: over.state.rounds,
+          why: null,
+          said: over.said,
+          resting: true,
+        });
+        hooks.halt(project, address);
+        return;
+      }
       // The most recent one wins. An add-on that asks twice before a settle is
       // asking for one turn, not two.
-      heldFor(project, address).asked = { from, text };
+      one.asked = { from, text };
     },
 
     lastMove(project, address): { move: Move; at: number } | null {

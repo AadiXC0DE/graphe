@@ -1,0 +1,745 @@
+/* A change, drawn: two columns or one, over the same rows.
+
+   The palette has no green, so nothing here leans on red-and-green to say which
+   side a line is on. Added lines carry the accent, a tint behind them and a bar
+   down their edge; removed lines sit on the sunken tone in muted ink with a
+   plain grey bar. The sign in the gutter says it a second time, in a character,
+   for anybody the colour does not reach. Same rule as the working diff, because
+   it is the same reading.
+
+   Every row is one grid line of a fixed height. The list is windowed: rows come
+   and go under the scroller, so nothing here may depend on how many there are,
+   and nothing may change height on hover. */
+
+.diffview {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+
+  /* Added and removed, in the colours everybody already reads a diff in. The
+     accent was used for both grounds, which put the app's own colour on the one
+     surface where green and red mean something. Set on the root as
+     `data-diff="accent"` to go back to it. */
+  --line-in: color-mix(in srgb, var(--good) 12%, var(--bg-raised));
+  --line-in-edge: var(--good);
+  --line-out: color-mix(in srgb, var(--bad) 10%, var(--bg-raised));
+  --line-out-edge: var(--bad);
+  /* One number for the gutter, so both readings line their code up at the same
+     x whichever one is showing. */
+  --gutter: 3.25rem;
+}
+
+/* A dark ground takes more of the colour before it reads as tinted at all. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .diffview {
+    --line-in: color-mix(in srgb, var(--good) 18%, var(--bg-raised));
+    --line-out: color-mix(in srgb, var(--bad) 15%, var(--bg-raised));
+  }
+}
+
+:root[data-theme='dark'] .diffview {
+  --line-in: color-mix(in srgb, var(--good) 18%, var(--bg-raised));
+  --line-out: color-mix(in srgb, var(--bad) 15%, var(--bg-raised));
+}
+
+/* The old reading, for anybody who wants the app's own colour here. */
+:root[data-diff='accent'] .diffview {
+  --line-in: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
+  --line-in-edge: var(--accent);
+  --line-out: var(--bg-sunken);
+  --line-out-edge: var(--border-control);
+}
+
+:root[data-theme='dark'][data-diff='accent'] .diffview {
+  --line-in: color-mix(in srgb, var(--accent) 18%, var(--bg-raised));
+}
+
+/* ---------------------------------------------------------------------------
+   The band across the top
+   --------------------------------------------------------------------------- */
+
+.diffview__band {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Which file the scroller is standing in. It changes as the list moves, so it
+   is the one thing here allowed to say something different every second. */
+.diffview__here {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.diffview__ways {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+}
+
+.diffview__way {
+  padding: 2px var(--space-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-2xs);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.diffview__way--on {
+  color: var(--text);
+  background: var(--bg-raised);
+}
+
+/* Which file the scroller is standing in, and how much the whole change is. */
+.diffview__whole {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.diffview__fold {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-faint);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.diffview__fold:hover {
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+/* ---------------------------------------------------------------------------
+   The file list
+   --------------------------------------------------------------------------- */
+
+.diffview__panes {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.diffview__files {
+  flex: none;
+  width: 260px;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  padding: var(--space-1) 0;
+}
+
+.diffview__file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .diffview__file:not(.diffview__file--here):hover {
+    background: color-mix(in oklab, var(--text) 7%, transparent);
+  }
+}
+
+.diffview__file--here {
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.diffview__file--off .diffview__filepath {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+
+.diffview__filekind {
+  flex: none;
+  width: 14px;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-align: center;
+  color: var(--text-faint);
+}
+
+/* The directory is the quiet half: two files with the same name are told apart
+   by it, and nothing else in the row is. */
+.diffview__filepath {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.diffview__filedir {
+  color: var(--text-faint);
+}
+
+.diffview__filename {
+  color: var(--text);
+}
+
+.diffview__filetally {
+  flex: none;
+  display: flex;
+  gap: var(--space-1);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.diffview__fileadded {
+  color: var(--accent);
+}
+
+.diffview__fileremoved {
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   The scroller
+   --------------------------------------------------------------------------- */
+
+.diffview__pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The heading of the file being read, held above the scroller. The list is
+   windowed, so a heading scrolled out of the drawn range cannot pin itself. */
+.diffview__pinned {
+  flex: none;
+}
+
+.diffview__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.diffview__list {
+  min-width: min-content;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+/* ---------------------------------------------------------------------------
+   File and hunk headings
+   --------------------------------------------------------------------------- */
+
+.diffview__filetop {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.diffview__filetop--off .diffview__path {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.diffview__kind {
+  flex: none;
+  padding: 1px var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.diffview__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffview__tally {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.diffview__fileall {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.diffview__small {
+  padding: 1px var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.diffview__small--on {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--bg-sunken);
+}
+
+.diffview__small:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.diffview__whole {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.diffview__piece {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 32px;
+}
+
+.diffview__piece--here {
+  background: var(--accent-soft);
+}
+
+.diffview__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.diffview__toggle:disabled {
+  cursor: default;
+}
+
+/* The box never changes size and the mark inside it only fades, so a row's
+   words do not shuffle sideways as pieces are turned on and off. */
+.diffview__box {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--border-control);
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-text);
+  transition:
+    background-color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.diffview__piece--off .diffview__box {
+  background: transparent;
+  border-color: var(--border-control);
+}
+
+.diffview__tick {
+  transition: opacity var(--dur-micro) var(--ease-hover);
+}
+
+.diffview__piece--off .diffview__tick {
+  opacity: 0;
+}
+
+.diffview__keep {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--text);
+  text-decoration: line-through;
+  text-decoration-color: transparent;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    text-decoration-color var(--dur-micro) var(--ease-hover);
+}
+
+.diffview__piece--off .diffview__keep {
+  color: var(--text-faint);
+  text-decoration-color: currentColor;
+}
+
+.diffview__where {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.diffview__in {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffview__in + .diffview__tally {
+  margin-left: 0;
+}
+
+.diffview__piece .diffview__tally {
+  margin-left: auto;
+}
+
+/* Asking about a hunk. Quiet, and only on the row the eye is already on:
+   two more buttons per hunk would be the loudest thing on the screen. */
+.diffview__ask {
+  flex: none;
+  padding: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+.diffview__piece:hover .diffview__ask,
+.diffview__piece--here .diffview__ask,
+.diffview__ask:focus-visible {
+  opacity: 1;
+}
+
+.diffview__ask:hover {
+  color: var(--text);
+  text-decoration-color: currentColor;
+}
+
+/* ---------------------------------------------------------------------------
+   The lines
+   --------------------------------------------------------------------------- */
+
+.diffview__row {
+  display: grid;
+  align-items: baseline;
+  min-height: 20px;
+  /* A row is as wide as the widest line in the file, not as wide as the box it
+     is scrolled inside: a background painted at the box's width stops dead in
+     the middle of a long line the moment anybody scrolls sideways. */
+  width: max-content;
+  min-width: 100%;
+}
+
+.diffview__row--split {
+  grid-template-columns: var(--gutter) minmax(0, 1fr) var(--gutter) minmax(0, 1fr);
+}
+
+.diffview__row--one {
+  grid-template-columns: var(--gutter) var(--gutter) 1.25rem minmax(0, 1fr);
+}
+
+/* The numbers are furniture: never selectable, never the thing the eye lands
+   on, and always the same width so the code beside them starts at one x. */
+.diffview__no {
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.diffview__sign {
+  color: var(--text-faint);
+  text-align: center;
+  user-select: none;
+}
+
+.diffview__side {
+  min-width: 0;
+  padding-right: var(--space-2);
+  border-left: 2px solid transparent;
+}
+
+.diffview__side--in,
+.diffview__row--in {
+  background: var(--line-in);
+}
+
+.diffview__side--in {
+  border-left-color: var(--line-in-edge);
+}
+
+.diffview__side--out,
+.diffview__row--out {
+  background: var(--line-out);
+  color: var(--text-muted);
+}
+
+.diffview__side--out {
+  border-left-color: var(--line-out-edge);
+}
+
+/* Nothing on this side of the pair. Not a line that was removed: a hole, and
+   drawn as one so the two columns stay in step. */
+.diffview__side--blank {
+  background: repeating-linear-gradient(
+    135deg,
+    transparent,
+    transparent 5px,
+    var(--bg-sunken) 5px,
+    var(--bg-sunken) 6px
+  );
+}
+
+.diffview__row--in .diffview__sign,
+.diffview__row--out .diffview__sign {
+  color: var(--text-muted);
+}
+
+.diffview__code {
+  min-width: 0;
+  font: inherit;
+  white-space: pre;
+}
+
+/* What actually changed inside a changed pair. An underline rather than a
+   second tint: the row already carries one, and two tints in a row is a row
+   nobody can read. */
+.diffview__mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+.diffview__note {
+  padding-left: var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* A hunk turned down is still readable. It fades and desaturates; it never
+   collapses, because a piece that disappears when you drop it takes the list
+   position with it. */
+.diffview__dropped {
+  opacity: 0.45;
+  filter: saturate(0.4);
+}
+
+/* ---------------------------------------------------------------------------
+   Folds, and remarks on a line
+   --------------------------------------------------------------------------- */
+
+.diffview__folded {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 22px;
+  padding: 0 var(--space-3);
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.diffview__unfold {
+  padding: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.diffview__unfold:hover {
+  color: var(--text);
+}
+
+/* The lines between two pieces where nobody can fetch them: a rule saying how
+   many, rather than a press that would do nothing. */
+.diffview__between {
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* The `+` sits over the first number rather than beside it, so a row is the
+   same height whether or not a remark can be left on it. */
+.diffview__lined {
+  position: relative;
+}
+
+.diffview__add {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--gutter);
+  height: 100%;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--accent-text);
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+}
+
+.diffview__lined:hover .diffview__add {
+  display: flex;
+}
+
+.diffview__said {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: var(--space-1) var(--space-3) var(--space-1) var(--gutter);
+  padding: var(--space-2);
+  font-family: var(--font-ui);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.diffview__by {
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+.diffview__when {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.diffview__saidbody {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.diffview__saying {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-1) var(--space-3) var(--space-1) var(--gutter);
+  padding: var(--space-2);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.diffview__field {
+  min-height: 56px;
+  padding: var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+.diffview__sayrow {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.diffview__rest {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.diffview__restsaid {
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diffview__way,
+  .diffview__box,
+  .diffview__tick,
+  .diffview__keep,
+  .diffview__ask {
+    transition: none;
+  }
+}

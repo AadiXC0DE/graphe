@@ -63,7 +63,7 @@ function momentAt(source: Fields): number | null {
  */
 export const WORTH_KEEPING = `This sitting is over and nobody is reading this reply, so keep it to the notes.
 
-Look back over what we just did. If you learned anything about this project that would save time next time — how it is built, how it is run, what it expects, a decision and why it went that way, something that caught you out — write each one down with retain, one fact per note, in a sentence that will still make sense months from now.
+Look back over what we just did. If you learned anything about this project that would save time next time (how it is built, how it is run, what it expects, a decision and why it went that way, something that caught you out), write each one down with retain, one fact per note, in a sentence that will still make sense months from now.
 
 Write nothing about how this sitting went, nothing you already have a note for, and nothing that reading the code would tell you just as fast. Most sittings are worth one or two notes and many are worth none, which is a fine answer. Say nothing else.`;
 

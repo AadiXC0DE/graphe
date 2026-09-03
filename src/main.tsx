@@ -1,4 +1,5 @@
 import { StrictMode } from 'react';
+import { mark } from './lib/marks';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './styles/global.css';
@@ -26,6 +27,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     true,
   );
 }
+
+// The first moment the window has any say in.
+mark('launch');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

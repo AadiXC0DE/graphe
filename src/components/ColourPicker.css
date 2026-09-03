@@ -1,0 +1,195 @@
+/* One colour, as a swatch you can read and a menu of colours worth one press.
+   The row it sits in is the settings card's, so nothing here sets a width. */
+
+.colour {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.colour__name {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.colour__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.colour__chip:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .colour__chip:hover {
+    border-color: var(--border-strong);
+  }
+}
+
+.colour__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A ring rather than a border: a swatch with a hairline of its own reads as a
+   button inside a button, and a pale colour needs the edge anyway. */
+.colour__swatch {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text) 22%, transparent);
+}
+
+.colour__value {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------------
+   The menu
+   --------------------------------------------------------------------------- */
+
+.colour__menu {
+  z-index: 60;
+  width: 232px;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  transform-origin: top right;
+  animation: colour-arrives 125ms var(--ease-out-quart);
+}
+
+@keyframes colour-arrives {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .colour__menu {
+    animation: none;
+  }
+}
+
+.colour__grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-1);
+}
+
+.colour__one {
+  height: 28px;
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text) 20%, transparent);
+  cursor: pointer;
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.colour__one:active {
+  transform: scale(0.94);
+}
+
+.colour__one--on {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--text) 20%, transparent),
+    0 0 0 2px var(--bg-raised),
+    0 0 0 4px var(--accent);
+}
+
+.colour__one:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.colour__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: 0 var(--space-1);
+}
+
+.colour__row--press {
+  cursor: pointer;
+}
+
+.colour__rowname {
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+.colour__hex {
+  width: 96px;
+  padding: 4px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+}
+
+.colour__hex:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.colour__wheel {
+  width: 44px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.colour__auto {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: var(--space-2) var(--space-1);
+  border-top: 1px solid var(--border);
+  text-align: left;
+  cursor: pointer;
+}
+
+.colour__auto--on .colour__rowname {
+  color: var(--accent-ink);
+}
+
+.colour__autonote {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .colour__auto:hover .colour__rowname {
+    color: var(--accent-ink);
+  }
+}

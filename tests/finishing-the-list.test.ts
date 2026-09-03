@@ -220,8 +220,16 @@ describe('FL-07 a run that failed is picked up once, never twice', () => {
   });
 
   it('does not try the same failure again', () => {
-    const stuck: State = { ...freshContinuation(), stuckRounds: 1 };
-    expect(decide(stuck, facts({ endedHow: 'failed' })).kind).not.toBe('send');
+    const tried: State = { ...freshContinuation(), recoveryAttempts: 1 };
+    expect(decide(tried, facts({ endedHow: 'failed' })).kind).not.toBe('send');
+  });
+
+  /* This used to be counted on `stuckRounds`, which a round that ticked nothing
+     off also increments, so one stalled round spent the retry a failure is
+     allowed and the run rested saying it had already tried when it had not. */
+  it('still tries after a round that ticked nothing off', () => {
+    const stalled: State = { ...freshContinuation(), stuckRounds: 1 };
+    expect(decide(stalled, facts({ endedHow: 'failed' })).kind).toBe('send');
   });
 });
 

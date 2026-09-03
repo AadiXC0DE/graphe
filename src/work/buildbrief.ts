@@ -12,7 +12,7 @@
 export const BUILD_BRIEF = [
   'Turn this document into a plan for building it, and tell me the plan.',
   '',
-  'Use the numbered form — "1. Make the header sticky" — one step per line, in the order the work should happen.',
+  'Use the numbered form ("1. Make the header sticky"), one step per line, in the order the work should happen.',
   'Keep each step small enough to finish and verify on its own. For every step:',
   '  - say what one change it makes, in a sentence a non-technical reader could check',
   '  - put the acceptance criteria under it, starting with "Acceptance:"',

@@ -1,10 +1,10 @@
 /** The bug that made a control look like it had never been built.
  *
- * Which folder is in front lives in `desks`, held in state. A `useCallback`
- * that reads `desks.current` but does not list it closes over the value from
- * the render that made it — and the first of those renders happens before any
- * folder is open, so the value is null forever. Every such callback returns
- * early, silently, for the life of the window.
+ * Which folder is in front lives in `desks`, held in state, and is read as
+ * `openProject`. A `useCallback` that reads it but does not list it closes over
+ * the value from the render that made it — and the first of those renders
+ * happens before any folder is open, so the value is null forever. Every such
+ * callback returns early, silently, for the life of the window.
  *
  * That is what happened to moving between lines of work: the name was clickable
  * and clicking it did nothing, with no error and nothing in the log. It is
@@ -54,15 +54,13 @@ describe('reading which folder is in front', () => {
   it('finds the hooks at all, so a silent pass means something', () => {
     const hooks = hooksIn(SOURCE);
     expect(hooks.length).toBeGreaterThan(40);
-    expect(hooks.some((one) => one.body.includes('desks.current'))).toBe(true);
+    expect(hooks.some((one) => one.body.includes('openProject'))).toBe(true);
   });
 
   it('never reads it without listing it', () => {
     const guilty = hooksIn(SOURCE)
-      .filter((one) => one.body.includes('desks.current'))
-      // `desksNow` is the ref kept for the same job, and a ref is always current.
-      .filter((one) => !one.body.includes('desksNow'))
-      .filter((one) => !depsOf(one.body).includes('desks'))
+      .filter((one) => one.body.includes('openProject'))
+      .filter((one) => !depsOf(one.body).includes('openProject'))
       .map((one) => `src/App.tsx:${String(one.line)}`);
 
     expect(guilty, `these close over the folder from first render: ${guilty.join(', ')}`).toEqual(

@@ -171,7 +171,7 @@ export default function CostMeter({
  * somebody is already looking at the number when they decide they want a limit
  * on it. Closed it is four words; open it is one field and two buttons.
  */
-function Ceiling({
+export function Ceiling({
   limit,
   spent,
   onLimit,

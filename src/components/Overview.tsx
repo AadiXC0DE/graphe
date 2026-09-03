@@ -1,10 +1,10 @@
 import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import Away from './Away';
+import Waiting from './Waiting';
 import CostMeter from './CostMeter';
 import { SAYS as DESIGN, type DesignPart } from './DesignView';
 import History from './History';
 import Lines from './Lines';
-import { LINE_WORDS } from '../lib/lines';
 import Landing, { type Outcome } from './Landing';
 import type { Verdict } from '../design/gate';
 import Swatches from './Swatches';
@@ -28,6 +28,7 @@ import type {
 import type { DesignReading } from '../design/reading';
 import type { NowView, Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
+import { elapsedWords } from '../work/goal';
 import './Overview.css';
 
 /** Words for the folder that holds several projects. Named for what somebody
@@ -66,6 +67,42 @@ const ORIGIN = {
   forwarding: 'Fast-forwarding…',
 } as const;
 
+/** The one band that answers "where is this project, and what is uncommitted".
+ *  Three bands answered it before, stacked, and a person had to read all three
+ *  to learn one thing. */
+/** The goal band. A status word rather than a colour, because a person reading
+ *  a panel out loud has to be able to say where the job is. */
+const GOAL = {
+  heading: 'Goal',
+  states: { active: 'Working', paused: 'Paused', done: 'Complete' } as const,
+  /** Steps, time and rounds on one line. Nothing here is a percentage: a list
+   *  of five with three ticked is 3/5 and never 60%. */
+  line: (done: number, total: number, elapsed: string, rounds: number): string =>
+    [
+      total === 0 ? null : `${String(done)}/${String(total)}`,
+      elapsed === '' ? null : elapsed,
+      rounds === 0 ? null : `${String(rounds)} ${rounds === 1 ? 'round' : 'rounds'}`,
+    ]
+      .filter((one) => one !== null)
+      .join(' · '),
+} as const;
+
+/** Where the Looked up band's own state is kept. */
+const LOOKED_UP = 'graphe:panel:lookedup';
+
+const GIT = {
+  heading: 'Git',
+  changes: 'Changes',
+  nothing: 'Nothing uncommitted',
+  files: (count: number): string => `${String(count)} ${count === 1 ? 'file' : 'files'}`,
+  /** What changed, in lines, beside how many files it is across. Nothing at
+   *  all where only untracked files are waiting: those have no diff to count,
+   *  and a `+0 −0` beside three new files would read as a bug. */
+  lines: (added: number, removed: number): string | null =>
+    added === 0 && removed === 0 ? null : `+${String(added)} −${String(removed)}`,
+  open: 'Read what changed',
+} as const;
+
 function commits(count: number): string {
   return count === 1 ? '1 commit' : `${String(count)} commits`;
 }
@@ -95,7 +132,7 @@ export function saysStanding(found: Fetched): string {
  *  everything else reports where the branch stands, and why nothing moved. */
 export function saysFound(found: Fetched): string {
   if (found.moved > 0) {
-    return `Fast-forwarded ${found.branch ?? 'HEAD'} to ${found.upstream ?? 'origin'} — ${commits(found.moved)} in.`;
+    return `Fast-forwarded ${found.branch ?? 'HEAD'} to ${found.upstream ?? 'origin'}, ${commits(found.moved)} in.`;
   }
   const standing = saysStanding(found);
   return found.state === 'behind' && found.dirty
@@ -147,6 +184,20 @@ export function repoState(git: RepoOverview['git']): string {
 export type OverviewView = {
   now: NowView;
   git: GitSnapshot | null;
+  /**
+   * The goal this conversation is working toward, when one is set.
+   *
+   * Four numbers were on four screens: what the objective is, how far the list
+   * has got, how long it has been going and what it has cost. One line.
+   */
+  goal?: {
+    objective: string;
+    status: 'active' | 'paused' | 'done';
+    done: number;
+    total: number;
+    elapsed: number;
+    rounds: number;
+  } | null;
   /** The projects this folder holds, when it is a folder holding several
    *  rather than one project itself. Empty the ordinary day. */
   repos: readonly RepoOverview[];
@@ -247,6 +298,11 @@ type Props = {
   onHandOver: (repo?: string) => void;
   /** Open an address in the person's own browser. */
   onOpenLink: (address: string) => void;
+  /** Read what changed, as a diff. The band names the count and this is the
+   *  press behind it; left off, the count is drawn and cannot be opened. */
+  onOpenChanges?: () => void;
+  /** Open the Review screen, at an entry when one is named. */
+  onOpenReview?: (id?: string) => void;
   /** Open one of the files the last turn made, in the person's editor. */
   onOpenFile: (file: string) => void;
 
@@ -397,6 +453,8 @@ export default function Overview({
   onHowMuch,
   onHandOver,
   onOpenLink,
+  onOpenChanges,
+  onOpenReview,
   onOpenFile,
   onKeepGoing,
   onStartAfter,
@@ -470,6 +528,19 @@ export default function Overview({
   /* Which band of the panel is in front. Bands used to stack into one column
      that only got longer; now each has a home and nothing is buried. */
   const [tab, setTab] = useState<TabId>('work');
+  /* Kept per machine: what somebody folded away stays folded. */
+  const [lookedUpOpen, setLookedUpOpen] = useState(() => {
+    try {
+      return localStorage.getItem(LOOKED_UP) === 'open';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOOKED_UP, lookedUpOpen ? 'open' : 'shut');
+    } catch { /* private mode */ }
+  }, [lookedUpOpen]);
 
   /* A dot on the tab, not a number: the count matters once you are looking, and
      before that it is only worth knowing there is something. */
@@ -481,7 +552,7 @@ export default function Overview({
 
   const shownResearch = research.slice(-WINDOW);
   const moreResearch = research.length - shownResearch.length;
-  const changedCount = git === null ? 0 : git.unstaged + git.staged + git.untracked;
+  const changedCount = git === null ? 0 : git.changedPaths;
 
   return (
     <aside className="overview" aria-label="What is going on">
@@ -591,49 +662,103 @@ export default function Overview({
           </ul>
         </section>
       ) : null}
-      {git === null || several ? null : (
+      {/* What the job is for, when somebody said. Above the project's own
+          state, because it is the thing the state is in service of. */}
+      {view.goal == null ? null : (
         <section className="overview__block">
-          <h2 className="overview__title">
-            {LINE_WORDS.heading}
-          </h2>
-          <Lines
-            branches={git.branches}
-            fallback={git.branch}
-            busy={busy}
-            onSwitch={onSwitchBranch}
-            onCreate={onCreateBranch}
-          />
+          <h2 className="overview__title">{GOAL.heading}</h2>
+          <p className="goalband__what">{view.goal.objective}</p>
+          <p className="goalband__how">
+            <span className={`goalband__state goalband__state--${view.goal.status}`}>
+              {GOAL.states[view.goal.status]}
+            </span>
+            <span className="goalband__numbers">
+              {GOAL.line(
+                view.goal.done,
+                view.goal.total,
+                elapsedWords(view.goal.elapsed),
+                view.goal.rounds,
+              )}
+            </span>
+          </p>
         </section>
       )}
 
-      {/* Origin. Two operations, one at a time: a fetch says what is there and
-          moves nothing, and only a fetch that found a clean run forward turns
-          the press into the fast-forward. A divergence, a dirty tree, no
-          remote, no upstream — each is said and nothing is done. */}
-      {git === null || several || onFetch === undefined ? null : (
+      {/* One band, not three. Where the project is, what is uncommitted, and
+          the two presses that move either: a person reading three stacked
+          bands to learn one thing is the whole of what was wrong here. */}
+      {git === null || several ? null : (
         <section className="overview__block">
-          <h2 className="overview__title">{ORIGIN.heading}</h2>
+          <h2 className="overview__title">{GIT.heading}</h2>
+          <div className="gitband">
+            <Lines
+              branches={git.branches}
+              fallback={git.branch}
+              busy={busy}
+              onSwitch={onSwitchBranch}
+              onCreate={onCreateBranch}
+            />
+            {onFetch === undefined ? null : (
+              <button
+                type="button"
+                className="gitband__act"
+                aria-busy={working === ''}
+                title={canFastForward(found['']) && found['']?.upstream != null
+                  ? `${ORIGIN.forward} to ${found[''].upstream}`
+                  : ORIGIN.fetch}
+                onClick={() => askOrigin(undefined, canFastForward(found['']))}
+                disabled={busy || working !== null}
+              >
+                {originSays('', canFastForward(found['']))}
+              </button>
+            )}
+          </div>
+
+          {/* What changed, as one press that opens the change rather than a
+              list of filenames nobody needed. */}
+          <div className="gitband__row">
+            {changedCount === 0 ? (
+              <span className="gitband__quiet">{GIT.nothing}</span>
+            ) : (
+              <button
+                type="button"
+                className="gitband__changes"
+                onClick={() => onOpenChanges?.()}
+                disabled={onOpenChanges === undefined}
+                title={GIT.open}
+              >
+                <span className="gitband__changesname">{GIT.files(changedCount)}</span>
+                {GIT.lines(git.added, git.removed) === null ? null : (
+                  <span className="gitband__lines">{GIT.lines(git.added, git.removed)}</span>
+                )}
+              </button>
+            )}
+            {changedCount === 0 ? null : (
+              <button
+                type="button"
+                className="gitband__commit"
+                onClick={() => onSave()}
+                disabled={busy}
+                title={COMMITTING.what(git.branch)}
+              >
+                {COMMITTING.heading}
+              </button>
+            )}
+          </div>
+
           <p className="overview__summary">
             {found[''] === undefined ? saysStanding(standingOf(git)) : saysFound(found[''])}
           </p>
-          <div className="overview__actions">
-            <button
-              type="button"
-              className="overview__do"
-              aria-busy={working === ''}
-              onClick={() => askOrigin(undefined, canFastForward(found['']))}
-              disabled={busy || working !== null}
-            >
-              {originSays('', canFastForward(found['']))}
-              {canFastForward(found['']) && found['']?.upstream != null ? (
-                <span className="overview__plainsay">{`to ${found[''].upstream}`}</span>
-              ) : null}
-            </button>
-          </div>
         </section>
       )}
 
-      {git !== null && changedCount > 0 ? (
+      {/* What has finished and is waiting. One press per row into the Review
+          screen, which is the one place work is decided about. */}
+      {several ? null : <Waiting onOpen={onOpenReview} clock={view.clock} />}
+
+      {/* A folder holding several projects keeps its own commit press: the band
+          above is one project's, and there is no folder-level branch to be on. */}
+      {git !== null && several && changedCount > 0 ? (
         <section className="overview__block">
           <h2 className="overview__title">{COMMITTING.heading}</h2>
           <p className="overview__summary">{COMMITTING.waiting(changedCount)}</p>
@@ -654,9 +779,21 @@ export default function Overview({
         </section>
       ) : null}
 
+      {/* Nothing looked up is nothing to say. A band that only ever reads
+          "0" is a band people stop looking at. */}
+      {research.length === 0 ? null : (
       <section className="overview__block">
-        <h2 className="overview__title">Looked up</h2>
-        {shownResearch.length === 0 ? (
+        <button
+          type="button"
+          className="overview__fold"
+          aria-expanded={lookedUpOpen}
+          onClick={() => setLookedUpOpen((was) => !was)}
+        >
+          <h2 className="overview__title">Looked up</h2>
+          <span className="overview__foldcount">{String(research.length)}</span>
+          <span className="overview__foldmark" aria-hidden="true">{lookedUpOpen ? '⌄' : '›'}</span>
+        </button>
+        {!lookedUpOpen ? null : shownResearch.length === 0 ? (
           <p className="overview__quiet">Nothing looked up yet.</p>
         ) : (
           <>
@@ -675,12 +812,13 @@ export default function Overview({
             ) : null}
           </>
         )}
-        {now.filesRead > 0 ? (
+        {!lookedUpOpen || now.filesRead === 0 ? null : (
           <p className="overview__read">
             {`${now.filesRead} ${now.filesRead === 1 ? 'file' : 'files'} of yours opened`}
           </p>
-        ) : null}
+        )}
       </section>
+      )}
 
       {references.length === 0 ? null : (
         <section className="overview__block">

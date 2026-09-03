@@ -24,8 +24,9 @@
  *  tokeniser for whichever model is in use. */
 export const PROMPT_BUDGET = 60_000;
 
-/** What one add-on may put in the prompt before it is summarised to its first
- *  paragraph. */
+/** What one add-on's tool descriptions may weigh before its row says so. They
+ *  reach the model through the tool schema rather than the system prompt, so
+ *  this is a number to report, not one to cut at. */
 export const EXTENSION_BUDGET = 2_000;
 
 /** What one skill may carry. */
@@ -42,12 +43,18 @@ export const standingWords = {
     'Work the whole list. An unticked step is a step that is not done.',
     'Call step_done(n) as each step lands, naming the step by its number.',
     'A progress report is not a step. Do not stop to summarise while steps are still unticked.',
-    'A second opinion — an advisor verdict, a review, a list of what is not yet proven — is advice on the work. It is never permission to leave the list unfinished.',
+    'A second opinion (an advisor verdict, a review, a list of what is not yet proven) is advice on the work. It is never permission to leave the list unfinished.',
     'A step that cannot be done is step_failed(n, why) or step_skipped(n, why), said out loud, never left quietly unticked.',
   ],
+  /** Only ever said when somebody asked for a language other than the
+   *  request's own. Saying it every turn would be budget spent on a default. */
+  language: (says: string): string => `Reply in ${says}, whatever language the request is written in.`,
   agentsTrimmed: 'The rest of this file is on disk. Read it if you need it.',
   skillTrimmed: 'This skill is longer than shown. Ask for the rest if you need it.',
-  extensionTrimmed: 'The rest of this add-on’s description is left out for room.',
+  promptTrimmed: 'Some of what was installed here is left out for room.',
+  /** Said with the real path, so the model can change into it. */
+  scratch: (where: string): string =>
+    `Scratch folder for anything temporary (builds, derived data, checks): ${where}. Nothing outside the project should be written anywhere else.`,
 } as const;
 
 /* -------------------------------------------------------------------------- */
@@ -65,6 +72,11 @@ export type Standing = {
   goal: string | null;
   /** The two notes most worth carrying. Bounded, because memory is not the job. */
   notes: readonly string[];
+  /** Somewhere of its own to write anything temporary. Nothing gave a run a
+   *  place, so it picked /tmp and nothing ever cleared it. */
+  scratch?: string | null;
+  /** The language to answer in, or null for the request's own. */
+  language?: string | null;
 };
 
 function notesLine(notes: readonly string[], most = 600): string | null {
@@ -97,8 +109,11 @@ export function standingBlock(standing: Standing): string | null {
     parts.push(`Working toward: ${standing.goal.trim()}`);
   }
   if (parts.length > 0) parts.push(standingWords.rules.join('\n'));
+  const language = standing.language?.trim() ?? '';
+  if (language !== '') parts.push(standingWords.language(language));
   const notes = notesLine(standing.notes);
   if (notes !== null) parts.push(notes);
+  if (standing.scratch != null && standing.scratch !== '') parts.push(standingWords.scratch(standing.scratch));
   if (parts.length === 0) return null;
   return [standingWords.open, parts.join('\n\n'), standingWords.close].join('\n');
 }
@@ -107,21 +122,11 @@ export function standingBlock(standing: Standing): string | null {
 /* The budget                                                                  */
 /* -------------------------------------------------------------------------- */
 
-/** One piece of the assembled prompt, with what put it there. */
-export type Piece = {
-  kind: 'pi' | 'extension' | 'skill' | 'agents' | 'notes' | 'graphe';
-  from: string;
-  text: string;
-};
-
-export type Trimmed = {
-  pieces: readonly Piece[];
-  /** How big it was before, and how big it is now. */
-  was: number;
-  now: number;
-  /** What was cut, in the order it was cut, so the chip can say. */
-  cut: readonly { from: string; saved: number }[];
-};
+/** One piece held to its cap, on the way in rather than after the prompt has
+ *  been assembled. What is cut is on disk, and the tail says so. */
+export function withinBudget(text: string, most: number, tail: string): string {
+  return firstParagraph(text, most, tail);
+}
 
 function firstParagraph(text: string, most: number, tail: string): string {
   const trimmed = text.trim();
@@ -129,44 +134,6 @@ function firstParagraph(text: string, most: number, tail: string): string {
   const stop = trimmed.indexOf('\n\n');
   const head = stop > 0 && stop < most ? trimmed.slice(0, stop) : trimmed.slice(0, most);
   return `${head.trimEnd()}\n${tail}`;
-}
-
-/**
- * Bring the assembled prompt inside its budget, in a fixed order.
- *
- * Fixed rather than "cut the biggest": what is cut has to be predictable, or a
- * run behaves differently for a reason nobody can name. Add-on text goes first
- * because nobody typed it, then skills, then `AGENTS.md` — and Graphe's own
- * block is never cut, because it is the thing holding the job together.
- */
-export function trimToBudget(pieces: readonly Piece[], budget = PROMPT_BUDGET): Trimmed {
-  const was = pieces.reduce((sum, one) => sum + one.text.length, 0);
-  // Already small enough that nothing is worth cutting: Pi's own text and
-  // Graphe's block together are far under the caps, so a short prompt is left
-  // exactly as it came.
-  if (was <= budget) return { pieces, was, now: was, cut: [] };
-  const cut: { from: string; saved: number }[] = [];
-  let out = [...pieces];
-
-  /* Each kind is held to its own cap whatever the total comes to. Cutting only
-     until the total happens to fit would mean the same add-on is summarised on
-     one machine and not on another — and a run that behaves differently for a
-     reason nobody can name is worse than one that is simply smaller. */
-  const shrink = (kind: Piece['kind'], most: number, tail: string): void => {
-    out = out.map((one) => {
-      if (one.kind !== kind || one.text.length <= most) return one;
-      const next = firstParagraph(one.text, most, tail);
-      cut.push({ from: one.from, saved: one.text.length - next.length });
-      return { ...one, text: next };
-    });
-  };
-
-  shrink('extension', EXTENSION_BUDGET, standingWords.extensionTrimmed);
-  shrink('skill', SKILL_BUDGET, standingWords.skillTrimmed);
-  shrink('agents', AGENTS_BUDGET, standingWords.agentsTrimmed);
-  void budget;
-
-  return { pieces: out, was, now: out.reduce((sum, one) => sum + one.text.length, 0), cut };
 }
 
 /** What the model chip says about the size of the prompt. Said as characters

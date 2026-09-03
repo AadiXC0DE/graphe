@@ -12,6 +12,9 @@
  * see.
  */
 
+import type { Appearance } from '../design/appearance';
+
+export type { Appearance };
 import type { AgentEvent, Money, RunningPiece, SpendSummary } from '../agent/types';
 
 export type { RunningPiece } from '../agent/types';
@@ -25,10 +28,21 @@ import type { FileEntry } from '../files/tree';
 import type { Page } from '../preview/pages';
 import type { Reading } from '../preview/inspect';
 import type { Pointed } from '../preview/point';
+import type { Said } from '../preview/tabs';
+export type { Said };
+import type { AlwaysRow } from '../work/always';
+import type { Telling } from '../work/notify';
+export type { AlwaysRow };
 import type { WorkState } from '../work/board';
+import type { Entry as ReviewQueued, FileVerdict, Verdict } from '../work/reviewqueue';
+import type { WorkspaceFacts } from '../work/workspaces';
+import type { Landing as HowItLands } from '../history/worktree';
 import type { TokenUsageView } from '../lib/token-days';
 
 export type { TokenUsageView } from '../lib/token-days';
+
+/** One conversation's copy of the project, as the panel's card is made from. */
+export type { WorkspaceFacts } from '../work/workspaces';
 
 export type {
   FileEntry,
@@ -173,6 +187,9 @@ export type RecentProject = {
   lastSpend: Money | null;
   /** True when the folder is not where we left it. */
   missing: boolean;
+  /** The branch checked out there, read with the list. Null when the folder is
+   *  not a repository, is gone, or is not on a branch. */
+  branch: string | null;
 };
 
 /**
@@ -197,6 +214,10 @@ export type SideOfWork = {
   /** Its own copy of the project, so the same set can be served and looked at
    *  rather than only read as a patch. Null once the copy has gone. */
   folder: string | null;
+  /** What every go in the set started from, named so the columns mean
+   *  something. The same for all of them; carried per side so the set needs no
+   *  envelope of its own. */
+  base: string;
 };
 
 export type Room = {
@@ -348,7 +369,41 @@ export type CarriedExtension = {
   trusted: boolean;
 };
 
+/**
+ * One installed add-on, as the settings screen draws it.
+ *
+ * `policy` is what the loader will actually do with it here, worked out from
+ * its capability card rather than from its name — so an add-on published
+ * tomorrow is described on the same evidence as one installed today.
+ */
+export type AddonHere = {
+  name: string;
+  says: string;
+  policy: 'on' | 'tools-only' | 'off';
+  startsTurns: boolean;
+  runsBackgroundWork: boolean;
+  rewritesSystemPrompt: boolean;
+};
+
+/** Every add-on loaded here, and how many processes they have running between
+ *  them. */
+export type AddonReport = {
+  says: Readonly<Record<string, string>>;
+  each: readonly AddonHere[];
+  running: number;
+};
+
 /** One thing that can be added to Graphe. */
+/** What the app is keeping on this computer, as the Storage page reads it. */
+export type StorageRow = { name: string; bytes: number; files: number; clearable: boolean };
+
+export type StorageNow = {
+  says: string;
+  couldClear: number;
+  because: string;
+  rows: readonly StorageRow[];
+};
+
 export type Pack = {
   id: string;
   name: string;
@@ -451,10 +506,18 @@ export type Preferences = {
    *  "report"; asking it every time a command repeats fires on running the
    *  tests three times. */
   advisorGates: { completionGate: boolean; loopGate: boolean };
-  /** Whether add-ons that start turns of their own keep their hooks. Off keeps
-   *  their tools and drops the hooks — Graphe is already deciding when a turn
-   *  begins, and two of those is the bug. */
-  addons: 'on' | 'tools-only';
+  /** How much of an add-on that starts turns of its own runs. `tools-only`
+   *  keeps its tools and drops the hooks — Graphe is already deciding when a
+   *  turn begins, and two of those is the bug; `off` leaves it out entirely. */
+  addons: 'on' | 'tools-only' | 'off';
+  /** Which editor "Open in editor" goes to, by name, or null for whichever is
+   *  found first. A machine with two always got the same one. */
+  editor: string | null;
+  /** The same for "Open in terminal". */
+  terminal: string | null;
+  /** How the app looks, as token overrides. Five colour presets were the whole
+   *  of it before, and a preset is somebody else's taste. */
+  appearance: Appearance;
   /** How much time each chosen model should take before answering. Kept per
    *  provider/model pair because the names and available choices differ. */
   thinking: Readonly<Record<string, ThinkingLevel>>;
@@ -482,7 +545,36 @@ export type Preferences = {
   ceiling: Money | null;
   /** Which finishing the window wears. 'system' follows the computer. */
   theme: Theme;
+  /** Name a conversation, and its branch, from what was first asked in it. */
+  nameConversations: boolean;
+  /** Ask before a conversation that is still working is closed. */
+  askBeforeClosing: boolean;
+  /** Put a version down before a job's work first reaches the folder. */
+  snapBeforeApply: boolean;
+  /** What replies come back in. Empty is the request's own language, and says
+   *  nothing to the model at all. */
+  replyLanguage: string;
+  /** How a finished run is said while the window is behind something. */
+  whenRunFinishes: Telling;
+  /** How something waiting on an answer is said. */
+  whenSomethingNeedsYou: Telling;
+  /** Whether being told makes a noise. Off unless somebody asked. */
+  notifySound: boolean;
+  /** Badge the dock with how many pieces are waiting to be looked at. */
+  badgeDock: boolean;
 };
+
+/** The preferences a row on Behaviour or Notifications writes by name. The
+ *  rows differ only in which one they hold, so they share one road. */
+export type PlainPreference =
+  | 'nameConversations'
+  | 'askBeforeClosing'
+  | 'snapBeforeApply'
+  | 'replyLanguage'
+  | 'whenRunFinishes'
+  | 'whenSomethingNeedsYou'
+  | 'notifySound'
+  | 'badgeDock';
 
 /* -------------------------------------------------------------------------- */
 /* Landing it                                                                  */
@@ -884,6 +976,10 @@ export type Workflow = {
 
 /** Where the app has got to carrying a job on by itself. `why` is null once it
  *  has come to rest. */
+/** A build newer than this one, and how to get it. Said once a day at most,
+ *  and never as trouble: being on last week's build is not an error. */
+export type NewerVersion = { version: string; upgrade: string };
+
 export type ContinuationNotice = {
   project: string;
   address: string;
@@ -891,6 +987,13 @@ export type ContinuationNotice = {
   why: 'checklist' | 'goal' | 'board' | 'extension' | 'recovery' | null;
   said: string;
   resting: boolean;
+};
+
+/** A frame's worth of one conversation's events, coalesced in the shell. */
+export type AgentFrame = {
+  project: string | null;
+  conversation: string | null;
+  events: readonly AgentEvent[];
 };
 
 /** One step of a document-to-build plan, as the window draws it. */
@@ -984,8 +1087,8 @@ export type RepoOverview = {
 export type AlwaysDoes = {
   /** The file it is all written in, so somebody can open it. */
   file: string;
-  /** Every one, with the moment it runs at said in plain words. */
-  rows: readonly { when: string; name: string; run: string }[];
+  /** Every one, the switched-off ones included, in the order they are written. */
+  rows: readonly AlwaysRow[];
   /** Present when the file itself will not read, so none of them are running. */
   trouble: string | null;
 };
@@ -1079,9 +1182,19 @@ export type GitSnapshot = {
   staged: number;
   /** Files the folder holds that history knows nothing about. */
   untracked: number;
+  /** How many files are changed at all. Not the three counts above added up:
+   *  a file both staged and edited again is one file, and was being counted
+   *  twice. */
+  changedPaths: number;
   /** Which files, by name, up to a limit. The panel names them rather than
    *  counting them: "3 files changed" is a number, `pricing.tsx` is a place. */
   files: readonly ChangedFile[];
+  /** Lines added and removed across every tracked file that has changed. Read
+   *  separately from the status: the porcelain format carries no line totals,
+   *  and "3 files" and "+734 −7" are two different answers to two different
+   *  questions. */
+  added: number;
+  removed: number;
   /** Saved work owned by this machine and not yet in the shared copy. */
   ahead: number;
   /** Saved work owned by the shared copy and not yet on this machine. */
@@ -1201,6 +1314,27 @@ export type RepoItem = {
    *  it is at. Null for an issue, and when github did not say. */
   headRef: string | null;
   headSha: string | null;
+  /** A pull request nobody is asking you to merge yet. False for an issue. */
+  draft: boolean;
+};
+
+/** One continuous-integration check on a pull request, as `gh pr checks` gives
+ *  it. `link` is null when github named no run to open. */
+export type PullCheck = {
+  name: string;
+  state: 'passed' | 'failed' | 'pending' | 'skipped';
+  link: string | null;
+};
+
+/** One review comment already on a pull request, drawn under the line it is
+ *  about. `line` is the line in the file as the pull request leaves it. */
+export type PullComment = {
+  id: string;
+  path: string;
+  line: number;
+  author: string;
+  body: string;
+  at: string;
 };
 
 /** Everything the reviews screen needs about the project's github repository.
@@ -1223,6 +1357,48 @@ export type RepoLook =
       trouble: string | null;
     }
   | null;
+
+/* -------------------------------------------------------------------------- */
+/* Finished work waiting to be reviewed                                       */
+/* -------------------------------------------------------------------------- */
+
+export type { FileVerdict, HowItLands };
+export type ReviewVerdict = Verdict;
+
+/**
+ * One thing waiting to be looked at, as the window draws it.
+ *
+ * The queue's own `Entry` plus the two facts only the shell can supply: the
+ * branch the work is on, which is what Land and the pull request are made from,
+ * and whether this card is still mirroring into the folder as it works.
+ */
+export type ReviewEntry = ReviewQueued & {
+  branch: string;
+  /** True while this conversation carries its files home on every settle. */
+  mirror: boolean;
+};
+
+/** An entry opened for reading: the queue as it stands, and the change itself. */
+export type ReviewOpened = {
+  entries: readonly ReviewEntry[];
+  /** Unified diff of everything the entry changed, against where it started. */
+  diff: string;
+};
+
+/** What a decision came to. `clashes` names the files both sides changed, which
+ *  are left exactly as this folder has them until somebody settles each one. */
+export type ReviewDecided = {
+  entries: readonly ReviewEntry[];
+  /** What just happened, in the words of the thing that happened. */
+  did: string;
+  clashes: readonly string[];
+  /** The conversation it came out of, so a clash can be handed back to it. */
+  address: string;
+};
+
+/** A file both sides changed, written out with markers so it can be decided
+ *  place by place. Nothing on disk is touched to produce it. */
+export type ReviewClash = { path: string; text: string };
 
 /** Channel names. Namespaced so nothing else on the wire can be mistaken for
  *  ours, and centralised so preload and main cannot drift apart. */
@@ -1271,16 +1447,26 @@ export const CHANNEL = {
   trustCarried: 'graphe:trust-carried',
   repoLook: 'graphe:repo-look',
   repoComment: 'graphe:repo-comment',
+  prDiff: 'graphe:pr-diff',
+  prChecks: 'graphe:pr-checks',
+  prCheckout: 'graphe:pr-checkout',
+  prComments: 'graphe:pr-comments',
+  prComment: 'graphe:pr-comment',
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
   setPlanMode: 'graphe:set-plan-mode',
   running: 'graphe:running',
+  runningSaid: 'graphe:running-said',
+  pageSaid: 'graphe:page-said',
   stopRunning: 'graphe:stop-running',
   tidyNow: 'graphe:tidy-now',
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
+  openSkillFile: 'graphe:open-skill-file',
   workflows: 'graphe:workflows',
   alwaysDoes: 'graphe:always-does',
+  /** The same list, written back. */
+  alwaysWrite: 'graphe:always-write',
   watchBrowser: 'graphe:watch-browser',
   browserFrame: 'graphe:browser-frame',
   branchSwitch: 'graphe:branch-switch',
@@ -1289,8 +1475,22 @@ export const CHANNEL = {
   fastForward: 'graphe:fast-forward',
   worktreeLand: 'graphe:worktree-land',
   worktreeDrop: 'graphe:worktree-drop',
+  checkouts: 'graphe:checkouts',
+  checkoutFront: 'graphe:checkout-front',
+  checkoutLook: 'graphe:checkout-look',
+  checkoutLand: 'graphe:checkout-land',
+  checkoutPutAway: 'graphe:checkout-put-away',
   prWorktreePrepare: 'graphe:pr-worktree-prepare',
   prReviewOpen: 'graphe:pr-review-open',
+  reviewQueue: 'graphe:review-queue',
+  reviewOpen: 'graphe:review-open',
+  reviewChoose: 'graphe:review-choose',
+  reviewDecide: 'graphe:review-decide',
+  reviewLand: 'graphe:review-land',
+  reviewPr: 'graphe:review-pr',
+  reviewMirror: 'graphe:review-mirror',
+  conflictLook: 'graphe:conflict-look',
+  conflictSettle: 'graphe:conflict-settle',
   buildStart: 'graphe:build-start',
   buildPlan: 'graphe:build-plan',
   buildAdvance: 'graphe:build-advance',
@@ -1299,6 +1499,12 @@ export const CHANNEL = {
   flowLoad: 'graphe:flow-load',
   flowSave: 'graphe:flow-save',
   flowForget: 'graphe:flow-forget',
+  /** Every editor and terminal installed here, so a row can offer the choice. */
+  appsHere: 'graphe:apps-here',
+  /** Which of them "Open in editor" and "Open in terminal" go to. */
+  setOpensIn: 'graphe:set-opens-in',
+  /** One of the plain Behaviour or Notifications preferences, by name. */
+  setPreference: 'graphe:set-preference',
   goalLoad: 'graphe:goal-load',
   goalSave: 'graphe:goal-save',
   goalClear: 'graphe:goal-clear',
@@ -1336,6 +1542,7 @@ export const CHANNEL = {
   setThinking: 'graphe:set-thinking',
   spendSplit: 'graphe:spend-split',
   tokenUsage: 'graphe:token-usage',
+  exportSpend: 'graphe:export-spend',
   spendLimit: 'graphe:spend-limit',
   setSpendLimit: 'graphe:set-spend-limit',
   connectStep: 'graphe:connect-step',
@@ -1346,6 +1553,8 @@ export const CHANNEL = {
   setHoldBack: 'graphe:set-hold-back',
   setKeepLogins: 'graphe:set-keep-logins',
   setTheme: 'graphe:set-theme',
+  setAppearance: 'graphe:set-appearance',
+  ownStyles: 'graphe:own-styles',
   setHowMuch: 'graphe:set-how-much',
   decideOnWork: 'graphe:decide-on-work',
   handToDeveloper: 'graphe:hand-to-developer',
@@ -1355,6 +1564,7 @@ export const CHANNEL = {
   connectedSave: 'graphe:connected-save',
   takeBackQueue: 'graphe:take-back-queue',
   changesLook: 'graphe:changes-look',
+  changesWider: 'graphe:changes-wider',
   changesDrop: 'graphe:changes-drop',
   away: 'graphe:away',
   awayEverywhere: 'graphe:away-everywhere',
@@ -1374,8 +1584,13 @@ export const CHANNEL = {
   buildPlanChanged: 'graphe:build-plan-changed',
   /** Where the app has got to carrying a job on by itself. */
   continuation: 'graphe:continuation',
+  /** A newer build is out. Once a day, and never in the way. */
+  newerVersion: 'graphe:newer-version',
   /** A press in the app's own menu that the window is the one to act on. */
   fromMenu: 'graphe:from-menu',
+  /** Everything that happened, a frame's worth at a time. One trip across the
+   *  wire per frame rather than one per token. */
+  events: 'graphe:events',
   /** Everything worth sending when somebody says "it stopped". */
   diagnostics: 'graphe:diagnostics',
   /** Which build this is. */
@@ -1388,6 +1603,8 @@ export const CHANNEL = {
   keepCredential: 'graphe:keep-credential',
   /** How much room this app is taking, and clearing the finished work. */
   storage: 'graphe:storage',
+  /** Empty one storage row outright, where that is safe. */
+  clearFolder: 'graphe:clear-folder',
   clearFinishedWork: 'graphe:clear-finished-work',
   /** Which of those are held, and whether this machine can hold any. */
   credentialsKept: 'graphe:credentials-kept',
@@ -1444,6 +1661,9 @@ export type GrapheApi = {
     answers: Readonly<Record<string, readonly string[]>> | null,
     where?: Where,
   ): Promise<Result<boolean>>;
+  /** Where a file the window was handed by a drop actually lives. Empty when
+   *  the shell cannot name it. */
+  pathOf(file: File): string;
   /** Ask the person to pick a folder. Null when they closed the picker. */
   chooseFolder(): Promise<Result<string | null>>;
 
@@ -1466,6 +1686,23 @@ export type GrapheApi = {
   repoLook(where?: Where): Promise<Result<RepoLook>>;
   /** Ask the terminal's `gh pr comment` to speak for the current person. */
   repoComment(number: number, body: string, where?: Where): Promise<Result<null>>;
+  /** Every line one pull request changes, as unified diff text. */
+  prDiff(number: number, where?: Where): Promise<Result<string>>;
+  /** What the checks on a pull request came to. An empty list means github said
+   *  there are none; a refusal means it could not be asked. */
+  prChecks(number: number, where?: Where): Promise<Result<readonly PullCheck[]>>;
+  /** Put the folder on a pull request's branch, and say what happened. */
+  prCheckout(number: number, where?: Where): Promise<Result<string>>;
+  /** The review comments already on a pull request. */
+  prComments(number: number, where?: Where): Promise<Result<readonly PullComment[]>>;
+  /** Write one review comment against a line of a file in a pull request. */
+  prComment(
+    number: number,
+    body: string,
+    path: string,
+    line: number,
+    where?: Where,
+  ): Promise<Result<readonly PullComment[]>>;
   /** Put the project back to a version. Undoable; see `PutBack`. */
   putBack(versionId: string, where?: Where): Promise<Result<PutBack>>;
   /** Give a version a name of the user's own. */
@@ -1518,6 +1755,8 @@ export type GrapheApi = {
   /** The commands this project runs without being asked, and where they are
    *  written down. Empty for a project that has written none. */
   alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>>;
+  /** Write the list back, whole, and answer with what the file now says. */
+  alwaysWrite(rows: readonly AlwaysRow[], where?: Where): Promise<Result<AlwaysDoes>>;
   /** Watch what the browser is doing, a picture at a time, or stop. The
    *  pictures arrive on `onBrowserFrame`. */
   watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>>;
@@ -1544,6 +1783,11 @@ export type GrapheApi = {
   flowSave(flow: import('../work/canvas').Flow, where?: Where): Promise<Result<null>>;
   /** Throw one away for good. */
   flowForget(id: string, where?: Where): Promise<Result<null>>;
+  appsHere(): Promise<Result<{ editors: readonly string[]; terminals: readonly string[] }>>;
+  setOpensIn(which: 'editor' | 'terminal', name: string | null): Promise<Result<Preferences>>;
+  /** One preference on Behaviour or Notifications. Whatever is handed back is
+   *  what was actually kept, so a refused write shows as the old answer. */
+  setPreference(which: PlainPreference, value: string | boolean): Promise<Result<Preferences>>;
   goalLoad(where?: Where): Promise<Result<import('../work/goal').Goal | null>>;
   goalSave(goal: import('../work/goal').Goal, where?: Where): Promise<Result<null>>;
   goalClear(where?: Where): Promise<Result<null>>;
@@ -1564,12 +1808,49 @@ export type GrapheApi = {
   worktreeLand(where?: Where): Promise<Result<null>>;
   /** Throw the front conversation's own checkout away, branch and all. */
   worktreeDrop(where?: Where): Promise<Result<null>>;
+
+  /** Every conversation with a copy of this project, one card's worth each. */
+  checkouts(where?: Where): Promise<Result<readonly WorkspaceFacts[]>>;
+  /** Move the project folder itself onto that conversation's branch. Its copy
+   *  is given back first, so the branch is only ever spread out in one place. */
+  checkoutFront(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>>;
+  /** What one copy changed, against the commit it started from, as one diff. */
+  checkoutLook(address: string, where?: Where): Promise<Result<string>>;
+  /** Bring one copy's work into the project and give the copy back. */
+  checkoutLand(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>>;
+  /** Give one copy's folder back and keep its branch. Refused while the copy
+   *  holds writing the branch does not carry. */
+  checkoutPutAway(address: string, where?: Where): Promise<Result<readonly WorkspaceFacts[]>>;
   /** Prepare an isolated worktree for a pull request, so the review reads the right files. */
   preparePrWorktree(prNumber: number, where?: Where): Promise<Result<string>>;
   /** Open a new conversation rooted at the PR worktree, so the review reads the PR's own files. */
   openPrReview(prNumber: number, where?: Where): Promise<Result<{ folder: string; opened: OpenedProject }>>;
+
+  /** Everything finished and waiting to be looked at, newest first. */
+  reviewQueue(where?: Where): Promise<Result<readonly ReviewEntry[]>>;
+  /** Open one to read it. Opening is reading, so it stops counting as waiting. */
+  reviewOpen(id: string, where?: Where): Promise<Result<ReviewOpened>>;
+  /** Say what to do with one file of it, or clear that and follow the entry. */
+  reviewChoose(id: string, path: string, choice: FileVerdict | null, where?: Where): Promise<Result<readonly ReviewEntry[]>>;
+  /** Answer a whole entry. The chosen files are carried into the folder,
+   *  uncommitted; a file both sides changed is left alone and named back. */
+  reviewDecide(id: string, verdict: ReviewVerdict, where?: Where): Promise<Result<ReviewDecided>>;
+  /** The same yes, committed. One commit unless the landing says otherwise. */
+  reviewLand(id: string, landing: HowItLands, where?: Where): Promise<Result<ReviewDecided>>;
+  /** Open a pull request from the entry's branch, with its summary as the body. */
+  reviewPr(id: string, summary: string, where?: Where): Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>>;
+  /** Carry this conversation's files home as it works, or stop doing that. */
+  reviewMirror(id: string, on: boolean, where?: Where): Promise<Result<readonly ReviewEntry[]>>;
+  /** One file both sides changed, written out with markers to decide over.
+   *  `address` is the conversation whose version is the other side. */
+  conflictLook(address: string, path: string, where?: Where): Promise<Result<ReviewClash>>;
+  /** Write the decided version of that file into the project. */
+  conflictSettle(address: string, path: string, text: string, where?: Where): Promise<Result<null>>;
   /** Full text for a library row. `id` is checked against that library first. */
   skillText(id: string, where?: Where): Promise<Result<string>>;
+  /** Open a library row's own file in the editor. `id` is checked against that
+   *  library first, so the window never names a path of its own. */
+  openSkillFile(id: string, where?: Where): Promise<Result<null>>;
   /** Stop checking before things that would otherwise be asked about, or start
    *  again. Answers with what is true afterwards. */
   stopAsking(on: boolean, where?: Where): Promise<Result<boolean>>;
@@ -1580,6 +1861,12 @@ export type GrapheApi = {
   setPlanMode(on: boolean, where?: Where): Promise<Result<boolean>>;
   /** What is being kept running in this conversation — servers, watchers. */
   running(where?: Where): Promise<Result<readonly RunningPiece[]>>;
+  /** Everything one of them has said since it started, whole. Read again rather
+   *  than pushed: the drawer asks while it is open and stops when it is not. */
+  runningSaid(id: string, where?: Where): Promise<Result<string>>;
+  /** What the page beside the conversation has printed, as the console model
+   *  holds it. Empty when no page is open. */
+  pageSaid(where?: Where): Promise<Result<readonly Said[]>>;
   /** Stop one of them. Answers with what is left. */
   stopRunning(id: string, where?: Where): Promise<Result<readonly RunningPiece[]>>;
   /** What the open project carries, and whether each one is being loaded. */
@@ -1666,6 +1953,16 @@ export type GrapheApi = {
 
   /** Listen to the agent. Returns the function that stops listening. */
   onEvent(listener: (notice: AgentNotice) => void): () => void;
+  /**
+   * The same events, a frame's worth at a time.
+   *
+   * One `webContents.send` per token meant sixty trips across the wire a
+   * second and sixty synchronous handlers in the window. Runs of text are
+   * welded; anything that gates the screen — a step starting, a question, a
+   * settle — goes at once, taking everything queued before it so the order a
+   * conversation is read in never changes.
+   */
+  onEvents(listener: (frames: readonly AgentFrame[]) => void): () => void;
 
   /** The full-size before and after for one change. Asked for when somebody
    *  opens the strip, and not before — see `VisualChange`. */
@@ -1704,7 +2001,7 @@ export type GrapheApi = {
     where?: Where,
   ): Promise<Result<Preferences>>;
   /** Whether add-ons that start turns of their own keep their hooks here. */
-  setAddons(choice: 'on' | 'tools-only', where?: Where): Promise<Result<Preferences>>;
+  setAddons(choice: 'on' | 'tools-only' | 'off', where?: Where): Promise<Result<Preferences>>;
   /** Let this exact model take more or less time before it answers. */
   setThinking(choice: ModelChoice, level: ThinkingLevel, where?: Where): Promise<Result<Preferences>>;
   /** Where the money went in this project, asked for rather than waited for.
@@ -1713,6 +2010,9 @@ export type GrapheApi = {
   /** Tokens through the model, one day at a time, read from this computer's
    *  own session transcripts. Null when there are none to read. */
   tokenUsage(): Promise<Result<TokenUsageView | null>>;
+  /** Write the spend out as a CSV, for whoever expenses it. Returns where it
+   *  went, or null when the save was cancelled. */
+  exportSpend(csv: string): Promise<Result<string | null>>;
   /** The ceiling somebody set on spending, or null when they have not set one. */
   spendLimit(): Promise<Result<SpendLimit | null>>;
   /** Set it, raise it, or take it away with null. Answers with what is held. */
@@ -1737,6 +2037,18 @@ export type GrapheApi = {
    *  it. Off keeps nothing and starts every browser clean. */
   setKeepLogins(on: boolean, where?: Where): Promise<Result<Preferences>>;
   setTheme(theme: Theme): Promise<Result<Preferences>>;
+  /** Change how it looks. Every control writes a token; the whole thing is one
+   *  small object, so it is set whole rather than a field at a time. */
+  setAppearance(appearance: Appearance): Promise<Result<Preferences>>;
+  /**
+   * A stylesheet of somebody's own, loaded last.
+   *
+   * The precise control behind the same Appearance row: every value the
+   * builder sets is a token, and this is where somebody who wants a token the
+   * builder does not offer writes it. Returns where the file is as well as
+   * what is in it, because the answer to "where do I put this" is a path.
+   */
+  ownStyles(): Promise<Result<{ css: string; file: string }>>;
   /** Move the line a picture has to cross before the work is stopped. One of
    *  `HOW_MUCH` in `src/design/gate.ts`. Sticky. */
   setHowMuch(id: string): Promise<Result<Preferences>>;
@@ -1769,6 +2081,9 @@ export type GrapheApi = {
 
   /** Everything changed in the folder and not saved yet, as a diff to read. */
   changesLook(where?: Where): Promise<Result<string>>;
+  /** One file of that change again, with `context` lines around it. What git
+   *  did not send cannot be worked out from what it did. */
+  changesWider(file: string, context: number, where?: Where): Promise<Result<string>>;
   /** Take the named parts back out. The patch is what to undo, not what to keep. */
   changesDrop(patch: string, where?: Where): Promise<Result<null>>;
 
@@ -1857,6 +2172,7 @@ export type GrapheApi = {
   /** Where the app has got to carrying a job on by itself, drawn as the one
    *  line under the reply with a Stop beside it. */
   onContinuation(listener: (notice: ContinuationNotice) => void): () => void;
+  onNewerVersion(listener: (one: NewerVersion) => void): () => void;
   /** Stop it carrying on, from that Stop or from Escape. */
   continuationStop(where?: Where): Promise<Result<null>>;
 
@@ -1903,8 +2219,9 @@ export type GrapheApi = {
    * one published tomorrow is described on the same evidence as one installed
    * today.
    */
-  addons(): Promise<Result<{ says: Readonly<Record<string, string>>; running: number }>>;
-  storage(): Promise<Result<{ says: string; couldClear: number; because: string }>>;
+  addons(): Promise<Result<AddonReport>>;
+  storage(): Promise<Result<StorageNow>>;
+  clearFolder(name: string): Promise<Result<StorageNow>>;
   clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>>;
 
   /* ----------------------------------------------- staying in step with Figma */

@@ -343,7 +343,7 @@ async function previewRename(
     signal,
     maxFiles,
   );
-  if (total === 0) return `No occurrences of "${from}" found — nothing to rename.${partial(walk)}`;
+  if (total === 0) return `No occurrences of "${from}" found. Nothing to rename.${partial(walk)}`;
   const skipped = files.filter((rel) => !isRenameable(rel));
   const more = total > hits.length ? `\n… (${String(total - hits.length)} more occurrences)` : '';
   const left =
@@ -351,7 +351,7 @@ async function previewRename(
       ? ''
       : `\n\nNot source, so a rename would leave these alone: ${skipped.slice(0, 10).join(', ')}`;
   return [
-    `Rename preview: "${from}" → "${to}" — ${String(total)} occurrence(s) in ${String(files.length)} file(s):`,
+    `Rename preview: "${from}" → "${to}", ${String(total)} occurrence(s) in ${String(files.length)} file(s):`,
     hits.join('\n') + more,
     left,
     '\nNothing was changed. Apply it with lsp_rename.',
@@ -370,7 +370,7 @@ async function performRename(
   const wrong = checkNames(from, to);
   if (wrong !== null) return wrong;
   if (from.length < MIN_SYMBOL) {
-    return `"${from}" is too short to rename across a whole project safely — it would match far more than you mean. Rename it a file at a time with edit instead.`;
+    return `"${from}" is too short to rename across a whole project safely; it would match far more than you mean. Rename it a file at a time with edit instead.`;
   }
 
   const re = new RegExp(`\\b${escapeRegExp(from)}\\b`, 'g');
@@ -389,9 +389,9 @@ async function performRename(
     maxFiles,
   );
   if (signal?.aborted) return `Stopped before anything was written. Nothing changed.`;
-  if (total === 0) return `No occurrences of "${from}" found — nothing to rename.${partial(walk)}`;
+  if (total === 0) return `No occurrences of "${from}" found. Nothing to rename.${partial(walk)}`;
   if (candidates.length > MAX_RENAME_FILES || total > MAX_RENAME_OCCURRENCES) {
-    return `"${from}" appears ${String(total)} time(s) in ${String(candidates.length)} file(s) — too broad to rename in one go, and a sweep that size is not one anybody can check. Run lsp preview to see it, then rename in smaller pieces, or pick a more specific name.`;
+    return `"${from}" appears ${String(total)} time(s) in ${String(candidates.length)} file(s). That is too broad to rename in one go, and a sweep that size is not one anybody can check. Run lsp preview to see it, then rename in smaller pieces, or pick a more specific name.`;
   }
 
   const realRoot = await realpath(absRoot).catch(() => absRoot);
@@ -428,7 +428,7 @@ async function performRename(
     } catch (cause) {
       const why = cause instanceof Error ? cause.message : 'it could not be written';
       const done = changed.length === 0 ? 'Nothing was written' : `Changed:\n${changed.join('\n')}`;
-      return `Renaming "${from}" → "${to}" stopped at ${one.rel}: ${why}. ${done}\n\nThe rest were left alone, so the project is half renamed — put it back or finish it by hand.`;
+      return `Renaming "${from}" → "${to}" stopped at ${one.rel}: ${why}. ${done}\n\nThe rest were left alone, so the project is half renamed. Put it back or finish it by hand.`;
     }
     totalReplacements += count;
     changed.push(`${one.rel}: ${String(count)}`);
@@ -445,7 +445,7 @@ async function performRename(
     return `Found ${String(total)} occurrence(s) of "${from}", but none of them were in files I will rewrite.`;
   }
 
-  const head = `Renamed "${from}" → "${to}" — ${String(totalReplacements)} occurrence(s) in ${String(changed.length)} file(s):\n${changed.join('\n')}`;
+  const head = `Renamed "${from}" → "${to}", ${String(totalReplacements)} occurrence(s) in ${String(changed.length)} file(s):\n${changed.join('\n')}`;
   if (stoppedAt !== null) {
     return `${head}\n\nStopped there: ${String(candidates.length - stoppedAt)} file(s) still hold "${from}".${staleNote}`;
   }
@@ -454,7 +454,7 @@ async function performRename(
   }
   const skipped = total - totalReplacements - staleOccurrences;
   if (skipped > 0) {
-    return `${head}\n\n${String(skipped)} occurrence(s) are in files I do not rewrite — lock files, bundles, binaries — and were left alone.${staleNote}`;
+    return `${head}\n\n${String(skipped)} occurrence(s) are in files I do not rewrite (lock files, bundles, binaries) and were left alone.${staleNote}`;
   }
   if (stale.length > 0) return `${head}${staleNote}`;
   return `${head}\n\nNo file I rewrite still holds "${from}". Dependencies, build output and files holding keys are never walked.`;
@@ -485,9 +485,9 @@ export function lspTool(options: LspOptions): ToolDefinition {
     name: 'lsp',
     label: 'Code intelligence',
     description:
-      'Diagnostics, references, definition and rename preview — grep-backed so it works without a language server. Reads only: preview lists every occurrence a rename would change and leaves every file alone. The rename itself is lsp_rename.',
+      'Diagnostics, references, definition and rename preview. Grep-backed, so it works without a language server. Reads only: preview lists every occurrence a rename would change and leaves every file alone. The rename itself is lsp_rename.',
     promptSnippet:
-      'lsp(operation, file?, symbol?, newName?) — diagnostics / references / definition / preview (reads only)',
+      'lsp(operation, file?, symbol?, newName?): diagnostics / references / definition / preview (reads only)',
     promptGuidelines: [
       'Operations: diagnostics needs file; references and definition need symbol; preview needs symbol and newName.',
       'Diagnostics reads the file and reports TODO/FIXME; no server needed.',
@@ -576,13 +576,13 @@ export function lspRenameTool(options: LspOptions): ToolDefinition {
     name: 'lsp_rename',
     label: 'Rename across the project',
     description:
-      'Rename a symbol everywhere it appears — word-bounded, grep-backed, and it writes every source file that holds it (formatBytes → formatFileSize across the project). Preview it with lsp(operation: "preview") first when the symbol is short or a common word; this applies the change without a second look.',
-    promptSnippet: 'lsp_rename(symbol, newName) — renames across every file (writes)',
+      'Rename a symbol everywhere it appears: word-bounded, grep-backed, and it writes every source file that holds it (formatBytes → formatFileSize across the project). Preview it with lsp(operation: "preview") first when the symbol is short or a common word; this applies the change without a second look.',
+    promptSnippet: 'lsp_rename(symbol, newName): renames across every file (writes)',
     promptGuidelines: [
       'Writes. Every source file holding the symbol is rewritten in one go.',
-      'Preview first with lsp(operation: "preview", symbol, newName) whenever the name is short or a common word — that one changes nothing.',
+      'Preview first with lsp(operation: "preview", symbol, newName) whenever the name is short or a common word; that one changes nothing.',
       'Only source is rewritten: lock files, minified bundles, binaries, and anything holding keys are left alone and reported.',
-      "A project's own dotted folders — .github, .vscode — are rewritten like any other source; .git, dependencies and build output are not walked.",
+      "A project's own dotted folders (.github, .vscode) are rewritten like any other source; .git, dependencies and build output are not walked.",
       'Grep-backed, not a language server: a name that also appears in prose or with another meaning is changed there too.',
       'A very short symbol, or one matching an enormous part of the project, is refused rather than swept.',
     ],

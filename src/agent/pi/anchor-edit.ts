@@ -179,12 +179,12 @@ export function anchorEditTool(opts: { cwd: string; delegate: EditDelegate }): T
     name: 'edit',
     label: 'Editing a file',
     description:
-      'Make precise file edits. Either give the exact text to replace (edits[].oldText), or — when the file was read in this session and carries a fingerprint — give the line range and that fingerprint, and the change is made without retyping the old lines.',
+      'Make precise file edits. Either give the exact text to replace (edits[].oldText), or, when the file was read in this session and carries a fingerprint, give the line range and that fingerprint, and the change is made without retyping the old lines.',
     promptSnippet:
-      'edit(path, edits) — change a file: by exact text, or by line numbers and the fingerprint from the last read',
+      'edit(path, edits): change a file by exact text, or by line numbers and the fingerprint from the last read',
     promptGuidelines: [
       'Use edit for precise changes. Each edits[].oldText must match exactly, including all whitespace.',
-      'When you just read the file, its reply ends with a fingerprint like [src/app.ts#A1B2]. Use startLine, endLine and tag instead of retyping the old text — it takes fewer tokens and refuses cleanly if the file has changed.',
+      'When you just read the file, its reply ends with a fingerprint like [src/app.ts#A1B2]. Use startLine, endLine and tag instead of retyping the old text; it takes fewer tokens and refuses cleanly if the file has changed.',
       'When changing multiple separate locations in one file, use one edit call with multiple entries.',
       'A stale fingerprint is refused with a message that says to re-read the file. Do that, then try again.',
     ],
@@ -308,8 +308,8 @@ export function taggedReadTool(opts: {
     name: 'read',
     label: 'Reading a file',
     description:
-      'Read file contents. The reply ends with the file\'s current fingerprint when the file is text — keep it, and an edit can name lines instead of retyping them.',
-    promptSnippet: 'read(path) — read a file; its reply carries the fingerprint edit can target',
+      'Read file contents. The reply ends with the file\'s current fingerprint when the file is text. Keep it, and an edit can name lines instead of retyping them.',
+    promptSnippet: 'read(path): read a file; its reply carries the fingerprint edit can target',
     promptGuidelines: [
       'Use read to examine files instead of cat or sed.',
       'The fingerprint at the end of the reply (like [src/app.ts#A1B2]) names the version you read. Give it to edit along with line numbers when you want to change those lines.',

@@ -17,9 +17,9 @@ type Props = {
 export const SAYS = {
   /** The chip, one rung each, in the fewest words that are still true. */
   rungs: {
-    looking: { name: 'Just looking', note: 'I read and tell you what I find. I change nothing.' },
-    asking: { name: 'Asks first', note: 'I stop and check with you before anything that could cost you something.' },
-    changing: { name: 'Changes files', note: 'I edit without asking, and still stop before running anything.' },
+    looking: { name: 'Read only', note: 'I read and tell you what I find. I change nothing.' },
+    asking: { name: 'Ask first', note: 'I stop and check with you before anything that could cost you something.' },
+    changing: { name: 'Edit files', note: 'I edit without asking, and still stop before running anything.' },
     doing: {
       name: 'Full access',
       note: 'Full computer access for this sitting, using the accounts and tools you already use in your terminal.',

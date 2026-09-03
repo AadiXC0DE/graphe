@@ -1,0 +1,163 @@
+/* What this project does without being asked, as a list rather than a file.
+
+   Drawn inside a settings card, so the rows carry the same inset and hairlines
+   as every other row on the screen. */
+
+.always {
+  display: flex;
+  flex-direction: column;
+}
+
+.always__back {
+  align-self: flex-start;
+  margin: var(--space-3) var(--space-4) 0;
+  padding: 2px var(--space-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.always__back:hover {
+  color: var(--text);
+}
+
+.always__trouble {
+  margin: var(--space-3) var(--space-4) 0;
+  padding: var(--space-3);
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.always__empty {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.always__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.always__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.always__row--new {
+  background: var(--bg-sunken);
+}
+
+.always__when {
+  flex: none;
+  max-width: 12rem;
+  padding: 4px var(--space-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.always__run,
+.always__field {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.always__field {
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* Out of the way until the row is reached for, and always there for a keyboard. */
+.always__remove {
+  flex: none;
+  padding: 2px var(--space-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--dur-micro) var(--ease-hover);
+}
+
+.always__row:hover .always__remove,
+.always__row:focus-within .always__remove,
+.always__remove:focus-visible {
+  opacity: 1;
+  border-color: var(--border);
+}
+
+.always__add {
+  align-self: flex-start;
+  margin: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.always__add:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.always__foot {
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-4);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.always__link {
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .always__remove {
+    transition: none;
+  }
+}

@@ -17,6 +17,7 @@
  * product is that we make them.
  */
 
+import { defaultAppearance, readAppearance, type Appearance } from '../design/appearance';
 import type { Money } from '../agent/types';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -24,7 +25,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { asAdvisor, asAdvisorThinking, sameAdvisor } from '../agent/advisor';
 import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
 import type { Theme } from '../lib/theme';
-import { themeFrom } from '../lib/theme';
+import { asTelling, type Telling } from '../work/notify';
 import { asTrusted, sameTrusted, type Trusted } from './carried';
 import { asKept, sameKept, type Kept } from './kept';
 
@@ -69,10 +70,27 @@ export type Preferences = {
    * somebody's decision; both are theirs now.
    */
   advisorGates: { completionGate: boolean; loopGate: boolean };
-  /** Whether add-ons that start turns of their own keep their hooks. Off keeps
-   *  their tools and drops the hooks; Graphe is already deciding when a turn
-   *  begins, and two of those is the bug. */
-  addons: 'on' | 'tools-only';
+  /**
+   * How much of an add-on that starts turns of its own runs: all of it, its
+   * tools without its hooks, or none of it.
+   *
+   * On, because Graphe ships a shelf of them and an app that installs something
+   * and then quietly disables half of it is worse than one that never offered
+   * it. The reason to take the hooks away was that two things deciding when a
+   * turn begins is a bug — but the Continuation Authority handles an add-on
+   * asking for a turn as one more reason among its own, counts it against the
+   * same budget and names it. So it can be let through.
+   */
+  addons: 'on' | 'tools-only' | 'off';
+  /** Which editor "Open in editor" goes to, by name, or null for whichever is
+   *  found first. A machine with two always got the same one. */
+  editor: string | null;
+  /** The same for "Open in terminal". */
+  terminal: string | null;
+  /** How the app looks, as a set of token overrides — accent, tone, contrast,
+   *  radius, density, fonts, motion. Five colour presets were the whole of it
+   *  before, and a preset is somebody else's taste. */
+  appearance: Appearance;
   /** How much time each model should take before it answers. The map is keyed
    * by its provider and model id because different models support different
    * choices. */
@@ -145,10 +163,52 @@ export type Preferences = {
    * afternoon would hold nobody to anything.
    */
   ceiling: Money | null;
-  /** Which finishing the window wears. 'system' follows the computer;
-   *  any other value is stamped as data-theme and wins over the media query. */
+  /** Which way the palette runs, mirroring the appearance's own base.
+   *  'system' follows the computer; the other two are stamped as data-theme
+   *  and win over the media query. */
   theme: Theme;
+  /** Name a conversation from what was first asked in it. On, because an
+   *  untitled row is a row nobody can find again. */
+  nameConversations: boolean;
+  /** Ask before a conversation that is still working is closed. On: closing
+   *  one throws away a turn somebody is paying for. */
+  askBeforeClosing: boolean;
+  /** Put a version down before a job's work first reaches the person's folder,
+   *  so the moment before is one press away. */
+  snapBeforeApply: boolean;
+  /** The language replies come back in. Empty is the request's own language,
+   *  and says nothing to the model at all. */
+  replyLanguage: string;
+  /** How to say a run has finished while the window is behind something. */
+  whenRunFinishes: Telling;
+  /** How to say something is waiting on an answer. */
+  whenSomethingNeedsYou: Telling;
+  /** Whether being told makes a noise. Off: a desktop that beeps at somebody
+   *  who did not ask is a desktop they turn notifications off on. */
+  notifySound: boolean;
+  /** Badge the dock with how many pieces are waiting to be looked at. */
+  badgeDock: boolean;
 };
+
+/** Every field, because an appearance is small and comparing it wrongly means
+ *  a change that never reaches the disk. */
+function sameAppearance(one: Appearance, other: Appearance): boolean {
+  return (
+    one.base === other.base &&
+    one.accent === other.accent &&
+    one.ground === other.ground &&
+    one.ink === other.ink &&
+    one.tone === other.tone &&
+    one.contrast === other.contrast &&
+    one.radius === other.radius &&
+    one.density === other.density &&
+    one.uiFont === other.uiFont &&
+    one.codeFont === other.codeFont &&
+    one.ligatures === other.ligatures &&
+    one.motion === other.motion &&
+    one.finish === other.finish
+  );
+}
 
 /** Both gates off unless the file says otherwise, and anything unreadable is
  *  off too: a gate that turns itself on because a file was half-written is the
@@ -165,7 +225,10 @@ export const defaultPreferences: Preferences = {
   advisor: null,
   advisorThinking: null,
   advisorGates: { completionGate: false, loopGate: false },
-  addons: 'tools-only',
+  addons: 'on',
+  editor: null,
+  terminal: null,
+  appearance: defaultAppearance,
   thinking: {},
   kept: {},
   trusted: {},
@@ -175,6 +238,14 @@ export const defaultPreferences: Preferences = {
   howMuch: null,
   ceiling: null,
   theme: 'system',
+  nameConversations: true,
+  askBeforeClosing: true,
+  snapBeforeApply: true,
+  replyLanguage: '',
+  whenRunFinishes: 'system',
+  whenSomethingNeedsYou: 'system',
+  notifySound: false,
+  badgeDock: true,
 };
 
 type Stored = { version: 1; preferences: Preferences };
@@ -184,6 +255,9 @@ function asPreferences(value: unknown): Preferences {
   const raw = (value as { preferences?: unknown }).preferences;
   if (typeof raw !== 'object' || raw === null) return { ...defaultPreferences };
   const record = raw as Record<string, unknown>;
+  // The theme was a system of its own until the presets became appearances; an
+  // old one names the preset it is now, once.
+  const appearance = readAppearance(record['appearance'], record['theme']);
   const showMe = record['showMe'];
   const model = record['model'];
   const rawThinking = record['thinking'];
@@ -211,7 +285,13 @@ function asPreferences(value: unknown): Preferences {
     advisor: asAdvisor(record['advisor']),
     advisorThinking: asAdvisorThinking(record['advisorThinking']),
     advisorGates: asGates(record['advisorGates']),
-    addons: record['addons'] === 'on' ? 'on' : 'tools-only',
+    addons:
+      record['addons'] === 'tools-only' || record['addons'] === 'off'
+        ? record['addons']
+        : 'on',
+    editor: typeof record['editor'] === 'string' ? record['editor'] : null,
+    terminal: typeof record['terminal'] === 'string' ? record['terminal'] : null,
+    appearance,
     thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
@@ -220,8 +300,23 @@ function asPreferences(value: unknown): Preferences {
     keptLogins: asHeldBack(record['keptLogins']),
     howMuch: typeof record['howMuch'] === 'string' ? record['howMuch'] : null,
     ceiling: asCeiling(record['ceiling']),
-    theme: themeFrom(record['theme']),
+    theme: appearance.base,
+    nameConversations: record['nameConversations'] !== false,
+    askBeforeClosing: record['askBeforeClosing'] !== false,
+    snapBeforeApply: record['snapBeforeApply'] !== false,
+    replyLanguage: asLanguage(record['replyLanguage']),
+    whenRunFinishes: asTelling(record['whenRunFinishes']),
+    whenSomethingNeedsYou: asTelling(record['whenSomethingNeedsYou']),
+    notifySound: record['notifySound'] === true,
+    badgeDock: record['badgeDock'] !== false,
   };
+}
+
+/** A language somebody typed, on one line and bounded. It is pasted into the
+ *  system prompt, where a paragraph would be somebody else's instructions. */
+function asLanguage(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').trim().slice(0, 60);
 }
 
 /** Read back defensively: a file edited by hand must not become a ceiling of
@@ -310,10 +405,19 @@ export class PreferenceFile {
       next.advisorGates.completionGate === this.#preferences.advisorGates.completionGate &&
       next.advisorGates.loopGate === this.#preferences.advisorGates.loopGate &&
       next.addons === this.#preferences.addons &&
+      sameAppearance(next.appearance, this.#preferences.appearance) &&
       sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted) &&
       next.theme === this.#preferences.theme &&
+      next.nameConversations === this.#preferences.nameConversations &&
+      next.askBeforeClosing === this.#preferences.askBeforeClosing &&
+      next.snapBeforeApply === this.#preferences.snapBeforeApply &&
+      next.replyLanguage === this.#preferences.replyLanguage &&
+      next.whenRunFinishes === this.#preferences.whenRunFinishes &&
+      next.whenSomethingNeedsYou === this.#preferences.whenSomethingNeedsYou &&
+      next.notifySound === this.#preferences.notifySound &&
+      next.badgeDock === this.#preferences.badgeDock &&
       // Left out, a ceiling was the one preference that never reached the file:
       // nothing else about it had changed, so nothing was written, and it was
       // gone by the next launch while the window still said it was set.

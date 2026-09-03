@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 
-import {
-  AGAINST_WORDS as SAYS,
-  canTake,
-  compare,
-  isFinal,
-  saysNothingHere,
-  saysSummary,
-  type Difference,
-  type Side,
-} from '../lib/against';
+import { parseDiff, type FileChange } from '../diff/hunks';
+import { AGAINST_WORDS as SAYS, saysNothingHere, type Side } from '../lib/against';
 import { boardWords, saysState } from '../work/board';
+import {
+  compare,
+  compareWords,
+  pickOne,
+  saysComparison,
+  type Attempt,
+  type Column,
+  type Comparison,
+  type FileRow,
+} from '../work/compare';
+import DiffView from './DiffView';
 import './Against.css';
 import './Sheet.css';
 
@@ -20,8 +23,9 @@ import './Sheet.css';
  *
  * The board shows each go as a picture, a sentence and what it cost. This keeps
  * that reading and adds the only thing the board cannot say: where the results
- * actually differ. A column per go, then one row per file, so the question
- * "which of these did more to this file" is answered by looking across.
+ * actually differ, and against what. Every column is held against one base, so
+ * three columns are three answers to the same question rather than three
+ * unrelated patches.
  *
  * Every go in the group gets a column, finished or not — watching one form is
  * half of why somebody opens this. A column that is still moving says so, and
@@ -30,9 +34,13 @@ import './Sheet.css';
  * Presentational: everything arrives as props.
  */
 
+/** A go, as the shell hands it over: the board's side plus the base every one
+ *  of them started from. */
+type SideOfWork = Side & { base?: string | null };
+
 type Props = {
   open: boolean;
-  sides: readonly Side[];
+  sides: readonly SideOfWork[];
   onClose: () => void;
   onKeep: (id: string) => void;
   /** Serve every go that still has a copy, and show them in the pane. Left off,
@@ -41,56 +49,63 @@ type Props = {
   busy?: boolean;
 };
 
-type Total = { touched: number; added: number; removed: number };
+/** What one go changed, by file, so a row can draw the change itself and not
+ *  only the size of it. */
+type ByPath = ReadonlyMap<string, FileChange>;
 
-/** Everything one go changed, for the line under its name. */
-function totalOf(files: readonly Difference[], id: string): Total {
-  let touched = 0;
-  let added = 0;
-  let removed = 0;
-  for (const file of files) {
-    const count = file.counts[id];
-    if (count === undefined) continue;
-    touched += 1;
-    added += count.added;
-    removed += count.removed;
-  }
-  return { touched, added, removed };
-}
-
-function Row({ file, sides }: { file: Difference; sides: readonly Side[] }) {
-  const names = file.onlyIn.map((id) => sides.find((side) => side.id === id)?.name ?? id);
+function Row({
+  file,
+  columns,
+  changes,
+  showing,
+  onShow,
+  busy,
+}: {
+  file: FileRow;
+  columns: readonly Column[];
+  changes: ReadonlyMap<string, ByPath>;
+  showing: boolean;
+  onShow: () => void;
+  busy: boolean;
+}) {
+  const names = file.touched.map((id) => columns.find((one) => one.id === id)?.name ?? id);
   // The busiest cell in this row sets the length of the bars in it, so a row is
   // read across rather than against every other row on the page. A file only
   // one go touched has nothing to be read across, and a full bar there would
   // say "a lot of this" when it only means "the only one".
-  const across = file.onlyIn.length > 1;
+  const across = file.touched.length > 1;
   const most = Math.max(
     1,
-    ...sides.map((side) => {
-      const count = file.counts[side.id];
+    ...columns.map((one) => {
+      const count = file.counts[one.id];
       return count === undefined ? 0 : count.added + count.removed;
     }),
   );
 
   return (
-    <li className="against__file">
-      <div className="against__about">
-        <p className="against__path">{file.path}</p>
-        <p className="against__who">{SAYS.who(names, sides.length)}</p>
-      </div>
+    <li className={`against__file${showing ? ' against__file--open' : ''}`}>
+      <button
+        type="button"
+        className="against__about"
+        aria-expanded={showing}
+        onClick={onShow}
+        title={compareWords.readIt}
+      >
+        <span className="against__path">{file.path}</span>
+        <span className="against__who">{SAYS.who(names, columns.length)}</span>
+      </button>
 
-      {sides.map((side) => {
-        const count = file.counts[side.id];
+      {columns.map((one) => {
+        const count = file.counts[one.id];
         return (
           <div
-            key={side.id}
+            key={one.id}
             className={`against__cell${count === undefined ? ' against__cell--untouched' : ''}`}
           >
-            <span className="against__whose">{side.name}</span>
+            <span className="against__whose">{one.name}</span>
             {count === undefined ? (
               <span className="against__untouched">
-                {isFinal(side) ? SAYS.untouched : SAYS.untouchedYet}
+                {one.final ? SAYS.untouched : SAYS.untouchedYet}
               </span>
             ) : (
               <>
@@ -107,19 +122,77 @@ function Row({ file, sides }: { file: Difference; sides: readonly Side[] }) {
           </div>
         );
       })}
+
+      {/* The change itself, one go under another, because the counts say how
+          much and never what. */}
+      {!showing ? null : (
+        <div className="against__reading">
+          {file.touched.map((id) => {
+            const change = changes.get(id)?.get(file.path);
+            if (change === undefined) return null;
+            return (
+              <section key={id} className="against__readingone">
+                <h3 className="against__readingname">
+                  {columns.find((one) => one.id === id)?.name ?? id}
+                </h3>
+                <DiffView files={[change]} busy={busy} />
+              </section>
+            );
+          })}
+        </div>
+      )}
     </li>
   );
 }
 
-export default function Against({ open, sides, onClose, onKeep, onOpenInBrowser, busy = false }: Props) {
+export default function Against({
+  open,
+  sides,
+  onClose,
+  onKeep,
+  onOpenInBrowser,
+  busy = false,
+}: Props) {
   const [opening, setOpening] = useState(false);
   const [pressed, setPressed] = useState<string | null>(null);
-  const { files, sameEverywhere } = useMemo(() => compare(sides), [sides]);
+  const [showing, setShowing] = useState<string | null>(null);
 
-  const deciding = useMemo(() => {
-    const same = new Set(sameEverywhere);
-    return files.filter((file) => !same.has(file.path));
-  }, [files, sameEverywhere]);
+  /* Every go against one starting point. The base is the same for all of them
+     and is carried on each, so the set needs no envelope of its own. */
+  const base = useMemo(
+    () => sides.map((one) => one.base ?? '').find((one) => one !== '') ?? '',
+    [sides],
+  );
+  const attempts = useMemo<readonly Attempt[]>(
+    () =>
+      sides.map((one) => ({
+        id: one.id,
+        name: one.name,
+        state: one.state,
+        diff: one.diff,
+        picture: one.picture ?? null,
+        spent: one.spent ?? null,
+      })),
+    [sides],
+  );
+  const comparison: Comparison = useMemo(() => compare(attempts, base), [attempts, base]);
+
+  const deciding = useMemo(
+    () => comparison.files.filter((file) => file.differs),
+    [comparison],
+  );
+
+  const changes = useMemo(() => {
+    const found = new Map<string, ByPath>();
+    for (const one of attempts) {
+      const byPath = new Map<string, FileChange>();
+      for (const file of parseDiff(one.diff)) if (file.path !== '') byPath.set(file.path, file);
+      found.set(one.id, byPath);
+    }
+    return found;
+  }, [attempts]);
+
+  const bySide = useMemo(() => new Map(sides.map((one) => [one.id, one])), [sides]);
 
   useEffect(() => {
     if (!busy) setPressed(null);
@@ -139,18 +212,19 @@ export default function Against({ open, sides, onClose, onKeep, onOpenInBrowser,
   if (!open) return null;
 
   return (
-    <section className="sheet against" aria-label={SAYS.heading}>
+    <section className="sheet against" aria-label={compareWords.heading}>
       <header className="sheet__top">
         <div className="sheet__titles">
-          <h1 className="sheet__title">{SAYS.heading}</h1>
-          <p className="against__summary">
-            {saysSummary(sides, deciding.length, sameEverywhere.length)}
-          </p>
+          <h1 className="sheet__title">{compareWords.heading}</h1>
+          <p className="against__summary">{saysComparison(attempts, comparison)}</p>
+          {base === '' ? null : (
+            <p className="against__base">{compareWords.against(base)}</p>
+          )}
         </div>
         <div className="sheet__chips">
           {/* A patch says what changed; a running copy says what it looks like.
               Only offered where a copy is still there to serve. */}
-          {onOpenInBrowser === undefined || !sides.some((one) => one.folder !== null) ? null : (
+          {onOpenInBrowser === undefined || !sides.some((one) => one.folder != null) ? null : (
             <button
               type="button"
               className="against__browser"
@@ -173,40 +247,41 @@ export default function Against({ open, sides, onClose, onKeep, onOpenInBrowser,
       <div className="sheet__body scroll--auto">
         <div
           className="against__inner"
-          style={{ '--against-columns': sides.length } as CSSProperties}
+          style={{ '--against-columns': comparison.attempts.length } as CSSProperties}
         >
           <ul className="against__heads">
             {/* The column the file names run down. Empty here, the way the
                 corner of any comparison is. */}
             <li className="against__lead" aria-hidden="true" />
-            {sides.map((side) => {
-              const total = totalOf(files, side.id);
-              const final = isFinal(side);
-              const notYet = boardWords.notYet(side.state);
+            {comparison.attempts.map((column) => {
+              const side = bySide.get(column.id);
+              const state = side?.state ?? 'waiting';
+              // What taking this one means, worked out by the same function
+              // that does the taking, so the sentence and the press agree.
+              const taking = pickOne(comparison, column.id);
               return (
-                <li key={side.id} className={`against__side${final ? '' : ' against__side--going'}`}>
-                  <h2 className="against__name">{side.name}</h2>
+                <li
+                  key={column.id}
+                  className={`against__side${column.final ? '' : ' against__side--going'}`}
+                >
+                  <h2 className="against__name">{column.name}</h2>
                   {/* On every column, not only the ones still moving: a line
                       that appears on some of them is a line to be found. */}
-                  <p className={`against__state against__state--${side.state}`}>
-                    {saysState(side.state)}
-                  </p>
+                  <p className={`against__state against__state--${state}`}>{saysState(state)}</p>
                   <div className="against__frame">
-                    {side.picture === null || side.picture === undefined ? (
+                    {side?.picture == null ? (
                       <p className="against__instead">{SAYS.noPicture}</p>
                     ) : (
                       <img
                         className="against__picture"
                         src={side.picture}
-                        alt={SAYS.picture(side.name)}
+                        alt={SAYS.picture(column.name)}
                       />
                     )}
                   </div>
                   <p className="against__total">
-                    {final
-                      ? SAYS.total(total.touched, total.added, total.removed)
-                      : SAYS.soFar(total.touched, total.added, total.removed)}
-                    {side.spent === null || side.spent === undefined ? null : (
+                    {column.line}
+                    {side?.spent == null ? null : (
                       <span className="against__spent">{side.spent}</span>
                     )}
                   </p>
@@ -214,27 +289,28 @@ export default function Against({ open, sides, onClose, onKeep, onOpenInBrowser,
                       work is over and has nothing to hand over. Said where the
                       offer would have been, rather than as a press that fails
                       afterwards. */}
-                  {canTake(side) ? (
+                  {column.canTake && taking !== null ? (
                     <button
                       type="button"
                       className="against__keep"
                       disabled={busy}
+                      title={taking.says}
                       onClick={() => {
-                        setPressed(side.id);
-                        onKeep(side.id);
+                        setPressed(taking.land);
+                        onKeep(taking.land);
                       }}
                     >
-                      {busy && pressed === side.id ? SAYS.keeping : SAYS.keep}
+                      {busy && pressed === column.id ? SAYS.keeping : compareWords.keep}
                     </button>
                   ) : (
-                    <p className="against__notyet">{notYet}</p>
+                    <p className="against__notyet">{boardWords.notYet(state)}</p>
                   )}
                 </li>
               );
             })}
           </ul>
 
-          {files.length === 0 ? (
+          {comparison.files.length === 0 ? (
             <p className="against__nothing">{saysNothingHere(sides)}</p>
           ) : (
             <>
@@ -242,7 +318,15 @@ export default function Against({ open, sides, onClose, onKeep, onOpenInBrowser,
               {deciding.length === 0 ? null : (
                 <ul className="against__files">
                   {deciding.map((file) => (
-                    <Row key={file.path} file={file} sides={sides} />
+                    <Row
+                      key={file.path}
+                      file={file}
+                      columns={comparison.attempts}
+                      changes={changes}
+                      busy={busy}
+                      showing={showing === file.path}
+                      onShow={() => setShowing((was) => (was === file.path ? null : file.path))}
+                    />
                   ))}
                 </ul>
               )}
@@ -250,10 +334,10 @@ export default function Against({ open, sides, onClose, onKeep, onOpenInBrowser,
           )}
 
           {/* The part nobody has to decide about, said once. */}
-          {sameEverywhere.length === 0 ? null : (
+          {comparison.sameInAll.length === 0 ? null : (
             <p className="against__same">
-              {SAYS.same(sameEverywhere.length)}{' '}
-              <span className="against__samepaths">{sameEverywhere.join(', ')}</span>
+              {SAYS.same(comparison.sameInAll.length)}{' '}
+              <span className="against__samepaths">{comparison.sameInAll.join(', ')}</span>
             </p>
           )}
         </div>

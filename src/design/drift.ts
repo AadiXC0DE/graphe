@@ -503,7 +503,7 @@ export function saysAll(findings: readonly Finding[]): string {
  */
 export function saysUseYours(finding: Finding, file: string): string {
   const where = file === '' ? `line ${String(finding.line)}` : `${file}, line ${String(finding.line)}`;
-  return `In ${where} the value ${finding.wrote} is written by hand. Put ${finding.use} there instead — it is this project's own ${finding.mine.name} (${finding.mine.value}). Change only that one value, and leave every other ${finding.wrote} in the project alone.`;
+  return `In ${where} the value ${finding.wrote} is written by hand. Put ${finding.use} there instead; it is this project's own ${finding.mine.name} (${finding.mine.value}). Change only that one value, and leave every other ${finding.wrote} in the project alone.`;
 }
 
 /* -------------------------------------------------------------------------- */

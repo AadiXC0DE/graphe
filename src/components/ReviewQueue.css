@@ -1,0 +1,609 @@
+/* Finished work waiting to be looked at: a list of what is waiting on the left,
+   and the one being read on the right — its files with a decision on each, then
+   the change itself.
+
+   The same two-part room the pull requests screen uses, so the hand already
+   knows it. What is different is the band: this screen decides things, so Land
+   sits at the top of the reading where the eye lands, and the precise way it
+   arrives folds out from beside it rather than living somewhere else. */
+
+.reviewq__count {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.reviewq__body {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-3);
+  overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .reviewq__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ------------------------------------------------------------- what is waiting */
+
+.reviewq__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+}
+
+.reviewq__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+  transition:
+    background var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.reviewq__row--open {
+  background: var(--bg-raised);
+  border-color: var(--border);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reviewq__row:hover {
+    background: var(--bg-raised);
+  }
+}
+
+.reviewq__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Unread is one dot, not a colour over the whole row: the row is a title
+   somebody is reading, and a highlighted list is a list with no highlight. */
+.reviewq__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.reviewq__dot--new {
+  background: var(--accent);
+}
+
+.reviewq__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reviewq__rowtitle {
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.reviewq__rowsub {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------- the one open */
+
+.reviewq__work {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.reviewq__band {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.reviewq__about {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.reviewq__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.reviewq__sub {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.reviewq__mirror {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.reviewq__mirrorname {
+  white-space: nowrap;
+}
+
+.reviewq__mirrorwhy {
+  margin: calc(var(--space-2) * -1) 0 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  max-width: 62ch;
+}
+
+/* ------------------------------------------------------------- the decisions */
+
+.reviewq__does {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.reviewq__spacer {
+  flex: 1 1 auto;
+}
+
+.reviewq__land {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.reviewq__do {
+  min-height: 28px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--accent);
+  border-right: none;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-xs);
+  transition: transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.reviewq__do:active {
+  transform: scale(0.98);
+}
+
+.reviewq__more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.reviewq__do:disabled,
+.reviewq__more:disabled,
+.reviewq__second:disabled,
+.reviewq__pickone:disabled {
+  opacity: 0.5;
+}
+
+.reviewq__second {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.reviewq__second--away {
+  color: var(--danger);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reviewq__second:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+.reviewq__do:focus-visible,
+.reviewq__more:focus-visible,
+.reviewq__second:focus-visible,
+.reviewq__way:focus-visible,
+.reviewq__pickone:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------ how it arrives */
+
+.reviewq__precise {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.reviewq__prefix {
+  margin: 0;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.reviewq__ways {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.reviewq__way {
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.reviewq__way--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.reviewq__way:disabled {
+  opacity: 0.45;
+}
+
+.reviewq__messagelabel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.reviewq__message {
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.reviewq__message:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.reviewq__note {
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  max-width: 70ch;
+}
+
+/* ------------------------------------------------------------ file by file */
+
+.reviewq__files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.reviewq__filelist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reviewq__file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.reviewq__file:nth-child(odd) {
+  background: var(--bg-sunken);
+}
+
+.reviewq__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.reviewq__tally {
+  flex: none;
+  display: inline-flex;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.reviewq__added {
+  color: var(--accent-ink);
+}
+
+.reviewq__removed {
+  color: var(--text-muted);
+}
+
+.reviewq__pick {
+  flex: none;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-raised);
+}
+
+.reviewq__pickone {
+  min-height: 22px;
+  padding: 0 var(--space-2);
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.reviewq__pickone:first-child {
+  border-left: none;
+}
+
+.reviewq__pickone--on {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* ----------------------------------------------------------------- the diff */
+
+.reviewq__diff {
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+.reviewq__waiting {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------- nothing yet */
+
+.reviewq__blank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+}
+
+.reviewq__blanktitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+
+.reviewq__blankdetail {
+  margin: 0;
+  max-width: 46ch;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reviewq__do:active {
+    transform: none;
+  }
+}
+
+/* --------------------------------------------- the row above the composer */
+
+/* One quiet row, in the band where the running servers and the queued line
+   already sit. It is an offer, not an alert: a dot, a count and the way in. */
+.reviewband {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: stretch;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: var(--text-xs);
+  text-align: left;
+  transition: border-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reviewband:hover {
+    border-color: var(--border-strong);
+  }
+}
+
+.reviewband:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.reviewband__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.reviewband__say {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewband__go {
+  flex: none;
+  color: var(--accent-ink);
+}
+
+/* One decision, then one press named by it. Seven verbs in a row, two of them
+   meaning nearly the same thing, is a row nobody reads twice. */
+.reviewq__verdicts {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.reviewq__verdict {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.reviewq__verdict--on {
+  color: var(--text);
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.reviewq__verdict:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* The once-a-project choice, out of the way of the once-an-entry one. */
+.reviewq__menuat {
+  position: relative;
+  flex: none;
+}
+
+.reviewq__menubtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--text-faint);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.reviewq__menubtn:hover {
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+.reviewq__menu {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 20;
+  width: 18rem;
+  padding: var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.reviewq__mirror {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.reviewq__mirrortext {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reviewq__mirrorname {
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+.reviewq__mirrorwhy {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}

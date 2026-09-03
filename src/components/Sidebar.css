@@ -42,7 +42,6 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 34px;
   padding: 0 var(--space-1);
 }
 
@@ -194,10 +193,31 @@
   }
 }
 
-/* The one persistent control on the folded shelf: it stays at the lower edge,
+/* The one persistent control in either state: it stays at the lower edge,
    separate from the places somebody moves between. */
-.shelf__act--settings {
+.shelf__act--last {
   margin-top: auto;
+}
+
+.shelf__more--last {
+  margin-top: var(--space-2);
+}
+
+/* How much is waiting behind a mark with no room for a number beside it. */
+.shelf__actcount {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-radius: 7px;
+  font-variant-numeric: tabular-nums;
 }
 
 .shelf__mark {
@@ -205,34 +225,35 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-md);
-  background: var(--accent-soft);
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
   transition:
     background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
+/* The hit area stops at the button's own top edge. Five pixels of it used to
+   reach up into the band the window is dragged by, and a drag region takes the
+   press rather than passing it on, so the top of the button did nothing. */
 .shelf__mark::after {
   content: '';
   position: absolute;
   left: -3px;
   right: -3px;
-  top: 50%;
-  height: 44px;
-  transform: translateY(-50%);
+  top: 0;
+  bottom: -10px;
+}
+
+.shelf__mark {
+  -webkit-app-region: no-drag;
 }
 
 .shelf__mark:active {
   transform: scale(0.97);
-}
-
-.shelf__markdot {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--accent);
 }
 
 /* The picker inside the shelf keeps the roomy rhythm of its standalone form;
@@ -476,13 +497,48 @@
   }
 }
 
-/* Room at the top of the list for the traffic lights that sit over it. In full
-   screen macOS takes them away and the room goes back to the projects. */
+/* The caption rides the traffic lights' own line rather than sitting in a band
+   of nothing under them. In full screen macOS takes the lights away and the
+   room goes back to the projects. */
 [data-shell='desktop'] .shelf {
-  padding-top: var(--space-6);
+  padding-top: var(--space-3);
+}
+
+[data-shell='desktop'] .shelf__top {
+  min-height: 28px;
+  padding-left: 66px;
 }
 
 [data-full='yes'] .shelf {
+  padding-top: var(--space-2);
+}
+
+[data-full='yes'] .shelf__top {
+  min-height: 30px;
+  padding-left: var(--space-1);
+}
+
+/* Collapsed the strip is 54px wide and the window's own buttons span 18 to 70,
+   so nothing of ours can share that line. The band is theirs; it is given the
+   least room that clears them, no rule under it — a line across an empty strip
+   draws the eye to the emptiness — and it is the window's drag handle, which is
+   what that corner is for on a mac anyway. */
+[data-shell='desktop'] .shelf--closed {
+  padding-top: 34px;
+}
+
+[data-shell='desktop'] .shelf--closed::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 34px;
+  -webkit-app-region: drag;
+}
+
+/* In full screen the buttons go away and the strip starts at the top. */
+[data-full='yes'] .shelf--closed {
   padding-top: var(--space-2);
 }
 
@@ -493,7 +549,8 @@
   }
 
   .shelf__mark:hover {
-    background: var(--accent-soft);
+    color: var(--text);
+    background: var(--bg-sunken);
   }
 
   .shelf__act:hover {
@@ -712,4 +769,50 @@
   font-size: var(--text-2xs);
   font-weight: 500;
   color: var(--text-faint);
+}
+
+/* A newer build, above the foot's own rows. Quiet: being on last week's build
+   is not an error, and a card for it would read as one. */
+.shelf__newer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.shelf__newername {
+  color: var(--text-muted);
+}
+
+.shelf__newerlink {
+  padding: 0;
+  color: var(--text-faint);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.shelf__newerlink:hover {
+  color: var(--text);
+}
+
+/* How much is waiting behind a row. A number rather than a dot: the row is one
+   of several, and "some" would not tell anybody whether to press it now. */
+.shelf__count {
+  margin-left: auto;
+  padding: 0 var(--space-1);
+  min-width: 1.25rem;
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+  text-align: center;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
 }

@@ -68,4 +68,4 @@ export const HELPER_WAITS_MS: readonly number[] = [15_000, 45_000, 90_000];
  *  request again: everything finished so far is still in the conversation, and
  *  asking for the whole thing twice is how a list gets done twice. */
 export const CARRY_ON =
-  'That stopped part way through, and this is the same piece of work carrying on. Pick up exactly where you left off. Do not start again and do not repeat anything already finished — work through whatever is still left on the list.';
+  'That stopped part way through, and this is the same piece of work carrying on. Pick up exactly where you left off. Do not start again and do not repeat anything already finished. Work through whatever is still left on the list.';

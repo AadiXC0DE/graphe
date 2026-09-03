@@ -71,35 +71,40 @@ export function useGoalChip(options: {
   desksNow: { current: Desks };
   /** The folder in front, which is what a goal is loaded for. */
   project: string | null;
+  /** The conversation in front. A goal belongs to one of them, so switching
+   *  tabs shows that tab's goal rather than the folder's last one. */
+  address?: string | null;
   say: (text: string) => void;
   setPlans: Dispatch<SetStateAction<Plans>>;
 }): GoalChip {
-  const { desksNow, project, say, setPlans } = options;
+  const { desksNow, project, address = null, say, setPlans } = options;
   const [goal, setGoal] = useState<Goal | null>(null);
   const goalNow = useRef(goal);
   goalNow.current = goal;
-  /* Which project the goal in hand belongs to. The goal itself is one value for
-     the window, so without this a run landing for another folder is verified
-     against — and continued toward — a goal that is not its own. */
-  const goalProject = useRef<string | null>(null);
+  /** Which conversation a folder is showing. A goal belongs to one, so every
+   *  route that writes one has to name it or write into another tab's file. */
+  const addressIn = useCallback(
+    (forProject: string): string | undefined => desksNow.current.byPath[forProject]?.address ?? undefined,
+    [desksNow],
+  );
 
   const persist = useCallback((next: Goal | null, forProject: string | null) => {
     if (forProject === null || forProject === '') {
       return;
     }
     // Every route that sets a goal comes through here with the folder it is
-    // for, so this is the one place the two can never drift apart.
-    goalProject.current = next === null ? null : forProject;
+    // for, so this is the one place the folder, the tab and the file agree.
+    const conversation = addressIn(forProject);
     if (next === null) {
-      void bridge.goalClear({ project: forProject }).catch(() => undefined);
+      void bridge.goalClear({ project: forProject, conversation }).catch(() => undefined);
       // Absent is the goal state we wanted; a missing key is not an error.
-      try { localStorage.removeItem(goalStorageKey(forProject)); } catch { /* already gone */ }
+      try { localStorage.removeItem(goalStorageKey(forProject, conversation ?? '')); } catch { /* already gone */ }
     } else {
-      void bridge.goalSave(next, { project: forProject }).catch(() => undefined);
+      void bridge.goalSave(next, { project: forProject, conversation }).catch(() => undefined);
       // Fallback only; disk via the shell is the store that matters.
-      try { localStorage.setItem(goalStorageKey(forProject), JSON.stringify(next)); } catch { /* quota or private mode */ }
+      try { localStorage.setItem(goalStorageKey(forProject, conversation ?? ''), JSON.stringify(next)); } catch { /* quota or private mode */ }
     }
-  }, []);
+  }, [addressIn]);
 
   const hold = useCallback(
     (next: Goal | null, forProject: string | null) => {
@@ -122,28 +127,29 @@ export function useGoalChip(options: {
   // goal leaks across projects on the switch.
   useEffect(() => {
     if (project === null) return;
-    void bridge.goalLoad({ project }).then((answer) => {
+    const conversation = addressIn(project);
+    void bridge.goalLoad({ project, conversation }).then((answer) => {
       let loaded: Goal | null = null;
       if (answer.ok && answer.value !== null) {
         loaded = readStoredGoal(answer.value);
       }
       if (loaded === null) {
         try {
-          const raw = localStorage.getItem(goalStorageKey(project));
+          const raw = localStorage.getItem(goalStorageKey(project, conversation ?? ''));
           if (raw !== null) loaded = readStoredGoal(JSON.parse(raw) as unknown);
         } catch { /* unreadable fallback: disk store is the truth */ }
       }
       // The folder may have been switched while this was in the air, and the
       // answer is only ever about the folder that was asked about.
       if (desksNow.current.current !== project) return;
-      // Null for a project with no goal — never keep the last project's.
+      if (addressIn(project) !== conversation) return;
+      // Null for a conversation with no goal, never the last one's.
       setGoal(loaded === null ? null : withElapsed(loaded));
-      goalProject.current = loaded === null ? null : project;
       // Coming back to a goal that was still going: the chip has to say so.
       // Which conversation carries it on is the shell's, not the window's.
       if (loaded !== null && loaded.status === 'active') setPlans('goal');
     });
-  }, [project, desksNow, setPlans]);
+  }, [project, address, addressIn, desksNow, setPlans]);
 
   const answer = useCallback(
     (text: string): GoalAnswer | null => {
@@ -156,14 +162,14 @@ export function useGoalChip(options: {
         say(
           showing === null
             ? 'No goal set. Use /goal <one sentence> to set one.'
-            : `Goal: ${showing.objective} — ${showing.status}, ${String(showing.iterations)} iterations, ${elapsedWords(goalElapsed(showing))} elapsed.`,
+            : `Goal: ${showing.objective} · ${showing.status}, ${String(showing.iterations)} iterations, ${elapsedWords(goalElapsed(showing))} elapsed.`,
         );
         return nothingToSend;
       }
       if (parsed.kind === 'set' || parsed.kind === 'replace') {
         const objective = parsed.objective.trim() === '' ? text.slice(5).trim() : parsed.objective;
         if (objective === '') {
-          say('Say what done looks like after /goal — one sentence, checkable.');
+          say('Say what done looks like after /goal: one sentence, checkable.');
           return nothingToSend;
         }
         const withTime = withElapsed(createGoal(objective, 'doing'));
@@ -178,7 +184,7 @@ export function useGoalChip(options: {
           const paused: Goal = { ...withElapsed(going), status: 'paused' };
           setGoal(paused);
           persist(paused, ownerDesk?.path ?? null);
-          say('Goal paused — rounds kept, files kept. /goal resume to carry on.');
+          say('Goal paused: rounds kept, files kept. /goal resume to carry on.');
         } else {
           say('No active goal to pause.');
         }
@@ -214,7 +220,7 @@ export function useGoalChip(options: {
           setGoal(null);
           persist(null, ownerDesk?.path ?? null);
           setPlans('auto');
-          say(`Goal cleared — was: ${going.objective}`);
+          say(`Goal cleared, was: ${going.objective}`);
         } else {
           say('No goal to clear.');
         }

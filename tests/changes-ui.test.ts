@@ -12,7 +12,12 @@
  * become "rewrite", and the person who pressed it approved something else.
  */
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
+
+import { CONTEXT, WIDER_STEP, widerThan, withWider } from '../src/diff/collapse';
 
 import {
   SAYS,
@@ -327,5 +332,92 @@ describe('CH-06 what the screen says', () => {
     for (const jargon of ['hunk', 'diff', 'patch', 'staged', 'commit', 'binary', 'blob', 'git']) {
       expect(said).not.toContain(jargon);
     }
+  });
+});
+
+/* ========================================================================== */
+/* CH-07 more of the file than git sent                                        */
+/* ========================================================================== */
+
+/** Reading a file again with a wider window round the change.
+ *
+ * The fold between two pieces offers "Show 40 more lines", and the lines it is
+ * offering are lines git never handed over. Nothing in the window can work them
+ * out, so the press has to reach the disk. This is that road, end to end: a
+ * ceiling in the reader, a channel, a prop, and the merge that puts the wider
+ * read back where the narrow one was. */
+const TWO_FILES = `diff --git a/one.ts b/one.ts
+--- a/one.ts
++++ b/one.ts
+@@ -1,3 +1,3 @@
+ const a = 1;
+-const b = 2;
++const b = 3;
+ const c = 4;
+diff --git a/two.ts b/two.ts
+--- a/two.ts
++++ b/two.ts
+@@ -1,2 +1,2 @@
+-let x = 0;
++let x = 1;
+ let y = 2;
+`;
+
+describe('CH-07 asking for more of the file', () => {
+  const changesTsx = readFileSync(
+    fileURLToPath(new URL('../src/components/Changes.tsx', import.meta.url)),
+    'utf8',
+  );
+  const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8');
+  const ipc = readFileSync(fileURLToPath(new URL('../src/lib/ipc.ts', import.meta.url)), 'utf8');
+  const preload = readFileSync(
+    fileURLToPath(new URL('../electron/preload.ts', import.meta.url)),
+    'utf8',
+  );
+  const main = readFileSync(fileURLToPath(new URL('../electron/main.ts', import.meta.url)), 'utf8');
+  const bridge = readFileSync(
+    fileURLToPath(new URL('../src/lib/bridge.ts', import.meta.url)),
+    'utf8',
+  );
+
+  it('is one road with all five planks', () => {
+    expect(ipc).toContain("changesWider: 'graphe:changes-wider'");
+    expect(preload).toContain('ipcRenderer.invoke(CHANNEL.changesWider');
+    expect(main).toContain('handle<string>(CHANNEL.changesWider');
+    expect(bridge).toContain('changesWider: (file, context, where) =>');
+    expect(app).toContain('bridge.changesWider(');
+  });
+
+  it('asks git for the one file, and only for the one file', () => {
+    expect(main).toContain('diffWider(file, context)');
+    const repo = readFileSync(
+      fileURLToPath(new URL('../src/history/repo.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(repo).toContain("`-U${String(lines)}`");
+    expect(repo).toContain("'--',\n      file,");
+  });
+
+  /* Widening the same file twice must open it further, not read it again at
+     the same width. */
+  it('asks for a wider window each time', () => {
+    expect(widerThan(undefined)).toBe(CONTEXT + WIDER_STEP);
+    expect(widerThan(widerThan(undefined))).toBe(CONTEXT + WIDER_STEP * 2);
+  });
+
+  it('puts the wider read where the narrow one was, and leaves the rest alone', () => {
+    const files = parseDiff(TWO_FILES);
+    const wider = parseDiff(TWO_FILES).filter((one) => one.path === 'one.ts');
+    const after = withWider(files, { 'one.ts': wider });
+    expect(after.map((one) => one.path)).toEqual(files.map((one) => one.path));
+  });
+
+  it('leaves every file alone when nothing has been widened', () => {
+    const files = parseDiff(TWO_FILES);
+    expect(withWider(files, {})).toEqual(files);
+  });
+
+  it('offers nothing to press where the screen was given no way to ask', () => {
+    expect(changesTsx).toContain('onWider === undefined ? {} : { onExpand: readWider }');
   });
 });

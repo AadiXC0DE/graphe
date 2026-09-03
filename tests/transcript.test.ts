@@ -80,7 +80,7 @@ describe('the steps it took', () => {
 
   it('includes them when they are asked for', () => {
     const said = asMarkdown([you('Tighten it'), step('Read', 'src/App.css')], { steps: true });
-    expect(said).toContain('- Read — src/App.css');
+    expect(said).toContain('- Read: src/App.css');
   });
 
   it('says nothing for a step with no detail beyond its label', () => {

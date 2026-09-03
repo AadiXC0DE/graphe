@@ -111,7 +111,7 @@ describe('the shared auto-hide scrollbar', () => {
     const widths = shared.match(/scrollbar-width:[^;]+/g) ?? [];
     expect(widths).toEqual(['scrollbar-width: thin']);
     // …and at no specificity, so a scroller wanting none of it still wins.
-    expect(shared).toMatch(/:where\(\.scroll--auto\)\s*\{\s*scrollbar-width: thin/);
+    expect(shared).toMatch(/:where\(\.scroll--auto, \.sheet__body\)\s*\{\s*scrollbar-width: thin/);
   });
 
   it('fades the thumb instead', () => {

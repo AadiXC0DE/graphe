@@ -33,6 +33,9 @@ type Props = {
   onClose: (id: string) => void;
   /** Start another conversation in the project in front. */
   onNew: () => void;
+  /** Put a tab somewhere else in the row. Left out where the row cannot be
+   *  rearranged, and then nothing in it is draggable. */
+  onReorder?: (id: string, to: number) => void;
 };
 
 export const SAYS = {
@@ -58,8 +61,12 @@ export const SAYS = {
  * working and having the tab tell you when it needs you is the whole reason
  * tabs exist here, and it is what a side panel of background agents gets wrong.
  */
-export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
+export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Props) {
   const [listing, setListing] = useState(false);
+  /** The tab under the hand, and where it would land. Held here rather than on
+   *  the event, because a drop needs both and only one of them is in it. */
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<number | null>(null);
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -106,10 +113,42 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew }: Props) {
   return (
     <div className="tabs" ref={root} style={{ width: `${String(compactWidth)}px` }}>
       <div className="tabs__strip" role="tablist" aria-label={SAYS.label}>
-        {shown.map((tab) => (
+        {shown.map((tab, index) => (
           <div
             key={tab.id}
-            className={`tabs__tab ${tab.id === at ? 'tabs__tab--here' : ''}`}
+            className={[
+              'tabs__tab',
+              tab.id === at ? 'tabs__tab--here' : '',
+              dragging === tab.id ? 'tabs__tab--lifted' : '',
+              over === index && dragging !== null && dragging !== tab.id ? 'tabs__tab--landing' : '',
+            ]
+              .filter((one) => one !== '')
+              .join(' ')}
+            draggable={onReorder !== undefined}
+            onDragStart={(event) => {
+              if (onReorder === undefined) return;
+              setDragging(tab.id);
+              event.dataTransfer.effectAllowed = 'move';
+              // Some browsers refuse a drag with nothing on it.
+              event.dataTransfer.setData('text/plain', tab.id);
+            }}
+            onDragOver={(event) => {
+              if (onReorder === undefined || dragging === null) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+              setOver(index);
+            }}
+            onDrop={(event) => {
+              if (onReorder === undefined || dragging === null) return;
+              event.preventDefault();
+              onReorder(dragging, index);
+              setDragging(null);
+              setOver(null);
+            }}
+            onDragEnd={() => {
+              setDragging(null);
+              setOver(null);
+            }}
           >
             <button
               type="button"

@@ -117,7 +117,7 @@ export default function HistoryView({
 
   const width = graph.lanes * LANE;
   const height = graph.rows.length * ROW;
-  const changed = git === null ? 0 : git.unstaged + git.staged + git.untracked;
+  const changed = git === null ? 0 : git.changedPaths;
 
   return (
     <section className="sheet" aria-label={SAYS.heading}>

@@ -37,6 +37,12 @@ export type State = {
   ticksAtLastRound: number;
   /** Consecutive rounds that ticked nothing off and moved no goal. */
   stuckRounds: number;
+  /** Times a run that ended in an error has been picked up again since the
+   *  person last typed. Its own count, because a round that ticked nothing off
+   *  is not an attempt to recover from anything: sharing `stuckRounds` meant one
+   *  stalled round spent the one retry a failure is allowed, and the run came to
+   *  rest saying it had already tried again when it never had. */
+  recoveryAttempts: number;
   /** The person pressed Escape. */
   stopped: boolean;
   /** A question card, plan card, guard confirmation or helper decision is open. */
@@ -96,7 +102,7 @@ export const continuationWords = {
     const said = named(objective);
     return [
       said === null ? 'Carry on toward the goal.' : `Carry on toward this goal: ${said}.`,
-      `It is not met yet — ${reason}`,
+      `It is not met yet: ${reason}`,
       'Work the next thing that moves it toward done. Do not stop to report progress while it is still unmet.',
     ].join(' ');
   },
@@ -123,7 +129,14 @@ export const continuationWords = {
 } as const;
 
 export function freshContinuation(): State {
-  return { rounds: 0, ticksAtLastRound: -1, stuckRounds: 0, stopped: false, waitingOnPerson: false };
+  return {
+    rounds: 0,
+    ticksAtLastRound: -1,
+    stuckRounds: 0,
+    recoveryAttempts: 0,
+    stopped: false,
+    waitingOnPerson: false,
+  };
 }
 
 /** The person typed something, so the budget starts again and whatever they
@@ -134,6 +147,7 @@ export function personSpoke(state: State): State {
     rounds: 0,
     ticksAtLastRound: -1,
     stuckRounds: 0,
+    recoveryAttempts: 0,
     stopped: false,
     waitingOnPerson: false,
   };
@@ -146,7 +160,7 @@ function sending(
   why: Why,
   text: string,
   said: string,
-  next: { stuckRounds: number; ticksAtLastRound: number },
+  next: { stuckRounds: number; ticksAtLastRound: number; recoveryAttempts?: number },
 ): Move {
   const rounds = state.rounds + 1;
   if (rounds > MOST_ROUNDS) {
@@ -161,6 +175,16 @@ function sending(
 
 function halt(state: State, said: string, stuckRounds = state.stuckRounds): Move {
   return { kind: 'stop', said, state: { ...state, stuckRounds, stopped: true } };
+}
+
+/**
+ * An add-on's turn has already begun by the time anything hears about it, so
+ * its round is checked as it arrives rather than on the settle. Null while
+ * there is budget left, and then the ordinary path counts it.
+ */
+export function extensionOverBudget(state: State): { said: string; state: State } | null {
+  if (state.stopped || state.rounds < MOST_ROUNDS) return null;
+  return { said: continuationWords.spent(state.rounds), state: { ...state, stopped: true } };
 }
 
 /**
@@ -243,12 +267,14 @@ export function decide(state: State, facts: Facts): Move {
   }
 
   if (facts.endedHow === 'failed') {
-    // Never twice in a row: the second identical retry is a loop, not a fix.
-    if (state.stuckRounds !== 0)
+    // Never twice: the second identical retry is a loop, not a fix. Counted on
+    // its own, so a round that happened to tick nothing off does not spend it.
+    if (state.recoveryAttempts > 0)
       return { kind: 'rest', said: continuationWords.recoveryTwice, state };
     return sending(state, 'recovery', continuationWords.recoveryPrompt, continuationWords.recovery(state.rounds + 1), {
-      stuckRounds: 1,
+      stuckRounds: state.stuckRounds,
       ticksAtLastRound: state.ticksAtLastRound,
+      recoveryAttempts: state.recoveryAttempts + 1,
     });
   }
 

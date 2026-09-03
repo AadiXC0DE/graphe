@@ -2,6 +2,7 @@ import { chmod, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 import { writeAtomically } from '../lib/atomic';
+import { landingWords } from '../work/reviewqueue';
 import { seededIn } from './seeding';
 
 /** One conversation, its own checkout.
@@ -168,15 +169,10 @@ async function branchAt(run: RunGit, folder: string): Promise<string | null> {
  *  who wants the conversation's own saves in their history. */
 export type Landing = { how: 'squash' | 'every-version'; message?: string };
 
-export const landingWords = {
-  squash: 'One commit, your message',
-  every: 'Keep every version',
-  note: 'One commit runs your pre-commit hooks and is signed the way your other commits are. Keeping every version brings the conversation’s automatic saves across as they were made — unsigned, and past your hooks.',
-  /** When nobody typed one. Reads as a commit subject, because it is one. */
-  message: (branch: string): string => `Work from ${branch.replace(/^graphe\//, '')}`,
-  failed:
-    'Your work is here, but the commit did not go through — a pre-commit hook turned it down, or the signing did. The changes are staged, so you can commit them yourself.',
-} as const;
+/* Both ways of landing are named in the queue's own vocabulary, which the
+   review screen can reach and this file cannot be reached from. Re-exported
+   here because landing is where the words are used. */
+export { landingWords } from '../work/reviewqueue';
 
 /**
  * Bring a conversation's checkout into the main checkout, then throw the
@@ -459,13 +455,28 @@ export async function sweepCheckouts(
   run: RunGit,
   repo: string,
   found: readonly string[],
-  options: { inUse?: (folder: string) => boolean; rescue?: Rescue } = {},
+  options: {
+    inUse?: (folder: string) => boolean;
+    rescue?: Rescue;
+    /** A second pass: a copy whose branch is already in the base line, and
+     *  which nothing has touched in this long, is released even when it is
+     *  carrying an install. Never one that holds work. */
+    settledAfter?: { days: number; base: string; touched: (folder: string) => Promise<number | null> };
+  } = {},
 ): Promise<readonly string[]> {
   const inUse = options.inUse ?? (() => false);
   const given: string[] = [];
+  const merged = options.settledAfter === undefined
+    ? new Set<string>()
+    : await branchesIn(run, repo, options.settledAfter.base);
   for (const folder of found) {
     if (inUse(folder)) continue;
     if (await holdsWork(run, folder)) continue;
+    if (await settledLongAgo(run, folder, merged, options.settledAfter)) {
+      const released = await releaseWorktree(run, repo, folder);
+      if (released.ok) given.push(folder);
+      continue;
+    }
     if (!(await carryOutWriting(run, folder, options.rescue))) continue;
     const released = await releaseWorktree(run, repo, folder);
     if (released.ok) given.push(folder);
@@ -474,6 +485,39 @@ export async function sweepCheckouts(
   // above leaves those notes pointing at nothing.
   if (given.length > 0) await run(['worktree', 'prune'], { cwd: repo });
   return given;
+}
+
+/** Every branch already in the base line. A copy whose work is in there has
+ *  nothing left to carry out of it. */
+async function branchesIn(run: RunGit, repo: string, base: string): Promise<ReadonlySet<string>> {
+  const { code, out } = await run(['branch', '--merged', base, '--format=%(refname:short)'], {
+    cwd: repo,
+  });
+  if (code !== 0 || out === undefined) return new Set();
+  return new Set(out.split('\n').map((one) => one.trim()).filter((one) => one !== ''));
+}
+
+/**
+ * Whether a copy is finished with and cold.
+ *
+ * Both, never one: a branch that landed a minute ago may still be open in front
+ * of somebody, and a folder nobody has touched in a fortnight may be the only
+ * copy of work that never landed. What it costs is `node_modules`, which is why
+ * these are the ones worth releasing at all.
+ */
+async function settledLongAgo(
+  run: RunGit,
+  folder: string,
+  merged: ReadonlySet<string>,
+  after: { days: number; base: string; touched: (folder: string) => Promise<number | null> } | undefined,
+): Promise<boolean> {
+  if (after === undefined) return false;
+  const when = await after.touched(folder);
+  if (when === null || Date.now() - when < after.days * 24 * 60 * 60 * 1000) return false;
+  const { code, out } = await run(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: folder });
+  if (code !== 0 || out === undefined) return false;
+  const branch = out.trim();
+  return branch !== '' && branch !== 'HEAD' && merged.has(branch);
 }
 
 /** The names and statuses git reports, as `{ kind, path }` rows.
@@ -530,7 +574,7 @@ async function worktreeChanges(
 
 /** The commit the worktree branched from: two sides one ancestor, so the
  *  changes each side made since then are the ones worth comparing. */
-async function sharedBase(run: RunGit, folder: string, repo: string): Promise<string | null> {
+export async function sharedBase(run: RunGit, folder: string, repo: string): Promise<string | null> {
   const branch = await branchAt(run, folder);
   if (branch === null) return null;
   const { code, out } = await run(['merge-base', branch, 'HEAD'], { cwd: repo });
@@ -601,11 +645,17 @@ export async function bringBack(
   run: RunGit,
   repo: string,
   folder: string,
+  /** The only paths to carry. Left off, every changed path is carried, which is
+   *  what every caller before the review queue meant. */
+  only?: readonly string[],
 ): Promise<{ ok: true; value: BringBack } | { ok: false; because: string }> {
   if (!(await isRepo(run, repo))) return { ok: false, because: bringBackWords.notRepo };
   const base = await sharedBase(run, folder, repo);
   if (base === null) return { ok: false, because: bringBackWords.notRepo };
-  const changes = await worktreeChanges(run, folder, base);
+  const wanted = only === undefined ? null : new Set(only);
+  const changes = (await worktreeChanges(run, folder, base)).filter(
+    (row) => wanted === null || wanted.has(row.path),
+  );
   const applied: string[] = [];
   const conflicted: string[] = [];
   for (const row of changes) {

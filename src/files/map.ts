@@ -174,7 +174,7 @@ export function saysMap(map: ProjectMap): string {
   for (const area of map.areas) {
     const count = `${String(area.files)} ${area.files === 1 ? 'file' : 'files'}`;
     const reaches = area.uses.length === 0 ? 'reaches nothing else' : `reaches into ${area.uses.join(', ')}`;
-    lines.push(`- ${area.name} — ${count}, ${reaches}`);
+    lines.push(`- ${area.name}: ${count}, ${reaches}`);
     if (area.waysIn.length > 0) lines.push(`  nothing else brings in: ${area.waysIn.join(', ')}`);
   }
   if (map.styles.length > 0) lines.push('', `${MAP_WORDS.styles} ${map.styles.join(', ')}`);

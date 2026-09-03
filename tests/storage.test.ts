@@ -108,17 +108,17 @@ describe('what Settings reads', () => {
 
   it('reads a folder list as a size and a breakdown', () => {
     const said = saysStorage([
-      { name: 'Checkouts', bytes: 1_700_000_000, files: 40_000 },
+      { name: 'Branches', bytes: 1_700_000_000, files: 40_000 },
       { name: 'Board copies', bytes: 1_500_000_000, files: 30_000 },
       { name: 'Logs', bytes: 0, files: 0 },
     ]);
     expect(said).toContain('3.2 GB');
-    expect(said.indexOf('Checkouts')).toBeLessThan(said.indexOf('Board copies'));
+    expect(said.indexOf('Branches')).toBeLessThan(said.indexOf('Board copies'));
     expect(said).not.toContain('Logs');
   });
 
   it('says nothing rather than zero when the folder is empty', () => {
-    expect(saysStorage([{ name: 'Checkouts', bytes: 0, files: 0 }])).toContain('Nothing kept');
+    expect(saysStorage([{ name: 'Branches', bytes: 0, files: 0 }])).toContain('Nothing kept');
   });
 
   it('writes sizes the way a person reads them', () => {
@@ -143,7 +143,7 @@ describe('measuring and clearing', () => {
     ]);
     const folders = await measureFolders(root);
     const named = new Map(folders.map((one) => [one.name, one]));
-    expect(named.get('Checkouts')).toEqual({ name: 'Checkouts', bytes: 150, files: 2 });
+    expect(named.get('Branches')).toEqual({ name: 'Branches', bytes: 150, files: 2 });
     expect(named.get('Conversations')?.bytes).toBe(20);
     expect(named.get('Builds')).toEqual({ name: 'Builds', bytes: 0, files: 0 });
   });

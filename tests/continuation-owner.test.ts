@@ -30,14 +30,16 @@ function owner(
   const sent: Sent[] = [];
   const saidOut: string[] = [];
   const told: Continuation[] = [];
+  const halted: string[] = [];
   const hooks: OwnerHooks = {
     send: (where, at, text, why) => sent.push({ project: where, address: at, text, why }),
     say: (_where, _at, text) => saidOut.push(text),
     tell: (one) => told.push(one),
     list: () => Promise.resolve(list()),
     goal: () => Promise.resolve(goal()),
+    halt: (_where, at) => halted.push(at),
   };
-  return { one: continuationOwner(hooks), sent, said: saidOut, told };
+  return { one: continuationOwner(hooks), sent, said: saidOut, told, halted };
 }
 
 const someList = (done: number, total: number): ListNow => ({

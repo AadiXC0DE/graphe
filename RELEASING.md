@@ -154,7 +154,9 @@ about what changed for somebody using it.
 ## 5. Update the Homebrew cask
 
 The cask lives in the tap repository, `AadiXC0DE/homebrew-tap`. `Casks/graphe.rb` in this
-repository is the template it is copied from.
+repository is the template it is copied from. Its `version` and both `sha256` values are the
+placeholder `REPLACED_BY_RELEASE_WORKFLOW` and must stay that way: a checksum committed beside the
+source goes stale the next time anything is built.
 
 The release workflow opens that pull request for you when the `TAP_TOKEN` secret is set — a
 fine-grained personal access token with contents and pull-request write on the tap. Without it the

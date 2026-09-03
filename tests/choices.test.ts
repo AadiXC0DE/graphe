@@ -16,6 +16,7 @@
  * because it leaks onto the people the product exists for.
  */
 
+import { defaultAppearance } from '../src/design/appearance';
 import { describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -159,7 +160,10 @@ describe('D1 — the real name of what just happened', () => {
           advisor: null,
           advisorThinking: null,
           advisorGates: { completionGate: false, loopGate: false },
-          addons: 'tools-only',
+          addons: 'on',
+          editor: null,
+          terminal: null,
+          appearance: defaultAppearance,
           showMe: true,
           model: null,
           thinking: {},
@@ -171,8 +175,84 @@ describe('D1 — the real name of what just happened', () => {
           howMuch: null,
           ceiling: null,
           theme: 'system',
+          nameConversations: true,
+          askBeforeClosing: true,
+          snapBeforeApply: true,
+          replyLanguage: '',
+          whenRunFinishes: 'system',
+          whenSomethingNeedsYou: 'system',
+          notifySound: false,
+          badgeDock: true,
         },
       });
+    });
+  });
+
+  /* The two new pages. What matters is the defaults: a file written before
+     these existed must come back with the smart behaviour on rather than off,
+     because absent is not the same as "somebody turned it off". */
+  it('reads a file written before Behaviour and Notifications existed', async () => {
+    await inATemporaryFolder(async (folder) => {
+      const file = join(folder, 'preferences.json');
+      await writeFile(file, JSON.stringify({ preferences: { showMe: true } }), 'utf8');
+      const all = (await PreferenceFile.open(file)).all();
+      expect(all.nameConversations).toBe(true);
+      expect(all.askBeforeClosing).toBe(true);
+      expect(all.snapBeforeApply).toBe(true);
+      expect(all.badgeDock).toBe(true);
+      expect(all.notifySound).toBe(false);
+      expect(all.replyLanguage).toBe('');
+      expect(all.whenRunFinishes).toBe('system');
+      expect(all.whenSomethingNeedsYou).toBe('system');
+    });
+  });
+
+  it('keeps what somebody chose on those pages across a launch', async () => {
+    await inATemporaryFolder(async (folder) => {
+      const file = join(folder, 'preferences.json');
+      const first = await PreferenceFile.open(file);
+      await first.change({
+        snapBeforeApply: false,
+        notifySound: true,
+        whenRunFinishes: 'bounce',
+        replyLanguage: 'French',
+      });
+      const later = (await PreferenceFile.open(file)).all();
+      expect(later.snapBeforeApply).toBe(false);
+      expect(later.notifySound).toBe(true);
+      expect(later.whenRunFinishes).toBe('bounce');
+      expect(later.replyLanguage).toBe('French');
+    });
+  });
+
+  /* It is pasted into the system prompt, so a paragraph typed into the field
+     would be somebody else's instructions arriving as ours. */
+  it('holds a reply language to one line', async () => {
+    await inATemporaryFolder(async (folder) => {
+      const file = join(folder, 'preferences.json');
+      await writeFile(
+        file,
+        JSON.stringify({ preferences: { replyLanguage: `  French\n${'x'.repeat(200)}` } }),
+        'utf8',
+      );
+      const said = (await PreferenceFile.open(file)).all().replyLanguage;
+      expect(said.length).toBeLessThanOrEqual(60);
+      expect(said).not.toContain('\n');
+      expect(said.startsWith('French')).toBe(true);
+    });
+  });
+
+  it('leaves an unreadable notification answer at the default', async () => {
+    await inATemporaryFolder(async (folder) => {
+      const file = join(folder, 'preferences.json');
+      await writeFile(
+        file,
+        JSON.stringify({ preferences: { whenRunFinishes: 'shout', badgeDock: 'yes' } }),
+        'utf8',
+      );
+      const all = (await PreferenceFile.open(file)).all();
+      expect(all.whenRunFinishes).toBe('system');
+      expect(all.badgeDock).toBe(true);
     });
   });
 

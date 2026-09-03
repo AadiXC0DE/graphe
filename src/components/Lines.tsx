@@ -133,7 +133,7 @@ export default function Lines({ branches, fallback, busy = false, onSwitch, onCr
                   {branches.length === 0 ? LINE_WORDS.none : LINE_WORDS.noneFound}
                 </p>
               ) : (
-                <ul className="lines__list">
+                <ul className="lines__list scroll--auto">
                   {showing.map((one) => {
                     const standing = saysStanding(one);
                     return (

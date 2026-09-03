@@ -23,6 +23,7 @@ function shape(turns: readonly Turn[]): unknown {
   return turns.map((turn) => {
     const { id: _id, ...rest } = turn;
     if ('at' in rest) delete (rest as { at?: number }).at;
+    if ('endedAt' in rest) delete (rest as { endedAt?: number }).endedAt;
     return rest;
   });
 }

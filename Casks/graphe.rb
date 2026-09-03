@@ -1,4 +1,5 @@
-# Homebrew cask for Graphe. A template — see the FILL IN markers below.
+# Homebrew cask for Graphe. A template: the version and the checksums are
+# written by the release workflow, and everything else is decided here.
 #
 # ## Why this is the launch route
 #
@@ -29,19 +30,20 @@
 # Moving to homebrew-cask proper needs a stable release history and a project
 # that is not obviously pre-1.0, so it is a later conversation.
 #
-# ## FILL IN at every release
+# ## What the release workflow fills in
 #
-#   1. `version`  — must match package.json exactly. The url interpolates it.
-#   2. `sha256`   — one per architecture, from the *zip* files, not the dmg:
+# `version` and the two `sha256` values are placeholders here and are written by
+# the workflow from the zips it just built. They are deliberately not real: a
+# checksum committed beside the source is a checksum that goes stale the next
+# time anything is built, and a cask carrying a version's name over another
+# version's bytes is the one thing a cask must never do.
 #
-#          shasum -a 256 release/Graphe-<version>-arm64.zip
-#          shasum -a 256 release/Graphe-<version>-x64.zip
+# To try it by hand, fill them in locally and do not commit that:
 #
-#      Or from a published release, which is what CI should be trusted for:
+#     shasum -a 256 release/Graphe-<version>-arm64.zip
+#     shasum -a 256 release/Graphe-<version>-x64.zip
 #
-#          brew fetch --cask ./Casks/graphe.rb   # prints what it got
-#
-#   3. `url`      — only if the GitHub owner or repository name changes.
+# `url` changes only if the GitHub owner or repository name does.
 #
 # RELEASING.md walks the whole thing through in order.
 
@@ -51,9 +53,9 @@ cask "graphe" do
   # smaller download of the two.
   arch arm: "arm64", intel: "x64"
 
-  version "0.9.0"
-  sha256 arm:   "da2c6e902ad759223e02a6ae9fa9603ee4a22dddad3a8cd7c5ad827a173528c0",
-         intel: "bb95505cac73019e6497f014476f93262cfe1b7d91664dbabf68360bb747dba3"
+  version "REPLACED_BY_RELEASE_WORKFLOW"
+  sha256 arm:   "REPLACED_BY_RELEASE_WORKFLOW",
+         intel: "REPLACED_BY_RELEASE_WORKFLOW"
 
   url "https://github.com/AadiXC0DE/graphe/releases/download/v#{version}/Graphe-#{version}-#{arch}.zip",
       verified: "github.com/AadiXC0DE/graphe/"
@@ -66,8 +68,8 @@ cask "graphe" do
     strategy :github_latest
   end
 
-  # Graphe is pre-1.0 and its window is the entire product, so an old copy is a
-  # different product. Say so rather than letting people sit on the first build.
+  # Graphe's window is the entire product, so an old copy is a different
+  # product. Say so rather than letting people sit on the build they installed.
   auto_updates false
   depends_on macos: :monterey
 
@@ -86,13 +88,13 @@ cask "graphe" do
   ]
 
   caveats <<~EOS
-    Graphe is signed, but not notarized by Apple — there is no paid developer
+    Graphe is signed, but not notarized by Apple: there is no paid developer
     account yet. Homebrew 5 and earlier installed it with no prompt, but
     Homebrew 6 applies the quarantine attribute to cask installs, so on first
     launch macOS may ask you to allow it. If it does: right-click the app in
-    Finder and choose Open, or use "Open Anyway" in System Settings → Privacy
+    Finder and choose Open, or use "Open Anyway" in System Settings, Privacy
     & Security. It is the genuine binary from the GitHub release, not a broken
-    download — the prompt exists because Apple has not vetted a signed binary
-    from a free account. Notarization removes it for good.
+    download. The prompt exists because Apple has not vetted a signed binary
+    from a free account, and notarization removes it for good.
   EOS
 end

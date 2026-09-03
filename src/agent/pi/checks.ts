@@ -214,7 +214,7 @@ export function gatheredChecks(verdicts: readonly CheckVerdict[]): string {
 
 /** The reviewers' marching orders, appended to the change being checked. */
 export function checksBrief(checks: readonly ProjectCheck[], own: boolean): string {
-  const lines = checks.map((check, index) => `${String(index + 1)}. ${check.name} — ${check.line}`);
+  const lines = checks.map((check, index) => `${String(index + 1)}. ${check.name}: ${check.line}`);
   return `${own ? CHECK_WORDS.itsOwn : CHECK_WORDS.usual}\n${lines.join('\n')}\n\n${CHECK_WORDS.name}`;
 }
 

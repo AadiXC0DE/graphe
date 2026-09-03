@@ -58,7 +58,7 @@ describe('the panel says what the fetch found', () => {
   });
 
   it('reports a fast-forward as what it took in', () => {
-    expect(saysFound(stands({ moved: 4 }))).toBe('Fast-forwarded main to origin/main — 4 commits in.');
+    expect(saysFound(stands({ moved: 4 }))).toBe('Fast-forwarded main to origin/main, 4 commits in.');
   });
 
   it('treats no remote, no upstream and a detached HEAD as ordinary days', () => {

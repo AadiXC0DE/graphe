@@ -1,0 +1,71 @@
+/* Finding a word in a long conversation.
+
+   A band across the top of the thread rather than a card floating over it: the
+   thread is what is being searched, and anything covering it hides the answer
+   the moment it is found. */
+
+.findthread {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.findthread__box {
+  flex: 0 1 14rem;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.findthread__count {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The line a result sits on. Runs off the end rather than wrapping: the band
+   is one row, and a band that grows pushes the conversation down as you type. */
+.findthread__line {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.findthread__act {
+  flex: none;
+  margin-left: auto;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.findthread__line + .findthread__act {
+  margin-left: 0;
+}
+
+.findthread__act:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.findthread__act:disabled {
+  cursor: default;
+  opacity: 0.5;
+}

@@ -496,17 +496,17 @@ function said(front: string, back: string, text?: { px: number; weight?: number 
 describe('L-06 saying it the way a designer would', () => {
   it('says a pale grey on white is too pale, and roughly how far to move it', () => {
     expect(said('#999999', WHITE)).toBe(
-      'Too pale to read on this background — about two steps darker would do it.',
+      'Too pale to read on this background: about two steps darker would do it.',
     );
   });
 
   it('says a near miss is a near miss', () => {
-    expect(said('#999999', WHITE, { px: 30 })).toBe('Nearly there — a step darker would do it.');
+    expect(said('#999999', WHITE, { px: 30 })).toBe('Nearly there: a step darker would do it.');
   });
 
   it('tells a pairing that only fails at this size what would fix it', () => {
     expect(said('#7c7c7c', WHITE)).toBe(
-      'Fine for a headline, but too pale at this size — a step darker would do it.',
+      'Fine for a headline, but too pale at this size: a step darker would do it.',
     );
   });
 
@@ -517,7 +517,7 @@ describe('L-06 saying it the way a designer would', () => {
 
   it('gives up on counting steps once the colour is a long way off', () => {
     expect(said('#f0f0f0', WHITE)).toBe(
-      'Too pale to read on this background — it needs to be much darker.',
+      'Too pale to read on this background: it needs to be much darker.',
     );
   });
 

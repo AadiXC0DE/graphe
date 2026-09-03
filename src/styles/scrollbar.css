@@ -13,25 +13,31 @@
 
    The gutter is each scroller's own call — worth reserving only where the
    content can grow past the box, and never on a sideways one, where it is a
-   band of empty under everything that fits. */
+   band of empty under everything that fits.
 
-:where(.scroll--auto) {
+   `.sheet__body` is in here rather than on each of its ten screens: it is the
+   one scroller every full-width screen already shares. */
+
+:where(.scroll--auto, .sheet__body) {
   scrollbar-width: thin;
 }
 
-.scroll--auto {
+.scroll--auto,
+.sheet__body {
   scrollbar-color: transparent transparent;
 }
 
 .scroll--auto:hover,
 .scroll--auto:focus-within,
-.scroll--auto.is-scrolling {
+.scroll--auto.is-scrolling,
+.sheet__body:hover,
+.sheet__body:focus-within {
   scrollbar-color: var(--border-control) transparent;
 }
 
 /* scrollbar-color inherits, so the resting transparent would follow down into
    every scroller nested inside and hide those bars too. No specificity, so
    anything with a rule of its own still wins. */
-:where(.scroll--auto) * {
+:where(.scroll--auto, .sheet__body) * {
   scrollbar-color: var(--border-control) transparent;
 }

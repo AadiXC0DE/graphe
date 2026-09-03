@@ -1,20 +1,48 @@
-/* The design system, shown as itself.
+/* The project's own values, as a spec sheet.
 
-   This is the whole point of the design screen: not a list of boxes you can
-   tweak but the project's visual language read aloud. Each discipline is drawn
-   with its own shape — colour as swatches, type as letters at size, spacing as
-   bars at their own width, corners as curves, shadows as cards — so a visitor
-   reads how things actually look, then finds the slider where the shape is.
-
-   The app's own restraint carries: the paper background, the two-grey ink, the
-   one terracotta accent. Specimen shapes take the room, and the labels are
-   small mono annotations rather than names shouting over the work.
-   --------------------------------------------------------------------------- */
+   A table because that is how a design system is read: down a column of names,
+   across to the value, and out to how much of the project leans on it. The
+   value is editable where it is read, so there is no mode to be in. */
 
 .styles {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: var(--space-5);
+}
+
+.styles__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.styles__find {
+  flex: 0 1 260px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--text-xs);
+  color: var(--text);
+  transition: border-color var(--dur-micro) var(--ease-hover);
+}
+
+.styles__find:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.styles__where {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .styles__none {
@@ -24,191 +52,112 @@
   color: var(--text-faint);
 }
 
-/* The head names the file and carries the one switch that turns the spec
-   sheet into knobs. The two sit on one line, so the Edit control is where the
-   hand already is when it has read enough. */
-.styles__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+.styles__table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
 
-.styles__where {
-  margin: 0;
-  font-size: var(--text-xs);
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.styles__edit {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  transition:
-    color var(--dur-micro) var(--ease-hover),
-    border-color var(--dur-micro) var(--ease-hover),
-    background-color var(--dur-micro) var(--ease-hover),
-    transform var(--dur-micro) var(--ease-out-quart);
-}
-
-.styles__edit:active {
-  transform: scale(0.97);
-}
-
-.styles__edit--on {
-  border-color: var(--accent);
-  color: var(--accent-ink);
-  background: var(--accent-soft);
-}
-
-.styles__edit:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .styles__edit:hover:not(.styles__edit--on) {
-    color: var(--text);
-    border-color: var(--border-strong);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .styles__edit:active {
-    transform: none;
-  }
-}
-
-/* ------------------------------------------------------------------ groups
-   One discipline per section. The header is a title and a count over a hairline;
-   the body is the discipline drawn as itself.
-   --------------------------------------------------------------------------- */
-
-.styles__group {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.styles__band {
+.styles__caption {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
-  padding: 0 0 var(--space-2);
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--space-2);
   text-align: left;
-  cursor: pointer;
-  color: var(--text);
-}
-
-.styles__shelf {
-  flex: 1;
-  min-width: 0;
-  /* The discipline title carries the weight of an upstream — a heading, not a
-     quiet shelf. */
-  font-size: var(--text-xs);
+  font-size: var(--text-2xs);
   font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-muted);
-  transition: color var(--dur-micro) var(--ease-hover);
+  color: var(--text-faint);
 }
 
 .styles__count {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
   color: var(--text-faint);
+}
+
+.styles__table th,
+.styles__table td {
+  padding: 0 var(--space-2);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.styles__table thead th {
+  height: 26px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.styles__table thead th:nth-child(1) {
+  width: 40%;
+}
+
+.styles__table thead th:nth-child(2) {
+  width: auto;
+}
+
+.styles__usedhead,
+.styles__used {
+  width: 72px;
+  text-align: right !important;
   font-variant-numeric: tabular-nums;
 }
 
-.styles__caret {
-  flex: none;
-  width: 0;
-  height: 0;
-  border-top: 3.5px solid transparent;
-  border-bottom: 3.5px solid transparent;
-  border-left: 5px solid currentColor;
-  opacity: 0.5;
-  transform: rotate(90deg);
-  transition: transform var(--dur-micro) var(--ease-out-quart);
+.styles__table thead th:nth-child(4) {
+  width: 32px;
 }
 
-.styles__group:not(.styles__group--open) .styles__caret {
-  transform: none;
+.styles__hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.styles__body {
-  padding-top: var(--space-3);
+.styles__row {
+  border-bottom: 1px solid var(--border);
 }
 
-/* One line under the heading that names the discipline in a human way, so the
-   shapes below are read rather than puzzled at. */
-.styles__intro {
-  margin: 0 0 var(--space-3);
+.styles__row--moved .styles__name {
+  color: var(--accent-ink);
+}
+
+.styles__name {
+  height: 32px;
+  font-family: var(--font-mono);
   font-size: var(--text-2xs);
-  color: var(--text-faint);
+  font-weight: 400;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.styles__rest {
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
-}
-
-/* ------------------------------------------------------------------ palette
-   Colour as a family. Each swatch is a column: a square of the value, the name,
-   and the value itself. Four across reads as a set that belongs together.
-   --------------------------------------------------------------------------- */
-
-.styles__palette {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-  gap: var(--space-4) var(--space-3);
-}
-
-.styles__swatch {
+.styles__valuecell {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
 }
 
-/* A well that reads as a swatch on a card, not a colour well on a paint
-   screen: 2:1, so a whole palette sits in a couple of rows instead of taking
-   over the sheet. */
+/* The colour itself, painted with the value as written, so a blend or a soft
+   grey looks like itself rather than like whatever a picker can hold. */
 .styles__well {
   position: relative;
-  display: block;
-  height: 46px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text) 14%, transparent);
   overflow: hidden;
-  /* The swatch is the invitation to change it: the quiet lift tells the hand
-     it can press the colour, the way a real swatch card would. */
-  transition:
-    box-shadow var(--dur-micro) var(--ease-hover),
-    transform var(--dur-micro) var(--ease-out-quart);
-}
-
-.styles__well:active {
-  transform: scale(0.97);
 }
 
 .styles__pick {
@@ -217,330 +166,70 @@
   width: 100%;
   height: 100%;
   padding: 0;
-  border: 0;
-  background: none;
+  border: none;
   opacity: 0;
   cursor: pointer;
 }
 
-.styles__pick:disabled {
-  cursor: default;
+.styles__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
 }
 
-.styles__well:focus-within {
+.styles__value:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.styles__used {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.styles__resetcell {
+  padding: 0 !important;
+}
+
+/* Only on a value that has been moved: a row of these on every line would be a
+   row of buttons that do nothing. */
+.styles__reset {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.styles__reset:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .styles__swatch:hover .styles__well {
-    box-shadow: var(--shadow-sm);
+  .styles__row:hover .styles__value {
+    border-color: var(--border);
   }
-}
 
-.styles__swname {
-  min-width: 0;
-  font-size: var(--text-2xs);
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The value a swatch writes back to, with a dot of the colour beside it so a
-   value reads as a colour rather than as a string. */
-.styles__swmeta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
-}
-
-.styles__swdot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-}
-
-.styles__swvalue {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ----------------------------------------------------------------- measures
-   Spacing as bars. Each row is one step: a track the width of the card, with a
-   fill whose width is the step itself. 4px is a hair, 48px is a room — the
-   scale reads as what it is before you read the number.
-   --------------------------------------------------------------------------- */
-
-.styles__measures {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-4) var(--space-5);
-}
-
-.styles__measure {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-}
-
-.styles__measuretrack {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  height: 22px;
-  border-bottom: 1px solid var(--border);
-}
-
-.styles__measurebar {
-  height: 12px;
-  border-radius: 2px;
-  background: var(--accent-soft);
-  /* The inner swatch reads the accent on the soft tint, so the width is the
-     thing you see and the colour stays quiet. */
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-.styles__measuremeta {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.styles__measure--editable .styles__slider {
-  grid-column: 1 / -1;
-}
-
-/* ------------------------------------------------------------------ corners
-   Radius as curves. Each corner is a square rounded with its own value, so a
-   6px corner and a 24px corner are visibly different shapes rather than two
-   numbers.
-   --------------------------------------------------------------------------- */
-
-.styles__corners {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: var(--space-4);
-}
-
-.styles__corner {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.styles__cornerbox {
-  display: block;
-  width: 100%;
-  aspect-ratio: 1.6;
-  border: 1px solid var(--border-strong);
-  background:
-    linear-gradient(135deg, transparent 48%, var(--border) 49%, var(--border) 51%, transparent 52%),
-    var(--bg-raised);
-}
-
-.styles__cornerhead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-/* ------------------------------------------------------------------- scale
-   Numeric stairs (sizes, and the rest). Reading, a row is name and value;
-   editing, the slider slips in between them.
-   --------------------------------------------------------------------------- */
-
-.styles__scale {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.styles__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.styles__row--editable {
-  grid-template-columns: minmax(0, 6em) 1fr auto;
-}
-
-.styles__name {
-  min-width: 0;
-  font-size: var(--text-2xs);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.styles__value {
-  flex: none;
-  min-width: 3.6em;
-  text-align: right;
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-.styles__slider {
-  width: 100%;
-  min-width: 0;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-/* --------------------------------------------------------------------- type
-   The scale as letters, in order, so the climb is the story. The specimen sits
-   at its own size; the name and value travel with it as a small mono note.
-   --------------------------------------------------------------------------- */
-
-.styles__scale--type {
-  gap: var(--space-4);
-}
-
-.styles__type {
-  display: grid;
-  grid-template-columns: minmax(3.2em, 7.5em) minmax(0, 1fr);
-  align-items: end;
-  gap: var(--space-4);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--border);
-}
-
-.styles__type:last-child {
-  border-bottom: 0;
-}
-
-/* A number says nothing about type. The letters do, and they move with the
-   slider — clamped only so one loud step cannot push the column around. */
-.styles__specimen {
-  display: flex;
-  align-items: baseline;
-  line-height: 1;
-  color: var(--text);
-  font-family: var(--font-ui);
-  /* The largest specimen is a target, not a given; trim the whole visual so a
-     big display size does not dominate the sheet. */
-  max-height: 1.6em;
-  overflow: hidden;
-}
-
-.styles__typebody {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.styles__typehead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-/* A font family is drawn as itself: the letters in that face, and the stack
-   written beneath as the small mono note that names it. */
-.styles__family {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--border);
-}
-
-.styles__family:last-child {
-  border-bottom: 0;
-}
-
-.styles__familysample {
-  font-size: var(--text-xl);
-  letter-spacing: -0.01em;
-  color: var(--text);
-}
-
-.styles__familyvalue {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ------------------------------------------------------------------ shadows
-   Elevation as cards. Each is a raised square casting its own shadow, labelled
-   with the small name that says how high it sits.
-   --------------------------------------------------------------------------- */
-
-.styles__lifts {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: var(--space-3) var(--space-2);
-}
-
-.styles__lift {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.styles__card {
-  display: block;
-  width: 100%;
-  height: 56px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-}
-
-.styles__lift .styles__name {
-  text-align: center;
-  max-width: 100%;
-}
-
-/* -------------------------------------------------------------------- focus */
-
-.styles__slider:focus-visible,
-.styles__band:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .styles__band:hover .styles__shelf {
+  .styles__reset:hover {
     color: var(--text);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .styles__caret,
-  .styles__well {
-    transition: none;
-  }
-
-  .styles__well:active {
-    transform: none;
+    background: var(--bg-sunken);
   }
 }

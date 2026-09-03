@@ -40,7 +40,23 @@ body {
      every scroller; the width reaches the window's own bar and no further, and
      styles/scrollbar.css sets it for the scrollers that ask. */
   scrollbar-width: thin;
-  scrollbar-color: var(--border-control) transparent;
+  /* Nothing at rest. A scroller that forgot `scroll--auto` shows no bar rather
+     than the wrong one, always visible, beside every scroller that behaves. */
+  scrollbar-color: transparent transparent;
+}
+
+/* Glass. The window itself is vibrant, so the page under everything has to let
+   it through, and the panels that sit on it do their own blurring. */
+[data-finish='glass'] body {
+  background: transparent;
+}
+
+[data-finish='glass'] .shelf,
+[data-finish='glass'] .overview,
+[data-finish='glass'] .topbar,
+[data-finish='glass'] .sheet {
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
 }
 
 button {

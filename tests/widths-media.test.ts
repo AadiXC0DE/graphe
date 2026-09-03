@@ -526,7 +526,7 @@ describe('M-10 judging one width', () => {
     expect(howBadly(390, 395)).toBe('slightly');
     const said = saysHowItHolds('Phone', 390, 395);
     expect(said).toBe(
-      'Something on the page sits 5px past the edge of a phone — a hair, but it scrolls sideways.',
+      'Something on the page sits 5px past the edge of a phone: a hair, but it scrolls sideways.',
     );
   });
 

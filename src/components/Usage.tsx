@@ -1,31 +1,59 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { Money } from '../agent/types';
 import type { SpendView } from '../lib/spend';
-import type { TokenUsageView } from '../lib/token-days';
-import { intensityOf, saysTokens, weeksOf } from '../lib/token-days';
-import { formatMoney } from '../cost/money';
+import type { DayTokens, TokenUsageView } from '../lib/token-days';
+import { costInMonth, costOnDay, lastDays, saysTokens, spendCsv } from '../lib/token-days';
+import type { SpendLimit } from '../cost/limits';
+import { formatMoney, fromMajor, toMajor } from '../cost/money';
+import { Ceiling } from './CostMeter';
 import './Usage.css';
 
 type Props = {
   open: boolean;
   spent: SpendView | null;
   onClose: () => void;
-  /** Tokens by day, read when the sheet opens. Left off, the grid is not
-   *  offered — a caller that cannot read transcripts says nothing. */
+  /** Days by cost and model, read when the sheet opens. Left off, only the
+   *  sitting's own number is offered. */
   onTokens?: () => Promise<TokenUsageView | null>;
+  /** The ceiling somebody set on the month, if they set one. */
+  limit?: SpendLimit | null;
+  onLimit?: (ceiling: Money | null) => void;
+  /** Open one of the conversations in the list. */
+  onOpenConversation?: (path: string) => void;
+  /** Hand the days to the shell to write out. */
+  onExport?: (csv: string) => void;
 };
 
-/** How many weeks the grid shows. Ten fits the sheet's measure and reaches
- *  back far enough for a rhythm to be visible. */
-const WEEKS = 10;
+/** How many days the bar chart shows. */
+const DAYS = 30;
 
-/** The model's own cache accounting, made legible. This is a details surface:
- * model names belong here, not beside ordinary design work.
+/** Each model's own colour: the accent hue turned a further 40° per model, so
+ *  a stack reads as one palette rather than a paint box. */
+function modelColour(at: number): string {
+  return `oklch(from var(--accent) l c calc(h + ${String((at * 40) % 360)}deg))`;
+}
+
+function saysDay(at: number): string {
+  return new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+/**
+ * What this cost: the sitting, the day, the month, and where the month went.
  *
- * Two answers to one question sit side by side. Money says what it cost;
- * tokens say how much work went through the model, day by day — because a
- * cheap model burns a pile of tokens for a small bill, and neither number
- * alone tells somebody how much they are actually using. */
-export default function Usage({ open, spent, onClose, onTokens }: Props) {
+ * Three numbers first, because "am I fine?" is the question people open this
+ * with. Everything under them answers "where did it go?" — by day, by model,
+ * by conversation — and the CSV at the top is for whoever has to expense it.
+ */
+export default function Usage({
+  open,
+  spent,
+  onClose,
+  onTokens,
+  limit,
+  onLimit,
+  onOpenConversation,
+  onExport,
+}: Props) {
   const [tokens, setTokens] = useState<TokenUsageView | null>(null);
 
   useEffect(() => {
@@ -52,123 +80,181 @@ export default function Usage({ open, spent, onClose, onTokens }: Props) {
     };
   }, [open, onTokens]);
 
+  const currency = spent?.total.currency ?? limit?.ceiling.currency ?? 'USD';
+  const days = useMemo<readonly DayTokens[]>(
+    () => (tokens === null ? [] : lastDays(tokens.days, Date.now(), DAYS)),
+    [tokens],
+  );
+  /* One colour per model, fixed by the order of the whole table, so a model
+     keeps its colour whichever day it appears in. */
+  const colours = useMemo(() => {
+    const found = new Map<string, string>();
+    (tokens?.byModel ?? []).forEach((one, at) => found.set(one.model, modelColour(at)));
+    return found;
+  }, [tokens]);
+
   if (!open) return null;
-  const usage = spent?.usage ?? null;
+  const money = (major: number): string => formatMoney(fromMajor(major, currency));
   const split = spent?.split ?? null;
-  const reused = usage?.reusedShare;
-  const weeks = tokens === null ? [] : weeksOf(tokens.days, Date.now(), WEEKS);
+  const now = Date.now();
+  const today = tokens === null ? 0 : costOnDay(tokens.days, now);
+  const month = tokens === null ? 0 : costInMonth(tokens.days, now);
+  const tallest = days.reduce((most, day) => Math.max(most, day.cost), 0);
+  const ceilingMajor = limit === null || limit === undefined ? 0 : toMajor(limit.ceiling);
+  const conversations = tokens?.byConversation ?? [];
 
   return (
-    <section className="usage" aria-label="What this cost" role="dialog" aria-modal="true">
+    <section className="usage scroll--auto" aria-label="What this cost" role="dialog" aria-modal="true">
       <header className="usage__top">
         <div>
-          <p className="usage__eyebrow">This sitting</p>
           <h1>What this cost</h1>
-          <p>What was spent, what got another try, and what was reused from earlier.</p>
+          <p>Spend by day, model and conversation.</p>
         </div>
-        <button type="button" className="usage__close" onClick={onClose}>
-          Close <kbd>Esc</kbd>
-        </button>
+        <div className="usage__actions">
+          {tokens === null || onExport === undefined ? null : (
+            <button type="button" className="usage__export" onClick={() => onExport(spendCsv(tokens))}>
+              Export
+            </button>
+          )}
+          <button type="button" className="usage__close" onClick={onClose}>
+            Close <kbd>Esc</kbd>
+          </button>
+        </div>
       </header>
 
-      {spent === null ? (
+      {spent === null && tokens === null ? (
         <p className="usage__empty">Nothing has been spent in this sitting yet.</p>
       ) : (
         <div className="usage__body">
-          <section className="usage__total">
-            <span>Total so far</span>
-            <strong>{formatMoney(spent.total)}</strong>
+          <section className="usage__numbers">
+            <div className="usage__number">
+              <strong>{spent === null ? money(0) : formatMoney(spent.total)}</strong>
+              <span>This sitting</span>
+            </div>
+            <div className="usage__number">
+              <strong>{money(today)}</strong>
+              <span>Today</span>
+            </div>
+            <div className="usage__number">
+              <strong>{money(month)}</strong>
+              <span>This month</span>
+              {limit === null || limit === undefined ? null : (
+                <>
+                  <p className="usage__of">of {formatMoney(limit.ceiling)} limit</p>
+                  <div className="usage__rule" aria-hidden="true">
+                    <span
+                      style={{
+                        width: `${String(Math.min(100, ceilingMajor === 0 ? 0 : (month / ceilingMajor) * 100))}%`,
+                      }}
+                    />
+                  </div>
+                </>
+              )}
+              {onLimit === undefined ? null : (
+                <Ceiling
+                  limit={limit ?? null}
+                  spent={fromMajor(month, currency)}
+                  onLimit={onLimit}
+                />
+              )}
+            </div>
           </section>
 
           {tokens === null ? null : (
             <section className="usage__card">
-              <h2>Tokens, week by week</h2>
-              <p className="usage__gridnote">
-                How much work went through the model, one square to a day. Alongside the money:
-                a small bill can still be a lot of work.
-              </p>
-              <div className="usage__grid" role="img" aria-label={`About ${saysTokens(tokens.total)} tokens in the last ${WEEKS} weeks`}>
-                {weeks.map((week, at) => (
-                  <span className="usage__week" key={at}>
-                    {week.map((day) => (
-                      <span
-                        key={day.at}
-                        // -1 marks days this week hasn't reached yet.
-                        className={`usage__cell ${day.tokens < 0 ? 'usage__cell--ahead' : ''} ${
-                          day.tokens > 0 ? `usage__cell--${intensityOf(day.tokens, tokens.days)}` : ''
-                        }`}
-                        title={
-                          day.tokens < 0
-                            ? undefined
-                            : `${new Date(day.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}: ${
-                                day.tokens === 0 ? 'nothing' : `${saysTokens(day.tokens)} tokens`
-                              }`
-                        }
-                      />
-                    ))}
-                  </span>
+              <h2>By day</h2>
+              <div className="usage__bars" role="img" aria-label={`${money(tokens.cost)} over ${String(DAYS)} days`}>
+                {days.map((day) => (
+                  <div
+                    key={day.at}
+                    className="usage__bar"
+                    title={`${saysDay(day.at)} · ${money(day.cost)} · ${saysTokens(day.tokens)} tokens`}
+                  >
+                    <span
+                      className="usage__barstack"
+                      style={{ height: `${String(tallest === 0 ? 0 : (day.cost / tallest) * 100)}%` }}
+                    >
+                      {day.models.map((one) => (
+                        <i
+                          key={one.model}
+                          style={{
+                            height: `${String(day.cost === 0 ? 0 : (one.cost / day.cost) * 100)}%`,
+                            background: colours.get(one.model) ?? 'var(--accent)',
+                          }}
+                        />
+                      ))}
+                    </span>
+                  </div>
                 ))}
               </div>
-              <footer className="usage__gridfoot">
-                <strong>{saysTokens(tokens.total)}</strong>
-                <span>tokens in ten weeks</span>
-                <span className="usage__scale" aria-hidden="true">
-                  less
-                  <i className="usage__cell" />
-                  <i className="usage__cell usage__cell--1" />
-                  <i className="usage__cell usage__cell--2" />
-                  <i className="usage__cell usage__cell--3" />
-                  more
-                </span>
+              <footer className="usage__barfoot">
+                <span>{saysDay(days[0]?.at ?? now)}</span>
+                <span>{saysDay(days[days.length - 1]?.at ?? now)}</span>
               </footer>
             </section>
           )}
 
-          <section className="usage__card">
-            <h2>What came back from earlier</h2>
-            {reused === null || reused === undefined ? (
-              <p>This account has not reported reusable prompt work yet.</p>
-            ) : (
-              <>
-                <div className="usage__reuse">
-                  <strong>{Math.round(reused * 100)}%</strong>
-                  <span>reused</span>
-                </div>
-                <div className="usage__rule" aria-hidden="true">
-                  <span style={{ width: `${Math.round(reused * 100)}%` }} />
-                </div>
-                <p>Work already understood from earlier messages did not need to be read again.</p>
-              </>
-            )}
-          </section>
+          {tokens === null || tokens.byModel.length === 0 ? null : (
+            <section className="usage__card">
+              <h2>By model</h2>
+              <table className="usage__table">
+                <thead>
+                  <tr>
+                    <th scope="col">Model</th>
+                    <th scope="col">Turns</th>
+                    <th scope="col">Tokens in</th>
+                    <th scope="col">Tokens out</th>
+                    <th scope="col">Cached</th>
+                    <th scope="col">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tokens.byModel.map((one) => (
+                    <tr key={one.model}>
+                      <th scope="row">
+                        <i className="usage__swatch" style={{ background: colours.get(one.model) ?? 'var(--accent)' }} />
+                        {one.model}
+                      </th>
+                      <td>{one.turns}</td>
+                      <td>{saysTokens(one.input)}</td>
+                      <td>{saysTokens(one.output)}</td>
+                      <td>{Math.round(one.cached * 100)}%</td>
+                      <td>{money(one.cost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
 
-          <section className="usage__card">
-            <h2>Models used</h2>
-            {usage === null || usage.byModel.length === 0 ? (
-              <p>It will appear after the first model response.</p>
-            ) : (
-              <ul className="usage__models">
-                {usage.byModel.map((model) => (
-                  <li key={model.name}>
-                    <span>{model.name}</span>
-                    <span>{Math.round(model.share * 100)}%</span>
+          {conversations.length === 0 ? null : (
+            <section className="usage__card">
+              <h2>By conversation</h2>
+              <ul className="usage__conversations">
+                {conversations.map((one) => (
+                  <li key={one.id}>
+                    <button
+                      type="button"
+                      className="usage__conversation"
+                      disabled={onOpenConversation === undefined}
+                      onClick={() => onOpenConversation?.(one.path)}
+                    >
+                      <span className="usage__conversationtitle">{one.title}</span>
+                      <span className="usage__conversationturns">{one.turns} turns</span>
+                      <span className="usage__conversationcost">{money(one.cost)}</span>
+                    </button>
                   </li>
                 ))}
               </ul>
-            )}
-          </section>
+            </section>
+          )}
 
-          <section className="usage__card">
-            <h2>Work and retries</h2>
-            {split === null ? (
-              <p>This settles when the current work finishes.</p>
-            ) : (
-              <div className="usage__split">
-                <p><span>Work you asked for</span><strong>{formatMoney(split.work)}</strong></p>
-                <p><span>Attempts that did not work</span><strong>{formatMoney(split.retry)}</strong></p>
-              </div>
-            )}
-          </section>
+          {split === null ? null : (
+            <p className="usage__retries">
+              Work you asked for {formatMoney(split.work)} · attempts that did not work{' '}
+              {formatMoney(split.retry)}
+            </p>
+          )}
         </div>
       )}
     </section>

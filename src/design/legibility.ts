@@ -649,16 +649,16 @@ export function saysPair(reading: Reading, fix?: Fix | null): string {
 
   if (reading.onlyBig) {
     const size = `Fine for a headline, but too ${pale ? 'pale' : 'dark'} at this size`;
-    return move === null ? `${size}.` : `${size} — ${move} would do it.`;
+    return move === null ? `${size}.` : `${size}: ${move} would do it.`;
   }
 
   const trouble = pale
     ? 'Too pale to read on this background'
     : 'Too dark to read on this background';
 
-  if (steps === 1) return `Nearly there — a step ${way} would do it.`;
-  if (move !== null) return `${trouble} — ${move} would do it.`;
-  if (steps >= STEPS.length) return `${trouble} — it needs to be much ${way}.`;
+  if (steps === 1) return `Nearly there: a step ${way} would do it.`;
+  if (move !== null) return `${trouble}: ${move} would do it.`;
+  if (steps >= STEPS.length) return `${trouble}: it needs to be much ${way}.`;
   return `${trouble}.`;
 }
 

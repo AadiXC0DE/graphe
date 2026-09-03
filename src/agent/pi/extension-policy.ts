@@ -21,19 +21,19 @@ export type Policy = 'on' | 'tools-only' | 'off';
 /** Every word this decision puts on screen. The switch belongs beside the model
  *  chip, which is where the hand already is when the run is being set up. */
 export const policyWords = {
-  label: 'Add-ons that start work on their own',
-  note: 'Some add-ons ask for another turn, or carry on after a reply is finished. With this off their tools still work — only the starting stops.',
+  label: 'Add-ons that start turns',
+  note: 'Some add-ons ask for another turn, or carry on after a reply is finished. With this off their tools still work; only the starting stops.',
   /** The three settings, as somebody would choose them. */
-  on: 'Let them',
+  on: 'On',
   toolsOnly: 'Tools only',
-  off: 'Off here',
+  off: 'Off',
 } as const;
 
 /** What a setting means, on the row under its name. */
 export function saysPolicy(policy: Policy): string {
-  if (policy === 'on') return 'Can start turns of its own';
-  if (policy === 'tools-only') return 'Its tools work; it cannot start a turn';
-  return 'Not running here';
+  if (policy === 'on') return 'Starts turns and runs tools';
+  if (policy === 'tools-only') return 'Runs tools only';
+  return 'Not loaded';
 }
 
 /**
@@ -66,7 +66,26 @@ export function policyFor(
   session: SessionKind,
   chosen?: Policy,
 ): Policy {
-  if (chosen !== undefined) return chosen;
+  if (chosen !== undefined && session === 'conversation') return chosen;
   if (card !== null && !card.orchestrating) return 'on';
-  return session === 'conversation' ? 'tools-only' : 'off';
+  /*
+   * A conversation gets the whole add-on, hooks and all.
+   *
+   * It used to get its tools without its hooks, which sounds cautious and is
+   * not: an add-on whose tool starts work and whose hook delivers the result is
+   * an add-on that launches and then never answers. Half an add-on is worse
+   * than none, because none is at least legible.
+   *
+   * What made the hooks dangerous — two things deciding when a turn begins — is
+   * handled where it belongs now. An add-on asking for a turn is one reason
+   * among the Continuation Authority's own, counted against the same budget and
+   * named out loud, and a lifecycle handler that stops answering is let go of
+   * rather than allowed to hold the settle.
+   *
+   * A board piece, a helper and a canvas block still get none of it. Nobody is
+   * sitting in front of those, and four of them each starting turns of their own
+   * is four loops nobody asked for.
+   */
+  if (session === 'conversation') return 'on';
+  return 'off';
 }

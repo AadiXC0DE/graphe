@@ -130,6 +130,15 @@ export type Desk = {
    */
   filing: { task: Task; startedAt: number } | null;
   /**
+   * Whether a turn is in flight, as the shell says it.
+   *
+   * Read off the shapes in `turns` for everything somebody typed, which is fine
+   * until the app sends a turn of its own: between "Step 4 of 12 · carrying on"
+   * and the first token there is nothing to read, and the composer said Send
+   * for a conversation that was already answering.
+   */
+  busy: boolean;
+  /**
    * Which conversation is on screen, as the shell addresses it. Null before the
    * shell has said — everything still works, it just cannot be addressed.
    */
@@ -173,6 +182,8 @@ export type Parked = {
   /** Job measurement belongs to the conversation whose session will settle. */
   doing?: { task: Task; startedAt: number } | null;
   counted?: number;
+  /** Whether a turn is in flight here. Same reason as `Desk.busy`. */
+  busy?: boolean;
 };
 
 /** A run of states somebody recorded on the page, and the project it was
@@ -272,6 +283,7 @@ function blankDesk(path: string, name: string): Desk {
     jobs: [],
     doing: null,
     filing: null,
+    busy: false,
     address: null,
     parked: {},
     order: [],
@@ -303,6 +315,7 @@ export function showThread(desks: Desks, project: string, address: string): Desk
       turns: wanted.turns,
       doing: wanted.doing ?? null,
       counted: wanted.counted ?? 0,
+      busy: wanted.busy ?? false,
       address,
       parked:
         desk.address === null
@@ -313,9 +326,30 @@ export function showThread(desks: Desks, project: string, address: string): Desk
                 turns: desk.turns,
                 doing: desk.doing,
                 counted: desk.counted,
+                busy: desk.busy,
               },
             },
     };
+  });
+}
+
+/**
+ * Move one conversation to another place in the row.
+ *
+ * The row is spatial memory, so where a tab sits is the person's to decide.
+ * `to` is where it lands in the row as it looks now, clamped: a drag that ends
+ * off the end of the strip means the end of the strip.
+ */
+export function moveThread(desks: Desks, project: string, address: string, to: number): Desks {
+  return changeDesk(desks, project, (desk) => {
+    const from = desk.order.indexOf(address);
+    if (from < 0) return desk;
+    const wanted = Math.max(0, Math.min(desk.order.length - 1, to));
+    if (wanted === from) return desk;
+    const order = [...desk.order];
+    order.splice(from, 1);
+    order.splice(wanted, 0, address);
+    return { ...desk, order };
   });
 }
 
@@ -424,6 +458,7 @@ export function receive(desks: Desks, notice: AgentNotice, at: number = Date.now
               turns: applyEvent(parked.turns, notice.event),
               doing: measured.doing,
               counted: measured.counted,
+              busy: busyAfter(parked.busy ?? false, notice.event),
             },
           },
           spent: applySpend(desk.spent, notice.event),
@@ -438,9 +473,18 @@ export function receive(desks: Desks, notice: AgentNotice, at: number = Date.now
       ...desk,
       turns: applyEvent(desk.turns, notice.event),
       spent: applySpend(desk.spent, notice.event),
+      busy: busyAfter(desk.busy, notice.event),
       ...measure(desk, notice, at),
     };
   });
+}
+
+/** Whether a turn is in flight after this event. The shell says so directly;
+ *  a settle is the end of one whatever else was said. */
+function busyAfter(busy: boolean, event: AgentNotice['event']): boolean {
+  if (event.type === 'busy') return event.on;
+  if (event.type === 'settled') return false;
+  return busy;
 }
 
 /**

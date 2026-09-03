@@ -98,7 +98,7 @@ export default function History({
         <section className="branches" aria-label={SAYS.branches}>
           <h3 className="branches__heading">{SAYS.branches}</h3>
 
-          <ul className="branches__list">
+          <ul className="branches__list scroll--auto">
             {branches.map((branch) => (
               <li key={branch.name}>
                 {branch.current ? (

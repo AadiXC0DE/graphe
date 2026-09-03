@@ -11,7 +11,7 @@
  * in a test, and it costs nothing.
  */
 
-export type Kind = 'helper' | 'server' | 'check' | 'lsp' | 'browser' | 'mcp' | 'other';
+export type Kind = 'tool' | 'helper' | 'server' | 'check' | 'lsp' | 'browser' | 'mcp' | 'other';
 
 export type Watcher = {
   started: (one: { pid: number; what: string; kind: Kind; project?: string }) => void;

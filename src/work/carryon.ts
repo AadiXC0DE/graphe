@@ -86,6 +86,6 @@ export function carryOnPrompt(next: string, done: number, total: number): string
   return [
     `Carry on with the checklist. ${String(done)} of ${String(total)} are done and the next is “${next}”.`,
     'Work through the rest of the list. Call step_done as each one lands.',
-    'Do not stop to report progress while steps are still unticked — a summary is not a step, and an advisor’s verdict is a second opinion on the work, not permission to leave the list unfinished.',
+    'Do not stop to report progress while steps are still unticked: a summary is not a step, and an advisor’s verdict is a second opinion on the work, not permission to leave the list unfinished.',
   ].join(' ');
 }

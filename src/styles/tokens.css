@@ -27,6 +27,12 @@
   --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
   /* Motion — hover and colour only */
   --ease-hover: ease;
+  /* The same two jobs, with the overshoot-free snap a sheet or a panel wants:
+     nearly all of the distance in the first third, then a long settle. */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+  /* Anything that slides in from an edge and can be dragged back out. */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 
   --dur-micro: 120ms;
   --dur-ui: 200ms;
@@ -35,6 +41,9 @@
      never given a number, so every exit in the app was running at the entrance
      speed. This is that rule, expressed once. */
   --dur-exit: 160ms;
+  /* One item after another in a list. Decorative: nothing may wait on it, so a
+     row that arrives last is still a row somebody can already click. */
+  --stagger: 40ms;
 
   /* Type. Satoshi is the face of the interface; the system list is the fallback
      while it loads and the off-machine list when it never does. */
@@ -123,7 +132,7 @@
   --text-faint: #6e6e68;
   --accent: #b8492c;
   --accent-text: #ffffff;
-  --accent-soft: #f6e9e4;
+  --accent-soft: #f6e3dc;
   /* Accent-coloured *text* sitting on --accent-soft — the "On screen" and "Open"
     badges. --accent on --accent-soft is 4.39:1, just under AA; this is 4.83:1
     there and 5.54:1 on --bg, so one token covers both places a badge can sit.
@@ -133,8 +142,14 @@
   /* The colour of a destructive press's hover. Text-level contrast, because it
      is read as text against whatever surface it lands on. */
   --danger: #b03528;
+  --bad: #b03528;
+  --good: #1f7a45;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
+
+  /* Zero unless the finish is glass, so the rules that blur read a real length
+     rather than nothing at all. */
+  --glass-blur: 0px;
 
   /* Selected text.
      Written once here rather than per theme, because it is a mix and the mix
@@ -188,9 +203,11 @@
     --text-faint: #87877f;
     --accent: #e0714d;
     --accent-text: #1a1a19;
-    --accent-soft: #2a1c17;
+    --accent-soft: #3a2119;
     --accent-ink: #e0714d;
     --danger: #e2574b;
+    --bad: #e2574b;
+    --good: #5fbf87;
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
     --shadow-md: 0 4px 20px rgb(0 0 0 / 0.4);
   }
@@ -210,9 +227,11 @@
   --text-faint: #6e6e68;
   --accent: #b8492c;
   --accent-text: #ffffff;
-  --accent-soft: #f6e9e4;
+  --accent-soft: #f6e3dc;
   --accent-ink: #ad4529;
   --danger: #b03528;
+  --bad: #b03528;
+  --good: #1f7a45;
 }
 
 :root[data-theme='dark'],
@@ -229,81 +248,9 @@
   --text-faint: #87877f;
   --accent: #e0714d;
   --accent-text: #1a1a19;
-  --accent-soft: #2a1c17;
+  --accent-soft: #3a2119;
   --accent-ink: #e0714d;
   --danger: #e2574b;
-}
-
-/* super — zinc #0A0A0B + amber. Darkest of the three darks.
-   AA: text 18.9 / muted 7.7 / faint 6.0 on bg; control 4.0 on bg (3:1 for
-   WCAG 1.4.11); accent-ink 10.8 on soft, 11.8 on bg; accentText 9.2 on accent. */
-:root[data-theme='super'] {
-  color-scheme: dark;
-  --bg: #0a0a0b;
-  --bg-raised: #18181b;
-  --bg-sunken: #050507;
-  --border: #27272a;
-  --border-strong: #3f3f46;
-  --border-control: #71717a;
-  --text: #fafafa;
-  --text-muted: #a1a1aa;
-  --text-faint: #8e8e96;
-  --accent: #f59e0b;
-  --accent-text: #0a0a0b;
-  --accent-soft: #1c1507;
-  --accent-ink: #fbbf24;
-  --danger: #ef4444;
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-md: 0 4px 20px rgb(0 0 0 / 0.5);
-}
-
-/* pink — rose hsl 340. Light, warm. Uses rose-50/100/200 tint.
-   AA: text 17.4 / muted 5.2 (hsl 340 30% 45% #955067) / faint 5.0 (hsl 340 20% 45% #8a5c6b) on bg;
-   faint 4.57 on sunken just clears; control 3.81 on bg / 3.49 on sunken (3:1);
-   accent-text 6.3 on accent, ink 7.3 on bg / 6.6 on soft.
-   The accent is rose-700 #be123c, not rose-600 #e11d48: the accent is read as
-   plain text in several places (skill eyebrows, code keywords), and #e11d48
-   measured 4.28:1 on --bg and 3.91:1 on --bg-sunken — under AA where it is
-   actually used. #be123c is 5.72 / 6.28 / 5.23. */
-:root[data-theme='pink'] {
-  color-scheme: light;
-  --bg: #fff1f2;
-  --bg-raised: #ffffff;
-  --bg-sunken: #ffe4e6;
-  --border: #fecdd3;
-  --border-strong: #fda4af;
-  --border-control: #7c7c7a;
-  --text: #1a0a13;
-  --text-muted: #955067;
-  --text-faint: #8a5c6b;
-  --accent: #be123c;
-  --accent-text: #ffffff;
-  --accent-soft: #ffe4e6;
-  --accent-ink: #9f1239;
-  --danger: #9f1239;
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
-  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
-}
-
-/* slate — #0f172a slate-900. Cool, desaturated dark blue.
-   AA: text 17.0 / muted 6.9 / faint 5.7 on bg; control 3.75 on bg / 3.07 on raised;
-   ink 10.4 on soft, accentText 9.4 on accent. */
-:root[data-theme='slate'] {
-  color-scheme: dark;
-  --bg: #0f172a;
-  --bg-raised: #1e293b;
-  --bg-sunken: #020617;
-  --border: #334155;
-  --border-strong: #475569;
-  --border-control: #64748b;
-  --text: #f8fafc;
-  --text-muted: #94a3b8;
-  --text-faint: #8293ad;
-  --accent: #38bdf8;
-  --accent-text: #020617;
-  --accent-soft: #0c1a2e;
-  --accent-ink: #7dd3fc;
-  --danger: #f87171;
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-md: 0 4px 20px rgb(0 0 0 / 0.5);
+  --bad: #e2574b;
+  --good: #5fbf87;
 }

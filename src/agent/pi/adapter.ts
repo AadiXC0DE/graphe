@@ -47,6 +47,13 @@ import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
 import { readAgentsMd } from '../../lib/agentsMd';
 import {
+  AGENTS_BUDGET,
+  PROMPT_BUDGET,
+  saysPromptSize,
+  standingWords,
+  withinBudget,
+} from './standing';
+import {
   ALWAYS_WORDS,
   alwaysFile,
   alwaysFrom,
@@ -920,6 +927,9 @@ export type GrapheSession = {
   /** What this session has kept running — servers, watchers, anything started
    *  to stay up. Empty for almost every sitting. */
   readonly running: readonly RunningPiece[];
+  /** Everything one of them has said since it started, whole. Reading it does
+   *  not move the cursor the agent's own reads use. */
+  runningSaid(id: string): string;
   /** Stop one of them by name. Resolves only once its process has gone. */
   stopRunning(id: string): Promise<boolean>;
   /** The extensions this folder brought with it, and which of them loaded.
@@ -969,12 +979,34 @@ type PiToolCallEvent = import('@earendil-works/pi-coding-agent').ToolCallEvent;
 type PiRuntime = Awaited<ReturnType<Pi['ModelRuntime']['create']>>;
 type PiAuthInteraction = Parameters<PiRuntime['login']>[2];
 
+/**
+ * The runtime, imported once.
+ *
+ * It is 810ms of import on this machine, and it used to be paid by whoever
+ * opened the first project — so the slowest thing the app ever does was the
+ * first thing somebody asked it to do. `warmUp` moves it to the idle moment
+ * after the window is on screen; the promise is shared, so a project opened
+ * before it finishes waits on the same one rather than starting a second.
+ */
+let piLoading: Promise<Pi> | null = null;
+
 async function loadPi(): Promise<Pi> {
+  piLoading ??= import('@earendil-works/pi-coding-agent');
   try {
-    return await import('@earendil-works/pi-coding-agent');
+    return await piLoading;
   } catch (cause) {
+    // A failed import must not be remembered as the answer: the next attempt
+    // deserves its own try, and its own error.
+    piLoading = null;
     throw new AdapterError('I could not start the part of me that does the work.', { cause });
   }
+}
+
+/** Start the import now, without waiting for it. Called when the window is up
+ *  and nothing is being asked of the machine. Never throws — a warm-up that
+ *  fails is a first project open that pays for itself, as it always did. */
+export function warmUp(): void {
+  void loadPi().catch(() => undefined);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1776,6 +1808,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
         : raw;
     if (event.type === 'tool-start') didSomething = true;
     if (event.type === 'error') failedThisRun = true;
+    /* An add-on's message inside a turn somebody asked for is part of that
+       turn. Only one that arrives with nothing running is a run nobody typed,
+       and that is the only one the authority has to hear about. */
+    if (event.type === 'extension-turn' && activePrompts > 0) return;
     /* A step refused by something outside Graphe. Graphe's own refusals never
        reach here as a tool result — they are said as `blocked`, with a reason
        the person has already read. This is a hook somebody installed saying no,
@@ -1891,7 +1927,11 @@ const MOST_AFTER_SAYINGS = 3;
   let agentsMdNote: string | null = null;
   if (options.projectRoot !== undefined && options.projectRoot !== '') {
     try {
-      agentsMdNote = await readAgentsMd(options.projectRoot);
+      const read = await readAgentsMd(options.projectRoot);
+      // Held to the same cap the budget holds it to. A 40 KB house-rules file
+      // would otherwise take most of the window before the work starts, and
+      // the rest of it is on disk for the model to read when it needs it.
+      agentsMdNote = read === null ? null : withinBudget(read, AGENTS_BUDGET, standingWords.agentsTrimmed);
     } catch {
       agentsMdNote = null;
     }
@@ -2223,16 +2263,32 @@ const MOST_AFTER_SAYINGS = 3;
       {
         name: 'graphe-standing',
         factory: (api) => {
+          /** Said once per sitting: a warning repeated every turn is a warning
+           *  nobody reads. */
+          const already = new Set<string>();
+          const sayOnce = (id: string, what: string): void => {
+            if (already.has(id)) return;
+            already.add(id);
+            options.onEvent({ type: 'notice', what });
+          };
           api.on('before_agent_start', async (_event, ctx) => {
             const block = await options.standing?.().catch(() => null);
-            const before = (ctx as { getSystemPrompt?: () => string }).getSystemPrompt?.() ?? '';
+            const was = (ctx as { getSystemPrompt?: () => string }).getSystemPrompt?.() ?? '';
+            /* Our own block is never cut: it is what holds the job together.
+               What is over budget is everything else, and a prompt too heavy
+               for a small model to hold a list in is a prompt that quietly
+               stops working. */
+            const room = PROMPT_BUDGET - (block?.length ?? 0);
+            const before =
+              was.length <= room ? was : withinBudget(was, room, standingWords.promptTrimmed);
+            const characters = before.length + (block?.length ?? 0);
             // Said whether or not there is a block, so the chip can show how
             // heavy the prompt has become before a small model stops coping.
-            options.onEvent({
-              type: 'prompt-size',
-              characters: before.length + (block?.length ?? 0),
-            });
-            if (block === null || block === undefined || block === '') return undefined;
+            options.onEvent({ type: 'prompt-size', characters });
+            if (before !== was) sayOnce('prompt-over-budget', saysPromptSize(was.length + (block?.length ?? 0)));
+            if (block === null || block === undefined || block === '') {
+              return before === was ? undefined : { systemPrompt: before };
+            }
             return { systemPrompt: `${before}\n\n${block}` };
           });
         },
@@ -2266,12 +2322,15 @@ const MOST_AFTER_SAYINGS = 3;
    * tools but loses its hooks in an ordinary conversation, because Graphe is
    * already deciding when a turn begins and two of those is the bug.
    */
-  withHookBudget(loader.getExtensions(), (over) => {
-    options.onEvent({
-      type: 'notice',
-      what: `${over.extension} took too long on ${over.event} and was left to it.`,
+  const budgetHooks = (): void => {
+    withHookBudget(loader.getExtensions(), (over) => {
+      options.onEvent({
+        type: 'notice',
+        what: `${over.extension} took too long on ${over.event} and was left to it.`,
+      });
     });
-  });
+  };
+  budgetHooks();
   for (const one of loadedExtensions) {
     const where = (one as { resolvedPath?: string; path?: string }).resolvedPath ?? '';
     if (!cards.has(where)) continue;
@@ -2558,7 +2617,7 @@ const MOST_AFTER_SAYINGS = 3;
         });
         const where =
           piece.address === null
-            ? 'It has not printed an address yet — ask running() again in a moment.'
+            ? 'It has not printed an address yet. Ask running() again in a moment.'
             : `at ${piece.address}`;
         return [
           `${already ? 'That is already running' : 'Started and left running'} ${where}`,
@@ -2761,6 +2820,9 @@ const MOST_AFTER_SAYINGS = 3;
       // second is somebody adding to work already going, and stopping that to
       // put a form up is exactly what this must never do.
       if (activePrompts === 0) {
+        // Again before every run: an add-on that registered a handler inside
+        // `session_start` registered it after the first sweep went past.
+        budgetHooks();
         asksLeft = 'open';
         runNumber += 1;
         // Said rather than inferred. The window used to work out that it was
@@ -3142,6 +3204,10 @@ const MOST_AFTER_SAYINGS = 3;
 
     get running(): readonly RunningPiece[] {
       return keptRunning.list();
+    },
+
+    runningSaid(id: string): string {
+      return keptRunning.said(id, { all: true });
     },
 
     async stopRunning(id: string): Promise<boolean> {

@@ -5,10 +5,12 @@ import './Drift.css';
 
 type Props = {
   findings: readonly Finding[];
-  /** The file they came from, named as a designer would name it. Optional. */
+  /** The file they came from, so each row can say where it is. */
   where?: string;
   /** Absent means the list is a report and nothing more. */
   onUse?: (finding: Finding) => void;
+  /** Every one of them at once. */
+  onUseAll?: (findings: readonly Finding[]) => void;
   /** "Show me" is on: the exact values sit under each sentence. */
   detail?: boolean;
 };
@@ -18,79 +20,74 @@ export const SAYS = {
   heading: 'Not from your styles',
   hint: 'Written into the file by hand, a hair off one of your own values.',
   use: 'Use yours',
+  useAll: 'Fix all',
   wrote: 'Written here',
   yours: 'Yours',
   more: (count: number): string => `Show ${String(count)} more`,
-  at: (line: number) => `line ${String(line)}`,
+  at: (file: string, line: number): string =>
+    file === '' ? `line ${String(line)}` : `${file}:${String(line)}`,
 } as const;
 
 /** How many are drawn before the rest are offered. */
 const AT_ONCE = 20;
 
-/** The written value and the project's own, touching, so the eye does the
- *  comparing. Two swatches with a gap between them is two colours; two swatches
- *  that meet is one seam you either see or do not. */
-function Pair({ finding }: { finding: Finding }) {
-  /* Decorative to a screen reader: the sentence beside it is the finding. */
-  if (finding.kind === 'colour') {
-    return (
-      <span className="drift__pair" aria-hidden="true">
-        <span className="drift__well" style={{ background: finding.wrote }} title={SAYS.wrote} />
-        <span
-          className="drift__well"
-          style={{ background: finding.mine.value }}
-          title={SAYS.yours}
-        />
-      </span>
-    );
+/** A colour is judged by eye; a length is a number beside a number. */
+function Swatch({ value, kind, title }: { value: string; kind: Finding['kind']; title: string }) {
+  if (kind === 'colour') {
+    return <span className="drift__well" style={{ background: value }} title={title} />;
   }
-  return (
-    <span className="drift__pair drift__pair--sizes" aria-hidden="true">
-      <span className="drift__amount" title={SAYS.wrote}>
-        {finding.wrote}
-      </span>
-      <span className="drift__amount drift__amount--mine" title={SAYS.yours}>
-        {finding.mine.value}
-      </span>
-    </span>
-  );
+  return null;
 }
 
 /**
  * Values that were nearly the project's own.
  *
- * The sentence is the claim and the two swatches are the evidence, so they sit
- * on the same line and the swatches come first — a near-miss is far more
- * convincing seen than described. One press puts the project's value back.
+ * A list of places rather than a list of sentences: where it is, what is
+ * written there, what belongs there, and one press to put it right. The
+ * evidence is the two values touching, because a near-miss is far more
+ * convincing seen than described.
  */
-export default function Drift({ findings, where, onUse, detail = false }: Props) {
+export default function Drift({ findings, where, onUse, onUseAll, detail = false }: Props) {
   const [room, setRoom] = useState(AT_ONCE);
   if (findings.length === 0) return null;
 
   const drawn = findings.slice(0, room);
   const rest = findings.length - drawn.length;
+  const file = where ?? '';
 
   return (
     <section className="drift" aria-label={SAYS.heading}>
       <header className="drift__head">
         <h2 className="drift__heading">{SAYS.heading}</h2>
-        <p className="drift__count">{where ?? saysAll(findings)}</p>
+        <p className="drift__count">{saysAll(findings)}</p>
+        {onUseAll === undefined ? null : (
+          <button type="button" className="drift__all" onClick={() => onUseAll(findings)}>
+            {SAYS.useAll}
+          </button>
+        )}
       </header>
 
       <ul className="drift__list">
         {drawn.map((finding) => (
           <li key={finding.id} className={`drift__row drift__row--${finding.confidence}`}>
-            <Pair finding={finding} />
+            <code className="drift__at">{SAYS.at(file, finding.line)}</code>
 
-            <span className="drift__text">
-              <span className="drift__says" id={`drift-${finding.id}`}>
-                {finding.says}
-              </span>
-              {detail ? (
-                <span className="drift__detail">
-                  {finding.detail} · {SAYS.at(finding.line)}
-                </span>
-              ) : null}
+            <span className="drift__wrote">
+              <Swatch value={finding.wrote} kind={finding.kind} title={SAYS.wrote} />
+              <span className="drift__amount">{finding.wrote}</span>
+            </span>
+
+            <span className="drift__arrow" aria-hidden="true">
+              →
+            </span>
+
+            <span className="drift__mine">
+              <Swatch value={finding.mine.value} kind={finding.kind} title={SAYS.yours} />
+              <span className="drift__amount drift__amount--mine">{finding.use}</span>
+            </span>
+
+            <span className="drift__says" id={`drift-${finding.id}`}>
+              {detail ? finding.detail : finding.says}
             </span>
 
             {onUse === undefined ? null : (

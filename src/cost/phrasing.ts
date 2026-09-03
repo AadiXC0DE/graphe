@@ -242,9 +242,10 @@ export const nothingSpentYet =
   'Nothing has been spent in this project yet, so there is nothing to break down.';
 
 /** Shown beside the split, once, so the number is never mistaken for a charge
- *  from us. It is also the reason we can show it at all. */
+ *  from us. Every call was billed, the ones that did not work included; what
+ *  this says is whose bill it is on. */
 export const retryHonesty =
-  'Attempts that didn’t work are on me, and we take no cut of any of it: you pay your own account directly.';
+  'All of it went to your own account, the attempts that didn’t work included. Graphe takes no cut.';
 
 /* ------------------------------------------------------------- the ceiling */
 

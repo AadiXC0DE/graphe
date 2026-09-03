@@ -1,6 +1,6 @@
 # site
 
-The landing page. Plain HTML, CSS and one module of JavaScript — no build step, no
+The landing page. Plain HTML, CSS and one module of JavaScript: no build step, no
 dependencies, no framework. Open `index.html` and it works.
 
 ```
@@ -25,7 +25,7 @@ node site/serve.mjs
 ```
 
 Then <http://localhost:4321>. Any static server will do; there is nothing to
-compile, and nothing to install — `serve.mjs` is forty lines of `node:http`.
+compile, and nothing to install. `serve.mjs` is forty lines of `node:http`.
 
 ## The pictures
 
@@ -39,11 +39,11 @@ node site/scripts/optimise.mjs   # resizes and encodes them as WebP (needs `brew
 ```
 
 `shots.mjs` starts the dev server if nothing is serving, walks the app the way a
-person would — opens a project, asks for something, opens each view — and captures
+person would (opens a project, asks for something, opens each view) and captures
 both themes. A server you are already running is used as-is and left alone.
 
 `optimise.mjs` encodes everything it finds in `shots/`, which is more than the page
-uses — only what `index.html` names is kept in `web/`. Delete the rest after a run.
+uses. Only what `index.html` names is kept in `web/`. Delete the rest after a run.
 
 Some shots are hand-cropped from a whole-window capture (`crop-*.png`) with `sips`,
 because a detail reads better than a whole screen. Re-crop those by hand if the
@@ -57,14 +57,14 @@ saves bytes. Leave it out of `optimise.mjs`'s output.
 
 Static hosting, any of it. The page has no server side.
 
-- **Vercel / Netlify** — point the project at this folder, no build command, output
+- **Vercel / Netlify**: point the project at this folder, no build command, output
   directory `.`
-- **GitHub Pages** — publish from `/site` on the default branch
-- **Anything else** — copy the folder up
+- **GitHub Pages**: publish from `/site` on the default branch
+- **Anything else**: copy the folder up
 
 ## Two things to change before launch
 
 - The download button points at the repository's releases page. Point it at the real
   download once there is one.
 - The install line names the Homebrew tap from `Casks/graphe.rb`. It is a template
-  until the tap exists — check it works before promising it.
+  until the tap exists. Check it works before promising it.

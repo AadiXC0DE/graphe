@@ -22,10 +22,30 @@ describe('git overview — reading git status text', () => {
       unstaged: 0,
       staged: 0,
       untracked: 0,
+      changedPaths: 0,
       files: [],
+      // The porcelain format carries no line totals; whoever asks for the
+      // status reads them separately.
+      added: 0,
+      removed: 0,
       ahead: 0,
       behind: 0,
     });
+  });
+
+  it('counts a file once, however many sides of it changed', () => {
+    const raw = [
+      '# branch.head design',
+      tracked('.M', 'src/App.tsx'),
+      tracked('M.', 'package.json'),
+      tracked('MM', 'README.md'),
+      '? public/hero.svg',
+    ].join('\n');
+    const snapshot = parseGitStatus(raw);
+    // Four files, and README.md is both staged and edited again: the three
+    // counts add up to five.
+    expect(snapshot.unstaged + snapshot.staged + snapshot.untracked).toBe(5);
+    expect(snapshot.changedPaths).toBe(4);
   });
 
   it('counts staged and unstaged work separately', () => {

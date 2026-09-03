@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { advisorSwitchWords, advisorWords, worthHaving } from '../agent/advisor';
-import { policyWords, type Policy } from '../agent/pi/extension-policy';
-import { saysPromptSize } from '../agent/pi/standing';
+import { createPortal } from 'react-dom';
+
+import { useAnchored } from '../lib/anchored';
+import { advisorWords, worthHaving } from '../agent/advisor';
 import type { ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
 import { thinkingLevels } from '../lib/thinking';
@@ -26,17 +27,9 @@ type Props = {
    *  answer yet, which leaves that model's own setting standing. */
   advisorThinking?: ThinkingLevel | undefined;
   onAdvisorThinking?: (choice: ModelChoice, level: ThinkingLevel) => void;
-  /** The two gates the advisor can hold, both off by default. Asking a second
-   *  model before saying a job is done turns "finish" into "report"; asking it
-   *  every time a command repeats fires on running the tests three times. */
-  advisorGates?: { completionGate: boolean; loopGate: boolean };
-  onAdvisorGate?: (which: 'completionGate' | 'loopGate', on: boolean) => void;
-  /** Whether add-ons that start work of their own are on for this conversation.
-   *  Off means their tools still work and their hooks do not. */
-  addons?: Policy;
-  onAddons?: (choice: Policy) => void;
-  /** How heavy the system prompt has become, in characters. */
-  promptSize?: number | null;
+  /** Open Settings on the Models page, where the gates and the rest of the
+   *  advisor live. Left off, the link is not offered. */
+  onMoreAdvisor?: () => void;
   /** What the chosen model was measured doing on a long job. Null for one
    *  nothing has measured, which is most of them. */
   longJobs?: string | null;
@@ -59,6 +52,10 @@ type Offer = {
    *  cannot are different claims. */
   takesImages: boolean | null;
 };
+
+/** The link at the foot of the advisor view. Named for where it lands, so the
+ *  press is not a surprise. */
+export const MORE_ADVISOR = 'More advisor settings';
 
 export const SWAP_WORDS = {
   losesPictures: 'Reads no pictures',
@@ -111,17 +108,18 @@ export default function ThinkingWith({
   onAdvisor,
   advisorThinking,
   onAdvisorThinking,
-  advisorGates,
-  onAdvisorGate,
-  addons,
-  onAddons,
-  promptSize = null,
+  onMoreAdvisor,
   longJobs = null,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'models' | 'thinking' | 'advisor' | 'advisorthinking'>('models');
   const root = useRef<HTMLDivElement>(null);
+  /* Placed from the chip's own rectangle rather than from whichever ancestor
+     happens to be positioned: in the composer that is the row, in Settings it
+     is the sheet, and the menu landed off the top right of the window. */
+  const menu = useRef<HTMLDivElement>(null);
+  const at = useAnchored(root, open, bare === true ? 'below-right' : 'above-left');
 
   /* Flat, because the provider is a heading in the list rather than a level to
      navigate into. */
@@ -213,7 +211,10 @@ export default function ThinkingWith({
   useEffect(() => {
     if (!open) return;
     const away = (event: MouseEvent) => {
-      if (root.current !== null && !root.current.contains(event.target as Node)) setOpen(false);
+      const inside =
+        root.current?.contains(event.target as Node) === true ||
+        menu.current?.contains(event.target as Node) === true;
+      if (!inside) setOpen(false);
     };
     const key = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -280,7 +281,7 @@ export default function ThinkingWith({
                 current === null
                   ? 'Nothing chosen yet. This is the one that will answer'
                   : `${current.providerName} · ${current.label}`
-              }${advisingNow ? ` — ${advisorWords.advises}: ${advising.label}` : ''}`
+              }${advisingNow ? ` · ${advisorWords.advises}: ${advising.label}` : ''}`
         }
       >
         <span className="thinking__dot" aria-hidden="true" />
@@ -301,9 +302,15 @@ export default function ThinkingWith({
         )}
       </button>
 
-      {open && !nothingConnected ? (
+      {/* Not until it has been measured: an unplaced menu is a static block at
+          the top of the body for one frame, which is exactly where it was seen
+          landing. */}
+      {open && at !== null && !nothingConnected ? (
+        createPortal(
         <div
           className="thinking__menu"
+          ref={menu}
+          style={at ?? undefined}
           role="dialog"
           aria-label="Choose a model, how long it thinks, and who advises"
         >
@@ -328,7 +335,7 @@ export default function ThinkingWith({
                 />
               ) : null}
 
-              <div className="thinking__list" role="listbox" aria-label="Which model should answer">
+              <div className="thinking__list scroll--auto" role="listbox" aria-label="Which model should answer">
                 {shown.length === 0 ? (
                   <p className="thinking__empty">Nothing here matches that.</p>
                 ) : (
@@ -367,6 +374,13 @@ export default function ThinkingWith({
                               {givesUp === null ? null : (
                                 <span className="thinking__optionloses">{givesUp}</span>
                               )}
+                              {/* What this one was measured doing on a long
+                                  list, read before somebody starts a night's
+                                  work on a model known to stop early. Only the
+                                  one answering has ever been measured. */}
+                              {isChosen && longJobs !== null ? (
+                                <span className="thinking__optionlong">{longJobs}</span>
+                              ) : null}
                             </span>
                           </button>
                         );
@@ -428,65 +442,6 @@ export default function ThinkingWith({
                 </div>
               ) : null}
 
-              {/* The two gates, behind the same control as the model that
-                  holds them. Both off: a second opinion is advice on the work,
-                  and neither of these was ever somebody's decision. */}
-              {offerAdvisor && advisorGates !== undefined && onAdvisorGate !== undefined ? (
-                <>
-                  <button
-                    type="button"
-                    className="thinking__tune thinking__tune--words"
-                    onClick={() => onAdvisorGate('completionGate', !advisorGates.completionGate)}
-                    aria-pressed={advisorGates.completionGate}
-                    title={advisorSwitchWords.completionGate.hint}
-                  >
-                    <span>{advisorSwitchWords.completionGate.label}</span>
-                    <span className="thinking__tunevalue">
-                      {advisorGates.completionGate ? 'On' : 'Off'}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="thinking__tune thinking__tune--words"
-                    onClick={() => onAdvisorGate('loopGate', !advisorGates.loopGate)}
-                    aria-pressed={advisorGates.loopGate}
-                    title={advisorSwitchWords.loopGate.hint}
-                  >
-                    <span>{advisorSwitchWords.loopGate.label}</span>
-                    <span className="thinking__tunevalue">
-                      {advisorGates.loopGate ? 'On' : 'Off'}
-                    </span>
-                  </button>
-                </>
-              ) : null}
-
-              {/* And the one about add-ons, in the same place for the same
-                  reason: what starts a turn is a question about how the model
-                  runs, so it belongs beside the model. */}
-              {addons !== undefined && onAddons !== undefined ? (
-                <button
-                  type="button"
-                  className="thinking__tune thinking__tune--words"
-                  onClick={() => onAddons(addons === 'on' ? 'tools-only' : 'on')}
-                  aria-pressed={addons === 'on'}
-                  title={policyWords.note}
-                >
-                  <span>{policyWords.label}</span>
-                  <span className="thinking__tunevalue">{addons === 'on' ? 'On' : 'Off'}</span>
-                </button>
-              ) : null}
-
-              {/* What this model was measured doing on a long list, when
-                  anybody has measured it. Said before somebody starts a night's
-                  work on one known to stop early, rather than after. */}
-              {longJobs !== null || promptSize !== null ? (
-                <p className="thinking__note">
-                  {[longJobs, promptSize === null ? null : saysPromptSize(promptSize)]
-                    .filter((one) => one !== null)
-                    .join(' · ')}
-                </p>
-              ) : null}
-
               <button
                 type="button"
                 className="thinking__more"
@@ -520,7 +475,7 @@ export default function ThinkingWith({
                     </p>
                   )}
 
-                  <div className="thinking__list" role="listbox" aria-label={advisorWords.advises}>
+                  <div className="thinking__list scroll--auto" role="listbox" aria-label={advisorWords.advises}>
                     {/* First, so turning it off is one press and never a hunt. */}
                     <button
                       type="button"
@@ -599,6 +554,23 @@ export default function ThinkingWith({
                   ) : null}
 
                   <p className="thinking__said thinking__said--foot">{advisorWords.advisesNote}</p>
+
+                  {/* The precise controls live behind the same chip, one press
+                      further in: the gates are read a few times a year, and a
+                      row for each of them here would cost every reader of this
+                      menu two lines. */}
+                  {onMoreAdvisor === undefined ? null : (
+                    <button
+                      type="button"
+                      className="thinking__more"
+                      onClick={() => {
+                        setOpen(false);
+                        onMoreAdvisor();
+                      }}
+                    >
+                      {MORE_ADVISOR}
+                    </button>
+                  )}
                 </>
             </>
           ) : view === 'advisorthinking' && advising !== null && onAdvisorThinking !== undefined ? (
@@ -648,7 +620,9 @@ export default function ThinkingWith({
               />
             </>
           ) : null}
-        </div>
+        </div>,
+        document.body,
+        )
       ) : null}
     </div>
   );

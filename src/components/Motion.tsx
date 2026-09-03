@@ -1,27 +1,18 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePrefersReducedMotion } from '../lib/motion';
 import {
-  FEELS,
-  curvePath,
-  easingForFeel,
-  feelOf,
   groupMoves,
   judgeMotion,
-  previewKind,
   readEasing,
   saidEasing,
-  sayEasing,
   sayTime,
   sayWhat,
-  timeSteps,
   type Change,
   type Easing,
-  type Feel,
   type Motion as Movement,
-  type MotionKind,
   type Move,
+  type MoveGroup,
   type Note,
-  type Sequence,
 } from '../motion/read';
 import './Motion.css';
 
@@ -29,65 +20,43 @@ type Props = {
   motion: Movement;
   /** Where it lives, said once so nobody has to wonder what is being changed. */
   file: string;
-  /** Called when a nudge settles — on release, not on every frame. */
+  /** Called when an edit settles — on commit, not on every keystroke. */
   onNudge: (move: Move, change: Change) => void;
   busy?: boolean;
 };
 
-/** How many of one kind are drawn before the rest are offered. Each row carries
- *  a demonstration, a curve and four controls, so a project with hundreds would
- *  otherwise mount thousands of live elements nobody has looked at. */
-const AT_ONCE = 24;
-
-/** Past this many in one shelf, finding one by eye stops working. */
+/** Past this many in one table, finding one by eye stops working. */
 const FIND_APPEARS_AT = 12;
 
 export const SAYS = {
-  heading: 'How it moves',
+  heading: 'Motion',
   none: 'Nothing in this project moves yet.',
-  find: 'Find one',
-  more: (count: number): string => `Show ${String(count)} more`,
+  find: 'Find a movement',
   nothingFound: 'Nothing here matches that.',
   where: (name: string): string => `From ${name}`,
-  play: 'Watch it',
-  howLong: 'How long',
-  howItGoes: 'How it starts and stops',
-  exact: 'The shape, in numbers',
-  still:
-    'You have asked for less movement, so nothing here plays by itself. The shape and the lengths are still yours to change.',
-  places: (count: number): string =>
-    count === 1 ? 'in one place' : `in ${String(count)} places`,
-  after: (time: string): string => `after ${time}`,
-  again: 'over and over',
+  element: 'Element',
+  duration: 'Duration',
+  easing: 'Easing',
+  still: 'You have asked for less movement, so nothing here plays by itself.',
+  places: (count: number): string => (count === 1 ? 'in one place' : `in ${String(count)} places`),
 } as const;
 
-/** The shelf nobody came here for starts shut. */
-const SHUT_AT_FIRST: readonly MotionKind[] = ['other'];
-
-/** How long the demonstration rests at the far end before it comes back, so the
- *  arrival can be watched rather than glimpsed. */
-const REST = 320;
-
 /**
- * The movement a project already has, where it can be watched.
+ * The movement a project already has, as a table.
  *
- * Movement is the one part of an interface nobody can review by reading it. So
- * each one performs itself on demand, the curve is drawn rather than named, and
- * both the length and the shape move under the hand without asking anybody.
+ * The same shape as the styles: every movement on one line, with its length and
+ * its curve where they can be read against each other and changed in place. A
+ * project's timing is a system, and a system is read in a column.
  */
 export default function Motion({ motion, file, onNudge, busy }: Props) {
   const all = useMemo(() => groupMoves(motion.moves), [motion.moves]);
   const notes = useMemo(() => judgeMotion(motion), [motion]);
-  const [shut, setShut] = useState<ReadonlySet<MotionKind>>(() => new Set(SHUT_AT_FIRST));
   const [term, setTerm] = useState('');
-  /** How many of each shelf are drawn. Grows when somebody asks for more. */
-  const [showing, setShowing] = useState<Readonly<Record<string, number>>>({});
   const still = usePrefersReducedMotion();
-  const base = useId();
 
   const findable = motion.moves.length > FIND_APPEARS_AT;
+  const wanted = term.trim().toLowerCase();
   const groups = useMemo(() => {
-    const wanted = term.trim().toLowerCase();
     if (wanted === '') return all;
     return all
       .map((group) => ({
@@ -99,7 +68,7 @@ export default function Motion({ motion, file, onNudge, busy }: Props) {
         ),
       }))
       .filter((group) => group.moves.length > 0);
-  }, [all, term]);
+  }, [all, wanted]);
 
   const perMove = useMemo(() => {
     const found = new Map<string, Note[]>();
@@ -116,13 +85,6 @@ export default function Motion({ motion, file, onNudge, busy }: Props) {
 
   const overall = notes.filter((note) => note.move === null);
 
-  const toggle = (id: MotionKind): void =>
-    setShut((was) => {
-      const next = new Set(was);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-
   return (
     <div className="motion">
       {still ? <p className="motion__still">{SAYS.still}</p> : null}
@@ -133,8 +95,6 @@ export default function Motion({ motion, file, onNudge, busy }: Props) {
         </p>
       ))}
 
-      {/* The field waits until a column of these is too long to read at a
-          glance; before that it is one more thing in the way. */}
       {findable ? (
         <input
           className="motion__find"
@@ -148,227 +108,151 @@ export default function Motion({ motion, file, onNudge, busy }: Props) {
 
       {groups.length === 0 ? <p className="motion__none">{SAYS.nothingFound}</p> : null}
 
-      {groups.map((group) => {
-        const open = !shut.has(group.id);
-        const panel = `${base}-${group.id}`;
-        /* Only what has been asked for is mounted. Each row is a live
-           demonstration, so drawing the tail of a long shelf costs real
-           frames for something nobody has scrolled to. */
-        const room = showing[group.id] ?? AT_ONCE;
-        const drawn = group.moves.slice(0, room);
-        const rest = group.moves.length - drawn.length;
-        return (
-          <section className="motion__group" key={group.id}>
-            <button
-              type="button"
-              className={`motion__band${open ? ' motion__band--open' : ''}`}
-              aria-expanded={open}
-              aria-controls={panel}
-              onClick={() => toggle(group.id)}
-            >
-              <span className="motion__caret" aria-hidden="true" />
-              <span className="motion__shelf">{group.title}</span>
-              <span className="motion__count">{group.moves.length}</span>
-            </button>
-
-            <ul className="motion__body" id={panel} hidden={!open}>
-              {drawn.map((move) => (
-                <One
-                  key={move.id}
-                  move={move}
-                  sequences={motion.sequences}
-                  notes={perMove.get(move.id) ?? []}
-                  onNudge={onNudge}
-                  busy={busy === true}
-                  still={still}
-                />
-              ))}
-            </ul>
-
-            {open && rest > 0 ? (
-              <button
-                type="button"
-                className="motion__more"
-                onClick={() => setShowing({ ...showing, [group.id]: room + AT_ONCE })}
-              >
-                {SAYS.more(Math.min(rest, AT_ONCE))}
-              </button>
-            ) : null}
-          </section>
-        );
-      })}
+      {groups.map((group) => (
+        <Shelf
+          key={group.id}
+          group={group}
+          notes={perMove}
+          onNudge={onNudge}
+          busy={busy === true}
+        />
+      ))}
 
       <p className="motion__from">{SAYS.where(file)}</p>
     </div>
   );
 }
 
-function One({
-  move,
-  sequences,
+function Shelf({
+  group,
   notes,
   onNudge,
   busy,
-  still,
+}: {
+  group: MoveGroup;
+  notes: ReadonlyMap<string, readonly Note[]>;
+  onNudge: (move: Move, change: Change) => void;
+  busy: boolean;
+}) {
+  return (
+    <table className="motion__table">
+      <caption className="motion__caption">
+        {group.title}
+        <span className="motion__count">{group.moves.length}</span>
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">{SAYS.element}</th>
+          <th scope="col">{SAYS.duration}</th>
+          <th scope="col">{SAYS.easing}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {group.moves.map((move) => (
+          <One
+            key={move.id}
+            move={move}
+            notes={notes.get(move.id) ?? []}
+            onNudge={onNudge}
+            busy={busy}
+          />
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function One({
+  move,
+  notes,
+  onNudge,
+  busy,
 }: {
   move: Move;
-  sequences: readonly Sequence[];
   notes: readonly Note[];
   onNudge: (move: Move, change: Change) => void;
   busy: boolean;
-  still: boolean;
 }) {
-  const [duration, setDuration] = useState(move.duration);
-  const [easing, setEasing] = useState<Easing>(move.easing);
-  const [typed, setTyped] = useState(() => saidEasing(move.easing));
-  const [playing, setPlaying] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [time, setTime] = useState(() => sayTime(move.duration));
+  const [curve, setCurve] = useState(() => saidEasing(move.easing));
 
-  /* Local while the hand is moving; theirs the moment anybody else changes it. */
-  useEffect(() => setDuration(move.duration), [move.duration]);
-  useEffect(() => {
-    setEasing(move.easing);
-    setTyped(saidEasing(move.easing));
-  }, [move.easing]);
-  useEffect(
-    () => () => {
-      if (timer.current !== null) clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  const steps = useMemo(() => timeSteps(move.duration), [move.duration]);
-  const shows = previewKind(move, sequences);
-  const where = move.places.map((place) => place.selector).join(', ');
-
-  const play = (): void => {
-    if (timer.current !== null) clearTimeout(timer.current);
-    setPlaying(true);
-    const howLong = still ? 0 : duration + move.delay;
-    timer.current = setTimeout(() => setPlaying(false), howLong + REST);
-  };
+  /* Local while it is being typed; theirs the moment anybody else changes it. */
+  useEffect(() => setTime(sayTime(move.duration)), [move.duration]);
+  useEffect(() => setCurve(saidEasing(move.easing)), [move.easing]);
 
   const settleTime = (): void => {
-    if (duration !== move.duration) onNudge(move, { duration });
+    const read = readTime(time);
+    if (read === null || read === move.duration) {
+      setTime(sayTime(move.duration));
+      return;
+    }
+    onNudge(move, { duration: read });
   };
 
-  const take = (next: Easing): void => {
-    setEasing(next);
-    setTyped(saidEasing(next));
-    if (saidEasing(next) !== saidEasing(move.easing)) onNudge(move, { easing: next });
+  const settleCurve = (): void => {
+    const read: Easing | null = readEasing(curve);
+    if (read === null || saidEasing(read) === saidEasing(move.easing)) {
+      setCurve(saidEasing(move.easing));
+      return;
+    }
+    onNudge(move, { easing: read });
   };
 
-  const readTyped = (): void => {
-    const next = readEasing(typed);
-    if (next === null) setTyped(saidEasing(easing));
-    else take(next);
-  };
+  const where = move.places.map((place) => place.selector).join(', ');
 
   return (
-    <li className="motion__one">
-      <div className="motion__head">
-        <span className="motion__what">{sayWhat(move)}</span>
+    <tr className="motion__row">
+      <th scope="row" className="motion__what">
+        <span className="motion__name">{sayWhat(move)}</span>
         <span className="motion__place" title={where}>
           {SAYS.places(move.places.length)}
         </span>
-        <span className="motion__value">{sayTime(duration)}</span>
-      </div>
-
-      <div className="motion__show">
-        <button
-          type="button"
-          className="motion__stage"
-          onClick={play}
-          disabled={busy}
-          aria-label={`${SAYS.play}: ${sayWhat(move)}`}
-        >
-          <span
-            className="motion__thing"
-            data-shows={shows}
-            data-playing={playing ? 'yes' : 'no'}
-            style={{
-              transitionDuration: `${String(still ? 0 : duration)}ms`,
-              transitionDelay: `${String(still ? 0 : move.delay)}ms`,
-              transitionTimingFunction: saidEasing(easing),
-            }}
-          />
-          <span className="motion__cue">{SAYS.play}</span>
-        </button>
-
-        <svg
-          className="motion__graph"
-          viewBox="-12 -26 124 152"
-          role="img"
-          aria-label={sayEasing(easing)}
-        >
-          <path className="motion__even" d="M 0 100 L 100 0" vectorEffect="non-scaling-stroke" />
-          <path
-            className="motion__curve"
-            d={curvePath(easing, 100, 100, 28)}
-            vectorEffect="non-scaling-stroke"
-          />
-        </svg>
-      </div>
-
-      <label className="motion__row">
-        <span className="motion__label">{SAYS.howLong}</span>
+        {notes.map((note) => (
+          <span className="motion__note" key={note.id}>
+            {note.says}
+          </span>
+        ))}
+      </th>
+      <td>
         <input
-          type="range"
-          className="motion__slider"
-          min={0}
-          max={Math.max(0, steps.length - 1)}
-          step={1}
-          value={Math.max(0, steps.indexOf(duration))}
+          className="motion__value"
+          aria-label={`${SAYS.duration}: ${sayWhat(move)}`}
+          value={time}
+          spellCheck={false}
           disabled={busy}
-          onChange={(event) => setDuration(steps[Number(event.target.value)] ?? duration)}
-          onPointerUp={settleTime}
-          onKeyUp={settleTime}
+          onChange={(event) => setTime(event.target.value)}
+          onBlur={settleTime}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') settleTime();
+            if (event.key === 'Escape') setTime(sayTime(move.duration));
+          }}
         />
-      </label>
-
-      <label className="motion__row">
-        <span className="motion__label">{SAYS.howItGoes}</span>
-        <select
-          className="motion__feel"
-          value={feelOf(easing)}
+      </td>
+      <td>
+        <input
+          className="motion__value motion__value--curve"
+          aria-label={`${SAYS.easing}: ${sayWhat(move)}`}
+          value={curve}
+          spellCheck={false}
           disabled={busy}
-          onChange={(event) => take(easingForFeel(event.target.value as Feel))}
-        >
-          {FEELS.map((feel) => (
-            <option key={feel.id} value={feel.id}>
-              {feel.name}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <p className="motion__says">{sayEasing(easing)}</p>
-
-      <input
-        className="motion__exact"
-        aria-label={SAYS.exact}
-        value={typed}
-        spellCheck={false}
-        disabled={busy}
-        onChange={(event) => setTyped(event.target.value)}
-        onBlur={readTyped}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') readTyped();
-        }}
-      />
-
-      {move.delay > 0 || !Number.isFinite(move.repeats) ? (
-        <p className="motion__meta">
-          {move.delay > 0 ? <span>{SAYS.after(sayTime(move.delay))}</span> : null}
-          {Number.isFinite(move.repeats) ? null : <span>{SAYS.again}</span>}
-        </p>
-      ) : null}
-
-      {notes.map((note) => (
-        <p className="motion__note" key={note.id}>
-          {note.says}
-        </p>
-      ))}
-    </li>
+          onChange={(event) => setCurve(event.target.value)}
+          onBlur={settleCurve}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') settleCurve();
+            if (event.key === 'Escape') setCurve(saidEasing(move.easing));
+          }}
+        />
+      </td>
+    </tr>
   );
+}
+
+/** `200ms`, `0.2s` or a bare number. Null for anything that is not a length. */
+export function readTime(said: string): number | null {
+  const found = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*(ms|s)?\s*$/i.exec(said);
+  const amount = found?.[1];
+  if (amount === undefined) return null;
+  const value = Number(amount);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return found?.[2]?.toLowerCase() === 's' ? Math.round(value * 1000) : Math.round(value);
 }

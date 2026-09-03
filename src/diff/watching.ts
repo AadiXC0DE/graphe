@@ -345,7 +345,7 @@ function watchingScript(): string {
   function onMutation() {
     window.clearTimeout(timers.mutated);
     timers.mutated = window.setTimeout(function () {
-      /* Something that happens on its own — a message, a spinner finishing, a
+      /* Something that happens on its own: a message, a spinner finishing, a
          panel arriving. Anything close behind a press is what that press did. */
       if (Date.now() - reportedAt < OWED) return;
       push('changed', '');

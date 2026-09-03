@@ -22,7 +22,7 @@ export const TOO_MANY_BYTES = 2 * 1024 * 1024 * 1024;
 export type OpenVerdict = { kind: 'open' } | { kind: 'refuse'; because: string; offer: string };
 
 export const openingWords = {
-  home: 'That is your home folder — everything on this computer is inside it, not one project.',
+  home: 'That is your home folder. Everything on this computer is inside it, not one project.',
   system: 'That is a folder your computer keeps for itself, not a project.',
   disk: 'That is a whole disk, not a project.',
   kept: (name: string) =>

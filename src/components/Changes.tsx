@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { WORDS, countsOf, diffOf, parseDiff } from '../diff/hunks';
 import type { FileChange, Hunk } from '../diff/hunks';
+import { widerThan, withWider } from '../diff/collapse';
+import DiffView from './DiffView';
 import './Changes.css';
 import './Sheet.css';
 
@@ -14,6 +16,13 @@ type Props = {
   /** The person kept a subset. Hand back a valid unified diff of ONLY those
    *  hunks, built with diffOf(). Empty selection must never call this. */
   onKeep: (diff: string) => void;
+  /** Ask the conversation about one piece. Both carry file and line, so the
+   *  answer starts where the eye already is. Left off, neither is offered. */
+  onExplain?: (file: string, line: number) => void;
+  onFix?: (file: string, line: number) => void;
+  /** Read one file again with more of it around the change. Left off, a fold
+   *  says how many lines are under it and offers nothing to press. */
+  onWider?: (file: string, context: number) => Promise<string | null>;
 };
 
 export const SAYS = {
@@ -22,7 +31,7 @@ export const SAYS = {
   readingDetail: 'A moment. This is being read off the disk.',
   nothing: 'Nothing has changed.',
   keptNothing: 'Nothing kept.',
-  nothingDetail: 'When there is work to look through, it will show up here.',
+  nothingDetail: 'Changes to this folder show up here.',
   keepAll: 'Keep all',
   dropAll: 'Drop all',
   keep: 'Keep',
@@ -170,14 +179,6 @@ export function captionOf(hunk: Hunk): string {
 
 /* -------------------------------------------------------------------------- */
 
-function Tick() {
-  return (
-    <svg className="changes__tick" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-      <path d="M2.5 6.2 4.8 8.5 9.5 3.6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 /**
  * A change, read piece by piece, with a yes or no on each one.
  *
@@ -186,14 +187,40 @@ function Tick() {
  * here, so it costs colour and opacity and never a line of layout — the piece
  * under the cursor is still under the cursor afterwards.
  */
-export default function Changes({ open, diff, busy = false, onClose, onKeep }: Props) {
+export default function Changes({ open, diff, busy = false, onClose, onKeep, onExplain, onFix, onWider }: Props) {
   const body = useRef<HTMLDivElement>(null);
   const [dropped, setDropped] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [at, setAt] = useState<string | null>(null);
 
-  const files = useMemo(() => (diff === null ? [] : parseDiff(diff)), [diff]);
+  const [wider, setWider] = useState<Readonly<Record<string, readonly FileChange[]>>>({});
+  const [asked, setAsked] = useState<Readonly<Record<string, number>>>({});
+
+  const read = useMemo(() => (diff === null ? [] : parseDiff(diff)), [diff]);
+  const files = useMemo(() => withWider(read, wider), [read, wider]);
   const order = useMemo(() => orderOf(files), [files]);
   const here = at !== null && order.includes(at) ? at : (order[0] ?? null);
+
+  /* A press asks for a wider window than the last one, so pressing twice on
+     the same file keeps opening it out. */
+  const readWider = useCallback(
+    async (file: string): Promise<void> => {
+      if (onWider === undefined) return;
+      const context = widerThan(asked[file]);
+      const text = await onWider(file, context);
+      if (text === null || text.trim() === '') return;
+      const found = parseDiff(text);
+      if (found.length === 0) return;
+      setAsked((was) => ({ ...was, [file]: context }));
+      setWider((was) => ({ ...was, [file]: found }));
+    },
+    [asked, onWider],
+  );
+
+  // A different change is read from scratch.
+  useEffect(() => {
+    setWider({});
+    setAsked({});
+  }, [diff]);
 
   const kept = useMemo(() => countsOf(keptOf(files, dropped)), [files, dropped]);
   const canKeep = kept.hunks > 0 && !busy;
@@ -210,15 +237,6 @@ export default function Changes({ open, diff, busy = false, onClose, onKeep }: P
   useEffect(() => {
     if (open) body.current?.focus();
   }, [open]);
-
-  /* Instant, never smooth: this rides the arrow keys, and a scroll that eases
-     into place turns a held key into a slide. */
-  useEffect(() => {
-    if (here === null) return;
-    body.current
-      ?.querySelector(`[data-piece="${CSS.escape(here)}"]`)
-      ?.scrollIntoView({ block: 'nearest' });
-  }, [here]);
 
   useEffect(() => {
     if (!open) return;
@@ -365,110 +383,22 @@ export default function Changes({ open, diff, busy = false, onClose, onKeep }: P
     <section className="sheet changes" aria-label={SAYS.heading}>
       {head}
 
-      <div className="sheet__body scroll--auto" ref={body} tabIndex={-1}>
-        <ol className="changes__files">
-          {files.map((file) => {
-            const state = fileKeep(file, dropped);
-            const added = file.hunks.reduce((sum, hunk) => sum + hunk.added, 0);
-            const removed = file.hunks.reduce((sum, hunk) => sum + hunk.removed, 0);
-            return (
-              <li
-                key={`${file.oldPath}>${file.path}`}
-                className={`changes__file ${state === 'none' ? 'changes__file--off' : ''}`}
-              >
-                <div className="changes__filetop">
-                  <span className={`changes__kind changes__kind--${file.kind}`}>
-                    {WORDS.kinds[file.kind]}
-                  </span>
-                  <span className="changes__path">
-                    {file.kind === 'renamed' ? SAYS.moved(file.oldPath, file.path) : file.path}
-                  </span>
-                  {file.hunks.length === 0 ? null : (
-                    <span className="changes__tally">{SAYS.tally(added, removed)}</span>
-                  )}
-                  {file.hunks.length === 0 ? null : (
-                    <span className="changes__fileall">
-                      <button
-                        type="button"
-                        className={`changes__small ${state === 'all' ? 'changes__small--on' : ''}`}
-                        onClick={() => setDropped((was) => withFile(was, file, true))}
-                        disabled={busy}
-                      >
-                        {SAYS.keepAll}
-                      </button>
-                      <button
-                        type="button"
-                        className={`changes__small ${state === 'none' ? 'changes__small--on' : ''}`}
-                        onClick={() => setDropped((was) => withFile(was, file, false))}
-                        disabled={busy}
-                      >
-                        {SAYS.dropAll}
-                      </button>
-                    </span>
-                  )}
-                </div>
-
-                {file.hunks.length === 0 ? (
-                  <p className="changes__whole">
-                    {file.binary ? WORDS.whole : 'The file only moved; not a line inside it changed.'}
-                  </p>
-                ) : null}
-
-                {file.hunks.map((hunk) => {
-                  const off = dropped.has(hunk.id);
-                  const caption = captionOf(hunk);
-                  return (
-                    <div
-                      key={hunk.id}
-                      data-piece={hunk.id}
-                      aria-current={hunk.id === here ? 'true' : undefined}
-                      className={`changes__piece ${off ? 'changes__piece--off' : ''} ${
-                        hunk.id === here ? 'changes__piece--here' : ''
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        className="changes__piecetop"
-                        aria-pressed={!off}
-                        disabled={busy}
-                        onClick={() => {
-                          setAt(hunk.id);
-                          setDropped((was) => withHunk(was, hunk.id));
-                        }}
-                      >
-                        <span className="changes__box">
-                          <Tick />
-                        </span>
-                        <span className="changes__keep">{SAYS.keep}</span>
-                        <span className="changes__where">{SAYS.where(hunk)}</span>
-                        {caption === '' ? null : <span className="changes__in">{caption}</span>}
-                        <span className="changes__tally">{SAYS.tally(hunk.added, hunk.removed)}</span>
-                      </button>
-
-                      <div className="changes__lines scroll--auto">
-                        {linesOf(hunk).map((line, index) => (
-                          <div
-                            key={`${hunk.id}:${String(index)}`}
-                            className={`changes__line changes__line--${
-                              line.sign === '+' ? 'in' : line.sign === '-' ? 'out' : line.sign === '\\' ? 'note' : 'same'
-                            }`}
-                          >
-                            <span className="changes__no">{line.before ?? ''}</span>
-                            <span className="changes__no">{line.after ?? ''}</span>
-                            <span className="changes__sign" aria-hidden="true">
-                              {line.sign === '\\' ? '' : line.sign}
-                            </span>
-                            <code className="changes__code">{line.text}</code>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </li>
-            );
-          })}
-        </ol>
+      <div className="sheet__body changes__body" ref={body} tabIndex={-1}>
+        <DiffView
+          files={files}
+          dropped={dropped}
+          at={here}
+          onAt={setAt}
+          busy={busy}
+          onToggle={(hunk) => {
+            setAt(hunk.id);
+            setDropped((was) => withHunk(was, hunk.id));
+          }}
+          onKeepFile={(file, keep) => setDropped((was) => withFile(was, file, keep))}
+          onExplain={onExplain}
+          onFix={onFix}
+          {...(onWider === undefined ? {} : { onExpand: readWider })}
+        />
       </div>
     </section>
   );

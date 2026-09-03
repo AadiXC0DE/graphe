@@ -48,6 +48,9 @@ export type Written = {
   ways?: string | null;
   /** Which model runs it, where a block on the canvas named one. */
   model?: { providerId: string; modelId: string } | null;
+  /** The conversation that asked for it. Written down so a restart still knows
+   *  who is waiting on the answer. */
+  startedBy?: string | null;
   owner: Owner;
 };
 
@@ -115,6 +118,7 @@ export function asPiece(one: Written): PieceOfWork {
     trouble: one.trouble,
     ...(one.ways == null ? {} : { ways: one.ways }),
     ...(one.model == null ? {} : { model: one.model }),
+    ...(one.startedBy == null ? {} : { startedBy: one.startedBy }),
   };
 }
 
@@ -147,6 +151,7 @@ export function noteOf(
     owner: about.owner,
     ...(piece.ways == null ? {} : { ways: piece.ways }),
     ...(piece.model == null ? {} : { model: piece.model }),
+    ...(piece.startedBy == null ? {} : { startedBy: piece.startedBy }),
   };
 }
 
@@ -217,6 +222,8 @@ export function readWritten(value: unknown): Written | null {
     spent: amount(raw['spent']),
     after: text(raw['after']),
     ...(whichModel(raw['model']) === null ? {} : { model: whichModel(raw['model']) }),
+    ...(text(raw['startedBy']) === null ? {} : { startedBy: text(raw['startedBy']) }),
+    ...(text(raw['ways']) === null ? {} : { ways: text(raw['ways']) }),
     owner: {
       pid: who['pid'],
       since: typeof who['since'] === 'number' ? who['since'] : 0,

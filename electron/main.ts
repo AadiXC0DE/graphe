@@ -42,7 +42,7 @@ import {
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { existsSync, readFileSync } from 'node:fs';
+import { constants, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
@@ -50,10 +50,12 @@ import { dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
+import { letChildrenRunAsNode, scratchUnder } from '../src/agent/pi/childenv';
 import {
   connectToProvider,
   connection as readConnection,
   createSession,
+  warmUp,
   defaultAgentDir,
   disconnectProvider,
   discoveredAccounts,
@@ -88,7 +90,15 @@ import {
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
 import { browserFolder, browserFrame, forgetLogins } from '../src/agent/pi/computer';
-import { ALWAYS_TEMPLATE, alwaysFile, alwaysFrom, isAlwaysFile, WHEN, type When } from '../src/work/always';
+import {
+  ALWAYS_TEMPLATE,
+  alwaysFile,
+  alwaysFrom,
+  alwaysText,
+  isAlwaysFile,
+  rowsAsGiven,
+  rowsFrom,
+} from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
@@ -124,8 +134,13 @@ import {
   type PutBack,
   type RecentProject,
   type Result,
+  type PullCheck,
+  type PullComment,
   type RepoItem,
   type RepoLook,
+  type AddonHere,
+  type StorageNow,
+  type AddonReport,
   type CarriedExtension,
   type Room,
   type Skill,
@@ -147,10 +162,15 @@ import {
   type VisualChange,
   type VisualFrames,
   type Where,
+  type ReviewClash,
+  type ReviewDecided,
+  type ReviewEntry,
+  type ReviewOpened,
   setDownWords,
   whereIn,
 } from '../src/lib/ipc';
-import { parseGitStatus } from '../src/lib/gitstatus';
+import { saidFrom, type Said } from '../src/preview/tabs';
+import { parseGitStatus, parseNumstat } from '../src/lib/gitstatus';
 import { parseBranches } from '../src/lib/branches';
 import {
   capture,
@@ -170,7 +190,7 @@ import { keeping, PreferenceFile } from '../src/projects/preferences';
 import { themeFrom } from '../src/lib/theme';
 import { Recents } from '../src/projects/recents';
 import { addressed, Workspaces, type Workspace } from '../src/projects/workspaces';
-import { findEditor, type Editor } from '../src/shell/editors';
+import { chosenFrom, findEditors, findTerminals, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
 import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
 import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShippedWith } from '../src/agent/pi/skills';
@@ -178,6 +198,7 @@ import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor, workflowWords } from '../src/work/workflows';
 import { readCheckoutIndex, type Checkout } from '../src/history/checkouts';
 import { seedCheckout, seedWords } from '../src/history/seeding';
+import { workspaceWords, type WorkspaceFacts } from '../src/work/workspaces';
 import { renameTo } from '../src/history/naming';
 import {
   branchNames,
@@ -185,17 +206,46 @@ import {
   bringBack,
   bringBackWords,
   createWorktree,
+  landWorktree,
+  landingWords,
   nextCheckoutName,
   renameCheckoutBranch,
   dropWorktree,
+  holdsWork,
   putAwayWorktree,
   releaseWorktree,
   reopenWorktree,
+  sharedBase,
   sweepCheckouts,
   worktreeWords,
+  type Landing as HowItLands,
   type RunGit,
   type Rescue,
 } from '../src/history/worktree';
+import {
+  chooseFile,
+  decide,
+  filesToTake,
+  landsAsOneCommit,
+  markRead,
+  queueFrom,
+  reviewWords,
+  withoutEntry,
+  type Arriving,
+  type Entry as ReviewQueued,
+  type FileTally,
+  type FileVerdict,
+  waiting as waitingToBeSeen,
+  type Verdict as ReviewVerdict,
+} from '../src/work/reviewqueue';
+import {
+  asTelling,
+  badgeFor,
+  howToTell,
+  makesASound,
+  type Because,
+} from '../src/work/notify';
+import { conflictWords, readConflict } from '../src/diff/conflict';
 import { preparePrWorktree } from './prWorktree';
 import { RUNTIME_SCRATCH, keepOutOfCommits } from './excludes';
 import {
@@ -221,10 +271,14 @@ import { keyOf } from '../src/work/owner';
 import { writeAtomically, writeAtomicallySync } from '../src/lib/atomic';
 import { GoalFile } from '../src/projects/goals';
 import { continuationOwner } from './continuation-owner';
+import { readAppearance } from '../src/design/appearance';
+import { batcher } from '../src/lib/batching';
 import { drainStarted, withoutOurs } from '../src/lib/queue';
 import { copiesFolder } from '../src/work/copies';
 import { checkoutWords, validateCheckouts } from '../src/history/checkouts';
 import {
+  canClear,
+  folderNamed,
   measureFolders,
   npmOnPath,
   saysStorage,
@@ -235,11 +289,12 @@ import {
 import { sizeOf, TOO_MANY_BYTES, TOO_MANY_FILES, verdictFor } from '../src/history/opening';
 import { openLog } from './log';
 import { saysWhyStopped } from '../src/lib/showme';
+import { mark, report, saysMarks } from '../src/lib/marks';
 import { addonProcesses, ledger } from './processes';
-import { watchWhatWeStart } from '../src/share/spawned';
+import { ended as noteEnded, started as noteStarted, watchWhatWeStart } from '../src/share/spawned';
 import { MENU_IDS, menuTemplate, type MenuItem } from './menu';
 import { gather, saysDiagnostics } from './diagnostics';
-import { MOST_ROWS, standingBlock } from '../src/agent/pi/standing';
+import { MOST_ROWS, SKILL_BUDGET, standingBlock, standingWords, withinBudget } from '../src/agent/pi/standing';
 import { FlowFile } from '../src/projects/flows';
 import { readFlow, withFlow, withoutFlow, type Flow } from '../src/work/canvas';
 import { notHere, runHelper } from '../src/share/run';
@@ -357,7 +412,19 @@ import { knownTrouble, plainMessage, plainTrouble } from './plainly';
  * with the full story; here it just has to run first. Remove the moment
  * Electron ships a Node that has it.
  */
+// The first moment this process has any say in.
+mark('launch');
 patchWorkerThreads();
+
+/**
+ * And one more thing an add-on cannot know: `process.execPath` here is Electron,
+ * not node. An add-on that spawns "the runtime I am running under" — which is
+ * the obvious way to start a fresh agent — gets a second Electron application
+ * that never opens a window and never says anything. That is what "the subagent
+ * produced no output" was. See src/agent/pi/childenv.ts for why this is a patch
+ * on the spawn rather than a variable on the environment.
+ */
+letChildrenRunAsNode();
 
 /**
  * The PATH a Finder-launched app inherits is `/usr/bin:/bin:/usr/sbin:/sbin`,
@@ -548,7 +615,7 @@ function couldNotUseModel(named: string, many: number): Trouble {
       many === 1
         ? 'One conversation is still answering as the model it had.'
         : `${String(many)} conversations are still answering as the model they had.`,
-    because: `${named} could not be brought into ${many === 1 ? 'it' : 'them'} — usually the account for it is not connected. It is saved as your choice, so a new conversation will use it.`,
+    because: `${named} could not be brought into ${many === 1 ? 'it' : 'them'}, usually because the account for it is not connected. It is saved as your choice, so a new conversation will use it.`,
     actionLabel: 'Got it',
   };
 }
@@ -557,7 +624,7 @@ function couldNotUseModel(named: string, many: number): Trouble {
  *  with the folder, so it must not read as though it has. */
 const NOT_A_YES_OR_NO: Trouble = {
   what: 'That switch was not given a yes or a no.',
-  because: 'Try it again — nothing was changed.',
+  because: 'Try it again. Nothing was changed.',
   actionLabel: 'Got it',
 };
 
@@ -722,9 +789,22 @@ let mainWindow: BrowserWindow | null = null;
 /** Every event carries the folder and the conversation it belongs to. A reply
  *  that was still arriving when somebody switched belongs where it started, and
  *  this is what lets the window put it there — see `AgentNotice`. */
+/**
+ * One trip across the wire per frame, rather than one per token.
+ *
+ * Sixty tokens a second was sixty `webContents.send` calls and sixty
+ * synchronous handlers in the window. Runs of text are welded; anything that
+ * gates the screen goes at once and takes everything queued before it, so the
+ * order a conversation is read in never changes.
+ */
+const wire = batcher((frames) => {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.events, frames);
+});
+
 function send(project: string | null, event: AgentEvent, conversation?: string): void {
   if (mainWindow === null || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(CHANNEL.event, { project, conversation: conversation ?? null, event });
+  wire.push({ project, conversation: conversation ?? null, event });
 }
 
 function tell(progress: ShowProgress): void {
@@ -823,7 +903,9 @@ function applyPermissionPolicy(): void {
   // thing. Writing only, and sanitized: reading the clipboard is somebody's
   // passwords, and nothing here ever needs it. This is the window's own store —
   // a page being previewed has its own, and is granted none of it.
-  const allowed = new Set(['media', 'clipboard-sanitized-write']);
+  // Reading the installed font families is how the font picker offers what is
+  // actually on the machine instead of asking for a family name spelled exactly.
+  const allowed = new Set(['media', 'clipboard-sanitized-write', 'local-fonts']);
   session.defaultSession.setPermissionRequestHandler((_contents, permission, decide) => {
     decide(allowed.has(permission));
   });
@@ -1313,11 +1395,11 @@ function watchPageRequests(store: Electron.Session): void {
     if (details.statusCode < 400) return;
     pageUnanswered = noteTrouble(
       pageUnanswered,
-      `${String(details.statusCode)} — ${details.method} ${details.url}`,
+      `${String(details.statusCode)} · ${details.method} ${details.url}`,
     );
   });
   store.webRequest.onErrorOccurred((details) => {
-    pageUnanswered = noteTrouble(pageUnanswered, `${details.method} ${details.url} — ${details.error}`);
+    pageUnanswered = noteTrouble(pageUnanswered, `${details.method} ${details.url} · ${details.error}`);
   });
 }
 
@@ -1487,8 +1569,24 @@ function rememberWindowBounds(win: BrowserWindow): void {
   }
 }
 
+/** The finish, straight off the file. Vibrancy is a window flag, so it has to
+ *  be known before the window is made, which is before any of the readers that
+ *  hold this file open are awake. */
+function savedFinish(): 'solid' | 'glass' {
+  try {
+    const raw: unknown = JSON.parse(
+      readFileSync(join(app.getPath('userData'), 'preferences.json'), 'utf8'),
+    );
+    const held = (raw as { preferences?: Record<string, unknown> }).preferences ?? {};
+    return readAppearance(held['appearance'], held['theme']).finish;
+  } catch {
+    return 'solid';
+  }
+}
+
 function createWindow(): void {
   const was = readWindowBounds();
+  const glass = savedFinish() === 'glass';
   const win = new BrowserWindow({
     width: was?.width ?? 1100,
     height: was?.height ?? 780,
@@ -1498,7 +1596,8 @@ function createWindow(): void {
     minHeight: 520,
     // The window is painted before React is, and a white flash on a dark desktop
     // is the first impression. Matches --bg in src/styles/tokens.css.
-    backgroundColor: '#131312',
+    backgroundColor: glass ? '#00000000' : '#131312',
+    ...(glass ? { vibrancy: 'under-window' as const, visualEffectState: 'active' as const } : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 18, y: 20 } : undefined,
     show: false,
@@ -1684,6 +1783,12 @@ type Held = {
    *  increases: naming one after how many are open right now gives the same
    *  name to two live conversations the moment an earlier one is closed. */
   checkoutsMade: number;
+  /** Finished work waiting to be looked at, before any of it touches the
+   *  person's folder. Newest first, as the queue keeps it. */
+  review: readonly ReviewQueued[];
+  /** Conversations still carrying their work home on every settle, by address.
+   *  The per-card way back to how this behaved before the queue. */
+  mirroring: Set<string>;
   /** A conversation's own checkout, by its address. Present only for the ones
    *  running isolated in a worktree — the primary conversation works directly
    *  on the project folder. The branch is the durable half: the folder is put
@@ -1910,11 +2015,24 @@ function preferences(): Promise<PreferenceFile> {
   return preferencesPromise;
 }
 
-let editorPromise: Promise<Editor | null> | null = null;
+let editorsPromise: Promise<readonly Editor[]> | null = null;
+let terminalsPromise: Promise<readonly Editor[]> | null = null;
 
-function editor(): Promise<Editor | null> {
-  editorPromise ??= findEditor().catch(() => null);
-  return editorPromise;
+function editorsHere(): Promise<readonly Editor[]> {
+  editorsPromise ??= findEditors().catch(() => []);
+  return editorsPromise;
+}
+
+function terminalsHere(): Promise<readonly Editor[]> {
+  terminalsPromise ??= findTerminals().catch(() => []);
+  return terminalsPromise;
+}
+
+/** The editor to open in: what somebody chose while it is still installed,
+ *  else the first found. A machine with two always gave the same one. */
+async function editor(): Promise<Editor | null> {
+  const prefs = await preferences();
+  return chosenFrom(await editorsHere(), prefs.all().editor);
 }
 
 const NO_EDITOR: Trouble = {
@@ -1943,7 +2061,12 @@ async function rememberedProjects(): Promise<readonly RecentProject[]> {
   return Promise.all(
     list.map(async (one) => {
       const found = await stat(one.path).catch(() => null);
-      return { ...one, missing: found === null || !found.isDirectory() };
+      const missing = found === null || !found.isDirectory();
+      const named = missing
+        ? null
+        : await gitRun(one.path, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => null);
+      const branch = named?.code === 0 ? (named.out ?? '').trim() : '';
+      return { ...one, missing, branch: branch === '' || branch === 'HEAD' ? null : branch };
     }),
   );
 }
@@ -2103,6 +2226,21 @@ function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
   });
 }
 
+/**
+ * A status with its line totals filled in.
+ *
+ * Two calls rather than one, because git's porcelain format carries no line
+ * counts and "3 files" and "+734 −7" answer two different questions. A folder
+ * with nothing changed skips the second call entirely.
+ */
+async function readGitStatusWithLines(cwd: string): Promise<GitSnapshot | null> {
+  const git = await readGitStatus(cwd);
+  if (git === null || !git.dirty) return git;
+  const counted = await gitRun(cwd, ['diff', '--numstat', 'HEAD']);
+  if (counted.code !== 0 || counted.out === undefined) return git;
+  return { ...git, ...parseNumstat(counted.out) };
+}
+
 /** Every line of work the project keeps, from git's own listing. The format
  *  stays on one line per branch with NUL separators, so a branch name or a
  *  message that contains spaces cannot break the parse. */
@@ -2215,6 +2353,8 @@ const GH_WORDS = {
   unreadable: 'github answered with something this could not read.',
 } as const;
 
+const NOT_GITHUB = 'This folder does not look like a github repository.';
+
 /** Which github repository this folder answers to, or `owner/name`. Read from a
  *  remote the folder already knows about, so a project with no remote or a
  *  remote that is not github is simply not a github repository.
@@ -2262,6 +2402,7 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
     baseRef: typeof raw['baseRefName'] === 'string' ? raw['baseRefName'] : null,
     headRef: typeof raw['headRefName'] === 'string' ? raw['headRefName'] : null,
     headSha: typeof raw['headRefOid'] === 'string' ? raw['headRefOid'] : null,
+    draft: raw['isDraft'] === true,
   };
 }
 
@@ -2308,7 +2449,7 @@ async function readRepo(open: { path: string }): Promise<RepoLook> {
     const prs = await ghJSON(
       open.path,
       ['pr', 'list', '-R', full, '--limit', '50'],
-      'number,title,state,url,body,author,updatedAt,baseRefName,headRefName,headRefOid',
+      'number,title,state,url,body,author,updatedAt,baseRefName,headRefName,headRefOid,isDraft',
     );
     const rows = (asked: Asked): readonly Record<string, unknown>[] =>
       asked.ok && Array.isArray(asked.value)
@@ -2329,6 +2470,123 @@ async function readRepo(open: { path: string }): Promise<RepoLook> {
     };
   } catch {
     return null;
+  }
+}
+
+/** Run `gh` for its plain stdout rather than its JSON. Same guards as `ghJSON`:
+ *  a missing command, a refusal and a silence are three different sentences,
+ *  and none of them is an empty string. */
+function ghText(cwd: string, args: readonly string[]): Promise<Asked> {
+  return new Promise((resolve) => {
+    const child = spawn('gh', [...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    noteStarted({ pid: child.pid, what: `gh ${args.join(' ')}`, kind: 'tool', project: cwd });
+    let out = '';
+    let noise = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      noise = `${noise}${chunk}`.slice(-400);
+    });
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve({ ok: false, because: GH_WORDS.tooSlow });
+    }, GH_PATIENCE_MS);
+    child.on('error', () => {
+      clearTimeout(timeout);
+      noteEnded(child.pid);
+      resolve({ ok: false, because: GH_WORDS.noTool });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      noteEnded(child.pid);
+      if (code !== 0) {
+        const said = noise.trim().split('\n').filter((line) => line.trim() !== '').pop();
+        resolve({ ok: false, because: said === undefined ? GH_WORDS.refused : said });
+        return;
+      }
+      resolve({ ok: true, value: out });
+    });
+  });
+}
+
+/** What `gh pr checks` calls a state, narrowed to the four the screen draws.
+ *  Anything unrecognised is still running as far as this is concerned, which is
+ *  the reading that claims the least. */
+function checkState(raw: string): PullCheck['state'] {
+  const word = raw.trim().toLowerCase();
+  if (word === 'pass' || word === 'success' || word === 'passed' || word === 'neutral') return 'passed';
+  if (word === 'fail' || word === 'failure' || word === 'failed' || word === 'error' || word === 'cancelled' || word === 'timed_out') {
+    return 'failed';
+  }
+  if (word === 'skipping' || word === 'skipped') return 'skipped';
+  return 'pending';
+}
+
+/** The checks on one pull request. `gh pr checks` exits non-zero when a check
+ *  failed and when there are none at all, so the rows it printed matter more
+ *  than the code: an answer with rows is an answer. */
+async function readChecks(cwd: string, full: string, number: number): Promise<Asked> {
+  const asked = await ghJSON(
+    cwd,
+    ['pr', 'checks', String(number), '-R', full],
+    'name,state,link',
+  );
+  if (asked.ok) return asked;
+  // "no checks reported" is github saying there are none, not a failure.
+  return /no checks/i.test(asked.because) ? { ok: true, value: [] } : asked;
+}
+
+function pullCheck(raw: Record<string, unknown>): PullCheck {
+  const link = typeof raw['link'] === 'string' && raw['link'] !== '' ? raw['link'] : null;
+  return {
+    name: typeof raw['name'] === 'string' ? raw['name'] : 'check',
+    state: checkState(typeof raw['state'] === 'string' ? raw['state'] : ''),
+    link,
+  };
+}
+
+function pullComment(raw: Record<string, unknown>): PullComment | null {
+  const path = raw['path'];
+  const line = raw['line'] ?? raw['original_line'];
+  const body = raw['body'];
+  if (typeof path !== 'string' || typeof body !== 'string' || typeof line !== 'number') return null;
+  const user = (raw['user'] as Record<string, unknown> | null)?.['login'];
+  return {
+    id: String(raw['id'] ?? `${path}:${String(line)}`),
+    path,
+    line,
+    author: typeof user === 'string' ? user : 'unknown',
+    body,
+    at: typeof raw['created_at'] === 'string' ? raw['created_at'] : '',
+  };
+}
+
+/** The review comments on a pull request, through `gh api` so the person's own
+ *  login is the one github sees. */
+async function readPullComments(
+  cwd: string,
+  full: string,
+  number: number,
+): Promise<{ ok: true; value: readonly PullComment[] } | { ok: false; because: string }> {
+  const asked = await ghText(cwd, [
+    'api',
+    `repos/${full}/pulls/${String(number)}/comments?per_page=100`,
+  ]);
+  if (!asked.ok) return asked;
+  try {
+    const rows: unknown = JSON.parse(String(asked.value));
+    if (!Array.isArray(rows)) return { ok: false, because: GH_WORDS.unreadable };
+    return {
+      ok: true,
+      value: (rows as Record<string, unknown>[])
+        .map(pullComment)
+        .filter((one): one is PullComment => one !== null),
+    };
+  } catch {
+    return { ok: false, because: GH_WORDS.unreadable };
   }
 }
 
@@ -2558,6 +2816,11 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     // Failures are the one kind of event that can arrive in somebody else's
     // words — see the note at the top of plainly.ts. Everything else in the
     // stream was written by us or by the Guard and goes through untouched.
+    /* How heavy the system prompt got, kept for the diagnostics rather than
+       shown in the window. It is a number with no unit and nothing to press —
+       useless beside a switch, and the first thing worth knowing when somebody
+       asks why a small model stopped coping. */
+    if (event.type === 'prompt-size') promptSizes.set(keyOf(path, from.address ?? ''), event.characters);
     const said: AgentEvent = enrichForTheWindow(path, from.address ?? '', event);
     send(path, said, from.address ?? undefined);
 
@@ -2612,7 +2875,18 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
       said.type === 'asked-first' ||
       (said.type === 'planned' && said.steps.length > 0)
     ) {
-      continuations.waiting(path, from.address ?? '', true);
+      holdForAnswer(path, from.address ?? '', true);
+    }
+    // A card taken back off the screen is a card nobody is going to answer.
+    if (said.type === 'questions-withdrawn' || said.type === 'asking-withdrawn') {
+      holdForAnswer(path, from.address ?? '', false);
+    }
+
+    /* An add-on started a turn of its own. It has already begun, so this is not
+       permission being asked for: it is counted against the same budget as
+       every other reason to carry on, and named when the run stops. */
+    if (said.type === 'extension-turn') {
+      continuations.extensionAsked(path, from.address ?? '', said.from, said.text);
     }
 
     // Against the ceiling as well as into the ledger. This is the conversation
@@ -2645,13 +2919,32 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
  */
 function settleUpTheJob(path: string, held: Held, from: Speaking): void {
   {
-      const inFront = held.sessions.current?.path === from.address;
-      const checkout =
-        !inFront ||
-        from.address === null ||
-        held.suppressCarry.has(from.address)
+      const address = from.address;
+      const known =
+        address === null || held.suppressCarry.has(address)
           ? null
-          : held.checkouts.get(from.address) ?? null;
+          : held.checkouts.get(address) ?? null;
+      const holding = known !== null && existsSync(known.folder) ? known : null;
+
+      /* Live mirror is how this behaved before the review queue, kept per card
+         for anybody who wants it: the work is carried into the folder as the
+         conversation makes it. Off, which is the default, an entry arrives on
+         the review list and nothing moves until somebody says so. Still only
+         ever the conversation in front, because a tab working in the background
+         writing over the folder on screen is the bug that rule exists for. */
+      const mirroring =
+        address !== null &&
+        held.mirroring.has(address) &&
+        held.sessions.current?.path === address;
+
+      if (holding !== null && address !== null) {
+        void noteForReview(path, held, address, holding, mirroring).catch(() => undefined);
+      }
+      if (!mirroring) {
+        void look(path, held);
+        return;
+      }
+      const checkout = holding;
       // What came back, and what did not. A file both sides changed is left as
       // this checkout has it — which is right, and used to happen in silence:
       // the person saw a finished turn and a file that had not changed.
@@ -2665,7 +2958,9 @@ function settleUpTheJob(path: string, held: Held, from: Speaking): void {
          version before every round would be a rail of identical entries. */
       const who = from.address ?? '';
       const first =
-        checkout === null || held.snappedBeforeApply.has(who)
+        checkout === null ||
+        held.snappedBeforeApply.has(who) ||
+        preferencesNow?.all().snapBeforeApply === false
           ? Promise.resolve()
           : (held.snappedBeforeApply.add(who),
             held.timeline
@@ -3305,6 +3600,7 @@ async function nameBranchAfter(
 ): Promise<void> {
   const checkout = open.held.checkouts.get(address);
   if (checkout === undefined || checkout.named === true) return;
+  if (preferencesNow?.all().nameConversations === false) return;
   const run = gitRunHereFor();
   const taken = await branchNames(run, open.path);
   const wanted = renameTo(checkout, request, (name) => taken.has(name));
@@ -3515,7 +3811,9 @@ function keepAside(project: string, whose: string): Rescue {
       const to = join(keptAsideFolder(project), whose, one);
       try {
         await mkdir(dirname(to), { recursive: true });
-        await copyFile(join(folder, one), to);
+        // Cloned where the filesystem can: on APFS the bytes are shared until
+        // one side is written to, so rescuing a large file costs nothing.
+        await copyFile(join(folder, one), to, constants.COPYFILE_FICLONE);
       } catch {
         // One that could not be carried is enough to keep the copy. Saying it
         // went and then deleting the only copy is the whole failure this was
@@ -3554,6 +3852,14 @@ async function sweepStrayCheckouts(): Promise<number> {
     if (folders.length === 0) continue;
     const released = await sweepCheckouts(gitRunHereFor(), project.path, folders, {
       rescue: (folder, files) => keepAside(project.path, basename(folder))(folder, files),
+      /* A copy whose branch already landed and that nothing has touched in a
+         fortnight is what a gigabyte of `node_modules` is sitting in. Never
+         one holding work, which `sweepCheckouts` checks first. */
+      settledAfter: {
+        days: SETTLED_DAYS,
+        base: 'HEAD',
+        touched: async (folder) => (await stat(folder).catch(() => null))?.mtimeMs ?? null,
+      },
     }).catch(() => []);
     given += released.length;
   }
@@ -3645,6 +3951,483 @@ async function syncCheckoutBranch(project: string, held: Held, address: string):
   if (branch === '' || branch === 'HEAD' || branch === one.branch) return;
   one.branch = branch;
   await saveCheckouts(project, held).catch(() => undefined);
+}
+
+/* ------------------------------------------- every copy, as a card each      */
+
+/** The commit a copy's branch and the project last had in common. Asked of the
+ *  branch rather than the folder, so a copy already given back still counts. */
+async function baseOfBranch(repo: string, branch: string): Promise<string | null> {
+  const { code, out } = await gitRun(repo, ['merge-base', branch, 'HEAD']);
+  const found = (out ?? '').trim();
+  return code === 0 && found !== '' ? found : null;
+}
+
+type CopyTally = { changed: number; added: number; removed: number };
+
+const NOTHING_TALLIED: CopyTally = { changed: 0, added: 0, removed: 0 };
+
+function tallyOf(files: readonly FileTally[]): CopyTally {
+  return files.reduce<CopyTally>(
+    (sum, one) => ({
+      changed: sum.changed + 1,
+      added: sum.added + one.added,
+      removed: sum.removed + one.removed,
+    }),
+    NOTHING_TALLIED,
+  );
+}
+
+/** What a copy whose folder has been given back is holding. The branch is all
+ *  that is left of it, so the branch is what gets counted. */
+async function tallyOnBranch(repo: string, base: string, branch: string): Promise<CopyTally> {
+  const counted = await gitRun(repo, ['diff', '--numstat', '--no-renames', base, branch]);
+  if (counted.code !== 0) return NOTHING_TALLIED;
+  const rows = (counted.out ?? '').split('\n').filter((line) => line.trim() !== '');
+  return { changed: rows.length, ...parseNumstat(counted.out ?? '') };
+}
+
+/** Whether this copy's branch has already arrived in the line the project is
+ *  on. A branch that has committed nothing of its own sits exactly where it
+ *  started, and reading that as landed hides a copy somebody is working in. */
+async function alreadyLanded(repo: string, branch: string, base: string | null): Promise<boolean> {
+  if (base === null) return false;
+  const tip = await gitRun(repo, ['rev-parse', branch]);
+  if (tip.code !== 0 || (tip.out ?? '').trim() === base) return false;
+  const { code } = await gitRun(repo, ['merge-base', '--is-ancestor', branch, 'HEAD']);
+  return code === 0;
+}
+
+/** When this copy last moved: the newest of what its branch carries and what
+ *  its folder was last written in. Zero where git can say neither. */
+async function lastMoved(repo: string, branch: string, folder: string | null): Promise<number> {
+  const tip = await gitRun(repo, ['log', '-1', '--format=%ct', branch]);
+  const at = tip.code === 0 ? Number.parseInt((tip.out ?? '').trim(), 10) * 1000 : 0;
+  const written = folder === null ? 0 : ((await stat(folder).catch(() => null))?.mtimeMs ?? 0);
+  return Math.max(Number.isFinite(at) ? at : 0, written);
+}
+
+/**
+ * Every conversation with a copy of this project, as the facts one card is made
+ * of. The cards themselves are `cardsFrom`, in the window, where the ordering
+ * and the words live.
+ *
+ * A copy that has been given back is still a card. Its work is on its branch,
+ * and leaving it out is how somebody decides a conversation's work has gone.
+ */
+async function copiesOfProject(open: Workspace<Held>): Promise<readonly WorkspaceFacts[]> {
+  const repo = open.path;
+  const git = await readGitStatus(repo);
+  const on = git?.branch ?? 'the project';
+  const facts: WorkspaceFacts[] = [];
+  for (const [address, one] of open.held.checkouts) {
+    const here = existsSync(one.folder);
+    const base = await baseOfBranch(repo, one.branch);
+    const tally =
+      base === null
+        ? NOTHING_TALLIED
+        : here
+          ? tallyOf(await talliesFor(one.folder, base))
+          : await tallyOnBranch(repo, base, one.branch);
+    const session = open.held.sessions.find(address);
+    facts.push({
+      address,
+      title: session?.name ?? '',
+      branch: one.branch,
+      base: on,
+      changed: tally.changed,
+      added: tally.added,
+      removed: tally.removed,
+      lastAt: await lastMoved(repo, one.branch, here ? one.folder : null),
+      cost: null,
+      run: askingSomebody.has(keyOf(repo, address))
+        ? 'asking'
+        : session?.held.working === true
+          ? 'running'
+          : 'settled',
+      landed: await alreadyLanded(repo, one.branch, base),
+      away: !here,
+      holdsWork: here && (await holdsWork(gitRunHereFor(), one.folder)),
+    });
+  }
+  return facts;
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* Work waiting to be looked at                                                */
+/* -------------------------------------------------------------------------- */
+
+/** Where a project's review queue is written down. One file per project, hashed
+ *  the same way the checkout index is, so two projects sharing an install can
+ *  never read each other's. */
+function reviewIndexFile(project: string): string {
+  const key = createHash('sha256').update(resolve(project)).digest('hex');
+  return join(app.getPath('userData'), 'review-queue', `${key}.json`);
+}
+
+type ReviewIndex = { entries: readonly ReviewQueued[]; mirroring: readonly string[] };
+
+/** One stored row, checked field by field. Anything that does not read as an
+ *  entry is dropped rather than repaired: a half-understood row would draw a
+ *  card offering to carry files nobody can name. */
+function reviewRow(value: unknown): ReviewQueued | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const id = row['id'];
+  const title = row['title'];
+  const address = row['address'];
+  const at = row['at'];
+  const from = row['from'];
+  if (typeof id !== 'string' || id === '') return null;
+  if (typeof title !== 'string' || typeof address !== 'string') return null;
+  if (typeof at !== 'number' || !Number.isFinite(at)) return null;
+  if (from !== 'conversation' && from !== 'board' && from !== 'schedule') return null;
+  const files: FileTally[] = [];
+  for (const one of Array.isArray(row['files']) ? (row['files'] as unknown[]) : []) {
+    if (one === null || typeof one !== 'object') continue;
+    const file = one as Record<string, unknown>;
+    if (typeof file['path'] !== 'string' || file['path'] === '') continue;
+    files.push({
+      path: file['path'],
+      added: typeof file['added'] === 'number' ? file['added'] : 0,
+      removed: typeof file['removed'] === 'number' ? file['removed'] : 0,
+    });
+  }
+  if (files.length === 0) return null;
+  const choices: Record<string, FileVerdict> = {};
+  const stored = row['choices'];
+  if (stored !== null && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [path, choice] of Object.entries(stored as Record<string, unknown>)) {
+      if (choice === 'take theirs' || choice === 'keep mine') choices[path] = choice;
+    }
+  }
+  return {
+    id,
+    from,
+    title,
+    address,
+    files,
+    at,
+    read: row['read'] === true,
+    ...(Object.keys(choices).length === 0 ? {} : { choices }),
+  };
+}
+
+async function readReviewQueue(project: string): Promise<ReviewIndex> {
+  try {
+    const parsed = JSON.parse(await readFile(reviewIndexFile(project), 'utf8')) as unknown;
+    if (parsed === null || typeof parsed !== 'object') return { entries: [], mirroring: [] };
+    const held = parsed as Record<string, unknown>;
+    const rows = Array.isArray(held['entries']) ? (held['entries'] as unknown[]) : [];
+    const entries: ReviewQueued[] = [];
+    for (const row of rows) {
+      const one = reviewRow(row);
+      if (one !== null) entries.push(one);
+    }
+    const mirroring = Array.isArray(held['mirroring'])
+      ? (held['mirroring'] as unknown[]).filter((one): one is string => typeof one === 'string')
+      : [];
+    return { entries: queueFrom(entries), mirroring };
+  } catch {
+    return { entries: [], mirroring: [] };
+  }
+}
+
+async function saveReviewQueue(project: string, held: Held): Promise<void> {
+  const file = reviewIndexFile(project);
+  // The one place the queue changes, so the one place the dock has to be told.
+  showWhatIsWaiting();
+  await mkdir(dirname(file), { recursive: true });
+  await writeAtomically(
+    file,
+    JSON.stringify({ entries: held.review, mirroring: [...held.mirroring] }),
+  );
+}
+
+/** How many lines a file has, for a tally. Capped: a generated bundle is not
+ *  something anybody counts, and reading one to count it costs the settle. */
+const TOO_BIG_TO_COUNT = 400_000;
+
+async function linesIn(file: string): Promise<number> {
+  const about = await stat(file).catch(() => null);
+  if (about === null || about.size > TOO_BIG_TO_COUNT) return 0;
+  const text = await readFile(file, 'utf8').catch(() => null);
+  if (text === null || text === '') return 0;
+  return text.endsWith('\n') ? text.split('\n').length - 1 : text.split('\n').length;
+}
+
+/** Every file a checkout changed against where it started, with its counts.
+ *
+ * Always asked for with `-z`: git quotes any path that is not plain ASCII, and
+ * a quoted name points at no file on disk.
+ */
+async function talliesFor(folder: string, base: string): Promise<readonly FileTally[]> {
+  const tallies = new Map<string, FileTally>();
+  const counted = await gitRun(folder, ['diff', '--numstat', '-z', '--no-renames', base]);
+  if (counted.code === 0) {
+    const parts = (counted.out ?? '').split('\0').filter((part) => part !== '');
+    for (let at = 0; at + 1 < parts.length; at += 2) {
+      const [added = '', removed = ''] = (parts[at] ?? '').split('\t');
+      const path = parts[at + 1] ?? '';
+      if (path === '' || path === '.') continue;
+      tallies.set(path, {
+        path,
+        added: Number.parseInt(added, 10) || 0,
+        removed: Number.parseInt(removed, 10) || 0,
+      });
+    }
+  }
+  const others = await gitRun(folder, ['ls-files', '--others', '--exclude-standard', '-z']);
+  if (others.code === 0) {
+    for (const path of (others.out ?? '').split('\0').filter((part) => part !== '')) {
+      if (tallies.has(path) || path === '.') continue;
+      tallies.set(path, { path, added: await linesIn(resolve(folder, path)), removed: 0 });
+    }
+  }
+  return [...tallies.values()].sort((one, other) => one.path.localeCompare(other.path));
+}
+
+/** A file git has never seen, written as a patch the viewer can read. */
+function patchForNew(path: string, text: string): string {
+  const lines = text.split('\n');
+  const ended = lines.length > 0 && lines[lines.length - 1] === '';
+  if (ended) lines.pop();
+  const body = lines.map((line) => `+${line}`);
+  if (!ended && lines.length > 0) body.push('\\ No newline at end of file');
+  return [
+    `diff --git a/${path} b/${path}`,
+    'new file mode 100644',
+    '--- /dev/null',
+    `+++ b/${path}`,
+    `@@ -0,0 +1,${String(lines.length)} @@`,
+    ...body,
+    '',
+  ].join('\n');
+}
+
+/** Everything a checkout changed, as one unified diff. Untracked files are
+ *  written out by hand because git has nothing to diff them against. */
+async function reviewDiff(folder: string, base: string): Promise<string> {
+  const changed = await gitRun(folder, ['diff', '--no-ext-diff', '--no-renames', base]);
+  const others = await gitRun(folder, ['ls-files', '--others', '--exclude-standard', '-z']);
+  const extras: string[] = [];
+  for (const path of (others.out ?? '').split('\0').filter((part) => part !== '')) {
+    const whole = resolve(folder, path);
+    const about = await stat(whole).catch(() => null);
+    if (about === null || about.size > TOO_BIG_TO_COUNT) continue;
+    const text = await readFile(whole, 'utf8').catch(() => null);
+    if (text === null) continue;
+    extras.push(patchForNew(path, text));
+  }
+  return [(changed.out ?? '').trim(), ...extras].filter((part) => part !== '').join('\n');
+}
+
+/**
+ * An entry for what this conversation's checkout is holding, put on the list.
+ *
+ * `queueFrom` keeps whatever a person has already done to an entry with the
+ * same id, so a conversation settling four times in a row refreshes one card
+ * rather than reopening a review somebody was halfway through. A card that is
+ * mirroring is marked read as it arrives: its files are already in the folder,
+ * so counting it as something waiting would be untrue.
+ */
+async function noteForReview(
+  project: string,
+  held: Held,
+  address: string,
+  checkout: Checkout,
+  mirrored: boolean,
+  from: Arriving['from'] = 'conversation',
+  called?: string,
+): Promise<void> {
+  // A pull request review runs in a checkout of somebody else's branch. It is
+  // read-only, and there is nothing in it anybody would land here.
+  if (checkout.branch.startsWith('graphe/pr-')) return;
+  const base = await sharedBase(gitRunHereFor(), checkout.folder, project);
+  if (base === null) return;
+  const files = await talliesFor(checkout.folder, base);
+  if (files.length === 0) return;
+  const named = called ?? held.sessions.find(address)?.name;
+  const arriving: Arriving = {
+    id: address,
+    from,
+    title: named === undefined || named.trim() === '' ? checkout.branch.replace(/^graphe\//, '') : named,
+    address,
+    files,
+    at: Date.now(),
+  };
+  const before = held.review.length;
+  held.review = queueFrom(held.review, [arriving]);
+  if (mirrored) held.review = markRead(held.review, address);
+  await saveReviewQueue(project, held).catch(() => undefined);
+  // Said once, the first time work waits here instead of arriving. Without it
+  // the change reads as the work having gone missing.
+  if (!mirrored && before === 0 && !toldAboutReview.has(project)) {
+    toldAboutReview.add(project);
+    await rememberToldAboutReview();
+    send(project, { type: 'notice', what: reviewWords.firstTime }, address === '' ? undefined : address);
+  }
+}
+
+/** Projects whose first review entry has been explained. On disk, because the
+ *  sentence is worth saying once and not once per launch. */
+const toldAboutReview = new Set<string>();
+
+function toldFile(): string {
+  return join(app.getPath('userData'), 'told-about-review.json');
+}
+
+async function rememberToldAboutReview(): Promise<void> {
+  await writeAtomically(toldFile(), JSON.stringify([...toldAboutReview])).catch(() => undefined);
+}
+
+function readToldAboutReview(): void {
+  try {
+    const raw = JSON.parse(readFileSync(toldFile(), 'utf8')) as unknown;
+    if (Array.isArray(raw)) for (const one of raw) if (typeof one === 'string') toldAboutReview.add(one);
+  } catch {
+    // Never told anybody yet, which is the state a first launch is in.
+  }
+}
+
+/**
+ * The checkout an entry's work is in, spread back out if it was put away.
+ *
+ * A copy is given back whenever nobody is in it, so a row whose folder is not
+ * on disk is an ordinary row rather than a broken one. Reading it as broken is
+ * how a review of work that is perfectly safe reports the work as gone.
+ */
+async function checkoutForReview(
+  project: string,
+  held: Held,
+  address: string,
+): Promise<Checkout | null> {
+  const one = held.checkouts.get(address);
+  if (one !== undefined) {
+    if (existsSync(one.folder)) return one;
+    return reopenCheckout(project, one);
+  }
+  // A board piece keeps its copy on the board rather than in the index, and
+  // that copy is detached, so it has a folder and no branch.
+  const piece = awayDesks.get(project)?.bench.pieces.find((other) => other.id === address);
+  if (piece?.folder == null || !existsSync(piece.folder)) return null;
+  return { folder: piece.folder, branch: '' };
+}
+
+/** The queue as the window draws it: the entries plus the two facts only the
+ *  shell knows — the branch behind each, and whether it is mirroring. */
+function reviewRows(held: Held): readonly ReviewEntry[] {
+  return held.review.map((one) => ({
+    ...one,
+    branch: held.checkouts.get(one.address)?.branch ?? '',
+    mirror: held.mirroring.has(one.address),
+  }));
+}
+
+const NO_SUCH_ENTRY: Trouble = {
+  what: reviewWords.gone,
+  because: 'It may have been answered in another window, or the conversation behind it closed.',
+  actionLabel: 'Got it',
+};
+
+const REVIEW_WORK_GONE: Trouble = {
+  what: 'The work behind this is not in the project any more.',
+  because: 'Its checkout has been landed or thrown away, so there is nothing left to carry over.',
+  actionLabel: 'Got it',
+};
+
+function isFileVerdict(value: unknown): value is FileVerdict {
+  return value === 'take theirs' || value === 'keep mine';
+}
+
+function isReviewVerdict(value: unknown): value is ReviewVerdict {
+  return value === 'take it' || value === 'keep mine' || value === 'ask again' || value === 'drop it';
+}
+
+/** One path under a folder, or null when it points anywhere else. Every path in
+ *  a review arrives off the wire, so nothing here may resolve outside. */
+function insideProject(folder: string, path: string): string | null {
+  if (path === '' || path.includes('\u0000')) return null;
+  const root = resolve(folder);
+  const whole = resolve(root, path);
+  return whole === root || whole.startsWith(`${root}${sep}`) ? whole : null;
+}
+
+/** The project a review lands into: a named child, or the folder itself. Never
+ *  the checkout's own folder, which would merge a branch into itself. */
+function reviewRepo(open: Workspace<Held>, where: Where): string {
+  return childRepoFor(open, where)?.path ?? open.path;
+}
+
+/** `git merge-file`, keeping what it printed.
+ *
+ * It exits with the number of clashes it left in, so a non-zero code here is
+ * the ordinary answer rather than a failure — and the merged text with the
+ * markers in it is on stdout either way. The shared runner throws that away.
+ */
+async function mergeFileText(cwd: string, args: string[]): Promise<string | null> {
+  try {
+    const made = await execFileAsync('git', args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    return made.stdout;
+  } catch (cause) {
+    const failed = cause as { stdout?: string; code?: number };
+    if (typeof failed.stdout !== 'string') return null;
+    return typeof failed.code === 'number' && failed.code >= 0 ? failed.stdout : null;
+  }
+}
+
+/** Open a pull request from a branch and give back its address, speaking as
+ *  whoever this computer's `gh` is logged in as. The body goes through a file
+ *  so a long summary needs no quoting. */
+async function ghOpenPr(
+  cwd: string,
+  branch: string,
+  title: string,
+  body: string,
+): Promise<{ url: string } | { because: string }> {
+  const file = join(tmpdir(), `graphe-pr-${String(Date.now())}.md`);
+  try {
+    await writeAtomically(file, body);
+  } catch {
+    return { because: 'I could not write the description down before sending it.' };
+  }
+  return new Promise((settle) => {
+    const child = spawn(
+      'gh',
+      ['pr', 'create', '--head', branch, '--title', title, '--body-file', file],
+      { cwd, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let out = '';
+    let noise = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      noise = `${noise}${chunk}`.slice(-400);
+    });
+    const timeout = setTimeout(() => child.kill('SIGKILL'), GH_PATIENCE_MS);
+    const tidy = (): void => {
+      clearTimeout(timeout);
+      void rm(file, { force: true }).catch(() => undefined);
+    };
+    child.on('error', () => {
+      tidy();
+      settle({ because: GH_WORDS.noTool });
+    });
+    child.on('close', (code) => {
+      tidy();
+      const address = out.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('http')).pop();
+      if (code === 0 && address !== undefined) {
+        settle({ url: address });
+        return;
+      }
+      const said = noise.trim().split('\n').filter((line) => line.trim() !== '').pop();
+      settle({ because: said === undefined ? GH_WORDS.refused : said });
+    });
+  });
 }
 
 /** Where a project's build plan lives, so it survives the window closing.
@@ -3818,7 +4601,7 @@ async function startConversationUnlocked(
       // once. Only the conversation in front gets this: the runs on the board
       // must not be able to fill the board they are running on.
       putOnBoard: (doing, after, ways) =>
-        keepGoing(open.path, basename(open.path), doing, after, false, ways ?? null),
+        keepGoing(open.path, basename(open.path), doing, after, false, ways ?? null, null, from.address ?? ''),
       // Whoever is doing the work says which step moved, rather than the window
       // guessing from where one reply ends and the next begins. `from.address`
       // is filled the moment this conversation has a name, which is before any
@@ -3956,6 +4739,10 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
      and the rows for them read as work waiting rather than as work put away. */
   const checked = await validateCheckouts(path, await readCheckouts(path), gitRunHereFor());
   const restoredCheckouts = checked.rows;
+  // Work waiting to be looked at outlives the sitting that made it. Quitting
+  // with a review half read must not be the same as answering it.
+  const restoredReview = await readReviewQueue(path);
+  mark('project-open');
   if (checked.putAway.length > 0) {
     send(path, { type: 'notice', what: checkoutWords.putAway(checked.putAway.length) });
   }
@@ -3974,6 +4761,8 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     snappedBeforeApply: new Set<string>(),
     checkoutsMade: restoredCheckouts.size,
     checkouts: restoredCheckouts,
+    review: restoredReview.entries,
+    mirroring: new Set(restoredReview.mirroring),
     waiting: null,
     checking: null,
     pictures: null,
@@ -3994,6 +4783,8 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   if (!started.ok) return started;
 
   workspaces.adopt({ path, name, held });
+  // What was left waiting last sitting counts on the dock this one.
+  showWhatIsWaiting();
   await (await recents()).remember({ path, name });
 
   // The picture of the project as it stands, taken before anybody asks for
@@ -4364,7 +5155,10 @@ let listNow: (project: string, address: string) => Promise<StoredPlan | null> = 
  * fired on the same settle and none knew the other two existed.
  */
 const continuations = continuationOwner({
-  send: (project, address, text) => {
+  send: (project, address, text, why) => {
+    // A round toward the goal is what a round is counted for. Counting them on
+    // the settle counted the ones that never went out.
+    if (why === 'goal') void countGoalRound(project, address);
     void sendOnTheirBehalf(project, address, text);
   },
   say: (project, address, text) => {
@@ -4373,9 +5167,19 @@ const continuations = continuationOwner({
     send(project, { type: 'message-delta', text: `\n\n${text}` }, at);
     send(project, { type: 'message-end' }, at);
   },
+  halt: (project, address) => {
+    const open = projectAt({ project });
+    if (open === null) return;
+    const session = sessionAt(open, address === '' ? {} : { conversation: address });
+    void session?.stop().catch(() => undefined);
+  },
   tell: (one) => {
     if (mainWindow === null || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send(CHANNEL.continuation, one);
+    /* A goal whose job has come to rest is not working any more, whatever the
+       last verdict said. Left active it kept the panel reading Working with a
+       clock still counting long after everything had stopped. */
+    if (one.resting) void restGoal(one.project, one.address);
   },
   list: async (project, address) => {
     const stored = await listNow(project, address);
@@ -4406,6 +5210,8 @@ const continuations = continuationOwner({
     // they are not run on every round to be thrown away.
     const checks = how.done < how.total ? null : await runProjectChecks(project, address);
     const verdict = verifyGoal(plan, checks, goal.objective);
+    // Met is a change worth writing. Not met is the same goal it was: the round
+    // is counted where the round is sent.
     if (verdict.met) {
       await GoalFile.write(
         project,
@@ -4413,17 +5219,60 @@ const continuations = continuationOwner({
         { ...withElapsed(goal), status: 'done' },
         address,
       );
-    } else {
-      await GoalFile.write(
-        project,
-        app.getPath('userData'),
-        { ...withElapsed(goal), iterations: goal.iterations + 1 },
-        address,
-      );
     }
     return { ...verdict, objective: goal.objective };
   },
 });
+
+/** Which conversations have a card on screen nobody has answered yet.
+ *
+ * The authority holds the same fact for its own budget and keeps it private.
+ * This is the readable half, so the panel can put a copy stopped on a question
+ * above the ones quietly getting on with it. */
+const askingSomebody = new Set<string>();
+
+/** Hold the loop back for an answer, and remember that it is held. Both halves
+ *  in one call: they were the same fact told twice and drifted apart. */
+function holdForAnswer(project: string, address: string, on: boolean): void {
+  continuations.waiting(project, address, on);
+  const key = keyOf(project, address);
+  if (on) askingSomebody.add(key);
+  else askingSomebody.delete(key);
+}
+
+/**
+ * The goal, when its job comes to rest.
+ *
+ * Done when the list it was working through is finished, paused when it is not:
+ * either way it stops being active, which is what stops its clock.
+ */
+async function restGoal(project: string, address: string): Promise<void> {
+  const userData = app.getPath('userData');
+  const goal = await GoalFile.read(project, userData, address).catch(() => null);
+  if (goal === null || goal.status !== 'active') return;
+  const stored = await listNow(project, address).catch(() => null);
+  const how = stored === null ? null : progress(stored.tasks);
+  const finished = how !== null && how.total > 0 && how.done >= how.total;
+  await GoalFile.write(
+    project,
+    userData,
+    { ...withElapsed(goal), status: finished ? 'done' : 'paused' },
+    address,
+  ).catch(() => undefined);
+}
+
+/** One more round toward the goal, written down so a restart keeps the count. */
+async function countGoalRound(project: string, address: string): Promise<void> {
+  const userData = app.getPath('userData');
+  const goal = await GoalFile.read(project, userData, address).catch(() => null);
+  if (goal === null || goal.status !== 'active') return;
+  await GoalFile.write(
+    project,
+    userData,
+    { ...withElapsed(goal), iterations: goal.iterations + 1 },
+    address,
+  ).catch(() => undefined);
+}
 
 /**
  * The one path a message the person did not type goes out by.
@@ -4452,6 +5301,10 @@ async function sendOnTheirBehalf(project: string, address: string, text: string)
  *  line they read as something somebody typed and is waiting for, and they are
  *  neither. */
 const ours = new Map<string, readonly string[]>();
+
+/** How heavy the system prompt was on the last call of each conversation. Read
+ *  by the diagnostics, drawn nowhere. */
+const promptSizes = new Map<string, number>();
 
 /**
  * One event on its way to the window, said in the window's terms.
@@ -4518,6 +5371,13 @@ async function runProjectChecks(
  * when the conversation opened is wrong by the second reply.
  */
 async function standingBlockFor(project: string, address: string): Promise<string | null> {
+  /* Said in the block and set as `TMPDIR` for every child started in this
+     conversation's folder, so the two cannot say different places. */
+  const scratch = scratchFor(project, address);
+  const open = projectAt({ project });
+  if (open !== null) {
+    scratchUnder(folderFor(open, address === '' ? {} : { conversation: address }), scratch);
+  }
   const stored = await listNow(project, address).catch(() => null);
   const goal = await GoalFile.read(project, app.getPath('userData'), address).catch(() => null);
   const how = stored === null ? null : progress(stored.tasks);
@@ -4537,7 +5397,63 @@ async function standingBlockFor(project: string, address: string): Promise<strin
        tidied up they were gone — and a long job is exactly the one that gets
        tidied. Bounded on purpose: memory is not the job. */
     notes: await notesFor(project, address),
+    scratch: scratch,
+    /* Only ever said when somebody asked for a language other than the
+       request's own. The default costs the prompt nothing. */
+    language: (await preferences().catch(() => null))?.all().replyLanguage ?? null,
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Somewhere of its own to write                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A folder each conversation may write anything temporary into.
+ *
+ * Nothing gave a run a place, so the model picked `/tmp`, named folders after
+ * itself and nothing ever removed them: twenty-two gigabytes in a day on this
+ * machine. This is a real path, said in the standing block and set as `TMPDIR`
+ * for every child, and it goes when the conversation does.
+ */
+function scratchFor(project: string, address: string): string {
+  const leaf = (one: string): string =>
+    (one.split(/[\\/]+/).filter((part) => part !== '').pop() ?? 'graphe')
+      .replace(/[^a-zA-Z0-9_.-]/g, '-')
+      .slice(0, 60);
+  const where = join(app.getPath('userData'), 'scratch', leaf(project), leaf(address || 'shared'));
+  try {
+    mkdirSync(where, { recursive: true });
+  } catch {
+    // A folder that cannot be made is a folder nothing writes to; the child
+    // falls back to the machine's own temporary folder.
+  }
+  return where;
+}
+
+/** How long a scratch folder nobody has touched is kept. */
+const SCRATCH_DAYS = 7;
+
+/** And how long a copy whose branch has already landed is. */
+const SETTLED_DAYS = 14;
+
+/** Everything under `scratch` that nothing has written to in a week. Run on the
+ *  way in, where a sweep costs nobody anything. */
+async function sweepScratch(): Promise<void> {
+  const root = join(app.getPath('userData'), 'scratch');
+  const cut = Date.now() - SCRATCH_DAYS * 24 * 60 * 60 * 1000;
+  const projects = await readdir(root, { withFileTypes: true }).catch(() => []);
+  for (const one of projects) {
+    if (!one.isDirectory()) continue;
+    const inside = join(root, one.name);
+    const each = await readdir(inside, { withFileTypes: true }).catch(() => []);
+    for (const other of each) {
+      const where = join(inside, other.name);
+      const when = await stat(where).catch(() => null);
+      if (when === null || when.mtimeMs >= cut) continue;
+      await rm(where, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -4605,7 +5521,7 @@ async function diagnosticsNow(): Promise<string> {
  * is the thing worth sending.
  */
 function whyStopped(): string {
-  const screens: string[] = [];
+  const screens: string[] = [saysMarks(report())];
   for (const one of workspaces.open) {
     for (const conversation of one.held.sessions.open) {
       const address = conversation.path;
@@ -4623,7 +5539,7 @@ function whyStopped(): string {
           list: null,
           rounds: { sent: last.move.state.rounds, stuck: last.move.state.stuckRounds },
           blockedStreak: null,
-          promptCharacters: null,
+          promptCharacters: promptSizes.get(keyOf(one.path, address)) ?? null,
           addons: conversation.held.addons.map((addon) => ({
             name: addon.name,
             says: addon.says,
@@ -4634,7 +5550,9 @@ function whyStopped(): string {
       );
     }
   }
-  return screens.length === 0 ? 'Nothing has stopped yet this sitting.' : screens.join('\n\n');
+  return screens.length <= 1
+    ? `${screens[0] ?? ''}\n\nNothing has stopped yet this sitting.`.trim()
+    : screens.join('\n\n');
 }
 
 /** The menu is data; the presses are here. Attached by id so the template stays
@@ -4746,14 +5664,23 @@ function isNewer(candidate: string, mine: string): boolean {
   return false;
 }
 
+/** How somebody on this build gets the next one. The one command, so a row can
+ *  offer it to be copied rather than describing it. */
+const UPGRADE = 'brew upgrade --cask graphe';
+
 function watchForANewerOne(): void {
   const look = (): void => {
     void newerRelease().then((tag) => {
       if (tag === null) return;
+      // A row of its own, not a line in whichever conversation happens to be
+      // open. With no project open the thread line went nowhere at all.
+      if (mainWindow !== null && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(CHANNEL.newerVersion, { version: tag, upgrade: UPGRADE });
+      }
       send(null, {
         type: 'notice',
         what: `${tag} is out.`,
-        because: 'Upgrade with brew upgrade --cask graphe.',
+        because: `Upgrade with ${UPGRADE}.`,
         actions: [{ id: 'release-notes', label: 'What changed' }],
       });
     });
@@ -4854,7 +5781,7 @@ function sayThePieceIsWaiting(project: string, id: string, doing: string): void 
   );
   // And the loop stands down: somebody is being asked, which is holding rather
   // than stalling.
-  if (at !== undefined) continuations.waiting(project, at, true);
+  if (at !== undefined) holdForAnswer(project, at, true);
 }
 
 /**
@@ -4895,7 +5822,7 @@ async function sayIfTheRuntimeIsNotThePinnedOne(): Promise<void> {
   send(null, {
     type: 'notice',
     what: `This is running agent runtime ${here}, and it was built against ${pinned}.`,
-    because: 'Worth knowing if something behaves oddly — it is the layer everything here sits on.',
+    because: 'Worth knowing if something behaves oddly: it is the layer everything here sits on.',
   });
 }
 
@@ -5190,15 +6117,75 @@ function makeSureThereIsAWindow(): void {
   createWindow();
 }
 
+/**
+ * The way this person asked to hear about one thing that happened.
+ *
+ * What to do is `work/notify.ts`; this only does it. Nothing here may throw:
+ * being told is the least important thing happening at this moment, and a run
+ * that fell over on a dock that does not exist would be absurd.
+ */
+function tellThemAbout(because: Because, title: string, body: string, path: string): void {
+  const prefs = preferencesNow?.all() ?? null;
+  const told = howToTell(because, {
+    finished: asTelling(prefs?.whenRunFinishes),
+    needsYou: asTelling(prefs?.whenSomethingNeedsYou),
+    inFront: mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isFocused(),
+  });
+  if (told === 'nothing') return;
+  const sound = makesASound(told, prefs?.notifySound === true);
+  if (told === 'bounce') {
+    bounceTheDock();
+    if (sound) makeANoise();
+    return;
+  }
+  tellThem(title, body, path, sound);
+}
+
+/** The icon in the dock, asking for a person. Nothing at all on a desktop that
+ *  has no dock, which is every one but macOS. */
+function bounceTheDock(): void {
+  try {
+    app.dock?.bounce('informational');
+  } catch {
+    // A dock that will not bounce is not worth a word to anybody.
+  }
+}
+
+function makeANoise(): void {
+  try {
+    shell.beep();
+  } catch {
+    // Same.
+  }
+}
+
+/**
+ * How many pieces are waiting to be looked at, on the dock icon.
+ *
+ * Every open project's queue counted together, because the icon is one icon.
+ * Cleared at zero: a badge saying 0 is a badge saying there is something.
+ */
+function showWhatIsWaiting(): void {
+  try {
+    if (app.dock === undefined) return;
+    const on = preferencesNow?.all().badgeDock !== false;
+    let count = 0;
+    for (const one of workspaces.open) count += waitingToBeSeen(one.held.review);
+    app.dock.setBadge(badgeFor(count, on));
+  } catch {
+    // Nothing about a badge is worth failing anything else over.
+  }
+}
+
 /** One sentence on somebody's screen. Pressing it brings them back to the thing
  *  it is about. Silent where the system has no way to show one. */
-function tellThem(title: string, body: string, path: string): void {
+function tellThem(title: string, body: string, path: string, sound = false): void {
   if (!Notification.isSupported()) {
     sayNotificationsAreOff(title, body);
     return;
   }
   try {
-    const notice = new Notification({ title, body });
+    const notice = new Notification({ title, body, silent: !sound });
     notice.on('click', () => {
       showTheWindow();
       pushAway(path);
@@ -5210,6 +6197,28 @@ function tellThem(title: string, body: string, path: string): void {
     // not going to be.
     sayNotificationsAreOff(title, body);
   }
+}
+
+/** One row on Behaviour or Notifications, narrowed to what it is allowed to
+ *  hold. Null for anything this does not recognise, which the caller reads as
+ *  "leave the preferences alone". */
+function onePreference(which: unknown, value: unknown): Partial<Preferences> | null {
+  if (which === 'whenRunFinishes' || which === 'whenSomethingNeedsYou') {
+    return { [which]: asTelling(value) };
+  }
+  if (which === 'replyLanguage') {
+    return typeof value === 'string' ? { replyLanguage: value } : null;
+  }
+  if (
+    which === 'nameConversations' ||
+    which === 'askBeforeClosing' ||
+    which === 'snapBeforeApply' ||
+    which === 'notifySound' ||
+    which === 'badgeDock'
+  ) {
+    return typeof value === 'boolean' ? { [which]: value } : null;
+  }
+  return null;
 }
 
 /** Once a sitting. macOS may refuse to deliver a notification from a bundle it
@@ -5284,7 +6293,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       // is none; never pulled in front of one somebody is already using.
       makeSureThereIsAWindow();
       const notice = saysNotice(desk.name, { doing: piece.doing, state: 'needs-you' });
-      tellThem(notice.title, notice.body, desk.path);
+      tellThemAbout('needs-you', notice.title, notice.body, desk.path);
       /* And the conversation that started it hears once. Only the board knew a
          piece was parked, so a conversation waiting on work that was itself
          waiting on a person looked stalled with nothing said. */
@@ -5298,7 +6307,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
         // the next time this piece asks is a new question.
         saidItIsWaiting.delete(piece.id);
         const at = projectAt({ project: desk.path })?.held.sessions.current?.path;
-        if (at !== undefined) continuations.waiting(desk.path, at, false);
+        if (at !== undefined) holdForAnswer(desk.path, at, false);
       }
     }
 
@@ -5439,7 +6448,8 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       { doing: landed.doing, state: landed.state },
       saidBriefly(run.said),
     );
-    tellThem(notice.title, notice.body, desk.path);
+    tellThemAbout('finished', notice.title, notice.body, desk.path);
+    tellTheConversation(desk, landed);
   }
   noteDown(desk, piece.id);
   whatFollows(desk, piece.id);
@@ -5464,6 +6474,32 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
 function whatFollows(desk: AwayDesk, id: string): void {
   const moved = desk.chain.finished(id);
   for (const one of [...moved.started, ...moved.stopped]) noteDown(desk, one);
+}
+
+/**
+ * The conversation that asked for this piece hears that it landed.
+ *
+ * Through the authority rather than around it, so it is counted against the
+ * same budget as every other reason to send, named in the line under the reply,
+ * and left out of the waiting line. A conversation with nothing running has no
+ * settle coming, so this is its settle.
+ */
+function tellTheConversation(desk: AwayDesk, piece: PieceOfWork): void {
+  const open = projectAt({ project: desk.path });
+  if (open === null) return;
+  const address = piece.startedBy ?? open.held.sessions.current?.path ?? '';
+  continuations.landed(desk.path, address, { id: piece.id, title: piece.doing });
+  // And onto the review list. With the queue as the default there is nowhere
+  // else a finished piece would be seen.
+  const checkout = open.held.checkouts.get(piece.id);
+  if (checkout !== undefined) {
+    void noteForReview(desk.path, open.held, piece.id, checkout, false, 'board', piece.doing).catch(
+      () => undefined,
+    );
+  }
+  const session = sessionAt(open, address === '' ? {} : { conversation: address });
+  if (session === null || session.working) return;
+  void continuations.settled(desk.path, address, 'finished');
 }
 
 /** Everything behind this one, however far back, on the board saying why it will
@@ -5548,6 +6584,9 @@ async function keepGoing(
   /** Which model runs it. Null takes whatever is answering, which is every
    *  route but a block on the canvas that named one. */
   model: { providerId: string; modelId: string } | null = null,
+  /** The conversation that asked. Null where nobody did: the canvas, a plan
+   *  picked up off the disk, a piece asked for from the board itself. */
+  startedBy: string | null = null,
 ): Promise<WentOn> {
   const desk = deskFor(path, name);
   const id = nextName(desk);
@@ -5555,7 +6594,7 @@ async function keepGoing(
   if (untilDone) desk.goals.add(id);
 
   if (after !== null) {
-    const asked = desk.chain.hold({ id, doing, at, after });
+    const asked = desk.chain.hold({ id, doing, at, after, startedBy });
     if (!asked.ok) return { ok: false, because: asked.because };
     desk.after.set(id, after);
     if (asked.waits) {
@@ -5570,7 +6609,7 @@ async function keepGoing(
     }
   }
 
-  const piece = desk.bench.ask(doing, { id, at, ways, model });
+  const piece = desk.bench.ask(doing, { id, at, ways, model, startedBy });
   // Written down before it starts, so a machine that loses power between the
   // asking and the first word still comes back to something waiting its turn.
   await notes().note(
@@ -5621,7 +6660,7 @@ async function pickUpWhereWeLeftOff(): Promise<void> {
       });
       if (next.do === 'leave' || next.do === 'carry-on') continue;
 
-      const piece = desk.bench.ask(one.doing, { id: one.id, at: one.at, ways: one.ways ?? null });
+      const piece = desk.bench.ask(one.doing, { id: one.id, at: one.at, ways: one.ways ?? null, startedBy: one.startedBy ?? null });
       Object.assign(piece, asPiece(one));
       if (one.spent !== null) desk.costs.set(piece.id, one.spent);
       if (one.says !== null) desk.saids.set(piece.id, one.says);
@@ -5664,7 +6703,7 @@ function putPlansBack(desk: AwayDesk, written: readonly Written[]): void {
     const piece = desk.bench.pieces.find((on) => on.id === one.id);
     if (piece === undefined || piece.state !== 'waiting') continue;
 
-    const asked = desk.chain.hold({ id: one.id, doing: one.doing, at: one.at, after: one.after });
+    const asked = desk.chain.hold({ id: one.id, doing: one.doing, at: one.at, after: one.after, startedBy: one.startedBy ?? null });
     if (asked.ok && !asked.waits) continue;
     if (!asked.ok) {
       desk.bench.stopped(one.id, afterWords.broke);
@@ -6264,6 +7303,131 @@ function register(): void {
     return exit === 0 ? done(null) : fail(plainTrouble('The comment did not reach github.'));
   });
 
+  /* The pull request screen's own reads. Each one resolves the repository first,
+     because a folder with no github remote is a different answer from a `gh`
+     that would not talk, and only one of the two is worth retrying. */
+
+  handle<string>(CHANNEL.prDiff, async (_event, args) => {
+    const [number] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    const asked = await ghText(folder, ['pr', 'diff', String(number), '-R', full]);
+    if (!asked.ok) return fail(plainTrouble('I could not read this pull request.', asked.because));
+    return done(String(asked.value));
+  });
+
+  handle<readonly PullCheck[]>(CHANNEL.prChecks, async (_event, args) => {
+    const [number] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    const asked = await readChecks(folder, full, number);
+    if (!asked.ok) return fail(plainTrouble('I could not read the checks.', asked.because));
+    if (!Array.isArray(asked.value)) return done([]);
+    return done((asked.value as Record<string, unknown>[]).map(pullCheck));
+  });
+
+  handle<string>(CHANNEL.prCheckout, async (_event, args) => {
+    const [number] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    const asked = await ghText(folder, ['pr', 'checkout', String(number), '-R', full]);
+    if (!asked.ok) {
+      return fail(plainTrouble('I could not check out this pull request.', asked.because));
+    }
+    const at = await whereThisFolderIs(folder);
+    return done(
+      at?.branch == null
+        ? `This folder is now on pull request #${String(number)}.`
+        : `This folder is now on ${at.branch}.`,
+    );
+  });
+
+  handle<readonly PullComment[]>(CHANNEL.prComments, async (_event, args) => {
+    const [number] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    const asked = await readPullComments(folder, full, number);
+    if (!asked.ok) return fail(plainTrouble('I could not read the comments.', asked.because));
+    return done(asked.value);
+  });
+
+  handle<readonly PullComment[]>(CHANNEL.prComment, async (_event, args) => {
+    const [number, body, path, line] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    if (typeof body !== 'string' || body.trim() === '') {
+      return fail(plainTrouble('There was nothing to post.'));
+    }
+    if (typeof path !== 'string' || path === '' || typeof line !== 'number' || line <= 0) {
+      return fail(plainTrouble('I could not tell which line you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    // github wants the commit the comment is against, and it has to be the head
+    // of the pull request or the comment lands on nothing.
+    const head = await ghJSON(folder, ['pr', 'view', String(number), '-R', full], 'headRefOid');
+    const sha =
+      head.ok && typeof (head.value as Record<string, unknown>)['headRefOid'] === 'string'
+        ? String((head.value as Record<string, unknown>)['headRefOid'])
+        : null;
+    if (sha === null) {
+      const why = head.ok ? GH_WORDS.unreadable : head.because;
+      return fail(plainTrouble('I could not find the commit to comment on.', why));
+    }
+    const posted = await ghText(folder, [
+      'api',
+      '--method',
+      'POST',
+      `repos/${full}/pulls/${String(number)}/comments`,
+      '-f',
+      `body=${body}`,
+      '-f',
+      `commit_id=${sha}`,
+      '-f',
+      `path=${path}`,
+      '-F',
+      `line=${String(line)}`,
+      '-f',
+      'side=RIGHT',
+    ]);
+    if (!posted.ok) return fail(plainTrouble('The comment did not reach github.', posted.because));
+    const after = await readPullComments(folder, full, number);
+    return done(after.ok ? after.value : []);
+  });
+
   handle<Overview>(CHANNEL.overview, async (_event, args) => {
     const where = whereIn(args);
     const open = projectAt(where);
@@ -6292,7 +7456,7 @@ function register(): void {
           (one): one is RepoOverview => one !== null,
         )
       : undefined;
-    const git = many ? null : await readGitStatus(cwd);
+    const git = many ? null : await readGitStatusWithLines(cwd);
     return done({
       git:
         git === null
@@ -6537,6 +7701,40 @@ function register(): void {
    * would open the folder in whatever the *system* has associated with folders,
    * which is the Finder, which is the other button.
    */
+  /** Every editor and terminal on this machine, so a row can offer the choice
+   *  rather than the app taking whichever it found first. */
+  handle<{ editors: readonly string[]; terminals: readonly string[] }>(
+    CHANNEL.appsHere,
+    async () =>
+      done({
+        editors: (await editorsHere()).map((one) => one.name),
+        terminals: (await terminalsHere()).map((one) => one.name),
+      }),
+  );
+
+  handle<Preferences>(CHANNEL.setOpensIn, async (_event, args) => {
+    const [which, name] = args;
+    if (which !== 'editor' && which !== 'terminal') {
+      const prefs = await preferences();
+      return done(prefs.all());
+    }
+    const prefs = await preferences();
+    return done(await prefs.change({ [which]: typeof name === 'string' ? name : null }));
+  });
+
+  /* One road for the plain rows on Behaviour and Notifications. Each is
+     narrowed to the shape it is, so a window that asks for nonsense gets the
+     preferences back unchanged rather than writing it. */
+  handle<Preferences>(CHANNEL.setPreference, async (_event, args) => {
+    const [which, value] = args;
+    const prefs = await preferences();
+    const some = onePreference(which, value);
+    if (some === null) return done(prefs.all());
+    const saved = await prefs.change(some);
+    showWhatIsWaiting();
+    return done(saved);
+  });
+
   handle<null>(CHANNEL.openInEditor, async (_event, args) => {
     const [file] = args;
     const open = projectAt(whereIn(args));
@@ -6557,6 +7755,37 @@ function register(): void {
     try {
       await new Promise<void>((resolve, reject) => {
         const child = spawn('open', ['-a', found.bundle, target], { stdio: 'ignore' });
+        child.on('error', reject);
+        child.on('exit', (code) =>
+          code === 0 ? resolve() : reject(new Error(`open exited with ${String(code)}`)),
+        );
+      });
+      return done(null);
+    } catch (cause) {
+      return fail(couldNotOpenEditor(found.name, cause));
+    }
+  });
+
+  /* A skill's own file, opened in the editor. The window names the row, never
+     the path: a skill lives outside the project as often as in it, so the one
+     safe way to reach it is to look it up in the library again. */
+  handle<null>(CHANNEL.openSkillFile, async (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
+    const open = projectAt(whereIn(args));
+    const skill = await skillNamed(open?.path ?? null, await defaultAgentDir(), id);
+    if (skill === null) {
+      return fail({
+        what: 'That skill is no longer installed.',
+        because: 'The library changed since it was opened, so I did not open a different file by mistake.',
+        actionLabel: 'Refresh skills',
+      });
+    }
+    const found = await editor();
+    if (found === null) return fail(NO_EDITOR);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('open', ['-a', found.bundle, skill.path], { stdio: 'ignore' });
         child.on('error', reject);
         child.on('exit', (code) =>
           code === 0 ? resolve() : reject(new Error(`open exited with ${String(code)}`)),
@@ -6607,6 +7836,22 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return Promise.resolve(done([]));
     return Promise.resolve(done(sessionAt(open, whereIn(args))?.running ?? []));
+  });
+
+  handle<string>(CHANNEL.runningSaid, (_event, args) => {
+    const [id] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null || typeof id !== 'string') return Promise.resolve(done(''));
+    return Promise.resolve(done(sessionAt(open, where)?.runningSaid(id) ?? ''));
+  });
+
+  /* The shell keeps one flat line per message; `saidFrom` reads them back into
+     the console model, so repeats collapse and the ceiling is the model's. */
+  handle<readonly Said[]>(CHANNEL.pageSaid, () => {
+    const view = pageView;
+    if (view === null || view.webContents.isDestroyed()) return Promise.resolve(done([]));
+    return Promise.resolve(done(saidFrom(pageSaid)));
   });
 
   handle<readonly RunningPiece[]>(CHANNEL.stopRunning, async (_event, args) => {
@@ -6763,7 +8008,7 @@ function register(): void {
       return fail({ what: 'I have not made that page.', because: safe.because, actionLabel: 'Got it' });
     }
     const where = await dialog.showSaveDialog(mainWindow ?? undefined!, {
-      defaultPath: join(app.getPath('desktop'), `${open.name} — what changed.html`),
+      defaultPath: join(app.getPath('desktop'), `${open.name} - what changed.html`),
       filters: [{ name: 'Web page', extensions: ['html'] }],
     });
     if (where.canceled || where.filePath === undefined) return done(null);
@@ -6816,7 +8061,12 @@ function register(): void {
 
   handle<Preferences>(CHANNEL.setTheme, async (_event, args) => {
     const [theme] = args;
-    return done(await (await preferences()).change({ theme: themeFrom(theme) }));
+    const base = themeFrom(theme);
+    const prefs = await preferences();
+    // The base belongs to the appearance; the theme is its mirror.
+    return done(
+      await prefs.change({ theme: base, appearance: { ...prefs.all().appearance, base } }),
+    );
   });
 
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
@@ -7055,6 +8305,19 @@ function register(): void {
     }
   });
 
+  handle<string>(CHANNEL.changesWider, async (_event, args) => {
+    const [file, context] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof file !== 'string' || typeof context !== 'number') return done('');
+    try {
+      return done(await new ProjectHistory(folderFor(open, where)).diffWider(file, context));
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
   handle<null>(CHANNEL.changesDrop, async (_event, args) => {
     const [patch] = args;
     const where = whereIn(args);
@@ -7149,7 +8412,7 @@ function register(): void {
       const held = desk.chain.take(id);
       if (held === null) return done(awayNow(open.path));
       desk.after.delete(id);
-      desk.bench.ask(held.doing, { id: held.id, at: held.at });
+      desk.bench.ask(held.doing, { id: held.id, at: held.at, startedBy: held.startedBy ?? null });
       noteDown(desk, id);
       pushAway(open.path);
       await runWhatCan(desk);
@@ -7167,9 +8430,9 @@ function register(): void {
 
     // Nothing left to wait for, or nothing that would hold: either way it goes
     // back on the board and takes its turn there.
-    const asked = desk.chain.hold({ id, doing: was.doing, at: was.at, after });
+    const asked = desk.chain.hold({ id, doing: was.doing, at: was.at, after, startedBy: was.startedBy ?? null });
     if (asked.ok) desk.after.set(id, after);
-    if (!asked.ok || !asked.waits) desk.bench.ask(was.doing, { id, at: was.at });
+    if (!asked.ok || !asked.waits) desk.bench.ask(was.doing, { id, at: was.at, startedBy: was.startedBy ?? null });
     noteDown(desk, id);
     pushAway(open.path);
     if (!asked.ok) return fail(couldNotWait(asked.because));
@@ -7402,6 +8665,9 @@ function register(): void {
 
     const numbering = waysNumbering(desk.bench.pieces);
     const group = desk.bench.pieces.filter((one) => one.ways === ways);
+    // Every go started from the project as it stood, so the line of work it is
+    // on is what all of these columns are held against.
+    const base = (await readGitStatus(open.path))?.branch ?? '';
     const sides: SideOfWork[] = [];
     for (const piece of group) {
       const named = numbering.get(piece.id);
@@ -7425,6 +8691,7 @@ function register(): void {
         picture: piece.picture,
         spent: spent === null ? null : formatMoney(spent),
         folder: piece.folder,
+        base,
       });
     }
     return done(sides);
@@ -7898,16 +9165,21 @@ function register(): void {
     const open = projectAt(where);
     if (open === null) return done({ file: '', rows: [], trouble: null });
     const file = alwaysFile(folderFor(open, where));
-    const read = alwaysFrom(await readFile(file, 'utf8').catch(() => null));
-    const said: Readonly<Record<When, string>> = {
-      afterEachChange: 'After every change',
-      whenItFinishes: 'When it finishes',
-      whenItOpens: 'When this project opens',
-    };
-    const rows = WHEN.flatMap((when) =>
-      read.all[when].map((one) => ({ when: said[when], name: one.name, run: one.run })),
-    );
-    return done({ file, rows, trouble: read.trouble });
+    const text = await readFile(file, 'utf8').catch(() => null);
+    return done({ file, rows: rowsFrom(text), trouble: alwaysFrom(text).trouble });
+  });
+
+  /** The same list, written back whole. The file is the feature, so the window
+   *  never patches it: it hands over every row it is showing. */
+  handle<AlwaysDoes>(CHANNEL.alwaysWrite, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const file = alwaysFile(folderFor(open, where));
+    const rows = rowsAsGiven(args[0]);
+    await mkdir(dirname(file), { recursive: true }).catch(() => undefined);
+    await writeAtomically(file, alwaysText(rows));
+    return done({ file, rows, trouble: null });
   });
 
   handle<readonly Workflow[]>(CHANNEL.workflows, async (_event, args) => {
@@ -8070,11 +9342,26 @@ function register(): void {
     if (open === null) return fail(NOTHING_OPEN);
     const entry = checkoutEntryFor(open, where);
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    return landTheCopy(open, where, entry);
+  });
+
+  /**
+   * Bring one conversation's copy home and give the copy back.
+   *
+   * Named apart from the handler because two presses reach it: the one in the
+   * conversation that owns the copy, and the one on that copy's card in the
+   * panel, which names a conversation that need not be in front.
+   */
+  async function landTheCopy(
+    open: Workspace<Held>,
+    where: Where,
+    entry: { address: string; folder: string; branch: string },
+  ): Promise<Result<null>> {
     // Reviews run in a pr worktree — they are read-only and must not be landed.
     if (entry.branch.startsWith('graphe/pr-')) {
       return fail({
         what: 'This is a pull request review checkout.',
-        because: 'Reviews are read-only — close the tab when you are done. It will be dropped, not landed into the project.',
+        because: 'Reviews are read-only. Close the tab when you are done: it will be dropped, not landed into the project.',
         actionLabel: 'Got it',
       });
     }
@@ -8134,7 +9421,7 @@ function register(): void {
       await saveCheckouts(open.path, open.held).catch(() => undefined);
     }
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
-  });
+  }
 
   handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
     const where = whereIn(args);
@@ -8152,6 +9439,435 @@ function register(): void {
       await saveCheckouts(open.path, open.held).catch(() => undefined);
     }
     return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
+  });
+
+
+  /* ------------------------------------------ every copy of this project     */
+
+  /** The copy a card names. Read straight off the index rather than through the
+   *  open conversations, so a card still works when its conversation is not. */
+  function copyNamed(
+    open: Workspace<Held>,
+    address: unknown,
+  ): { address: string; folder: string; branch: string } | null {
+    if (typeof address !== 'string' || address === '') return null;
+    const one = open.held.checkouts.get(address);
+    return one === undefined ? null : { address, folder: one.folder, branch: one.branch };
+  }
+
+  const HOLDS_WRITING: Trouble = {
+    what: 'This copy is keeping its folder.',
+    because: `${workspaceWords.holds} Land it, or open the conversation and deal with what is in it.`,
+    actionLabel: 'Got it',
+  };
+
+  handle<readonly WorkspaceFacts[]>(CHANNEL.checkouts, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done<readonly WorkspaceFacts[]>([]);
+    return done(await copiesOfProject(open));
+  });
+
+  /**
+   * Put the project folder itself on that conversation's branch.
+   *
+   * A branch is only ever spread out in one place, so the copy is given back
+   * first. A copy holding writing its branch does not carry keeps its folder,
+   * and this says so rather than moving anything.
+   */
+  handle<readonly WorkspaceFacts[]>(CHANNEL.checkoutFront, async (_event, args) => {
+    const [address] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const one = copyNamed(open, address);
+    if (one === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    if (stillWriting(open.held)) {
+      return fail({
+        what: 'Not yet. This is still being written.',
+        because: 'Let it finish, then bring that copy to the front.',
+        actionLabel: 'Got it',
+      });
+    }
+    if (existsSync(one.folder) && (await holdsWork(gitRunHereFor(), one.folder))) {
+      return fail(HOLDS_WRITING);
+    }
+    const history = open.held.timeline;
+    if (history === null) return fail(SEVERAL_PROJECTS);
+    await history.snapshot({ boundary: 'before-going-back' }).catch(() => null);
+    await putDownCopyConversation(open, one.address);
+    await putAwayCheckoutAt(open.path, open.held, one.address);
+    if (existsSync(one.folder)) return fail(HOLDS_WRITING);
+    const switched = await gitRun(open.path, ['checkout', one.branch]);
+    if (switched.code !== 0) {
+      return fail({
+        what: 'I could not move onto that line of work.',
+        because: 'git refused the switch. Check that nothing here holds the files open.',
+        actionLabel: 'Got it',
+      });
+    }
+    return done(await copiesOfProject(open));
+  });
+
+  /** What one copy changed, against where it started. The same reading the
+   *  review queue opens, so one change is never two different diffs. */
+  handle<string>(CHANNEL.checkoutLook, async (_event, args) => {
+    const [address] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof address !== 'string' || address === '') {
+      return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    }
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, address);
+    if (checkout === null) return fail(worktreeTrouble(worktreeWords.gone));
+    const base = await sharedBase(gitRunHereFor(), checkout.folder, repo);
+    return done(base === null ? '' : await reviewDiff(checkout.folder, base));
+  });
+
+  handle<readonly WorkspaceFacts[]>(CHANNEL.checkoutLand, async (_event, args) => {
+    const [address] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const one = copyNamed(open, address);
+    if (one === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    const landed = await landTheCopy(open, where, one);
+    return landed.ok ? done(await copiesOfProject(open)) : fail(landed.trouble);
+  });
+
+  /**
+   * Give one copy's folder back and keep its branch.
+   *
+   * This is the whole of what the card offers to remove: the folder. The branch
+   * stays, and a copy holding writing no branch is carrying keeps its folder
+   * too, so there is no press here that can lose work.
+   */
+  handle<readonly WorkspaceFacts[]>(CHANNEL.checkoutPutAway, async (_event, args) => {
+    const [address] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const one = copyNamed(open, address);
+    if (one === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
+    if (!existsSync(one.folder)) return done(await copiesOfProject(open));
+    if (await holdsWork(gitRunHereFor(), one.folder)) return fail(HOLDS_WRITING);
+    await putDownCopyConversation(open, one.address);
+    await putAwayCheckoutAt(open.path, open.held, one.address);
+    if (existsSync(one.folder)) return fail(HOLDS_WRITING);
+    return done(await copiesOfProject(open));
+  });
+
+
+  /* ------------------------------------------------- work waiting to be read */
+
+  handle<readonly ReviewEntry[]>(CHANNEL.reviewQueue, (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(done<readonly ReviewEntry[]>([]));
+    return Promise.resolve(done(reviewRows(open.held)));
+  });
+
+  /** Open one to read it. Opening is reading, and reading is not agreeing: the
+   *  entry stops counting as waiting and nothing else about it changes. */
+  handle<ReviewOpened>(CHANNEL.reviewOpen, async (_event, args) => {
+    const [id] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string') return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    if (entry === undefined) return fail(NO_SUCH_ENTRY);
+
+    open.held.review = markRead(open.held.review, id);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, entry.address);
+    if (checkout === null) return done({ entries: reviewRows(open.held), diff: '' });
+    const base = await sharedBase(gitRunHereFor(), checkout.folder, repo);
+    return done({
+      entries: reviewRows(open.held),
+      diff: base === null ? '' : await reviewDiff(checkout.folder, base),
+    });
+  });
+
+  handle<readonly ReviewEntry[]>(CHANNEL.reviewChoose, async (_event, args) => {
+    const [id, path, choice] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || typeof path !== 'string') return fail(NO_SUCH_ENTRY);
+    if (choice !== null && !isFileVerdict(choice)) return fail(NO_SUCH_ENTRY);
+    open.held.review = chooseFile(open.held.review, id, path, choice);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    return done(reviewRows(open.held));
+  });
+
+  /**
+   * Answer a whole entry, and carry whatever it says to carry.
+   *
+   * The files arrive uncommitted, which is what makes a review reversible: a
+   * version is put down first, so the moment before somebody's folder changed
+   * is one press away. A file this folder has also changed is left exactly as
+   * it is and named back, for the resolver to settle place by place.
+   */
+  handle<ReviewDecided>(CHANNEL.reviewDecide, async (_event, args) => {
+    const [id, verdict] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || !isReviewVerdict(verdict)) return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    if (entry === undefined) return fail(NO_SUCH_ENTRY);
+
+    const repo = reviewRepo(open, where);
+    const taking = filesToTake(entry, verdict);
+    let clashes: readonly string[] = [];
+    if (taking.length > 0) {
+      const checkout = await checkoutForReview(repo, open.held, entry.address);
+      if (checkout === null) return fail(REVIEW_WORK_GONE);
+      await (await timelineFor(open, { ...where, conversation: undefined }))
+        ?.snapshot({ name: beforeBringingWorkIn, boundary: 'turn-ended' })
+        .catch(() => undefined);
+      const carried = await bringBack(gitRunHereFor(), repo, checkout.folder, taking);
+      if (!carried.ok) return fail(worktreeTrouble(carried.because));
+      clashes = carried.value.conflicted;
+    }
+
+    const after = decide(open.held.review, id, verdict);
+    open.held.review = after.entries;
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    void look(open.path, open.held);
+    return done({
+      entries: reviewRows(open.held),
+      did: clashes.length === 0 ? after.did : `${after.did} ${reviewWords.clashed(clashes)}`,
+      clashes,
+      address: entry.address,
+    });
+  });
+
+  /**
+   * The same yes, committed.
+   *
+   * One commit as the person, with their hooks and their signing, unless they
+   * asked for the conversation's own saves. Once any file is held back there is
+   * no branch to bring across, only a subset of one, so a partial landing is
+   * always the single commit and says so on the control.
+   */
+  handle<ReviewDecided>(CHANNEL.reviewLand, async (_event, args) => {
+    const [id, asked] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string') return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    if (entry === undefined) return fail(NO_SUCH_ENTRY);
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, entry.address);
+    if (checkout === null) return fail(REVIEW_WORK_GONE);
+
+    const said = asked === null || typeof asked !== 'object' ? {} : (asked as Record<string, unknown>);
+    const message = typeof said['message'] === 'string' ? said['message'] : '';
+    const everyVersion = said['how'] === 'every-version' && !landsAsOneCommit(entry);
+    const landing: HowItLands = {
+      how: everyVersion ? 'every-version' : 'squash',
+      ...(message.trim() === '' ? {} : { message }),
+    };
+
+    const taking = filesToTake(entry, 'take it');
+    if (taking.length === 0) {
+      return fail({
+        what: reviewWords.nothingChosen,
+        because: 'Take at least one file, or keep your own version and let this go.',
+        actionLabel: 'Got it',
+      });
+    }
+
+    let clashes: readonly string[] = [];
+    if (taking.length === entry.files.length && checkout.branch !== '') {
+      // Nothing held back, so the branch itself goes in and the copy is given
+      // back. Its conversation is put down first: the session is rooted in that
+      // folder, and left open the next thing it was asked to do would run
+      // somewhere that no longer exists.
+      await putDownCopyConversation(open, entry.address);
+      const landed = await landWorktree(gitRunHereFor(), repo, checkout.folder, landing);
+      if (!landed.ok) return fail(worktreeTrouble(landed.because));
+      open.held.checkouts.delete(entry.address);
+      await saveCheckouts(open.path, open.held).catch(() => undefined);
+    } else {
+      const carried = await bringBack(gitRunHereFor(), repo, checkout.folder, taking);
+      if (!carried.ok) return fail(worktreeTrouble(carried.because));
+      clashes = carried.value.conflicted;
+      const paths = [...carried.value.applied];
+      if (paths.length > 0) {
+        await gitRun(repo, ['add', '--', ...paths]);
+        const text =
+          message.trim() === ''
+            ? landingWords.message(checkout.branch === '' ? entry.title : checkout.branch)
+            : message;
+        const committed = await gitRun(repo, ['commit', '--cleanup=verbatim', '--message', text, '--', ...paths]);
+        if (committed.code !== 0) return fail(worktreeTrouble(landingWords.failed));
+      }
+    }
+
+    open.held.review = withoutEntry(open.held.review, id);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    void look(open.path, open.held);
+    return done({
+      entries: reviewRows(open.held),
+      did: clashes.length === 0 ? reviewWords.landed(entry.title) : `${reviewWords.landed(entry.title)} ${reviewWords.clashed(clashes)}`,
+      clashes,
+      address: entry.address,
+    });
+  });
+
+  /** Send the branch and open a pull request from it, with what the
+   *  conversation said it did as the description. */
+  handle<{ url: string; entries: readonly ReviewEntry[] }>(CHANNEL.reviewPr, async (_event, args) => {
+    const [id, summary] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string') return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    if (entry === undefined) return fail(NO_SUCH_ENTRY);
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, entry.address);
+    if (checkout === null) return fail(REVIEW_WORK_GONE);
+    if (checkout.branch === '') {
+      return fail({
+        what: 'This work is not on a branch.',
+        because: 'A piece from the board works in a detached copy, so there is nothing to push. Take it in first, then open a pull request from your own branch.',
+        actionLabel: 'Got it',
+      });
+    }
+
+    const sent = await gitRun(checkout.folder, [
+      'push',
+      '--set-upstream',
+      'origin',
+      `${checkout.branch}:${checkout.branch}`,
+    ]);
+    if (sent.code !== 0) {
+      return fail({
+        what: 'I could not send that branch to github.',
+        because: 'The project may have no github remote, or this computer is not allowed to write to it.',
+        actionLabel: 'Got it',
+      });
+    }
+    const made = await ghOpenPr(
+      repo,
+      checkout.branch,
+      entry.title,
+      typeof summary === 'string' && summary.trim() !== '' ? summary : entry.title,
+    );
+    if (!('url' in made)) {
+      return fail({ what: 'I could not open the pull request.', because: made.because, actionLabel: 'Got it' });
+    }
+    open.held.review = withoutEntry(open.held.review, id);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    return done({ url: made.url, entries: reviewRows(open.held) });
+  });
+
+  /** The way back to how this behaved before the queue, one card at a time. */
+  handle<readonly ReviewEntry[]>(CHANNEL.reviewMirror, async (_event, args) => {
+    const [id, on] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || typeof on !== 'boolean') return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    const address = entry?.address ?? id;
+    if (on) open.held.mirroring.add(address);
+    else open.held.mirroring.delete(address);
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+    return done(reviewRows(open.held));
+  });
+
+  /**
+   * One file both sides changed, written out with markers to decide over.
+   *
+   * Nothing on disk is touched to make it: the three versions are read, git is
+   * asked to put them together in memory, and what comes back is the text the
+   * resolver reads. So a clash somebody never settles leaves the project
+   * exactly as it was.
+   */
+  handle<ReviewClash>(CHANNEL.conflictLook, async (_event, args) => {
+    const [address, path] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof address !== 'string' || typeof path !== 'string') return fail(NO_SUCH_ENTRY);
+    const repo = reviewRepo(open, where);
+    const checkout = await checkoutForReview(repo, open.held, address);
+    if (checkout === null) return fail(REVIEW_WORK_GONE);
+    const mine = insideProject(repo, path);
+    const theirs = insideProject(checkout.folder, path);
+    if (mine === null || theirs === null) return fail(NO_SUCH_ENTRY);
+
+    const base = await sharedBase(gitRunHereFor(), checkout.folder, repo);
+    const started = base === null ? { code: 1, out: '' } : await gitRun(repo, ['show', `${base}:${path}`]);
+    const three = join(tmpdir(), `graphe-clash-${String(Date.now())}`);
+    await mkdir(three, { recursive: true });
+    try {
+      const files = {
+        mine: join(three, 'mine'),
+        base: join(three, 'base'),
+        theirs: join(three, 'theirs'),
+      };
+      await writeAtomically(files.mine, await readFile(mine, 'utf8').catch(() => ''));
+      await writeAtomically(files.base, started.code === 0 ? (started.out ?? '') : '');
+      await writeAtomically(files.theirs, await readFile(theirs, 'utf8').catch(() => ''));
+      const text = await mergeFileText(repo, [
+        'merge-file',
+        '-p',
+        '--diff3',
+        '-L',
+        conflictWords.mine,
+        '-L',
+        conflictWords.base,
+        '-L',
+        conflictWords.theirs,
+        files.mine,
+        files.base,
+        files.theirs,
+      ]);
+      if (text === null) {
+        return fail({
+          what: 'I could not read that file’s two versions.',
+          because: conflictWords.unreadable,
+          actionLabel: 'Got it',
+        });
+      }
+      return done({ path, text });
+    } finally {
+      await rm(three, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  /** Write the decided version of one file into the project. Refused while it
+   *  still carries markers: a half-decided file is not a file. */
+  handle<null>(CHANNEL.conflictSettle, async (_event, args) => {
+    const [address, path, text] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof address !== 'string' || typeof path !== 'string' || typeof text !== 'string') {
+      return fail(NO_SUCH_ENTRY);
+    }
+    const target = insideProject(reviewRepo(open, where), path);
+    if (target === null) return fail(NO_SUCH_ENTRY);
+    const read = readConflict(text);
+    if (!read.ok || read.clashes > 0) {
+      return fail({
+        what: 'I have left that file alone.',
+        because: read.ok ? conflictWords.stillOpen(read.clashes) : conflictWords.unreadable,
+        actionLabel: 'Got it',
+      });
+    }
+    await (await timelineFor(open, { ...where, conversation: undefined }))
+      ?.snapshot({ name: beforeBringingWorkIn, boundary: 'turn-ended' })
+      .catch(() => undefined);
+    await mkdir(dirname(target), { recursive: true });
+    await writeAtomically(target, text);
+    void look(open.path, open.held);
+    return done(null);
   });
 
   handle<string>(CHANNEL.prWorktreePrepare, async (_event, args) => {
@@ -8482,6 +10198,12 @@ function register(): void {
     return found === null ? null : addressOf(found.held);
   }
 
+  /** A card has been answered, so the loop is no longer held back by it. A
+   *  click is an answer; before this only typing counted as one. */
+  function answered(open: Workspace<Held>, where: Where): void {
+    holdForAnswer(open.path, listAddress(open, where) ?? '', false);
+  }
+
   handle<import('../src/lib/ipc').BuildPlan | null>(CHANNEL.buildPlan, async (_event, args) => {
     const where = whereIn(args);
     const open = projectAt(where);
@@ -8673,26 +10395,65 @@ function register(): void {
     }
   });
 
-  handle<{ says: Readonly<Record<string, string>>; running: number }>(
-    CHANNEL.addons,
-    async (_event, args) => {
-      const open = projectAt(whereIn(args));
-      const says: Record<string, string> = {};
-      for (const one of open?.held.sessions.open ?? []) {
-        for (const addon of one.held.addons) says[addon.name] = addon.says;
+  handle<AddonReport>(CHANNEL.addons, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    const says: Record<string, string> = {};
+    /* One entry per add-on, not per session: the same add-on loaded into three
+       conversations is one thing somebody sets. */
+    const each = new Map<string, AddonHere>();
+    for (const one of open?.held.sessions.open ?? []) {
+      for (const addon of one.held.addons) {
+        says[addon.name] = addon.says;
+        each.set(addon.name, addon);
       }
-      const running = await addonProcesses(
-        process.pid,
-        spawned.all().map((one) => one.pid),
-      ).catch(() => 0);
-      return done({ says, running });
-    },
-  );
+    }
+    const running = await addonProcesses(
+      process.pid,
+      spawned.all().map((one) => one.pid),
+    ).catch(() => 0);
+    return done({ says, each: [...each.values()], running });
+  });
 
-  handle<{ says: string; couldClear: number; because: string }>(CHANNEL.storage, async () => {
+  handle<StorageNow>(CHANNEL.storage, async () => {
     const folders = await measureFolders(app.getPath('userData'));
     const { sweep: could, because } = whatToSweep(await whatIsLyingAround(), Date.now());
-    return done({ says: saysStorage(folders), couldClear: could.length, because });
+    return done({
+      says: saysStorage(folders),
+      couldClear: could.length,
+      because,
+      // A sentence naming six folders is a sentence nobody reads. The rows are
+      // the same reading, each with its own size and its own way out.
+      rows: folders.map((one) => ({
+        name: one.name,
+        bytes: one.bytes,
+        files: one.files,
+        clearable: canClear(one.name),
+      })),
+    });
+  });
+
+  /** Empty one row outright. Only the rows that never hold anybody's work. */
+  handle<StorageNow>(CHANNEL.clearFolder, async (_event, args) => {
+    const [name] = args;
+    const userData = app.getPath('userData');
+    const where = typeof name === 'string' && canClear(name) ? folderNamed(userData, name) : null;
+    if (where !== null) {
+      await rm(where, { recursive: true, force: true }).catch(() => undefined);
+      await mkdir(where, { recursive: true }).catch(() => undefined);
+    }
+    const folders = await measureFolders(userData);
+    const { sweep: could, because } = whatToSweep(await whatIsLyingAround(), Date.now());
+    return done({
+      says: saysStorage(folders),
+      couldClear: could.length,
+      because,
+      rows: folders.map((one) => ({
+        name: one.name,
+        bytes: one.bytes,
+        files: one.files,
+        clearable: canClear(one.name),
+      })),
+    });
   });
 
   handle<{ removed: number; freed: number; says: string }>(
@@ -8728,7 +10489,18 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return done(null);
-    return done(await GoalFile.read(open.path, app.getPath('userData')));
+    const address = listAddress(open, where);
+    if (address === null) return done(null);
+    const userData = app.getPath('userData');
+    const found = await GoalFile.read(open.path, userData, address);
+    if (found !== null) return done(found);
+    // A goal written when there was one per project belongs to whichever
+    // conversation asks for it first, and only once.
+    const older = await GoalFile.read(open.path, userData);
+    if (older === null) return done(null);
+    await GoalFile.write(open.path, userData, older, address);
+    await GoalFile.clear(open.path, userData);
+    return done(older);
   });
 
   handle<null>(CHANNEL.goalSave, async (_event, args) => {
@@ -8736,10 +10508,12 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
+    const address = listAddress(open, where);
+    if (address === null) return fail(NOTHING_OPEN);
     // Read the same way it is read back, so nothing half-shaped reaches disk.
     const goal = readStoredGoal(raw);
     if (goal === null) return fail(NOTHING_OPEN);
-    await GoalFile.write(open.path, app.getPath('userData'), goal);
+    await GoalFile.write(open.path, app.getPath('userData'), goal, address);
     return done(null);
   });
 
@@ -8747,7 +10521,9 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return done(null);
-    await GoalFile.clear(open.path, app.getPath('userData'));
+    const address = listAddress(open, where);
+    if (address === null) return done(null);
+    await GoalFile.clear(open.path, app.getPath('userData'), address);
     return done(null);
   });
 
@@ -8839,6 +10615,7 @@ function register(): void {
        The ceiling is there to stop a loop nobody is watching, not to ration a
        person who is. */
     continuations.spoke(open.path, addressOf(conversation.held));
+    askingSomebody.delete(keyOf(open.path, addressOf(conversation.held)));
     // A new job, so the next apply puts a version down again, and whatever the
     // app had queued for itself is behind us.
     open.held.snappedBeforeApply.delete(addressOf(conversation.held));
@@ -8913,7 +10690,7 @@ function register(): void {
           : `${asked}\n\n<graphe-selected-skills>\n${chosen
               .map(
                 ({ skill, text: instructions }) =>
-                  `The user explicitly selected @${skill.handle}. Follow these instructions for this request:\n<skill name="${skill.name}">\n${instructions.slice(0, 50000)}\n</skill>`,
+                  `The user explicitly selected @${skill.handle}. Follow these instructions for this request:\n<skill name="${skill.name}">\n${withinBudget(instructions, SKILL_BUDGET, standingWords.skillTrimmed)}\n</skill>`,
               )
               .join('\n\n')}\n</graphe-selected-skills>`;
       await agent.prompt(withSkills, imageCards(attachments), { lookFirst, queue });
@@ -9009,8 +10786,13 @@ function register(): void {
     // Whichever session asked. A check running in a copy draws its card into
     // the same thread, and answering it into the conversation behind would have
     // returned quietly false and left the run waiting forever.
-    if (open.held.checking?.answerAsked(id, picked) === true) return done(true);
-    return done(sessionAt(open, where)?.answerAsked(id, picked) ?? false);
+    if (open.held.checking?.answerAsked(id, picked) === true) {
+      answered(open, where);
+      return done(true);
+    }
+    const took = sessionAt(open, where)?.answerAsked(id, picked) ?? false;
+    if (took) answered(open, where);
+    return done(took);
   });
 
   handle<boolean>(CHANNEL.answer, async (_event, args) => {
@@ -9021,8 +10803,13 @@ function register(): void {
     if (open === null) return done(false);
     // Same again for the Guard's own questions: the check in a copy asks them
     // too, and it is the one that has to hear the answer.
-    if (open.held.checking?.answer(callId, decision as Decision) === true) return done(true);
-    return done(sessionAt(open, where)?.answer(callId, decision as Decision) ?? false);
+    if (open.held.checking?.answer(callId, decision as Decision) === true) {
+      answered(open, where);
+      return done(true);
+    }
+    const took = sessionAt(open, where)?.answer(callId, decision as Decision) ?? false;
+    if (took) answered(open, where);
+    return done(took);
   });
 
   /**
@@ -9271,8 +11058,27 @@ function register(): void {
   handle<Preferences>(CHANNEL.setAddons, async (_event, args) => {
     const [choice] = args;
     const prefs = await preferences();
-    if (choice !== 'on' && choice !== 'tools-only') return done(prefs.all());
+    if (choice !== 'on' && choice !== 'tools-only' && choice !== 'off') return done(prefs.all());
     return done(await prefs.change({ addons: choice }));
+  });
+
+  /* How it looks. Read forgivingly — anything unreadable falls back to the
+     shipped answer for that one field, so a hand-edited file costs the field
+     it broke rather than the whole appearance. */
+  handle<Preferences>(CHANNEL.setAppearance, async (_event, args) => {
+    const [raw] = args;
+    const prefs = await preferences();
+    const appearance = readAppearance(raw);
+    return done(await prefs.change({ appearance, theme: appearance.base }));
+  });
+
+  /* Somebody's own stylesheet, loaded last so it wins. The precise control
+     behind the Appearance row: every value the builder sets is a token, and
+     this is where a token the builder does not offer gets written. */
+  handle<{ css: string; file: string }>(CHANNEL.ownStyles, async () => {
+    const file = join(app.getPath('userData'), 'graphe.css');
+    const css = await readFile(file, 'utf8').catch(() => '');
+    return done({ css, file });
   });
 
   handle<Preferences>(CHANNEL.setThinking, async (_event, args) => {
@@ -9318,6 +11124,26 @@ function register(): void {
   handle<TokenUsageView | null>(CHANNEL.tokenUsage, async () =>
     done(await readTokenUsage(sessionsFolder())),
   );
+
+  /* The same days as a CSV, saved where the person says. Written by the shell
+     because the window has no disk of its own. */
+  handle<string | null>(CHANNEL.exportSpend, async (_event, args) => {
+    const [csv] = args;
+    if (typeof csv !== 'string' || csv === '') return fail(NOTHING_OPEN);
+    const where = await dialog.showSaveDialog(mainWindow ?? undefined!, {
+      defaultPath: join(app.getPath('downloads'), 'graphe-spend.csv'),
+      filters: [{ name: 'Comma separated values', extensions: ['csv'] }],
+    });
+    if (where.canceled || where.filePath === undefined) return done(null);
+    try {
+      await writeAtomically(where.filePath, csv);
+      shell.showItemInFolder(where.filePath);
+      return done(where.filePath);
+    } catch (cause) {
+      const raw = cause instanceof Error ? cause.message : String(cause);
+      return fail(plainTrouble(raw, detailsOf(cause)));
+    }
+  });
 
   /* Where the window has drawn its placeholder, in window coordinates. The
      native view is glued to it: nothing here guesses the rectangle, because a
@@ -9608,9 +11434,16 @@ if (!app.requestSingleInstanceLock()) {
     // that came round while this was shut is done once — see whenNext.
     await standingFile().catch(() => null);
     watchTheClock();
+    /* The agent runtime is 810ms of import, and it used to be paid by whoever
+       opened the first project — so the slowest thing the app does was the
+       first thing anybody asked of it. The window is up by now and nothing is
+       being asked of the machine. */
+    setImmediate(() => warmUp());
     // A fresh Mac has no git, and finding that out inside "open folder" reads
     // as the app failing rather than as one thing missing.
     if (!(await probeGit())) send(null, { type: 'notice', ...GIT_MISSING, because: GIT_MISSING.because });
+    readToldAboutReview();
+    void sweepScratch();
     watchForANewerOne();
   });
 
@@ -9643,6 +11476,9 @@ if (!app.requestSingleInstanceLock()) {
     // this process is, or it outlives the app that started it with nobody left
     // who can stop it. The ordinary stop leans on a timer there is no time for.
     for (const one of workspaces.open) one.held.running.stopAllNow();
+    // Whatever is still waiting for its frame goes now, or the last thing said
+    // is lost between the tick and the quit.
+    wire.flush();
     // Everything else this app started — helpers, checks, language servers,
     // browsers, the servers an add-on's tool spawned. None of them used to be
     // written down anywhere, and none of them died with the app.

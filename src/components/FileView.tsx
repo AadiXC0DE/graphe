@@ -13,6 +13,12 @@ type Props = {
   trouble?: string | null;
   /** Left off, no way out is drawn. */
   onClose?: () => void;
+  /** Read in the thread's own column rather than in a card over it: every
+   *  line, numbered, with a way of finding a word in it. */
+  whole?: boolean;
+  onWhole?: (want: boolean) => void;
+  /** Ask the conversation about a run of lines. */
+  onAsk?: (path: string, from: number, to: number) => void;
 };
 
 /** How much of a long file appears at once, and how much each "show more" adds.
@@ -44,9 +50,11 @@ function endingOf(path: string): string | null {
  * and a text box that looked editable but was not would be a worse lie than no
  * text box at all.
  */
-export default function FileView({ path, text, trouble, onClose }: Props) {
+export default function FileView({ path, text, trouble, onClose, whole = false, onWhole, onAsk }: Props) {
   const [cap, setCap] = useState(CHUNK);
   const [coloured, setColoured] = useState<{ code: string; html: string } | null>(null);
+  const [finding, setFinding] = useState<string | null>(null);
+  const [at, setAt] = useState(0);
   const copying = useCopying({ idle: 'Copy path' });
 
   const ending = endingOf(path);
@@ -61,7 +69,32 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
     if (split.length > 1 && split[split.length - 1] === '') split.pop();
     return split;
   }, [text]);
-  const shown = useMemo(() => lines.slice(0, cap), [lines, cap]);
+  // Read whole, there is nothing to hold back: the highlighter already skips
+  // anything over 400 KB, which is the only reason a cap existed.
+  const shown = useMemo(() => (whole ? lines : lines.slice(0, cap)), [lines, cap, whole]);
+
+  /** Every line the word is on, in order. */
+  const found = useMemo(() => {
+    const needle = (finding ?? '').trim().toLowerCase();
+    if (needle === '') return [] as number[];
+    const rows: number[] = [];
+    lines.forEach((line, index) => {
+      if (line.toLowerCase().includes(needle)) rows.push(index + 1);
+    });
+    return rows;
+  }, [lines, finding]);
+
+  useEffect(() => {
+    setAt(0);
+  }, [finding]);
+
+  const standing = found[at] ?? null;
+  useEffect(() => {
+    if (standing === null) return;
+    document
+      .querySelector(`.fileview__code [data-line="${String(standing)}"]`)
+      ?.scrollIntoView({ block: 'center' });
+  }, [standing]);
   const code = useMemo(() => shown.join('\n'), [shown]);
 
   /** Nothing to read: a file full of bytes rather than words. */
@@ -70,7 +103,28 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
   useEffect(() => {
     setCap(CHUNK);
     setColoured(null);
+    setFinding(null);
   }, [path]);
+
+  /* Only while it has the column. In the card over the thread the keys belong
+     to the conversation behind it. */
+  useEffect(() => {
+    if (!whole) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'f') {
+        event.preventDefault();
+        setFinding((was) => (was === null ? '' : was));
+        return;
+      }
+      if (event.key === 'Escape' && finding !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        setFinding(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [whole, finding]);
 
   useEffect(() => {
     if (binary || !canHighlight(language) || code === '' || code.length > TOO_MUCH) return;
@@ -102,6 +156,16 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
           <button type="button" className="fileview__act" onClick={() => copying.copy(path)}>
             {copying.label}
           </button>
+          {onWhole === undefined ? null : (
+            <button
+              type="button"
+              className="fileview__act"
+              onClick={() => onWhole(!whole)}
+              title={whole ? 'Back to the conversation' : 'Read it in full ⌘⇧E'}
+            >
+              {whole ? 'Back' : 'Expand'}
+            </button>
+          )}
           {onClose === undefined ? null : (
             <button type="button" className="fileview__act" onClick={onClose}>
               Close
@@ -109,6 +173,35 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
           )}
         </span>
       </div>
+
+      {finding === null ? null : (
+        <div className="fileview__find" role="search">
+          <input
+            type="search"
+            className="fileview__findbox"
+            autoFocus
+            value={finding}
+            placeholder="Find in this file"
+            aria-label="Find in this file"
+            onChange={(event) => setFinding(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              setAt((was) => (found.length === 0 ? 0 : (was + (event.shiftKey ? -1 : 1) + found.length) % found.length));
+            }}
+          />
+          <span className="fileview__foundcount">
+            {finding.trim() === ''
+              ? ''
+              : found.length === 0
+                ? 'Not in this file'
+                : `${String(at + 1)} of ${String(found.length)}`}
+          </span>
+          <button type="button" className="fileview__act" onClick={() => setFinding(null)}>
+            Done
+          </button>
+        </div>
+      )}
 
       {trouble !== null && trouble !== undefined && trouble !== '' ? (
         <p className="fileview__say">{trouble}</p>
@@ -125,7 +218,11 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
                   {shown.map((line, index) => (
                     // Index is the line number here, which is the one place it
                     // is genuinely the identity of the row.
-                    <span className="line" key={index}>
+                    <span
+                      className={`line ${found[at] === index + 1 ? 'line--found' : ''}`}
+                      data-line={index + 1}
+                      key={index}
+                    >
                       {line}
                       {'\n'}
                     </span>
@@ -142,7 +239,19 @@ export default function FileView({ path, text, trouble, onClose }: Props) {
             />
           )}
 
-          {rest > 0 ? (
+          {!whole || onAsk === undefined || lines.length === 0 ? null : (
+            <div className="fileview__more">
+              <button
+                type="button"
+                className="fileview__act"
+                onClick={() => onAsk(path, 1, lines.length)}
+              >
+                Ask about this file
+              </button>
+            </div>
+          )}
+
+          {rest > 0 && !whole ? (
             <div className="fileview__more">
               <span className="fileview__rest">
                 {shown.length} of {lines.length} lines

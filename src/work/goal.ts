@@ -51,7 +51,7 @@ export const goalWords = {
 
   chip: 'Goal',
   name: 'Work toward a goal',
-  note: 'Keep working toward one sentence until it is done — checks after every round and carries on by itself. Full access while it lasts.',
+  note: 'Keep working toward one sentence until it is done, checking after every round and carrying on by itself. Full access while it lasts.',
   paused: 'Goal paused',
   resumed: 'Goal resumed',
   cleared: 'Goal cleared',
@@ -171,8 +171,15 @@ export function verifyGoal(
   return { met: true, reason: `All ${String(plan.total)} steps settled and ${checks.reason}` };
 }
 
-/** Update elapsed in place, for display. */
+/**
+ * Update elapsed in place, for display.
+ *
+ * Only while it is running. A goal that is paused or done ran for as long as it
+ * ran; measuring from the moment it started means a job that took six minutes
+ * reads as forty a while later, and keeps counting while nobody is working.
+ */
 export function withElapsed(goal: Goal): Goal {
+  if (goal.status !== 'active') return goal;
   return { ...goal, elapsed: goalElapsed(goal) };
 }
 
@@ -200,7 +207,8 @@ export function readStoredGoal(raw: unknown): Goal | null {
   };
 }
 
-/** Key for localStorage per project. */
-export function goalStorageKey(project: string): string {
-  return `graphe:goal:${project}`;
+/** Key for localStorage. One goal per conversation, so the fallback store is
+ *  addressed the same way the file on disk is. */
+export function goalStorageKey(project: string, address = ''): string {
+  return address === '' ? `graphe:goal:${project}` : `graphe:goal:${project}\u0000${address}`;
 }

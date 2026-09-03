@@ -42,6 +42,11 @@
      somebody has opened it, which keeps this whole file unchanged for everybody
      who has not. */
   --browser-take: 0px;
+  /* How tall the commands drawer is, and how much of the bottom it is holding.
+     The second is zero until it is opened, so the composer sits on the glass
+     for everybody who never opens it. */
+  --commands-height: 240px;
+  --commands-take: 0px;
   /* The conversation's floor. It never goes below this — squeezing a thread
      into a column too narrow to read is how every side-by-side layout fails,
      and the fix is a floor rather than a smaller font. */
@@ -107,7 +112,9 @@
    strip, so the strip owes them nothing. */
 .app--shelved .topbar {
   left: var(--shelf-take);
-  padding-left: 0;
+  /* Not zero: the first tab sat against the shelf's own edge, two surfaces
+     touching with nothing between them. */
+  padding-left: var(--space-3);
 }
 
 /* The overview owns the right-hand edge; the ramp belongs to the conversation. */
@@ -153,6 +160,52 @@
    reads as placed rather than pinned to the top edge. */
 .app--empty .welcome {
   margin-top: calc(var(--space-8) + var(--space-5));
+}
+
+/* The press above a long conversation's tail. Quiet and centred: it is the top
+   of the page, and nobody arrives here looking for it. */
+.thread__earlier {
+  align-self: center;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.thread__earlier:hover {
+  color: var(--text);
+}
+
+/* One turn and whatever it produced. A box of its own so a result can be
+   scrolled to, laid out exactly as the thread lays its own children out, so
+   wrapping changed nothing about the spacing. */
+.thread__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  scroll-margin: var(--space-6) 0;
+}
+
+/* Where a search landed. Held while that is the result somebody is standing
+   on and gone the moment they move off it, rather than a flash that has faded
+   by the time the eye arrives. */
+.thread__row--found {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 var(--space-2) var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
+.thread__row {
+  transition: background-color var(--dur-ui) var(--ease-out-quart);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread__row {
+    transition: none;
+  }
 }
 
 .thread {
@@ -239,7 +292,14 @@
   align-items: stretch;
   gap: var(--space-2);
   background: var(--bg);
-  padding-bottom: calc(var(--space-5) + var(--space-3));
+  padding-bottom: calc(var(--space-5) + var(--space-3) + var(--commands-take));
+}
+
+/* The drawer takes the bottom of the window, so the composer takes its room out
+   of its own foot rather than moving: the box you type in stays where the hands
+   already are. */
+.app--commands {
+  --commands-take: var(--commands-height);
 }
 
 /* The last line of the conversation used to end at a hard horizontal edge where
@@ -638,7 +698,7 @@
    where the shelf does. */
 .app--files .topbar {
   left: calc(var(--shelf-take) + var(--files-take));
-  padding-left: 0;
+  padding-left: var(--space-3);
 }
 
 .filespanel {

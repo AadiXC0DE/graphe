@@ -4,7 +4,7 @@ import './ErrorBoundary.css';
 
 /** The card's words, in one place so a test and the window read the same ones. */
 export const boundaryWords = {
-  what: (where: string) => `Something went wrong in ${where} — here is what to send me.`,
+  what: (where: string) => `Something went wrong in ${where}. Here is what to send me.`,
   copy: 'Copy diagnostics',
   copied: 'Copied',
   noMessage: 'No message came with it.',
@@ -20,7 +20,7 @@ export function boundaryReport(
   at: number,
 ): string {
   return [
-    'Graphe — something went wrong',
+    'Graphe: something went wrong',
     `when: ${new Date(at).toISOString()}`,
     `where: ${where}`,
     `what: ${message}`,
@@ -77,7 +77,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     return (
       <section className="boundary" role="alert">
         <p className="boundary__what">{boundaryWords.what(this.props.what)}</p>
-        <pre className="boundary__message">{message}</pre>
+        <pre className="boundary__message scroll--auto">{message}</pre>
         <button type="button" className="boundary__copy" onClick={this.copy}>
           {copied ? boundaryWords.copied : boundaryWords.copy}
         </button>

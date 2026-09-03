@@ -56,6 +56,9 @@ export type Turn =
       /** When it began, epoch ms. A helper's card counts up from this; without
        *  it every helper on the board claimed to have started this second. */
       at?: number;
+      /** When it finished, epoch ms. The pair is how long a command took, which
+       *  is the one thing a list of commands cannot work out for itself. */
+      endedAt?: number;
       label: string;
       detail?: string;
       /** What the step has said for itself while running — a helper's findings
@@ -259,6 +262,7 @@ function closeInto(
     turns[index] = {
       ...turn,
       state,
+      endedAt: Date.now(),
       ...(answered
         ? { label: ADVISOR_ANSWERED, progress: detail }
         : { detail: detail ?? turn.detail }),
@@ -611,6 +615,7 @@ export function applyEventInto(turns: Turn[], event: AgentEvent): boolean {
     case 'model-reading':
     case 'running':
     case 'busy':
+    case 'extension-turn':
     case 'prompt-size':
       return false;
 

@@ -190,7 +190,7 @@ export default function Annotate({ source, name, onDone, onClose }: AnnotateProp
     if (tool === 'note') {
       const id = nextId();
       wasSaid.current = '';
-      setMarks([...settled(), { id, kind: 'note', at, text: '' }]);
+      setMarks([...settled(editing), { id, kind: 'note', at, text: '' }]);
       setUndone([]);
       setEditing(id);
       return;
@@ -282,19 +282,21 @@ export default function Annotate({ source, name, onDone, onClose }: AnnotateProp
   /* A pin with nothing written on it is a click somebody changed their mind
      about. Every way out of the field agrees on that, so it is one function
      rather than the same filter written in three places. */
-  const settled = (): readonly Mark[] => {
-    const id = editing;
-    if (id === null) return marksNow.current;
-    return marksNow.current.filter(
-      (one) => !(one.id === id && one.kind === 'note' && one.text.trim() === ''),
-    );
-  };
+  const settled = useCallback(
+    (id: string | null): readonly Mark[] =>
+      id === null
+        ? marksNow.current
+        : marksNow.current.filter(
+            (one) => !(one.id === id && one.kind === 'note' && one.text.trim() === ''),
+          ),
+    [marksNow],
+  );
 
   const keepNote = useCallback(() => {
     if (editing === null) return;
     setEditing(null);
-    setMarks(settled());
-  }, [editing]);
+    setMarks(settled(editing));
+  }, [editing, settled]);
 
   const dropNote = useCallback(() => {
     const id = editing;
@@ -487,7 +489,7 @@ export default function Annotate({ source, name, onDone, onClose }: AnnotateProp
                       aria-label={SAYS.noteAt(number)}
                       onClick={() => {
                         if (editing === note.id) return;
-                        setMarks(settled());
+                        setMarks(settled(editing));
                         wasSaid.current = note.text;
                         setEditing(note.id);
                       }}

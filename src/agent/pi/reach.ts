@@ -162,7 +162,7 @@ export const REACHABLE: readonly Reach[] = [
     // way anything can be drawn rather than only read.
     id: 'figma',
     name: 'Figma',
-    what: 'Lets me open the Figma file you have in front of you and work in it — read the real spacing, colours and words, and draw into it as well.',
+    what: 'Lets me open the Figma file you have in front of you and work in it: read the real spacing, colours and words, and draw into it as well.',
     needs:
       'Figma keeps one step for itself. I fetch the helper it needs and open the folder at it; you point Figma at it from Figma’s own menu, once, and it is there from then on.',
     using:

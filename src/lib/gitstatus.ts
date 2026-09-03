@@ -38,6 +38,9 @@ export function parseGitStatus(raw: string): GitSnapshot {
   let staged = 0;
   let untracked = 0;
   const files: ChangedFile[] = [];
+  // By path, because one file can be both staged and edited again, and adding
+  // the three counts together reports it twice.
+  const touched = new Set<string>();
   for (const line of raw.split('\n')) {
     // `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>`. The two letters say which
     // side changed — index half first, worktree half second — and a dot means
@@ -53,6 +56,7 @@ export function parseGitStatus(raw: string): GitSnapshot {
       if (index !== '.') staged += 1;
       if (index === '.' && worktree === '.') continue;
       const path = parts.slice(8).join(' ');
+      if (path !== '') touched.add(path);
       if (path !== '' && files.length < NAMES) {
         files.push({ path, kind: index === 'A' || worktree === 'A' ? 'new' : 'changed' });
       }
@@ -61,6 +65,7 @@ export function parseGitStatus(raw: string): GitSnapshot {
     if (line.startsWith('? ')) {
       untracked += 1;
       const path = line.slice(2);
+      if (path !== '') touched.add(path);
       if (path !== '' && files.length < NAMES) files.push({ path, kind: 'new' });
     }
   }
@@ -76,8 +81,32 @@ export function parseGitStatus(raw: string): GitSnapshot {
     unstaged,
     staged,
     untracked,
+    changedPaths: touched.size,
     files,
+    // Read separately, by whoever asked for the status: `--porcelain=v2`
+    // carries no line totals at all.
+    added: 0,
+    removed: 0,
     ahead: branchAb === null ? 0 : Number(branchAb[1] ?? 0),
     behind: branchAb === null ? 0 : Number(branchAb[2] ?? 0),
   };
+}
+
+/**
+ * The lines added and removed, from `git diff --numstat`.
+ *
+ * One line per file, `added<TAB>removed<TAB>path`, and a dash for either count
+ * on a file git read as binary. Those are counted as files rather than lines,
+ * which is the honest answer: a picture has no lines.
+ */
+export function parseNumstat(raw: string): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const line of raw.split('\n')) {
+    const parts = line.split('\t');
+    if (parts.length < 3) continue;
+    added += Number(parts[0]) || 0;
+    removed += Number(parts[1]) || 0;
+  }
+  return { added, removed };
 }

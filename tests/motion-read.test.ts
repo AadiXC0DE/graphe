@@ -905,8 +905,11 @@ describe('M-08 the words on the screen', () => {
     }
   });
 
-  it('draws its own preview at rest for anybody who asked for less movement', () => {
+  /* The band is a table of lengths and curves now. Nothing in it performs, so
+     there is nothing to hold still for somebody who asked for less movement. */
+  it('does not perform anything of its own', () => {
     const source = readFileSync(new URL('../src/components/Motion.css', import.meta.url), 'utf8');
-    expect(source).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(source).not.toMatch(/^\s*animation:/m);
+    expect(source).not.toContain('@keyframes');
   });
 });

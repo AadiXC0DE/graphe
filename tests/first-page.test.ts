@@ -34,10 +34,18 @@ describe('a colour per project', () => {
     }
   });
 
-  it('paints the tile from that hue, light and dark', () => {
-    expect(css).toContain('background: oklch(0.9 0.05 var(--tile-hue, 0))');
-    expect(css).toContain('background: oklch(0.3 0.06 var(--tile-hue, 0))');
-    expect(css).toContain('color: oklch(0.45 0.12 var(--tile-hue, 0))');
+  /* Two hand-written pairs behind a media query got it wrong the moment
+     somebody derived a palette of their own: the tile came out of the dark pair
+     on a light ground and the letter was barely there. Mixed against the ground
+     and the ink that are actually on, there is one rule and no wrong pair. */
+  it('paints the tile from that hue, against whatever palette is on', () => {
+    expect(css).toContain(
+      'background: color-mix(in oklab, oklch(0.62 0.16 var(--tile-hue, 0)) 16%, var(--bg-raised))',
+    );
+    expect(css).toContain(
+      'color: color-mix(in oklab, oklch(0.55 0.19 var(--tile-hue, 0)) 62%, var(--text))',
+    );
+    expect(css).not.toContain('prefers-color-scheme');
   });
 });
 

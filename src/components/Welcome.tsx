@@ -104,10 +104,18 @@ export default function Welcome({
 
   return (
     <div className="welcome">
+      {/* The ground, not an ornament: a dot field that fades out before it
+          reaches anything, and one soft bloom of the accent behind the
+          question. Both are painted once and never move. */}
+      <span className="welcome__ground" aria-hidden="true" />
       <h1 className="welcome__title">
-        {project === null || project === undefined
-          ? 'What do you want to make?'
-          : `What do you want to make in ${project}?`}
+        {project === null || project === undefined ? (
+          'What do you want to make?'
+        ) : (
+          <>
+            What do you want to make in <span className="welcome__where">{project}</span>?
+          </>
+        )}
       </h1>
       {/* The second sentence is the only instruction on the screen, and it is
           there because nothing else says what pressing a row does. Without it

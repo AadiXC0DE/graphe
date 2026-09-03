@@ -779,6 +779,9 @@ export default function Overview({
         </section>
       ) : null}
 
+      {/* Nothing looked up is nothing to say. A band that only ever reads
+          "0" is a band people stop looking at. */}
+      {research.length === 0 ? null : (
       <section className="overview__block">
         <button
           type="button"
@@ -815,6 +818,7 @@ export default function Overview({
           </p>
         )}
       </section>
+      )}
 
       {references.length === 0 ? null : (
         <section className="overview__block">

@@ -892,3 +892,46 @@
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------------------------------------------------------------------------
+   A band that folds
+   The heading is the press. Closed it is one line: the name, how many, and the
+   mark. Unstyled, the count and the chevron fell under the heading and read as
+   a stray "0".
+   --------------------------------------------------------------------------- */
+
+.overview__fold {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+}
+
+.overview__fold .overview__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.overview__foldcount {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.overview__foldmark {
+  flex: none;
+  width: 12px;
+  text-align: center;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .overview__fold:hover .overview__title,
+  .overview__fold:hover .overview__foldmark {
+    color: var(--text);
+  }
+}

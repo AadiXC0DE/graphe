@@ -1,4 +1,4 @@
-import { lazy, memo, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import { Shown } from "./components/Shown";
@@ -243,11 +243,22 @@ const VIEWS = [
   () => import("./components/Usage"),
   () => import("./components/AddMore"),
   () => import("./components/Changes"),
+  () => import("./components/Files"),
+  () => import("./components/FileView"),
+  () => import("./components/HelpersView"),
+  () => import("./components/Connected"),
+  () => import("./components/Palette"),
+  () => import("./components/Against"),
+  () => import("./components/Conflict"),
 ];
 
 /** A sheet-coloured rectangle where the sheet will be, rather than nothing, for
  *  the frame or two a chunk still on its way costs. */
 const ARRIVING = <div className="sheet sheet--arriving" aria-busy="true" />;
+
+/** The same rectangle, over the screen being left rather than under the one
+ *  arriving. */
+const COVER = <div className="sheet sheet--arriving sheet--cover" aria-hidden="true" />;
 
 /** /?gallery renders every component on one page instead of the app, so the UI
  *  can be screenshotted and reviewed in both themes. Read once, at module load. */
@@ -562,6 +573,9 @@ function Conversation() {
   /** What this computer remembers. Null until the shell has been asked — which
    *  is not the same as an empty list, and the two states look different: one is
    *  a first launch, the other is a launch we have not finished yet. */
+  /** True from the moment a launch decides which folder to open until it is
+   *  open. Neither first screen is drawn under it. */
+  const [openingOnLaunch, setOpeningOnLaunch] = useState(false);
   const [recent, setRecent] = useState<readonly RecentProject[] | null>(null);
   /** True while the picker is hanging under the project's name as a switcher. */
   const [switching, setSwitching] = useState(false);
@@ -725,11 +739,27 @@ function Conversation() {
     });
   }, []);
 
+  /* Opening a screen is a transition, so the one on screen stays put rather
+     than blinking out. What it must not do is leave the *wrong* screen up while
+     the new one's code arrives: past a frame or two, the ground is covered
+     instead. Under that, nothing is drawn at all — a cover that flashes on
+     every press is worse than the wait it hides. */
+  const [screenComing, startScreen] = useTransition();
+  const [covering, setCovering] = useState(false);
+  useEffect(() => {
+    if (!screenComing) {
+      setCovering(false);
+      return;
+    }
+    const timer = setTimeout(() => setCovering(true), 90);
+    return () => clearTimeout(timer);
+  }, [screenComing]);
+
   /** Reached from the shelf and from the project's name, so it lives here
    *  rather than at either call site. */
   const openAddMore = useCallback(() => {
     setSwitching(false);
-    startTransition(() => setAddMore(true));
+    startScreen(() => setAddMore(true));
     void bridge.packages().then((answer) => {
       if (answer.ok) setPacks(answer.value);
     });
@@ -1019,7 +1049,10 @@ function Conversation() {
     });
   }, []);
   /** A file read in the thread's own column rather than in a card over it. */
-  const [readingWhole, setReadingWhole] = useState(false);
+  /* Reading one file in the whole column, which is not offered yet: the mode
+     is here and works, the composition around it is not. Held at false rather
+     than removed, so the way back in is one press rather than a rebuild. */
+  const [readingWhole] = useState(false);
   const [finding, setFinding] = useState<string | null>(null);
   const [foundAt, setFoundAt] = useState<number | null>(null);
   /** The turn a search landed on, by its own id, so the row can be marked and
@@ -1531,7 +1564,7 @@ function Conversation() {
     ) => {
       /* In a transition, so the conversation stays on screen while the code for
          the screen being opened arrives. */
-      startTransition(() => {
+      startScreen(() => {
         if (screen !== 'chat') setDesignAt(null);
         if (screen !== 'graph') setGraphOpen(false);
         if (screen !== 'reviews') setReviewsOpen(false);
@@ -1834,6 +1867,10 @@ function Conversation() {
       // a canvas opening its own conversation moves the second without moving
       // the first, and a guard on the shell's idea then refused the swap that
       // would have caught the two up.
+      // Whatever screen is over the conversation, the new tab is the thing
+      // being asked for, so the way out of it comes first.
+      setCanvasAt(null);
+      goToScreen('chat');
       const showing = desksNow.current.byPath[desksNow.current.current ?? '']?.address ?? null;
       if (path !== null && path === inConversation && path === showing) return;
       if (path === null && (desk?.turns.length ?? 0) === 0) {
@@ -1926,7 +1963,7 @@ function Conversation() {
         if (answer.ok && desksNow.current.current === project) setConversations(answer.value);
       });
     },
-    [inConversation, desk?.turns.length, refreshRoom, refreshRunning, toChat, troubleHere, troubleAt],
+    [inConversation, desk?.turns.length, refreshRoom, refreshRunning, toChat, troubleHere, troubleAt, goToScreen],
   );
 
   /** Throw a conversation away. If it is the one on screen, open a fresh one
@@ -2071,16 +2108,23 @@ function Conversation() {
       /* A launch lands on the project last open unless somebody asked for the
          list. A folder that has since been moved falls through to the list on
          its own, which is where they would have to go anyway. */
+      /* Nothing is drawn while a launch is on its way to a folder. Without
+         this the list appears, is read, and is taken away a second later by the
+         project opening behind it. */
+      const goTo = (path: string): void => {
+        setOpeningOnLaunch(true);
+        void open(path).finally(() => setOpeningOnLaunch(false));
+      };
       if (openOnLoad === null) {
         if (openTo !== 'last') return;
         const last = answer.value.find((one) => !one.missing);
-        if (last !== undefined) void open(last.path);
+        if (last !== undefined) goTo(last.path);
         return;
       }
       const wanted =
         answer.value.find((one) => one.name === openOnLoad && !one.missing) ??
         answer.value.find((one) => !one.missing);
-      if (wanted !== undefined) void open(wanted.path);
+      if (wanted !== undefined) goTo(wanted.path);
     });
     return () => {
       stillHere = false;
@@ -2173,7 +2217,7 @@ function Conversation() {
     goToScreen('canvas');
     const made = newFlow();
     changeFlow(made);
-    startTransition(() => setCanvasAt(made.id));
+    startScreen(() => setCanvasAt(made.id));
   }, [changeFlow, goToScreen]);
 
   /** The one somebody last drew on, or a new one. What the shelf's row does. */
@@ -2187,7 +2231,7 @@ function Conversation() {
       newCanvas();
       return;
     }
-    startTransition(() => setCanvasAt(held[held.length - 1]!.id));
+    startScreen(() => setCanvasAt(held[held.length - 1]!.id));
   }, [newCanvas, goToScreen]);
 
   const forgetCanvas = useCallback((id: string) => {
@@ -3045,7 +3089,7 @@ function Conversation() {
         case 'design':
           // Design toggles on and off on the same key, like the shelf. Only a
           // switch from another screen clears the rest.
-          startTransition(() => {
+          startScreen(() => {
             setDesignAt((was) => {
               if (was !== null) return null;
               goToScreen("design");
@@ -3083,9 +3127,6 @@ function Conversation() {
           return;
         case 'find':
           setFinding((was) => (was === null ? '' : null));
-          return;
-        case 'file-expand':
-          setReadingWhole((was) => !was);
           return;
         case 'new':
           void swapConversation(null);
@@ -3928,7 +3969,7 @@ function Conversation() {
       if (here.current !== project) await open(project);
       const canvas = canvasIn(id);
       if (canvas !== null) {
-        startTransition(() => setCanvasAt(canvas));
+        startScreen(() => setCanvasAt(canvas));
         return;
       }
       const desk = desksNow.current.byPath[project];
@@ -4689,7 +4730,7 @@ function Conversation() {
       { id: 'new', name: 'Start a new conversation', where: 'Conversation', keys: keysFor('new'),
         run: () => void swapConversation(null), ready: here, whyNot: needsProject },
       { id: 'design', name: 'Open the design view', where: 'Conversation', keys: keysFor('design'),
-        run: () => { goToScreen('design'); startTransition(() => setDesignAt('styles')); }, ready: here, whyNot: needsProject },
+        run: () => { goToScreen('design'); startScreen(() => setDesignAt('styles')); }, ready: here, whyNot: needsProject },
       { id: 'files', name: 'Show everything in this project', where: 'Project', keys: keysFor('files'),
         run: () => setFilesOpen(true), ready: here, whyNot: needsProject },
       { id: 'page', name: 'Show the page beside the conversation', where: 'Conversation', keys: keysFor('page'),
@@ -4728,10 +4769,10 @@ function Conversation() {
       { id: 'reviews', name: 'Read the pull requests', where: 'Project',
         run: () => { goToScreen('reviews'); refreshRepo(); }, ready: here, whyNot: needsProject },
       { id: 'review-queue', name: 'Review finished work', where: 'Project',
-        run: () => { goToScreen('review'); startTransition(() => setReviewQueueOpen(true)); refreshReviewQueue(); },
+        run: () => { goToScreen('review'); startScreen(() => setReviewQueueOpen(true)); refreshReviewQueue(); },
         ready: here, whyNot: needsProject },
       { id: 'skills', name: 'Look at the skills', where: 'Graphe',
-        run: () => { goToScreen('skills'); refreshSkills(); refreshWorkflows(); startTransition(() => setSkillsOpen(true)); } },
+        run: () => { goToScreen('skills'); refreshSkills(); refreshWorkflows(); startScreen(() => setSkillsOpen(true)); } },
       { id: 'connected', name: 'Other tools', where: 'Graphe',
         run: () => { goToScreen('connected'); setConnectedOpen(true); void refreshConnected(); } },
       { id: 'more', name: 'Add more to Graphe', where: 'Graphe', run: () => openAddMore() },
@@ -4747,7 +4788,7 @@ function Conversation() {
        and nobody has to know which page it is on. */
     const settings = settingsCommands((row) => {
       setSettingsAt(row.id);
-      startTransition(() => setSettingsOpen(true));
+      startScreen(() => setSettingsOpen(true));
     });
     return [...made, ...settings].map((one) => ({
       ...one,
@@ -5059,7 +5100,7 @@ function Conversation() {
           goToScreen("skills");
           refreshSkills();
           refreshWorkflows();
-          startTransition(() => setSkillsOpen(true));
+          startScreen(() => setSkillsOpen(true));
           return;
         case 'always': {
           // The file is the whole feature, so this opens the file.
@@ -5078,7 +5119,7 @@ function Conversation() {
           return;
         case 'usage':
           goToScreen("usage");
-          startTransition(() => setUsageOpen(true));
+          startScreen(() => setUsageOpen(true));
           return;
         case 'accounts':
           openConnect();
@@ -5242,13 +5283,13 @@ function Conversation() {
     desk?.turns ?? [],
   );
 
-  const picking = desk === null && recent !== null && recent.length > 0;
+  const picking = desk === null && !openingOnLaunch && recent !== null && recent.length > 0;
   /** Nothing has been opened and the list of what was open last time has not
    *  come back yet, so which of the two first screens is right is not known.
    *  Neither is drawn: `recent` is null for "not asked", and reading it as
    *  "none" puts somebody in front of a blank conversation for a moment and
    *  then takes it away. */
-  const undecided = desk === null && recent === null;
+  const undecided = desk === null && (recent === null || openingOnLaunch);
   const empty = desk === null || desk.turns.length === 0;
   // Which regions have earned their place (notes/strategy/UI-DESIGN.md):
   // the shelf the moment there is a folder in front; the overview the moment
@@ -5550,28 +5591,28 @@ function Conversation() {
           onAsk={() => setAsking(true)}
           onDesign={() => {
             goToScreen("design");
-            startTransition(() => setDesignAt("styles"));
+            startScreen(() => setDesignAt("styles"));
           }}
           onCanvas={openCanvas}
           onHistory={() => {
             goToScreen("graph");
-            startTransition(() => setGraphOpen(true));
+            startScreen(() => setGraphOpen(true));
           }}
           onReviewQueue={() => {
             goToScreen("review");
-            startTransition(() => setReviewQueueOpen(true));
+            startScreen(() => setReviewQueueOpen(true));
             refreshReviewQueue();
           }}
           reviewsWaiting={waitingToReview(reviewQ)}
           onReviews={() => {
             goToScreen("reviews");
-            startTransition(() => setReviewsOpen(true));
+            startScreen(() => setReviewsOpen(true));
           }}
           onSkills={() => {
             goToScreen("skills");
             refreshSkills();
             refreshWorkflows();
-            startTransition(() => setSkillsOpen(true));
+            startScreen(() => setSkillsOpen(true));
           }}
           onAddMore={() => {
             goToScreen("add-more");
@@ -5585,7 +5626,7 @@ function Conversation() {
           onThrowWorkAway={(path) => void throwWorkAway(path)}
           onSettings={() => {
             goToScreen("settings");
-            startTransition(() => setSettingsOpen(true));
+            startScreen(() => setSettingsOpen(true));
             // Read when the sheet opens rather than kept in step: the file is
             // edited outside this window, so the only true reading is a fresh
             // one.
@@ -5906,18 +5947,12 @@ function Conversation() {
                 path={reading.path}
                 text={reading.text}
                 trouble={reading.trouble}
-                whole={readingWhole}
-                onWhole={setReadingWhole}
                 onAsk={(path, from, to) => {
                   setReading(null);
-                  setReadingWhole(false);
                   const asked = `Tell me about @${path}:${String(from)}-${String(to)}`;
                   void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
                 }}
-                onClose={() => {
-                  setReading(null);
-                  setReadingWhole(false);
-                }}
+                onClose={() => setReading(null)}
               />
             </Suspense>
           </div>
@@ -6143,7 +6178,7 @@ function Conversation() {
               helpers={angles}
               onOpen={(at) => {
                 goToScreen("helpers");
-                startTransition(() => setHelpersAt({ at }));
+                startScreen(() => setHelpersAt({ at }));
               }}
             />
             <InLine waiting={waitingHere} onTake={takeBack} />
@@ -6157,7 +6192,7 @@ function Conversation() {
                 className="reviewband"
                 onClick={() => {
                   goToScreen('review');
-                  startTransition(() => setReviewQueueOpen(true));
+                  startScreen(() => setReviewQueueOpen(true));
                   refreshReviewQueue();
                 }}
               >
@@ -6221,7 +6256,7 @@ function Conversation() {
               onAdvisorThinking={setAdvisorThinking}
               onMoreAdvisor={() => {
                 setSettingsAt('model');
-                startTransition(() => setSettingsOpen(true));
+                startScreen(() => setSettingsOpen(true));
               }}
               longJobs={longJobs}
               onConnect={openConnect}
@@ -6301,12 +6336,12 @@ function Conversation() {
           onLimit={setLimit}
           onOpenDesign={(part) => {
             goToScreen("design");
-            startTransition(() => setDesignAt(part));
+            startScreen(() => setDesignAt(part));
           }}
           onOpenGraph={(repo) => {
             goToScreen("graph");
             setGraphRepo(repo ?? null);
-            startTransition(() => setGraphOpen(true));
+            startScreen(() => setGraphOpen(true));
           }}
           onSwitchBranch={switchBranch}
           onCreateBranch={createBranch}
@@ -6319,7 +6354,7 @@ function Conversation() {
           onOpenLink={(address) => void bridge.openLink(address)}
           onOpenReview={(id) => {
             goToScreen('review');
-            startTransition(() => setReviewQueueOpen(true));
+            startScreen(() => setReviewQueueOpen(true));
             refreshReviewQueue();
             if (id !== undefined) openReviewEntry(id);
           }}
@@ -6745,6 +6780,8 @@ function Conversation() {
           onRefresh={() => refreshConnection(true)}
         />
       </Suspense>
+
+      {covering ? COVER : null}
     </main>
   );
 }

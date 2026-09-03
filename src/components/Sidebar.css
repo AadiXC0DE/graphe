@@ -512,10 +512,13 @@
   padding-left: var(--space-1);
 }
 
-/* Collapsed the strip is 54px and the lights span 18 to 70, so nothing can
-   share their line. The band is drawn as the toolbar row it is. */
+/* Collapsed the strip is 54px wide and the window's own buttons span 18 to 70,
+   so nothing of ours can share that line. The band is theirs; it is given the
+   least room that clears them, no rule under it — a line across an empty strip
+   draws the eye to the emptiness — and it is the window's drag handle, which is
+   what that corner is for on a mac anyway. */
 [data-shell='desktop'] .shelf--closed {
-  padding-top: var(--topbar-height);
+  padding-top: 34px;
 }
 
 [data-shell='desktop'] .shelf--closed::before {
@@ -524,8 +527,13 @@
   left: 0;
   right: 0;
   top: 0;
-  height: var(--topbar-height);
-  border-bottom: 1px solid var(--border);
+  height: 34px;
+  -webkit-app-region: drag;
+}
+
+/* In full screen the buttons go away and the strip starts at the top. */
+[data-full='yes'] .shelf--closed {
+  padding-top: var(--space-2);
 }
 
 @media (hover: hover) and (pointer: fine) {

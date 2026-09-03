@@ -24,10 +24,12 @@ const sheet = readFileSync(
   'utf8',
 );
 
-/** Every `startTransition(...)` call as a [from, to) span of the source. */
+/** Every transition call as a [from, to) span of the source. The window's own
+ *  `startScreen` is `useTransition`'s, so it can also say when it is still
+ *  waiting; `startTransition` is the same thing without that. */
 function transitionSpans(source: string): [number, number][] {
   const spans: [number, number][] = [];
-  const opener = /startTransition\(/g;
+  const opener = /start(?:Transition|Screen)\(/g;
   let match: RegExpExecArray | null;
   while ((match = opener.exec(source)) !== null) {
     let depth = 0;
@@ -86,7 +88,24 @@ describe('opening a view', () => {
   });
 
   it('imports the transition it uses', () => {
-    expect(app).toMatch(/import \{[^}]*\bstartTransition\b[^}]*\} from "react";/);
+    expect(app).toMatch(/import \{[^}]*\buseTransition\b[^}]*\} from "react";/);
+    expect(app).toContain('const [screenComing, startScreen] = useTransition();');
+  });
+
+  /* A transition holds the screen somebody is leaving, which is right for the
+     frame or two a warmed chunk costs and wrong for a cold one: past that, they
+     are reading the wrong screen and wondering why the press did nothing. */
+  it('covers the screen being left once the wait is long enough to notice', () => {
+    expect(app).toContain('setTimeout(() => setCovering(true), 90)');
+    expect(app).toContain('{covering ? COVER : null}');
+    expect(app).toContain('const COVER = <div className="sheet sheet--arriving sheet--cover"');
+    expect(sheet).toMatch(/\.sheet--cover \{[^}]*animation: none;/);
+  });
+
+  it('draws nothing while a fast press settles', () => {
+    /* The cover is behind a timer rather than the pending flag itself: shown on
+       the flag, every press would flash it. */
+    expect(app).not.toMatch(/\{screenComing \? COVER/);
   });
 });
 

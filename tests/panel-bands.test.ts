@@ -188,7 +188,12 @@ describe('the two textures in the thread', () => {
     expect(line).toContain("real !== undefined && real !== '' && !machinery ?");
   });
 
-  it('says a step failed in a word rather than a card', () => {
-    expect(line).toContain("{state === 'failed' ? <span className=\"activity__failed\">Failed</span> : null}");
+  /* "Failed" reads as the app announcing a disaster; a command that exited
+     non-zero is usually the ordinary business of an afternoon. The row already
+     names what was run, so the word only has to say how it went. */
+  it('says a step failed in a word rather than a card, and calmly', () => {
+    expect(line).toContain(
+      "{state === 'failed' ? <span className=\"activity__failed\">Did not work</span> : null}",
+    );
   });
 });

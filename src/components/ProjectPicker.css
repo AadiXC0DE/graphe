@@ -139,26 +139,16 @@
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: oklch(0.9 0.05 var(--tile-hue, 0));
-  color: oklch(0.45 0.12 var(--tile-hue, 0));
+  /* Mixed against the ground and the ink of whatever palette is on, rather
+     than two hand-written pairs and a media query: the tile is a tint of its
+     own hue over the surface it sits on, and the letter is that hue pulled most
+     of the way to the text colour, so it reads in light, dark and anything
+     somebody derives for themselves. */
+  background: color-mix(in oklab, oklch(0.62 0.16 var(--tile-hue, 0)) 16%, var(--bg-raised));
+  color: color-mix(in oklab, oklch(0.55 0.19 var(--tile-hue, 0)) 62%, var(--text));
   font-size: var(--text-sm);
   font-weight: 650;
   letter-spacing: -0.02em;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .pickerrow__tile {
-    background: oklch(0.3 0.06 var(--tile-hue, 0));
-  }
-}
-
-:root[data-theme='dark'] .pickerrow__tile,
-:root[data-theme='graphe'] .pickerrow__tile {
-  background: oklch(0.3 0.06 var(--tile-hue, 0));
-}
-
-:root[data-theme='light'] .pickerrow__tile {
-  background: oklch(0.9 0.05 var(--tile-hue, 0));
 }
 
 .pickerrow__copy {

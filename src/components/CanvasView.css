@@ -5,7 +5,10 @@
 .canvas {
   position: fixed;
   top: var(--topbar-height);
-  bottom: 0;
+  /* The drawer along the bottom takes its room from the canvas rather than
+     being drawn over it: the zoom control and the card that says a run stopped
+     both live down there. */
+  bottom: var(--commands-take, 0px);
   /* Three units, not two: the project's files are a column of their own, and a
      canvas that only counted the shelf sat underneath them. */
   left: calc(var(--shelf-take, 0px) + var(--files-take, 0px));
@@ -63,12 +66,19 @@
 }
 
 .canvas__count {
+  flex: none;
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--text-faint);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+/* Half a word is worse than no word. Under this the count goes, because the
+   same fact is on the canvas itself in the cards. */
+@media (max-width: 1180px) {
+  .canvas__count {
+    display: none;
+  }
 }
 
 /* The third thing that changes what Start does, said beside it. */

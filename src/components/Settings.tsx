@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Always from './Always';
 import AppearanceBand from './AppearanceBand';
 import Switch from './Switch';
+import ColourPicker from './ColourPicker';
 import ThinkingWith from './ThinkingWith';
 import { advisorSwitchWords, advisorWords } from '../agent/advisor';
 import { policyWords, saysPolicy, type Policy } from '../agent/pi/extension-policy';
@@ -594,34 +595,21 @@ export default function Settings({
                   </span>
 
                   <div className="settings__pickers">
-                    <label className="settings__picker">
-                      <span className="settings__picker-name">{appearanceWords.accent.name}</span>
-                      <input
-                        type="color"
-                        className="settings__colour"
-                        value={swatchFor(appearance, 'accent', computerIsDark)}
-                        onChange={(event) => onAppearance({ ...appearance, accent: event.target.value })}
-                      />
-                    </label>
+                    <ColourPicker
+                      name={appearanceWords.accent.name}
+                      value={swatchFor(appearance, 'accent', computerIsDark)}
+                      chosen={appearance.accent}
+                      onChange={(hex) => onAppearance({ ...appearance, accent: hex })}
+                    />
                     {(['ground', 'ink'] as const).map((which) => (
-                      <span className="settings__picker" key={which}>
-                        <span className="settings__picker-name">{appearanceWords[which].name}</span>
-                        <input
-                          type="color"
-                          aria-label={appearanceWords[which].name}
-                          className="settings__colour"
-                          value={swatchFor(appearance, which, computerIsDark)}
-                          onChange={(event) => onAppearance({ ...appearance, [which]: event.target.value })}
-                        />
-                        <button
-                          type="button"
-                          className={`settings__system ${appearance[which] === null ? 'settings__system--on' : ''}`}
-                          aria-pressed={appearance[which] === null}
-                          onClick={() => onAppearance({ ...appearance, [which]: null })}
-                        >
-                          {appearanceWords[which].auto}
-                        </button>
-                      </span>
+                      <ColourPicker
+                        key={which}
+                        name={appearanceWords[which].name}
+                        value={swatchFor(appearance, which, computerIsDark)}
+                        chosen={appearance[which]}
+                        onChange={(hex) => onAppearance({ ...appearance, [which]: hex })}
+                        onAuto={() => onAppearance({ ...appearance, [which]: null })}
+                      />
                     ))}
                   </div>
                 </>

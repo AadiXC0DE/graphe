@@ -114,20 +114,6 @@ export default function AppearanceBand({ appearance, onChange, on }: Props) {
       )}
 
       {row(
-        appearanceWords.finish.name,
-        appearanceWords.finish.hint,
-        <span className="appearance__stack">
-          {choice('finish', [
-            { id: 'solid', says: appearanceWords.finish.solid },
-            { id: 'glass', says: appearanceWords.finish.glass },
-          ])}
-          {/* The window flag is set as the window is made, so a press here is
-              answered by the next launch. */}
-          <span className="appearance__later">{appearanceWords.finish.later}</span>
-        </span>,
-      )}
-
-      {row(
         appearanceWords.motion.name,
         appearanceWords.motion.hint,
         choice('motion', [

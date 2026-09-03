@@ -22,27 +22,37 @@ const styles = readFileSync(
 const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8');
 
 describe('taking the column', () => {
-  it('has a key of its own, in the one registry the keyboard reads', () => {
-    expect(chordFor('file-expand')).toBe('mod+shift+e');
-    expect(ACTIONS.some((one) => one.id === 'file-expand')).toBe(true);
+  /* Not offered yet. The mode reads a file properly; the composition around it
+     does not, and half of it left the panels behind and the strip over the top.
+     What is guarded here is that it stays off: a key nobody can reach, and no
+     press, until the rest of it is built. */
+  it('is not reachable, in either registry', () => {
+    expect(chordFor('file-expand')).toBe(null);
+    expect(ACTIONS.some((one) => one.id === 'file-expand')).toBe(false);
     expect(
       actionAt(
         { key: 'e', metaKey: true, ctrlKey: false, shiftKey: true, altKey: false },
         true,
         'in a conversation',
-      )?.id,
-    ).toBe('file-expand');
-    expect(app).toContain("case 'file-expand':");
+      ),
+    ).toBe(null);
+    expect(app).not.toContain("case 'file-expand':");
+    expect(app).not.toContain('onWhole={');
   });
+
+  /* The mode itself stays whole, so putting it back is a press rather than a
+     rebuild. */
 
   it('draws every line rather than a chunk of them', () => {
     expect(view).toContain('const shown = useMemo(() => (whole ? lines : lines.slice(0, cap))');
     expect(view).toContain('{rest > 0 && !whole ? (');
   });
 
-  /* Hidden, not unmounted: coming back finds the conversation where it was. */
+  /* Hidden, not unmounted: coming back would find the conversation where it
+     was. Held at false, so nothing is hidden today. */
   it('hides the conversation rather than throwing its place away', () => {
     expect(app).toContain('<div className="thread" hidden={readingWhole && reading !== null}>');
+    expect(app).toContain('const [readingWhole] = useState(false);');
   });
 
   it('steps the panel aside, because there is not room for both', () => {

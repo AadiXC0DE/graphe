@@ -50,7 +50,15 @@ describe('the first screen is not guessed at', () => {
   it('tells "nothing was open" apart from "nobody has said yet"', async () => {
     // `recent` is null until the answer lands and an array afterwards. Reading
     // null as "none" is the bug: it draws the empty conversation for a moment.
-    expect(await app()).toContain('const undecided = desk === null && recent === null;');
+    // The second half is the launch that is already on its way to a folder:
+    // the list used to appear, be read, and be taken away a second later.
+    expect(await app()).toContain(
+      'const undecided = desk === null && (recent === null || openingOnLaunch);',
+    );
+    expect(await app()).toContain(
+      'const picking = desk === null && !openingOnLaunch && recent !== null && recent.length > 0;',
+    );
+    expect(await app()).toContain('void open(path).finally(() => setOpeningOnLaunch(false));');
   });
 
   it('draws neither first screen until it knows which', async () => {

@@ -103,7 +103,7 @@ export default function ActivityLine({ state, label, detail, meta, real, lead = 
 
       {/* A word, not a card. A step that failed is a step that failed; painting
           the conversation for it is the app blaming the work. */}
-      {state === 'failed' ? <span className="activity__failed">Failed</span> : null}
+      {state === 'failed' ? <span className="activity__failed">Did not work</span> : null}
       {meta ? <span className="activity__meta">{meta}</span> : null}
 
       <span className="activity__sr">

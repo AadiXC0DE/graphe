@@ -61,16 +61,18 @@ export const defaultAppearance: Appearance = {
   finish: 'solid',
 };
 
-/** The five starting points, as whole appearances rather than a second system
- *  of stylesheets beside this one. A press is this spread over what is there,
- *  so everything a person has already set that the preset does not name stays
- *  set. */
+/** The starting points, as whole appearances rather than a second system of
+ *  stylesheets beside this one. A press is this spread over what is there, so
+ *  everything a person has already set that the preset does not name stays set.
+ *
+ *  A glass one is deliberately not offered yet. The tokens and the window flag
+ *  behind it are here and work; what is not here is every surface in the app
+ *  drawn for a translucent ground, and half of that is worse than none. */
 export const PRESETS: readonly { id: string; name: string; is: Partial<Appearance> }[] = [
   { id: 'graphe', name: 'Graphe', is: { base: 'system', accent: '#b8492c', ground: null, ink: null, tone: 'warm', finish: 'solid' } },
   { id: 'super',  name: 'Super',  is: { base: 'dark',  accent: '#f59e0b', ground: '#0a0a0b', ink: '#fafafa', tone: 'neutral', finish: 'solid' } },
   { id: 'pink',   name: 'Pink',   is: { base: 'light', accent: '#be123c', ground: '#fff1f2', ink: '#1a0a13', tone: 'warm', finish: 'solid' } },
   { id: 'slate',  name: 'Slate',  is: { base: 'dark',  accent: '#38bdf8', ground: '#0f172a', ink: '#f8fafc', tone: 'cool', finish: 'solid' } },
-  { id: 'glass',  name: 'Glass',  is: { base: 'system', accent: '#b8492c', ground: null, ink: null, tone: 'neutral', finish: 'glass' } },
 ];
 
 /** Which preset this appearance is sitting on, or null once somebody has moved

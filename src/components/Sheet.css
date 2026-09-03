@@ -368,3 +368,12 @@
   line-height: 1.5;
   color: var(--text-faint);
 }
+
+/* Held over whatever was on screen while the code for the screen being opened
+   arrives. Flat and instant: it exists so nobody reads the screen they just
+   left as the one they asked for, and anything that faded in would be a second
+   thing to watch. Only shown once the wait is long enough to notice. */
+.sheet--cover {
+  animation: none;
+  z-index: 6;
+}

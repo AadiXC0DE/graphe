@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import FontPicker from './FontPicker';
 import {
   appearanceWords,
   cssFor,
@@ -139,24 +140,23 @@ export default function AppearanceBand({ appearance, onChange, on }: Props) {
       {row(
         appearanceWords.uiFont.name,
         appearanceWords.uiFont.hint,
-        <input
-          type="text"
-          className="appearance__font"
-          aria-label={appearanceWords.uiFont.name}
+        <FontPicker
           value={appearance.uiFont}
-          onChange={(event) => change({ uiFont: event.target.value })}
+          onChange={(family) => change({ uiFont: family })}
+          sample="Where were we?"
+          label={appearanceWords.uiFont.name}
         />,
       )}
 
       {row(
         appearanceWords.codeFont.name,
         appearanceWords.codeFont.hint,
-        <input
-          type="text"
-          className="appearance__font"
-          aria-label={appearanceWords.codeFont.name}
+        <FontPicker
+          mono
           value={appearance.codeFont}
-          onChange={(event) => change({ codeFont: event.target.value })}
+          onChange={(family) => change({ codeFont: family })}
+          sample="const x = 1"
+          label={appearanceWords.codeFont.name}
         />,
       )}
 

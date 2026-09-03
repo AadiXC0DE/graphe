@@ -178,3 +178,71 @@
     transform: none;
   }
 }
+
+/* Reading a file in full: the thread's own column, every line numbered, and a
+   way of finding a word in it. The card over the thread is for a glance; this
+   is for reading. */
+.fileview__find {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.fileview__findbox {
+  flex: 0 1 14rem;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.fileview__foundcount {
+  flex: 1 1 auto;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Numbers are furniture: never selectable, so copying the file copies the file
+   and not a column of counting. */
+.app--reading .fileview__code .line {
+  counter-increment: fileline;
+  display: block;
+}
+
+.app--reading .fileview__code .line::before {
+  content: counter(fileline);
+  display: inline-block;
+  width: 3.5em;
+  padding-right: var(--space-3);
+  text-align: right;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.app--reading .fileview__code code {
+  counter-reset: fileline;
+}
+
+.line--found {
+  background: var(--accent-soft);
+}
+
+/* Reading a file takes the column the conversation had. The thread is hidden
+   rather than unmounted, so coming back finds it where it was. */
+.app--reading .app__column {
+  max-width: none;
+  padding: 0;
+}
+
+.app--reading .app__file {
+  position: static;
+  max-height: none;
+  height: calc(100dvh - var(--topbar-height));
+}

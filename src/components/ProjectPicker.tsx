@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { RecentProject } from '../lib/ipc';
 import { formatMoney } from '../cost/money';
 import { ago } from '../lib/when';
@@ -23,13 +24,51 @@ type Props = {
  *  the last few, and everything else is one press of "Open another folder". */
 export const MOST_SHOWN = 5;
 
+export const SAYS = {
+  returning: 'Where were we?',
+  first: 'Open a project folder to start.',
+  firstNote: 'Describe a change; Graphe works in your files and every step can be put back.',
+  keys: '↑↓ to choose, Enter to open',
+  gone: 'Not where it was',
+  browse: 'Open another folder…',
+  browseFirst: 'Open a project folder',
+  privacy:
+    'Prompts go to the model you chose, on your account. Keys and history stay on this computer.',
+  spent: (money: string): string => `${money} last time`,
+} as const;
+
+/**
+ * A hue per project, stable for the life of the name.
+ *
+ * Recognising a folder by its colour only works if the colour never moves, so
+ * it is derived rather than assigned.
+ */
+export function hueOf(name: string): number {
+  let hash = 0;
+  for (let at = 0; at < name.length; at += 1) {
+    hash = (hash * 31 + name.charCodeAt(at)) % 360000;
+  }
+  return hash % 360;
+}
+
+/** The second line of a row: where the folder is up to, and when. */
+function metaOf(project: RecentProject): string {
+  const when = ago(project.lastOpenedAt);
+  return project.branch === null ? when : `${project.branch} · ${when}`;
+}
+
+/** Everything that is not the name, kept where a pointer can ask for it. */
+function titleOf(project: RecentProject): string {
+  if (project.lastSpend === null) return project.path;
+  return `${project.path} · ${SAYS.spent(formatMoney(project.lastSpend))}`;
+}
+
 /**
  * Where were we.
  *
- * First screen of every sitting. The brand is the signature — a mark that reads
- * as both a letter and a graph node — and the list is the job. No tour, no cards
- * of features for people who already know the product; three quiet promises only
- * on a first run, when there is nothing else to show.
+ * First screen of every sitting. A masked dot grid, the mark, and the list —
+ * which is the whole job, so it is the only thing with weight on the page. The
+ * colour tile is how a folder is recognised before the name is read.
  */
 export default function ProjectPicker({
   projects,
@@ -41,13 +80,61 @@ export default function ProjectPicker({
 }: Props) {
   const firstRun = projects.length === 0;
   const shown = projects.slice(0, MOST_SHOWN);
+  const rows = useRef<(HTMLButtonElement | null)[]>([]);
+  const [at, setAt] = useState(0);
+
+  const press = useCallback(
+    (project: RecentProject | undefined) => {
+      if (project === undefined) return;
+      if (project.missing) onForget(project);
+      else onOpen(project);
+    },
+    [onForget, onOpen],
+  );
+
+  /* The first row is the one under the hand on arrival: this screen exists to
+     be pressed, and one press should not have to start with a click. */
+  useEffect(() => {
+    if (compact === true || firstRun) return;
+    rows.current[0]?.focus();
+  }, [compact, firstRun]);
+
+  /* Numbers and the browse key belong to the whole screen; in the switcher they
+     would fight the window behind it. */
+  useEffect(() => {
+    if (compact === true) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.key.toLowerCase() === 'o') {
+        event.preventDefault();
+        onBrowse();
+        return;
+      }
+      const nth = Number(event.key);
+      if (!Number.isInteger(nth) || nth < 1 || nth > MOST_SHOWN) return;
+      const project = projects.slice(0, MOST_SHOWN)[nth - 1];
+      if (project === undefined) return;
+      event.preventDefault();
+      press(project);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [compact, onBrowse, press, projects]);
+
+  const move = (from: number, by: number): void => {
+    const next = Math.min(shown.length - 1, Math.max(0, from + by));
+    setAt(next);
+    rows.current[next]?.focus();
+  };
 
   return (
-    <section className={`picker ${compact ? 'picker--compact' : ''} ${firstRun && !compact ? 'picker--first' : ''}`}>
+    <section
+      className={`picker ${compact ? 'picker--compact' : ''} ${firstRun && !compact ? 'picker--first' : ''}`}
+    >
       {compact ? null : (
         <header className="picker__brand">
           <div className="picker__mark" aria-hidden="true">
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+            <svg width="48" height="48" viewBox="0 0 40 40" fill="none">
               <rect width="40" height="40" rx="12" className="picker__markfill" />
               {/* Node + edge: a G that is also a small graph. */}
               <circle cx="14" cy="20" r="3.2" className="picker__markink" />
@@ -68,86 +155,56 @@ export default function ProjectPicker({
             </svg>
           </div>
           <p className="picker__product">Graphe</p>
-          <h1 className="picker__title">
-            {firstRun ? 'Design in the real project.' : 'Where were we?'}
-          </h1>
-          <p className="picker__sub">
-            {firstRun
-              ? 'Describe the change. I work in your files, show you before and after, and every step can be put back.'
-              : 'Pick up where you left off, or open another folder.'}
-          </p>
+          <h1 className="picker__title">{firstRun ? SAYS.first : SAYS.returning}</h1>
+          {firstRun ? <p className="picker__sub">{SAYS.firstNote}</p> : null}
         </header>
       )}
 
-      {firstRun && !compact ? (
-        <ul className="picker__promises" aria-label="What Graphe does">
-          <li>
-            <span className="picker__promisekicker">Talk</span>
-            <strong>Not configure</strong>
-            <span>Plain sentences. Real files. No setup maze.</span>
-          </li>
-          <li>
-            <span className="picker__promisekicker">See</span>
-            <strong>As you go</strong>
-            <span>Before-and-after pictures, not a wall of diff.</span>
-          </li>
-          <li>
-            <span className="picker__promisekicker">Keep</span>
-            <strong>Always reversible</strong>
-            <span>Every change is a moment you can return to.</span>
-          </li>
-        </ul>
-      ) : null}
-
       {firstRun ? null : (
         <ul className="picker__list" aria-label="Recent projects">
-          {shown.map((project) => (
+          {shown.map((project, nth) => (
             <li
               key={project.path}
               className={`pickerrow ${project.missing ? 'pickerrow--missing' : ''} ${project.path === openPath ? 'pickerrow--open' : ''}`}
             >
               <button
                 type="button"
+                ref={(node) => {
+                  rows.current[nth] = node;
+                }}
                 className="pickerrow__open"
-                onClick={() => (project.missing ? onForget(project) : onOpen(project))}
+                title={titleOf(project)}
+                onClick={() => press(project)}
+                onFocus={() => setAt(nth)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    move(nth, 1);
+                  } else if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    move(nth, -1);
+                  }
+                }}
+                tabIndex={compact === true || nth === at ? 0 : -1}
                 aria-current={project.path === openPath ? 'true' : undefined}
                 aria-describedby={project.missing ? `${project.path}-gone` : undefined}
               >
-                <span className="pickerrow__glyph" aria-hidden="true">
+                <span
+                  className="pickerrow__tile"
+                  style={{ '--tile-hue': hueOf(project.name) } as CSSProperties}
+                  aria-hidden="true"
+                >
                   {project.name.slice(0, 1).toUpperCase()}
                 </span>
                 <span className="pickerrow__copy">
                   <span className="pickerrow__name">{project.name}</span>
                   <span className="pickerrow__meta" id={`${project.path}-gone`}>
-                    {project.missing ? (
-                      <>Not where it was</>
-                    ) : (
-                      <>
-                        {ago(project.lastOpenedAt)}
-                        {project.lastSpend === null ? null : (
-                          <>
-                            <span className="pickerrow__dot" aria-hidden="true">
-                              ·
-                            </span>
-                            {formatMoney(project.lastSpend)} last time
-                          </>
-                        )}
-                      </>
-                    )}
+                    {project.missing ? SAYS.gone : metaOf(project)}
                   </span>
                 </span>
               </button>
 
-              {project.missing ? (
-                <button
-                  type="button"
-                  className="pickerrow__forget"
-                  onClick={() => onForget(project)}
-                  aria-label={`Take ${project.name} off the list`}
-                >
-                  Remove
-                </button>
-              ) : project.path === openPath ? (
+              {project.path === openPath && !project.missing ? (
                 <span className="pickerrow__badge">Open</span>
               ) : (
                 <button
@@ -165,23 +222,20 @@ export default function ProjectPicker({
         </ul>
       )}
 
+      {firstRun || compact ? null : <p className="picker__hint">{SAYS.keys}</p>}
+
       <button
         type="button"
         className={`picker__browse ${firstRun && !compact ? 'picker__browse--primary' : ''}`}
         onClick={onBrowse}
       >
-        <span>{firstRun ? 'Open a project folder' : 'Open another folder…'}</span>
+        <span>{firstRun ? SAYS.browseFirst : SAYS.browse}</span>
         <kbd className="picker__key" aria-hidden="true">
           ⌘O
         </kbd>
       </button>
 
-      {compact ? null : (
-        <p className="picker__foot">
-          Your prompts go to the model you picked, on your own account. Everything else
-          (keys, history, what it remembers) stays here.
-        </p>
-      )}
+      {compact ? null : <p className="picker__foot">{SAYS.privacy}</p>}
     </section>
   );
 }

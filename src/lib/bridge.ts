@@ -108,6 +108,7 @@ import {
   type ReviewDecided,
   type ReviewEntry,
   type ReviewOpened,
+  type StorageNow,
 } from './ipc';
 
 declare global {
@@ -239,12 +240,17 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const started = Date.now();
 
-const PREVIEW_PROJECTS: readonly { path: string; name: string; ago: number; spent: number | null }[] =
-  [
-    { path: '/Users/you/Sites/paper-street', name: 'paper-street', ago: 12 * MINUTE, spent: 62 },
-    { path: '/Users/you/Sites/atlas-studio', name: 'atlas-studio', ago: 26 * HOUR, spent: 214 },
-    { path: '/Users/you/Sites/field-notes', name: 'field-notes', ago: 5 * 24 * HOUR, spent: null },
-  ];
+const PREVIEW_PROJECTS: readonly {
+  path: string;
+  name: string;
+  ago: number;
+  spent: number | null;
+  branch: string | null;
+}[] = [
+  { path: '/Users/you/Sites/paper-street', name: 'paper-street', ago: 12 * MINUTE, spent: 62, branch: 'feat/pricing-page' },
+  { path: '/Users/you/Sites/atlas-studio', name: 'atlas-studio', ago: 26 * HOUR, spent: 214, branch: 'main' },
+  { path: '/Users/you/Sites/field-notes', name: 'field-notes', ago: 5 * 24 * HOUR, spent: null, branch: null },
+];
 
 type PreviewVersion = {
   title: string;
@@ -715,6 +721,8 @@ let previewPlanMode = false;
     advisorThinking: null,
     advisorGates: { completionGate: false, loopGate: false },
     addons: 'on',
+    editor: null,
+    terminal: null,
     appearance: readAppearance(
       null,
       typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme'),
@@ -757,6 +765,7 @@ let previewPlanMode = false;
       // more" is a state the picker has to draw and nobody would ever see it by
       // accident.
       missing: one.path === '/Users/you/Sites/field-notes',
+      branch: one.branch,
     }));
 
   /** Once, shortly after the interface starts listening. It is the one thing a
@@ -784,6 +793,9 @@ let previewPlanMode = false;
 
   return {
     desktop: false,
+
+    /** No shell to ask, so a dropped folder cannot be named here. */
+    pathOf: (): string => '',
 
     openProject(path: string): Promise<Result<OpenedProject>> {
       const known = PREVIEW_PROJECTS.find((one) => one.path === path);
@@ -1108,6 +1120,10 @@ let previewPlanMode = false;
       return Promise.resolve(done(''));
     },
 
+    openSkillFile(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
     watchBrowser(): Promise<Result<boolean>> {
       return Promise.resolve(done(false));
     },
@@ -1117,6 +1133,10 @@ let previewPlanMode = false;
     },
 
     alwaysDoes(): Promise<Result<AlwaysDoes>> {
+      return Promise.resolve(done({ file: '', rows: [], trouble: null }));
+    },
+
+    alwaysWrite(): Promise<Result<AlwaysDoes>> {
       return Promise.resolve(done({ file: '', rows: [], trouble: null }));
     },
 
@@ -1654,11 +1674,37 @@ let previewPlanMode = false;
       const now = Date.now();
       const DAY = 24 * 60 * 60 * 1000;
       const shape = [0, 41_200, 0, 128_900, 64_300, 0, 12_400, 88_100, 0, 0, 152_700, 45_600, 9_800, 0];
+      const models = ['sonnet-4-6', 'gpt-5.6-terra', 'haiku-4-5'];
+      const talks = [
+        { id: 'one', title: 'Tighten the review screen', path: '/preview/one.jsonl' },
+        { id: 'two', title: 'Colour and type pass', path: '/preview/two.jsonl' },
+        { id: 'three', title: 'Why is the build slow', path: '/preview/three.jsonl' },
+      ];
       const entries = shape.flatMap((tokens, back) => {
         const at = now - (shape.length - 1 - back) * DAY - 3 * 60 * 60 * 1000;
-        return tokens === 0 ? [] : [{ at, tokens }];
+        if (tokens === 0) return [];
+        return [0, 1].map((half) => ({
+          at,
+          tokens: Math.round(tokens / 2),
+          cost: tokens / 120_000,
+          model: models[(back + half) % models.length] ?? models[0]!,
+          input: Math.round(tokens * 0.7),
+          output: Math.round(tokens * 0.1),
+          cached: Math.round(tokens * 0.2),
+          conversation: talks[(back + half) % talks.length] ?? talks[0]!,
+        }));
       });
       return Promise.resolve(done(daysFromUsage(entries)));
+    },
+
+    /** A browser tab has no Downloads folder of ours to write into. */
+    exportSpend(): Promise<Result<string | null>> {
+      send({
+        type: 'error',
+        message:
+          'This is Graphe running in a browser tab, so there is nowhere to save a file. In the app this writes a CSV you can expense.',
+      });
+      return Promise.resolve(done(null));
     },
 
     closeConversation(): Promise<Result<null>> {
@@ -2054,8 +2100,12 @@ let previewPlanMode = false;
       return Promise.resolve(done({ says: {}, each: [], running: 0 }));
     },
 
-    storage(): Promise<Result<{ says: string; couldClear: number; because: string }>> {
-      return Promise.resolve(done({ says: 'Nothing kept behind this window.', couldClear: 0, because: '' }));
+    storage(): Promise<Result<StorageNow>> {
+      return Promise.resolve(done({ says: 'Nothing kept on this computer yet.', couldClear: 0, because: '', rows: [] }));
+    },
+
+    clearFolder(): Promise<Result<StorageNow>> {
+      return Promise.resolve(done({ says: 'Nothing kept on this computer yet.', couldClear: 0, because: '', rows: [] }));
     },
 
     clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>> {
@@ -2221,6 +2271,7 @@ function connect(): Bridge {
 
   return {
     desktop: true,
+    pathOf: (file) => api.pathOf(file),
     openProject: (path) => api.openProject(path),
     // The `where` is what names *which conversation* this message belongs to.
     // Dropping it — as a bare `(text, attachments) =>` call but that left them
@@ -2264,8 +2315,10 @@ function connect(): Bridge {
     tidyNow: (where) => api.tidyNow(where),
     skills: (where) => api.skills(where),
     skillText: (id, where) => api.skillText(id, where),
+    openSkillFile: (id, where) => api.openSkillFile(id, where),
     workflows: (where) => api.workflows(where),
     alwaysDoes: (where) => api.alwaysDoes(where),
+    alwaysWrite: (rows, where) => api.alwaysWrite(rows, where),
     watchBrowser: (on, where) => api.watchBrowser(on, where),
     onBrowserFrame: (listener) => api.onBrowserFrame(listener),
     branchSwitch: (name, where) => api.branchSwitch(name, where),
@@ -2354,6 +2407,7 @@ function connect(): Bridge {
     watchStop: () => api.watchStop(),
     spendSplit: (where) => api.spendSplit(where),
     tokenUsage: () => api.tokenUsage(),
+    exportSpend: (csv) => api.exportSpend(csv),
     spendLimit: () => api.spendLimit(),
     setSpendLimit: (ceiling) => api.setSpendLimit(ceiling),
     onConnectStep: (listener) => api.onConnectStep(listener),
@@ -2398,6 +2452,7 @@ function connect(): Bridge {
     longJobs: (providerId, modelId) => api.longJobs(providerId, modelId),
     addons: () => api.addons(),
     storage: () => api.storage(),
+    clearFolder: (name) => api.clearFolder(name),
     clearFinishedWork: () => api.clearFinishedWork(),
     inStep: (where) => api.inStep(where),
     followDesign: (address, where) => api.followDesign(address, where),

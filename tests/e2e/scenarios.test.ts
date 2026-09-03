@@ -34,6 +34,15 @@ import { implementationPlanFromResearch, stepsFromReport } from '../../src/agent
 import type { AgentEvent, Money } from '../../src/agent/types';
 import { changeDesk, noDesks, openDesk, receive } from '../../src/lib/projects';
 import { GoalFile } from '../../src/projects/goals';
+import { parseDiff } from '../../src/diff/hunks';
+import { forgetScratch, optionsWithScratch, scratchUnder } from '../../src/agent/pi/childenv';
+import {
+  chooseFile,
+  markRead,
+  queueFrom,
+  waiting as waitingToReview,
+  type Arriving,
+} from '../../src/work/reviewqueue';
 import { Workspaces } from '../../src/projects/workspaces';
 import { STEP_WAS_STOPPED, type Turn } from '../../src/lib/thread';
 import { carryOnWords } from '../../src/work/carryon';
@@ -670,6 +679,111 @@ describe('S-16 a house-rules file nobody could carry whole', () => {
     );
     expect(adapter).toContain(
       'withinBudget(read, AGENTS_BUDGET, standingWords.agentsTrimmed)',
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('S-20 a settle with the queue as the default', () => {
+  const arriving = (over: Partial<Arriving> = {}): Arriving => ({
+    id: '/sessions/a.jsonl',
+    from: 'conversation',
+    title: 'Rewrite the header',
+    address: '/sessions/a.jsonl',
+    files: [{ path: 'src/hero.css', added: 12, removed: 0 }],
+    at: 1,
+    ...over,
+  });
+
+  it('puts an entry on the list rather than the files in the folder', () => {
+    const queue = queueFrom([], [arriving()]);
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toMatchObject({ from: 'conversation', read: false });
+  });
+
+  /* The count is what the sidebar badge and the panel band both read, so one
+     number cannot disagree with the other. */
+  it('is one thing waiting, in the sidebar and in the panel', () => {
+    expect(waitingToReview(queueFrom([], [arriving()]))).toBe(1);
+  });
+
+  it('refreshes one card rather than reopening a half-done review', () => {
+    const first = queueFrom([], [arriving()]);
+    const chosen = chooseFile(first, '/sessions/a.jsonl', 'src/hero.css', 'keep mine');
+    const again = queueFrom(chosen, [arriving({ files: [{ path: 'src/hero.css', added: 20, removed: 2 }] })]);
+    expect(again).toHaveLength(1);
+    expect(again[0]?.choices?.['src/hero.css']).toBe('keep mine');
+    expect(again[0]?.files[0]?.added).toBe(20);
+  });
+
+  it('counts a card that is mirroring as nothing waiting, because it already arrived', () => {
+    const mirrored = markRead(queueFrom([], [arriving()]), '/sessions/a.jsonl');
+    expect(waitingToReview(mirrored)).toBe(0);
+  });
+});
+
+describe('S-21 a board piece that finishes', () => {
+  it('reaches the same list, marked as its own kind', () => {
+    const queue = queueFrom([], [
+      {
+        id: 'work-1',
+        from: 'board',
+        title: 'rewrite the header',
+        address: 'work-1',
+        files: [{ path: 'src/hero.css', added: 4, removed: 1 }],
+        at: 2,
+      },
+    ]);
+    expect(queue[0]?.from).toBe('board');
+    expect(waitingToReview(queue)).toBe(1);
+  });
+});
+
+describe('S-22 a file git has never seen', () => {
+  it('parses as one added file rather than vanishing from the change', () => {
+    const written = [
+      'diff --git a/src/hero.css b/src/hero.css',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/src/hero.css',
+      '@@ -0,0 +1,2 @@',
+      '+.hero { color: red; }',
+      '+.hero h1 { font-size: 3rem; }',
+      '',
+    ].join('\n');
+    const files = parseDiff(written);
+    expect(files).toHaveLength(1);
+    expect(files[0]?.kind).toBe('added');
+    expect(files[0]?.hunks[0]?.newLines).toBe(2);
+  });
+});
+
+describe('S-24 the shelf’s two states', () => {
+  it('expose the same places in the same order', async () => {
+    // Rendered in `tests/sidebar.test.ts`; what is asserted here is that one
+    // list is the only source, so the two cannot drift again.
+    const { readFileSync } = await import('node:fs');
+    const shelf = readFileSync(`${process.cwd()}/src/components/Sidebar.tsx`, 'utf8');
+    expect(shelf).toContain('function placesOf(p: Props): readonly Place[] {');
+    expect(shelf.match(/places\.map\(/g)).toHaveLength(2);
+  });
+});
+
+describe('S-25 a tool spawned by a conversation', () => {
+  it('writes anything temporary under the app’s own folder', () => {
+    scratchUnder('/work/site', '/data/scratch/site/one');
+    const fixed = optionsWithScratch<{ cwd: string; env: NodeJS.ProcessEnv }>(
+      { cwd: '/work/site/src', env: {} },
+      {},
+    );
+    expect(fixed?.env?.['TMPDIR']).toBe('/data/scratch/site/one');
+    forgetScratch('/work/site');
+  });
+
+  it('is told the same path it will actually get', () => {
+    expect(standingBlock({ list: null, goal: null, notes: [], scratch: '/data/scratch/site/one' })).toContain(
+      '/data/scratch/site/one',
     );
   });
 });

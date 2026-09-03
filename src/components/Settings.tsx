@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import Always from './Always';
 import AppearanceBand from './AppearanceBand';
 import Switch from './Switch';
 import ThinkingWith from './ThinkingWith';
@@ -7,7 +8,14 @@ import { policyWords, saysPolicy, type Policy } from '../agent/pi/extension-poli
 import { PRESETS, appearanceWords, presetOf, type Appearance } from '../design/appearance';
 import { hexOf, rgbFrom, surfacesFrom } from '../design/palette-oklch';
 import { ACTIONS, ACTION_WORDS, chordFor, clashesIn, type Bindings, type Chord, type Where } from '../lib/actions';
-import type { AddonHere, AlwaysDoes, ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
+import type {
+  AddonHere,
+  AlwaysDoes,
+  AlwaysRow,
+  ConnectionState,
+  ModelChoice,
+  ThinkingLevel,
+} from '../lib/ipc';
 import { chordOf, saysChord } from '../lib/keys';
 import { THEME_WORDS, showing, type Theme } from '../lib/theme';
 import {
@@ -50,6 +58,15 @@ type Props = {
   keepLogins: boolean;
   /** What this project does without being asked, or null before it is read. */
   always: AlwaysDoes | null;
+  /** The whole list, written back. Left off, the page is read only. */
+  onAlwaysWrite?: (rows: readonly AlwaysRow[]) => void;
+  /** Every editor and terminal installed on this machine, in the order they
+   *  are preferred. Empty until the shell has answered. */
+  editors?: readonly string[];
+  terminals?: readonly string[];
+  /** Which of them the two Open in rows go to, or null for the first found. */
+  opensIn?: { editor: string | null; terminal: string | null };
+  onOpensIn?: (which: 'editor' | 'terminal', name: string) => void;
   /** Which palette somebody has chosen, or to follow the computer. */
   theme: Theme;
   onTheme: (theme: Theme) => void;
@@ -119,6 +136,13 @@ const POLICIES: readonly { id: Policy; label: string }[] = [
   { id: 'tools-only', label: policyWords.toolsOnly },
   { id: 'off', label: policyWords.off },
 ];
+
+/** Past this many the strip is wider than the row it sits in. */
+const MOST_INLINE = 4;
+
+const APP_WORDS = {
+  none: 'None found here',
+} as const;
 
 const ADDON_WORDS = {
   none: 'Nothing is loaded here yet. Open a conversation and this fills in.',
@@ -202,6 +226,11 @@ export default function Settings({
   keepLogins,
   onToggleKeepLogins,
   always,
+  onAlwaysWrite,
+  editors = [],
+  terminals = [],
+  opensIn,
+  onOpensIn,
   onGo,
   version,
   storage = null,
@@ -266,6 +295,9 @@ export default function Settings({
   const onScreenName = THEME_WORDS[showing('system', computerIsDark)];
 
   const shown = found ?? rowsOn(page);
+  /* Always is reached from a row on Advanced rather than the sidebar, so the
+     sidebar keeps naming the page it was opened from. */
+  const navPage: Page = page === 'always' ? 'advanced' : page;
   const highlighted = startAt === null || typed !== '' ? null : startAt;
 
   const words = (row: Row, note?: string) => (
@@ -301,6 +333,55 @@ export default function Settings({
       <Switch on={on} onChange={change} label={row.name} />
     </label>
   );
+
+  /** Which app one of the two Open in rows goes to. A short list is a strip you
+   *  can read at a glance; past four that strip is wider than the row. */
+  const opens = (row: Row, which: 'editor' | 'terminal') => {
+    const names = which === 'editor' ? editors : terminals;
+    const chosen = opensIn?.[which] ?? names[0] ?? null;
+    return (
+      <div className="settings__row">
+        {words(row)}
+        {names.length === 0 ? (
+          <span className="settings__meta">{APP_WORDS.none}</span>
+        ) : names.length > MOST_INLINE ? (
+          <select
+            className="settings__pick"
+            aria-label={row.name}
+            value={chosen ?? ''}
+            disabled={onOpensIn === undefined}
+            onChange={(event) => onOpensIn?.(which, event.target.value)}
+          >
+            {names.map((one) => (
+              <option key={one} value={one}>
+                {one}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span
+            className="settings__choices settings__choices--inline"
+            role="radiogroup"
+            aria-label={row.name}
+          >
+            {names.map((one) => (
+              <button
+                key={one}
+                type="button"
+                role="radio"
+                aria-checked={one === chosen}
+                className={`settings__choice ${one === chosen ? 'settings__choice--on' : ''}`}
+                disabled={onOpensIn === undefined}
+                onClick={() => onOpensIn?.(which, one)}
+              >
+                {one}
+              </button>
+            ))}
+          </span>
+        )}
+      </div>
+    );
+  };
 
   /** The two switches the advisor holds, drawn under the model row because that
    *  is the control they belong to. */
@@ -550,12 +631,15 @@ export default function Settings({
         return <li key={row.id} className={at}>{goes(row, 'folder')}</li>;
 
       case 'editor':
-        return <li key={row.id} className={at}>{goes(row, 'editor')}</li>;
+        return <li key={row.id} className={at}>{opens(row, 'editor')}</li>;
+
+      case 'terminal':
+        return <li key={row.id} className={at}>{opens(row, 'terminal')}</li>;
 
       case 'always':
         return (
           <li key={row.id} className={at}>
-            <button type="button" className="settings__row" onClick={() => onGo('always')}>
+            <button type="button" className="settings__row" onClick={() => setPage('always')}>
               {words(row)}
               <span className="settings__meta">
                 {always === null || always.rows.length === 0
@@ -693,7 +777,7 @@ export default function Settings({
               /* While something is typed the sidebar follows the answer rather
                  than the last press, so searching never leaves somebody looking
                  at a page with no results on it. */
-              const on = typed === '' ? one === page : one === bestPage;
+              const on = typed === '' ? one === navPage : one === bestPage;
               return (
                 <button
                   key={one}
@@ -732,6 +816,17 @@ export default function Settings({
                 </div>
               ))
             )}
+
+            {found === null && page === 'always' ? (
+              <div className="settings__group">
+                <Always
+                  always={always}
+                  {...(onAlwaysWrite === undefined ? {} : { onWrite: onAlwaysWrite })}
+                  onOpenFile={() => onGo('always')}
+                  onBack={() => setPage('advanced')}
+                />
+              </div>
+            ) : null}
 
             {/* The band belongs to Appearance and to nothing else, so it is
                 drawn under that page rather than as a row of its own. */}

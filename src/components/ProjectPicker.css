@@ -1,8 +1,10 @@
 /* Where were we — first screen of every sitting.
    Still by default: this is opened constantly, so nothing moves on arrival.
-   The brand is the signature; the list is the job. */
+   The mark is the signature; the list is the job. */
 
 .picker {
+  position: relative;
+  z-index: 0;
   width: 100%;
   max-width: 440px;
   margin: 0 auto;
@@ -12,10 +14,25 @@
   padding: var(--space-2) 0;
 }
 
-/* First run gets a little more air and a wider measure for the promises. */
+/* The ground. A grid of dots fading to nothing at the edges, so the list sits
+   on a surface rather than in a void. Fixed and still: this is a place, not an
+   event. */
+.picker:not(.picker--compact)::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse 60% 55% at 50% 40%, black 30%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 40%, black 30%, transparent 100%);
+}
+
+/* First run has no list, so the little there is gets more air. */
 .picker--first {
-  max-width: 520px;
-  gap: var(--space-6);
+  max-width: 400px;
+  gap: var(--space-4);
   padding: var(--space-4) 0;
 }
 
@@ -48,7 +65,7 @@
 
 .picker__product {
   margin: 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
   font-weight: 650;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -56,17 +73,12 @@
 }
 
 .picker__title {
-  font-size: clamp(1.35rem, 2.4vw, 1.65rem);
+  font-size: var(--text-lg);
   font-weight: 600;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
   margin: 0;
   color: var(--text);
-  max-width: 18ch;
-}
-
-.picker--first .picker__title {
-  max-width: 16ch;
 }
 
 .picker__sub {
@@ -77,67 +89,16 @@
   line-height: 1.5;
 }
 
-/* Three promises — only when there is nothing else on the screen. Kickers are
-   verbs from the product's own voice, not 01/02/03 decoration. */
-.picker__promises {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2);
-}
-
-.picker__promises li {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--space-3) var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  text-align: left;
-  box-shadow: var(--shadow-sm);
-}
-
-.picker__promisekicker {
-  font-size: var(--text-2xs);
-  font-weight: 650;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent-ink);
-}
-
-.picker__promises strong {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text);
-}
-
-.picker__promises span:last-child {
-  font-size: var(--text-xs);
-  line-height: 1.4;
-  color: var(--text-muted);
-}
-
-@media (max-width: 560px) {
-  .picker__promises {
-    grid-template-columns: 1fr;
-  }
-}
-
 .picker__list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: var(--border);
+  background: var(--bg-raised);
   box-shadow: var(--shadow-sm);
 }
 
@@ -150,6 +111,10 @@
   transition: background-color var(--dur-micro) var(--ease-hover);
 }
 
+.pickerrow + .pickerrow {
+  border-top: 1px solid var(--border);
+}
+
 .pickerrow--open {
   background: var(--bg-sunken);
 }
@@ -160,23 +125,40 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  min-height: 56px;
-  padding: var(--space-2) var(--space-3);
+  height: 56px;
+  padding: 0 var(--space-3);
   text-align: left;
 }
 
-.pickerrow__glyph {
+/* A colour per project, derived from its name, so the folder is recognised
+   before the word is read. */
+.pickerrow__tile {
   flex: none;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  background: var(--accent-soft);
-  color: var(--accent-ink);
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: oklch(0.9 0.05 var(--tile-hue, 0));
+  color: oklch(0.45 0.12 var(--tile-hue, 0));
   font-size: var(--text-sm);
   font-weight: 650;
   letter-spacing: -0.02em;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .pickerrow__tile {
+    background: oklch(0.3 0.06 var(--tile-hue, 0));
+  }
+}
+
+:root[data-theme='dark'] .pickerrow__tile,
+:root[data-theme='graphe'] .pickerrow__tile {
+  background: oklch(0.3 0.06 var(--tile-hue, 0));
+}
+
+:root[data-theme='light'] .pickerrow__tile {
+  background: oklch(0.9 0.05 var(--tile-hue, 0));
 }
 
 .pickerrow__copy {
@@ -194,7 +176,7 @@
 .pickerrow__name {
   max-width: 100%;
   font-size: var(--text-base);
-  font-weight: 550;
+  font-weight: 500;
   letter-spacing: -0.01em;
   color: var(--text);
   white-space: nowrap;
@@ -203,13 +185,13 @@
 }
 
 .pickerrow__meta {
-  font-size: var(--text-xs);
+  max-width: 100%;
+  font-size: var(--text-2xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
-}
-
-.pickerrow__dot {
-  padding: 0 var(--space-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pickerrow--missing .pickerrow__name {
@@ -222,7 +204,7 @@
   color: var(--text-faint);
 }
 
-.pickerrow--missing .pickerrow__glyph {
+.pickerrow--missing .pickerrow__tile {
   background: var(--bg-sunken);
   color: var(--text-faint);
 }
@@ -270,6 +252,12 @@
   opacity: 1;
 }
 
+/* A folder that is not there is the one row whose only useful action is this
+   one, so it does not wait for a pointer. */
+.pickerrow--missing .pickerrow__forget {
+  opacity: 1;
+}
+
 .pickerrow__forget:active {
   transform: scale(0.97);
 }
@@ -278,6 +266,13 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   color: var(--text);
+}
+
+.picker__hint {
+  margin: calc(var(--space-3) * -1) 0 0;
+  text-align: center;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
 }
 
 .picker__browse {
@@ -335,7 +330,7 @@
   font-size: var(--text-2xs);
   line-height: 1.45;
   color: var(--text-faint);
-  max-width: 40ch;
+  max-width: 44ch;
   align-self: center;
 }
 
@@ -349,7 +344,6 @@
 .picker--compact .picker__list {
   border: none;
   background: transparent;
-  gap: 0;
   box-shadow: none;
   border-radius: 0;
 }
@@ -359,20 +353,17 @@
   padding-right: var(--space-1);
 }
 
-.picker--compact .pickerrow__meta {
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.picker--compact .pickerrow + .pickerrow {
+  border-top: none;
 }
 
 .picker--compact .pickerrow__open {
-  min-height: 44px;
+  height: 44px;
   padding-left: var(--space-2);
   padding-right: var(--space-2);
 }
 
-.picker--compact .pickerrow__glyph {
+.picker--compact .pickerrow__tile {
   width: 24px;
   height: 24px;
   border-radius: 7px;

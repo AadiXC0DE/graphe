@@ -183,3 +183,21 @@ export function withMention(
   const put = `${chosen.insert} `;
   return { text: `${before}${put}${after}`, caret: before.length + put.length };
 }
+
+/**
+ * The draft with `insert` put at the caret.
+ *
+ * A half-typed `@word` under the caret is what the insert replaces, the same
+ * as choosing from the list in the box; anywhere else it lands where the
+ * cursor is, with a space in front of it if one is needed. This is the path a
+ * screen outside the composer uses to hand something to it.
+ */
+export function draftWith(text: string, insert: string, caret: number = text.length): string {
+  const at = Math.max(0, Math.min(caret, text.length));
+  const pending = insert.startsWith('@') ? mentionAt(text, at) : null;
+  const from = pending === null ? at : pending.from;
+  const to = pending === null ? at : pending.from + 1 + pending.query.length;
+  const before = text.slice(0, from);
+  const gap = before === '' || /\s$/.test(before) ? '' : ' ';
+  return `${before}${gap}${insert} ${text.slice(to)}`;
+}

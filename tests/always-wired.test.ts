@@ -41,11 +41,20 @@ describe('what runs without being asked', () => {
     expect(ADAPTER).toContain('always.trouble === null ? [] : [always.trouble]');
   });
 
+  it('lets the window write the whole list back, atomically', () => {
+    const at = MAIN.indexOf('handle<AlwaysDoes>(CHANNEL.alwaysWrite');
+    expect(at).toBeGreaterThan(-1);
+    const block = MAIN.slice(at, at + 600);
+    expect(block).toContain('rowsAsGiven(args[0])');
+    expect(block).toContain('writeAtomically(file, alwaysText(rows))');
+  });
+
   it('lets the window read them, fresh each time', () => {
     const at = MAIN.indexOf('handle<AlwaysDoes>(CHANNEL.alwaysDoes');
     expect(at).toBeGreaterThan(-1);
     const block = MAIN.slice(at, at + 900);
-    expect(block).toContain('alwaysFrom(await readFile(file');
+    expect(block).toContain('rowsFrom(text)');
+    expect(block).toContain('alwaysFrom(text).trouble');
     expect(SETTINGS).toContain("onGo('always')");
   });
 });

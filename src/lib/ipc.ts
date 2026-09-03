@@ -28,6 +28,8 @@ import type { FileEntry } from '../files/tree';
 import type { Page } from '../preview/pages';
 import type { Reading } from '../preview/inspect';
 import type { Pointed } from '../preview/point';
+import type { AlwaysRow } from '../work/always';
+export type { AlwaysRow };
 import type { WorkState } from '../work/board';
 import type { Entry as ReviewQueued, FileVerdict, Verdict } from '../work/reviewqueue';
 import type { WorkspaceFacts } from '../work/workspaces';
@@ -182,6 +184,9 @@ export type RecentProject = {
   lastSpend: Money | null;
   /** True when the folder is not where we left it. */
   missing: boolean;
+  /** The branch checked out there, read with the list. Null when the folder is
+   *  not a repository, is gone, or is not on a branch. */
+  branch: string | null;
 };
 
 /**
@@ -386,6 +391,16 @@ export type AddonReport = {
 };
 
 /** One thing that can be added to Graphe. */
+/** What the app is keeping on this computer, as the Storage page reads it. */
+export type StorageRow = { name: string; bytes: number; files: number; clearable: boolean };
+
+export type StorageNow = {
+  says: string;
+  couldClear: number;
+  because: string;
+  rows: readonly StorageRow[];
+};
+
 export type Pack = {
   id: string;
   name: string;
@@ -492,6 +507,11 @@ export type Preferences = {
    *  keeps its tools and drops the hooks — Graphe is already deciding when a
    *  turn begins, and two of those is the bug; `off` leaves it out entirely. */
   addons: 'on' | 'tools-only' | 'off';
+  /** Which editor "Open in editor" goes to, by name, or null for whichever is
+   *  found first. A machine with two always got the same one. */
+  editor: string | null;
+  /** The same for "Open in terminal". */
+  terminal: string | null;
   /** How the app looks, as token overrides. Five colour presets were the whole
    *  of it before, and a preset is somebody else's taste. */
   appearance: Appearance;
@@ -1035,8 +1055,8 @@ export type RepoOverview = {
 export type AlwaysDoes = {
   /** The file it is all written in, so somebody can open it. */
   file: string;
-  /** Every one, with the moment it runs at said in plain words. */
-  rows: readonly { when: string; name: string; run: string }[];
+  /** Every one, the switched-off ones included, in the order they are written. */
+  rows: readonly AlwaysRow[];
   /** Present when the file itself will not read, so none of them are running. */
   trouble: string | null;
 };
@@ -1382,8 +1402,11 @@ export const CHANNEL = {
   tidyNow: 'graphe:tidy-now',
   skills: 'graphe:skills',
   skillText: 'graphe:skill-text',
+  openSkillFile: 'graphe:open-skill-file',
   workflows: 'graphe:workflows',
   alwaysDoes: 'graphe:always-does',
+  /** The same list, written back. */
+  alwaysWrite: 'graphe:always-write',
   watchBrowser: 'graphe:watch-browser',
   browserFrame: 'graphe:browser-frame',
   branchSwitch: 'graphe:branch-switch',
@@ -1457,6 +1480,7 @@ export const CHANNEL = {
   setThinking: 'graphe:set-thinking',
   spendSplit: 'graphe:spend-split',
   tokenUsage: 'graphe:token-usage',
+  exportSpend: 'graphe:export-spend',
   spendLimit: 'graphe:spend-limit',
   setSpendLimit: 'graphe:set-spend-limit',
   connectStep: 'graphe:connect-step',
@@ -1516,6 +1540,8 @@ export const CHANNEL = {
   keepCredential: 'graphe:keep-credential',
   /** How much room this app is taking, and clearing the finished work. */
   storage: 'graphe:storage',
+  /** Empty one storage row outright, where that is safe. */
+  clearFolder: 'graphe:clear-folder',
   clearFinishedWork: 'graphe:clear-finished-work',
   /** Which of those are held, and whether this machine can hold any. */
   credentialsKept: 'graphe:credentials-kept',
@@ -1572,6 +1598,9 @@ export type GrapheApi = {
     answers: Readonly<Record<string, readonly string[]>> | null,
     where?: Where,
   ): Promise<Result<boolean>>;
+  /** Where a file the window was handed by a drop actually lives. Empty when
+   *  the shell cannot name it. */
+  pathOf(file: File): string;
   /** Ask the person to pick a folder. Null when they closed the picker. */
   chooseFolder(): Promise<Result<string | null>>;
 
@@ -1646,6 +1675,8 @@ export type GrapheApi = {
   /** The commands this project runs without being asked, and where they are
    *  written down. Empty for a project that has written none. */
   alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>>;
+  /** Write the list back, whole, and answer with what the file now says. */
+  alwaysWrite(rows: readonly AlwaysRow[], where?: Where): Promise<Result<AlwaysDoes>>;
   /** Watch what the browser is doing, a picture at a time, or stop. The
    *  pictures arrive on `onBrowserFrame`. */
   watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>>;
@@ -1734,6 +1765,9 @@ export type GrapheApi = {
   conflictSettle(address: string, path: string, text: string, where?: Where): Promise<Result<null>>;
   /** Full text for a library row. `id` is checked against that library first. */
   skillText(id: string, where?: Where): Promise<Result<string>>;
+  /** Open a library row's own file in the editor. `id` is checked against that
+   *  library first, so the window never names a path of its own. */
+  openSkillFile(id: string, where?: Where): Promise<Result<null>>;
   /** Stop checking before things that would otherwise be asked about, or start
    *  again. Answers with what is true afterwards. */
   stopAsking(on: boolean, where?: Where): Promise<Result<boolean>>;
@@ -1887,6 +1921,9 @@ export type GrapheApi = {
   /** Tokens through the model, one day at a time, read from this computer's
    *  own session transcripts. Null when there are none to read. */
   tokenUsage(): Promise<Result<TokenUsageView | null>>;
+  /** Write the spend out as a CSV, for whoever expenses it. Returns where it
+   *  went, or null when the save was cancelled. */
+  exportSpend(csv: string): Promise<Result<string | null>>;
   /** The ceiling somebody set on spending, or null when they have not set one. */
   spendLimit(): Promise<Result<SpendLimit | null>>;
   /** Set it, raise it, or take it away with null. Answers with what is held. */
@@ -2091,7 +2128,8 @@ export type GrapheApi = {
    * today.
    */
   addons(): Promise<Result<AddonReport>>;
-  storage(): Promise<Result<{ says: string; couldClear: number; because: string }>>;
+  storage(): Promise<Result<StorageNow>>;
+  clearFolder(name: string): Promise<Result<StorageNow>>;
   clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>>;
 
   /* ----------------------------------------------- staying in step with Figma */

@@ -1,10 +1,9 @@
 /* Near-misses, one row each.
 
-   The argument this section makes is visual, so the two colours meet along one
-   seam at the head of the row: a difference you can see needs no sentence, and
-   one you cannot see is the whole point of the sentence. Both wells carry the
-   same hairline as the palette chips, or a near-white pair is a blank rectangle
-   on the light page. */
+   A place, what is written there, what belongs there, and one press. The
+   argument is visual, so the two values sit next to each other with an arrow
+   between them; the wells carry a hairline, or a near-white pair is a blank
+   rectangle on the light page. */
 
 .drift {
   display: flex;
@@ -15,7 +14,6 @@
 .drift__head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: var(--space-2);
 }
 
@@ -29,6 +27,7 @@
 }
 
 .drift__count {
+  flex: 1 1 auto;
   margin: 0;
   font-size: var(--text-xs);
   color: var(--text-faint);
@@ -37,17 +36,12 @@
   white-space: nowrap;
 }
 
-/* A list, not a column of paragraphs. Given the whole band it fills the room
-   the way the sheet's own grid does — as many tracks as fit, one when they do
-   not — so fifty near-misses are still something you can scan. */
 .drift__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr));
-  align-items: start;
-  gap: var(--space-1) var(--space-3);
+  display: flex;
+  flex-direction: column;
 }
 
 .drift__row {
@@ -55,75 +49,95 @@
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
-  padding: var(--space-2);
-  border-radius: var(--radius-sm);
+  min-height: 34px;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
   transition: background-color var(--dur-micro) var(--ease-hover);
 }
 
 /* The ones we are least sure about recede rather than disappear. */
 .drift__row--maybe .drift__says {
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
-.drift__pair {
-  display: flex;
+/* Where it is. Printed as an editor would print it, because somebody who
+   reads this row goes there next. */
+.drift__at {
   flex: 0 0 auto;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  width: 30%;
+  max-width: 22rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drift__wrote,
+.drift__mine {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .drift__well {
   display: block;
-  width: 22px;
-  height: 32px;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-/* The seam. Without it two colours this close read as one wide swatch. */
-.drift__well + .drift__well {
-  border-left: 1px solid var(--border-strong);
-}
-
-.drift__pair--sizes {
-  align-items: stretch;
-  background: var(--bg-sunken);
+.drift__arrow {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
 }
 
 .drift__amount {
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-2);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .drift__amount--mine {
-  border-left: 1px solid var(--border-strong);
   color: var(--text);
-}
-
-.drift__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1 1 auto;
 }
 
 .drift__says {
-  font-size: var(--text-sm);
-  color: var(--text);
-}
-
-.drift__detail {
-  font-family: var(--font-mono);
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: var(--text-2xs);
-  color: var(--text-faint);
+  color: var(--text-muted);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* Every one of them at once, for a file nobody wants to walk down. */
+.drift__all {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.drift__all:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .drift__use {
@@ -155,7 +169,8 @@
     background: var(--bg-sunken);
   }
 
-  .drift__use:hover {
+  .drift__use:hover,
+  .drift__all:hover {
     color: var(--text);
     border-color: var(--border-strong);
   }

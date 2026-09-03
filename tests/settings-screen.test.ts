@@ -277,7 +277,6 @@ describe('what the screen must not lose', () => {
       ['add-more', 'add-ons'],
       ['usage', 'models'],
       ['folder', 'storage'],
-      ['editor', 'advanced'],
     ] as const) {
       const went: string[] = [];
       const host = open({ onGo: (link) => went.push(link) });
@@ -298,5 +297,183 @@ describe('what the screen must not lose', () => {
     expect(host.querySelectorAll('.settings__theme').length).toBeGreaterThan(1);
     expect(host.querySelector('.settings__system')).not.toBeNull();
     expect(host.querySelector('.appearance')).not.toBeNull();
+  });
+});
+
+/** The escape hatch used to be whichever editor was found first, and a machine
+ *  with two always got the same one. */
+describe('which app Open in goes to', () => {
+  const advanced = (props: Partial<Parameters<typeof Settings>[0]>): HTMLElement => {
+    const host = open(props);
+    act(() => {
+      pageButton(host, pageWords.advanced.name).click();
+    });
+    return host;
+  };
+
+  const strip = (host: HTMLElement, label: string): HTMLElement[] =>
+    [
+      ...(host.querySelector(`[role="radiogroup"][aria-label="${label}"]`)?.querySelectorAll(
+        '[role="radio"]',
+      ) ?? []),
+    ] as HTMLElement[];
+
+  it('is a strip of the installed names, with the one in force ticked', () => {
+    const host = advanced({
+      editors: ['VS Code', 'Cursor', 'Zed'],
+      opensIn: { editor: 'Cursor', terminal: null },
+      onOpensIn: () => {},
+    });
+    const choices = strip(host, 'Editor');
+    expect(choices.map((one) => one.textContent)).toEqual(['VS Code', 'Cursor', 'Zed']);
+    expect(choices.map((one) => one.getAttribute('aria-checked'))).toEqual([
+      'false',
+      'true',
+      'false',
+    ]);
+  });
+
+  /* Nothing chosen still names the one that will answer: that is what the shell
+     falls back to, so a blank strip would be a lie about what happens. */
+  it('ticks the first found where nobody has chosen', () => {
+    const host = advanced({
+      editors: ['VS Code', 'Cursor'],
+      opensIn: { editor: null, terminal: null },
+      onOpensIn: () => {},
+    });
+    expect(strip(host, 'Editor')[0]?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('hands back the one pressed', () => {
+    const got: [string, string][] = [];
+    const host = advanced({
+      editors: ['VS Code', 'Cursor'],
+      opensIn: { editor: null, terminal: null },
+      onOpensIn: (which, name) => got.push([which, name]),
+    });
+    act(() => (strip(host, 'Editor')[1] as HTMLElement).click());
+    expect(got).toEqual([['editor', 'Cursor']]);
+  });
+
+  /* Past four the strip is wider than the row it sits in. */
+  it('becomes a menu once there are more than four', () => {
+    const got: [string, string][] = [];
+    const host = advanced({
+      editors: ['VS Code', 'Cursor', 'Windsurf', 'Zed', 'Nova', 'WebStorm'],
+      opensIn: { editor: 'Zed', terminal: null },
+      onOpensIn: (which, name) => got.push([which, name]),
+    });
+    expect(strip(host, 'Editor')).toEqual([]);
+    const menu = host.querySelector('select[aria-label="Editor"]') as HTMLSelectElement;
+    expect([...menu.options].map((one) => one.value)).toHaveLength(6);
+    expect(menu.value).toBe('Zed');
+    act(() => {
+      menu.value = 'Nova';
+      menu.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(got).toEqual([['editor', 'Nova']]);
+  });
+
+  it('says so where nothing is installed', () => {
+    const host = advanced({ editors: [], terminals: [], onOpensIn: () => {} });
+    expect(names(host)).toContain('Editor');
+    expect(names(host)).toContain('Terminal');
+    expect(host.textContent).toContain('None found here');
+  });
+
+  it('offers the terminals on their own row', () => {
+    const got: [string, string][] = [];
+    const host = advanced({
+      terminals: ['Terminal', 'iTerm', 'Ghostty'],
+      opensIn: { editor: null, terminal: null },
+      onOpensIn: (which, name) => got.push([which, name]),
+    });
+    act(() => (strip(host, 'Terminal')[2] as HTMLElement).click());
+    expect(got).toEqual([['terminal', 'Ghostty']]);
+  });
+});
+
+/** A settings row that opened somebody's editor with a JSON file, or did
+ *  nothing at all where the file did not exist yet. */
+describe('things this project always does', () => {
+  const rows = [
+    { when: 'afterEachChange', name: 'format', run: 'npx prettier --write $FILES', on: true },
+  ] as const;
+
+  const goToAlways = (props: Partial<Parameters<typeof Settings>[0]>): HTMLElement => {
+    const host = open(props);
+    act(() => {
+      pageButton(host, pageWords.advanced.name).click();
+    });
+    const row = ([...host.querySelectorAll('.settings__row')] as HTMLElement[]).find(
+      (one) => one.textContent?.startsWith('Things this project always does') === true,
+    ) as HTMLElement;
+    act(() => row.click());
+    return host;
+  };
+
+  it('opens a page of its own rather than an editor', () => {
+    const went: string[] = [];
+    const host = goToAlways({
+      always: { file: '/p/.pi/hooks.json', rows, trouble: null },
+      onGo: (link) => went.push(link),
+    });
+    expect(went).toEqual([]);
+    expect(host.querySelector('.always')).not.toBeNull();
+    expect(host.textContent).toContain('npx prettier --write $FILES');
+    expect(host.textContent).toContain('/p/.pi/hooks.json');
+  });
+
+  it('is one line and an Add press when nothing runs yet', () => {
+    const host = goToAlways({ always: { file: '/p/.pi/hooks.json', rows: [], trouble: null } });
+    expect(host.querySelector('.always__empty')?.textContent).toBe('Nothing runs on its own yet.');
+    expect(host.querySelector('.always__add')).not.toBeNull();
+  });
+
+  it('writes the whole list back when one is added', () => {
+    const written: unknown[] = [];
+    const host = goToAlways({
+      always: { file: '/p/.pi/hooks.json', rows: [], trouble: null },
+      onAlwaysWrite: (next) => written.push(next),
+    });
+    act(() => (host.querySelector('.always__add') as HTMLElement).click());
+    const field = host.querySelector('.always__field') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      setter?.call(field, 'npm test');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(written).toEqual([
+      [{ when: 'afterEachChange', name: 'npm', run: 'npm test', on: true }],
+    ]);
+  });
+
+  it('switches one off without losing it, and removes it on the press', () => {
+    const written: unknown[] = [];
+    const host = goToAlways({
+      always: { file: '/p/.pi/hooks.json', rows, trouble: null },
+      onAlwaysWrite: (next) => written.push(next),
+    });
+    act(() => (host.querySelector('.always [role="switch"]') as HTMLElement).click());
+    expect(written[0]).toEqual([{ ...rows[0], on: false }]);
+    act(() => (host.querySelector('.always__remove') as HTMLElement).click());
+    expect(written[1]).toEqual([]);
+  });
+
+  /* The file is still one press away for whoever wants the JSON. */
+  it('keeps the file reachable from the foot of the page', () => {
+    const went: string[] = [];
+    const host = goToAlways({
+      always: { file: '/p/.pi/hooks.json', rows, trouble: null },
+      onGo: (link) => went.push(link),
+    });
+    act(() => (host.querySelector('.always__link') as HTMLElement).click());
+    expect(went).toEqual(['always']);
   });
 });

@@ -264,6 +264,7 @@ const REMEMBERED: readonly RecentProject[] = [
     lastOpenedAt: NOW - 12 * MINUTE,
     lastSpend: money(62, 'USD'),
     missing: false,
+    branch: 'feat/product-excellence',
   },
   {
     path: '/Users/you/Sites/atlas-studio',
@@ -271,6 +272,7 @@ const REMEMBERED: readonly RecentProject[] = [
     lastOpenedAt: NOW - 26 * HOUR,
     lastSpend: money(214, 'USD'),
     missing: false,
+    branch: 'main',
   },
   {
     path: '/Users/you/Sites/field-notes',
@@ -278,6 +280,7 @@ const REMEMBERED: readonly RecentProject[] = [
     lastOpenedAt: NOW - 5 * 24 * HOUR,
     lastSpend: null,
     missing: true,
+    branch: null,
   },
 ];
 
@@ -2182,7 +2185,7 @@ vite v6.0.5 building for production...
                   busy: false,
                   showMe: false,
                 }}
-                dirty={false}
+                changes={0}
                 onSave={noop}
                 onDiscard={noop}
                 onClose={noop}

@@ -103,6 +103,25 @@ describe('the rows', () => {
   it('puts the add-ons policy where the add-ons are', () => {
     expect(rowAt('addons')?.page).toBe('add-ons');
   });
+
+  /* Whichever was found first was always the answer, and the row that used to
+     be here only opened the project. */
+  it('let somebody choose which editor and which terminal', () => {
+    for (const id of ['editor', 'terminal']) {
+      expect(rowAt(id)?.page, id).toBe('advanced');
+      expect(rowAt(id)?.kind, id).toBe('choice');
+    }
+    expect(rowAt('editor')?.name).toBe('Editor');
+    expect(rowAt('terminal')?.name).toBe('Terminal');
+  });
+
+  /* Reached from the Advanced row rather than the sidebar, so it is a page with
+     a name but not one of the seven. */
+  it('give the always list a page of its own, off the sidebar', () => {
+    expect(pageWords.always.name).toBe('Always');
+    expect(pageWords.always.note.length).toBeGreaterThan(20);
+    expect(PAGES).not.toContain('always');
+  });
 });
 
 describe('searching', () => {

@@ -455,13 +455,28 @@ export async function sweepCheckouts(
   run: RunGit,
   repo: string,
   found: readonly string[],
-  options: { inUse?: (folder: string) => boolean; rescue?: Rescue } = {},
+  options: {
+    inUse?: (folder: string) => boolean;
+    rescue?: Rescue;
+    /** A second pass: a copy whose branch is already in the base line, and
+     *  which nothing has touched in this long, is released even when it is
+     *  carrying an install. Never one that holds work. */
+    settledAfter?: { days: number; base: string; touched: (folder: string) => Promise<number | null> };
+  } = {},
 ): Promise<readonly string[]> {
   const inUse = options.inUse ?? (() => false);
   const given: string[] = [];
+  const merged = options.settledAfter === undefined
+    ? new Set<string>()
+    : await branchesIn(run, repo, options.settledAfter.base);
   for (const folder of found) {
     if (inUse(folder)) continue;
     if (await holdsWork(run, folder)) continue;
+    if (await settledLongAgo(run, folder, merged, options.settledAfter)) {
+      const released = await releaseWorktree(run, repo, folder);
+      if (released.ok) given.push(folder);
+      continue;
+    }
     if (!(await carryOutWriting(run, folder, options.rescue))) continue;
     const released = await releaseWorktree(run, repo, folder);
     if (released.ok) given.push(folder);
@@ -470,6 +485,39 @@ export async function sweepCheckouts(
   // above leaves those notes pointing at nothing.
   if (given.length > 0) await run(['worktree', 'prune'], { cwd: repo });
   return given;
+}
+
+/** Every branch already in the base line. A copy whose work is in there has
+ *  nothing left to carry out of it. */
+async function branchesIn(run: RunGit, repo: string, base: string): Promise<ReadonlySet<string>> {
+  const { code, out } = await run(['branch', '--merged', base, '--format=%(refname:short)'], {
+    cwd: repo,
+  });
+  if (code !== 0 || out === undefined) return new Set();
+  return new Set(out.split('\n').map((one) => one.trim()).filter((one) => one !== ''));
+}
+
+/**
+ * Whether a copy is finished with and cold.
+ *
+ * Both, never one: a branch that landed a minute ago may still be open in front
+ * of somebody, and a folder nobody has touched in a fortnight may be the only
+ * copy of work that never landed. What it costs is `node_modules`, which is why
+ * these are the ones worth releasing at all.
+ */
+async function settledLongAgo(
+  run: RunGit,
+  folder: string,
+  merged: ReadonlySet<string>,
+  after: { days: number; base: string; touched: (folder: string) => Promise<number | null> } | undefined,
+): Promise<boolean> {
+  if (after === undefined) return false;
+  const when = await after.touched(folder);
+  if (when === null || Date.now() - when < after.days * 24 * 60 * 60 * 1000) return false;
+  const { code, out } = await run(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: folder });
+  if (code !== 0 || out === undefined) return false;
+  const branch = out.trim();
+  return branch !== '' && branch !== 'HEAD' && merged.has(branch);
 }
 
 /** The names and statuses git reports, as `{ kind, path }` rows.

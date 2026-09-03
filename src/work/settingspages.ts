@@ -25,7 +25,10 @@ export type Page =
   | 'add-ons'
   | 'storage'
   | 'privacy'
-  | 'advanced';
+  | 'advanced'
+  /** Reached from the Advanced row rather than the sidebar, because it is one
+   *  project's list rather than a preference. */
+  | 'always';
 
 /** What kind of control the row is. `goes` opens somewhere else, `press` does
  *  something once. */
@@ -76,6 +79,7 @@ export const pageWords: Record<Page, { name: string; note: string }> = {
     name: 'Advanced',
     note: 'Editor, terminal, and what runs on its own.',
   },
+  always: { name: 'Always', note: 'What runs without being asked, and when.' },
 };
 
 export const settingsWords = {
@@ -260,10 +264,18 @@ export const ROWS: readonly Row[] = [
   {
     id: 'editor',
     page: 'advanced',
-    name: 'Open in your editor',
-    note: 'Hand the project to the place you already write code.',
-    kind: 'goes',
-    also: ['vscode', 'code', 'ide', 'zed'],
+    name: 'Editor',
+    note: 'Where Open in editor goes.',
+    kind: 'choice',
+    also: ['vscode', 'code', 'ide', 'zed', 'cursor', 'open in'],
+  },
+  {
+    id: 'terminal',
+    page: 'advanced',
+    name: 'Terminal',
+    note: 'Where a shell on this project opens.',
+    kind: 'choice',
+    also: ['iterm', 'warp', 'ghostty', 'shell', 'console', 'open in'],
   },
 ];
 

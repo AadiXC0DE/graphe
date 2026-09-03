@@ -42,7 +42,7 @@ import {
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { constants, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
@@ -90,7 +90,15 @@ import {
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
 import { browserFolder, browserFrame, forgetLogins } from '../src/agent/pi/computer';
-import { ALWAYS_TEMPLATE, alwaysFile, alwaysFrom, isAlwaysFile, WHEN, type When } from '../src/work/always';
+import {
+  ALWAYS_TEMPLATE,
+  alwaysFile,
+  alwaysFrom,
+  alwaysText,
+  isAlwaysFile,
+  rowsAsGiven,
+  rowsFrom,
+} from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import {
   CHANNEL,
@@ -129,6 +137,7 @@ import {
   type RepoItem,
   type RepoLook,
   type AddonHere,
+  type StorageNow,
   type AddonReport,
   type CarriedExtension,
   type Room,
@@ -257,6 +266,8 @@ import { drainStarted, withoutOurs } from '../src/lib/queue';
 import { copiesFolder } from '../src/work/copies';
 import { checkoutWords, validateCheckouts } from '../src/history/checkouts';
 import {
+  canClear,
+  folderNamed,
   measureFolders,
   npmOnPath,
   saysStorage,
@@ -881,7 +892,9 @@ function applyPermissionPolicy(): void {
   // thing. Writing only, and sanitized: reading the clipboard is somebody's
   // passwords, and nothing here ever needs it. This is the window's own store —
   // a page being previewed has its own, and is granted none of it.
-  const allowed = new Set(['media', 'clipboard-sanitized-write']);
+  // Reading the installed font families is how the font picker offers what is
+  // actually on the machine instead of asking for a family name spelled exactly.
+  const allowed = new Set(['media', 'clipboard-sanitized-write', 'local-fonts']);
   session.defaultSession.setPermissionRequestHandler((_contents, permission, decide) => {
     decide(allowed.has(permission));
   });
@@ -2037,7 +2050,12 @@ async function rememberedProjects(): Promise<readonly RecentProject[]> {
   return Promise.all(
     list.map(async (one) => {
       const found = await stat(one.path).catch(() => null);
-      return { ...one, missing: found === null || !found.isDirectory() };
+      const missing = found === null || !found.isDirectory();
+      const named = missing
+        ? null
+        : await gitRun(one.path, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => null);
+      const branch = named?.code === 0 ? (named.out ?? '').trim() : '';
+      return { ...one, missing, branch: branch === '' || branch === 'HEAD' ? null : branch };
     }),
   );
 }
@@ -3659,7 +3677,9 @@ function keepAside(project: string, whose: string): Rescue {
       const to = join(keptAsideFolder(project), whose, one);
       try {
         await mkdir(dirname(to), { recursive: true });
-        await copyFile(join(folder, one), to);
+        // Cloned where the filesystem can: on APFS the bytes are shared until
+        // one side is written to, so rescuing a large file costs nothing.
+        await copyFile(join(folder, one), to, constants.COPYFILE_FICLONE);
       } catch {
         // One that could not be carried is enough to keep the copy. Saying it
         // went and then deleting the only copy is the whole failure this was
@@ -3698,6 +3718,14 @@ async function sweepStrayCheckouts(): Promise<number> {
     if (folders.length === 0) continue;
     const released = await sweepCheckouts(gitRunHereFor(), project.path, folders, {
       rescue: (folder, files) => keepAside(project.path, basename(folder))(folder, files),
+      /* A copy whose branch already landed and that nothing has touched in a
+         fortnight is what a gigabyte of `node_modules` is sitting in. Never
+         one holding work, which `sweepCheckouts` checks first. */
+      settledAfter: {
+        days: SETTLED_DAYS,
+        base: 'HEAD',
+        touched: async (folder) => (await stat(folder).catch(() => null))?.mtimeMs ?? null,
+      },
     }).catch(() => []);
     given += released.length;
   }
@@ -5239,6 +5267,9 @@ function scratchFor(project: string, address: string): string {
 
 /** How long a scratch folder nobody has touched is kept. */
 const SCRATCH_DAYS = 7;
+
+/** And how long a copy whose branch has already landed is. */
+const SETTLED_DAYS = 14;
 
 /** Everything under `scratch` that nothing has written to in a week. Run on the
  *  way in, where a sweep costs nobody anything. */
@@ -7349,6 +7380,37 @@ function register(): void {
     }
   });
 
+  /* A skill's own file, opened in the editor. The window names the row, never
+     the path: a skill lives outside the project as often as in it, so the one
+     safe way to reach it is to look it up in the library again. */
+  handle<null>(CHANNEL.openSkillFile, async (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
+    const open = projectAt(whereIn(args));
+    const skill = await skillNamed(open?.path ?? null, await defaultAgentDir(), id);
+    if (skill === null) {
+      return fail({
+        what: 'That skill is no longer installed.',
+        because: 'The library changed since it was opened, so I did not open a different file by mistake.',
+        actionLabel: 'Refresh skills',
+      });
+    }
+    const found = await editor();
+    if (found === null) return fail(NO_EDITOR);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('open', ['-a', found.bundle, skill.path], { stdio: 'ignore' });
+        child.on('error', reject);
+        child.on('exit', (code) =>
+          code === 0 ? resolve() : reject(new Error(`open exited with ${String(code)}`)),
+        );
+      });
+      return done(null);
+    } catch (cause) {
+      return fail(couldNotOpenEditor(found.name, cause));
+    }
+  });
+
   /** How full the conversation is. Null rather than a failure when there is no
    *  session yet or the model has not answered once — the ring simply has
    *  nothing to draw, which is not something to put a card in front of. */
@@ -8688,16 +8750,21 @@ function register(): void {
     const open = projectAt(where);
     if (open === null) return done({ file: '', rows: [], trouble: null });
     const file = alwaysFile(folderFor(open, where));
-    const read = alwaysFrom(await readFile(file, 'utf8').catch(() => null));
-    const said: Readonly<Record<When, string>> = {
-      afterEachChange: 'After every change',
-      whenItFinishes: 'When it finishes',
-      whenItOpens: 'When this project opens',
-    };
-    const rows = WHEN.flatMap((when) =>
-      read.all[when].map((one) => ({ when: said[when], name: one.name, run: one.run })),
-    );
-    return done({ file, rows, trouble: read.trouble });
+    const text = await readFile(file, 'utf8').catch(() => null);
+    return done({ file, rows: rowsFrom(text), trouble: alwaysFrom(text).trouble });
+  });
+
+  /** The same list, written back whole. The file is the feature, so the window
+   *  never patches it: it hands over every row it is showing. */
+  handle<AlwaysDoes>(CHANNEL.alwaysWrite, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const file = alwaysFile(folderFor(open, where));
+    const rows = rowsAsGiven(args[0]);
+    await mkdir(dirname(file), { recursive: true }).catch(() => undefined);
+    await writeAtomically(file, alwaysText(rows));
+    return done({ file, rows, trouble: null });
   });
 
   handle<readonly Workflow[]>(CHANNEL.workflows, async (_event, args) => {
@@ -9932,10 +9999,46 @@ function register(): void {
     return done({ says, each: [...each.values()], running });
   });
 
-  handle<{ says: string; couldClear: number; because: string }>(CHANNEL.storage, async () => {
+  handle<StorageNow>(CHANNEL.storage, async () => {
     const folders = await measureFolders(app.getPath('userData'));
     const { sweep: could, because } = whatToSweep(await whatIsLyingAround(), Date.now());
-    return done({ says: saysStorage(folders), couldClear: could.length, because });
+    return done({
+      says: saysStorage(folders),
+      couldClear: could.length,
+      because,
+      // A sentence naming six folders is a sentence nobody reads. The rows are
+      // the same reading, each with its own size and its own way out.
+      rows: folders.map((one) => ({
+        name: one.name,
+        bytes: one.bytes,
+        files: one.files,
+        clearable: canClear(one.name),
+      })),
+    });
+  });
+
+  /** Empty one row outright. Only the rows that never hold anybody's work. */
+  handle<StorageNow>(CHANNEL.clearFolder, async (_event, args) => {
+    const [name] = args;
+    const userData = app.getPath('userData');
+    const where = typeof name === 'string' && canClear(name) ? folderNamed(userData, name) : null;
+    if (where !== null) {
+      await rm(where, { recursive: true, force: true }).catch(() => undefined);
+      await mkdir(where, { recursive: true }).catch(() => undefined);
+    }
+    const folders = await measureFolders(userData);
+    const { sweep: could, because } = whatToSweep(await whatIsLyingAround(), Date.now());
+    return done({
+      says: saysStorage(folders),
+      couldClear: could.length,
+      because,
+      rows: folders.map((one) => ({
+        name: one.name,
+        bytes: one.bytes,
+        files: one.files,
+        clearable: canClear(one.name),
+      })),
+    });
   });
 
   handle<{ removed: number; freed: number; says: string }>(
@@ -10606,6 +10709,26 @@ function register(): void {
   handle<TokenUsageView | null>(CHANNEL.tokenUsage, async () =>
     done(await readTokenUsage(sessionsFolder())),
   );
+
+  /* The same days as a CSV, saved where the person says. Written by the shell
+     because the window has no disk of its own. */
+  handle<string | null>(CHANNEL.exportSpend, async (_event, args) => {
+    const [csv] = args;
+    if (typeof csv !== 'string' || csv === '') return fail(NOTHING_OPEN);
+    const where = await dialog.showSaveDialog(mainWindow ?? undefined!, {
+      defaultPath: join(app.getPath('downloads'), 'graphe-spend.csv'),
+      filters: [{ name: 'Comma separated values', extensions: ['csv'] }],
+    });
+    if (where.canceled || where.filePath === undefined) return done(null);
+    try {
+      await writeAtomically(where.filePath, csv);
+      shell.showItemInFolder(where.filePath);
+      return done(where.filePath);
+    } catch (cause) {
+      const raw = cause instanceof Error ? cause.message : String(cause);
+      return fail(plainTrouble(raw, detailsOf(cause)));
+    }
+  });
 
   /* Where the window has drawn its placeholder, in window coordinates. The
      native view is glued to it: nothing here guesses the rectangle, because a

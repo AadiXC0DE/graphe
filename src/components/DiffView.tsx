@@ -10,9 +10,13 @@ import {
   entriesOf,
   fileAt,
   fileKeep,
+  fileRows,
+  indexOfFile,
   indexOfHunk,
   lineOf,
+  onlySpacing,
   sidesOf,
+  tallyOf,
 } from '../diff/rows';
 import type { Cell, Entry, Reading } from '../diff/rows';
 import { sideWords } from '../diff/sidebyside';
@@ -61,6 +65,13 @@ export const DIFF_SAYS = {
   rest: (hunks: number): string =>
     `${String(hunks)} more ${hunks === 1 ? 'hunk' : 'hunks'}, not laid out yet.`,
   drawRest: 'Lay out the rest',
+  files: 'Files',
+  hideFiles: 'Hide the file list',
+  showFiles: 'Show the file list',
+  whitespace: 'Whitespace',
+  whitespaceWhy: 'Show lines where only the spacing changed',
+  whole: (files: number, added: number, removed: number): string =>
+    `${String(files)} ${files === 1 ? 'file' : 'files'} · +${String(added)} −${String(removed)}`,
 } as const;
 
 /** What the two presses on a hunk send. Written where the model reads them and
@@ -75,6 +86,25 @@ export const CHANGE_WORDS = {
 /** Which reading somebody last chose. Remembered, because it is a habit rather
  *  than a decision about one particular change. */
 const REMEMBERED = 'graphe.diff.reading';
+
+/** Whether the file list is out. */
+const FILES_SHOWN = 'graphe.diff.files';
+
+function remembered(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function keep(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* A window that cannot remember still draws the diff. */
+  }
+}
 
 function rememberedReading(): Reading {
   try {
@@ -152,6 +182,19 @@ function Code({
       {note === null ? null : <span className="diffview__note">{note}</span>}
     </code>
   );
+}
+
+/** The folder a path is in, and the file itself. The directory is the quiet
+ *  half: two files with the same name are told apart by it, and nothing else
+ *  in the row is. */
+function dirOf(path: string): string {
+  const at = path.lastIndexOf('/');
+  return at < 0 ? '' : `${path.slice(0, at)}/`;
+}
+
+function nameOf(path: string): string {
+  const at = path.lastIndexOf('/');
+  return at < 0 ? path : path.slice(at + 1);
 }
 
 /** Which of the two tints a line takes, or none. */
@@ -235,6 +278,10 @@ export default function DiffView({
 }: Props) {
   const [reading, setReading] = useState<Reading>(rememberedReading);
   const [budget, setBudget] = useState(BUDGET);
+  /* Folded with `[`. Kept, because whether somebody wants the list is a habit
+     rather than a decision about this change. */
+  const [listing, setListing] = useState(() => remembered(FILES_SHOWN) !== 'shut');
+  const [spacing, setSpacing] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const heights = useRef<number[]>([]);
@@ -244,7 +291,21 @@ export default function DiffView({
     [files, reading, budget],
   );
 
-  const { first, last, before, after, measure: mark } = useWindowed(entries.length, {
+  /* A pair whose two sides differ only in spacing is noise in a review of the
+     words. Hidden by default, and the toolbar says so rather than the diff
+     quietly being shorter than the file. */
+  const shown = useMemo(() => {
+    if (spacing) return entries;
+    return entries.filter((entry) => {
+      if (entry.kind === 'split') {
+        const { left, right } = entry.row;
+        return left === null || right === null || !onlySpacing(left.text, right.text);
+      }
+      return true;
+    });
+  }, [entries, spacing]);
+
+  const { first, last, before, after, measure: mark } = useWindowed(shown.length, {
     scroller,
     list,
     guess: GUESS_ROW,
@@ -262,7 +323,7 @@ export default function DiffView({
   // A different arrangement is a different set of heights.
   useEffect(() => {
     heights.current = [];
-  }, [entries]);
+  }, [shown]);
 
   const [painted, setPainted] = useState<ReadonlyMap<string, Painted>>(() => new Map());
   const asked = useRef<Set<string>>(new Set());
@@ -279,12 +340,12 @@ export default function DiffView({
   const inView = useMemo(() => {
     const seen = new Map<string, Hunk>();
     for (let step = first; step < last; step += 1) {
-      const entry = entries[step];
+      const entry = shown[step];
       if (entry === undefined || (entry.kind !== 'split' && entry.kind !== 'one')) continue;
       if (!seen.has(entry.hunk.id)) seen.set(entry.hunk.id, entry.hunk);
     }
     return [...seen.values()];
-  }, [entries, first, last]);
+  }, [shown, first, last]);
 
   useEffect(() => {
     let live = true;
@@ -312,7 +373,7 @@ export default function DiffView({
      yet is reached by the arithmetic instead. */
   useEffect(() => {
     if (at === null) return;
-    const index = indexOfHunk(entries, at);
+    const index = indexOfHunk(shown, at);
     if (index < 0) return;
     const drawn = [...(list.current?.querySelectorAll('[data-piece]') ?? [])].find(
       (el) => el.getAttribute('data-piece') === at,
@@ -329,9 +390,53 @@ export default function DiffView({
       top += tall === undefined || tall <= 0 ? GUESS_ROW : tall;
     }
     pane.scrollTop = top;
-  }, [at, entries]);
+  }, [at, shown]);
 
-  const here = fileAt(entries, first);
+  const here = fileAt(shown, first);
+  const rows = useMemo(() => fileRows(files, dropped ?? new Set<string>()), [files, dropped]);
+  const whole = useMemo(() => tallyOf(rows), [rows]);
+
+  const goToFile = useCallback(
+    (path: string) => {
+      const index = indexOfFile(shown, path);
+      if (index < 0) return;
+      const pane = scroller.current;
+      if (pane === null) return;
+      let top = 0;
+      for (let step = 0; step < index; step += 1) {
+        const tall = heights.current[step];
+        top += tall === undefined || tall <= 0 ? GUESS_ROW : tall;
+      }
+      pane.scrollTop = top;
+    },
+    [shown],
+  );
+
+  /* `n` and `p` move a file at a time, `[` folds the list. The hunk keys are
+     the caller's, on the sheet around this. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]') != null) return;
+      if (event.key === '[') {
+        event.preventDefault();
+        setListing((was) => {
+          keep(FILES_SHOWN, was ? 'shut' : 'open');
+          return !was;
+        });
+        return;
+      }
+      if (event.key !== 'n' && event.key !== 'p') return;
+      const at = rows.findIndex((one) => one.path === (here?.path ?? ''));
+      const to = rows[Math.max(0, Math.min(rows.length - 1, at + (event.key === 'n' ? 1 : -1)))];
+      if (to === undefined) return;
+      event.preventDefault();
+      goToFile(to.path);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [rows, here, goToFile]);
 
   const drawEntry = (entry: Entry): React.ReactNode => {
     if (entry.kind === 'file') {
@@ -461,9 +566,36 @@ export default function DiffView({
   };
 
   return (
-    <section className={`diffview diffview--${reading}`}>
+    <section className={`diffview diffview--${reading} ${listing ? 'diffview--listing' : ''}`}>
       <div className="diffview__band">
+        <button
+          type="button"
+          className="diffview__fold"
+          aria-expanded={listing}
+          title={listing ? DIFF_SAYS.hideFiles : DIFF_SAYS.showFiles}
+          onClick={() =>
+            setListing((was) => {
+              keep(FILES_SHOWN, was ? 'shut' : 'open');
+              return !was;
+            })
+          }
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2.25" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M6 2.75v10.5" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>
         <span className="diffview__here">{here === null ? '' : here.path}</span>
+        <span className="diffview__whole">{DIFF_SAYS.whole(whole.files, whole.added, whole.removed)}</span>
+        <button
+          type="button"
+          className={`diffview__way ${spacing ? 'diffview__way--on' : ''}`}
+          aria-pressed={spacing}
+          title={DIFF_SAYS.whitespaceWhy}
+          onClick={() => setSpacing((was) => !was)}
+        >
+          {DIFF_SAYS.whitespace}
+        </button>
         <span className="diffview__ways" role="group" aria-label={DIFF_SAYS.reading}>
           <button
             type="button"
@@ -490,10 +622,39 @@ export default function DiffView({
         </span>
       </div>
 
+      <div className="diffview__panes">
+      {listing ? (
+        <nav className="diffview__files scroll--auto" aria-label={DIFF_SAYS.files}>
+          {rows.map((one) => (
+            <button
+              key={one.path}
+              type="button"
+              className={`diffview__file ${one.path === here?.path ? 'diffview__file--here' : ''} ${
+                one.keeping === 'none' ? 'diffview__file--off' : ''
+              }`}
+              onClick={() => goToFile(one.path)}
+              title={one.path}
+            >
+              <span className={`diffview__filekind diffview__filekind--${one.kind}`} aria-hidden="true">
+                {WORDS.kinds[one.kind].slice(0, 1)}
+              </span>
+              <span className="diffview__filepath">
+                <span className="diffview__filedir">{dirOf(one.path)}</span>
+                <span className="diffview__filename">{nameOf(one.path)}</span>
+              </span>
+              <span className="diffview__filetally">
+                <span className="diffview__fileadded">+{one.added}</span>
+                <span className="diffview__fileremoved">−{one.removed}</span>
+              </span>
+            </button>
+          ))}
+        </nav>
+      ) : null}
+
       <div className="diffview__body scroll--auto" ref={scroller}>
         <div className="diffview__list" ref={list}>
           <div style={{ height: before }} aria-hidden="true" />
-          {entries.slice(first, last).map((entry, offset) => (
+          {shown.slice(first, last).map((entry, offset) => (
             <div
               key={entry.key}
               ref={(el) => {
@@ -505,6 +666,7 @@ export default function DiffView({
           ))}
           <div style={{ height: after }} aria-hidden="true" />
         </div>
+      </div>
       </div>
     </section>
   );

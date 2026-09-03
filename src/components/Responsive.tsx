@@ -36,7 +36,12 @@ export default function Responsive({
 
   return (
     <section className="widths" aria-label={responsive.button}>
-      <p className="widths__what">{responsive.what}</p>
+      <div className="widths__top">
+        <p className="widths__what">{responsive.what}</p>
+        <button type="button" className="widths__ask" onClick={onCheck} disabled={busy}>
+          {responsive.again}
+        </button>
+      </div>
 
       {shown.length === 0 ? null : (
         <ul className="widths__shots scroll--auto">
@@ -97,12 +102,7 @@ export default function Responsive({
           reason and no pictures used to leave the band blank. */}
       {!busy && said !== '' ? <p className="widths__says">{said}</p> : null}
 
-      <div className="widths__foot">
-        <button type="button" className="widths__ask" onClick={onCheck} disabled={busy}>
-          {looks.length === 0 ? responsive.button : responsive.again}
-        </button>
-        <p className="widths__where">{responsive.where}</p>
-      </div>
+      <p className="widths__where">{responsive.where}</p>
     </section>
   );
 }

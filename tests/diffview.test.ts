@@ -19,7 +19,11 @@ import {
   entriesOf,
   fileAt,
   fileKeep,
+  fileRows,
+  indexOfFile,
   indexOfHunk,
+  onlySpacing,
+  tallyOf,
   lineOf,
   oneColumn,
   sidesOf,
@@ -252,5 +256,50 @@ describe('where the viewer is used', () => {
 
   it('draws a bounded number of rows however long the change is', () => {
     expect(view).toContain('useWindowed');
+  });
+});
+
+describe('the file list', () => {
+  it('is one row per file, with what each one changed', () => {
+    const rows = fileRows(files, new Set());
+    expect(rows.map((one) => one.path)).toEqual(['src/one.ts', 'README.md']);
+    expect(rows[0]).toMatchObject({ kind: 'modified', added: 1, removed: 1, keeping: 'all' });
+  });
+
+  it('marks a file whose every hunk is dropped', () => {
+    const id = files[0]?.hunks[0]?.id ?? '';
+    expect(fileRows(files, new Set([id]))[0]?.keeping).toBe('none');
+  });
+
+  it('adds the whole change up for the toolbar', () => {
+    expect(tallyOf(fileRows(files, new Set()))).toEqual({ files: 2, added: 2, removed: 1 });
+  });
+
+  it('finds a file by name, so pressing its row can scroll to it undrawn', () => {
+    const { entries } = entriesOf(files, 'split');
+    expect(entries[indexOfFile(entries, 'README.md')]).toMatchObject({ kind: 'file' });
+    expect(indexOfFile(entries, 'nothing.ts')).toBe(-1);
+  });
+
+  it('is folded and unfolded with one key, and the choice is kept', () => {
+    expect(view).toContain("if (event.key === '[') {");
+    expect(view).toContain("keep(FILES_SHOWN, was ? 'shut' : 'open')");
+  });
+
+  it('moves a file at a time on n and p', () => {
+    expect(view).toContain("if (event.key !== 'n' && event.key !== 'p') return;");
+  });
+});
+
+describe('lines that changed nothing but their spacing', () => {
+  it('are the same line with the spaces taken out', () => {
+    expect(onlySpacing('const a = 1;', 'const   a = 1;')).toBe(true);
+    expect(onlySpacing('  const a = 1;', 'const a = 1;')).toBe(true);
+    expect(onlySpacing('const a = 1;', 'const a = 2;')).toBe(false);
+  });
+
+  it('are left out until somebody asks for them', () => {
+    expect(view).toContain('if (spacing) return entries;');
+    expect(view).toContain('!onlySpacing(left.text, right.text)');
   });
 });

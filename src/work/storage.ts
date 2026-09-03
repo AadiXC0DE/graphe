@@ -51,14 +51,27 @@ function keepDaysFor(kind: Sweepable['kind']): number {
 
 /** The folders under the app's data directory, in the order Settings shows
  *  them, and the plain name each is given there. */
-const FOLDERS: readonly { dir: string; name: string }[] = [
-  { dir: 'worktrees', name: 'Checkouts' },
+const FOLDERS: readonly { dir: string; name: string; clearable?: boolean }[] = [
+  { dir: 'worktrees', name: 'Branches' },
   { dir: 'copies', name: 'Board copies' },
   { dir: 'kept-aside', name: 'Set aside' },
   { dir: 'sessions', name: 'Conversations' },
   { dir: 'builds', name: 'Builds' },
-  { dir: 'logs', name: 'Logs' },
+  { dir: 'scratch', name: 'Scratch', clearable: true },
+  { dir: 'logs', name: 'Logs', clearable: true },
 ];
+
+/** Which rows are safe to empty outright. A branch may hold work; a scratch
+ *  folder and a log never do. */
+export function canClear(name: string): boolean {
+  return FOLDERS.some((one) => one.name === name && one.clearable === true);
+}
+
+/** Where one row's folder is, so a Clear knows what to remove. */
+export function folderNamed(userData: string, name: string): string | null {
+  const found = FOLDERS.find((one) => one.name === name);
+  return found === undefined ? null : join(userData, found.dir);
+}
 
 /* -------------------------------------------------------------------------- */
 /* Deciding                                                                    */

@@ -112,18 +112,6 @@
   cursor: pointer;
 }
 
-.appearance__font {
-  flex: 0 1 12rem;
-  min-width: 0;
-  padding: var(--space-2) var(--space-3);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--text-xs);
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-
 /* The preview carries the whole token set for the appearance being considered,
    so everything inside it is drawn the way the app would draw it. */
 .appearance__preview {

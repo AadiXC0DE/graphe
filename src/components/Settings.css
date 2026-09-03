@@ -639,6 +639,27 @@ button.settings__row {
   background: var(--bg-sunken);
 }
 
+/* The same strip on the right-hand end of an ordinary row, where the row's own
+   inset already holds it off the edge. */
+.settings__choices--inline {
+  flex: none;
+  margin: 0;
+}
+
+/* Past four names the strip becomes a menu. */
+.settings__pick {
+  flex: none;
+  max-width: 12rem;
+  padding: 4px var(--space-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
 .settings__choice {
   padding: 4px var(--space-3);
   border: 1px solid transparent;

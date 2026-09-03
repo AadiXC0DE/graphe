@@ -15,7 +15,7 @@
  * never be the only thing standing between a typo and a session.
  */
 
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import {
   CHANNEL,
   type AgentNotice,
@@ -62,6 +62,7 @@ import {
   type SideOfWork,
   type Skill,
   type AlwaysDoes,
+  type AlwaysRow,
   type Workflow,
   type AgentFrame,
   type Appearance,
@@ -69,6 +70,7 @@ import {
   type BuildAdvance,
   type ContinuationNotice,
   type NewerVersion,
+  type StorageNow,
   type SavedVersion,
   type DesignChange,
   type ShowOutcome,
@@ -145,6 +147,16 @@ function named(where?: Where): Where | undefined {
 }
 
 const api: GrapheApi = {
+  /** A folder dropped from Finder is a project; naming it is the shell's job,
+   *  because the window is only ever handed a File. */
+  pathOf(file: File): string {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
+  },
+
   openProject(path: string): Promise<Result<OpenedProject>> {
     if (typeof path !== 'string' || path.trim() === '') {
       return Promise.resolve(refuse<OpenedProject>('I did not get a folder to open.'));
@@ -355,6 +367,11 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.skillText, id, named(where)) as Promise<Result<string>>;
   },
 
+  openSkillFile(id: string, where?: Where): Promise<Result<null>> {
+    if (typeof id !== 'string' || id === '') return Promise.resolve(refuse<null>('I could not tell which skill to open.'));
+    return ipcRenderer.invoke(CHANNEL.openSkillFile, id, named(where)) as Promise<Result<null>>;
+  },
+
   watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>> {
     if (typeof on !== 'boolean') {
       return Promise.resolve(refuse<boolean>('I could not tell whether that was on or off.'));
@@ -370,6 +387,10 @@ const api: GrapheApi = {
 
   alwaysDoes(where?: Where): Promise<Result<AlwaysDoes>> {
     return ipcRenderer.invoke(CHANNEL.alwaysDoes, named(where)) as Promise<Result<AlwaysDoes>>;
+  },
+
+  alwaysWrite(rows: readonly AlwaysRow[], where?: Where): Promise<Result<AlwaysDoes>> {
+    return ipcRenderer.invoke(CHANNEL.alwaysWrite, rows, named(where)) as Promise<Result<AlwaysDoes>>;
   },
 
   workflows(where?: Where): Promise<Result<readonly Workflow[]>> {
@@ -942,6 +963,11 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.tokenUsage) as Promise<Result<TokenUsageView | null>>;
   },
 
+  exportSpend(csv: string): Promise<Result<string | null>> {
+    if (typeof csv !== 'string' || csv === '') return Promise.resolve(refuse<string | null>('There is nothing to write out yet.'));
+    return ipcRenderer.invoke(CHANNEL.exportSpend, csv) as Promise<Result<string | null>>;
+  },
+
   pageAt(
     address: string | null,
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -1331,9 +1357,14 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.addons);
   },
 
-  storage(): Promise<Result<{ says: string; couldClear: number; because: string }>> {
-    return ipcRenderer.invoke(CHANNEL.storage);
+  storage(): Promise<Result<StorageNow>> {
+    return ipcRenderer.invoke(CHANNEL.storage) as Promise<Result<StorageNow>>;
   },
+
+  clearFolder(name: string): Promise<Result<StorageNow>> {
+    return ipcRenderer.invoke(CHANNEL.clearFolder, name) as Promise<Result<StorageNow>>;
+  },
+
 
   clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>> {
     return ipcRenderer.invoke(CHANNEL.clearFinishedWork);

@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  draftWith,
   mentionAt,
   MOST_OFFERED,
   offerFor,
@@ -145,5 +146,25 @@ describe('putting one in the message', () => {
       insert: 'src/components/Button.tsx',
     });
     expect(put.text).toBe('src/components/Button.tsx  and the rest');
+  });
+});
+
+describe('handing something to the box from another screen', () => {
+  it('puts it where the caret is, with a space in front where one is needed', () => {
+    expect(draftWith('', '@drift')).toBe('@drift ');
+    expect(draftWith('use ', '@drift')).toBe('use @drift ');
+    expect(draftWith('use', '@drift')).toBe('use @drift ');
+  });
+
+  it('replaces a half-typed mention rather than adding a second one', () => {
+    expect(draftWith('look at @dri', '@drift')).toBe('look at @drift ');
+  });
+
+  it('keeps what comes after the caret', () => {
+    expect(draftWith('one two', '@drift', 3)).toBe('one @drift  two');
+  });
+
+  it('leaves a half-typed mention alone when a command is being inserted', () => {
+    expect(draftWith('@dri', '/ship')).toBe('@dri /ship ');
   });
 });

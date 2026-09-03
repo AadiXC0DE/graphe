@@ -37,6 +37,7 @@ import { keepsLogins } from "./projects/logins";
 import { actionAt, chordFor, readActions, type Bindings, type Chord } from "./lib/actions";
 import { saysChord } from "./lib/keys";
 import { mark } from "./lib/marks";
+import { draftWith } from "./lib/mentions";
 import { cssFor, defaultAppearance, type Appearance } from "./design/appearance";
 import { lookFirstStore } from "./lib/lookfirst";
 import { escapeMeans } from "./lib/escape";
@@ -139,6 +140,7 @@ import {
   type HowFar,
   type Money,
   type AlwaysDoes,
+  type AlwaysRow,
   type SavedVersion,
   type Overview as OverviewNow,
   type ShowProgress,
@@ -603,6 +605,8 @@ function Conversation() {
     advisor: null,
     advisorThinking: null,
     advisorGates: { completionGate: false, loopGate: false },
+    editor: null,
+    terminal: null,
     addons: 'on',
     appearance: defaultAppearance,
     thinking: {},
@@ -876,6 +880,11 @@ function Conversation() {
   const [workflows, setWorkflows] = useState<readonly Workflow[]>([]);
   /** What the open project does without being asked. Null until it is read. */
   const [alwaysNow, setAlwaysNow] = useState<AlwaysDoes | null>(null);
+  /** Every editor and terminal on this machine, read when Settings opens. */
+  const [appsHere, setAppsHere] = useState<{
+    editors: readonly string[];
+    terminals: readonly string[];
+  }>({ editors: [], terminals: [] });
   /** Whose history the full-screen graph is drawing, in a folder holding
    *  several projects. Null for a folder that is one project. */
   const [graphRepo, setGraphRepo] = useState<string | null>(null);
@@ -935,6 +944,8 @@ function Conversation() {
       return next;
     });
   }, []);
+  /** A file read in the thread's own column rather than in a card over it. */
+  const [readingWhole, setReadingWhole] = useState(false);
   const [finding, setFinding] = useState<string | null>(null);
   const [foundAt, setFoundAt] = useState<number | null>(null);
   /** The turn a search landed on, by its own id, so the row can be marked and
@@ -1699,6 +1710,36 @@ function Conversation() {
     [accountArrived, waitForAccount, openProject, refreshVersions, refreshOverview, refreshBuildPlan, refreshRoom, refreshRunning, setReading, toChat, troubleHere],
   );
   connect.opens.current = open;
+
+  /* A folder dragged onto the window is a project. Taken in the capture phase
+     so it never reaches the composer, which would refuse it as an attachment. */
+  useEffect(() => {
+    const carriesFiles = (event: globalThis.DragEvent): boolean =>
+      Array.from(event.dataTransfer?.types ?? []).includes("Files");
+
+    const isFolder = (event: globalThis.DragEvent): boolean =>
+      event.dataTransfer?.items[0]?.webkitGetAsEntry()?.isDirectory === true;
+
+    const over = (event: globalThis.DragEvent) => {
+      if (carriesFiles(event)) event.preventDefault();
+    };
+
+    const drop = (event: globalThis.DragEvent) => {
+      if (!isFolder(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const file = event.dataTransfer?.files[0];
+      const path = file === undefined ? "" : bridge.pathOf(file);
+      if (path !== "") void open(path);
+    };
+
+    window.addEventListener("dragover", over, true);
+    window.addEventListener("drop", drop, true);
+    return () => {
+      window.removeEventListener("dragover", over, true);
+      window.removeEventListener("drop", drop, true);
+    };
+  }, [open]);
 
   /**
    * Put a different conversation on screen, or start a fresh one.
@@ -2765,6 +2806,14 @@ function Conversation() {
     });
   }, []);
 
+  /** Which installed app the two Open in rows go to. */
+  const changeOpensIn = useCallback((which: 'editor' | 'terminal', name: string) => {
+    setPreferences((was) => ({ ...was, [which]: name }));
+    void bridge.setOpensIn(which, name).then((answer) => {
+      if (answer.ok) setPreferences(answer.value);
+    });
+  }, []);
+
   /** Sticky the same way, and the menu closes on the way out: what was asked
    *  for is about to appear beside the conversation. Closing it puts the file
    *  that was open away with it. */
@@ -2932,6 +2981,9 @@ function Conversation() {
           return;
         case 'find':
           setFinding((was) => (was === null ? '' : null));
+          return;
+        case 'file-expand':
+          setReadingWhole((was) => !was);
           return;
         case 'new':
           void swapConversation(null);
@@ -4740,13 +4792,29 @@ function Conversation() {
     });
   }, [openProject]);
 
-  /** Whether the project in front has edits waiting to be saved. */
-  const designDirty = useCallback((): boolean => {
+  /** One value put back where it was. The draft simply forgets it. */
+  const resetToken = useCallback(
+    (name: string) => {
+      const path = openProject;
+      if (path === null) return;
+      setDesignDraft((current) => {
+        const here = current[path];
+        if (here === undefined || here.tokens[name] === undefined) return current;
+        const tokens = { ...here.tokens };
+        delete tokens[name];
+        return { ...current, [path]: { ...here, tokens } };
+      });
+    },
+    [openProject],
+  );
+
+  /** How many edits are waiting to be saved, for the Save button's own label. */
+  const designChanges = useCallback((): number => {
     const path = desk === null ? null : desk.path;
-    if (path === null) return false;
+    if (path === null) return 0;
     const here = designDraft[path];
-    if (here === undefined) return false;
-    return Object.keys(here.tokens).length > 0 || here.motions.length > 0;
+    if (here === undefined) return 0;
+    return Object.keys(here.tokens).length + here.motions.length;
   }, [desk, designDraft]);
 
   /** The stylesheet with the draft edits laid over it, so the design view shows
@@ -4823,6 +4891,25 @@ function Conversation() {
     ].join('\n');
     say(body);
   }, [desk, say]);
+
+  /** The project the settings sheet was opened on, for the list of things it
+   *  always does. */
+  const alwaysWhere = useCallback((): Where | undefined => {
+    if (openProject === null) return undefined;
+    return {
+      project: openProject,
+      ...(panelRepoNow.current === null ? {} : { repo: panelRepoNow.current }),
+    };
+  }, [openProject, panelRepoNow]);
+
+  const writeAlways = useCallback(
+    (rows: readonly AlwaysRow[]) => {
+      void bridge.alwaysWrite(rows, alwaysWhere()).then((answer) => {
+        if (answer.ok) setAlwaysNow(answer.value);
+      });
+    },
+    [alwaysWhere],
+  );
 
   const openSettingsLink = useCallback(
     (link: SettingsLink) => {
@@ -5132,7 +5219,10 @@ function Conversation() {
       desk.references.length > 0 ||
       desk.versions.length >= 2);
   if (desk !== null && hasOverview) overviewSeen.current.add(desk.path);
-  const overviewed = desk !== null && (hasOverview || overviewSeen.current.has(desk.path));
+  // The panel steps aside while a file has the column: there is not room for
+  // both, and the file is what somebody asked for.
+  const overviewed =
+    desk !== null && !(readingWhole && reading !== null) && (hasOverview || overviewSeen.current.has(desk.path));
 
   // The pill that takes you back to the live preview. It earns its place the
   // moment there is an address to go to — nothing here is worth a button before
@@ -5165,7 +5255,7 @@ function Conversation() {
 
   return (
     <main
-      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${canvasAt === null ? "" : "app--canvas"}`}
+      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${canvasAt === null ? "" : "app--canvas"} ${readingWhole && reading !== null ? "app--reading" : ""}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -5368,6 +5458,11 @@ function Conversation() {
               .then((answer) => {
                 if (answer.ok) setAlwaysNow(answer.value);
               });
+            // Which editors and terminals are installed, for the two rows that
+            // offer the choice. Read here for the same reason: apps come and go.
+            void bridge.appsHere().then((answer) => {
+              if (answer.ok) setAppsHere(answer.value);
+            });
           }}
         />
       ) : null}
@@ -5471,6 +5566,9 @@ function Conversation() {
             const answer = await bridge.skillText(skill.id);
             return answer.ok ? answer.value : null;
           }}
+          onUse={(insert) => setDraft((was) => draftWith(was, insert))}
+          onOpenFile={(skill) => void bridge.openSkillFile(skill.id)}
+          onAddMore={openAddMore}
         />
       </Suspense>
 
@@ -5491,6 +5589,11 @@ function Conversation() {
           onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
           onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}
           always={alwaysNow}
+          onAlwaysWrite={writeAlways}
+          editors={appsHere.editors}
+          terminals={appsHere.terminals}
+          opensIn={{ editor: preferences.editor, terminal: preferences.terminal }}
+          onOpensIn={changeOpensIn}
           keepLogins={keepsLogins(preferences.keptLogins, desk?.path)}
           onToggleKeepLogins={() =>
             changeKeepLogins(!keepsLogins(preferences.keptLogins, desk?.path))
@@ -5547,6 +5650,13 @@ function Conversation() {
           onTokens={() =>
             bridge.tokenUsage().then((answer) => (answer.ok ? answer.value : null))
           }
+          limit={ceiling}
+          onLimit={setLimit}
+          onOpenConversation={(path) => {
+            setUsageOpen(false);
+            void swapConversation(path);
+          }}
+          onExport={(csv) => void bridge.exportSpend(csv)}
         />
       </Suspense>
 
@@ -5586,7 +5696,18 @@ function Conversation() {
                 path={reading.path}
                 text={reading.text}
                 trouble={reading.trouble}
-                onClose={() => setReading(null)}
+                whole={readingWhole}
+                onWhole={setReadingWhole}
+                onAsk={(path, from, to) => {
+                  setReading(null);
+                  setReadingWhole(false);
+                  const asked = `Tell me about @${path}:${String(from)}-${String(to)}`;
+                  void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+                }}
+                onClose={() => {
+                  setReading(null);
+                  setReadingWhole(false);
+                }}
               />
             </Suspense>
           </div>
@@ -5659,7 +5780,7 @@ function Conversation() {
               />
             )}
 
-            <div className="thread">
+            <div className="thread" hidden={readingWhole && reading !== null}>
             {(() => {
               /* Nobody reopens a sitting to read the top of it. A conversation
                  of ten thousand turns draws its last few hundred, and the rest
@@ -6060,6 +6181,10 @@ function Conversation() {
               drifted: design.drifted,
               unreadable: design.unreadable,
               fixing,
+              repairs: design.repairs,
+              nudged: Object.keys(
+                (desk === null ? undefined : designDraft[desk.path])?.tokens ?? {},
+              ),
               looks: looks.looks,
               looksSay: looks.says,
               checkingWidths,
@@ -6069,12 +6194,22 @@ function Conversation() {
               busy,
               showMe: preferences.showMe,
             }}
-            dirty={designDirty()}
+            changes={designChanges()}
             onSave={commitDesign}
             onDiscard={discardDesign}
             onClose={() => setDesignAt(null)}
             onNudge={nudge}
+            onResetToken={resetToken}
             onNudgeMotion={nudgeMotion}
+            onOpenFile={(file) => void bridge.openInEditor(file)}
+            onUseAll={(findings) => {
+              // One message for the lot: a press per finding would be a
+              // conversation per finding.
+              const where = designStyles?.file ?? "";
+              const text = findings.map((one) => saysUseYours(one, where)).join("\n");
+              setDesignAt(null);
+              void deliver(text, sizeUp(text), { lookFirst: true });
+            }}
             onUseYours={(finding) => {
               // Through the agent rather than straight to disk: the edit is then
               // snapshotted, photographed and undoable like any other change.

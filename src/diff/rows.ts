@@ -142,6 +142,50 @@ export function entriesOf(
 
 /** Where a hunk's heading sits in the list, so the keyboard can bring it into
  *  view even when it has not been drawn. */
+/** Where a file's heading sits in the list, so pressing its row scrolls there
+ *  even when its rows have not been drawn. */
+export function indexOfFile(entries: readonly Entry[], path: string): number {
+  return entries.findIndex((entry) => entry.kind === 'file' && entry.file.path === path);
+}
+
+/** One row of the file list: what changed, and how much. */
+export type FileRow = {
+  path: string;
+  kind: FileChange['kind'];
+  added: number;
+  removed: number;
+  /** Whether every hunk in it is being kept. */
+  keeping: 'all' | 'some' | 'none';
+};
+
+export function fileRows(
+  files: readonly FileChange[],
+  dropped: ReadonlySet<string>,
+): readonly FileRow[] {
+  return files.map((file) => ({
+    path: file.path,
+    kind: file.kind,
+    added: file.hunks.reduce((sum, hunk) => sum + hunk.added, 0),
+    removed: file.hunks.reduce((sum, hunk) => sum + hunk.removed, 0),
+    keeping: fileKeep(file, dropped),
+  }));
+}
+
+/** What the toolbar says about the whole change. */
+export function tallyOf(rows: readonly FileRow[]): { files: number; added: number; removed: number } {
+  return {
+    files: rows.length,
+    added: rows.reduce((sum, one) => sum + one.added, 0),
+    removed: rows.reduce((sum, one) => sum + one.removed, 0),
+  };
+}
+
+/** Whether a line changed nothing but whitespace. Both sides with every space
+ *  taken out are the same line, so it is noise in a review of the words. */
+export function onlySpacing(before: string, after: string): boolean {
+  return before.replace(/\s+/g, '') === after.replace(/\s+/g, '');
+}
+
 export function indexOfHunk(entries: readonly Entry[], id: string): number {
   return entries.findIndex((entry) => entry.kind === 'hunk' && entry.hunk.id === id);
 }

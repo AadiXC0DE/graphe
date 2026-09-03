@@ -145,3 +145,95 @@ export const ALWAYS_TEMPLATE = `{
   "whenItOpens": []
 }
 `;
+
+/** Each moment, in the words the window shows. One list, so the screen and the
+ *  file agree about what a moment is called. */
+export const whenWords: Readonly<Record<When, string>> = {
+  afterEachChange: 'After every change',
+  whenItFinishes: 'When it finishes',
+  whenItOpens: 'When this project opens',
+};
+
+/** One row as the window draws it: the moment as a key, and whether it runs. */
+export type AlwaysRow = { when: When; name: string; run: string; on: boolean };
+
+/** Where a switched-off one is kept. Not one of the three moments, so nothing
+ *  that runs has to know the key exists. */
+const OFF = 'off';
+
+/** A name for a command nobody named, the same way the reader derives one. */
+function nameFor(name: string, run: string): string {
+  const said = name.trim();
+  return said === '' ? (run.trim().split(/\s+/)[0] ?? run.trim()) : said;
+}
+
+/** Every row in the file, the switched-off ones included, in the order they
+ *  are written. */
+export function rowsFrom(text: string | null): readonly AlwaysRow[] {
+  if (text === null || text.trim() === '') return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const found = record(parsed);
+  if (found === null) return [];
+  const rows: AlwaysRow[] = [];
+  for (const when of WHEN) {
+    const list = found[when];
+    if (!Array.isArray(list)) continue;
+    for (const one of list) {
+      const read = oneAlways(one);
+      if (read !== null) rows.push({ when, name: read.name, run: read.run, on: true });
+    }
+  }
+  const off = found[OFF];
+  if (Array.isArray(off)) {
+    for (const one of off) {
+      const read = oneAlways(one);
+      const said = record(one)?.['when'];
+      const when = WHEN.find((each) => each === said);
+      if (read !== null && when !== undefined) {
+        rows.push({ when, name: read.name, run: read.run, on: false });
+      }
+    }
+  }
+  return rows;
+}
+
+/** Rows as they arrive from the window, kept only where the moment is one of
+ *  the three and there is something to run. */
+export function rowsAsGiven(value: unknown): readonly AlwaysRow[] {
+  if (!Array.isArray(value)) return [];
+  const rows: AlwaysRow[] = [];
+  for (const one of value) {
+    const found = record(one);
+    if (found === null) continue;
+    const run = typeof found['run'] === 'string' ? found['run'].trim() : '';
+    const when = WHEN.find((each) => each === found['when']);
+    if (run === '' || when === undefined) continue;
+    rows.push({
+      when,
+      name: nameFor(typeof found['name'] === 'string' ? found['name'] : '', run),
+      run,
+      on: found['on'] !== false,
+    });
+  }
+  return rows;
+}
+
+/** The file, written. The three moments in their own order, and whatever is
+ *  switched off kept whole so turning it back on costs nothing. */
+export function alwaysText(rows: readonly AlwaysRow[]): string {
+  const body: Record<string, unknown> = {};
+  for (const when of WHEN) {
+    body[when] = rows
+      .filter((one) => one.on && one.when === when)
+      .map((one) => ({ name: nameFor(one.name, one.run), run: one.run }));
+  }
+  body[OFF] = rows
+    .filter((one) => !one.on)
+    .map((one) => ({ when: one.when, name: nameFor(one.name, one.run), run: one.run }));
+  return `${JSON.stringify(body, null, 2)}\n`;
+}

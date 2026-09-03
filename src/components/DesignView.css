@@ -1,0 +1,193 @@
+/* The design view's own furniture: the rail that says what the six parts are,
+   and the column of parts beside it. Everything else is Sheet.css. */
+
+.design {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  padding: var(--space-5);
+  max-width: 1400px;
+}
+
+/* Sticky rather than fixed: it belongs to the scroller, so it stops where the
+   content stops rather than floating over the foot of the sheet. */
+.design__rail {
+  position: sticky;
+  top: 0;
+  flex: none;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.design__parts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.design__part {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: left;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.design__part--here {
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text);
+}
+
+.design__partname {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design__partcount {
+  flex: none;
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+/* The key that jumps here. Drawn always, because a shortcut nobody can see is
+   a shortcut nobody uses. */
+.design__partkey {
+  flex: none;
+  min-width: 16px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.design__part:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* What is being read, and the way into it for somebody who would rather edit
+   the file (src/lib/showme.ts). */
+.design__source {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.design__path {
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design__open {
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.design__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.design__bands {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+
+.design__band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  /* Where the rail lands it, clear of the head above. */
+  scroll-margin-top: var(--space-4);
+}
+
+.design__actions {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+}
+
+/* Nothing to save: present, so the row does not move when there is, and quiet,
+   so it does not ask to be pressed. */
+.sheet__savebtn--quiet {
+  border-color: var(--border);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .design__part:not(.design__part--here):hover {
+    background: color-mix(in oklab, var(--text) 7%, transparent);
+    color: var(--text);
+  }
+
+  .design__open:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+@container (max-width: 720px) {
+  .design {
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  .design__rail {
+    position: static;
+    width: 100%;
+  }
+
+  .design__parts {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .design__part {
+    width: auto;
+  }
+}

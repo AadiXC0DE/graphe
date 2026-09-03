@@ -5176,6 +5176,10 @@ const continuations = continuationOwner({
   tell: (one) => {
     if (mainWindow === null || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send(CHANNEL.continuation, one);
+    /* A goal whose job has come to rest is not working any more, whatever the
+       last verdict said. Left active it kept the panel reading Working with a
+       clock still counting long after everything had stopped. */
+    if (one.resting) void restGoal(one.project, one.address);
   },
   list: async (project, address) => {
     const stored = await listNow(project, address);
@@ -5234,6 +5238,27 @@ function holdForAnswer(project: string, address: string, on: boolean): void {
   const key = keyOf(project, address);
   if (on) askingSomebody.add(key);
   else askingSomebody.delete(key);
+}
+
+/**
+ * The goal, when its job comes to rest.
+ *
+ * Done when the list it was working through is finished, paused when it is not:
+ * either way it stops being active, which is what stops its clock.
+ */
+async function restGoal(project: string, address: string): Promise<void> {
+  const userData = app.getPath('userData');
+  const goal = await GoalFile.read(project, userData, address).catch(() => null);
+  if (goal === null || goal.status !== 'active') return;
+  const stored = await listNow(project, address).catch(() => null);
+  const how = stored === null ? null : progress(stored.tasks);
+  const finished = how !== null && how.total > 0 && how.done >= how.total;
+  await GoalFile.write(
+    project,
+    userData,
+    { ...withElapsed(goal), status: finished ? 'done' : 'paused' },
+    address,
+  ).catch(() => undefined);
 }
 
 /** One more round toward the goal, written down so a restart keeps the count. */

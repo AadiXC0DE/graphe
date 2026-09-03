@@ -171,8 +171,15 @@ export function verifyGoal(
   return { met: true, reason: `All ${String(plan.total)} steps settled and ${checks.reason}` };
 }
 
-/** Update elapsed in place, for display. */
+/**
+ * Update elapsed in place, for display.
+ *
+ * Only while it is running. A goal that is paused or done ran for as long as it
+ * ran; measuring from the moment it started means a job that took six minutes
+ * reads as forty a while later, and keeps counting while nobody is working.
+ */
 export function withElapsed(goal: Goal): Goal {
+  if (goal.status !== 'active') return goal;
   return { ...goal, elapsed: goalElapsed(goal) };
 }
 

@@ -142,6 +142,8 @@
   /* The colour of a destructive press's hover. Text-level contrast, because it
      is read as text against whatever surface it lands on. */
   --danger: #b03528;
+  --bad: #b03528;
+  --good: #1f7a45;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
 
@@ -204,6 +206,8 @@
     --accent-soft: #3a2119;
     --accent-ink: #e0714d;
     --danger: #e2574b;
+    --bad: #e2574b;
+    --good: #5fbf87;
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
     --shadow-md: 0 4px 20px rgb(0 0 0 / 0.4);
   }
@@ -226,6 +230,8 @@
   --accent-soft: #f6e3dc;
   --accent-ink: #ad4529;
   --danger: #b03528;
+  --bad: #b03528;
+  --good: #1f7a45;
 }
 
 :root[data-theme='dark'],
@@ -245,4 +251,6 @@
   --accent-soft: #3a2119;
   --accent-ink: #e0714d;
   --danger: #e2574b;
+  --bad: #e2574b;
+  --good: #5fbf87;
 }

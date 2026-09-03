@@ -95,6 +95,19 @@ export function useConnect(): Connect {
     void refresh();
   }, [refresh]);
 
+  /* And once more against the catalogue itself, when the window is otherwise
+     idle. The list on disk is the one the installed runtime shipped with, so a
+     model added upstream since then, a free one among them, is invisible until
+     somebody thinks to press Refresh. Nobody presses Refresh. The call is
+     bounded and its failure is the list already on screen. */
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 2500));
+    const handle = idle(() => {
+      void refresh(true);
+    });
+    return () => (window.cancelIdleCallback ?? clearTimeout)(handle as never);
+  }, [refresh]);
+
   /** Follow along while a connection happens. Each step is one moment of the
    *  provider's sign-in — a browser it opened, a question it asked. The step
    *  is kept for as long as the modal is up and then let go. */

@@ -17,28 +17,42 @@
   min-height: 0;
   min-width: 0;
 
-  --line-in: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
-  --line-in-edge: var(--accent);
-  --line-out: var(--bg-sunken);
-  --line-out-edge: var(--border-control);
+  /* Added and removed, in the colours everybody already reads a diff in. The
+     accent was used for both grounds, which put the app's own colour on the one
+     surface where green and red mean something. Set on the root as
+     `data-diff="accent"` to go back to it. */
+  --line-in: color-mix(in srgb, var(--good) 12%, var(--bg-raised));
+  --line-in-edge: var(--good);
+  --line-out: color-mix(in srgb, var(--bad) 10%, var(--bg-raised));
+  --line-out-edge: var(--bad);
   /* One number for the gutter, so both readings line their code up at the same
      x whichever one is showing. */
   --gutter: 3.25rem;
 }
 
+/* A dark ground takes more of the colour before it reads as tinted at all. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .diffview {
-    --line-in: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
+  :root:not([data-theme='light']) .diffview {
+    --line-in: color-mix(in srgb, var(--good) 18%, var(--bg-raised));
+    --line-out: color-mix(in srgb, var(--bad) 15%, var(--bg-raised));
   }
 }
 
-:root[data-theme='dark'] .diffview,
-:root[data-theme='graphe'] .diffview {
-  --line-in: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
+:root[data-theme='dark'] .diffview {
+  --line-in: color-mix(in srgb, var(--good) 18%, var(--bg-raised));
+  --line-out: color-mix(in srgb, var(--bad) 15%, var(--bg-raised));
 }
 
-:root[data-theme='light'] .diffview {
-  --line-in: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+/* The old reading, for anybody who wants the app's own colour here. */
+:root[data-diff='accent'] .diffview {
+  --line-in: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
+  --line-in-edge: var(--accent);
+  --line-out: var(--bg-sunken);
+  --line-out-edge: var(--border-control);
+}
+
+:root[data-theme='dark'][data-diff='accent'] .diffview {
+  --line-in: color-mix(in srgb, var(--accent) 18%, var(--bg-raised));
 }
 
 /* ---------------------------------------------------------------------------
@@ -478,6 +492,11 @@
   display: grid;
   align-items: baseline;
   min-height: 20px;
+  /* A row is as wide as the widest line in the file, not as wide as the box it
+     is scrolled inside: a background painted at the box's width stops dead in
+     the middle of a long line the moment anybody scrolls sideways. */
+  width: max-content;
+  min-width: 100%;
 }
 
 .diffview__row--split {

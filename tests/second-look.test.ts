@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import { PRESETS, appearanceWords, defaultAppearance, tokensFor } from '../src/design/appearance';
 import { OPEN_TO, ROWS as rows, asOpenTo } from '../src/work/settingspages';
+import { withElapsed } from '../src/work/goal';
 
 const read = (path: string): string =>
   readFileSync(fileURLToPath(new URL(`../${path}`, import.meta.url)), 'utf8');
@@ -28,6 +29,11 @@ const app = read('src/App.tsx');
 const welcome = read('src/components/Welcome.tsx');
 const welcomeCss = read('src/components/Welcome.css');
 const settings = read('src/components/Settings.tsx');
+const sheetCss = read('src/components/Sheet.css');
+const diffCss = read('src/components/DiffView.css');
+const tokensCss = read('src/styles/tokens.css');
+const connect = read('src/hooks/useConnect.ts');
+const main = read('electron/main.ts');
 
 describe('a band that folds', () => {
   /* Closed, with nothing in it, the band drew the word LOOKED UP and a "0" on
@@ -188,5 +194,66 @@ describe('where a launch lands', () => {
 
   it('is still both, on the row that chooses', () => {
     expect(OPEN_TO.map((one) => one.id)).toEqual(['last', 'list']);
+  });
+});
+
+describe('a screen that arrives', () => {
+  /* The flicker that survived two fixes. A sheet faded in from nothing over
+     280ms, and what shows through a half-transparent sheet is the screen you
+     just left: canvas to history flashed the conversation, history to canvas
+     did not, because the canvas is opaque and does not fade. Screens are opened
+     dozens of times an hour, the frequency the motion rule bans animating at. */
+  it('does not fade in over whatever is behind it', () => {
+    expect(sheetCss).not.toContain('animation: sheet-arrives');
+    expect(sheetCss).not.toContain('@keyframes sheet-arrives');
+  });
+});
+
+describe('the goal band', () => {
+  /* Six minutes of work read as forty and kept counting: elapsed was measured
+     from the moment the goal started, every time it was drawn, whatever the
+     goal was doing. */
+  it('stops counting once the goal is not running', () => {
+    const started = Date.now() - 60_000;
+    const base = { id: 'g', objective: 'x', iterations: 1, elapsed: 12, howFar: 'doing' as const, startedAt: started };
+    expect(withElapsed({ ...base, status: 'active' }).elapsed).toBeGreaterThan(50);
+    expect(withElapsed({ ...base, status: 'paused' }).elapsed).toBe(12);
+    expect(withElapsed({ ...base, status: 'done' }).elapsed).toBe(12);
+  });
+
+  it('is put to rest when its job is', () => {
+    expect(main).toContain('if (one.resting) void restGoal(one.project, one.address);');
+    expect(main).toContain("status: finished ? 'done' : 'paused'");
+  });
+});
+
+describe('reading a change', () => {
+  /* The colour stopped at the edge of the box the moment anybody scrolled
+     sideways, because the row was as wide as the box rather than as wide as the
+     longest line in the file. */
+  it('paints a row to the end of its longest line', () => {
+    expect(diffCss).toMatch(/\.diffview__row \{[^}]*width: max-content;/);
+    expect(diffCss).toMatch(/\.diffview__row \{[^}]*min-width: 100%;/);
+  });
+
+  /* Green and red are what a diff means. The accent was on both grounds, which
+     is the app's own colour on the one surface where the colours are the
+     information. */
+  it('is green and red, with the accent behind a switch', () => {
+    expect(diffCss).toContain('--line-in: color-mix(in srgb, var(--good) 12%, var(--bg-raised));');
+    expect(diffCss).toContain('--line-out: color-mix(in srgb, var(--bad) 10%, var(--bg-raised));');
+    expect(diffCss).toContain("[data-diff='accent']");
+    expect(tokensCss).toContain('--good:');
+    expect(tokensCss).toContain('--bad:');
+  });
+});
+
+describe('the model list', () => {
+  /* The catalogue on disk is the one the installed runtime shipped with, so a
+     model added upstream since, a free one among them, was invisible until
+     somebody pressed Refresh. Nobody presses Refresh. */
+  it('is asked of the catalogue itself once the window is idle', () => {
+    expect(connect).toContain('void refresh(true);');
+    expect(connect).toContain('window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 2500))');
   });
 });

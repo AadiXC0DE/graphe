@@ -119,7 +119,13 @@
      and a map that scrolls away is a map you have to go back for. */
   .settings__pages {
     position: sticky;
+    /* At the top of its column and staying there: it used to ride the scroll
+       until it touched the top, which reads as the page having two scrollbars. */
     top: 0;
+    align-self: start;
+    max-height: 100%;
+    overflow-y: auto;
+    scrollbar-width: none;
   }
 }
 

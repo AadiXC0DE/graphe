@@ -45,6 +45,8 @@ export type Surfaces = {
   accentText: string;
   accentSoft: string;
   accentInk: string;
+  /** Went in, and came out. Named for what they mean, not for the accent. */
+  good: string;
   danger: string;
 };
 
@@ -384,5 +386,6 @@ export function surfacesFrom(
     accentSoft,
     accentInk: readableOn(hardest, reads + 1.2, hue, chroma, runs),
     danger: readableOn(hardest, reads, 27, 0.16, runs),
+    good: readableOn(hardest, reads, 148, 0.14, runs),
   };
 }

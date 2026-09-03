@@ -236,14 +236,20 @@
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
+/* The hit area stops at the button's own top edge. Five pixels of it used to
+   reach up into the band the window is dragged by, and a drag region takes the
+   press rather than passing it on, so the top of the button did nothing. */
 .shelf__mark::after {
   content: '';
   position: absolute;
   left: -3px;
   right: -3px;
-  top: 50%;
-  height: 44px;
-  transform: translateY(-50%);
+  top: 0;
+  bottom: -10px;
+}
+
+.shelf__mark {
+  -webkit-app-region: no-drag;
 }
 
 .shelf__mark:active {

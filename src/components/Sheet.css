@@ -21,23 +21,16 @@
      the whole full-window surface every frame and read as a jitter when the
      shelf sat behind the sheet's edge, so the scale is gone and the rise is
      smaller: only transform and opacity change, both GPU-cheap. */
-  animation: sheet-arrives var(--dur-large) var(--ease-out-quart) both;
+  /* No entrance. A sheet that fades in from nothing is a sheet you can see
+     through while it arrives, and what is behind it is the screen somebody just
+     left: switch from the canvas to the history and the conversation flashes up
+     for the length of the fade. Screens are opened dozens of times an hour,
+     which is the frequency the motion rule bans animating at anyway. */
 }
 
 /* The rectangle held while a sheet's code is still on its way. */
 .sheet--arriving {
   background: var(--bg);
-}
-
-@keyframes sheet-arrives {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* ---------------------------------------------------------------------------

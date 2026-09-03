@@ -819,7 +819,7 @@ function Conversation() {
     void bridge.connectedLook().then((answer) => {
       if (answer.ok) setConnected(answer.value);
     });
-  }, []);
+  }, [startScreen]);
 
 
 
@@ -1628,7 +1628,7 @@ function Conversation() {
         if (screen !== 'canvas' && screen !== 'helpers') setCanvasAt(null);
       });
     },
-    [],
+    [startScreen],
   );
 
   /** Optimistic on screen, confirmed underneath — the same bargain "Show me"
@@ -2266,7 +2266,7 @@ function Conversation() {
     const made = newFlow();
     changeFlow(made);
     startScreen(() => setCanvasAt(made.id));
-  }, [changeFlow, goToScreen]);
+  }, [changeFlow, goToScreen, startScreen]);
 
   /** The one somebody last drew on, or a new one. What the shelf's row does. */
   /* A canvas is a tab rather than a sheet, so opening one has to put away
@@ -2280,7 +2280,7 @@ function Conversation() {
       return;
     }
     startScreen(() => setCanvasAt(held[held.length - 1]!.id));
-  }, [newCanvas, goToScreen]);
+  }, [newCanvas, goToScreen, startScreen]);
 
   const forgetCanvas = useCallback((id: string) => {
     setFlows((held) => withoutFlow(held, id));
@@ -3201,6 +3201,7 @@ function Conversation() {
       window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
+    startScreen,
     busy,
     halt,
     switching,
@@ -4031,7 +4032,7 @@ function Conversation() {
       if (desk.address !== address) await swapConversation(address);
       setCanvasAt(null);
     },
-    [open, swapConversation],
+    [open, swapConversation, startScreen],
   );
 
   /** Closing a tab puts the conversation down; it does not throw it away.
@@ -4846,6 +4847,7 @@ function Conversation() {
       },
     }));
   }, [
+    startScreen,
     openProject, actingRepoNow, busy, swapConversation, goToScreen, togglePane, refreshRepo,
     refreshReviewQueue,
     refreshSkills, refreshWorkflows, refreshConnected, openAddMore, openConnect, openCanvas, browse,
@@ -5189,6 +5191,7 @@ function Conversation() {
        opened once, so a callback built without it captured that null and the
        row opened nothing at all. */
     [
+      startScreen,
       alwaysNow?.file,
       goToScreen,
       refreshConnected,

@@ -255,6 +255,8 @@ export function tokensFor(one: Appearance, on: Base = 'light'): Readonly<Record<
     '--accent-soft': surfaces.accentSoft,
     '--accent-ink': surfaces.accentInk,
     '--danger': surfaces.danger,
+    '--bad': surfaces.danger,
+    '--good': surfaces.good,
 
     '--radius-sm': `${String(small)}px`,
     '--radius-md': `${String(medium)}px`,

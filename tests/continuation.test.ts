@@ -544,6 +544,40 @@ describe('CN-10 a run that fell over', () => {
     );
     expect(move.why).toBe('checklist');
   });
+
+  /* The retry used to be counted on `stuckRounds`, which a checklist round that
+     ticked nothing off also increments. One stalled round then one real failure
+     and the run came to rest saying it had already tried again, when it never
+     had, and the one retry a failure is allowed had been spent by something
+     that was not a failure. */
+  it('is still picked up after a round that ticked nothing off', () => {
+    // A round with the list where it was: no progress, so stuck goes to one.
+    const stalled = asSend(decide(freshContinuation(), facts({ list: list(3, 9) })));
+    const again = asSend(decide(stalled.state, facts({ list: list(3, 9) })));
+    expect(again.state.stuckRounds).toBe(1);
+    expect(again.state.recoveryAttempts).toBe(0);
+
+    const move = asSend(decide(again.state, facts({ endedHow: 'failed' })));
+    expect(move.why).toBe('recovery');
+    expect(move.state.recoveryAttempts).toBe(1);
+    // And the stall count is left as it was, rather than being written over.
+    expect(move.state.stuckRounds).toBe(1);
+  });
+
+  it('is not picked up a second time, whatever happened in between', () => {
+    const first = asSend(decide(freshContinuation(), facts({ endedHow: 'failed' })));
+    // A round that does move the list: the old counter would have reset here
+    // and handed out a second retry.
+    const moved = asSend(decide(first.state, facts({ list: list(4, 9) })));
+    expect(moved.state.stuckRounds).toBe(0);
+    const second = asRest(decide(moved.state, facts({ endedHow: 'failed' })));
+    expect(second.said).toBe(continuationWords.recoveryTwice);
+  });
+
+  it('starts again once the person has typed', () => {
+    const first = asSend(decide(freshContinuation(), facts({ endedHow: 'failed' })));
+    expect(personSpoke(first.state).recoveryAttempts).toBe(0);
+  });
 });
 
 describe('CN-11 the person typed something', () => {

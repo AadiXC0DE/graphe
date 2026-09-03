@@ -4,9 +4,11 @@
 
 **Send in a team, not a prompt.**
 
-An agentic coding platform for the desktop. A canvas of blocks you join up, helpers in parallel,
-jobs that run for hours without you, and a design system it reads before it writes. Built on
-[pi](https://github.com/earendil-works/pi), your keys, any model, the meter in plain sight.
+The desktop pi has been missing. A canvas of blocks you join up, helpers in parallel, jobs that
+run for hours without you, finished work that waits for a review before it touches your folder,
+and a design system it reads before it writes. Built on
+[pi](https://github.com/earendil-works/pi), your keys, any model, the meter in plain sight, and
+every colour, corner and key in it yours to change.
 
 <p align="center">
   <a href="https://github.com/AadiXC0DE/graphe/actions"><img src="https://img.shields.io/github/actions/workflow/status/AadiXC0DE/graphe/ci.yml?branch=main&label=CI" alt="CI"></a>
@@ -74,6 +76,9 @@ come back to a board of what finished, what's waiting, and what it cost.
 
 | | |
 |---|---|
+| **Finished work waits for you** | Nothing reaches your folder unasked: an entry arrives on a list with its diff, and you take it, keep yours, send it back or throw it away, file by file |
+| **Made yours** | One accent and every surface derived from it in OKLCH and measured before it lands, four presets, any font on the machine, every chord rebindable, and `graphe.css` for anything the builder does not offer |
+| **One thing decides when it carries on** | A checklist, a goal, a finished board piece, an add-on asking for a turn and a run that fell over are five reasons through one door, counted against one budget and named out loud |
 | **Works in parallel, and keeps working** | Helpers run side by side, each in its own context; jobs outlast your attention |
 | **One request, many pieces** | The plan puts the list on the board; each piece gets its own copy and its own agent |
 | **A run drawn as blocks** | The canvas: every step left to right, what waits for what, joined up and left to go |

@@ -725,163 +725,51 @@ a {
 /* The method is part of the argument, but it should not compete with the two
    results above. It begins as a compact protocol and expands in the same place,
    so there is no detour between the chart and its qualification. */
-.method__top,
-.method__rules,
-.method__details {
-  max-width: var(--full);
-  margin-inline: auto;
-}
-
-.method__top {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr);
-  align-items: end;
-  gap: clamp(28px, 8vw, 160px);
-  margin-bottom: clamp(36px, 5vw, 58px);
-}
-
-.method__top .head {
-  margin: 0;
-}
-
-.method__lede {
-  max-width: 41ch;
-  color: var(--ink-muted);
-  font-size: clamp(1rem, 0.96rem + 0.2vw, 1.125rem);
-}
-
-.method__rules {
+.yours__grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px 40px;
+  margin-top: 48px;
+  padding-top: 40px;
   border-top: 1px solid var(--paper-edge);
-  border-bottom: 1px solid var(--paper-edge);
 }
 
-.method__rules p {
-  min-height: 150px;
-  margin: 0;
-  padding: 24px clamp(16px, 2.2vw, 32px);
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
+@media (max-width: 900px) {
+  .yours__grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
 }
 
-.method__rules p + p {
-  border-left: 1px solid var(--paper-edge);
-}
-
-.method__rules span {
-  color: var(--brick);
-  font-size: 0.6875rem;
-  letter-spacing: 0.08em;
-}
-
-.method__rules b {
-  font-size: 1.0625rem;
-  letter-spacing: -0.02em;
-}
-
-.method__rules em {
+.yours__grid article p.mono {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
   color: var(--ink-muted);
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  font-style: normal;
+}
+
+.yours__grid h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.yours__grid article > p:last-child {
+  margin: 0;
+  font-size: 15px;
   line-height: 1.55;
-}
-
-.method__details {
-  margin-top: 22px;
-  border: 1px solid var(--paper-edge);
-  border-radius: var(--r-md);
-  background: #fff;
-}
-
-.method__details summary {
-  min-height: 62px;
-  padding: 17px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  cursor: pointer;
-  font-weight: 750;
-  letter-spacing: -0.015em;
-  list-style: none;
-}
-
-.method__details summary::-webkit-details-marker {
-  display: none;
-}
-
-.method__plus {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--paper-edge);
-  border-radius: 50%;
-  color: var(--brick);
-  font-family: var(--mono);
-  font-size: 1.125rem;
-  font-weight: 400;
-  line-height: 1;
-  transition: transform 200ms var(--ease-out), background-color 180ms ease, color 180ms ease;
-}
-
-.method__details[open] .method__plus {
-  transform: rotate(45deg);
-  background: var(--brick);
-  color: #fff;
-}
-
-.method__inside {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-top: 1px solid var(--paper-edge);
-}
-
-.method__inside article {
-  padding: 26px clamp(18px, 2.2vw, 32px) 30px;
-}
-
-.method__inside article + article {
-  border-left: 1px solid var(--paper-edge);
-}
-
-.method__inside article:nth-child(odd) {
-  border-left: 0;
-}
-
-.method__inside article:nth-child(n + 3) {
-  border-top: 1px solid var(--paper-edge);
-}
-
-.method__inside .mono {
-  color: var(--brick);
-  font-size: 0.625rem;
-  letter-spacing: 0.1em;
-}
-
-.method__inside h3 {
-  margin-top: 13px;
-  font-size: 1.25rem;
-}
-
-.method__inside article > p:last-child,
-.method__disclaimer {
-  margin-top: 10px;
   color: var(--ink-muted);
-  font-size: 0.9375rem;
-  line-height: 1.58;
 }
 
-.method__disclaimer {
-  margin: 0;
-  padding: 16px 20px;
-  border-top: 1px solid var(--paper-edge);
-  font-family: var(--mono);
-  font-size: 0.6875rem;
+.yours__foot {
+  margin: 36px 0 0;
+  max-width: 62ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-muted);
 }
+
 
 .eyebrow {
   font-family: var(--mono);
@@ -2672,10 +2560,6 @@ a {
     grid-template-columns: 1fr;
   }
 
-  .method__top {
-    grid-template-columns: 1fr;
-    gap: 20px;
-  }
 }
 
 @media (max-width: 640px) {
@@ -2742,25 +2626,6 @@ a {
     font-size: 0.875rem;
   }
 
-  .method__rules,
-  .method__inside {
-    grid-template-columns: 1fr;
-  }
-
-  .method__rules p {
-    min-height: 0;
-    padding: 19px 0;
-  }
-
-  .method__rules p + p,
-  .method__inside article + article {
-    border-top: 1px solid var(--paper-edge);
-    border-left: 0;
-  }
-
-  .method__inside article {
-    padding-inline: 20px;
-  }
 
   .step {
     gap: 18px;
@@ -2991,5 +2856,50 @@ a {
 
   .pill--was {
     opacity: 0.45 !important;
+  }
+}
+
+/* The same window wearing three palettes, side by side. The point is made by
+   putting them next to each other, so they are one row and never a carousel. */
+.skins {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 44px;
+}
+
+.skins figure {
+  margin: 0;
+}
+
+.skins img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--paper-edge);
+  box-shadow: 0 18px 40px rgba(20, 16, 14, 0.1);
+}
+
+.skins figcaption {
+  margin-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.skins__note {
+  margin: 22px 0 0;
+  font-size: 13px;
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+@media (max-width: 860px) {
+  .skins {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
   }
 }

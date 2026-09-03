@@ -139,14 +139,10 @@ export function saysStorage(folders: readonly Folder[]): string {
   return `${saysBytes(total)} on this computer: ${parts.join(', ')}.`;
 }
 
-/** Sizes the way a person reads them, not the way a disk reports them. */
-export function saysBytes(bytes: number): string {
-  const n = Math.max(0, bytes);
-  if (n < 1000) return `${String(Math.round(n))} B`;
-  if (n < 1000 * 1000) return `${(n / 1000).toFixed(0)} KB`;
-  if (n < 1000 * 1000 * 1000) return `${(n / (1000 * 1000)).toFixed(n < 10 * 1000 * 1000 ? 1 : 0)} MB`;
-  return `${(n / (1000 * 1000 * 1000)).toFixed(1)} GB`;
-}
+/* Sizes are read by the window as well, and everything else here reaches the
+   disk, so they are their own file and re-exported from where they were. */
+export { saysBytes } from './bytes';
+import { saysBytes } from './bytes';
 
 /** The Settings copy, in one place so the button and the sentence under it
  *  cannot drift apart. */

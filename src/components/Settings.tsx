@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Always from './Always';
 import AppearanceBand from './AppearanceBand';
 import Switch from './Switch';
-import { saysBytes } from '../work/storage';
+import { saysBytes } from '../work/bytes';
 import ColourPicker from './ColourPicker';
 import ThinkingWith from './ThinkingWith';
 import { advisorSwitchWords, advisorWords } from '../agent/advisor';

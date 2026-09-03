@@ -132,7 +132,7 @@
   --text-faint: #6e6e68;
   --accent: #b8492c;
   --accent-text: #ffffff;
-  --accent-soft: #f6e9e4;
+  --accent-soft: #f6e3dc;
   /* Accent-coloured *text* sitting on --accent-soft — the "On screen" and "Open"
     badges. --accent on --accent-soft is 4.39:1, just under AA; this is 4.83:1
     there and 5.54:1 on --bg, so one token covers both places a badge can sit.
@@ -201,7 +201,7 @@
     --text-faint: #87877f;
     --accent: #e0714d;
     --accent-text: #1a1a19;
-    --accent-soft: #2a1c17;
+    --accent-soft: #3a2119;
     --accent-ink: #e0714d;
     --danger: #e2574b;
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
@@ -223,7 +223,7 @@
   --text-faint: #6e6e68;
   --accent: #b8492c;
   --accent-text: #ffffff;
-  --accent-soft: #f6e9e4;
+  --accent-soft: #f6e3dc;
   --accent-ink: #ad4529;
   --danger: #b03528;
 }
@@ -242,7 +242,7 @@
   --text-faint: #87877f;
   --accent: #e0714d;
   --accent-text: #1a1a19;
-  --accent-soft: #2a1c17;
+  --accent-soft: #3a2119;
   --accent-ink: #e0714d;
   --danger: #e2574b;
 }

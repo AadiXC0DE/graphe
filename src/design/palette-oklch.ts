@@ -342,9 +342,15 @@ export function surfacesFrom(
   const bg = grey(groundL);
   const bgRaised = grey(raisedL);
   const bgSunken = grey(sunkenL);
+  /* A tint that can be seen.
+     It used to sit a hundredth of a step from the surface under it, which is a
+     pill with no pill: the badge on an added extension and the filter that is
+     switched on both read as bare coloured text. Far enough from the ground to
+     be a shape, near enough that it is still a ground for the accent's own ink
+     to sit on. */
   const accentSoft = hexFrom({
-    l: runs === 'light' ? sunkenL - 0.015 : raisedL + 0.005,
-    c: runs === 'light' ? 0.045 : 0.05,
+    l: runs === 'light' ? Math.max(0.88, groundL - 0.075) : Math.min(0.34, groundL + 0.1),
+    c: runs === 'light' ? 0.06 : 0.075,
     h: hue,
   });
 

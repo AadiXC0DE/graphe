@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import { Shown } from "./components/Shown";
@@ -312,13 +312,22 @@ const openOnLoad = new URLSearchParams(window.location.search).get("open");
  *  and covering it would be the flash rather than the fix. */
 let viewsWarm = false;
 
+/** The one fetch of every screen's code. Started at idle, and again by the
+ *  first press if that has not happened yet; the same promise either way, so a
+ *  handful of presses in a row wait on one fetch rather than starting several. */
+let warming: Promise<void> | null = null;
+function warmViews(): Promise<void> {
+  warming ??= Promise.all(VIEWS.map((load) => load())).then(() => {
+    viewsWarm = true;
+  });
+  return warming;
+}
+
 export default function App() {
   useEffect(() => {
     const idle = window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 1500));
     const handle = idle(() => {
-      void Promise.all(VIEWS.map((load) => load())).then(() => {
-        viewsWarm = true;
-      });
+      void warmViews();
     });
     return () => (window.cancelIdleCallback ?? clearTimeout)(handle as never);
   }, []);
@@ -752,24 +761,47 @@ function Conversation() {
      the new one's code arrives: past a frame or two, the ground is covered
      instead. Under that, nothing is drawn at all — a cover that flashes on
      every press is worse than the wait it hides. */
-  const [screenComing, startScreen] = useTransition();
+  /* Which screen is in front, and the one thing that took three goes to get
+     right.
+     A screen used to open in a transition, so the one on screen stayed put
+     while the code for the new one arrived. That is the right behaviour for one
+     press and the wrong one for two: React holds each transition until it is
+     ready and then commits them in the order they were made, so pressing Design
+     and then Skills before Design has arrived puts Design up for a moment on
+     the way to Skills. Nothing can call a transition off once it is made.
+     So the wait is held here instead. A press says what it wants, the code is
+     fetched, and only then is anything on screen changed — by the newest press
+     and no other. One that was replaced while it waited never touches the
+     screen at all. Cold, the ground goes up at once, because a press with a
+     real wait behind it has to look like it did something; warm, the swap is a
+     frame and there is nothing to cover. */
   const [covering, setCovering] = useState(false);
-  useEffect(() => {
-    if (!screenComing) {
-      setCovering(false);
-      return;
-    }
-    /* Cold, the wait is a chunk off the disk and the screen somebody pressed
-       away from would sit there for a quarter of a second looking like a press
-       that did nothing. Warm, it is a frame, and a cover would be the only
-       thing anybody saw of it. */
-    if (!viewsWarm) {
+  const pressAt = useRef(0);
+  const pressRuns = useRef<(() => void)[]>([]);
+  const startScreen = useCallback((run: () => void) => {
+    /* One press is often two calls: what to close, then what to open. They are
+       collected and run together, or half a press could win. */
+    pressRuns.current.push(run);
+    if (pressRuns.current.length > 1) return;
+    const token = (pressAt.current += 1);
+    queueMicrotask(() => {
+      const runs = pressRuns.current;
+      pressRuns.current = [];
+      const swap = (): void => {
+        for (const one of runs) one();
+      };
+      if (viewsWarm) {
+        swap();
+        return;
+      }
       setCovering(true);
-      return;
-    }
-    const timer = setTimeout(() => setCovering(true), 90);
-    return () => clearTimeout(timer);
-  }, [screenComing]);
+      void warmViews().then(() => {
+        if (pressAt.current !== token) return;
+        setCovering(false);
+        swap();
+      });
+    });
+  }, []);
 
   /** Reached from the shelf and from the project's name, so it lives here
    *  rather than at either call site. */
@@ -1578,8 +1610,8 @@ function Conversation() {
         | 'add-more'
         | 'helpers',
     ) => {
-      /* In a transition, so the conversation stays on screen while the code for
-         the screen being opened arrives. */
+      /* Held with the press that opens the new one, so the two are one change
+         to the screen rather than two. */
       startScreen(() => {
         if (screen !== 'chat') setDesignAt(null);
         if (screen !== 'graph') setGraphOpen(false);
@@ -1590,6 +1622,10 @@ function Conversation() {
         if (screen !== 'usage') setUsageOpen(false);
         if (screen !== 'add-more') setAddMore(false);
         if (screen !== 'helpers') setHelpersAt(null);
+        /* The canvas is a whole surface like the rest of them. It was left
+           mounted behind whatever opened over it, which is a second screen
+           nobody closed and the conversation still hidden underneath. */
+        if (screen !== 'canvas' && screen !== 'helpers') setCanvasAt(null);
       });
     },
     [],

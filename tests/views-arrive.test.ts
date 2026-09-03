@@ -87,37 +87,45 @@ describe('opening a view', () => {
     expect(inTransition(at)).toBe(true);
   });
 
-  it('imports the transition it uses', () => {
-    expect(app).toMatch(/import \{[^}]*\buseTransition\b[^}]*\} from "react";/);
-    expect(app).toContain('const [screenComing, startScreen] = useTransition();');
+  /* Not a transition any more, and the reason is the bug that took three goes.
+     React holds a transition until it is ready and then commits them in the
+     order they were made, so pressing Design and then Skills before Design has
+     arrived put Design up for a moment on the way to Skills, and nothing can
+     call a transition off. The wait is held by the window instead: the code is
+     fetched, and only then is the screen changed, by the newest press alone. */
+  it('holds the wait itself rather than handing it to a transition', () => {
+    expect(app).not.toMatch(/\buseTransition\b/);
+    expect(app).toContain('const startScreen = useCallback((run: () => void) => {');
+    expect(app).toContain('const token = (pressAt.current += 1);');
+    expect(app).toContain('if (pressAt.current !== token) return;');
   });
 
-  /* A transition holds the screen somebody is leaving, which is right for the
-     frame or two a warmed chunk costs and wrong for a cold one: past that, they
-     are reading the wrong screen and wondering why the press did nothing. */
-  it('covers the screen being left once the wait is long enough to notice', () => {
-    expect(app).toContain('setTimeout(() => setCovering(true), 90)');
+  it('runs the close and the open of one press together', () => {
+    expect(app).toContain('pressRuns.current.push(run);');
+    expect(app).toContain('if (pressRuns.current.length > 1) return;');
+    expect(app).toContain('for (const one of runs) one();');
+  });
+
+  it('covers the ground at once while the code is still arriving', () => {
+    const at = app.indexOf('const startScreen = useCallback(');
+    const body = app.slice(at, at + 900);
+    expect(body).toContain('if (viewsWarm) {\n        swap();\n        return;\n      }');
+    expect(body).toContain('setCovering(true);\n      void warmViews().then(() => {');
     expect(app).toContain('{covering ? COVER : null}');
     expect(app).toContain('const COVER = <div className="sheet sheet--arriving sheet--cover"');
     expect(sheet).toMatch(/\.sheet--cover \{[^}]*animation: none;/);
   });
 
-  /* Cold, the wait is a chunk off the disk and holding the screen somebody
-     pressed away from reads as a press that did nothing. Warm, it is a frame,
-     and the cover would be the only thing anybody saw. */
-  it('covers at once until every screen is here, and on a wait after that', () => {
-    expect(app).toContain('let viewsWarm = false;');
-    expect(app).toContain('        viewsWarm = true;');
-    const at = app.indexOf('if (!screenComing) {');
-    const body = app.slice(at, at + 700);
-    expect(body).toContain('if (!viewsWarm) {\n      setCovering(true);');
-    expect(body).toContain('setTimeout(() => setCovering(true), 90)');
+  it('draws nothing at all once every screen is here', () => {
+    /* Warm, the swap is a frame; a cover would be the only thing anybody saw. */
+    const at = app.indexOf('const startScreen = useCallback(');
+    const warm = app.slice(at, app.indexOf('setCovering(true)', at));
+    expect(warm).toContain('if (viewsWarm) {');
+    expect(warm).not.toContain('setTimeout');
   });
 
-  it('draws nothing while a fast press settles', () => {
-    /* The cover is behind a timer rather than the pending flag itself: shown on
-       the flag, every press would flash it. */
-    expect(app).not.toMatch(/\{screenComing \? COVER/);
+  it('closes the canvas like any other screen', () => {
+    expect(app).toContain("if (screen !== 'canvas' && screen !== 'helpers') setCanvasAt(null);");
   });
 });
 
@@ -154,7 +162,8 @@ describe('warming the views', () => {
       './components/Settings',
     );
     expect(app).toContain('window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 1500))');
-    expect(app).toContain('void Promise.all(VIEWS.map((load) => load())).then(() => {');
+    expect(app).toContain('void warmViews();');
+    expect(app).toContain('warming ??= Promise.all(VIEWS.map((load) => load())).then(() => {');
     expect(app).toContain('(window.cancelIdleCallback ?? clearTimeout)(handle as never)');
   });
 

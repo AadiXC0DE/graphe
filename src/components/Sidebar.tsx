@@ -5,6 +5,7 @@ import { ago } from '../lib/when';
 import type { Reference } from '../lib/projects';
 import { byDay, foldOlder, matching, needsDayLabels, needsSearch } from '../lib/shelf';
 import { keepAsking, offersOwnCopy, OWN_COPY_WORDS } from '../lib/owncopy';
+import { MOST_SHOWN } from './ProjectPicker';
 import './Sidebar.css';
 
 type Props = {
@@ -167,7 +168,11 @@ export default function Sidebar(props: Props) {
               same list as the rest, visibly selected, so the screen answers
               both “where am I?” and “where else can I go?” at a glance. */}
           <ul className="shelf__list">
+            {/* The five most recent, as the first screen draws them. The shelf
+                is 232px of the window and a list of eleven folders was most of
+                it; the rest is one press of the row under these. */}
             {projects
+              .slice(0, MOST_SHOWN)
               .map((project) => (
                 <li key={project.path}>
                   <button

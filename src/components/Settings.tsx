@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Always from './Always';
 import AppearanceBand from './AppearanceBand';
 import Switch from './Switch';
+import { saysBytes } from '../work/storage';
 import ColourPicker from './ColourPicker';
 import ThinkingWith from './ThinkingWith';
 import { advisorSwitchWords, advisorWords } from '../agent/advisor';
@@ -15,6 +16,7 @@ import type {
   AlwaysRow,
   ConnectionState,
   ModelChoice,
+  StorageNow,
   ThinkingLevel,
 } from '../lib/ipc';
 import { chordOf, saysChord } from '../lib/keys';
@@ -87,8 +89,10 @@ type Props = {
   version?: string;
   /** How much room this app is taking, and what could be cleared. Asked when
    *  the sheet opens — it walks folders, and this is open for seconds. */
-  storage?: { says: string; couldClear: number; because: string } | null;
+  storage?: StorageNow | null;
   onClearFinishedWork?: () => void;
+  /** Empty one named folder. Offered only for the ones that never hold work. */
+  onClearFolder?: (name: string) => void;
   /** Everything worth sending when somebody says "it stopped", on the
    *  clipboard. Never a conversation, never a key. */
   onCopyDiagnostics?: () => void;
@@ -191,7 +195,7 @@ const ADDON_WORDS = {
 /** Rows whose control will not sit on the right-hand end of a row, so each one
  *  gets a card of its own. The model chip opens a menu over the card, which a
  *  card that clips its corners would cut in half. */
-const BLOCKS = new Set(['theme', 'model', 'addons', 'new-model']);
+const BLOCKS = new Set(['folders', 'theme', 'model', 'addons', 'new-model']);
 
 /** The three answers to which way the palette runs, in the order a segmented
  *  control reads them. */
@@ -272,6 +276,7 @@ export default function Settings({
   onGo,
   version,
   storage = null,
+  onClearFolder,
   onClearFinishedWork,
   onCopyDiagnostics,
   caps,
@@ -929,6 +934,39 @@ export default function Settings({
                 </ul>
               )}
             </section>
+          </li>
+        );
+
+      case 'folders':
+        return (
+          <li key={row.id} className={`settings__block${at}`}>
+            <div className="settings__blockhead">{words(row)}</div>
+            {storage === null || storage.rows.length === 0 ? (
+              <p className="settings__quiet">Reading what is here…</p>
+            ) : (
+              <ul className="settings__folders">
+                {[...storage.rows]
+                  .sort((a, b) => b.bytes - a.bytes)
+                  .map((one) => (
+                    <li key={one.name} className="settings__folder">
+                      <span className="settings__foldername">{one.name}</span>
+                      <span className="settings__foldersize">{saysBytes(one.bytes)}</span>
+                      {one.clearable && onClearFolder !== undefined ? (
+                        <button
+                          type="button"
+                          className="settings__folderdo"
+                          disabled={one.bytes === 0}
+                          onClick={() => onClearFolder(one.name)}
+                        >
+                          Clear
+                        </button>
+                      ) : (
+                        <span className="settings__folderdo settings__folderdo--none" aria-hidden="true" />
+                      )}
+                    </li>
+                  ))}
+              </ul>
+            )}
           </li>
         );
 

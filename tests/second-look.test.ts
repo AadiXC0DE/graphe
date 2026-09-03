@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { PRESETS, appearanceWords, defaultAppearance, tokensFor } from '../src/design/appearance';
+import { ROWS as rows } from '../src/work/settingspages';
 
 const read = (path: string): string =>
   readFileSync(fileURLToPath(new URL(`../${path}`, import.meta.url)), 'utf8');
@@ -26,6 +27,7 @@ const picker = read('src/components/ColourPicker.tsx');
 const app = read('src/App.tsx');
 const welcome = read('src/components/Welcome.tsx');
 const welcomeCss = read('src/components/Welcome.css');
+const settings = read('src/components/Settings.tsx');
 
 describe('a band that folds', () => {
   /* Closed, with nothing in it, the band drew the word LOOKED UP and a "0" on
@@ -146,5 +148,27 @@ describe('the first screen of a project', () => {
   it('says which folder in the folder’s own colour', () => {
     expect(welcome).toContain('className="welcome__where"');
     expect(welcomeCss).toMatch(/\.welcome__where \{\s*color: var\(--accent-ink\);/);
+  });
+});
+
+describe('what is on this computer', () => {
+  /* The shell has answered with a row per folder and a way to empty the two
+     that never hold work since the storage page existed. The screen drew one
+     sentence naming six folders, which is a sentence nobody reads. */
+  it('is a row per folder, biggest first', () => {
+    expect(settings).toContain("case 'folders':");
+    expect(settings).toContain('[...storage.rows]');
+    expect(settings).toContain('.sort((a, b) => b.bytes - a.bytes)');
+    expect(settings).toContain('{saysBytes(one.bytes)}');
+  });
+
+  it('offers a Clear only where clearing can lose nothing', () => {
+    expect(settings).toContain('one.clearable && onClearFolder !== undefined ?');
+    expect(rows.some((one) => one.id === 'folders' && one.page === 'storage')).toBe(true);
+  });
+
+  it('keeps the answer whole rather than three fields of it', () => {
+    expect(app).toContain('useState<StorageNow | null>(null)');
+    expect(app).toContain('void bridge.clearFolder(name).then((answer) => {');
   });
 });

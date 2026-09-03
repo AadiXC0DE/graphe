@@ -787,3 +787,77 @@ button.settings__row {
   font-size: var(--text-2xs);
   color: var(--accent);
 }
+
+/* ---------------------------------------------------------------------------
+   What is on this computer
+   One row per folder: what it is, what it is taking, and a way to empty it
+   where emptying it can never lose work. A sentence naming six folders is a
+   sentence nobody reads.
+   --------------------------------------------------------------------------- */
+
+.settings__folders {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+}
+
+.settings__folder {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 34px;
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--border);
+}
+
+.settings__folder:first-child {
+  border-top: none;
+}
+
+.settings__foldername {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.settings__foldersize {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The same width whether or not there is a press, so the sizes line up. */
+.settings__folderdo {
+  flex: none;
+  width: 54px;
+  min-height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.settings__folderdo--none {
+  border-color: transparent;
+  background: none;
+  cursor: default;
+}
+
+.settings__folderdo:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings__folderdo:not(:disabled):not(.settings__folderdo--none):hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+}

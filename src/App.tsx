@@ -154,6 +154,7 @@ import {
   type Overview as OverviewNow,
   type ShowProgress,
   type SpendLimit,
+  type StorageNow,
   type ThinkingLevel,
   type Trouble,
   type VisualChange,
@@ -2156,11 +2157,7 @@ function Conversation() {
 
   /** How much room this app is taking. Asked when the sheet opens: it walks
    *  folders, and the sheet is open for seconds. */
-  const [storage, setStorage] = useState<{
-    says: string;
-    couldClear: number;
-    because: string;
-  } | null>(null);
+  const [storage, setStorage] = useState<StorageNow | null>(null);
 
 
   /* The canvases this project has. Drawing one changes nothing until Start. */
@@ -5804,7 +5801,12 @@ function Conversation() {
               );
             });
           }}
-          onClearFinishedWork={() => {
+          onClearFolder={(name) => {
+          void bridge.clearFolder(name).then((answer) => {
+            if (answer.ok) setStorage(answer.value);
+          });
+        }}
+        onClearFinishedWork={() => {
             void bridge.clearFinishedWork().then((answer) => {
               if (!answer.ok) return;
               setStorage((was) => (was === null ? was : { ...was, says: answer.value.says, couldClear: 0 }));

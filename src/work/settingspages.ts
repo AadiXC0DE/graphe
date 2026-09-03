@@ -376,6 +376,14 @@ export const ROWS: readonly Row[] = [
 
   /* --------------------------------------------------------------- storage */
   {
+    id: 'folders',
+    page: 'storage',
+    name: 'What is on this computer',
+    note: 'Every folder Graphe keeps and what it is taking. A scratch folder and a log can be emptied outright; a branch may be holding work, so it is cleared by the sweep above rather than by name.',
+    kind: 'choice',
+    also: ['disk', 'space', 'size', 'gb', 'worktrees', 'copies', 'scratch', 'logs'],
+  },
+  {
     id: 'storage',
     page: 'storage',
     name: 'Clear finished work',

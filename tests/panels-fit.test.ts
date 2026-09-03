@@ -25,8 +25,15 @@ describe('settings can be scrolled to the end', () => {
     // so the rows past the fold were not off-screen, they were gone. The head
     // keeps its height; the band under it is the one that scrolls.
     expect(block('.settings__top')).toContain('flex: none');
-    expect(block('.settings__body')).toContain('overflow: auto');
     expect(block('.settings__body')).toContain('min-height: 0');
+    // Wide, the page scrolls inside its own half and the list of pages does not
+    // move at all: sticky held it still only after it had ridden up to the top,
+    // which reads as a screen with two scrollbars. Narrow, the two are one
+    // column again and the whole band scrolls, which is right.
+    expect(block('.settings__body')).toContain('overflow: hidden');
+    expect(css).toContain('@container (max-width: 779.98px)');
+    expect(block('.settings__page-body')).toContain('overflow-y: auto');
+    expect(block('.settings__pages')).toContain('overflow-y: auto');
   });
 
   it('still clips its own corners, which is why this was ever a problem', () => {
@@ -50,7 +57,10 @@ describe('settings can be scrolled to the end', () => {
       .split('.settings__inner {')
       .slice(1)
       .map((after) => /grid-template-columns: ([^;]+);/.exec(after.slice(0, after.indexOf('}')))?.[1]);
-    expect(counts).toEqual(['minmax(0, 1fr)', '220px minmax(0, 1fr)']);
+    expect(counts.filter((one) => one !== undefined)).toEqual([
+      'minmax(0, 1fr)',
+      '220px minmax(0, 1fr)',
+    ]);
   });
 });
 

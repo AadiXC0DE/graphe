@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { PRESETS, appearanceWords, defaultAppearance, tokensFor } from '../src/design/appearance';
 import { OPEN_TO, ROWS as rows, asOpenTo } from '../src/work/settingspages';
 import { withElapsed } from '../src/work/goal';
+import { tallyOf, titleOf } from '../src/components/HelpersView';
 
 const read = (path: string): string =>
   readFileSync(fileURLToPath(new URL(`../${path}`, import.meta.url)), 'utf8');
@@ -34,6 +35,9 @@ const diffCss = read('src/components/DiffView.css');
 const tokensCss = read('src/styles/tokens.css');
 const connect = read('src/hooks/useConnect.ts');
 const main = read('electron/main.ts');
+const helpers = read('src/components/HelpersView.tsx');
+const helpersCss = read('src/components/HelpersView.css');
+const appCss = read('src/App.css');
 
 describe('a band that folds', () => {
   /* Closed, with nothing in it, the band drew the word LOOKED UP and a "0" on
@@ -255,5 +259,48 @@ describe('the model list', () => {
   it('is asked of the catalogue itself once the window is idle', () => {
     expect(connect).toContain('void refresh(true);');
     expect(connect).toContain('window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 2500))');
+  });
+});
+
+describe('the helpers screen', () => {
+  /* A raw prompt cut mid-sentence, four times in a column, over a pane with a
+     horizontal scrollbar under it. A helper is recognised by the line somebody
+     wrote it as, and what it came back with is prose, not a paragraph in a box. */
+  it('names a helper by its first line rather than its whole ask', () => {
+    expect(titleOf('Review PR 316 API + permission. Repo at /Users/x/y. Diff is a vs b.')).toBe(
+      'Review PR 316 API + permission',
+    );
+    expect(titleOf('  \n  Check the build\nand then some more')).toBe('Check the build');
+    expect(titleOf('x'.repeat(200)).length).toBeLessThanOrEqual(90);
+  });
+
+  it('says how they are all getting on, under the heading', () => {
+    const at = 1;
+    const some = [
+      { id: 'a', task: 'a', saying: null, state: 'running' as const, startedAt: at },
+      { id: 'b', task: 'b', saying: 'x', state: 'done' as const, startedAt: at },
+      { id: 'c', task: 'c', saying: 'x', state: 'done' as const, startedAt: at },
+    ];
+    expect(tallyOf(some)).toBe('3 helpers · 1 working, 2 finished');
+    expect(tallyOf([])).toBe('0 helpers');
+  });
+
+  it('scrolls each half on its own, and wraps a path rather than pushing sideways', () => {
+    expect(helpersCss).toMatch(/\.helpersview \{[^}]*overflow: hidden;/);
+    expect(helpersCss).toMatch(/\.helpersview__list \{[^}]*overflow-y: auto;/);
+    expect(helpersCss).toMatch(/\.helpersview__one \{[^}]*overflow-y: auto;/);
+    expect(helpersCss).toMatch(/\.helpersview__asked \{[^}]*overflow-wrap: anywhere;/);
+  });
+
+  it('draws what it said as prose', () => {
+    expect(helpers).toContain('<Markdown text={chosen.saying} />');
+  });
+});
+
+describe('the strip along the top', () => {
+  /* The first tab sat against the shelf's own edge, two surfaces touching with
+     nothing between them. */
+  it('starts a little after the shelf ends', () => {
+    expect(appCss).toMatch(/\.app--shelved \.topbar \{[^}]*padding-left: var\(--space-3\);/);
   });
 });

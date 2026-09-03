@@ -93,9 +93,19 @@
 .settings__body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
+  /* The page list is not part of the scroll. Sticky held it still only once it
+     had ridden up to the top, which is a page that looks like it has two
+     scrollbars. Narrow, the two are one column again and the whole thing
+     scrolls, which is right. */
+  overflow: hidden;
   container-type: inline-size;
+}
+
+@container (max-width: 779.98px) {
+  .settings__body {
+    overflow: auto;
+    scrollbar-gutter: stable;
+  }
 }
 
 .settings__inner {
@@ -115,17 +125,27 @@
     gap: var(--space-6);
   }
 
-  /* The page list stays put while its page scrolls: seven names are the map,
-     and a map that scrolls away is a map you have to go back for. */
+  /* The page list is the map: it does not move at all. */
+  .settings__inner {
+    height: 100%;
+    min-height: 0;
+    padding-bottom: 0;
+  }
+
   .settings__pages {
-    position: sticky;
-    /* At the top of its column and staying there: it used to ride the scroll
-       until it touched the top, which reads as the page having two scrollbars. */
-    top: 0;
-    align-self: start;
-    max-height: 100%;
+    align-self: stretch;
+    min-height: 0;
     overflow-y: auto;
     scrollbar-width: none;
+    padding-bottom: var(--space-6);
+  }
+
+  .settings__page-body {
+    min-height: 0;
+    height: 100%;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    padding-bottom: var(--space-7);
   }
 }
 

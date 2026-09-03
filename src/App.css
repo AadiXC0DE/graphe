@@ -112,7 +112,9 @@
    strip, so the strip owes them nothing. */
 .app--shelved .topbar {
   left: var(--shelf-take);
-  padding-left: 0;
+  /* Not zero: the first tab sat against the shelf's own edge, two surfaces
+     touching with nothing between them. */
+  padding-left: var(--space-3);
 }
 
 /* The overview owns the right-hand edge; the ramp belongs to the conversation. */

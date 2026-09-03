@@ -777,18 +777,38 @@ function Conversation() {
      frame and there is nothing to cover. */
   const [covering, setCovering] = useState(false);
   const pressAt = useRef(0);
-  const pressRuns = useRef<(() => void)[]>([]);
-  const startScreen = useCallback((run: () => void) => {
-    /* One press is often two calls: what to close, then what to open. They are
-       collected and run together, or half a press could win. */
-    pressRuns.current.push(run);
-    if (pressRuns.current.length > 1) return;
+  const pressOpens = useRef<(() => void)[]>([]);
+  const pressCloses = useRef<(() => void)[]>([]);
+  /**
+   * One press, and the order the screen changes in.
+   *
+   * A press is two calls: what to open, and what to close. Run together they
+   * are one commit, which sounds right and is not: for the frame between the
+   * old screen being taken down and the new one being painted, whatever was
+   * behind them both is what a person sees, and behind them both is the
+   * conversation. That is the flash, and it is why it showed leaving the canvas
+   * and not arriving at it.
+   *
+   * So the opening happens first and the closing a frame later, once the new
+   * screen is up. The two overlap for one frame, which nobody can see: a screen
+   * is drawn over whatever it is replacing, never beside it.
+   */
+  const startScreen = useCallback((run: () => void, closing = false) => {
+    (closing ? pressCloses : pressOpens).current.push(run);
+    if (pressOpens.current.length + pressCloses.current.length > 1) return;
     const token = (pressAt.current += 1);
     queueMicrotask(() => {
-      const runs = pressRuns.current;
-      pressRuns.current = [];
+      const opens = pressOpens.current;
+      const closes = pressCloses.current;
+      pressOpens.current = [];
+      pressCloses.current = [];
       const swap = (): void => {
-        for (const one of runs) one();
+        for (const one of opens) one();
+        if (closes.length === 0) return;
+        requestAnimationFrame(() => {
+          if (pressAt.current !== token) return;
+          for (const one of closes) one();
+        });
       };
       if (viewsWarm) {
         swap();
@@ -1610,8 +1630,8 @@ function Conversation() {
         | 'add-more'
         | 'helpers',
     ) => {
-      /* Held with the press that opens the new one, so the two are one change
-         to the screen rather than two. */
+      /* Marked as the closing half of the press, so it happens a frame after
+         the new screen is up rather than in the same breath. */
       startScreen(() => {
         if (screen !== 'chat') setDesignAt(null);
         if (screen !== 'graph') setGraphOpen(false);
@@ -1626,7 +1646,7 @@ function Conversation() {
            mounted behind whatever opened over it, which is a second screen
            nobody closed and the conversation still hidden underneath. */
         if (screen !== 'canvas' && screen !== 'helpers') setCanvasAt(null);
-      });
+      }, true);
     },
     [startScreen],
   );

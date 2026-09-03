@@ -1063,7 +1063,7 @@ export default function Settings({
             })}
           </nav>
 
-          <div className="settings__page-body">
+          <div className="settings__page-body scroll--auto">
             <h2 className="settings__pagetitle">
               {found === null ? pageWords[page].name : settingsWords.search}
             </h2>

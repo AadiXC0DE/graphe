@@ -95,15 +95,23 @@ describe('opening a view', () => {
      fetched, and only then is the screen changed, by the newest press alone. */
   it('holds the wait itself rather than handing it to a transition', () => {
     expect(app).not.toMatch(/\buseTransition\b/);
-    expect(app).toContain('const startScreen = useCallback((run: () => void) => {');
+    expect(app).toContain('const startScreen = useCallback((run: () => void, closing = false) => {');
     expect(app).toContain('const token = (pressAt.current += 1);');
     expect(app).toContain('if (pressAt.current !== token) return;');
   });
 
-  it('runs the close and the open of one press together', () => {
-    expect(app).toContain('pressRuns.current.push(run);');
-    expect(app).toContain('if (pressRuns.current.length > 1) return;');
-    expect(app).toContain('for (const one of runs) one();');
+  /* And the open before the close, a frame apart. Run together they are one
+     commit, which sounds right and is not: for the frame between the old screen
+     coming down and the new one being painted, what shows is whatever was
+     behind them both, which is the conversation. That is why the flash appeared
+     leaving the canvas and not arriving at it. */
+  it('opens the new screen before it closes the old one', () => {
+    expect(app).toContain('(closing ? pressCloses : pressOpens).current.push(run);');
+    expect(app).toContain('for (const one of opens) one();');
+    expect(app).toContain('requestAnimationFrame(() => {');
+    expect(app).toContain('for (const one of closes) one();');
+    // The closing half of a press is marked as such where it is made.
+    expect(app).toContain("if (screen !== 'canvas' && screen !== 'helpers') setCanvasAt(null);\n      }, true);");
   });
 
   it('covers the ground at once while the code is still arriving', () => {

@@ -24,6 +24,7 @@ import ProjectMenu from "./components/ProjectMenu";
 import ProjectPicker from "./components/ProjectPicker";
 import EvidenceReel from "./components/EvidenceReel";
 import Running from "./components/Running";
+import Commands from "./components/Commands";
 import { asksAbout } from "./preview/point";
 import { ATTACH_WORDS, pictureType, readsPictures } from "./lib/attachments";
 import type { Answers } from "./agent/asking";
@@ -49,7 +50,14 @@ import { threadWords } from "./lib/threadview";
 import { capsNow, saysCaps } from "./work/capacity";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
 import type { AddonHere, AgentNotice, ConnectedState, ContinuationNotice } from "./lib/ipc";
-import { settingsCommands } from "./work/settingspages";
+import {
+  asOpenTo,
+  asShelfAtLaunch,
+  settingsCommands,
+  type OpenTo,
+  type ShelfAtLaunch,
+} from "./work/settingspages";
+import type { Telling } from "./work/notify";
 import type { SettingsLink } from "./components/Settings";
 import { CHANGE_WORDS } from "./components/DiffView";
 import { parseDiff, undoOf } from "./diff/hunks";
@@ -128,6 +136,7 @@ import {
   type Pack,
   type Fetched,
   type Page,
+  type PlainPreference,
   type Preferences,
   type PromptAttachment,
   type RecentProject,
@@ -254,6 +263,29 @@ const ON_MAC = /mac/i.test(navigator.platform ?? navigator.userAgent);
 /** Where the chords somebody changed are kept. This machine's, because a chord
  *  is a habit of the hands in front of it. */
 const KEYS_STORE = 'graphe:keys';
+
+/** Where a launch lands, how the shelf comes back, and how it was left. Kept
+ *  here rather than in the shell: all three are this window's own habits. */
+const OPEN_TO_STORE = 'graphe:openTo';
+const SHELF_STORE = 'graphe:shelfAtLaunch';
+const SHELF_WAS_STORE = 'graphe:shelfWas';
+
+/** Asked before a conversation with a turn in flight is closed. */
+const STILL_WORKING =
+  'This conversation is still working. Closing it now stops the turn it is in the middle of. Close it anyway?';
+
+/** Whether one conversation still has a turn in flight, whether it is the one
+ *  in front or one already put down. */
+function stillWorkingIn(desk: Desk, address: string): boolean {
+  const here = desk.address === address;
+  const parked = desk.parked[address];
+  if ((here ? desk.busy : parked?.busy) === true) return true;
+  return (here ? desk.turns : (parked?.turns ?? [])).some(
+    (turn) =>
+      (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming === true) ||
+      ((turn.kind === 'did' || turn.kind === 'tidying') && turn.state === 'running'),
+  );
+}
 const showGallery =
   inDevelopment && new URLSearchParams(window.location.search).has("gallery");
 
@@ -617,7 +649,19 @@ function Conversation() {
     howMuch: null,
     ceiling: null,
     theme: 'system',
+    nameConversations: true,
+    askBeforeClosing: true,
+    snapBeforeApply: true,
+    replyLanguage: '',
+    whenRunFinishes: 'system',
+    whenSomethingNeedsYou: 'system',
+    notifySound: false,
+    badgeDock: true,
   });
+  /** The same, read by callbacks that must not be rebuilt every time one of
+   *  them changes. */
+  const preferencesNow = useRef(preferences);
+  preferencesNow.current = preferences;
   const [editor, setEditor] = useState<string | null>(null);
 
   /* ------------------------------------------------------------- connecting */
@@ -758,9 +802,37 @@ function Conversation() {
    *  somebody is looking at. See src/hooks/useTabRow.ts. */
   const tabRow = useTabRow();
 
-  /** Whether the shelf is open. Deliberately not remembered across launches —
-   *  it is a thing people flip all the time and it costs nothing to reset. */
-  const [shelfOpen, setShelfOpen] = useState(true);
+  /** Where a launch lands, and how the shelf comes back. Both are habits of
+   *  the hands in front of this machine rather than anything the shell acts
+   *  on, so they are kept here beside the chords. */
+  const [openTo, setOpenTo] = useState<OpenTo>(() =>
+    asOpenTo(typeof localStorage === 'undefined' ? null : localStorage.getItem(OPEN_TO_STORE)),
+  );
+  const [shelfAtLaunch, setShelfAtLaunch] = useState<ShelfAtLaunch>(() =>
+    asShelfAtLaunch(typeof localStorage === 'undefined' ? null : localStorage.getItem(SHELF_STORE)),
+  );
+
+  /** Whether the shelf is open. Remembered only where somebody asked for it to
+   *  come back the way they left it. */
+  const [shelfOpen, setShelfOpen] = useState(() => {
+    if (shelfAtLaunch === 'open') return true;
+    if (shelfAtLaunch === 'closed') return false;
+    try {
+      return localStorage.getItem(SHELF_WAS_STORE) !== 'closed';
+    } catch {
+      return true;
+    }
+  });
+
+  /* Written on every flip, so "as I left it" means the last thing they did
+     rather than the last thing they did before a crash. */
+  useEffect(() => {
+    try {
+      localStorage.setItem(SHELF_WAS_STORE, shelfOpen ? 'open' : 'closed');
+    } catch {
+      // Private mode. The shelf opens as it always did.
+    }
+  }, [shelfOpen]);
 
   /** Light, dark, or whatever the computer is set to. Kept on this computer
    *  rather than per project — it is about the person, not the work. */
@@ -856,6 +928,8 @@ function Conversation() {
   /** The project file rail keeps its setting when folded, just like the main
    *  sidebar: showing it again is one press rather than a trip to settings. */
   const [filesOpen, setFilesOpen] = useState(true);
+  /** The drawer along the bottom. Shut until somebody asks for it. */
+  const [commandsOpen, setCommandsOpen] = useState(false);
   /* Once a project has earned its right rail, keep that shell mounted for the
      sitting. Snapshot and status refreshes arrive independently of agent events;
      deriving the rail directly from each one made it blink out for a frame and
@@ -1993,7 +2067,16 @@ function Conversation() {
     void bridge.recentProjects().then((answer) => {
       if (!stillHere) return;
       setRecent((current) => stableProjectOrder(current, answer.ok ? answer.value : []));
-      if (openOnLoad === null || !answer.ok) return;
+      if (!answer.ok) return;
+      /* A launch lands on the project last open unless somebody asked for the
+         list. A folder that has since been moved falls through to the list on
+         its own, which is where they would have to go anyway. */
+      if (openOnLoad === null) {
+        if (openTo !== 'last') return;
+        const last = answer.value.find((one) => !one.missing);
+        if (last !== undefined) void open(last.path);
+        return;
+      }
       const wanted =
         answer.value.find((one) => one.name === openOnLoad && !one.missing) ??
         answer.value.find((one) => !one.missing);
@@ -2814,6 +2897,25 @@ function Conversation() {
     });
   }, []);
 
+  /** One row on Behaviour or Notifications. Sticky the same way the rest are:
+   *  what comes back is what was actually kept. */
+  const changePreference = useCallback((which: PlainPreference, value: string | boolean) => {
+    setPreferences((was) => ({ ...was, [which]: value }));
+    void bridge.setPreference(which, value).then((answer) => {
+      if (answer.ok) setPreferences(answer.value);
+    });
+  }, []);
+
+  const changeOpenTo = useCallback((choice: OpenTo) => {
+    setOpenTo(choice);
+    try { localStorage.setItem(OPEN_TO_STORE, choice); } catch { /* private mode */ }
+  }, []);
+
+  const changeShelfAtLaunch = useCallback((choice: ShelfAtLaunch) => {
+    setShelfAtLaunch(choice);
+    try { localStorage.setItem(SHELF_STORE, choice); } catch { /* private mode */ }
+  }, []);
+
   /** Sticky the same way, and the menu closes on the way out: what was asked
    *  for is about to appear beside the conversation. Closing it puts the file
    *  that was open away with it. */
@@ -2990,6 +3092,9 @@ function Conversation() {
           return;
         case 'files':
           setFilesOpen(true);
+          return;
+        case 'commands':
+          setCommandsOpen((was) => !was);
           return;
         case 'go-nth': {
           /* ⌘1 to ⌘9 goes to what is open, not to what is remembered. Recent
@@ -3780,6 +3885,33 @@ function Conversation() {
     [repo, reviewsRepoNow, toChat, swapConversation, send, troubleAt, troubleHere, refreshRoom, refreshRunning],
   );
 
+  /** Which project and repository the pull request screen is asking about. */
+  const reviewsWhere = useCallback((): Where => {
+    const desk = currentDesk(desksNow.current);
+    const inside = desk?.overview?.repos ?? [];
+    const named =
+      inside.find((one) => one.name === reviewsRepoNow.current)?.name ?? inside[0]?.name ?? null;
+    return {
+      ...(desk === null ? {} : { project: desk.path }),
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+      ...(named === null ? {} : { repo: named }),
+    };
+  }, [reviewsRepoNow]);
+
+  /** Start on an issue: a fresh conversation whose first message is the issue.
+   *  The screen closes, because the answer arrives in the thread behind it. */
+  const startIssue = useCallback(
+    (_item: RepoItem, first: string) => {
+      setReviewsOpen(false);
+      toChat();
+      void (async () => {
+        await swapConversation(null);
+        void send(first);
+      })();
+    },
+    [toChat, swapConversation, send],
+  );
+
   /* A tab names a conversation inside a project, so going to one is at most two
      moves: bring the project to the front, then bring its conversation. */
   /** The canvas an id names, or null when it names a conversation. One row
@@ -3825,6 +3957,15 @@ function Conversation() {
       const { project, address } = ownerOf(id);
       const desk = desksNow.current.byPath[project];
       if (desk === undefined) return;
+      /* Closing one mid-turn throws away work somebody is paying for, so it is
+         worth one question. Asked only while something is actually running. */
+      if (
+        preferencesNow.current.askBeforeClosing &&
+        stillWorkingIn(desk, address) &&
+        !window.confirm(STILL_WORKING)
+      ) {
+        return;
+      }
       // Closing the last tab used to take the whole project off the list with
       // it, which put somebody back on the list of projects for pressing the
       // small x on a tab. Closing a tab is closing a tab: the project stays
@@ -5252,10 +5393,12 @@ function Conversation() {
   // for it, and it stays until they say otherwise.
   const filesShown = desk !== null && preferences.showFiles;
   const filesExpanded = filesShown && filesOpen;
+  /* Only over a project: there is nothing to have run anywhere else. */
+  const commandsHere = commandsOpen && desk !== null;
 
   return (
     <main
-      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${canvasAt === null ? "" : "app--canvas"} ${readingWhole && reading !== null ? "app--reading" : ""}`}
+      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${canvasAt === null ? "" : "app--canvas"} ${readingWhole && reading !== null ? "app--reading" : ""} ${commandsHere ? "app--commands" : ""}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -5435,6 +5578,7 @@ function Conversation() {
             openAddMore();
           }}
           onFiles={filesShown ? () => setFilesOpen(true) : undefined}
+          onCommands={desk === null ? undefined : () => setCommandsOpen((was) => !was)}
           onDeleteConversation={(path) => void deleteConversation(path)}
           ownCopy={ownCopyHere}
           onBringWorkBack={(path) => void bringWorkBack(path)}
@@ -5505,6 +5649,15 @@ function Conversation() {
             setChangesOpen(false);
             const asked = CHANGE_WORDS.fix(file, line);
             void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+          }}
+          onWider={async (file, context) => {
+            const repo = actingRepoNow.current;
+            const answer = await bridge.changesWider(
+              file,
+              context,
+              repo === null ? undefined : { repo },
+            );
+            return answer.ok ? answer.value : null;
           }}
           onKeep={(kept) => {
             const whole = changeText ?? '';
@@ -5639,6 +5792,23 @@ function Conversation() {
           addons={preferences.addons}
           onAddons={setAddons}
           addonsHere={addonsHere}
+          openTo={openTo}
+          onOpenTo={changeOpenTo}
+          shelfAtLaunch={shelfAtLaunch}
+          onShelfAtLaunch={changeShelfAtLaunch}
+          nameConversations={preferences.nameConversations}
+          askBeforeClosing={preferences.askBeforeClosing}
+          snapBeforeApply={preferences.snapBeforeApply}
+          replyLanguage={preferences.replyLanguage}
+          onReplyLanguage={(says) => changePreference('replyLanguage', says)}
+          whenRunFinishes={preferences.whenRunFinishes}
+          whenSomethingNeedsYou={preferences.whenSomethingNeedsYou}
+          notifySound={preferences.notifySound}
+          badgeDock={preferences.badgeDock}
+          onBehaviour={changePreference}
+          onTelling={(which: 'whenRunFinishes' | 'whenSomethingNeedsYou', told: Telling) =>
+            changePreference(which, told)
+          }
         />
       </Suspense>
 
@@ -5684,6 +5854,46 @@ function Conversation() {
             />
           </Suspense>
         </aside>
+      ) : null}
+
+      {commandsHere && desk !== null ? (
+        <Commands
+          open
+          onClose={() => setCommandsOpen(false)}
+          turns={desk.turns}
+          servers={running}
+          onSaid={(id) =>
+            bridge
+              .runningSaid(id, {
+                project: desk.path,
+                ...(desk.address == null ? {} : { conversation: desk.address }),
+              })
+              .then((answer) => (answer.ok ? answer.value : ''))
+          }
+          page={pane === 'off' ? null : pageAt}
+          onPageSaid={() =>
+            bridge
+              .pageSaid({
+                project: desk.path,
+                ...(desk.address == null ? {} : { conversation: desk.address }),
+              })
+              .then((answer) => (answer.ok ? answer.value : []))
+          }
+          onOpenAddress={(address) => {
+            setPageAt(address);
+            movePane('split');
+          }}
+          onStop={(id) => {
+            void bridge
+              .stopRunning(id, {
+                project: desk.path,
+                ...(desk.address == null ? {} : { conversation: desk.address }),
+              })
+              .then((answer) => {
+                if (answer.ok) setRunning(answer.value);
+              });
+          }}
+        />
       ) : null}
 
       <div className="app__column" ref={contentRef}>
@@ -6309,6 +6519,14 @@ function Conversation() {
           onRefresh={refreshRepo}
           onClose={() => setReviewsOpen(false)}
           onReview={startReview}
+          onWork={startIssue}
+          prDiff={(number) => bridge.prDiff(number, reviewsWhere())}
+          prChecks={(number) => bridge.prChecks(number, reviewsWhere())}
+          prCheckout={(number) => bridge.prCheckout(number, reviewsWhere())}
+          prComments={(number) => bridge.prComments(number, reviewsWhere())}
+          prComment={(number, body, path, line) =>
+            bridge.prComment(number, body, path, line, reviewsWhere())
+          }
           repos={desk.overview?.repos ?? []}
           which={
             (desk.overview?.repos ?? []).find((one) => one.name === reviewsRepo)?.name ??

@@ -44,12 +44,16 @@ import {
   type InStep,
   type Page,
   type PointedAt,
+  type PlainPreference,
   type Preferences,
   type PromptAttachment,
   type PromptOptions,
   type RunningPiece,
+  type Said,
   type ProviderMethod,
   type PutBack,
+  type PullCheck,
+  type PullComment,
   type RepoLook,
   type RecentProject,
   type Conversation,
@@ -265,6 +269,46 @@ const api: GrapheApi = {
 
   repoComment(number: number, body: string, where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.repoComment, number, body, named(where)) as Promise<Result<null>>;
+  },
+
+  prDiff(number: number, where?: Where): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.prDiff, number, named(where)) as Promise<Result<string>>;
+  },
+
+  prChecks(number: number, where?: Where): Promise<Result<readonly PullCheck[]>> {
+    return ipcRenderer.invoke(CHANNEL.prChecks, number, named(where)) as Promise<
+      Result<readonly PullCheck[]>
+    >;
+  },
+
+  prCheckout(number: number, where?: Where): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.prCheckout, number, named(where)) as Promise<Result<string>>;
+  },
+
+  prComments(number: number, where?: Where): Promise<Result<readonly PullComment[]>> {
+    return ipcRenderer.invoke(CHANNEL.prComments, number, named(where)) as Promise<
+      Result<readonly PullComment[]>
+    >;
+  },
+
+  prComment(
+    number: number,
+    body: string,
+    path: string,
+    line: number,
+    where?: Where,
+  ): Promise<Result<readonly PullComment[]>> {
+    if (typeof body !== 'string' || body.trim() === '') {
+      return Promise.resolve(refuse<readonly PullComment[]>('There was nothing to post.'));
+    }
+    return ipcRenderer.invoke(
+      CHANNEL.prComment,
+      number,
+      body,
+      path,
+      line,
+      named(where),
+    ) as Promise<Result<readonly PullComment[]>>;
   },
 
   putBack(versionId: string, where?: Where): Promise<Result<PutBack>> {
@@ -592,6 +636,10 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.setOpensIn, which, name) as Promise<Result<Preferences>>;
   },
 
+  setPreference(which: PlainPreference, value: string | boolean): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.setPreference, which, value) as Promise<Result<Preferences>>;
+  },
+
   goalLoad(where?: Where): Promise<Result<import('../src/work/goal').Goal | null>> {
     return ipcRenderer.invoke(CHANNEL.goalLoad, named(where)) as Promise<Result<import('../src/work/goal').Goal | null>>;
   },
@@ -643,6 +691,17 @@ const api: GrapheApi = {
 
   running(where?: Where): Promise<Result<readonly RunningPiece[]>> {
     return ipcRenderer.invoke(CHANNEL.running, named(where)) as Promise<Result<readonly RunningPiece[]>>;
+  },
+
+  runningSaid(id: string, where?: Where): Promise<Result<string>> {
+    if (typeof id !== 'string' || id.trim() === '') {
+      return Promise.resolve(refuse<string>('I could not tell which one you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.runningSaid, id, named(where)) as Promise<Result<string>>;
+  },
+
+  pageSaid(where?: Where): Promise<Result<readonly Said[]>> {
+    return ipcRenderer.invoke(CHANNEL.pageSaid, named(where)) as Promise<Result<readonly Said[]>>;
   },
 
   stopRunning(id: string, where?: Where): Promise<Result<readonly RunningPiece[]>> {
@@ -1137,6 +1196,11 @@ const api: GrapheApi = {
   },
   changesLook(where?: Where): Promise<Result<string>> {
     return ipcRenderer.invoke(CHANNEL.changesLook, named(where)) as Promise<Result<string>>;
+  },
+  changesWider(file: string, context: number, where?: Where): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.changesWider, file, context, named(where)) as Promise<
+      Result<string>
+    >;
   },
   changesDrop(patch: string, where?: Where): Promise<Result<null>> {
     return ipcRenderer.invoke(CHANNEL.changesDrop, patch, named(where)) as Promise<Result<null>>;

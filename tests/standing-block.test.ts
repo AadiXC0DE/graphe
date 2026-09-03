@@ -78,6 +78,15 @@ describe('the block itself', () => {
     expect(standingBlock({ list: null, goal: null, notes: ['   ', ''] })).toBeNull();
   });
 
+  /* A line saying "reply in the same language as the request" on every single
+     turn is budget spent on the default. */
+  it('says nothing about language until somebody asks for one', () => {
+    const quiet = standingBlock({ list: list(0, 3), goal: null, notes: [], language: '' }) ?? '';
+    expect(quiet).not.toMatch(/Reply in/);
+    const asked = standingBlock({ list: list(0, 3), goal: null, notes: [], language: 'French' }) ?? '';
+    expect(asked).toContain(standingWords.language('French'));
+  });
+
   it('never lets the notes become the prompt', () => {
     const said =
       standingBlock({ list: null, goal: null, notes: [Array.from({ length: 40 }, () => 'a note about the project').join(' ')] }) ??

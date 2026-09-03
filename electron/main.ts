@@ -134,6 +134,8 @@ import {
   type PutBack,
   type RecentProject,
   type Result,
+  type PullCheck,
+  type PullComment,
   type RepoItem,
   type RepoLook,
   type AddonHere,
@@ -167,6 +169,7 @@ import {
   setDownWords,
   whereIn,
 } from '../src/lib/ipc';
+import { saidFrom, type Said } from '../src/preview/tabs';
 import { parseGitStatus, parseNumstat } from '../src/lib/gitstatus';
 import { parseBranches } from '../src/lib/branches';
 import {
@@ -232,8 +235,16 @@ import {
   type Entry as ReviewQueued,
   type FileTally,
   type FileVerdict,
+  waiting as waitingToBeSeen,
   type Verdict as ReviewVerdict,
 } from '../src/work/reviewqueue';
+import {
+  asTelling,
+  badgeFor,
+  howToTell,
+  makesASound,
+  type Because,
+} from '../src/work/notify';
 import { conflictWords, readConflict } from '../src/diff/conflict';
 import { preparePrWorktree } from './prWorktree';
 import { RUNTIME_SCRATCH, keepOutOfCommits } from './excludes';
@@ -280,7 +291,7 @@ import { openLog } from './log';
 import { saysWhyStopped } from '../src/lib/showme';
 import { mark, report, saysMarks } from '../src/lib/marks';
 import { addonProcesses, ledger } from './processes';
-import { watchWhatWeStart } from '../src/share/spawned';
+import { ended as noteEnded, started as noteStarted, watchWhatWeStart } from '../src/share/spawned';
 import { MENU_IDS, menuTemplate, type MenuItem } from './menu';
 import { gather, saysDiagnostics } from './diagnostics';
 import { MOST_ROWS, SKILL_BUDGET, standingBlock, standingWords, withinBudget } from '../src/agent/pi/standing';
@@ -2342,6 +2353,8 @@ const GH_WORDS = {
   unreadable: 'github answered with something this could not read.',
 } as const;
 
+const NOT_GITHUB = 'This folder does not look like a github repository.';
+
 /** Which github repository this folder answers to, or `owner/name`. Read from a
  *  remote the folder already knows about, so a project with no remote or a
  *  remote that is not github is simply not a github repository.
@@ -2389,6 +2402,7 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
     baseRef: typeof raw['baseRefName'] === 'string' ? raw['baseRefName'] : null,
     headRef: typeof raw['headRefName'] === 'string' ? raw['headRefName'] : null,
     headSha: typeof raw['headRefOid'] === 'string' ? raw['headRefOid'] : null,
+    draft: raw['isDraft'] === true,
   };
 }
 
@@ -2435,7 +2449,7 @@ async function readRepo(open: { path: string }): Promise<RepoLook> {
     const prs = await ghJSON(
       open.path,
       ['pr', 'list', '-R', full, '--limit', '50'],
-      'number,title,state,url,body,author,updatedAt,baseRefName,headRefName,headRefOid',
+      'number,title,state,url,body,author,updatedAt,baseRefName,headRefName,headRefOid,isDraft',
     );
     const rows = (asked: Asked): readonly Record<string, unknown>[] =>
       asked.ok && Array.isArray(asked.value)
@@ -2456,6 +2470,123 @@ async function readRepo(open: { path: string }): Promise<RepoLook> {
     };
   } catch {
     return null;
+  }
+}
+
+/** Run `gh` for its plain stdout rather than its JSON. Same guards as `ghJSON`:
+ *  a missing command, a refusal and a silence are three different sentences,
+ *  and none of them is an empty string. */
+function ghText(cwd: string, args: readonly string[]): Promise<Asked> {
+  return new Promise((resolve) => {
+    const child = spawn('gh', [...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    noteStarted({ pid: child.pid, what: `gh ${args.join(' ')}`, kind: 'tool', project: cwd });
+    let out = '';
+    let noise = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      noise = `${noise}${chunk}`.slice(-400);
+    });
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve({ ok: false, because: GH_WORDS.tooSlow });
+    }, GH_PATIENCE_MS);
+    child.on('error', () => {
+      clearTimeout(timeout);
+      noteEnded(child.pid);
+      resolve({ ok: false, because: GH_WORDS.noTool });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      noteEnded(child.pid);
+      if (code !== 0) {
+        const said = noise.trim().split('\n').filter((line) => line.trim() !== '').pop();
+        resolve({ ok: false, because: said === undefined ? GH_WORDS.refused : said });
+        return;
+      }
+      resolve({ ok: true, value: out });
+    });
+  });
+}
+
+/** What `gh pr checks` calls a state, narrowed to the four the screen draws.
+ *  Anything unrecognised is still running as far as this is concerned, which is
+ *  the reading that claims the least. */
+function checkState(raw: string): PullCheck['state'] {
+  const word = raw.trim().toLowerCase();
+  if (word === 'pass' || word === 'success' || word === 'passed' || word === 'neutral') return 'passed';
+  if (word === 'fail' || word === 'failure' || word === 'failed' || word === 'error' || word === 'cancelled' || word === 'timed_out') {
+    return 'failed';
+  }
+  if (word === 'skipping' || word === 'skipped') return 'skipped';
+  return 'pending';
+}
+
+/** The checks on one pull request. `gh pr checks` exits non-zero when a check
+ *  failed and when there are none at all, so the rows it printed matter more
+ *  than the code: an answer with rows is an answer. */
+async function readChecks(cwd: string, full: string, number: number): Promise<Asked> {
+  const asked = await ghJSON(
+    cwd,
+    ['pr', 'checks', String(number), '-R', full],
+    'name,state,link',
+  );
+  if (asked.ok) return asked;
+  // "no checks reported" is github saying there are none, not a failure.
+  return /no checks/i.test(asked.because) ? { ok: true, value: [] } : asked;
+}
+
+function pullCheck(raw: Record<string, unknown>): PullCheck {
+  const link = typeof raw['link'] === 'string' && raw['link'] !== '' ? raw['link'] : null;
+  return {
+    name: typeof raw['name'] === 'string' ? raw['name'] : 'check',
+    state: checkState(typeof raw['state'] === 'string' ? raw['state'] : ''),
+    link,
+  };
+}
+
+function pullComment(raw: Record<string, unknown>): PullComment | null {
+  const path = raw['path'];
+  const line = raw['line'] ?? raw['original_line'];
+  const body = raw['body'];
+  if (typeof path !== 'string' || typeof body !== 'string' || typeof line !== 'number') return null;
+  const user = (raw['user'] as Record<string, unknown> | null)?.['login'];
+  return {
+    id: String(raw['id'] ?? `${path}:${String(line)}`),
+    path,
+    line,
+    author: typeof user === 'string' ? user : 'unknown',
+    body,
+    at: typeof raw['created_at'] === 'string' ? raw['created_at'] : '',
+  };
+}
+
+/** The review comments on a pull request, through `gh api` so the person's own
+ *  login is the one github sees. */
+async function readPullComments(
+  cwd: string,
+  full: string,
+  number: number,
+): Promise<{ ok: true; value: readonly PullComment[] } | { ok: false; because: string }> {
+  const asked = await ghText(cwd, [
+    'api',
+    `repos/${full}/pulls/${String(number)}/comments?per_page=100`,
+  ]);
+  if (!asked.ok) return asked;
+  try {
+    const rows: unknown = JSON.parse(String(asked.value));
+    if (!Array.isArray(rows)) return { ok: false, because: GH_WORDS.unreadable };
+    return {
+      ok: true,
+      value: (rows as Record<string, unknown>[])
+        .map(pullComment)
+        .filter((one): one is PullComment => one !== null),
+    };
+  } catch {
+    return { ok: false, because: GH_WORDS.unreadable };
   }
 }
 
@@ -2827,7 +2958,9 @@ function settleUpTheJob(path: string, held: Held, from: Speaking): void {
          version before every round would be a rail of identical entries. */
       const who = from.address ?? '';
       const first =
-        checkout === null || held.snappedBeforeApply.has(who)
+        checkout === null ||
+        held.snappedBeforeApply.has(who) ||
+        preferencesNow?.all().snapBeforeApply === false
           ? Promise.resolve()
           : (held.snappedBeforeApply.add(who),
             held.timeline
@@ -3467,6 +3600,7 @@ async function nameBranchAfter(
 ): Promise<void> {
   const checkout = open.held.checkouts.get(address);
   if (checkout === undefined || checkout.named === true) return;
+  if (preferencesNow?.all().nameConversations === false) return;
   const run = gitRunHereFor();
   const taken = await branchNames(run, open.path);
   const wanted = renameTo(checkout, request, (name) => taken.has(name));
@@ -4002,6 +4136,8 @@ async function readReviewQueue(project: string): Promise<ReviewIndex> {
 
 async function saveReviewQueue(project: string, held: Held): Promise<void> {
   const file = reviewIndexFile(project);
+  // The one place the queue changes, so the one place the dock has to be told.
+  showWhatIsWaiting();
   await mkdir(dirname(file), { recursive: true });
   await writeAtomically(
     file,
@@ -4647,6 +4783,8 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   if (!started.ok) return started;
 
   workspaces.adopt({ path, name, held });
+  // What was left waiting last sitting counts on the dock this one.
+  showWhatIsWaiting();
   await (await recents()).remember({ path, name });
 
   // The picture of the project as it stands, taken before anybody asks for
@@ -5235,6 +5373,9 @@ async function standingBlockFor(project: string, address: string): Promise<strin
        tidied. Bounded on purpose: memory is not the job. */
     notes: await notesFor(project, address),
     scratch: scratch,
+    /* Only ever said when somebody asked for a language other than the
+       request's own. The default costs the prompt nothing. */
+    language: (await preferences().catch(() => null))?.all().replyLanguage ?? null,
   });
 }
 
@@ -5951,15 +6092,75 @@ function makeSureThereIsAWindow(): void {
   createWindow();
 }
 
+/**
+ * The way this person asked to hear about one thing that happened.
+ *
+ * What to do is `work/notify.ts`; this only does it. Nothing here may throw:
+ * being told is the least important thing happening at this moment, and a run
+ * that fell over on a dock that does not exist would be absurd.
+ */
+function tellThemAbout(because: Because, title: string, body: string, path: string): void {
+  const prefs = preferencesNow?.all() ?? null;
+  const told = howToTell(because, {
+    finished: asTelling(prefs?.whenRunFinishes),
+    needsYou: asTelling(prefs?.whenSomethingNeedsYou),
+    inFront: mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isFocused(),
+  });
+  if (told === 'nothing') return;
+  const sound = makesASound(told, prefs?.notifySound === true);
+  if (told === 'bounce') {
+    bounceTheDock();
+    if (sound) makeANoise();
+    return;
+  }
+  tellThem(title, body, path, sound);
+}
+
+/** The icon in the dock, asking for a person. Nothing at all on a desktop that
+ *  has no dock, which is every one but macOS. */
+function bounceTheDock(): void {
+  try {
+    app.dock?.bounce('informational');
+  } catch {
+    // A dock that will not bounce is not worth a word to anybody.
+  }
+}
+
+function makeANoise(): void {
+  try {
+    shell.beep();
+  } catch {
+    // Same.
+  }
+}
+
+/**
+ * How many pieces are waiting to be looked at, on the dock icon.
+ *
+ * Every open project's queue counted together, because the icon is one icon.
+ * Cleared at zero: a badge saying 0 is a badge saying there is something.
+ */
+function showWhatIsWaiting(): void {
+  try {
+    if (app.dock === undefined) return;
+    const on = preferencesNow?.all().badgeDock !== false;
+    let count = 0;
+    for (const one of workspaces.open) count += waitingToBeSeen(one.held.review);
+    app.dock.setBadge(badgeFor(count, on));
+  } catch {
+    // Nothing about a badge is worth failing anything else over.
+  }
+}
+
 /** One sentence on somebody's screen. Pressing it brings them back to the thing
  *  it is about. Silent where the system has no way to show one. */
-function tellThem(title: string, body: string, path: string): void {
+function tellThem(title: string, body: string, path: string, sound = false): void {
   if (!Notification.isSupported()) {
     sayNotificationsAreOff(title, body);
     return;
   }
   try {
-    const notice = new Notification({ title, body });
+    const notice = new Notification({ title, body, silent: !sound });
     notice.on('click', () => {
       showTheWindow();
       pushAway(path);
@@ -5971,6 +6172,28 @@ function tellThem(title: string, body: string, path: string): void {
     // not going to be.
     sayNotificationsAreOff(title, body);
   }
+}
+
+/** One row on Behaviour or Notifications, narrowed to what it is allowed to
+ *  hold. Null for anything this does not recognise, which the caller reads as
+ *  "leave the preferences alone". */
+function onePreference(which: unknown, value: unknown): Partial<Preferences> | null {
+  if (which === 'whenRunFinishes' || which === 'whenSomethingNeedsYou') {
+    return { [which]: asTelling(value) };
+  }
+  if (which === 'replyLanguage') {
+    return typeof value === 'string' ? { replyLanguage: value } : null;
+  }
+  if (
+    which === 'nameConversations' ||
+    which === 'askBeforeClosing' ||
+    which === 'snapBeforeApply' ||
+    which === 'notifySound' ||
+    which === 'badgeDock'
+  ) {
+    return typeof value === 'boolean' ? { [which]: value } : null;
+  }
+  return null;
 }
 
 /** Once a sitting. macOS may refuse to deliver a notification from a bundle it
@@ -6045,7 +6268,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       // is none; never pulled in front of one somebody is already using.
       makeSureThereIsAWindow();
       const notice = saysNotice(desk.name, { doing: piece.doing, state: 'needs-you' });
-      tellThem(notice.title, notice.body, desk.path);
+      tellThemAbout('needs-you', notice.title, notice.body, desk.path);
       /* And the conversation that started it hears once. Only the board knew a
          piece was parked, so a conversation waiting on work that was itself
          waiting on a person looked stalled with nothing said. */
@@ -6200,7 +6423,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
       { doing: landed.doing, state: landed.state },
       saidBriefly(run.said),
     );
-    tellThem(notice.title, notice.body, desk.path);
+    tellThemAbout('finished', notice.title, notice.body, desk.path);
     tellTheConversation(desk, landed);
   }
   noteDown(desk, piece.id);
@@ -7055,6 +7278,131 @@ function register(): void {
     return exit === 0 ? done(null) : fail(plainTrouble('The comment did not reach github.'));
   });
 
+  /* The pull request screen's own reads. Each one resolves the repository first,
+     because a folder with no github remote is a different answer from a `gh`
+     that would not talk, and only one of the two is worth retrying. */
+
+  handle<string>(CHANNEL.prDiff, async (_event, args) => {
+    const [number] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    const asked = await ghText(folder, ['pr', 'diff', String(number), '-R', full]);
+    if (!asked.ok) return fail(plainTrouble('I could not read this pull request.', asked.because));
+    return done(String(asked.value));
+  });
+
+  handle<readonly PullCheck[]>(CHANNEL.prChecks, async (_event, args) => {
+    const [number] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    const asked = await readChecks(folder, full, number);
+    if (!asked.ok) return fail(plainTrouble('I could not read the checks.', asked.because));
+    if (!Array.isArray(asked.value)) return done([]);
+    return done((asked.value as Record<string, unknown>[]).map(pullCheck));
+  });
+
+  handle<string>(CHANNEL.prCheckout, async (_event, args) => {
+    const [number] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    const asked = await ghText(folder, ['pr', 'checkout', String(number), '-R', full]);
+    if (!asked.ok) {
+      return fail(plainTrouble('I could not check out this pull request.', asked.because));
+    }
+    const at = await whereThisFolderIs(folder);
+    return done(
+      at?.branch == null
+        ? `This folder is now on pull request #${String(number)}.`
+        : `This folder is now on ${at.branch}.`,
+    );
+  });
+
+  handle<readonly PullComment[]>(CHANNEL.prComments, async (_event, args) => {
+    const [number] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    const asked = await readPullComments(folder, full, number);
+    if (!asked.ok) return fail(plainTrouble('I could not read the comments.', asked.because));
+    return done(asked.value);
+  });
+
+  handle<readonly PullComment[]>(CHANNEL.prComment, async (_event, args) => {
+    const [number, body, path, line] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof number !== 'number' || number <= 0) {
+      return fail(plainTrouble('I could not tell which pull request you meant.'));
+    }
+    if (typeof body !== 'string' || body.trim() === '') {
+      return fail(plainTrouble('There was nothing to post.'));
+    }
+    if (typeof path !== 'string' || path === '' || typeof line !== 'number' || line <= 0) {
+      return fail(plainTrouble('I could not tell which line you meant.'));
+    }
+    const folder = folderFor(open, where);
+    const full = await githubRepo(folder);
+    if (full === null) return fail(plainTrouble(NOT_GITHUB));
+    // github wants the commit the comment is against, and it has to be the head
+    // of the pull request or the comment lands on nothing.
+    const head = await ghJSON(folder, ['pr', 'view', String(number), '-R', full], 'headRefOid');
+    const sha =
+      head.ok && typeof (head.value as Record<string, unknown>)['headRefOid'] === 'string'
+        ? String((head.value as Record<string, unknown>)['headRefOid'])
+        : null;
+    if (sha === null) {
+      const why = head.ok ? GH_WORDS.unreadable : head.because;
+      return fail(plainTrouble('I could not find the commit to comment on.', why));
+    }
+    const posted = await ghText(folder, [
+      'api',
+      '--method',
+      'POST',
+      `repos/${full}/pulls/${String(number)}/comments`,
+      '-f',
+      `body=${body}`,
+      '-f',
+      `commit_id=${sha}`,
+      '-f',
+      `path=${path}`,
+      '-F',
+      `line=${String(line)}`,
+      '-f',
+      'side=RIGHT',
+    ]);
+    if (!posted.ok) return fail(plainTrouble('The comment did not reach github.', posted.because));
+    const after = await readPullComments(folder, full, number);
+    return done(after.ok ? after.value : []);
+  });
+
   handle<Overview>(CHANNEL.overview, async (_event, args) => {
     const where = whereIn(args);
     const open = projectAt(where);
@@ -7349,6 +7697,19 @@ function register(): void {
     return done(await prefs.change({ [which]: typeof name === 'string' ? name : null }));
   });
 
+  /* One road for the plain rows on Behaviour and Notifications. Each is
+     narrowed to the shape it is, so a window that asks for nonsense gets the
+     preferences back unchanged rather than writing it. */
+  handle<Preferences>(CHANNEL.setPreference, async (_event, args) => {
+    const [which, value] = args;
+    const prefs = await preferences();
+    const some = onePreference(which, value);
+    if (some === null) return done(prefs.all());
+    const saved = await prefs.change(some);
+    showWhatIsWaiting();
+    return done(saved);
+  });
+
   handle<null>(CHANNEL.openInEditor, async (_event, args) => {
     const [file] = args;
     const open = projectAt(whereIn(args));
@@ -7450,6 +7811,22 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return Promise.resolve(done([]));
     return Promise.resolve(done(sessionAt(open, whereIn(args))?.running ?? []));
+  });
+
+  handle<string>(CHANNEL.runningSaid, (_event, args) => {
+    const [id] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null || typeof id !== 'string') return Promise.resolve(done(''));
+    return Promise.resolve(done(sessionAt(open, where)?.runningSaid(id) ?? ''));
+  });
+
+  /* The shell keeps one flat line per message; `saidFrom` reads them back into
+     the console model, so repeats collapse and the ceiling is the model's. */
+  handle<readonly Said[]>(CHANNEL.pageSaid, () => {
+    const view = pageView;
+    if (view === null || view.webContents.isDestroyed()) return Promise.resolve(done([]));
+    return Promise.resolve(done(saidFrom(pageSaid)));
   });
 
   handle<readonly RunningPiece[]>(CHANNEL.stopRunning, async (_event, args) => {
@@ -7898,6 +8275,19 @@ function register(): void {
       return done(
         await new ProjectHistory(folderFor(open, where)).diffFor({ kind: 'working' }),
       );
+    } catch (cause) {
+      return fail(historyTrouble(cause));
+    }
+  });
+
+  handle<string>(CHANNEL.changesWider, async (_event, args) => {
+    const [file, context] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof file !== 'string' || typeof context !== 'number') return done('');
+    try {
+      return done(await new ProjectHistory(folderFor(open, where)).diffWider(file, context));
     } catch (cause) {
       return fail(historyTrouble(cause));
     }

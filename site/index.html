@@ -159,6 +159,12 @@
           <p class="hero__fine reveal" data-reveal style="--i: 4">
             Open source, MIT · Any provider, your own key · macOS, Apple silicon and Intel
           </p>
+          <!-- The build is signed but not notarized, so the first open goes
+               through Gatekeeper's warning. Said here rather than left to be
+               discovered as a broken download. -->
+          <p class="hero__fine reveal" data-reveal style="--i: 4">
+            First open: right-click the app, choose Open, then Open again.
+          </p>
         </div>
 
         <!-- the window itself: four real screens, one frame -->
@@ -1417,6 +1423,7 @@
             >
           </div>
           <p class="cta__fine mono">Apple silicon and Intel · macOS · bring your own model key</p>
+          <p class="cta__fine">First open: right-click the app, choose Open, then Open again.</p>
           <p class="cta__note">
             macOS is the only build today. Graphe is an Electron app and the source is open, so
             Windows and Linux can be built from it, but nothing is set up for that yet, and

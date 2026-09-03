@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { WORDS, countsOf, diffOf, parseDiff } from '../diff/hunks';
 import type { FileChange, Hunk } from '../diff/hunks';
+import { widerThan, withWider } from '../diff/collapse';
 import DiffView from './DiffView';
 import './Changes.css';
 import './Sheet.css';
@@ -19,6 +20,9 @@ type Props = {
    *  answer starts where the eye already is. Left off, neither is offered. */
   onExplain?: (file: string, line: number) => void;
   onFix?: (file: string, line: number) => void;
+  /** Read one file again with more of it around the change. Left off, a fold
+   *  says how many lines are under it and offers nothing to press. */
+  onWider?: (file: string, context: number) => Promise<string | null>;
 };
 
 export const SAYS = {
@@ -183,14 +187,40 @@ export function captionOf(hunk: Hunk): string {
  * here, so it costs colour and opacity and never a line of layout — the piece
  * under the cursor is still under the cursor afterwards.
  */
-export default function Changes({ open, diff, busy = false, onClose, onKeep, onExplain, onFix }: Props) {
+export default function Changes({ open, diff, busy = false, onClose, onKeep, onExplain, onFix, onWider }: Props) {
   const body = useRef<HTMLDivElement>(null);
   const [dropped, setDropped] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [at, setAt] = useState<string | null>(null);
 
-  const files = useMemo(() => (diff === null ? [] : parseDiff(diff)), [diff]);
+  const [wider, setWider] = useState<Readonly<Record<string, readonly FileChange[]>>>({});
+  const [asked, setAsked] = useState<Readonly<Record<string, number>>>({});
+
+  const read = useMemo(() => (diff === null ? [] : parseDiff(diff)), [diff]);
+  const files = useMemo(() => withWider(read, wider), [read, wider]);
   const order = useMemo(() => orderOf(files), [files]);
   const here = at !== null && order.includes(at) ? at : (order[0] ?? null);
+
+  /* A press asks for a wider window than the last one, so pressing twice on
+     the same file keeps opening it out. */
+  const readWider = useCallback(
+    async (file: string): Promise<void> => {
+      if (onWider === undefined) return;
+      const context = widerThan(asked[file]);
+      const text = await onWider(file, context);
+      if (text === null || text.trim() === '') return;
+      const found = parseDiff(text);
+      if (found.length === 0) return;
+      setAsked((was) => ({ ...was, [file]: context }));
+      setWider((was) => ({ ...was, [file]: found }));
+    },
+    [asked, onWider],
+  );
+
+  // A different change is read from scratch.
+  useEffect(() => {
+    setWider({});
+    setAsked({});
+  }, [diff]);
 
   const kept = useMemo(() => countsOf(keptOf(files, dropped)), [files, dropped]);
   const canKeep = kept.hunks > 0 && !busy;
@@ -367,6 +397,7 @@ export default function Changes({ open, diff, busy = false, onClose, onKeep, onE
           onKeepFile={(file, keep) => setDropped((was) => withFile(was, file, keep))}
           onExplain={onExplain}
           onFix={onFix}
+          {...(onWider === undefined ? {} : { onExpand: readWider })}
         />
       </div>
     </section>

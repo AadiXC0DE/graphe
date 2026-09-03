@@ -28,7 +28,10 @@ import type { FileEntry } from '../files/tree';
 import type { Page } from '../preview/pages';
 import type { Reading } from '../preview/inspect';
 import type { Pointed } from '../preview/point';
+import type { Said } from '../preview/tabs';
+export type { Said };
 import type { AlwaysRow } from '../work/always';
+import type { Telling } from '../work/notify';
 export type { AlwaysRow };
 import type { WorkState } from '../work/board';
 import type { Entry as ReviewQueued, FileVerdict, Verdict } from '../work/reviewqueue';
@@ -542,7 +545,36 @@ export type Preferences = {
   ceiling: Money | null;
   /** Which finishing the window wears. 'system' follows the computer. */
   theme: Theme;
+  /** Name a conversation, and its branch, from what was first asked in it. */
+  nameConversations: boolean;
+  /** Ask before a conversation that is still working is closed. */
+  askBeforeClosing: boolean;
+  /** Put a version down before a job's work first reaches the folder. */
+  snapBeforeApply: boolean;
+  /** What replies come back in. Empty is the request's own language, and says
+   *  nothing to the model at all. */
+  replyLanguage: string;
+  /** How a finished run is said while the window is behind something. */
+  whenRunFinishes: Telling;
+  /** How something waiting on an answer is said. */
+  whenSomethingNeedsYou: Telling;
+  /** Whether being told makes a noise. Off unless somebody asked. */
+  notifySound: boolean;
+  /** Badge the dock with how many pieces are waiting to be looked at. */
+  badgeDock: boolean;
 };
+
+/** The preferences a row on Behaviour or Notifications writes by name. The
+ *  rows differ only in which one they hold, so they share one road. */
+export type PlainPreference =
+  | 'nameConversations'
+  | 'askBeforeClosing'
+  | 'snapBeforeApply'
+  | 'replyLanguage'
+  | 'whenRunFinishes'
+  | 'whenSomethingNeedsYou'
+  | 'notifySound'
+  | 'badgeDock';
 
 /* -------------------------------------------------------------------------- */
 /* Landing it                                                                  */
@@ -1282,6 +1314,27 @@ export type RepoItem = {
    *  it is at. Null for an issue, and when github did not say. */
   headRef: string | null;
   headSha: string | null;
+  /** A pull request nobody is asking you to merge yet. False for an issue. */
+  draft: boolean;
+};
+
+/** One continuous-integration check on a pull request, as `gh pr checks` gives
+ *  it. `link` is null when github named no run to open. */
+export type PullCheck = {
+  name: string;
+  state: 'passed' | 'failed' | 'pending' | 'skipped';
+  link: string | null;
+};
+
+/** One review comment already on a pull request, drawn under the line it is
+ *  about. `line` is the line in the file as the pull request leaves it. */
+export type PullComment = {
+  id: string;
+  path: string;
+  line: number;
+  author: string;
+  body: string;
+  at: string;
 };
 
 /** Everything the reviews screen needs about the project's github repository.
@@ -1394,10 +1447,17 @@ export const CHANNEL = {
   trustCarried: 'graphe:trust-carried',
   repoLook: 'graphe:repo-look',
   repoComment: 'graphe:repo-comment',
+  prDiff: 'graphe:pr-diff',
+  prChecks: 'graphe:pr-checks',
+  prCheckout: 'graphe:pr-checkout',
+  prComments: 'graphe:pr-comments',
+  prComment: 'graphe:pr-comment',
   stopAsking: 'graphe:stop-asking',
   goAsFarAs: 'graphe:go-as-far-as',
   setPlanMode: 'graphe:set-plan-mode',
   running: 'graphe:running',
+  runningSaid: 'graphe:running-said',
+  pageSaid: 'graphe:page-said',
   stopRunning: 'graphe:stop-running',
   tidyNow: 'graphe:tidy-now',
   skills: 'graphe:skills',
@@ -1443,6 +1503,8 @@ export const CHANNEL = {
   appsHere: 'graphe:apps-here',
   /** Which of them "Open in editor" and "Open in terminal" go to. */
   setOpensIn: 'graphe:set-opens-in',
+  /** One of the plain Behaviour or Notifications preferences, by name. */
+  setPreference: 'graphe:set-preference',
   goalLoad: 'graphe:goal-load',
   goalSave: 'graphe:goal-save',
   goalClear: 'graphe:goal-clear',
@@ -1502,6 +1564,7 @@ export const CHANNEL = {
   connectedSave: 'graphe:connected-save',
   takeBackQueue: 'graphe:take-back-queue',
   changesLook: 'graphe:changes-look',
+  changesWider: 'graphe:changes-wider',
   changesDrop: 'graphe:changes-drop',
   away: 'graphe:away',
   awayEverywhere: 'graphe:away-everywhere',
@@ -1623,6 +1686,23 @@ export type GrapheApi = {
   repoLook(where?: Where): Promise<Result<RepoLook>>;
   /** Ask the terminal's `gh pr comment` to speak for the current person. */
   repoComment(number: number, body: string, where?: Where): Promise<Result<null>>;
+  /** Every line one pull request changes, as unified diff text. */
+  prDiff(number: number, where?: Where): Promise<Result<string>>;
+  /** What the checks on a pull request came to. An empty list means github said
+   *  there are none; a refusal means it could not be asked. */
+  prChecks(number: number, where?: Where): Promise<Result<readonly PullCheck[]>>;
+  /** Put the folder on a pull request's branch, and say what happened. */
+  prCheckout(number: number, where?: Where): Promise<Result<string>>;
+  /** The review comments already on a pull request. */
+  prComments(number: number, where?: Where): Promise<Result<readonly PullComment[]>>;
+  /** Write one review comment against a line of a file in a pull request. */
+  prComment(
+    number: number,
+    body: string,
+    path: string,
+    line: number,
+    where?: Where,
+  ): Promise<Result<readonly PullComment[]>>;
   /** Put the project back to a version. Undoable; see `PutBack`. */
   putBack(versionId: string, where?: Where): Promise<Result<PutBack>>;
   /** Give a version a name of the user's own. */
@@ -1705,6 +1785,9 @@ export type GrapheApi = {
   flowForget(id: string, where?: Where): Promise<Result<null>>;
   appsHere(): Promise<Result<{ editors: readonly string[]; terminals: readonly string[] }>>;
   setOpensIn(which: 'editor' | 'terminal', name: string | null): Promise<Result<Preferences>>;
+  /** One preference on Behaviour or Notifications. Whatever is handed back is
+   *  what was actually kept, so a refused write shows as the old answer. */
+  setPreference(which: PlainPreference, value: string | boolean): Promise<Result<Preferences>>;
   goalLoad(where?: Where): Promise<Result<import('../work/goal').Goal | null>>;
   goalSave(goal: import('../work/goal').Goal, where?: Where): Promise<Result<null>>;
   goalClear(where?: Where): Promise<Result<null>>;
@@ -1778,6 +1861,12 @@ export type GrapheApi = {
   setPlanMode(on: boolean, where?: Where): Promise<Result<boolean>>;
   /** What is being kept running in this conversation — servers, watchers. */
   running(where?: Where): Promise<Result<readonly RunningPiece[]>>;
+  /** Everything one of them has said since it started, whole. Read again rather
+   *  than pushed: the drawer asks while it is open and stops when it is not. */
+  runningSaid(id: string, where?: Where): Promise<Result<string>>;
+  /** What the page beside the conversation has printed, as the console model
+   *  holds it. Empty when no page is open. */
+  pageSaid(where?: Where): Promise<Result<readonly Said[]>>;
   /** Stop one of them. Answers with what is left. */
   stopRunning(id: string, where?: Where): Promise<Result<readonly RunningPiece[]>>;
   /** What the open project carries, and whether each one is being loaded. */
@@ -1992,6 +2081,9 @@ export type GrapheApi = {
 
   /** Everything changed in the folder and not saved yet, as a diff to read. */
   changesLook(where?: Where): Promise<Result<string>>;
+  /** One file of that change again, with `context` lines around it. What git
+   *  did not send cannot be worked out from what it did. */
+  changesWider(file: string, context: number, where?: Where): Promise<Result<string>>;
   /** Take the named parts back out. The patch is what to undo, not what to keep. */
   changesDrop(patch: string, where?: Where): Promise<Result<null>>;
 

@@ -32,6 +32,7 @@ import {
 import { howMuchBy } from '../design/gate';
 import { themeFrom } from './theme';
 import { pagesIn, type Page } from '../preview/pages';
+import type { Said } from '../preview/tabs';
 import { holdsBack } from '../projects/heldback';
 import { readFlows, withFlow, withoutFlow, type Flow } from '../work/canvas';
 import { keepsLogins } from '../projects/logins';
@@ -52,6 +53,8 @@ import {
   type ConnectedState,
   type AwayPiece,
   type EveryKind,
+  type PullCheck,
+  type PullComment,
   type Repeating,
   type ConnectOutcome,
   type ConnectStep,
@@ -73,6 +76,7 @@ import {
   type Look,
   type Overview,
   type Pack,
+  type PlainPreference,
   type Preferences,
   type PromptAttachment,
   type ProviderMethod,
@@ -658,6 +662,9 @@ let previewRunning: readonly RunningPiece[] = [
   },
 ];
 
+/** What that made-up server has said so far. */
+let previewSaid = 'VITE v6.0.0  ready in 412 ms\n\n  ➜  Local:   http://localhost:5173/\n';
+
 /** Lines of work the tab can actually move between, so the switcher is a
  *  control somebody can try rather than a picture of one. */
 let previewLine = 'main';
@@ -739,6 +746,14 @@ let previewPlanMode = false;
     // answer agrees with what painted, instead of a fresh 'system' clobbering
     // the choice back on every reload.
     theme: themeFrom(typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme')),
+    nameConversations: true,
+    askBeforeClosing: true,
+    snapBeforeApply: true,
+    replyLanguage: '',
+    whenRunFinishes: 'system',
+    whenSomethingNeedsYou: 'system',
+    notifySound: false,
+    badgeDock: true,
   };
 
   const send = (event: AgentEvent): void => {
@@ -950,6 +965,26 @@ let previewPlanMode = false;
 
     repoComment(): Promise<Result<null>> {
       return Promise.resolve(done(null));
+    },
+
+    prDiff(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
+    prChecks(): Promise<Result<readonly PullCheck[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    prCheckout(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
+    prComments(): Promise<Result<readonly PullComment[]>> {
+      return Promise.resolve(done([]));
+    },
+
+    prComment(): Promise<Result<readonly PullComment[]>> {
+      return Promise.resolve(previewFail<readonly PullComment[]>());
     },
 
     putBack(versionId: string): Promise<Result<PutBack>> {
@@ -1299,6 +1334,11 @@ let previewPlanMode = false;
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setPreference(which: PlainPreference, value: string | boolean): Promise<Result<Preferences>> {
+      preferred = { ...preferred, [which]: value };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
     goalLoad(): Promise<Result<import('../work/goal').Goal | null>> {
       try {
         const raw = localStorage.getItem(`graphe:goal:${openPath ?? ''}`);
@@ -1362,6 +1402,15 @@ let previewPlanMode = false;
 
     running(): Promise<Result<readonly RunningPiece[]>> {
       return Promise.resolve(done(previewRunning));
+    },
+
+    runningSaid(id: string): Promise<Result<string>> {
+      const one = previewRunning.find((piece) => piece.id === id);
+      if (one === undefined) return Promise.resolve(done(''));
+      // A line with the clock in it, so the drawer's own reading of the tail
+      // can be watched moving without a real server anywhere.
+      previewSaid = `${previewSaid}ready in ${String(Math.round(Date.now() / 1000) % 1000)}ms\n`;
+      return Promise.resolve(done(previewSaid));
     },
 
     stopRunning(id: string): Promise<Result<readonly RunningPiece[]>> {
@@ -1721,6 +1770,11 @@ let previewPlanMode = false;
       return Promise.resolve(done(null));
     },
 
+    /** The mock has no page, so it has nothing the page said. */
+    pageSaid(): Promise<Result<readonly Said[]>> {
+      return Promise.resolve(done([]));
+    },
+
     /** A browser tab has no page of ours to watch, and says so rather than
      *  handing back an empty run that would read as "nothing happened". */
     watchStart(): Promise<Result<null>> {
@@ -1839,6 +1893,9 @@ let previewPlanMode = false;
     },
 
     changesLook(): Promise<Result<string>> {
+      return Promise.resolve(done(''));
+    },
+    changesWider(): Promise<Result<string>> {
       return Promise.resolve(done(''));
     },
     changesDrop(): Promise<Result<null>> {
@@ -2295,6 +2352,11 @@ function connect(): Bridge {
     versions: (where) => api.versions(where),
     repoLook: (where) => api.repoLook(where),
     repoComment: (number, body, where) => api.repoComment(number, body, where),
+    prDiff: (number, where) => api.prDiff(number, where),
+    prChecks: (number, where) => api.prChecks(number, where),
+    prCheckout: (number, where) => api.prCheckout(number, where),
+    prComments: (number, where) => api.prComments(number, where),
+    prComment: (number, body, path, line, where) => api.prComment(number, body, path, line, where),
     putBack: (versionId, where) => api.putBack(versionId, where),
     nameVersion: (versionId, name, where) => api.nameVersion(versionId, name, where),
     versionPictures: (where) => api.versionPictures(where),
@@ -2354,6 +2416,7 @@ function connect(): Bridge {
     flowForget: (id, whereArg) => (api.flowForget as unknown as (id: string, where?: Where) => Promise<Result<null>>)?.(id, whereArg) ?? Promise.resolve(done(null)),
     appsHere: () => api.appsHere(),
     setOpensIn: (which, name) => api.setOpensIn(which, name),
+    setPreference: (which, value) => api.setPreference(which, value),
     goalLoad: (whereArg) => (api.goalLoad as unknown as (where?: Where) => Promise<Result<import('../work/goal').Goal | null>>)?.(whereArg) ?? Promise.resolve(done(null)),
     goalSave: (goal, whereArg) => (api.goalSave as unknown as (goal: import('../work/goal').Goal, where?: Where) => Promise<Result<null>>)?.(goal, whereArg) ?? Promise.resolve(done(null)),
     goalClear: (whereArg) => (api.goalClear as unknown as (where?: Where) => Promise<Result<null>>)?.(whereArg) ?? Promise.resolve(done(null)),
@@ -2362,6 +2425,12 @@ function connect(): Bridge {
     goAsFarAs: (howFar, where) => api.goAsFarAs(howFar, where),
     setPlanMode: (on, where) => (api.setPlanMode as unknown as (on: boolean, where?: Where) => Promise<Result<boolean>>)?.(on, where) ?? Promise.resolve(done(on)),
     running: (where) => api.running(where),
+    runningSaid: (id, where) =>
+      (api.runningSaid as unknown as ((id: string, where?: Where) => Promise<Result<string>>) | undefined)?.(id, where) ??
+      Promise.resolve(done('')),
+    pageSaid: (where) =>
+      (api.pageSaid as unknown as ((where?: Where) => Promise<Result<readonly Said[]>>) | undefined)?.(where) ??
+      Promise.resolve(done([])),
     stopRunning: (id, where) => api.stopRunning(id, where),
     carried: (where) => api.carried(where),
     trustCarried: (id, trust, where) => api.trustCarried(id, trust, where),
@@ -2424,6 +2493,7 @@ function connect(): Bridge {
     connectedCheck: (name, where) => api.connectedCheck(name, where),
     connectedSave: (tools, where) => api.connectedSave(tools, where),
     changesLook: (where) => api.changesLook(where),
+    changesWider: (file, context, where) => api.changesWider(file, context, where),
     changesDrop: (patch, where) => api.changesDrop(patch, where),
     takeBackQueue: (where) => api.takeBackQueue(where),
     away: (where) => api.away(where),

@@ -20,6 +20,7 @@ import { defaultAppearance } from '../src/design/appearance';
 import { policyWords } from '../src/agent/pi/extension-policy';
 import Settings from '../src/components/Settings';
 import { ACTIONS } from '../src/lib/actions';
+import { TELLINGS } from '../src/work/notify';
 import { PAGES, ROWS, pageWords, rowsOn, settingsWords } from '../src/work/settingspages';
 
 beforeAll(() => {
@@ -306,7 +307,7 @@ describe('which app Open in goes to', () => {
   const advanced = (props: Partial<Parameters<typeof Settings>[0]>): HTMLElement => {
     const host = open(props);
     act(() => {
-      pageButton(host, pageWords.advanced.name).click();
+      pageButton(host, pageWords.behaviour.name).click();
     });
     return host;
   };
@@ -475,5 +476,152 @@ describe('things this project always does', () => {
     });
     act(() => (host.querySelector('.always__link') as HTMLElement).click());
     expect(went).toEqual(['always']);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Behaviour and Notifications                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Two pages of the things people expect a desktop tool to let them settle. */
+describe('behaviour', () => {
+  const behaviour = (props: Partial<Parameters<typeof Settings>[0]> = {}): HTMLElement => {
+    const host = open(props);
+    act(() => {
+      pageButton(host, pageWords.behaviour.name).click();
+    });
+    return host;
+  };
+
+  const strip = (host: HTMLElement, label: string): HTMLElement[] =>
+    [
+      ...(host.querySelector(`[role="radiogroup"][aria-label="${label}"]`)?.querySelectorAll(
+        '[role="radio"]',
+      ) ?? []),
+    ] as HTMLElement[];
+
+  it('offers where a launch lands, and hands back the one pressed', () => {
+    const got: string[] = [];
+    const host = behaviour({ openTo: 'last', onOpenTo: (choice) => got.push(choice) });
+    const choices = strip(host, 'When Graphe opens');
+    expect(choices.map((one) => one.textContent)).toEqual(['Last project', 'The project list']);
+    expect(choices[0]?.getAttribute('aria-checked')).toBe('true');
+    act(() => (choices[1] as HTMLElement).click());
+    expect(got).toEqual(['list']);
+  });
+
+  it('offers how the shelf comes back', () => {
+    const got: string[] = [];
+    const host = behaviour({
+      shelfAtLaunch: 'closed',
+      onShelfAtLaunch: (choice) => got.push(choice),
+    });
+    const choices = strip(host, 'Sidebar at launch');
+    expect(choices.map((one) => one.textContent)).toEqual(['As I left it', 'Open', 'Closed']);
+    expect(choices[2]?.getAttribute('aria-checked')).toBe('true');
+    act(() => (choices[0] as HTMLElement).click());
+    expect(got).toEqual(['remembered']);
+  });
+
+  /* The one list of chords, edited through the one mechanism: this row writes
+     the same binding the Keys page does. */
+  it('sends with whichever press, through the chords themselves', () => {
+    const got: [string, string | null][] = [];
+    const host = behaviour({ onMac: true, bindings: {}, onBind: (id, chord) => got.push([id, chord]) });
+    const choices = strip(host, 'Send with');
+    expect(choices[0]?.getAttribute('aria-checked')).toBe('true');
+    act(() => (choices[1] as HTMLElement).click());
+    expect(got).toEqual([['send', 'mod+enter']]);
+  });
+
+  it('ticks the other press once it is the one bound', () => {
+    const host = behaviour({ onMac: true, bindings: { send: 'mod+enter' }, onBind: () => {} });
+    expect(strip(host, 'Send with')[1]?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('has three switches, all on unless somebody turned one off', () => {
+    const got: [string, boolean][] = [];
+    const host = behaviour({
+      nameConversations: true,
+      askBeforeClosing: true,
+      snapBeforeApply: false,
+      onBehaviour: (which, on) => got.push([which, on]),
+    });
+    const at = (label: string): HTMLElement =>
+      ([...host.querySelectorAll('[role="switch"]')] as HTMLElement[]).find(
+        (one) => one.getAttribute('aria-label') === label,
+      ) as HTMLElement;
+    expect(at('Name conversations automatically').getAttribute('aria-checked')).toBe('true');
+    expect(at('Take a snapshot before work is brought into my folder').getAttribute('aria-checked')).toBe(
+      'false',
+    );
+    act(() => at('Ask before closing a conversation that is still working').click());
+    expect(got).toEqual([['askBeforeClosing', false]]);
+  });
+
+  /* Written on the way out rather than letter by letter, so a preference is
+     not saved nine times while somebody types one word. */
+  it('takes a reply language, and says what it does when nobody has set one', () => {
+    const got: string[] = [];
+    const host = behaviour({ replyLanguage: '', onReplyLanguage: (says) => got.push(says) });
+    const field = host.querySelector('input[aria-label="Reply language"]') as HTMLInputElement;
+    expect(field.placeholder).toBe('Same as the request');
+    act(() => {
+      field.value = 'French';
+      field.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(got).toEqual(['French']);
+  });
+});
+
+describe('notifications', () => {
+  const notifications = (props: Partial<Parameters<typeof Settings>[0]> = {}): HTMLElement => {
+    const host = open(props);
+    act(() => {
+      pageButton(host, pageWords.notifications.name).click();
+    });
+    return host;
+  };
+
+  const strip = (host: HTMLElement, label: string): HTMLElement[] =>
+    [
+      ...(host.querySelector(`[role="radiogroup"][aria-label="${label}"]`)?.querySelectorAll(
+        '[role="radio"]',
+      ) ?? []),
+    ] as HTMLElement[];
+
+  it('offers the same three answers to both kinds of interruption', () => {
+    const got: [string, string][] = [];
+    const host = notifications({
+      whenRunFinishes: 'bounce',
+      whenSomethingNeedsYou: 'system',
+      onTelling: (which, told) => got.push([which, told]),
+    });
+    for (const label of [
+      'When a run finishes and the window is not in front',
+      'When something needs an answer',
+    ]) {
+      expect(strip(host, label).map((one) => one.textContent)).toEqual(
+        TELLINGS.map((one) => one.says),
+      );
+    }
+    expect(strip(host, 'When a run finishes and the window is not in front')[1]?.getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    act(() => (strip(host, 'When something needs an answer')[2] as HTMLElement).click());
+    expect(got).toEqual([['whenSomethingNeedsYou', 'nothing']]);
+  });
+
+  it('keeps the sound off and the badge on until somebody says otherwise', () => {
+    const got: [string, boolean][] = [];
+    const host = notifications({ onBehaviour: (which, on) => got.push([which, on]) });
+    const at = (label: string): HTMLElement =>
+      ([...host.querySelectorAll('[role="switch"]')] as HTMLElement[]).find(
+        (one) => one.getAttribute('aria-label') === label,
+      ) as HTMLElement;
+    expect(at('Play a sound').getAttribute('aria-checked')).toBe('false');
+    expect(at('Badge the Dock with what is waiting').getAttribute('aria-checked')).toBe('true');
+    act(() => at('Play a sound').click());
+    expect(got).toEqual([['notifySound', true]]);
   });
 });

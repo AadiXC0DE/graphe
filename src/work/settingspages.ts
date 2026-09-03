@@ -20,6 +20,8 @@ import { THEME_WORDS } from '../lib/theme';
 
 export type Page =
   | 'appearance'
+  | 'behaviour'
+  | 'notifications'
   | 'keys'
   | 'models'
   | 'add-ons'
@@ -31,8 +33,8 @@ export type Page =
   | 'always';
 
 /** What kind of control the row is. `goes` opens somewhere else, `press` does
- *  something once. */
-export type RowKind = 'switch' | 'choice' | 'goes' | 'press';
+ *  something once, `text` is a field somebody types into. */
+export type RowKind = 'switch' | 'choice' | 'goes' | 'press' | 'text';
 
 export type Row = {
   id: string;
@@ -49,8 +51,14 @@ export type Row = {
   keys?: string;
 };
 
+/** Appearance is how it looks and Behaviour is how it acts, so the two pages
+ *  about the app itself sit together at the top; Notifications is behaviour
+ *  while you are looking elsewhere, and follows it. Everything below is
+ *  machinery, and Advanced is still the floor. */
 export const PAGES: readonly Page[] = [
   'appearance',
+  'behaviour',
+  'notifications',
   'keys',
   'models',
   'add-ons',
@@ -63,6 +71,14 @@ export const pageWords: Record<Page, { name: string; note: string }> = {
   appearance: {
     name: 'Appearance',
     note: 'How the app looks, and how much of the machinery it names.',
+  },
+  behaviour: {
+    name: 'Behaviour',
+    note: 'What happens at launch, what sends a message, and what is done for you.',
+  },
+  notifications: {
+    name: 'Notifications',
+    note: 'How you hear about work while you are looking at something else.',
   },
   keys: { name: 'Keys', note: 'Every command and the keys it answers to.' },
   models: { name: 'Models', note: 'Which model does the work, whose account pays, and what it cost.' },
@@ -77,10 +93,42 @@ export const pageWords: Record<Page, { name: string; note: string }> = {
   },
   advanced: {
     name: 'Advanced',
-    note: 'Editor, terminal, and what runs on its own.',
+    note: 'What this project runs on its own.',
   },
   always: { name: 'Always', note: 'What runs without being asked, and when.' },
 };
+
+/* -------------------------------------------------------------------------- */
+/* The answers two of the behaviour rows offer                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Where a launch lands. */
+export type OpenTo = 'last' | 'list';
+
+export const OPEN_TO: readonly { id: OpenTo; says: string }[] = [
+  { id: 'last', says: 'Last project' },
+  { id: 'list', says: 'The project list' },
+];
+
+export function asOpenTo(raw: unknown): OpenTo {
+  return raw === 'list' ? 'list' : 'last';
+}
+
+/** How the shelf comes back at launch. */
+export type ShelfAtLaunch = 'remembered' | 'open' | 'closed';
+
+export const SHELF_AT_LAUNCH: readonly { id: ShelfAtLaunch; says: string }[] = [
+  { id: 'remembered', says: 'As I left it' },
+  { id: 'open', says: 'Open' },
+  { id: 'closed', says: 'Closed' },
+];
+
+export function asShelfAtLaunch(raw: unknown): ShelfAtLaunch {
+  return raw === 'open' || raw === 'closed' ? raw : 'remembered';
+}
+
+/** What the Reply language field shows while nobody has asked for one. */
+export const SAME_LANGUAGE = 'Same as the request';
 
 export const settingsWords = {
   title: 'Settings',
@@ -125,6 +173,124 @@ export const ROWS: readonly Row[] = [
     kind: 'switch',
     also: ['file tree', 'sidebar', 'explorer', 'folder'],
     keys: 'mod+shift+f',
+  },
+
+  /* ------------------------------------------------------------- behaviour */
+  {
+    id: 'open-to',
+    page: 'behaviour',
+    name: 'When Graphe opens',
+    note: 'The project you were last in, or the list of all of them.',
+    kind: 'choice',
+    also: ['startup', 'launch', 'start', 'last project', 'reopen'],
+  },
+  {
+    id: 'shelf-at-launch',
+    page: 'behaviour',
+    name: 'Sidebar at launch',
+    note: 'Whether the shelf beside the conversation comes back the way you left it.',
+    kind: 'choice',
+    also: ['startup', 'launch', 'shelf', 'sidebar', 'panel'],
+    keys: 'mod+b',
+  },
+  {
+    id: 'send-with',
+    page: 'behaviour',
+    name: 'Send with',
+    note: 'Which press sends a message. The other one starts a new line.',
+    kind: 'choice',
+    also: ['enter', 'return', 'newline', 'composer', 'submit'],
+  },
+  {
+    id: 'name-conversations',
+    page: 'behaviour',
+    name: 'Name conversations automatically',
+    note: 'The first thing you ask becomes the name of the conversation and of its branch.',
+    kind: 'switch',
+    also: ['title', 'name', 'rename', 'automatic'],
+  },
+  {
+    id: 'ask-before-closing',
+    page: 'behaviour',
+    name: 'Ask before closing a conversation that is still working',
+    kind: 'switch',
+    note: 'Closing one while it runs throws away the turn it was in the middle of.',
+    also: ['close', 'confirm', 'warn', 'running', 'quit'],
+    keys: 'mod+w',
+  },
+  {
+    id: 'snap-before-apply',
+    page: 'behaviour',
+    name: 'Take a snapshot before work is brought into my folder',
+    note: 'A version put down the moment before your files change, so going back is one press.',
+    kind: 'switch',
+    also: ['version', 'snapshot', 'undo', 'backup', 'revert'],
+  },
+  {
+    id: 'editor',
+    page: 'behaviour',
+    name: 'Editor',
+    note: 'Where Open in editor goes.',
+    kind: 'choice',
+    also: ['vscode', 'code', 'ide', 'zed', 'cursor', 'open in'],
+  },
+  {
+    id: 'terminal',
+    page: 'behaviour',
+    name: 'Terminal',
+    note: 'Where a shell on this project opens.',
+    kind: 'choice',
+    also: ['iterm', 'warp', 'ghostty', 'shell', 'console', 'open in'],
+  },
+  {
+    id: 'new-model',
+    page: 'behaviour',
+    name: 'Default model for new projects',
+    note: 'What a project starts on before anybody chooses something else for it.',
+    kind: 'choice',
+    also: ['llm', 'default', 'new project', 'opus', 'sonnet', 'haiku'],
+  },
+  {
+    id: 'reply-language',
+    page: 'behaviour',
+    name: 'Reply language',
+    note: 'What replies come back in. Left alone, each answer matches the request.',
+    kind: 'text',
+    also: ['language', 'locale', 'translate', 'english', 'french'],
+  },
+
+  /* --------------------------------------------------------- notifications */
+  {
+    id: 'when-finished',
+    page: 'notifications',
+    name: 'When a run finishes and the window is not in front',
+    note: 'Nothing is said while you are watching it happen.',
+    kind: 'choice',
+    also: ['notification', 'alert', 'dock', 'bounce', 'finished', 'done'],
+  },
+  {
+    id: 'when-needed',
+    page: 'notifications',
+    name: 'When something needs an answer',
+    note: 'Said whether or not the window is in front, because nothing moves until you answer.',
+    kind: 'choice',
+    also: ['notification', 'alert', 'dock', 'bounce', 'question', 'waiting'],
+  },
+  {
+    id: 'notify-sound',
+    page: 'notifications',
+    name: 'Play a sound',
+    note: 'A noise with whatever is said. Off, being told is silent.',
+    kind: 'switch',
+    also: ['sound', 'noise', 'chime', 'beep', 'audio'],
+  },
+  {
+    id: 'badge-dock',
+    page: 'notifications',
+    name: 'Badge the Dock with what is waiting',
+    note: 'How many pieces of finished work are waiting to be looked at, on the icon.',
+    kind: 'switch',
+    also: ['badge', 'dock', 'count', 'review', 'icon'],
   },
 
   /* ------------------------------------------------------------------ keys */
@@ -260,22 +426,6 @@ export const ROWS: readonly Row[] = [
     note: 'Commands that run without being asked: format what was written, run the tests. One file, kept with the project.',
     kind: 'goes',
     also: ['hooks', 'format', 'lint', 'tests', 'automatic'],
-  },
-  {
-    id: 'editor',
-    page: 'advanced',
-    name: 'Editor',
-    note: 'Where Open in editor goes.',
-    kind: 'choice',
-    also: ['vscode', 'code', 'ide', 'zed', 'cursor', 'open in'],
-  },
-  {
-    id: 'terminal',
-    page: 'advanced',
-    name: 'Terminal',
-    note: 'Where a shell on this project opens.',
-    kind: 'choice',
-    also: ['iterm', 'warp', 'ghostty', 'shell', 'console', 'open in'],
   },
 ];
 

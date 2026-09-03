@@ -223,6 +223,20 @@
    The scroller
    --------------------------------------------------------------------------- */
 
+.diffview__pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The heading of the file being read, held above the scroller. The list is
+   windowed, so a heading scrolled out of the drawn range cannot pin itself. */
+.diffview__pinned {
+  flex: none;
+}
+
 .diffview__body {
   flex: 1 1 auto;
   min-height: 0;
@@ -561,6 +575,130 @@
 .diffview__dropped {
   opacity: 0.45;
   filter: saturate(0.4);
+}
+
+/* ---------------------------------------------------------------------------
+   Folds, and remarks on a line
+   --------------------------------------------------------------------------- */
+
+.diffview__folded {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 22px;
+  padding: 0 var(--space-3);
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.diffview__unfold {
+  padding: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.diffview__unfold:hover {
+  color: var(--text);
+}
+
+/* The lines between two pieces where nobody can fetch them: a rule saying how
+   many, rather than a press that would do nothing. */
+.diffview__between {
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+/* The `+` sits over the first number rather than beside it, so a row is the
+   same height whether or not a remark can be left on it. */
+.diffview__lined {
+  position: relative;
+}
+
+.diffview__add {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--gutter);
+  height: 100%;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--accent-text);
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+}
+
+.diffview__lined:hover .diffview__add {
+  display: flex;
+}
+
+.diffview__said {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: var(--space-1) var(--space-3) var(--space-1) var(--gutter);
+  padding: var(--space-2);
+  font-family: var(--font-ui);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.diffview__by {
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+.diffview__when {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.diffview__saidbody {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.diffview__saying {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-1) var(--space-3) var(--space-1) var(--gutter);
+  padding: var(--space-2);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.diffview__field {
+  min-height: 56px;
+  padding: var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+.diffview__sayrow {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 .diffview__rest {

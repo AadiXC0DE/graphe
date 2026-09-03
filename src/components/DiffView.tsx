@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
+import { foldIn, foldUnchanged } from '../diff/collapse';
 import { WORDS } from '../diff/hunks';
 import type { FileChange, Hunk } from '../diff/hunks';
 import { piecesOf } from '../diff/paint';
@@ -7,22 +8,26 @@ import type { Token } from '../diff/paint';
 import {
   BUDGET,
   captionOf,
+  commentsByLine,
   entriesOf,
   fileAt,
   fileKeep,
   fileRows,
   indexOfFile,
   indexOfHunk,
+  lineAt,
+  lineKey,
   lineOf,
   onlySpacing,
   sidesOf,
   tallyOf,
 } from '../diff/rows';
-import type { Cell, Entry, Reading } from '../diff/rows';
+import type { Cell, DiffComment, Entry, Reading } from '../diff/rows';
 import { sideWords } from '../diff/sidebyside';
 import type { Line, Mark, Row } from '../diff/sidebyside';
 import { tokensOf } from '../lib/highlight';
 import { languageOf } from '../lib/markdown';
+import { ago } from '../lib/when';
 import { useWindowed } from '../lib/windowed';
 import './DiffView.css';
 
@@ -41,6 +46,13 @@ type Props = {
    *  answer starts where the eye already is. */
   onExplain?: (file: string, line: number) => void;
   onFix?: (file: string, line: number) => void;
+  /** Remarks already on the change, drawn under the lines they were left on. */
+  comments?: readonly DiffComment[];
+  /** Left off, no line offers to take a remark and the gutter is as it was. */
+  onComment?: (file: string, line: number, text: string) => void | Promise<void>;
+  /** More of the file than git sent, around a line at the edge of a piece.
+   *  Left off, a fold still opens what is already in hand. */
+  onExpand?: (file: string, around: number) => void | Promise<void>;
 };
 
 export const DIFF_SAYS = {
@@ -70,6 +82,18 @@ export const DIFF_SAYS = {
   showFiles: 'Show the file list',
   whitespace: 'Whitespace',
   whitespaceWhy: 'Show lines where only the spacing changed',
+  collapse: 'Collapse unchanged',
+  collapseWhy: 'Fold long runs of unchanged lines',
+  hidden: (lines: number): string =>
+    `Show ${String(lines)} more ${lines === 1 ? 'line' : 'lines'}`,
+  more: 'More context',
+  moreWhy: 'Read more of the file than git sent',
+  between: (lines: number): string =>
+    `${String(lines)} more ${lines === 1 ? 'line' : 'lines'}`,
+  comment: 'Comment on this line',
+  saying: 'Write a comment',
+  post: 'Post',
+  cancel: 'Cancel',
   whole: (files: number, added: number, removed: number): string =>
     `${String(files)} ${files === 1 ? 'file' : 'files'} · +${String(added)} −${String(removed)}`,
 } as const;
@@ -89,6 +113,9 @@ const REMEMBERED = 'graphe.diff.reading';
 
 /** Whether the file list is out. */
 const FILES_SHOWN = 'graphe.diff.files';
+
+/** Whether long runs of unchanged lines are folded. On unless turned off. */
+const COLLAPSED = 'graphe.diff.collapse';
 
 function remembered(key: string): string | null {
   try {
@@ -252,6 +279,67 @@ function OneRow({ cell, hunk, painted }: { cell: Cell; hunk: Hunk; painted: Pain
   );
 }
 
+/** A file's heading. Drawn in the list where the file starts, and again pinned
+ *  above the scroller once that row has gone past the top. */
+function FileTop({
+  file,
+  dropped,
+  busy,
+  onKeepFile,
+}: {
+  file: FileChange;
+  dropped: ReadonlySet<string>;
+  busy: boolean;
+  onKeepFile: ((file: FileChange, keep: boolean) => void) | undefined;
+}) {
+  const state = fileKeep(file, dropped);
+  const added = file.hunks.reduce((sum, hunk) => sum + hunk.added, 0);
+  const removed = file.hunks.reduce((sum, hunk) => sum + hunk.removed, 0);
+  return (
+    <div className={`diffview__filetop ${state === 'none' ? 'diffview__filetop--off' : ''}`}>
+      <span className={`diffview__kind diffview__kind--${file.kind}`}>{WORDS.kinds[file.kind]}</span>
+      <span className="diffview__path" title={file.path}>
+        {file.kind === 'renamed' ? DIFF_SAYS.moved(file.oldPath, file.path) : file.path}
+      </span>
+      {file.hunks.length === 0 ? null : (
+        <span className="diffview__tally">{DIFF_SAYS.tally(added, removed)}</span>
+      )}
+      {onKeepFile === undefined || file.hunks.length === 0 ? null : (
+        <span className="diffview__fileall">
+          <button
+            type="button"
+            className={`diffview__small ${state === 'all' ? 'diffview__small--on' : ''}`}
+            onClick={() => onKeepFile(file, true)}
+            disabled={busy}
+          >
+            {DIFF_SAYS.keepAll}
+          </button>
+          <button
+            type="button"
+            className={`diffview__small ${state === 'none' ? 'diffview__small--on' : ''}`}
+            onClick={() => onKeepFile(file, false)}
+            disabled={busy}
+          >
+            {DIFF_SAYS.dropAll}
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** One remark, under the line it was left on. */
+function Said({ said }: { said: DiffComment }) {
+  const when = Date.parse(said.at);
+  return (
+    <div className="diffview__said">
+      <span className="diffview__by">{said.author}</span>
+      {Number.isNaN(when) ? null : <span className="diffview__when">{ago(when)}</span>}
+      <p className="diffview__saidbody">{said.body}</p>
+    </div>
+  );
+}
+
 /**
  * A change, drawn.
  *
@@ -275,6 +363,9 @@ export default function DiffView({
   busy = false,
   onExplain,
   onFix,
+  comments,
+  onComment,
+  onExpand,
 }: Props) {
   const [reading, setReading] = useState<Reading>(rememberedReading);
   const [budget, setBudget] = useState(BUDGET);
@@ -282,6 +373,12 @@ export default function DiffView({
      rather than a decision about this change. */
   const [listing, setListing] = useState(() => remembered(FILES_SHOWN) !== 'shut');
   const [spacing, setSpacing] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => remembered(COLLAPSED) !== 'no');
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set<string>());
+  /* The line a remark is being written on, and the row that is drawn under. */
+  const [asking, setAsking] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [topAt, setTopAt] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const heights = useRef<number[]>([]);
@@ -305,7 +402,16 @@ export default function DiffView({
     });
   }, [entries, spacing]);
 
-  const { first, last, before, after, measure: mark } = useWindowed(shown.length, {
+  /* Three lines of context either side of a change; the rest is one row that
+     says how much is under it. */
+  const folded = useMemo(
+    () => (collapsed ? foldUnchanged(shown, opened) : shown),
+    [shown, collapsed, opened],
+  );
+
+  const said = useMemo(() => commentsByLine(comments ?? []), [comments]);
+
+  const { first, last, before, after, measure: mark } = useWindowed(folded.length, {
     scroller,
     list,
     guess: GUESS_ROW,
@@ -323,7 +429,7 @@ export default function DiffView({
   // A different arrangement is a different set of heights.
   useEffect(() => {
     heights.current = [];
-  }, [shown]);
+  }, [folded]);
 
   const [painted, setPainted] = useState<ReadonlyMap<string, Painted>>(() => new Map());
   const asked = useRef<Set<string>>(new Set());
@@ -332,7 +438,33 @@ export default function DiffView({
     asked.current = new Set();
     setPainted(new Map());
     setBudget(BUDGET);
+    setOpened(new Set<string>());
+    setAsking(null);
   }, [files]);
+
+  /* Which row the scroller is actually standing on, rather than where the
+     window starts: the pinned heading and the file list both follow it. */
+  useEffect(() => {
+    const pane = scroller.current;
+    if (pane === null) return;
+    const settle = (): void => {
+      let top = 0;
+      let index = 0;
+      while (index < folded.length) {
+        const tall = heights.current[index];
+        const step = tall === undefined || tall <= 0 ? GUESS_ROW : tall;
+        if (top + step > pane.scrollTop) break;
+        top += step;
+        index += 1;
+      }
+      setTopAt(index);
+    };
+    pane.addEventListener('scroll', settle, { passive: true });
+    settle();
+    return () => pane.removeEventListener('scroll', settle);
+    // The window sliding means rows have been measured, and the arithmetic
+    // above reads those heights.
+  }, [folded, first, last]);
 
   /* Only the pieces somebody is looking at are coloured. The highlighter is a
      large late import and a diff can hold a thousand hunks; asking it for all
@@ -340,12 +472,12 @@ export default function DiffView({
   const inView = useMemo(() => {
     const seen = new Map<string, Hunk>();
     for (let step = first; step < last; step += 1) {
-      const entry = shown[step];
+      const entry = folded[step];
       if (entry === undefined || (entry.kind !== 'split' && entry.kind !== 'one')) continue;
       if (!seen.has(entry.hunk.id)) seen.set(entry.hunk.id, entry.hunk);
     }
     return [...seen.values()];
-  }, [shown, first, last]);
+  }, [folded, first, last]);
 
   useEffect(() => {
     let live = true;
@@ -373,7 +505,7 @@ export default function DiffView({
      yet is reached by the arithmetic instead. */
   useEffect(() => {
     if (at === null) return;
-    const index = indexOfHunk(shown, at);
+    const index = indexOfHunk(folded, at);
     if (index < 0) return;
     const drawn = [...(list.current?.querySelectorAll('[data-piece]') ?? [])].find(
       (el) => el.getAttribute('data-piece') === at,
@@ -390,15 +522,24 @@ export default function DiffView({
       top += tall === undefined || tall <= 0 ? GUESS_ROW : tall;
     }
     pane.scrollTop = top;
-  }, [at, shown]);
+  }, [at, folded]);
 
-  const here = fileAt(shown, first);
+  const here = fileAt(folded, topAt);
   const rows = useMemo(() => fileRows(files, dropped ?? new Set<string>()), [files, dropped]);
   const whole = useMemo(() => tallyOf(rows), [rows]);
 
+  /* The heading pins above the scroller only once its own row has gone past the
+     top, so a file never carries two headings at once. */
+  const headAt = here === null ? -1 : indexOfFile(folded, here.path);
+  const pinned = here !== null && headAt >= 0 && headAt < topAt;
+
+  const open = useCallback((key: string) => {
+    setOpened((was) => new Set(was).add(key));
+  }, []);
+
   const goToFile = useCallback(
     (path: string) => {
-      const index = indexOfFile(shown, path);
+      const index = indexOfFile(folded, path);
       if (index < 0) return;
       const pane = scroller.current;
       if (pane === null) return;
@@ -409,11 +550,12 @@ export default function DiffView({
       }
       pane.scrollTop = top;
     },
-    [shown],
+    [folded],
   );
 
-  /* `n` and `p` move a file at a time, `[` folds the list. The hunk keys are
-     the caller's, on the sheet around this. */
+  /* `n` and `p` move a file at a time, `[` folds the list, `e` opens the fold
+     nearest the cursor. The hunk keys are the caller's, on the sheet around
+     this. */
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -427,55 +569,34 @@ export default function DiffView({
         });
         return;
       }
+      if (event.key === 'e') {
+        if (at === null) return;
+        const key = foldIn(folded, at);
+        if (key === null) return;
+        event.preventDefault();
+        open(key);
+        return;
+      }
       if (event.key !== 'n' && event.key !== 'p') return;
-      const at = rows.findIndex((one) => one.path === (here?.path ?? ''));
-      const to = rows[Math.max(0, Math.min(rows.length - 1, at + (event.key === 'n' ? 1 : -1)))];
+      const from = rows.findIndex((one) => one.path === (here?.path ?? ''));
+      const to = rows[Math.max(0, Math.min(rows.length - 1, from + (event.key === 'n' ? 1 : -1)))];
       if (to === undefined) return;
       event.preventDefault();
       goToFile(to.path);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [rows, here, goToFile]);
+  }, [rows, here, goToFile, at, folded, open]);
 
   const drawEntry = (entry: Entry): React.ReactNode => {
     if (entry.kind === 'file') {
-      const file = entry.file;
-      const state = fileKeep(file, dropped ?? new Set<string>());
-      const added = file.hunks.reduce((sum, hunk) => sum + hunk.added, 0);
-      const removed = file.hunks.reduce((sum, hunk) => sum + hunk.removed, 0);
       return (
-        <div className={`diffview__filetop ${state === 'none' ? 'diffview__filetop--off' : ''}`}>
-          <span className={`diffview__kind diffview__kind--${file.kind}`}>
-            {WORDS.kinds[file.kind]}
-          </span>
-          <span className="diffview__path" title={file.path}>
-            {file.kind === 'renamed' ? DIFF_SAYS.moved(file.oldPath, file.path) : file.path}
-          </span>
-          {file.hunks.length === 0 ? null : (
-            <span className="diffview__tally">{DIFF_SAYS.tally(added, removed)}</span>
-          )}
-          {onKeepFile === undefined || file.hunks.length === 0 ? null : (
-            <span className="diffview__fileall">
-              <button
-                type="button"
-                className={`diffview__small ${state === 'all' ? 'diffview__small--on' : ''}`}
-                onClick={() => onKeepFile(file, true)}
-                disabled={busy}
-              >
-                {DIFF_SAYS.keepAll}
-              </button>
-              <button
-                type="button"
-                className={`diffview__small ${state === 'none' ? 'diffview__small--on' : ''}`}
-                onClick={() => onKeepFile(file, false)}
-                disabled={busy}
-              >
-                {DIFF_SAYS.dropAll}
-              </button>
-            </span>
-          )}
-        </div>
+        <FileTop
+          file={entry.file}
+          dropped={dropped ?? new Set<string>()}
+          busy={busy}
+          onKeepFile={onKeepFile}
+        />
       );
     }
 
@@ -555,6 +676,47 @@ export default function DiffView({
       );
     }
 
+    /* The lines between two pieces. Nothing here has them, so the only thing
+       to do with the row is ask the caller for them. */
+    if (entry.kind === 'gap') {
+      return (
+        <div className="diffview__folded">
+          {onExpand === undefined ? (
+            <span className="diffview__between">{DIFF_SAYS.between(entry.hidden)}</span>
+          ) : (
+            <button
+              type="button"
+              className="diffview__unfold"
+              title={DIFF_SAYS.moreWhy}
+              onClick={() => void onExpand(entry.hunk.path, entry.line)}
+            >
+              {DIFF_SAYS.hidden(entry.hidden)}
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    if (entry.kind === 'fold') {
+      return (
+        <div className="diffview__folded">
+          <button type="button" className="diffview__unfold" onClick={() => { open(entry.key); }}>
+            {DIFF_SAYS.hidden(entry.hidden)}
+          </button>
+          {onExpand === undefined || !entry.edge ? null : (
+            <button
+              type="button"
+              className="diffview__small"
+              title={DIFF_SAYS.moreWhy}
+              onClick={() => void onExpand(entry.hunk.path, entry.line)}
+            >
+              {DIFF_SAYS.more}
+            </button>
+          )}
+        </div>
+      );
+    }
+
     const off = dropped?.has(entry.hunk.id) ?? false;
     const body =
       entry.kind === 'split' ? (
@@ -562,7 +724,63 @@ export default function DiffView({
       ) : (
         <OneRow cell={entry.cell} hunk={entry.hunk} painted={painted.get(entry.hunk.id)} />
       );
-    return off ? <div className="diffview__dropped">{body}</div> : body;
+    const line = lineAt(entry);
+    const key = line === null ? null : lineKey(entry.hunk.path, line);
+    const on = key === null ? undefined : said.get(key);
+    const writing = key !== null && key === asking;
+    return (
+      <>
+        <div className={`diffview__lined ${off ? 'diffview__dropped' : ''}`}>
+          {body}
+          {onComment === undefined || key === null ? null : (
+            <button
+              type="button"
+              className="diffview__add"
+              title={DIFF_SAYS.comment}
+              aria-label={DIFF_SAYS.comment}
+              onClick={() => {
+                setAsking(key);
+                setDraft('');
+              }}
+            >
+              +
+            </button>
+          )}
+        </div>
+        {on?.map((one) => <Said key={one.id} said={one} />)}
+        {!writing || line === null || onComment === undefined ? null : (
+          <div className="diffview__saying">
+            <textarea
+              className="diffview__field"
+              placeholder={DIFF_SAYS.saying}
+              value={draft}
+              autoFocus
+              onChange={(event) => { setDraft(event.target.value); }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setAsking(null);
+              }}
+            />
+            <div className="diffview__sayrow">
+              <button type="button" className="diffview__small" onClick={() => { setAsking(null); }}>
+                {DIFF_SAYS.cancel}
+              </button>
+              <button
+                type="button"
+                className="diffview__small diffview__small--on"
+                disabled={draft.trim() === ''}
+                onClick={() => {
+                  void onComment(entry.hunk.path, line, draft.trim());
+                  setAsking(null);
+                  setDraft('');
+                }}
+              >
+                {DIFF_SAYS.post}
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    );
   };
 
   return (
@@ -595,6 +813,20 @@ export default function DiffView({
           onClick={() => setSpacing((was) => !was)}
         >
           {DIFF_SAYS.whitespace}
+        </button>
+        <button
+          type="button"
+          className={`diffview__way ${collapsed ? 'diffview__way--on' : ''}`}
+          aria-pressed={collapsed}
+          title={DIFF_SAYS.collapseWhy}
+          onClick={() =>
+            setCollapsed((was) => {
+              keep(COLLAPSED, was ? 'no' : 'yes');
+              return !was;
+            })
+          }
+        >
+          {DIFF_SAYS.collapse}
         </button>
         <span className="diffview__ways" role="group" aria-label={DIFF_SAYS.reading}>
           <button
@@ -651,20 +883,32 @@ export default function DiffView({
         </nav>
       ) : null}
 
-      <div className="diffview__body scroll--auto" ref={scroller}>
-        <div className="diffview__list" ref={list}>
-          <div style={{ height: before }} aria-hidden="true" />
-          {shown.slice(first, last).map((entry, offset) => (
-            <div
-              key={entry.key}
-              ref={(el) => {
-                measure(first + offset, el);
-              }}
-            >
-              {drawEntry(entry)}
-            </div>
-          ))}
-          <div style={{ height: after }} aria-hidden="true" />
+      <div className="diffview__pane">
+        {pinned ? (
+          <div className="diffview__pinned">
+            <FileTop
+              file={here}
+              dropped={dropped ?? new Set<string>()}
+              busy={busy}
+              onKeepFile={onKeepFile}
+            />
+          </div>
+        ) : null}
+        <div className="diffview__body scroll--auto" ref={scroller}>
+          <div className="diffview__list" ref={list}>
+            <div style={{ height: before }} aria-hidden="true" />
+            {folded.slice(first, last).map((entry, offset) => (
+              <div
+                key={entry.key}
+                ref={(el) => {
+                  measure(first + offset, el);
+                }}
+              >
+                {drawEntry(entry)}
+              </div>
+            ))}
+            <div style={{ height: after }} aria-hidden="true" />
+          </div>
         </div>
       </div>
       </div>

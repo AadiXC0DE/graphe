@@ -88,6 +88,7 @@ export const ACTIONS: readonly Action[] = [
   { id: 'canvas', says: 'Open the canvas', where: 'in a project', chord: null },
   { id: 'reviews', says: 'Read the pull requests', where: 'in a project', chord: null },
   { id: 'design', says: 'Open the design view', where: 'in a project', chord: 'mod+d' },
+  { id: 'commands', says: 'Show the commands', where: 'in a project', chord: 'mod+`' },
 
   { id: 'send', says: 'Send', where: 'in a conversation', chord: 'enter', also: ['mod+enter'] },
   { id: 'stop', says: 'Stop what is running', where: 'in a conversation', chord: 'escape' },

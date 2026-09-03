@@ -42,6 +42,11 @@
      somebody has opened it, which keeps this whole file unchanged for everybody
      who has not. */
   --browser-take: 0px;
+  /* How tall the commands drawer is, and how much of the bottom it is holding.
+     The second is zero until it is opened, so the composer sits on the glass
+     for everybody who never opens it. */
+  --commands-height: 240px;
+  --commands-take: 0px;
   /* The conversation's floor. It never goes below this — squeezing a thread
      into a column too narrow to read is how every side-by-side layout fails,
      and the fix is a floor rather than a smaller font. */
@@ -285,7 +290,14 @@
   align-items: stretch;
   gap: var(--space-2);
   background: var(--bg);
-  padding-bottom: calc(var(--space-5) + var(--space-3));
+  padding-bottom: calc(var(--space-5) + var(--space-3) + var(--commands-take));
+}
+
+/* The drawer takes the bottom of the window, so the composer takes its room out
+   of its own foot rather than moving: the box you type in stays where the hands
+   already are. */
+.app--commands {
+  --commands-take: var(--commands-height);
 }
 
 /* The last line of the conversation used to end at a hard horizontal edge where

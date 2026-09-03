@@ -1,6 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
-import type { RepoItem, RepoLook } from '../lib/ipc';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PullCheck, PullComment, RepoItem, RepoLook, Result } from '../lib/ipc';
+import { parseDiff } from '../diff/hunks';
+import {
+  checkLine,
+  chipsFor,
+  firstFilter,
+  issuePrompt,
+  listFor,
+  markOf,
+  moveBy,
+  rowSub,
+  type Filter,
+  type Mark,
+} from '../work/pulls';
 import { ago } from '../lib/when';
+import DiffView from './DiffView';
+import Markdown from './Markdown';
 import './ReviewsView.css';
 import './Sheet.css';
 
@@ -14,11 +29,25 @@ type Props = {
   onClose: () => void;
   /** Open one pull request's review in the conversation. */
   onReview: (item: RepoItem) => void;
+  /** Start a conversation on an issue, with the issue as its first message. */
+  onWork?: (item: RepoItem, first: string) => void;
   /** The projects inside this folder, when it holds several. */
   repos?: readonly { name: string; path: string }[];
   /** Whose pull requests are being shown, and how to show another's. */
   which?: string | null;
   onWhich?: (name: string) => void;
+  /** The reads this screen makes of one pull request. Absent in a browser tab,
+   *  where the Files tab and the checks line simply do not appear. */
+  prDiff?: (number: number) => Promise<Result<string>>;
+  prChecks?: (number: number) => Promise<Result<readonly PullCheck[]>>;
+  prCheckout?: (number: number) => Promise<Result<string>>;
+  prComments?: (number: number) => Promise<Result<readonly PullComment[]>>;
+  prComment?: (
+    number: number,
+    body: string,
+    path: string,
+    line: number,
+  ) => Promise<Result<readonly PullComment[]>>;
 };
 
 export const SAYS = {
@@ -47,10 +76,31 @@ export const SAYS = {
     'You need the github CLI (`gh`) installed and logged in, the same one your terminal uses, and the project needs a `github.com` remote.',
   issues: 'Issues',
   prs: 'Pull requests',
-  prAction: 'Review this PR',
-  openUrl: 'Open in github',
+  prAction: 'Review with Graphe',
+  openUrl: 'Open on GitHub',
   by: (author: string): string => `by ${author}`,
   changed: 'Updated',
+  /** The detail's two tabs. */
+  description: 'Description',
+  files: 'Files',
+  noDescription: 'No description written.',
+  /** The issue action, and the row of things behind the dots. */
+  work: 'Work on this',
+  more: 'More',
+  checkout: 'Check out this branch',
+  copyLink: 'Copy link',
+  copied: 'Link copied',
+  /** Marks on a row, for whoever is reading with a screen reader. */
+  mark: {
+    open: 'Open',
+    merged: 'Merged',
+    closed: 'Closed',
+    draft: 'Draft',
+    issue: 'Issue',
+  } as Record<Mark, string>,
+  hasComments: 'Has review comments',
+  readingDiff: 'Reading the diff…',
+  noDiff: 'This pull request changes nothing.',
 } as const;
 
 /**
@@ -106,10 +156,82 @@ Be specific: name file paths and lines, and give a one-line reason for every poi
 Finish with a short plain summary followed by a fenced review block: a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, \`"pull": ${item.number}\`, and the findings, each with priority (0 blocks shipping, 1 should be fixed first, 2 can wait, 3 a note), file, line, issue, impact and confidence (0-100). The findings then appear as a card with a button that posts them on the pull request, so do not post them yourself.`;
 }
 
-export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, repos, which, onWhich }: Props) {
+/** The state mark. Shape as well as colour, so it still reads at a glance for
+ *  somebody who does not see the difference between green and purple. */
+function StateMark({ mark }: { mark: Mark }) {
+  const common = { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true } as const;
+  const stroke = { stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' } as const;
+  if (mark === 'issue') {
+    return (
+      <svg {...common} className="reviews__mark reviews__mark--issue">
+        <circle cx="8" cy="8" r="5.25" {...stroke} />
+        <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+      </svg>
+    );
+  }
+  if (mark === 'merged') {
+    return (
+      <svg {...common} className="reviews__mark reviews__mark--merged">
+        <circle cx="4.5" cy="3.5" r="2" {...stroke} />
+        <circle cx="4.5" cy="12.5" r="2" {...stroke} />
+        <circle cx="11.5" cy="8" r="2" {...stroke} />
+        <path d="M4.5 5.5v5" {...stroke} />
+        <path d="M6.5 5.5a3.5 3.5 0 0 0 3 2.5" {...stroke} />
+      </svg>
+    );
+  }
+  if (mark === 'closed') {
+    return (
+      <svg {...common} className="reviews__mark reviews__mark--closed">
+        <circle cx="4.5" cy="3.5" r="2" {...stroke} />
+        <circle cx="4.5" cy="12.5" r="2" {...stroke} />
+        <path d="M4.5 5.5v5" {...stroke} />
+        <path d="M9 4.5h5" {...stroke} />
+      </svg>
+    );
+  }
+  const dotted = mark === 'draft' ? { strokeDasharray: '1.5 2' } : {};
+  return (
+    <svg {...common} className={`reviews__mark reviews__mark--${mark}`}>
+      <circle cx="4.5" cy="3.5" r="2" {...stroke} {...dotted} />
+      <circle cx="4.5" cy="12.5" r="2" {...stroke} {...dotted} />
+      <circle cx="11.5" cy="3.5" r="2" {...stroke} {...dotted} />
+      <path d="M4.5 5.5v5" {...stroke} {...dotted} />
+      <path d="M11.5 5.5c0 3-3 2.5-5 5" {...stroke} {...dotted} />
+    </svg>
+  );
+}
+
+/** One remote read, kept per pull request until the next Refresh. */
+type Cache<T> = ReadonlyMap<number, T>;
+
+export default function ReviewsView({
+  repo,
+  busy,
+  onRefresh,
+  onClose,
+  onReview,
+  onWork,
+  repos,
+  which,
+  onWhich,
+  prDiff,
+  prChecks,
+  prCheckout,
+  prComments,
+  prComment,
+}: Props) {
   const shut = useRef<HTMLButtonElement>(null);
-  const [tab, setTab] = useState<'prs' | 'issues'>('prs');
+  const primary = useRef<HTMLButtonElement>(null);
+  const [filter, setFilter] = useState<Filter | null>(null);
   const [open, setOpen] = useState<number | null>(null);
+  const [tab, setTab] = useState<'description' | 'files'>('description');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  const [diffs, setDiffs] = useState<Cache<string>>(new Map());
+  const [checks, setChecks] = useState<Cache<readonly PullCheck[]>>(new Map());
+  const [comments, setComments] = useState<Cache<readonly PullComment[]>>(new Map());
+  const [reading, setReading] = useState(false);
   // A null repo means one of two things, and only one of them is "there is no
   // repository here". True once a fetch has come back and we actually know.
   const [looked, setLooked] = useState(false);
@@ -129,6 +251,13 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
     shut.current?.focus();
   }, []);
 
+  // Everything read per pull request is only true of the reading it came with.
+  useEffect(() => {
+    setDiffs(new Map());
+    setChecks(new Map());
+    setComments(new Map());
+  }, [repo]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -138,6 +267,121 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
+
+  const everything = useMemo(
+    () => (repo === null ? [] : [...repo.prs, ...repo.issues]),
+    [repo],
+  );
+  const here: Filter = filter ?? firstFilter(everything);
+  const items = useMemo(() => listFor(everything, here), [everything, here]);
+  const chips = useMemo(() => chipsFor(everything), [everything]);
+
+  /* Nothing picked yet, so the first one stands in — a list and an empty
+     detail pane next to each other is a screen that has taught the hand there
+     is nothing to read here, when there clearly is. */
+  const chosen = items.find((one) => one.number === open) ?? items[0] ?? null;
+  const picked = chosen?.number ?? null;
+  const at = chosen === null ? -1 : items.indexOf(chosen);
+
+  const move = useCallback(
+    (step: number) => {
+      const next = items[moveBy(items.length, at, step)];
+      if (next === undefined) return;
+      setOpen(next.number);
+      setTab('description');
+    },
+    [items, at],
+  );
+
+  // j/k and the arrows walk the list, and Enter carries the hand across to the
+  // press. The diff has j/k of its own, so the list lets go while it is out.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const on = event.target as HTMLElement | null;
+      if (on?.closest('input, textarea, [contenteditable="true"], .reviews__diff') != null) return;
+      if (tab === 'files' && (event.key === 'j' || event.key === 'k')) return;
+      if (event.key === 'Enter') {
+        if (primary.current === null) return;
+        event.preventDefault();
+        primary.current.focus();
+      } else if (event.key === 'j' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        move(1);
+      } else if (event.key === 'k' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        move(-1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [move, tab]);
+
+  // The checks and the existing comments belong to the pull request in front.
+  useEffect(() => {
+    if (chosen === null || chosen.kind !== 'pr') return;
+    const number = chosen.number;
+    if (prChecks !== undefined && !checks.has(number)) {
+      void prChecks(number).then((answer) => {
+        if (answer.ok) setChecks((was) => new Map(was).set(number, answer.value));
+      });
+    }
+    if (prComments !== undefined && !comments.has(number)) {
+      void prComments(number).then((answer) => {
+        if (answer.ok) setComments((was) => new Map(was).set(number, answer.value));
+      });
+    }
+  }, [chosen, prChecks, prComments, checks, comments]);
+
+  // The diff is a whole PR of text; it is read the first time somebody asks for
+  // Files, and then kept until Refresh.
+  useEffect(() => {
+    if (tab !== 'files' || chosen === null || chosen.kind !== 'pr') return;
+    if (prDiff === undefined || diffs.has(chosen.number)) return;
+    const number = chosen.number;
+    setReading(true);
+    void prDiff(number)
+      .then((answer) => {
+        if (answer.ok) setDiffs((was) => new Map(was).set(number, answer.value));
+        else setSaid(answer.trouble.because);
+      })
+      .finally(() => setReading(false));
+  }, [tab, chosen, prDiff, diffs]);
+
+  const files = useMemo(() => {
+    const text = chosen === null ? undefined : diffs.get(chosen.number);
+    return text === undefined ? [] : parseDiff(text);
+  }, [chosen, diffs]);
+
+  const onLineComment = useCallback(
+    async (file: string, line: number, text: string) => {
+      if (prComment === undefined || chosen === null) return;
+      const number = chosen.number;
+      const answer = await prComment(number, text, file, line);
+      if (answer.ok) setComments((was) => new Map(was).set(number, answer.value));
+      else setSaid(answer.trouble.because);
+    },
+    [prComment, chosen],
+  );
+
+  const copyLink = useCallback((url: string) => {
+    void navigator.clipboard?.writeText(url).then(
+      () => setSaid(SAYS.copied),
+      () => setSaid(null),
+    );
+    setMenuOpen(false);
+  }, []);
+
+  const checkOut = useCallback(
+    (number: number) => {
+      setMenuOpen(false);
+      if (prCheckout === undefined) return;
+      void prCheckout(number).then((answer) => {
+        setSaid(answer.ok ? answer.value : answer.trouble.because);
+      });
+    },
+    [prCheckout],
+  );
 
   if (repo === null) {
     return (
@@ -195,12 +439,8 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
     );
   }
 
-  const items = tab === 'prs' ? repo.prs : repo.issues;
-  /* Nothing picked yet, so the first one stands in — a list and an empty
-     detail pane next to each other is a screen that has taught the hand there
-     is nothing to read here, when there clearly is. */
-  const chosen = items.find((one) => one.number === open) ?? items[0] ?? null;
-  const picked = chosen?.number ?? null;
+  const line = chosen === null ? null : checkLine(checks.get(chosen.number) ?? []);
+  const onPull = chosen !== null && chosen.kind === 'pr';
 
   return (
     <section className="sheet" aria-label={SAYS.heading}>
@@ -228,15 +468,21 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
           </div>
         )}
 
-        <div className="sheet__chips">
-          {(['prs', 'issues'] as const).map((part) => (
+        <div className="sheet__chips" role="group" aria-label={SAYS.heading}>
+          {chips.map((chip) => (
             <button
-              key={part}
+              key={chip.id}
               type="button"
-              className={`sheet__chip ${tab === part ? 'sheet__chip--here' : ''}`}
-              onClick={() => setTab(part)}
+              className={`sheet__chip ${chip.id === here ? 'sheet__chip--here' : ''}`}
+              aria-pressed={chip.id === here}
+              onClick={() => {
+                setFilter(chip.id);
+                setOpen(null);
+                setTab('description');
+              }}
             >
-              {part === 'prs' ? SAYS.prs : SAYS.issues}
+              {chip.says}
+              {chip.count === 0 ? null : <span className="sheet__chipcount">{chip.count}</span>}
             </button>
           ))}
         </div>
@@ -255,12 +501,14 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
         {chosen === null ? (
           <div className="reviews reviews--empty">
             <div className="reviews__blank">
-              {tab === 'prs' ? <svg viewBox="0 0 32 32" className="reviews__blankicon" width="34" height="34" fill="none" aria-hidden="true"><path d="M10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm12 0a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM10 19a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm3 0h9a5 5 0 0 0 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M13 19v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg> : <svg viewBox="0 0 32 32" className="reviews__blankicon" width="34" height="34" fill="none" aria-hidden="true"><circle cx="9" cy="16" r="3" stroke="currentColor" strokeWidth="2"/><path d="M6 16h7m0 0h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>}
+              <StateMark mark={here === 'issues' ? 'issue' : 'open'} />
               {repo.trouble === null ? (
                 <>
-                  <h2 className="reviews__blanktitle">{tab === 'prs' ? SAYS.empty : SAYS.noIssues}</h2>
+                  <h2 className="reviews__blanktitle">
+                    {here === 'issues' ? SAYS.noIssues : SAYS.empty}
+                  </h2>
                   <p className="reviews__blankdetail">
-                    {tab === 'prs' ? SAYS.emptyDetail : SAYS.noIssuesDetail}
+                    {here === 'issues' ? SAYS.noIssuesDetail : SAYS.emptyDetail}
                   </p>
                 </>
               ) : (
@@ -287,57 +535,180 @@ export default function ReviewsView({ repo, busy, onRefresh, onClose, onReview, 
                 <button
                   type="button"
                   className={`reviews__row ${item.number === picked ? 'reviews__row--open' : ''}`}
-                  onClick={() => setOpen(item.number === open ? null : item.number)}
-                  aria-expanded={item.number === open}
+                  onClick={() => {
+                    setOpen(item.number);
+                    setTab('description');
+                  }}
+                  aria-current={item.number === picked ? 'true' : undefined}
                 >
-                  <span className={`reviews__num reviews__num--${item.state}`}>#{item.number}</span>
+                  <span className="reviews__markbox" title={SAYS.mark[markOf(item)]}>
+                    <StateMark mark={markOf(item)} />
+                  </span>
                   <span className="reviews__text">
-                    <span className="reviews__title">{item.title}</span>
+                    <span className="reviews__titleline">
+                      <span className="reviews__num">#{item.number}</span>
+                      <span className="reviews__title">{item.title}</span>
+                      {(comments.get(item.number) ?? []).length === 0 ? null : (
+                        <span className="reviews__spoke" title={SAYS.hasComments} aria-label={SAYS.hasComments}>
+                          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v5A1.5 1.5 0 0 1 12.5 11H7l-3 2.5V11h-.5A1.5 1.5 0 0 1 2 9.5v-5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                          </svg>
+                        </span>
+                      )}
+                    </span>
                     <span className="reviews__sub">
-                      {SAYS.by(item.author)}
-                      {item.updatedAt === '' ? '' : ` · ${SAYS.changed} ${ago(new Date(item.updatedAt).getTime())}`}
+                      {rowSub(
+                        item.author,
+                        item.updatedAt === '' ? '' : ago(new Date(item.updatedAt).getTime()),
+                        item.kind === 'pr' && diffs.has(item.number)
+                          ? parseDiff(diffs.get(item.number) ?? '').length
+                          : null,
+                      )}
                     </span>
                   </span>
-                  <span className={`reviews__state reviews__state--${item.state}`}>{item.state}</span>
                 </button>
               </li>
             ))}
           </ul>
 
-            <aside className="reviews__about">
-              <h2 className="sheet__blocktitle">
-                {chosen.kind === 'pr' ? SAYS.prs : SAYS.issues} #{chosen.number}
-              </h2>
-              <p className="reviews__abouttitle">{chosen.title}</p>
+            <div className="reviews__about">
+              <h2 className="reviews__abouttitle">{chosen.title}</h2>
+
               <p className="reviews__aboutwhen">
-                {SAYS.by(chosen.author)}
-                {chosen.updatedAt === ''
-                  ? ''
-                  : ` · ${SAYS.changed} ${ago(new Date(chosen.updatedAt).getTime())}`}
+                <span className="reviews__num">#{chosen.number}</span>
+                {' '}
+                {rowSub(
+                  SAYS.by(chosen.author),
+                  chosen.updatedAt === '' ? '' : `${SAYS.changed} ${ago(new Date(chosen.updatedAt).getTime())}`,
+                  null,
+                )}
               </p>
 
-              {(chosen.kind === 'pr') ? (
-                <button
-                  type="button"
-                  className="reviews__do"
-                  onClick={() => onReview(chosen)}
-                >
-                  {SAYS.prAction}
-                </button>
+              {onPull && chosen.headRef !== null ? (
+                <p className="reviews__branches">
+                  <span className="reviews__branch">{chosen.headRef}</span>
+                  <span className="reviews__into" aria-hidden="true">→</span>
+                  <span className="reviews__branch">{chosen.baseRef ?? 'main'}</span>
+                </p>
               ) : null}
 
-              {chosen.description === null ? (
-                <p className="reviews__detail">No description written.</p>
-              ) : (
-                <p className="reviews__detail">{chosen.description}</p>
+              {line === null ? null : (
+                <p className={`reviews__checks ${line.good ? '' : 'reviews__checks--bad'}`}>
+                  <span aria-hidden="true">{line.good ? '✓' : '✗'}</span> {line.says}
+                  {line.link === null ? null : (
+                    <a className="reviews__link" href={line.link} target="_blank" rel="noreferrer">
+                      {SAYS.openUrl}
+                    </a>
+                  )}
+                </p>
               )}
 
-              {chosen.url === '' ? null : (
-                <a className="reviews__link" href={chosen.url} target="_blank" rel="noreferrer">
-                  {SAYS.openUrl}
-                </a>
+              <div className="reviews__presses">
+                {onPull ? (
+                  <button ref={primary} type="button" className="reviews__do" onClick={() => onReview(chosen)}>
+                    {SAYS.prAction}
+                  </button>
+                ) : onWork === undefined ? null : (
+                  <button
+                    ref={primary}
+                    type="button"
+                    className="reviews__do"
+                    onClick={() => onWork(chosen, issuePrompt(chosen, repo.full))}
+                  >
+                    {SAYS.work}
+                  </button>
+                )}
+
+                {chosen.url === '' ? null : (
+                  <a className="reviews__press" href={chosen.url} target="_blank" rel="noreferrer">
+                    {SAYS.openUrl}
+                  </a>
+                )}
+
+                <div className="reviews__menu">
+                  <button
+                    type="button"
+                    className="reviews__press reviews__press--dots"
+                    aria-label={SAYS.more}
+                    aria-expanded={menuOpen}
+                    onClick={() => setMenuOpen((was) => !was)}
+                  >
+                    …
+                  </button>
+                  {!menuOpen ? null : (
+                    <div className="reviews__menulist" role="menu">
+                      {onPull && prCheckout !== undefined ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="reviews__menurow"
+                          onClick={() => checkOut(chosen.number)}
+                        >
+                          {SAYS.checkout}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="reviews__menurow"
+                        onClick={() => copyLink(chosen.url)}
+                      >
+                        {SAYS.copyLink}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {said === null ? null : (
+                <p className="reviews__said" role="status">{said}</p>
               )}
-            </aside>
+
+              <div className="reviews__tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === 'description'}
+                  className={`reviews__tab ${tab === 'description' ? 'reviews__tab--here' : ''}`}
+                  onClick={() => setTab('description')}
+                >
+                  {SAYS.description}
+                </button>
+                {onPull && prDiff !== undefined ? (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === 'files'}
+                    className={`reviews__tab ${tab === 'files' ? 'reviews__tab--here' : ''}`}
+                    onClick={() => setTab('files')}
+                  >
+                    {SAYS.files}
+                  </button>
+                ) : null}
+              </div>
+
+              {tab === 'description' ? (
+                <div className="reviews__read">
+                  {chosen.description === null ? (
+                    <p className="reviews__detail">{SAYS.noDescription}</p>
+                  ) : (
+                    <Markdown text={chosen.description} />
+                  )}
+                </div>
+              ) : (
+                <div className="reviews__diff">
+                  {files.length > 0 ? (
+                    <DiffView
+                      files={files}
+                      comments={comments.get(chosen.number) ?? []}
+                      {...(prComment === undefined ? {} : { onComment: onLineComment })}
+                    />
+                  ) : (
+                    <p className="reviews__detail">{reading ? SAYS.readingDiff : SAYS.noDiff}</p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

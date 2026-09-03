@@ -168,7 +168,8 @@ function nameFor(name: string, run: string): string {
 }
 
 /** Every row in the file, the switched-off ones included, in the order they
- *  are written. */
+ *  are written. Past the ceiling a moment comes back switched off rather than
+ *  missing, so the page shows what actually runs. */
 export function rowsFrom(text: string | null): readonly AlwaysRow[] {
   if (text === null || text.trim() === '') return [];
   let parsed: unknown;
@@ -183,9 +184,12 @@ export function rowsFrom(text: string | null): readonly AlwaysRow[] {
   for (const when of WHEN) {
     const list = found[when];
     if (!Array.isArray(list)) continue;
+    let on = 0;
     for (const one of list) {
       const read = oneAlways(one);
-      if (read !== null) rows.push({ when, name: read.name, run: read.run, on: true });
+      if (read === null) continue;
+      on += 1;
+      rows.push({ when, name: read.name, run: read.run, on: on <= MOST_AT_ONCE });
     }
   }
   const off = found[OFF];
@@ -203,21 +207,25 @@ export function rowsFrom(text: string | null): readonly AlwaysRow[] {
 }
 
 /** Rows as they arrive from the window, kept only where the moment is one of
- *  the three and there is something to run. */
+ *  the three and there is something to run. The ceiling is applied here too:
+ *  the window is not the only thing that writes this list. */
 export function rowsAsGiven(value: unknown): readonly AlwaysRow[] {
   if (!Array.isArray(value)) return [];
   const rows: AlwaysRow[] = [];
+  const on: Record<string, number> = {};
   for (const one of value) {
     const found = record(one);
     if (found === null) continue;
     const run = typeof found['run'] === 'string' ? found['run'].trim() : '';
     const when = WHEN.find((each) => each === found['when']);
     if (run === '' || when === undefined) continue;
+    const wanted = found['on'] !== false;
+    if (wanted) on[when] = (on[when] ?? 0) + 1;
     rows.push({
       when,
       name: nameFor(typeof found['name'] === 'string' ? found['name'] : '', run),
       run,
-      on: found['on'] !== false,
+      on: wanted && (on[when] ?? 0) <= MOST_AT_ONCE,
     });
   }
   return rows;

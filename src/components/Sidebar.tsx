@@ -55,6 +55,8 @@ type Props = {
   /** The project files are optional furniture. When their panel is folded, the
    *  way back belongs in this dock rather than as a second, stranded rail. */
   onFiles?: () => void;
+  /** The commands the agent ran, and every server it left running. */
+  onCommands?: () => void;
   /** The clock, so a test of the day headings means something. */
   now?: number;
 };
@@ -88,6 +90,7 @@ function placesOf(p: Props): readonly Place[] {
     { id: 'reviews', name: 'Pull requests', tip: 'Pull requests and issues', on: p.onReviews, icon: <PullIcon /> },
     { id: 'skills', name: 'Skills', tip: 'Skills', on: p.onSkills, icon: <SkillsIcon /> },
     { id: 'files', name: 'Project files', tip: 'Project files (⌘⇧F)', on: p.onFiles, icon: <FilesIcon /> },
+    { id: 'commands', name: 'Commands', tip: 'Commands (⌘`)', on: p.onCommands, icon: <CommandsIcon /> },
     { id: 'more', name: 'Add more', tip: 'Add more to Graphe', on: p.onAddMore, icon: <AddIcon /> },
     { id: 'settings', name: 'Settings', tip: 'Settings', on: p.onSettings, icon: <SettingsIcon /> },
   ].filter((one) => one.on !== undefined) as Place[];
@@ -555,6 +558,17 @@ function FilesIcon({ size = 14 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path d="M2.5 4.5h3l1.2 1.5h6.3v5.5H2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** The prompt every terminal opens with, drawn rather than typed so it sits on
+ *  the same 16px grid as the rest of the marks. */
+function CommandsIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="m3 4.5 3 3.5-3 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8.25 11.5h4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }

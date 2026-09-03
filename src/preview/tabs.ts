@@ -85,6 +85,9 @@ export const tabsWords = {
   console: 'What the page said',
   consoleEmpty: 'The page has not complained about anything.',
   network: 'Requests that did not come back',
+  /** What each level is called, wherever one is drawn. Said once so the
+   *  console drawer and the commands drawer cannot name them differently. */
+  levels: { note: 'note', warning: 'warning', problem: 'problem' },
   fixThis: 'Fix this',
   fixAll: 'Fix these',
   blank: 'New tab',
@@ -374,6 +377,61 @@ export function forgetTrouble(pane: Pane): Pane {
 
 export function openDrawer(pane: Pane, open: boolean): Pane {
   return { ...pane, drawer: open };
+}
+
+/** What one level is called. */
+export function saysLevel(level: Level): string {
+  return tabsWords.levels[level];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reading the shell's own lines                                               */
+/* -------------------------------------------------------------------------- */
+
+/** How the shell writes a level on the front of a line it kept. */
+const SAID_LEVELS: Readonly<Record<string, Level>> = {
+  'a note': 'note',
+  'a warning': 'warning',
+  'a problem': 'problem',
+};
+
+/** The last bracket on the line, when it reads as a file and a line number
+ *  rather than as part of the sentence. */
+const SOURCE_AT_END = /\s\(([^()]+:\d+|[^()\s]+)\)$/;
+
+/** One kept line, pulled back apart into the three things a note is made of. */
+export function saidIn(line: string): { level: Level; text: string; where: string | null } {
+  let rest = line.trim();
+  let level: Level = 'note';
+  for (const [word, named] of Object.entries(SAID_LEVELS)) {
+    if (!rest.startsWith(`${word}: `)) continue;
+    level = named;
+    rest = rest.slice(word.length + 2);
+    break;
+  }
+  const source = SOURCE_AT_END.exec(rest);
+  if (source === null) return { level, text: rest.trim(), where: null };
+  return {
+    level,
+    text: rest.slice(0, source.index).trim(),
+    where: source[1] ?? null,
+  };
+}
+
+/**
+ * Everything the page said, as the console model holds it.
+ *
+ * The shell keeps one flat line per message; this is that list read back
+ * through `noteFromPage`, so repeats collapse into a count and the ceiling
+ * applies here exactly as it does anywhere else the pane is built up.
+ */
+export function saidFrom(lines: readonly string[]): readonly Said[] {
+  let pane = emptyPane();
+  for (const line of lines) {
+    const one = saidIn(line);
+    pane = noteFromPage(pane, one.level, one.text, one.where);
+  }
+  return pane.said;
 }
 
 /** Noise a browser prints about itself, or about somebody else's script, which

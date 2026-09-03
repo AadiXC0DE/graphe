@@ -46,6 +46,9 @@ export const standingWords = {
     'A second opinion (an advisor verdict, a review, a list of what is not yet proven) is advice on the work. It is never permission to leave the list unfinished.',
     'A step that cannot be done is step_failed(n, why) or step_skipped(n, why), said out loud, never left quietly unticked.',
   ],
+  /** Only ever said when somebody asked for a language other than the
+   *  request's own. Saying it every turn would be budget spent on a default. */
+  language: (says: string): string => `Reply in ${says}, whatever language the request is written in.`,
   agentsTrimmed: 'The rest of this file is on disk. Read it if you need it.',
   skillTrimmed: 'This skill is longer than shown. Ask for the rest if you need it.',
   promptTrimmed: 'Some of what was installed here is left out for room.',
@@ -72,6 +75,8 @@ export type Standing = {
   /** Somewhere of its own to write anything temporary. Nothing gave a run a
    *  place, so it picked /tmp and nothing ever cleared it. */
   scratch?: string | null;
+  /** The language to answer in, or null for the request's own. */
+  language?: string | null;
 };
 
 function notesLine(notes: readonly string[], most = 600): string | null {
@@ -104,6 +109,8 @@ export function standingBlock(standing: Standing): string | null {
     parts.push(`Working toward: ${standing.goal.trim()}`);
   }
   if (parts.length > 0) parts.push(standingWords.rules.join('\n'));
+  const language = standing.language?.trim() ?? '';
+  if (language !== '') parts.push(standingWords.language(language));
   const notes = notesLine(standing.notes);
   if (notes !== null) parts.push(notes);
   if (standing.scratch != null && standing.scratch !== '') parts.push(standingWords.scratch(standing.scratch));

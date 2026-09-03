@@ -11,17 +11,21 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { foldIn, foldUnchanged } from '../src/diff/collapse';
 import { parseDiff } from '../src/diff/hunks';
 import { piecesOf, type Token } from '../src/diff/paint';
 import {
   BUDGET,
   captionOf,
+  commentsByLine,
   entriesOf,
   fileAt,
   fileKeep,
   fileRows,
   indexOfFile,
   indexOfHunk,
+  lineAt,
+  lineKey,
   onlySpacing,
   tallyOf,
   lineOf,
@@ -301,5 +305,281 @@ describe('lines that changed nothing but their spacing', () => {
   it('are left out until somebody asks for them', () => {
     expect(view).toContain('if (spacing) return entries;');
     expect(view).toContain('!onlySpacing(left.text, right.text)');
+  });
+});
+
+/* A hunk git handed over with a lot of context reads as a wall. Three lines
+   either side of a change is what the eye needs; the rest is one row that says
+   how much is under it. */
+describe('the unchanged lines nobody came to read', () => {
+  const WIDE = `diff --git a/wide.ts b/wide.ts
+--- a/wide.ts
++++ b/wide.ts
+@@ -1,21 +1,21 @@
+ a1
+ a2
+ a3
+ a4
+ a5
+ a6
+ a7
+ a8
+ a9
+ a10
+-old
++new
+ b1
+ b2
+ b3
+ b4
+ b5
+ b6
+ b7
+ b8
+ b9
+ b10
+`;
+  const wide = parseDiff(WIDE);
+
+  const foldsIn = (entries: readonly Entry[]): readonly Entry[] =>
+    entries.filter((one) => one.kind === 'fold');
+
+  it('keeps three lines either side of a change and folds the rest', () => {
+    const { entries } = entriesOf(wide, 'unified');
+    const out = foldUnchanged(entries, new Set());
+    const folds = foldsIn(out);
+    expect(folds).toHaveLength(2);
+    expect(out.filter((one) => one.kind === 'one')).toHaveLength(8);
+  });
+
+  it('counts what each fold is hiding', () => {
+    const out = foldUnchanged(entriesOf(wide, 'unified').entries, new Set());
+    const hidden = foldsIn(out).map((one) => (one.kind === 'fold' ? one.hidden : 0));
+    expect(hidden).toEqual([7, 7]);
+  });
+
+  /* Past the first and the last folded run there are lines git never sent, and
+     only the caller can fetch them. */
+  it('marks a fold that reaches the edge of the piece', () => {
+    const out = foldUnchanged(entriesOf(wide, 'unified').entries, new Set());
+    expect(foldsIn(out).every((one) => one.kind === 'fold' && one.edge)).toBe(true);
+  });
+
+  it('carries the line to ask around', () => {
+    const out = foldUnchanged(entriesOf(wide, 'unified').entries, new Set());
+    const first = foldsIn(out)[0];
+    expect(first?.kind === 'fold' ? first.line : 0).toBe(1);
+  });
+
+  it('gives back the lines of a fold somebody opened', () => {
+    const { entries } = entriesOf(wide, 'unified');
+    const key = foldIn(foldUnchanged(entries, new Set()), wide[0]?.hunks[0]?.id ?? '');
+    if (key === null) throw new Error('no fold');
+    const out = foldUnchanged(entries, new Set([key]));
+    expect(foldsIn(out)).toHaveLength(1);
+    expect(out.filter((one) => one.kind === 'one')).toHaveLength(15);
+  });
+
+  it('folds the same runs in either reading', () => {
+    const out = foldUnchanged(entriesOf(wide, 'split').entries, new Set());
+    expect(foldsIn(out)).toHaveLength(2);
+  });
+
+  it('leaves an ordinary three-line hunk alone', () => {
+    const { entries } = entriesOf(files, 'split');
+    expect(foldsIn(foldUnchanged(entries, new Set()))).toHaveLength(0);
+  });
+
+  it('leaves the headings where they were', () => {
+    const { entries } = entriesOf(wide, 'unified');
+    const out = foldUnchanged(entries, new Set());
+    expect(out[0]).toMatchObject({ kind: 'file' });
+    expect(out[1]).toMatchObject({ kind: 'hunk' });
+  });
+
+  it('gives every fold a key of its own, and one that survives opening', () => {
+    const { entries } = entriesOf(wide, 'unified');
+    const shut = foldsIn(foldUnchanged(entries, new Set())).map((one) => one.key);
+    expect(new Set(shut).size).toBe(shut.length);
+    const open = foldsIn(foldUnchanged(entries, new Set([shut[0] ?? '']))).map((one) => one.key);
+    expect(open).toEqual(shut.slice(1));
+  });
+
+  it('is on unless somebody turned it off, and the choice is kept', () => {
+    expect(view).toContain("remembered(COLLAPSED) !== 'no'");
+    expect(view).toContain("keep(COLLAPSED, was ? 'no' : 'yes')");
+  });
+
+  it('opens the fold nearest the cursor on e', () => {
+    expect(view).toContain("if (event.key === 'e') {");
+    expect(view).toContain('foldIn(folded, at)');
+  });
+});
+
+describe('the file heading, pinned', () => {
+  it('is drawn above the scroller once its own row has gone past the top', () => {
+    expect(view).toContain('const pinned = here !== null && headAt >= 0 && headAt < topAt;');
+    expect(view).toContain('diffview__pinned');
+  });
+
+  it('is the same heading in both places', () => {
+    expect(view.match(/<FileTop/g)).toHaveLength(2);
+  });
+});
+
+describe('remarks on a line', () => {
+  const said = [
+    { id: '1', path: 'src/one.ts', line: 2, author: 'ada', body: 'why?', at: '2026-01-01' },
+    { id: '2', path: 'src/one.ts', line: 2, author: 'bob', body: 'because', at: '2026-01-02' },
+    { id: '3', path: 'README.md', line: 2, author: 'ada', body: 'nice', at: '2026-01-03' },
+  ];
+
+  it('gathers them under the line they belong to', () => {
+    const by = commentsByLine(said);
+    expect(by.get(lineKey('src/one.ts', 2))).toHaveLength(2);
+    expect(by.get(lineKey('README.md', 2))).toHaveLength(1);
+    expect(by.get(lineKey('src/one.ts', 9))).toBeUndefined();
+  });
+
+  it('keeps them in the order they arrived', () => {
+    const on = commentsByLine(said).get(lineKey('src/one.ts', 2)) ?? [];
+    expect(on.map((one) => one.author)).toEqual(['ada', 'bob']);
+  });
+
+  it('hangs a row on its new-side line, so a remark lands where the eye is', () => {
+    const { entries } = entriesOf(files, 'unified');
+    const added = entries.find((one) => one.kind === 'one' && one.cell.line.sign === '+');
+    if (added === undefined) throw new Error('no added line');
+    expect(lineAt(added)).toBe(added.kind === 'one' ? added.cell.line.after : 0);
+  });
+
+  it('falls back to the old side for a line that is only there', () => {
+    const { entries } = entriesOf(files, 'unified');
+    const gone = entries.find((one) => one.kind === 'one' && one.cell.line.sign === '-');
+    if (gone === undefined) throw new Error('no removed line');
+    expect(lineAt(gone)).toBe(gone.kind === 'one' ? gone.cell.line.before : 0);
+  });
+
+  it('has nothing to hang on a heading', () => {
+    const { entries } = entriesOf(files, 'unified');
+    expect(lineAt(entries[0] as Entry)).toBeNull();
+  });
+
+  /* Changes and Review pass neither prop, and must look exactly as they did. */
+  it('leaves the gutter alone where nothing can be said', () => {
+    expect(view).toContain('onComment === undefined || key === null ? null : (');
+  });
+
+  it('posts what was written and closes the box', () => {
+    expect(view).toContain('void onComment(entry.hunk.path, line, draft.trim());');
+    expect(view).toContain('setAsking(null);');
+  });
+
+  it('says the time the way the rest of the app does', () => {
+    expect(view).toContain("import { ago } from '../lib/when';");
+  });
+});
+
+/* Git sends three lines of context and nothing between one piece and the next.
+   Those lines exist, and only the caller can fetch them. */
+describe('the lines between two pieces', () => {
+  const APART = `diff --git a/far.ts b/far.ts
+--- a/far.ts
++++ b/far.ts
+@@ -1,3 +1,3 @@
+-one
++ONE
+ a
+ b
+@@ -44,3 +44,3 @@
+ c
+-two
++TWO
+ d
+diff --git a/near.ts b/near.ts
+--- a/near.ts
++++ b/near.ts
+@@ -1,2 +1,2 @@
+-x
++X
+ y
+@@ -3,2 +3,2 @@
+-z
++Z
+ w
+diff --git a/late.ts b/late.ts
+--- a/late.ts
++++ b/late.ts
+@@ -60,2 +60,2 @@
+-p
++P
+ q
+`;
+  const apart = parseDiff(APART);
+  const gapsIn = (entries: readonly Entry[]): readonly Entry[] =>
+    entries.filter((one) => one.kind === 'gap');
+
+  it('is a row of its own between two pieces of one file', () => {
+    const out = foldUnchanged(entriesOf(apart, 'unified').entries, new Set());
+    const gaps = gapsIn(out);
+    expect(gaps).toHaveLength(1);
+    const before = out.slice(0, out.indexOf(gaps[0] as Entry));
+    expect(before.filter((one) => one.kind === 'hunk')).toHaveLength(1);
+    expect(out[out.indexOf(gaps[0] as Entry) + 1]).toMatchObject({ kind: 'hunk' });
+  });
+
+  it('counts the lines git did not give us', () => {
+    const out = foldUnchanged(entriesOf(apart, 'unified').entries, new Set());
+    const gap = gapsIn(out)[0];
+    expect(gap?.kind === 'gap' ? gap.hidden : 0).toBe(40);
+  });
+
+  it('carries the line to ask around, and the file to ask about', () => {
+    const out = foldUnchanged(entriesOf(apart, 'unified').entries, new Set());
+    const gap = gapsIn(out)[0];
+    if (gap?.kind !== 'gap') throw new Error('no gap');
+    expect(gap.line).toBe(4);
+    expect(gap.hunk.path).toBe('far.ts');
+  });
+
+  /* `late.ts` opens at line 60, a long way past where `near.ts` left off. The
+     count is per file or it would invent a gap at every file boundary. */
+  it('is never drawn between two files', () => {
+    const out = foldUnchanged(entriesOf(apart, 'unified').entries, new Set());
+    expect(gapsIn(out)).toHaveLength(1);
+    for (const gap of gapsIn(out)) {
+      const before = out.slice(0, out.indexOf(gap));
+      const lastFile = before.map((one) => one.kind).lastIndexOf('file');
+      const lastHunk = before.map((one) => one.kind).lastIndexOf('hunk');
+      expect(lastHunk).toBeGreaterThan(lastFile);
+    }
+  });
+
+  it('is absent where the two pieces abut', () => {
+    const near = apart[1];
+    if (near === undefined) throw new Error('no file');
+    expect(gapsIn(foldUnchanged(entriesOf([near], 'unified').entries, new Set()))).toHaveLength(0);
+  });
+
+  it('has a key of its own', () => {
+    const out = foldUnchanged(entriesOf(apart, 'unified').entries, new Set());
+    expect(new Set(out.map((one) => one.key)).size).toBe(out.length);
+    expect(gapsIn(out)[0]?.key.startsWith('g:')).toBe(true);
+  });
+
+  it('is in both readings', () => {
+    expect(gapsIn(foldUnchanged(entriesOf(apart, 'split').entries, new Set()))).toHaveLength(1);
+  });
+
+  /* There is nothing in hand to open, so `e` walks past it. */
+  it('is not what e opens', () => {
+    const { entries } = entriesOf(apart, 'unified');
+    const out = foldUnchanged(entries, new Set());
+    expect(foldIn(out, apart[0]?.hunks[1]?.id ?? '')).toBeNull();
+  });
+
+  it('is a plain rule rather than a press where nobody can fetch the lines', () => {
+    expect(view).toContain('onExpand === undefined ? (');
+    expect(view).toContain('<span className="diffview__between">{DIFF_SAYS.between(entry.hidden)}</span>');
   });
 });

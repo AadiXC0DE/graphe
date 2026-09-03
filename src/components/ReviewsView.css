@@ -59,10 +59,10 @@
 
 .reviews {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: 340px minmax(0, 1fr);
   gap: var(--space-5);
   align-items: start;
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   width: 100%;
   padding: var(--space-5) var(--space-3);
@@ -118,10 +118,11 @@
 .reviews__row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   width: 100%;
   min-width: 0;
-  padding: var(--space-3) var(--space-3);
+  height: 44px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-md);
   text-align: left;
   transition: background-color var(--dur-micro) var(--ease-hover);
@@ -152,6 +153,36 @@
 
 .reviews__num--merged {
   color: var(--accent-ink);
+}
+
+/* The state mark. Shape carries the state as much as colour does, so the list
+   still reads for somebody who does not separate green from purple. */
+.reviews__markbox {
+  flex: none;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.reviews__mark--open { color: var(--good, #2f8f4e); }
+.reviews__mark--draft { color: var(--text-faint); }
+.reviews__mark--merged { color: var(--accent-ink); }
+.reviews__mark--closed { color: var(--text-faint); }
+.reviews__mark--issue { color: var(--text-muted); }
+
+.reviews__titleline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* A pull request this app has left comments on. */
+.reviews__spoke {
+  flex: none;
+  display: inline-flex;
+  align-self: center;
+  color: var(--text-faint);
 }
 
 .reviews__text {
@@ -203,12 +234,6 @@
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-raised);
-  position: sticky;
-  top: 0;
 }
 
 .reviews__hint {
@@ -219,7 +244,7 @@
 
 .reviews__abouttitle {
   margin: 0;
-  font-size: var(--text-base);
+  font-size: var(--text-lg);
   font-weight: 500;
   letter-spacing: -0.01em;
   color: var(--text);
@@ -295,10 +320,6 @@
 @media (max-width: 860px) {
   .reviews {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .reviews__about {
-    position: static;
   }
 }
 
@@ -382,4 +403,159 @@
     animation: none;
     border-top-color: var(--border);
   }
+}
+
+/* ---------------------------------------------------------------------------
+   The detail: what a pull request is, and what can be done with it here
+   --------------------------------------------------------------------------- */
+
+.reviews__branches {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.reviews__branch {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviews__into {
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+}
+
+.reviews__checks {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.reviews__checks--bad {
+  color: var(--bad, #b3413a);
+}
+
+.reviews__presses {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.reviews__press {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reviews__press:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+}
+
+.reviews__press:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.reviews__press--dots {
+  padding: 0 var(--space-2);
+  letter-spacing: 0.08em;
+}
+
+.reviews__menu {
+  position: relative;
+}
+
+.reviews__menulist {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 3;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-pop, 0 8px 24px rgb(0 0 0 / 12%));
+}
+
+.reviews__menurow {
+  text-align: left;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text);
+  background: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reviews__menurow:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+/* What just happened, in one line, where the press that caused it was. */
+.reviews__said {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.reviews__tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.reviews__tab {
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.reviews__tab--here {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.reviews__read {
+  max-width: 72ch;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.reviews__diff {
+  min-width: 0;
 }

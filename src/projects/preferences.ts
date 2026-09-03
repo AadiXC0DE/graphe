@@ -25,6 +25,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { asAdvisor, asAdvisorThinking, sameAdvisor } from '../agent/advisor';
 import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
 import type { Theme } from '../lib/theme';
+import { asTelling, type Telling } from '../work/notify';
 import { asTrusted, sameTrusted, type Trusted } from './carried';
 import { asKept, sameKept, type Kept } from './kept';
 
@@ -166,6 +167,27 @@ export type Preferences = {
    *  'system' follows the computer; the other two are stamped as data-theme
    *  and win over the media query. */
   theme: Theme;
+  /** Name a conversation from what was first asked in it. On, because an
+   *  untitled row is a row nobody can find again. */
+  nameConversations: boolean;
+  /** Ask before a conversation that is still working is closed. On: closing
+   *  one throws away a turn somebody is paying for. */
+  askBeforeClosing: boolean;
+  /** Put a version down before a job's work first reaches the person's folder,
+   *  so the moment before is one press away. */
+  snapBeforeApply: boolean;
+  /** The language replies come back in. Empty is the request's own language,
+   *  and says nothing to the model at all. */
+  replyLanguage: string;
+  /** How to say a run has finished while the window is behind something. */
+  whenRunFinishes: Telling;
+  /** How to say something is waiting on an answer. */
+  whenSomethingNeedsYou: Telling;
+  /** Whether being told makes a noise. Off: a desktop that beeps at somebody
+   *  who did not ask is a desktop they turn notifications off on. */
+  notifySound: boolean;
+  /** Badge the dock with how many pieces are waiting to be looked at. */
+  badgeDock: boolean;
 };
 
 /** Every field, because an appearance is small and comparing it wrongly means
@@ -216,6 +238,14 @@ export const defaultPreferences: Preferences = {
   howMuch: null,
   ceiling: null,
   theme: 'system',
+  nameConversations: true,
+  askBeforeClosing: true,
+  snapBeforeApply: true,
+  replyLanguage: '',
+  whenRunFinishes: 'system',
+  whenSomethingNeedsYou: 'system',
+  notifySound: false,
+  badgeDock: true,
 };
 
 type Stored = { version: 1; preferences: Preferences };
@@ -271,7 +301,22 @@ function asPreferences(value: unknown): Preferences {
     howMuch: typeof record['howMuch'] === 'string' ? record['howMuch'] : null,
     ceiling: asCeiling(record['ceiling']),
     theme: appearance.base,
+    nameConversations: record['nameConversations'] !== false,
+    askBeforeClosing: record['askBeforeClosing'] !== false,
+    snapBeforeApply: record['snapBeforeApply'] !== false,
+    replyLanguage: asLanguage(record['replyLanguage']),
+    whenRunFinishes: asTelling(record['whenRunFinishes']),
+    whenSomethingNeedsYou: asTelling(record['whenSomethingNeedsYou']),
+    notifySound: record['notifySound'] === true,
+    badgeDock: record['badgeDock'] !== false,
   };
+}
+
+/** A language somebody typed, on one line and bounded. It is pasted into the
+ *  system prompt, where a paragraph would be somebody else's instructions. */
+function asLanguage(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').trim().slice(0, 60);
 }
 
 /** Read back defensively: a file edited by hand must not become a ceiling of
@@ -365,6 +410,14 @@ export class PreferenceFile {
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted) &&
       next.theme === this.#preferences.theme &&
+      next.nameConversations === this.#preferences.nameConversations &&
+      next.askBeforeClosing === this.#preferences.askBeforeClosing &&
+      next.snapBeforeApply === this.#preferences.snapBeforeApply &&
+      next.replyLanguage === this.#preferences.replyLanguage &&
+      next.whenRunFinishes === this.#preferences.whenRunFinishes &&
+      next.whenSomethingNeedsYou === this.#preferences.whenSomethingNeedsYou &&
+      next.notifySound === this.#preferences.notifySound &&
+      next.badgeDock === this.#preferences.badgeDock &&
       // Left out, a ceiling was the one preference that never reached the file:
       // nothing else about it had changed, so nothing was written, and it was
       // gone by the next launch while the window still said it was set.

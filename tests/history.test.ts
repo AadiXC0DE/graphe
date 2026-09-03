@@ -1016,3 +1016,50 @@ describe('H-11 unsaved work, as a diff', () => {
     expect(changed.map((one) => one.path).sort()).toEqual(['about.html', 'index.html']);
   });
 });
+
+/* ========================================================================== */
+/* More of the file around a change                                            */
+/* ========================================================================== */
+
+/** Twenty numbered lines, so how much context came back is countable. */
+function counted(from: number, to: number): string {
+  return `${Array.from({ length: to - from + 1 }, (_, at) => `line ${String(from + at)}`).join('\n')}\n`;
+}
+
+describe('asking for more of the file around a change', () => {
+  it('carries lines the ordinary reading never sent', async () => {
+    const root = await newFolder();
+    const line = await Timeline.open(root);
+    await put(root, 'page.txt', counted(1, 40));
+    expect(await line.snapshot({ instruction: 'first' })).not.toBeNull();
+    await put(root, 'page.txt', counted(1, 40).replace('line 20\n', 'line twenty\n'));
+
+    const folder = new ProjectHistory(root);
+    const near = await folder.diffWorking();
+    const wide = await folder.diffWider('page.txt', 15);
+
+    expect(near).not.toContain('line 6');
+    expect(wide).toContain('line 6');
+    expect(wide).toContain('line 34');
+  });
+
+  it('asks about one file, whatever else has changed', async () => {
+    const { root } = await projectWithOneVersion();
+    await put(root, 'index.html', '<h1>Changed</h1>\n');
+    await put(root, 'other.html', '<h1>Also</h1>\n');
+
+    const wide = await new ProjectHistory(root).diffWider('index.html', 10);
+    expect(wide).toContain('index.html');
+    expect(wide).not.toContain('other.html');
+  });
+
+  /* A press that asks for the whole file is a press that hands the reader a
+     diff nobody can scroll. */
+  it('will not be talked into an unbounded window', async () => {
+    const { root } = await projectWithOneVersion();
+    await put(root, 'index.html', '<h1>Changed</h1>\n');
+    const folder = new ProjectHistory(root);
+    await expect(folder.diffWider('index.html', 10_000)).resolves.toContain('index.html');
+    await expect(folder.diffWider('index.html', -4)).resolves.toContain('index.html');
+  });
+});

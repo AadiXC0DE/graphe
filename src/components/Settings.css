@@ -660,6 +660,23 @@ button.settings__row {
   cursor: pointer;
 }
 
+/* A row answered by typing rather than by choosing. */
+.settings__field {
+  flex: none;
+  width: 12rem;
+  padding: 4px var(--space-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.settings__field:disabled {
+  opacity: 0.5;
+}
+
 .settings__choice {
   padding: 4px var(--space-3);
   border: 1px solid transparent;

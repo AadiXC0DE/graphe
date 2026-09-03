@@ -18,16 +18,22 @@ import type {
 } from '../lib/ipc';
 import { chordOf, saysChord } from '../lib/keys';
 import { THEME_WORDS, showing, type Theme } from '../lib/theme';
+import { TELLINGS, type Telling } from '../work/notify';
 import {
+  OPEN_TO,
   PAGES,
+  SAME_LANGUAGE,
+  SHELF_AT_LAUNCH,
   pageFor,
   pageWords,
   rowAt,
   rowsOn,
   search,
   settingsWords,
+  type OpenTo,
   type Page,
   type Row,
+  type ShelfAtLaunch,
 } from '../work/settingspages';
 import './Settings.css';
 
@@ -122,6 +128,37 @@ type Props = {
   advisorGates?: { completionGate: boolean; loopGate: boolean };
   onAdvisorGate?: (which: 'completionGate' | 'loopGate', on: boolean) => void;
 
+  /* ------------------------------------------------------------ behaviour */
+  /** Where a launch lands, and how the shelf comes back. Both are habits of
+   *  this window rather than anything the shell acts on. */
+  openTo?: OpenTo;
+  onOpenTo?: (choice: OpenTo) => void;
+  shelfAtLaunch?: ShelfAtLaunch;
+  onShelfAtLaunch?: (choice: ShelfAtLaunch) => void;
+  nameConversations?: boolean;
+  askBeforeClosing?: boolean;
+  snapBeforeApply?: boolean;
+  replyLanguage?: string;
+  onReplyLanguage?: (says: string) => void;
+
+  /* -------------------------------------------------------- notifications */
+  whenRunFinishes?: Telling;
+  whenSomethingNeedsYou?: Telling;
+  notifySound?: boolean;
+  badgeDock?: boolean;
+  /** The switches on both new pages, written back by name. One road rather
+   *  than eight, because the rows differ only in which preference they hold. */
+  onBehaviour?: (
+    which:
+      | 'nameConversations'
+      | 'askBeforeClosing'
+      | 'snapBeforeApply'
+      | 'notifySound'
+      | 'badgeDock',
+    on: boolean,
+  ) => void;
+  onTelling?: (which: 'whenRunFinishes' | 'whenSomethingNeedsYou', told: Telling) => void;
+
   /* -------------------------------------------------------------- add-ons */
   /** How much of an add-on that starts turns of its own runs here. */
   addons?: Policy;
@@ -153,7 +190,7 @@ const ADDON_WORDS = {
 /** Rows whose control will not sit on the right-hand end of a row, so each one
  *  gets a card of its own. The model chip opens a menu over the card, which a
  *  card that clips its corners would cut in half. */
-const BLOCKS = new Set(['theme', 'model', 'addons']);
+const BLOCKS = new Set(['theme', 'model', 'addons', 'new-model']);
 
 /** The three answers to which way the palette runs, in the order a segmented
  *  control reads them. */
@@ -258,6 +295,21 @@ export default function Settings({
   addons,
   onAddons,
   addonsHere = [],
+  openTo = 'last',
+  onOpenTo,
+  shelfAtLaunch = 'remembered',
+  onShelfAtLaunch,
+  nameConversations = true,
+  askBeforeClosing = true,
+  snapBeforeApply = true,
+  replyLanguage = '',
+  onReplyLanguage,
+  whenRunFinishes = 'system',
+  whenSomethingNeedsYou = 'system',
+  notifySound = false,
+  badgeDock = true,
+  onBehaviour,
+  onTelling,
 }: Props) {
   const [page, setPage] = useState<Page>('appearance');
   const [query, setQuery] = useState('');
@@ -327,11 +379,63 @@ export default function Settings({
     </button>
   );
 
-  const flip = (row: Row, on: boolean, change: () => void) => (
+  const flip = (row: Row, on: boolean, change: () => void, off = false) => (
     <label className="settings__row settings__row--switch">
       {words(row)}
-      <Switch on={on} onChange={change} label={row.name} />
+      <Switch on={on} onChange={change} label={row.name} disabled={off} />
     </label>
+  );
+
+  /** A row answered by one of a short list. The same strip the two Open in
+   *  rows use, so every choice on these pages reads the same way. */
+  const picks = <T extends string>(
+    row: Row,
+    all: readonly { id: T; says: string }[],
+    chosen: T,
+    pick: ((id: T) => void) | undefined,
+  ) => (
+    <div className="settings__row">
+      {words(row)}
+      <span
+        className="settings__choices settings__choices--inline"
+        role="radiogroup"
+        aria-label={row.name}
+      >
+        {all.map((one) => (
+          <button
+            key={one.id}
+            type="button"
+            role="radio"
+            aria-checked={one.id === chosen}
+            className={`settings__choice ${one.id === chosen ? 'settings__choice--on' : ''}`}
+            disabled={pick === undefined}
+            onClick={() => pick?.(one.id)}
+          >
+            {one.says}
+          </button>
+        ))}
+      </span>
+    </div>
+  );
+
+  /** A row answered by typing. Held in the window while somebody types and
+   *  written on the way out, so a preference is not saved letter by letter. */
+  const field = (row: Row, value: string, hint: string, write: ((says: string) => void) | undefined) => (
+    <div className="settings__row">
+      {words(row)}
+      <input
+        type="text"
+        className="settings__field"
+        aria-label={row.name}
+        placeholder={hint}
+        defaultValue={value}
+        disabled={write === undefined}
+        onBlur={(event) => write?.(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+        }}
+      />
+    </div>
   );
 
   /** Which app one of the two Open in rows goes to. A short list is a strip you
@@ -635,6 +739,143 @@ export default function Settings({
 
       case 'terminal':
         return <li key={row.id} className={at}>{opens(row, 'terminal')}</li>;
+
+      case 'open-to':
+        return <li key={row.id} className={at}>{picks(row, OPEN_TO, openTo, onOpenTo)}</li>;
+
+      case 'shelf-at-launch':
+        return (
+          <li key={row.id} className={at}>
+            {picks(row, SHELF_AT_LAUNCH, shelfAtLaunch, onShelfAtLaunch)}
+          </li>
+        );
+
+      case 'send-with': {
+        /* The one list of chords, edited through the one mechanism. The other
+           press starts a new line, which is why this is a choice of two
+           rather than a field. */
+        const now = chordFor('send', bindings) === 'mod+enter' ? 'mod+enter' : 'enter';
+        const sends = [
+          { id: 'enter', says: saysChord('enter', onMac) },
+          { id: 'mod+enter', says: saysChord('mod+enter', onMac) },
+        ] as const;
+        return (
+          <li key={row.id} className={at}>
+            {picks(
+              row,
+              sends,
+              now,
+              onBind === undefined ? undefined : (chord) => onBind('send', chord),
+            )}
+          </li>
+        );
+      }
+
+      case 'name-conversations':
+        return (
+          <li key={row.id} className={at}>
+            {flip(
+              row,
+              nameConversations,
+              () => onBehaviour?.('nameConversations', !nameConversations),
+              onBehaviour === undefined,
+            )}
+          </li>
+        );
+
+      case 'ask-before-closing':
+        return (
+          <li key={row.id} className={at}>
+            {flip(
+              row,
+              askBeforeClosing,
+              () => onBehaviour?.('askBeforeClosing', !askBeforeClosing),
+              onBehaviour === undefined,
+            )}
+          </li>
+        );
+
+      case 'snap-before-apply':
+        return (
+          <li key={row.id} className={at}>
+            {flip(
+              row,
+              snapBeforeApply,
+              () => onBehaviour?.('snapBeforeApply', !snapBeforeApply),
+              onBehaviour === undefined,
+            )}
+          </li>
+        );
+
+      case 'new-model':
+        return (
+          <li key={row.id} className={`settings__block${at}`}>
+            <div className="settings__blockhead">
+              {words(row)}
+              {onSelectModel === undefined || onConnect === undefined ? null : (
+                <ThinkingWith
+                  state={connection}
+                  onSelect={onSelectModel}
+                  onConnect={onConnect}
+                  advisor={advisor}
+                  {...(onThinking === undefined ? {} : { onThinking })}
+                />
+              )}
+            </div>
+          </li>
+        );
+
+      case 'reply-language':
+        return (
+          <li key={row.id} className={at}>
+            {field(row, replyLanguage, SAME_LANGUAGE, onReplyLanguage)}
+          </li>
+        );
+
+      case 'when-finished':
+        return (
+          <li key={row.id} className={at}>
+            {picks(
+              row,
+              TELLINGS,
+              whenRunFinishes,
+              onTelling === undefined ? undefined : (told) => onTelling('whenRunFinishes', told),
+            )}
+          </li>
+        );
+
+      case 'when-needed':
+        return (
+          <li key={row.id} className={at}>
+            {picks(
+              row,
+              TELLINGS,
+              whenSomethingNeedsYou,
+              onTelling === undefined
+                ? undefined
+                : (told) => onTelling('whenSomethingNeedsYou', told),
+            )}
+          </li>
+        );
+
+      case 'notify-sound':
+        return (
+          <li key={row.id} className={at}>
+            {flip(
+              row,
+              notifySound,
+              () => onBehaviour?.('notifySound', !notifySound),
+              onBehaviour === undefined,
+            )}
+          </li>
+        );
+
+      case 'badge-dock':
+        return (
+          <li key={row.id} className={at}>
+            {flip(row, badgeDock, () => onBehaviour?.('badgeDock', !badgeDock), onBehaviour === undefined)}
+          </li>
+        );
 
       case 'always':
         return (

@@ -24,9 +24,11 @@ import {
 } from '../src/work/settingspages';
 
 describe('the pages', () => {
-  it('are the seven the app is split into', () => {
+  it('are the nine the app is split into', () => {
     expect(PAGES).toEqual([
       'appearance',
+      'behaviour',
+      'notifications',
       'keys',
       'models',
       'add-ons',
@@ -108,7 +110,7 @@ describe('the rows', () => {
      be here only opened the project. */
   it('let somebody choose which editor and which terminal', () => {
     for (const id of ['editor', 'terminal']) {
-      expect(rowAt(id)?.page, id).toBe('advanced');
+      expect(rowAt(id)?.page, id).toBe('behaviour');
       expect(rowAt(id)?.kind, id).toBe('choice');
     }
     expect(rowAt('editor')?.name).toBe('Editor');
@@ -116,7 +118,7 @@ describe('the rows', () => {
   });
 
   /* Reached from the Advanced row rather than the sidebar, so it is a page with
-     a name but not one of the seven. */
+     a name but not one the sidebar lists. */
   it('give the always list a page of its own, off the sidebar', () => {
     expect(pageWords.always.name).toBe('Always');
     expect(pageWords.always.note.length).toBeGreaterThan(20);

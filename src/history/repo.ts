@@ -782,6 +782,10 @@ export class ProjectHistory {
   /** The empty tree, so the very first saved version can show its whole self. */
   private static readonly EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
+  /** As wide as one press will ever ask for. A file read whole is a file read
+   *  in the reader, not in the diff. */
+  private static readonly MOST_CONTEXT = 200;
+
   /** Run one read-only git command and return its stdout, or a plain sentence
    *  when git says no. */
   private async readOnly(args: readonly string[]): Promise<string> {
@@ -817,6 +821,27 @@ export class ProjectHistory {
       });
     const extras = await Promise.all(neverSaved);
     return [changed.trim(), ...extras].filter((part) => part !== '').join('\n\n');
+  }
+
+  /**
+   * One file again, with more of it around the change.
+   *
+   * git decides how much context a diff carries and three lines is not enough
+   * to see what a change sits in. This asks for the same file with a wider
+   * window rather than guessing at the lines in between, which is the only way
+   * to get lines git never sent.
+   */
+  async diffWider(file: string, context: number): Promise<string> {
+    await this.ensureReady();
+    const lines = Math.max(3, Math.min(Math.trunc(context), ProjectHistory.MOST_CONTEXT));
+    return this.readOnly([
+      'diff',
+      'HEAD',
+      '--no-ext-diff',
+      `-U${String(lines)}`,
+      '--',
+      file,
+    ]);
   }
 
   /** What one saved version changed, against the version before it. */

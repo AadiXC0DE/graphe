@@ -927,6 +927,9 @@ export type GrapheSession = {
   /** What this session has kept running — servers, watchers, anything started
    *  to stay up. Empty for almost every sitting. */
   readonly running: readonly RunningPiece[];
+  /** Everything one of them has said since it started, whole. Reading it does
+   *  not move the cursor the agent's own reads use. */
+  runningSaid(id: string): string;
   /** Stop one of them by name. Resolves only once its process has gone. */
   stopRunning(id: string): Promise<boolean>;
   /** The extensions this folder brought with it, and which of them loaded.
@@ -3201,6 +3204,10 @@ const MOST_AFTER_SAYINGS = 3;
 
     get running(): readonly RunningPiece[] {
       return keptRunning.list();
+    },
+
+    runningSaid(id: string): string {
+      return keptRunning.said(id, { all: true });
     },
 
     async stopRunning(id: string): Promise<boolean> {

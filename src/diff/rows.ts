@@ -21,6 +21,9 @@ export type Entry =
   | { kind: 'hunk'; key: string; file: FileChange; hunk: Hunk }
   | { kind: 'split'; key: string; hunk: Hunk; row: Row }
   | { kind: 'one'; key: string; hunk: Hunk; cell: Cell }
+  | { kind: 'fold'; key: string; hunk: Hunk; hidden: number; edge: boolean; line: number }
+  /** The lines between two pieces of one file, which git never sent. */
+  | { kind: 'gap'; key: string; hunk: Hunk; hidden: number; line: number }
   | { kind: 'rest'; key: string; hunks: number };
 
 export type Reading = 'split' | 'unified';
@@ -206,6 +209,44 @@ export function fileKeep(
   const out = file.hunks.filter((hunk) => dropped.has(hunk.id)).length;
   if (out === 0) return 'all';
   return out === file.hunks.length ? 'none' : 'some';
+}
+
+/** The line a row hangs a comment on: the new side wherever there is one, so a
+ *  comment lands where a reviewer is looking rather than where the line was. */
+export function lineAt(entry: Entry): number | null {
+  if (entry.kind === 'one') return entry.cell.line.after ?? entry.cell.line.before;
+  if (entry.kind === 'split') return entry.row.right?.after ?? entry.row.left?.before ?? null;
+  return null;
+}
+
+/** One remark on one line of one file, as the pull request holds it. */
+export type DiffComment = {
+  id: string;
+  path: string;
+  line: number;
+  author: string;
+  body: string;
+  /** When it was written, as the host wrote it. */
+  at: string;
+};
+
+export function lineKey(path: string, line: number): string {
+  return `${path}:${String(line)}`;
+}
+
+/** Comments gathered under the line they belong to, so a row finds its own in
+ *  one lookup rather than a pass over every comment on the change. */
+export function commentsByLine(
+  comments: readonly DiffComment[],
+): ReadonlyMap<string, readonly DiffComment[]> {
+  const out = new Map<string, DiffComment[]>();
+  for (const one of comments) {
+    const key = lineKey(one.path, one.line);
+    const held = out.get(key);
+    if (held === undefined) out.set(key, [one]);
+    else held.push(one);
+  }
+  return out;
 }
 
 export function fileAt(entries: readonly Entry[], at: number): FileChange | null {

@@ -129,9 +129,16 @@ describe('reading one', () => {
     expect(host.querySelector('.skills__says pre')).toBeNull();
   });
 
-  it('says nothing is selected before anything is', () => {
+  /* Only with nothing to open. A list beside an empty half is a screen that has
+     taught the hand there is nothing to read here, when there plainly is. */
+  it('says nothing is selected only when there is nothing to select', () => {
+    const bare = open({ skills: [], workflows: [] });
+    expect(bare.querySelector('.skills__blank')?.textContent).toBe(SAYS.nothing);
+  });
+
+  it('opens on the first row there is, the project’s own before the computer’s', () => {
     const host = open();
-    expect(host.querySelector('.skills__blank')?.textContent).toBe(SAYS.nothing);
+    expect(host.querySelector('.skills__row--here strong')?.textContent).toBe('The drift skill');
   });
 
   /** The whole point of the screen. */
@@ -183,7 +190,7 @@ describe('the keyboard', () => {
 
   it('moves down the whole list, skills then workflows', async () => {
     const host = open();
-    await key('ArrowDown');
+    // The first is already open, so the first press is the second row.
     expect(host.querySelector('.skills__row--here strong')?.textContent).toBe('The drift skill');
     await key('ArrowDown');
     expect(host.querySelector('.skills__row--here strong')?.textContent).toBe('The legible skill');
@@ -194,9 +201,11 @@ describe('the keyboard', () => {
   it('uses the selected row on Enter', async () => {
     const put: string[] = [];
     open({ onUse: (one) => put.push(one) });
-    await key('ArrowDown');
     await key('Enter');
     expect(put).toEqual(['@drift']);
+    await key('ArrowDown');
+    await key('Enter');
+    expect(put).toEqual(['@drift', '@legible']);
   });
 
   it('closes on Escape', async () => {

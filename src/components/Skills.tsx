@@ -119,6 +119,20 @@ export default function Skills({
     [project, global, shownWorkflows],
   );
 
+  /* Opened on the first row there is. A list beside an empty half is a screen
+     that has taught the hand there is nothing to read here, when there plainly
+     is. The project's own skills are first in that list, which is the right
+     one to land on: they are the ones somebody wrote for this work. */
+  useEffect(() => {
+    if (!open || picked !== null) return;
+    const first = rows[0];
+    if (first === undefined) return;
+    choose(first);
+    // Only until something is chosen. Naming `choose` here would re-run it on
+    // every render, and picking another row must not be undone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, rows, picked]);
+
   const choose = (one: Picked): void => {
     setPicked(one);
     setCopied(false);

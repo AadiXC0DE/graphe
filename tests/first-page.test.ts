@@ -106,8 +106,18 @@ describe('the keyboard', () => {
     expect(tsx).toContain('⌘O');
   });
 
-  it('leaves the first row focused on arrival', () => {
-    expect(tsx).toContain('rows.current[0]?.focus()');
+  /* Nothing is chosen when the screen appears: a focused row reads as a folder
+     already picked, and this screen is the question. The keys belong to the
+     screen rather than to whichever row holds focus, so a click on the
+     background does not take them away. */
+  it('chooses nothing on arrival, and still answers the arrows after a click away', () => {
+    expect(tsx).not.toContain('rows.current[0]?.focus()');
+    expect(tsx).toContain('const [at, setAt] = useState(-1);');
+    expect(tsx).toContain("if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {");
+    expect(tsx).toContain("if (event.key === 'Enter') {");
+    expect(tsx).toContain('window.addEventListener(\'keydown\', onKey);');
+    // Down from nothing takes the first, up takes the last.
+    expect(tsx).toContain('was < 0 ? (step === 1 ? 0 : shown.length - 1) : was + step');
   });
 });
 

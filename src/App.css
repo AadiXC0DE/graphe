@@ -698,7 +698,7 @@
    where the shelf does. */
 .app--files .topbar {
   left: calc(var(--shelf-take) + var(--files-take));
-  padding-left: 0;
+  padding-left: var(--space-3);
 }
 
 .filespanel {

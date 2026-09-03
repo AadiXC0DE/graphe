@@ -5533,9 +5533,7 @@ function Conversation() {
           ) : null}
 
           <div className="topbar__project">
-            {desk === null ? (
-              <span className="topbar__name topbar__name--quiet">Graphe</span>
-            ) : (
+            {desk === null ? null : (
               <button
                 type="button"
                 className="topbar__name"

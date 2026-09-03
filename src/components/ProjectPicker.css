@@ -423,3 +423,10 @@
     transform: none;
   }
 }
+
+/* Where the keys are. Nothing carries this when the screen appears: a row that
+   is already marked reads as a folder already chosen, and this screen is the
+   question. */
+.pickerrow--at {
+  background: var(--bg-raised);
+}

@@ -130,6 +130,10 @@
     height: 100%;
     min-height: 0;
     padding-bottom: 0;
+    /* Stretched, not started: a grid item aligned to the start is as tall as
+       its content, so `height: 100%` on the page under it resolved to nothing
+       to scroll inside and everything past the fold was clipped away. */
+    align-items: stretch;
   }
 
   .settings__pages {

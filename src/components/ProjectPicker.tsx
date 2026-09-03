@@ -81,7 +81,11 @@ export default function ProjectPicker({
   const firstRun = projects.length === 0;
   const shown = projects.slice(0, MOST_SHOWN);
   const rows = useRef<(HTMLButtonElement | null)[]>([]);
-  const [at, setAt] = useState(0);
+  /** Which row the keyboard is on. Below zero until somebody presses a key:
+   *  nothing is chosen when the screen appears. */
+  const [at, setAt] = useState(-1);
+  const atNow = useRef(-1);
+  atNow.current = at;
 
   const press = useCallback(
     (project: RecentProject | undefined) => {
@@ -92,18 +96,39 @@ export default function ProjectPicker({
     [onForget, onOpen],
   );
 
-  /* The first row is the one under the hand on arrival: this screen exists to
-     be pressed, and one press should not have to start with a click. */
-  useEffect(() => {
-    if (compact === true || firstRun) return;
-    rows.current[0]?.focus();
-  }, [compact, firstRun]);
+  /* Nothing is chosen on arrival. A row that is focused the moment the screen
+     appears reads as a folder already picked, and this screen exists to ask
+     which one. The keys still work without it: they belong to the screen rather
+     than to whichever row happens to hold focus, so clicking the background
+     does not take them away. */
 
   /* Numbers and the browse key belong to the whole screen; in the switcher they
      would fight the window behind it. */
   useEffect(() => {
     if (compact === true) return;
+    const shown = projects.slice(0, MOST_SHOWN);
     const onKey = (event: KeyboardEvent) => {
+      const typing = (event.target as HTMLElement | null)?.closest('input, textarea') !== null;
+      if (!(event.metaKey || event.ctrlKey) && !event.altKey && !typing) {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          if (shown.length === 0) return;
+          event.preventDefault();
+          setAt((was) => {
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            /* Nothing chosen yet: down takes the first, up takes the last. */
+            const next = was < 0 ? (step === 1 ? 0 : shown.length - 1) : was + step;
+            return Math.min(shown.length - 1, Math.max(0, next));
+          });
+          return;
+        }
+        if (event.key === 'Enter') {
+          const project = shown[atNow.current];
+          if (project === undefined) return;
+          event.preventDefault();
+          press(project);
+          return;
+        }
+      }
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       if (event.key.toLowerCase() === 'o') {
         event.preventDefault();
@@ -112,7 +137,7 @@ export default function ProjectPicker({
       }
       const nth = Number(event.key);
       if (!Number.isInteger(nth) || nth < 1 || nth > MOST_SHOWN) return;
-      const project = projects.slice(0, MOST_SHOWN)[nth - 1];
+      const project = shown[nth - 1];
       if (project === undefined) return;
       event.preventDefault();
       press(project);
@@ -121,11 +146,12 @@ export default function ProjectPicker({
     return () => window.removeEventListener('keydown', onKey);
   }, [compact, onBrowse, press, projects]);
 
-  const move = (from: number, by: number): void => {
-    const next = Math.min(shown.length - 1, Math.max(0, from + by));
-    setAt(next);
-    rows.current[next]?.focus();
-  };
+  /* The row the keys are on follows them, so the ring is where the eye is and
+     Enter opens what it is over. */
+  useEffect(() => {
+    if (compact === true || at < 0) return;
+    rows.current[at]?.focus();
+  }, [at, compact]);
 
   return (
     <section
@@ -165,7 +191,7 @@ export default function ProjectPicker({
           {shown.map((project, nth) => (
             <li
               key={project.path}
-              className={`pickerrow ${project.missing ? 'pickerrow--missing' : ''} ${project.path === openPath ? 'pickerrow--open' : ''}`}
+              className={`pickerrow ${project.missing ? 'pickerrow--missing' : ''} ${project.path === openPath ? 'pickerrow--open' : ''} ${nth === at ? 'pickerrow--at' : ''}`}
             >
               <button
                 type="button"
@@ -176,16 +202,7 @@ export default function ProjectPicker({
                 title={titleOf(project)}
                 onClick={() => press(project)}
                 onFocus={() => setAt(nth)}
-                onKeyDown={(event) => {
-                  if (event.key === 'ArrowDown') {
-                    event.preventDefault();
-                    move(nth, 1);
-                  } else if (event.key === 'ArrowUp') {
-                    event.preventDefault();
-                    move(nth, -1);
-                  }
-                }}
-                tabIndex={compact === true || nth === at ? 0 : -1}
+                tabIndex={0}
                 aria-current={project.path === openPath ? 'true' : undefined}
                 aria-describedby={project.missing ? `${project.path}-gone` : undefined}
               >

@@ -38,6 +38,7 @@ const main = read('electron/main.ts');
 const helpers = read('src/components/HelpersView.tsx');
 const helpersCss = read('src/components/HelpersView.css');
 const appCss = read('src/App.css');
+const settingsCss = read('src/components/Settings.css');
 
 describe('a band that folds', () => {
   /* Closed, with nothing in it, the band drew the word LOOKED UP and a "0" on
@@ -302,5 +303,32 @@ describe('the strip along the top', () => {
      nothing between them. */
   it('starts a little after the shelf ends', () => {
     expect(appCss).toMatch(/\.app--shelved \.topbar \{[^}]*padding-left: var\(--space-3\);/);
+  });
+});
+
+describe('the screen with no project on it', () => {
+  /* The app's own name, printed over an empty window, under the mark that is
+     already the app's name. It is in the menu bar, the Dock and the window's
+     title as well. */
+  it('does not print the app’s name at itself', () => {
+    expect(app).not.toContain('<span className="topbar__name topbar__name--quiet">Graphe</span>');
+  });
+});
+
+describe('the strip beside the project files', () => {
+  it('starts a little after that panel ends too', () => {
+    expect(appCss).toMatch(/\.app--files \.topbar \{[^}]*padding-left: var\(--space-3\);/);
+  });
+});
+
+describe('settings scrolls its page', () => {
+  /* Taking the list of pages out of the scroll took the scroll with it: a grid
+     item aligned to the start is as tall as its content, so the page under it
+     had no height to scroll inside and everything past the fold was clipped. */
+  it('gives the page a height to scroll inside', () => {
+    const at = settingsCss.indexOf('@container (min-width: 780px)');
+    const wide = settingsCss.slice(at, settingsCss.indexOf('/* ---', at));
+    expect(wide).toContain('align-items: stretch;');
+    expect(wide).toContain('overflow-y: auto;');
   });
 });

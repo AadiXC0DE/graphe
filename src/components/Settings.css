@@ -217,6 +217,15 @@
   min-width: 0;
 }
 
+/* Nothing on this page gives up height so the page can pretend to fit.
+   A flex item shrinks before its parent scrolls, and a group hides its own
+   overflow, so the moment the page became a scroller every card quietly
+   squeezed itself and clipped the rows inside it instead: no scrollbar, and
+   the settings past the fold simply gone. */
+.settings__page-body > * {
+  flex: none;
+}
+
 .settings__pagetitle {
   margin: 0;
   font-size: var(--text-base);

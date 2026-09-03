@@ -34,6 +34,12 @@ describe('settings can be scrolled to the end', () => {
     expect(css).toContain('@container (max-width: 779.98px)');
     expect(block('.settings__page-body')).toContain('overflow-y: auto');
     expect(block('.settings__pages')).toContain('overflow-y: auto');
+    /* And nothing on the page gives up height so the page can pretend to fit.
+       The page is a flex column: the moment it became a scroller, every card
+       inside it shrank rather than overflowing, and a card hides its own
+       overflow, so the rows past the fold were clipped away with no scrollbar
+       to reach them. This is the same fault as the head above, one level in. */
+    expect(block('.settings__page-body > *')).toContain('flex: none');
   });
 
   it('still clips its own corners, which is why this was ever a problem', () => {

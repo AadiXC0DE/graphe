@@ -77,7 +77,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     return (
       <section className="boundary" role="alert">
         <p className="boundary__what">{boundaryWords.what(this.props.what)}</p>
-        <pre className="boundary__message">{message}</pre>
+        <pre className="boundary__message scroll--auto">{message}</pre>
         <button type="button" className="boundary__copy" onClick={this.copy}>
           {copied ? boundaryWords.copied : boundaryWords.copy}
         </button>

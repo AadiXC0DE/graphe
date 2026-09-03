@@ -22,8 +22,15 @@ export type Density = 'compact' | 'comfortable' | 'spacious';
 export type Motion = 'full' | 'reduced' | 'off';
 
 export type Appearance = {
+  /** Light, dark, or whatever the computer is set to. */
+  base: 'system' | 'light' | 'dark';
   /** Any hue, written as hex or `oklch()`. Everything else colour follows it. */
   accent: string;
+  /** Left null, the ground is derived from the accent and tone. Set, it is
+   *  this colour, and the ladder is built from it. */
+  ground: string | null;
+  /** The same for the ink. */
+  ink: string | null;
   tone: Tone;
   contrast: Contrast;
   radius: Radius;
@@ -32,13 +39,17 @@ export type Appearance = {
   codeFont: string;
   ligatures: boolean;
   motion: Motion;
+  finish: 'solid' | 'glass';
 };
 
 /** What ships: the accent the app has always worn, and the spacing every
  *  existing screen was drawn against. Changing a value here re-draws the app
  *  for everybody who has never opened this panel. */
 export const defaultAppearance: Appearance = {
+  base: 'system',
   accent: '#b8492c',
+  ground: null,
+  ink: null,
   tone: 'warm',
   contrast: 'normal',
   radius: 'soft',
@@ -47,14 +58,65 @@ export const defaultAppearance: Appearance = {
   codeFont: 'SF Mono',
   ligatures: true,
   motion: 'full',
+  finish: 'solid',
 };
+
+/** The five starting points, as whole appearances rather than a second system
+ *  of stylesheets beside this one. A press is this spread over what is there,
+ *  so everything a person has already set that the preset does not name stays
+ *  set. */
+export const PRESETS: readonly { id: string; name: string; is: Partial<Appearance> }[] = [
+  { id: 'graphe', name: 'Graphe', is: { base: 'system', accent: '#b8492c', ground: null, ink: null, tone: 'warm', finish: 'solid' } },
+  { id: 'super',  name: 'Super',  is: { base: 'dark',  accent: '#f59e0b', ground: '#0a0a0b', ink: '#fafafa', tone: 'neutral', finish: 'solid' } },
+  { id: 'pink',   name: 'Pink',   is: { base: 'light', accent: '#be123c', ground: '#fff1f2', ink: '#1a0a13', tone: 'warm', finish: 'solid' } },
+  { id: 'slate',  name: 'Slate',  is: { base: 'dark',  accent: '#38bdf8', ground: '#0f172a', ink: '#f8fafc', tone: 'cool', finish: 'solid' } },
+  { id: 'glass',  name: 'Glass',  is: { base: 'system', accent: '#b8492c', ground: null, ink: null, tone: 'neutral', finish: 'glass' } },
+];
+
+/** Which preset this appearance is sitting on, or null once somebody has moved
+ *  off one. Only the fields a preset names are compared. */
+export function presetOf(one: Appearance): string | null {
+  const found = PRESETS.find((preset) =>
+    (Object.keys(preset.is) as (keyof Appearance)[]).every((field) => one[field] === preset.is[field]),
+  );
+  return found?.id ?? null;
+}
 
 export const appearanceWords = {
   name: 'Appearance',
-  note: 'One colour and a handful of choices. The rest of the palette is worked out from them.',
+  note: 'Pick a base, a preset or a colour. The rest follows.',
+  base: {
+    name: 'Base',
+    hint: 'Light, dark, or whatever this computer is set to.',
+    system: 'System',
+    light: 'Light',
+    dark: 'Dark',
+  },
+  presets: {
+    name: 'Presets',
+    hint: 'Five starting points. Every choice under them stays yours to move.',
+    custom: 'Custom',
+  },
   accent: {
     name: 'Accent',
     hint: 'Any colour. Surfaces, borders and text are derived from it, and every pair is measured before it lands.',
+  },
+  ground: {
+    name: 'Background',
+    hint: 'The colour the window sits on. On Auto it follows the accent.',
+    auto: 'Auto',
+  },
+  ink: {
+    name: 'Text colour',
+    hint: 'Taken when it can be read on every surface, and worked out when it cannot.',
+    auto: 'Auto',
+  },
+  finish: {
+    name: 'Finish',
+    hint: 'Glass lets the desktop through the window.',
+    solid: 'Solid',
+    glass: 'Glass',
+    later: 'Takes effect next time Graphe opens.',
   },
   tone: {
     name: 'Tone',
@@ -77,7 +139,7 @@ export const appearanceWords = {
     comfortable: 'Comfortable',
     spacious: 'Spacious',
   },
-  uiFont: { name: 'Interface font', hint: 'Satoshi comes with Graphe. Name any font on this computer instead.' },
+  uiFont: { name: 'Interface font', hint: 'Any font installed on this computer.' },
   codeFont: { name: 'Code font', hint: 'What code, paths and commands are set in.' },
   ligatures: { name: 'Ligatures in code', hint: 'Draw → and ≠ as one mark, where the font has them.' },
   motion: {
@@ -165,17 +227,22 @@ function rem(size: number): string {
  * choice of its own — the accent decides everything else about the palette.
  */
 export function tokensFor(one: Appearance, on: Base = 'light'): Readonly<Record<string, string>> {
-  const surfaces = surfacesFrom(one.accent, one.tone, one.contrast, on);
+  const surfaces = surfacesFrom(one.accent, one.tone, one.contrast, on, one.ground, one.ink);
+  // Glass is the same palette with the desktop allowed through it, so the
+  // surfaces stay solved and only what lands on screen is thinned.
+  const glass = one.finish === 'glass';
+  const through = (colour: string, keep: number): string =>
+    glass ? `color-mix(in oklab, ${colour} ${String(keep)}%, transparent)` : colour;
   const room = ROOM[one.density];
   const size = SIZE[one.density];
   const [small, medium, large] = RADIUS[one.radius];
   const timing = TIMING[one.motion];
 
   const tokens: Record<string, string> = {
-    '--bg': surfaces.bg,
-    '--bg-raised': surfaces.bgRaised,
-    '--bg-sunken': surfaces.bgSunken,
-    '--border': surfaces.border,
+    '--bg': through(surfaces.bg, 72),
+    '--bg-raised': through(surfaces.bgRaised, 78),
+    '--bg-sunken': through(surfaces.bgSunken, 60),
+    '--border': through(surfaces.border, 60),
     '--border-strong': surfaces.borderStrong,
     '--border-control': surfaces.borderControl,
     '--text': surfaces.text,
@@ -200,6 +267,8 @@ export function tokensFor(one: Appearance, on: Base = 'light'): Readonly<Record<
     '--font-ui': fontStack(one.uiFont, UI_FALLBACK),
     '--font-mono': fontStack(one.codeFont, CODE_FALLBACK),
   };
+
+  if (glass) tokens['--glass-blur'] = '22px';
 
   SPACE.forEach((step, at) => {
     tokens[`--space-${String(at + 1)}`] = `${String(Math.round(step * room))}px`;
@@ -244,6 +313,8 @@ export function cssFor(one: Appearance, on: Base = 'light', under?: string): str
 /* Reading it back                                                             */
 /* -------------------------------------------------------------------------- */
 
+const BASES: readonly Appearance['base'][] = ['system', 'light', 'dark'];
+const FINISHES: readonly Appearance['finish'][] = ['solid', 'glass'];
 const TONES: readonly Tone[] = ['warm', 'neutral', 'cool'];
 const CONTRASTS: readonly Contrast[] = ['normal', 'high'];
 const RADII: readonly Radius[] = ['sharp', 'soft', 'round'];
@@ -256,12 +327,22 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
     : fallback;
 }
 
+/** The preset an old `graphe:theme` names, once. A saved `base` is the mark
+ *  that it has already run: after that the appearance is the whole answer. */
+function movingOn(wasTheme: unknown, saved: Record<string, unknown>): Partial<Appearance> {
+  if (typeof saved['base'] === 'string' && (BASES as readonly string[]).includes(saved['base'])) return {};
+  return PRESETS.find((preset) => preset.id === wasTheme)?.is ?? {};
+}
+
 /** Anything unreadable is the shipped answer for that one setting and nothing
  *  more: a file somebody hand-edited badly should cost them the line they got
- *  wrong, not the whole appearance. */
-export function readAppearance(raw: unknown): Appearance {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { ...defaultAppearance };
-  const saved = raw as Record<string, unknown>;
+ *  wrong, not the whole appearance.
+ *
+ * `wasTheme` is the theme this computer last chose by name, back when a theme
+ * and an appearance were two systems. It becomes the preset of the same name. */
+export function readAppearance(raw: unknown, wasTheme?: unknown): Appearance {
+  const saved =
+    raw === null || typeof raw !== 'object' || Array.isArray(raw) ? {} : (raw as Record<string, unknown>);
 
   const accent = saved['accent'];
   const uiFont = saved['uiFont'];
@@ -269,8 +350,11 @@ export function readAppearance(raw: unknown): Appearance {
   const ligatures = saved['ligatures'];
 
   return {
+    base: oneOf(saved['base'], BASES, defaultAppearance.base),
     accent:
       typeof accent === 'string' && rgbFrom(accent) !== null ? accent.trim() : defaultAppearance.accent,
+    ground: readColour(saved['ground']),
+    ink: readColour(saved['ink']),
     tone: oneOf(saved['tone'], TONES, defaultAppearance.tone),
     contrast: oneOf(saved['contrast'], CONTRASTS, defaultAppearance.contrast),
     radius: oneOf(saved['radius'], RADII, defaultAppearance.radius),
@@ -279,7 +363,16 @@ export function readAppearance(raw: unknown): Appearance {
     codeFont: readFont(codeFont, defaultAppearance.codeFont),
     ligatures: typeof ligatures === 'boolean' ? ligatures : defaultAppearance.ligatures,
     motion: oneOf(saved['motion'], MOTIONS, defaultAppearance.motion),
+    finish: oneOf(saved['finish'], FINISHES, defaultAppearance.finish),
+    ...movingOn(wasTheme, saved),
   };
+}
+
+/** A ground or an ink: a colour we can parse, or nothing at all. */
+function readColour(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const said = value.trim();
+  return rgbFrom(said) === null ? null : said;
 }
 
 function readFont(value: unknown, fallback: string): string {

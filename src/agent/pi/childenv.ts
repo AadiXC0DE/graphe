@@ -71,6 +71,58 @@ export function optionsForOurRuntime<T extends { env?: NodeJS.ProcessEnv }>(
   return { ...(options ?? ({} as T)), env: { ...already, [RUN_AS_NODE]: '1' } };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Somewhere of its own to write                                               */
+/* -------------------------------------------------------------------------- */
+
+/** Folders a child started inside should write its temporary files under, by
+ *  the folder it runs in. Longest match wins, so a checkout inside a project
+ *  gets its own rather than the project's. */
+const scratchAt = new Map<string, string>();
+
+/** Say where a child running in `folder` should put anything temporary. */
+export function scratchUnder(folder: string, scratch: string): void {
+  scratchAt.set(folder, scratch);
+}
+
+export function forgetScratch(folder: string): void {
+  scratchAt.delete(folder);
+}
+
+/** The scratch folder for a child running here, or null when nothing claims it. */
+export function scratchIn(cwd: string | undefined): string | null {
+  if (typeof cwd !== 'string' || cwd === '') return null;
+  let best: string | null = null;
+  let nearest: string | null = null;
+  for (const [folder, scratch] of scratchAt) {
+    if (cwd !== folder && !cwd.startsWith(`${folder}/`)) continue;
+    // The nearest claim wins: a checkout sits inside its project, and the
+    // project's folder would otherwise swallow every conversation's.
+    if (nearest === null || folder.length > nearest.length) {
+      nearest = folder;
+      best = scratch;
+    }
+  }
+  return best;
+}
+
+/** The options a child should really have: its own place for temporary files,
+ *  unless whoever spawned it already said where. */
+export function optionsWithScratch<T extends { cwd?: unknown; env?: NodeJS.ProcessEnv }>(
+  options: T | undefined,
+  env: NodeJS.ProcessEnv,
+): T | undefined {
+  const cwd = typeof options?.cwd === 'string' ? options.cwd : undefined;
+  const scratch = scratchIn(cwd);
+  if (scratch === null) return options;
+  const already = options?.env ?? env;
+  if (typeof already['TMPDIR'] === 'string' && already['TMPDIR'].startsWith(scratch)) return options;
+  return {
+    ...(options ?? ({} as T)),
+    env: { ...already, TMPDIR: scratch, TMP: scratch, TEMP: scratch },
+  };
+}
+
 /** Set once, so a second call is free. */
 let patched = false;
 
@@ -103,14 +155,17 @@ export function letChildrenRunAsNode(
     const before = children[name];
     if (typeof before !== 'function') continue;
     children[name] = function patchedSpawn(this: unknown, ...args: unknown[]): unknown {
-      if (!isOurOwnRuntime(args[0], execPath)) return before.apply(this, args);
       /* The options are the last argument that is a plain object, and the
          signature allows it in two places — `(cmd, args, options)` and
          `(cmd, options)`. Found rather than assumed, because guessing wrong
          means dropping somebody's cwd. */
       const at = args.length >= 2 && isOptions(args[args.length - 1]) ? args.length - 1 : -1;
-      const options = at === -1 ? undefined : (args[at] as { env?: NodeJS.ProcessEnv });
-      const fixed = optionsForOurRuntime(options, process.env);
+      const options =
+        at === -1 ? undefined : (args[at] as { cwd?: unknown; env?: NodeJS.ProcessEnv });
+      const ours = isOurOwnRuntime(args[0], execPath);
+      let fixed = optionsWithScratch(options, process.env);
+      if (ours) fixed = optionsForOurRuntime(fixed, process.env);
+      if (fixed === options) return before.apply(this, args);
       if (at === -1) return before.apply(this, [...args, fixed]);
       const next = [...args];
       next[at] = fixed;

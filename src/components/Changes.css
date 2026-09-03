@@ -33,14 +33,11 @@
 }
 
 :root[data-theme='dark'] .changes,
-:root[data-theme='graphe'] .changes,
-:root[data-theme='super'] .changes,
-:root[data-theme='slate'] .changes {
+:root[data-theme='graphe'] .changes {
   --line-in: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
 }
 
-:root[data-theme='light'] .changes,
-:root[data-theme='pink'] .changes {
+:root[data-theme='light'] .changes {
   --line-in: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
 }
 

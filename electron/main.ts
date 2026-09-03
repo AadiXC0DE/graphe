@@ -42,7 +42,7 @@ import {
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
@@ -50,7 +50,7 @@ import { dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { patchWorkerThreads } from '../src/agent/pi/node-shim';
-import { letChildrenRunAsNode } from '../src/agent/pi/childenv';
+import { letChildrenRunAsNode, scratchUnder } from '../src/agent/pi/childenv';
 import {
   connectToProvider,
   connection as readConnection,
@@ -178,7 +178,7 @@ import { keeping, PreferenceFile } from '../src/projects/preferences';
 import { themeFrom } from '../src/lib/theme';
 import { Recents } from '../src/projects/recents';
 import { addressed, Workspaces, type Workspace } from '../src/projects/workspaces';
-import { findEditor, type Editor } from '../src/shell/editors';
+import { chosenFrom, findEditors, findTerminals, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
 import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
 import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShippedWith } from '../src/agent/pi/skills';
@@ -1545,8 +1545,24 @@ function rememberWindowBounds(win: BrowserWindow): void {
   }
 }
 
+/** The finish, straight off the file. Vibrancy is a window flag, so it has to
+ *  be known before the window is made, which is before any of the readers that
+ *  hold this file open are awake. */
+function savedFinish(): 'solid' | 'glass' {
+  try {
+    const raw: unknown = JSON.parse(
+      readFileSync(join(app.getPath('userData'), 'preferences.json'), 'utf8'),
+    );
+    const held = (raw as { preferences?: Record<string, unknown> }).preferences ?? {};
+    return readAppearance(held['appearance'], held['theme']).finish;
+  } catch {
+    return 'solid';
+  }
+}
+
 function createWindow(): void {
   const was = readWindowBounds();
+  const glass = savedFinish() === 'glass';
   const win = new BrowserWindow({
     width: was?.width ?? 1100,
     height: was?.height ?? 780,
@@ -1556,7 +1572,8 @@ function createWindow(): void {
     minHeight: 520,
     // The window is painted before React is, and a white flash on a dark desktop
     // is the first impression. Matches --bg in src/styles/tokens.css.
-    backgroundColor: '#131312',
+    backgroundColor: glass ? '#00000000' : '#131312',
+    ...(glass ? { vibrancy: 'under-window' as const, visualEffectState: 'active' as const } : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 18, y: 20 } : undefined,
     show: false,
@@ -1974,11 +1991,24 @@ function preferences(): Promise<PreferenceFile> {
   return preferencesPromise;
 }
 
-let editorPromise: Promise<Editor | null> | null = null;
+let editorsPromise: Promise<readonly Editor[]> | null = null;
+let terminalsPromise: Promise<readonly Editor[]> | null = null;
 
-function editor(): Promise<Editor | null> {
-  editorPromise ??= findEditor().catch(() => null);
-  return editorPromise;
+function editorsHere(): Promise<readonly Editor[]> {
+  editorsPromise ??= findEditors().catch(() => []);
+  return editorsPromise;
+}
+
+function terminalsHere(): Promise<readonly Editor[]> {
+  terminalsPromise ??= findTerminals().catch(() => []);
+  return terminalsPromise;
+}
+
+/** The editor to open in: what somebody chose while it is still installed,
+ *  else the first found. A machine with two always gave the same one. */
+async function editor(): Promise<Editor | null> {
+  const prefs = await preferences();
+  return chosenFrom(await editorsHere(), prefs.all().editor);
 }
 
 const NO_EDITOR: Trouble = {
@@ -4044,6 +4074,8 @@ async function noteForReview(
   address: string,
   checkout: Checkout,
   mirrored: boolean,
+  from: Arriving['from'] = 'conversation',
+  called?: string,
 ): Promise<void> {
   // A pull request review runs in a checkout of somebody else's branch. It is
   // read-only, and there is nothing in it anybody would land here.
@@ -4052,18 +4084,47 @@ async function noteForReview(
   if (base === null) return;
   const files = await talliesFor(checkout.folder, base);
   if (files.length === 0) return;
-  const named = held.sessions.find(address)?.name;
+  const named = called ?? held.sessions.find(address)?.name;
   const arriving: Arriving = {
     id: address,
-    from: 'conversation',
+    from,
     title: named === undefined || named.trim() === '' ? checkout.branch.replace(/^graphe\//, '') : named,
     address,
     files,
     at: Date.now(),
   };
+  const before = held.review.length;
   held.review = queueFrom(held.review, [arriving]);
   if (mirrored) held.review = markRead(held.review, address);
   await saveReviewQueue(project, held).catch(() => undefined);
+  // Said once, the first time work waits here instead of arriving. Without it
+  // the change reads as the work having gone missing.
+  if (!mirrored && before === 0 && !toldAboutReview.has(project)) {
+    toldAboutReview.add(project);
+    await rememberToldAboutReview();
+    send(project, { type: 'notice', what: reviewWords.firstTime }, address === '' ? undefined : address);
+  }
+}
+
+/** Projects whose first review entry has been explained. On disk, because the
+ *  sentence is worth saying once and not once per launch. */
+const toldAboutReview = new Set<string>();
+
+function toldFile(): string {
+  return join(app.getPath('userData'), 'told-about-review.json');
+}
+
+async function rememberToldAboutReview(): Promise<void> {
+  await writeAtomically(toldFile(), JSON.stringify([...toldAboutReview])).catch(() => undefined);
+}
+
+function readToldAboutReview(): void {
+  try {
+    const raw = JSON.parse(readFileSync(toldFile(), 'utf8')) as unknown;
+    if (Array.isArray(raw)) for (const one of raw) if (typeof one === 'string') toldAboutReview.add(one);
+  } catch {
+    // Never told anybody yet, which is the state a first launch is in.
+  }
 }
 
 /**
@@ -4079,9 +4140,15 @@ async function checkoutForReview(
   address: string,
 ): Promise<Checkout | null> {
   const one = held.checkouts.get(address);
-  if (one === undefined) return null;
-  if (existsSync(one.folder)) return one;
-  return reopenCheckout(project, one);
+  if (one !== undefined) {
+    if (existsSync(one.folder)) return one;
+    return reopenCheckout(project, one);
+  }
+  // A board piece keeps its copy on the board rather than in the index, and
+  // that copy is detached, so it has a folder and no branch.
+  const piece = awayDesks.get(project)?.bench.pieces.find((other) => other.id === address);
+  if (piece?.folder == null || !existsSync(piece.folder)) return null;
+  return { folder: piece.folder, branch: '' };
 }
 
 /** The queue as the window draws it: the entries plus the two facts only the
@@ -5113,6 +5180,13 @@ async function runProjectChecks(
  * when the conversation opened is wrong by the second reply.
  */
 async function standingBlockFor(project: string, address: string): Promise<string | null> {
+  /* Said in the block and set as `TMPDIR` for every child started in this
+     conversation's folder, so the two cannot say different places. */
+  const scratch = scratchFor(project, address);
+  const open = projectAt({ project });
+  if (open !== null) {
+    scratchUnder(folderFor(open, address === '' ? {} : { conversation: address }), scratch);
+  }
   const stored = await listNow(project, address).catch(() => null);
   const goal = await GoalFile.read(project, app.getPath('userData'), address).catch(() => null);
   const how = stored === null ? null : progress(stored.tasks);
@@ -5132,7 +5206,57 @@ async function standingBlockFor(project: string, address: string): Promise<strin
        tidied up they were gone — and a long job is exactly the one that gets
        tidied. Bounded on purpose: memory is not the job. */
     notes: await notesFor(project, address),
+    scratch: scratch,
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Somewhere of its own to write                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A folder each conversation may write anything temporary into.
+ *
+ * Nothing gave a run a place, so the model picked `/tmp`, named folders after
+ * itself and nothing ever removed them: twenty-two gigabytes in a day on this
+ * machine. This is a real path, said in the standing block and set as `TMPDIR`
+ * for every child, and it goes when the conversation does.
+ */
+function scratchFor(project: string, address: string): string {
+  const leaf = (one: string): string =>
+    (one.split(/[\\/]+/).filter((part) => part !== '').pop() ?? 'graphe')
+      .replace(/[^a-zA-Z0-9_.-]/g, '-')
+      .slice(0, 60);
+  const where = join(app.getPath('userData'), 'scratch', leaf(project), leaf(address || 'shared'));
+  try {
+    mkdirSync(where, { recursive: true });
+  } catch {
+    // A folder that cannot be made is a folder nothing writes to; the child
+    // falls back to the machine's own temporary folder.
+  }
+  return where;
+}
+
+/** How long a scratch folder nobody has touched is kept. */
+const SCRATCH_DAYS = 7;
+
+/** Everything under `scratch` that nothing has written to in a week. Run on the
+ *  way in, where a sweep costs nobody anything. */
+async function sweepScratch(): Promise<void> {
+  const root = join(app.getPath('userData'), 'scratch');
+  const cut = Date.now() - SCRATCH_DAYS * 24 * 60 * 60 * 1000;
+  const projects = await readdir(root, { withFileTypes: true }).catch(() => []);
+  for (const one of projects) {
+    if (!one.isDirectory()) continue;
+    const inside = join(root, one.name);
+    const each = await readdir(inside, { withFileTypes: true }).catch(() => []);
+    for (const other of each) {
+      const where = join(inside, other.name);
+      const when = await stat(where).catch(() => null);
+      if (when === null || when.mtimeMs >= cut) continue;
+      await rm(where, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -6086,6 +6210,14 @@ function tellTheConversation(desk: AwayDesk, piece: PieceOfWork): void {
   if (open === null) return;
   const address = piece.startedBy ?? open.held.sessions.current?.path ?? '';
   continuations.landed(desk.path, address, { id: piece.id, title: piece.doing });
+  // And onto the review list. With the queue as the default there is nowhere
+  // else a finished piece would be seen.
+  const checkout = open.held.checkouts.get(piece.id);
+  if (checkout !== undefined) {
+    void noteForReview(desk.path, open.held, piece.id, checkout, false, 'board', piece.doing).catch(
+      () => undefined,
+    );
+  }
   const session = sessionAt(open, address === '' ? {} : { conversation: address });
   if (session === null || session.working) return;
   void continuations.settled(desk.path, address, 'finished');
@@ -7165,6 +7297,27 @@ function register(): void {
    * would open the folder in whatever the *system* has associated with folders,
    * which is the Finder, which is the other button.
    */
+  /** Every editor and terminal on this machine, so a row can offer the choice
+   *  rather than the app taking whichever it found first. */
+  handle<{ editors: readonly string[]; terminals: readonly string[] }>(
+    CHANNEL.appsHere,
+    async () =>
+      done({
+        editors: (await editorsHere()).map((one) => one.name),
+        terminals: (await terminalsHere()).map((one) => one.name),
+      }),
+  );
+
+  handle<Preferences>(CHANNEL.setOpensIn, async (_event, args) => {
+    const [which, name] = args;
+    if (which !== 'editor' && which !== 'terminal') {
+      const prefs = await preferences();
+      return done(prefs.all());
+    }
+    const prefs = await preferences();
+    return done(await prefs.change({ [which]: typeof name === 'string' ? name : null }));
+  });
+
   handle<null>(CHANNEL.openInEditor, async (_event, args) => {
     const [file] = args;
     const open = projectAt(whereIn(args));
@@ -7444,7 +7597,12 @@ function register(): void {
 
   handle<Preferences>(CHANNEL.setTheme, async (_event, args) => {
     const [theme] = args;
-    return done(await (await preferences()).change({ theme: themeFrom(theme) }));
+    const base = themeFrom(theme);
+    const prefs = await preferences();
+    // The base belongs to the appearance; the theme is its mirror.
+    return done(
+      await prefs.change({ theme: base, appearance: { ...prefs.all().appearance, base } }),
+    );
   });
 
   handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
@@ -9041,7 +9199,7 @@ function register(): void {
     }
 
     let clashes: readonly string[] = [];
-    if (taking.length === entry.files.length) {
+    if (taking.length === entry.files.length && checkout.branch !== '') {
       // Nothing held back, so the branch itself goes in and the copy is given
       // back. Its conversation is put down first: the session is rooted in that
       // folder, and left open the next thing it was asked to do would run
@@ -9058,7 +9216,10 @@ function register(): void {
       const paths = [...carried.value.applied];
       if (paths.length > 0) {
         await gitRun(repo, ['add', '--', ...paths]);
-        const text = message.trim() === '' ? landingWords.message(checkout.branch) : message;
+        const text =
+          message.trim() === ''
+            ? landingWords.message(checkout.branch === '' ? entry.title : checkout.branch)
+            : message;
         const committed = await gitRun(repo, ['commit', '--cleanup=verbatim', '--message', text, '--', ...paths]);
         if (committed.code !== 0) return fail(worktreeTrouble(landingWords.failed));
       }
@@ -9088,6 +9249,13 @@ function register(): void {
     const repo = reviewRepo(open, where);
     const checkout = await checkoutForReview(repo, open.held, entry.address);
     if (checkout === null) return fail(REVIEW_WORK_GONE);
+    if (checkout.branch === '') {
+      return fail({
+        what: 'This work is not on a branch.',
+        because: 'A piece from the board works in a detached copy, so there is nothing to push. Take it in first, then open a pull request from your own branch.',
+        actionLabel: 'Got it',
+      });
+    }
 
     const sent = await gitRun(checkout.folder, [
       'push',
@@ -10382,7 +10550,8 @@ function register(): void {
   handle<Preferences>(CHANNEL.setAppearance, async (_event, args) => {
     const [raw] = args;
     const prefs = await preferences();
-    return done(await prefs.change({ appearance: readAppearance(raw) }));
+    const appearance = readAppearance(raw);
+    return done(await prefs.change({ appearance, theme: appearance.base }));
   });
 
   /* Somebody's own stylesheet, loaded last so it wins. The precise control
@@ -10735,6 +10904,8 @@ if (!app.requestSingleInstanceLock()) {
     // A fresh Mac has no git, and finding that out inside "open folder" reads
     // as the app failing rather than as one thing missing.
     if (!(await probeGit())) send(null, { type: 'notice', ...GIT_MISSING, because: GIT_MISSING.because });
+    readToldAboutReview();
+    void sweepScratch();
     watchForANewerOne();
   });
 

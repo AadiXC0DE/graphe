@@ -230,7 +230,7 @@ describe('how much of an add-on runs', () => {
     });
     expect(names(host)).toContain('storybook');
     expect(host.textContent).toContain('starts turns on its own');
-    expect(host.textContent).toContain('Its tools work; it cannot start a turn');
+    expect(host.textContent).toContain('Runs tools only');
   });
 });
 

@@ -511,3 +511,99 @@
   flex: none;
   color: var(--accent-ink);
 }
+
+/* One decision, then one press named by it. Seven verbs in a row, two of them
+   meaning nearly the same thing, is a row nobody reads twice. */
+.reviewq__verdicts {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.reviewq__verdict {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.reviewq__verdict--on {
+  color: var(--text);
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.reviewq__verdict:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* The once-a-project choice, out of the way of the once-an-entry one. */
+.reviewq__menuat {
+  position: relative;
+  flex: none;
+}
+
+.reviewq__menubtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--text-faint);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.reviewq__menubtn:hover {
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+.reviewq__menu {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 20;
+  width: 18rem;
+  padding: var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.reviewq__mirror {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.reviewq__mirrortext {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reviewq__mirrorname {
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+.reviewq__mirrorwhy {
+  margin: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}

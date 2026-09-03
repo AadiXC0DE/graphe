@@ -161,6 +161,8 @@ describe('D1 — the real name of what just happened', () => {
           advisorThinking: null,
           advisorGates: { completionGate: false, loopGate: false },
           addons: 'on',
+          editor: null,
+          terminal: null,
           appearance: defaultAppearance,
           showMe: true,
           model: null,

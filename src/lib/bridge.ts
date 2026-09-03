@@ -20,7 +20,7 @@
  * drifts away from the thing it is standing in for.
  */
 
-import { defaultAppearance, type Appearance } from '../design/appearance';
+import { readAppearance, type Appearance } from '../design/appearance';
 import type { AgentEvent, RunningPiece } from '../agent/types';
 import {
   findMoved,
@@ -715,7 +715,10 @@ let previewPlanMode = false;
     advisorThinking: null,
     advisorGates: { completionGate: false, loopGate: false },
     addons: 'on',
-    appearance: defaultAppearance,
+    appearance: readAppearance(
+      null,
+      typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme'),
+    ),
     thinking: {},
     kept: {},
     showFiles: true,
@@ -868,6 +871,7 @@ let previewPlanMode = false;
           unstaged: previewDirty ? 2 : 0,
           staged: previewDirty ? 1 : 0,
           untracked: previewDirty ? 1 : 0,
+          changedPaths: previewDirty ? PREVIEW_CHANGED.length : 0,
           ahead: previewStandsOn().ahead,
           behind: previewStandsOn().behind,
           branches: previewLines.map((one) => ({ ...one, current: one.name === previewLine })),
@@ -1007,12 +1011,13 @@ let previewPlanMode = false;
     },
 
     setTheme(theme: unknown): Promise<Result<Preferences>> {
-      preferred = { ...preferred, theme: themeFrom(theme) };
+      const base = themeFrom(theme);
+      preferred = { ...preferred, theme: base, appearance: { ...preferred.appearance, base } };
       return Promise.resolve(done({ ...preferred }));
     },
 
     setAppearance(appearance: Appearance): Promise<Result<Preferences>> {
-      preferred = { ...preferred, appearance };
+      preferred = { ...preferred, appearance, theme: appearance.base };
       return Promise.resolve(done({ ...preferred }));
     },
 
@@ -1263,6 +1268,15 @@ let previewPlanMode = false;
     flowForget(id: string): Promise<Result<null>> {
       keepFlows(withoutFlow(heldFlows(), id));
       return Promise.resolve(done(null));
+    },
+
+    appsHere(): Promise<Result<{ editors: readonly string[]; terminals: readonly string[] }>> {
+      return Promise.resolve(done({ editors: [], terminals: [] }));
+    },
+
+    setOpensIn(which: 'editor' | 'terminal', name: string | null): Promise<Result<Preferences>> {
+      preferred = { ...preferred, [which]: name };
+      return Promise.resolve(done({ ...preferred }));
     },
 
     goalLoad(): Promise<Result<import('../work/goal').Goal | null>> {
@@ -2285,6 +2299,8 @@ function connect(): Bridge {
     flowLoad: (whereArg) => (api.flowLoad as unknown as (where?: Where) => Promise<Result<readonly Flow[]>>)?.(whereArg) ?? Promise.resolve(done([])),
     flowSave: (flow, whereArg) => (api.flowSave as unknown as (flow: Flow, where?: Where) => Promise<Result<null>>)?.(flow, whereArg) ?? Promise.resolve(done(null)),
     flowForget: (id, whereArg) => (api.flowForget as unknown as (id: string, where?: Where) => Promise<Result<null>>)?.(id, whereArg) ?? Promise.resolve(done(null)),
+    appsHere: () => api.appsHere(),
+    setOpensIn: (which, name) => api.setOpensIn(which, name),
     goalLoad: (whereArg) => (api.goalLoad as unknown as (where?: Where) => Promise<Result<import('../work/goal').Goal | null>>)?.(whereArg) ?? Promise.resolve(done(null)),
     goalSave: (goal, whereArg) => (api.goalSave as unknown as (goal: import('../work/goal').Goal, where?: Where) => Promise<Result<null>>)?.(goal, whereArg) ?? Promise.resolve(done(null)),
     goalClear: (whereArg) => (api.goalClear as unknown as (where?: Where) => Promise<Result<null>>)?.(whereArg) ?? Promise.resolve(done(null)),

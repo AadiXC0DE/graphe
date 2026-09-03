@@ -17,7 +17,7 @@ export type DesignPart = 'styles' | 'motion' | 'drift' | 'legible' | 'widths' | 
 export const SAYS = {
   heading: 'Design',
   save: 'Save changes',
-  discard: 'Throw away',
+  discard: 'Discard',
   dirty: 'You have changes waiting to be saved.',
   clean: 'Nothing changed yet.',
   close: 'Close',

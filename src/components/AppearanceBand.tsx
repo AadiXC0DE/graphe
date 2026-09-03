@@ -74,18 +74,6 @@ export default function AppearanceBand({ appearance, onChange, on }: Props) {
       <p className="appearance__note">{appearanceWords.note}</p>
 
       {row(
-        appearanceWords.accent.name,
-        appearanceWords.accent.hint,
-        <input
-          type="color"
-          className="appearance__colour"
-          aria-label={appearanceWords.accent.name}
-          value={appearance.accent}
-          onChange={(event) => change({ accent: event.target.value })}
-        />,
-      )}
-
-      {row(
         appearanceWords.tone.name,
         appearanceWords.tone.hint,
         choice('tone', [
@@ -122,6 +110,20 @@ export default function AppearanceBand({ appearance, onChange, on }: Props) {
           { id: 'comfortable', says: appearanceWords.density.comfortable },
           { id: 'spacious', says: appearanceWords.density.spacious },
         ]),
+      )}
+
+      {row(
+        appearanceWords.finish.name,
+        appearanceWords.finish.hint,
+        <span className="appearance__stack">
+          {choice('finish', [
+            { id: 'solid', says: appearanceWords.finish.solid },
+            { id: 'glass', says: appearanceWords.finish.glass },
+          ])}
+          {/* The window flag is set as the window is made, so a press here is
+              answered by the next launch. */}
+          <span className="appearance__later">{appearanceWords.finish.later}</span>
+        </span>,
       )}
 
       {row(
@@ -178,7 +180,7 @@ export default function AppearanceBand({ appearance, onChange, on }: Props) {
         <div className="appearance__sample">
           <span className="appearance__sampletitle">The quick brown fox</span>
           <span className="appearance__samplebody">
-            Every surface, border and piece of text here is worked out from the accent above.
+            Every surface, border and piece of text here is worked out from the accent.
           </span>
           <span className="appearance__samplecode">const answer = 42; // =&gt; !==</span>
           <span className="appearance__sampleaccent">A press</span>

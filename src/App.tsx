@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import { Shown } from "./components/Shown";
@@ -37,7 +37,7 @@ import { keepsLogins } from "./projects/logins";
 import { actionAt, chordFor, readActions, type Bindings, type Chord } from "./lib/actions";
 import { saysChord } from "./lib/keys";
 import { mark } from "./lib/marks";
-import { cssFor, defaultAppearance } from "./design/appearance";
+import { cssFor, defaultAppearance, type Appearance } from "./design/appearance";
 import { lookFirstStore } from "./lib/lookfirst";
 import { escapeMeans } from "./lib/escape";
 import { heldWrites } from "./lib/heldwrites";
@@ -220,6 +220,23 @@ const ConnectModal = lazy(() => import("./components/ConnectModal"));
 const HelpersView = lazy(() => import("./components/HelpersView"));
 const Usage = lazy(() => import("./components/Usage"));
 
+/* The screens a press reaches most often. Fetched once the first paint is over
+   so the press finds the code already there. */
+const VIEWS = [
+  () => import("./components/Settings"),
+  () => import("./components/DesignView"),
+  () => import("./components/CanvasView"),
+  () => import("./components/HistoryView"),
+  () => import("./components/ReviewQueue"),
+  () => import("./components/Skills"),
+  () => import("./components/Usage"),
+  () => import("./components/AddMore"),
+  () => import("./components/Changes"),
+];
+
+/** A sheet-coloured rectangle where the sheet will be, rather than nothing, for
+ *  the frame or two a chunk still on its way costs. */
+const ARRIVING = <div className="sheet sheet--arriving" aria-busy="true" />;
 
 /** /?gallery renders every component on one page instead of the app, so the UI
  *  can be screenshotted and reviewed in both themes. Read once, at module load. */
@@ -245,6 +262,14 @@ const showGallery =
 const openOnLoad = new URLSearchParams(window.location.search).get("open");
 
 export default function App() {
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 1500));
+    const handle = idle(() => {
+      for (const load of VIEWS) void load();
+    });
+    return () => (window.cancelIdleCallback ?? clearTimeout)(handle as never);
+  }, []);
+
   /* Nothing is drawn while a view arrives: these are all reached by a press,
      and a spinner in place of a sheet that takes a frame to load is more
      motion than the wait it is covering. */
@@ -656,7 +681,7 @@ function Conversation() {
    *  rather than at either call site. */
   const openAddMore = useCallback(() => {
     setSwitching(false);
-    setAddMore(true);
+    startTransition(() => setAddMore(true));
     void bridge.packages().then((answer) => {
       if (answer.ok) setPacks(answer.value);
     });
@@ -745,7 +770,7 @@ function Conversation() {
      does nothing. */
   useEffect(() => {
     const showingNow = markFor(theme);
-    const on = showingNow === null || showingNow === 'light' || showingNow === 'pink' ? 'light' : 'dark';
+    const on = showingNow === null || showingNow === 'light' ? 'light' : 'dark';
     let sheet = document.getElementById('appearance');
     if (sheet === null) {
       sheet = document.createElement('style');
@@ -774,12 +799,15 @@ function Conversation() {
 
   useEffect(() => loadOwnStyles(), [loadOwnStyles]);
 
+  const finish = preferences.appearance.finish;
+
   useEffect(() => {
     const mark = markFor(theme);
     // Removing it is the point of "follow this computer": the stylesheet's own
     // prefers-color-scheme block then decides, and keeps deciding.
     if (mark === null) document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', mark);
+    document.documentElement.dataset.finish = finish;
     // Diagrams are drawn in the palette that was on screen when they rendered;
     // this is their cue to draw again.
     window.dispatchEvent(new Event('graphe:theme'));
@@ -788,7 +816,7 @@ function Conversation() {
     } catch {
       // A window with no storage still gets the theme, just not next time.
     }
-  }, [theme]);
+  }, [theme, finish]);
 
   const changeTheme = useCallback(
     (next: Theme) => {
@@ -796,8 +824,26 @@ function Conversation() {
       setTheme(wanted);
       // Persist to preferences.json (desktop) and keep the in-memory copy in sync
       // so the next launch reads the same value without waiting for the async reply.
-      setPreferences((was) => ({ ...was, theme: wanted }));
+      // The base is the appearance's own field, so it moves with it.
+      setPreferences((was) => ({
+        ...was,
+        theme: wanted,
+        appearance: { ...was.appearance, base: wanted },
+      }));
       void bridge.setTheme(wanted).then((answer) => {
+        if (answer.ok) setPreferences(answer.value);
+      });
+    },
+    [],
+  );
+
+  /** How it looks, saved. A preset carries a base with it, so a press that
+   *  changes which way the palette runs lands here as well. */
+  const changeAppearance = useCallback(
+    (next: Appearance) => {
+      setPreferences((was) => ({ ...was, appearance: next, theme: next.base }));
+      setTheme(next.base);
+      void bridge.setAppearance(next).then((answer) => {
         if (answer.ok) setPreferences(answer.value);
       });
     },
@@ -1398,15 +1444,19 @@ function Conversation() {
         | 'add-more'
         | 'helpers',
     ) => {
-      if (screen !== 'chat') setDesignAt(null);
-      if (screen !== 'graph') setGraphOpen(false);
-      if (screen !== 'reviews') setReviewsOpen(false);
-      if (screen !== 'review') setReviewQueueOpen(false);
-      if (screen !== 'skills') setSkillsOpen(false);
-      if (screen !== 'settings') setSettingsOpen(false);
-      if (screen !== 'usage') setUsageOpen(false);
-      if (screen !== 'add-more') setAddMore(false);
-      if (screen !== 'helpers') setHelpersAt(null);
+      /* In a transition, so the conversation stays on screen while the code for
+         the screen being opened arrives. */
+      startTransition(() => {
+        if (screen !== 'chat') setDesignAt(null);
+        if (screen !== 'graph') setGraphOpen(false);
+        if (screen !== 'reviews') setReviewsOpen(false);
+        if (screen !== 'review') setReviewQueueOpen(false);
+        if (screen !== 'skills') setSkillsOpen(false);
+        if (screen !== 'settings') setSettingsOpen(false);
+        if (screen !== 'usage') setUsageOpen(false);
+        if (screen !== 'add-more') setAddMore(false);
+        if (screen !== 'helpers') setHelpersAt(null);
+      });
     },
     [],
   );
@@ -1999,7 +2049,7 @@ function Conversation() {
     goToScreen('canvas');
     const made = newFlow();
     changeFlow(made);
-    setCanvasAt(made.id);
+    startTransition(() => setCanvasAt(made.id));
   }, [changeFlow, goToScreen]);
 
   /** The one somebody last drew on, or a new one. What the shelf's row does. */
@@ -2013,7 +2063,7 @@ function Conversation() {
       newCanvas();
       return;
     }
-    setCanvasAt(held[held.length - 1]!.id);
+    startTransition(() => setCanvasAt(held[held.length - 1]!.id));
   }, [newCanvas, goToScreen]);
 
   const forgetCanvas = useCallback((id: string) => {
@@ -2844,10 +2894,12 @@ function Conversation() {
         case 'design':
           // Design toggles on and off on the same key, like the shelf. Only a
           // switch from another screen clears the rest.
-          setDesignAt((was) => {
-            if (was !== null) return null;
-            goToScreen("design");
-            return "styles";
+          startTransition(() => {
+            setDesignAt((was) => {
+              if (was !== null) return null;
+              goToScreen("design");
+              return "styles";
+            });
           });
           return;
         case 'next':
@@ -3692,7 +3744,7 @@ function Conversation() {
       if (here.current !== project) await open(project);
       const canvas = canvasIn(id);
       if (canvas !== null) {
-        setCanvasAt(canvas);
+        startTransition(() => setCanvasAt(canvas));
         return;
       }
       const desk = desksNow.current.byPath[project];
@@ -4444,7 +4496,7 @@ function Conversation() {
       { id: 'new', name: 'Start a new conversation', where: 'Conversation', keys: keysFor('new'),
         run: () => void swapConversation(null), ready: here, whyNot: needsProject },
       { id: 'design', name: 'Open the design view', where: 'Conversation', keys: keysFor('design'),
-        run: () => { goToScreen('design'); setDesignAt('styles'); }, ready: here, whyNot: needsProject },
+        run: () => { goToScreen('design'); startTransition(() => setDesignAt('styles')); }, ready: here, whyNot: needsProject },
       { id: 'files', name: 'Show everything in this project', where: 'Project', keys: keysFor('files'),
         run: () => setFilesOpen(true), ready: here, whyNot: needsProject },
       { id: 'page', name: 'Show the page beside the conversation', where: 'Conversation', keys: keysFor('page'),
@@ -4483,10 +4535,10 @@ function Conversation() {
       { id: 'reviews', name: 'Read the pull requests', where: 'Project',
         run: () => { goToScreen('reviews'); refreshRepo(); }, ready: here, whyNot: needsProject },
       { id: 'review-queue', name: 'Review finished work', where: 'Project',
-        run: () => { goToScreen('review'); setReviewQueueOpen(true); refreshReviewQueue(); },
+        run: () => { goToScreen('review'); startTransition(() => setReviewQueueOpen(true)); refreshReviewQueue(); },
         ready: here, whyNot: needsProject },
       { id: 'skills', name: 'Look at the skills', where: 'Graphe',
-        run: () => { goToScreen('skills'); refreshSkills(); refreshWorkflows(); setSkillsOpen(true); } },
+        run: () => { goToScreen('skills'); refreshSkills(); refreshWorkflows(); startTransition(() => setSkillsOpen(true)); } },
       { id: 'connected', name: 'Other tools', where: 'Graphe',
         run: () => { goToScreen('connected'); setConnectedOpen(true); void refreshConnected(); } },
       { id: 'more', name: 'Add more to Graphe', where: 'Graphe', run: () => openAddMore() },
@@ -4502,7 +4554,7 @@ function Conversation() {
        and nobody has to know which page it is on. */
     const settings = settingsCommands((row) => {
       setSettingsAt(row.id);
-      setSettingsOpen(true);
+      startTransition(() => setSettingsOpen(true));
     });
     return [...made, ...settings].map((one) => ({
       ...one,
@@ -4779,7 +4831,7 @@ function Conversation() {
           goToScreen("skills");
           refreshSkills();
           refreshWorkflows();
-          setSkillsOpen(true);
+          startTransition(() => setSkillsOpen(true));
           return;
         case 'always': {
           // The file is the whole feature, so this opens the file.
@@ -4798,7 +4850,7 @@ function Conversation() {
           return;
         case 'usage':
           goToScreen("usage");
-          setUsageOpen(true);
+          startTransition(() => setUsageOpen(true));
           return;
         case 'accounts':
           openConnect();
@@ -5265,28 +5317,28 @@ function Conversation() {
           onAsk={() => setAsking(true)}
           onDesign={() => {
             goToScreen("design");
-            setDesignAt("styles");
+            startTransition(() => setDesignAt("styles"));
           }}
           onCanvas={openCanvas}
           onHistory={() => {
             goToScreen("graph");
-            setGraphOpen(true);
+            startTransition(() => setGraphOpen(true));
           }}
           onReviewQueue={() => {
             goToScreen("review");
-            setReviewQueueOpen(true);
+            startTransition(() => setReviewQueueOpen(true));
             refreshReviewQueue();
           }}
           reviewsWaiting={waitingToReview(reviewQ)}
           onReviews={() => {
             goToScreen("reviews");
-            setReviewsOpen(true);
+            startTransition(() => setReviewsOpen(true));
           }}
           onSkills={() => {
             goToScreen("skills");
             refreshSkills();
             refreshWorkflows();
-            setSkillsOpen(true);
+            startTransition(() => setSkillsOpen(true));
           }}
           onAddMore={() => {
             goToScreen("add-more");
@@ -5299,7 +5351,7 @@ function Conversation() {
           onThrowWorkAway={(path) => void throwWorkAway(path)}
           onSettings={() => {
             goToScreen("settings");
-            setSettingsOpen(true);
+            startTransition(() => setSettingsOpen(true));
             // Read when the sheet opens rather than kept in step: the file is
             // edited outside this window, so the only true reading is a fresh
             // one.
@@ -5326,167 +5378,177 @@ function Conversation() {
           rest back out, which is a real edit — so it snapshots first. */}
       {/* Which of the several goes to take. The one question the board cannot
           answer on its own, because the answer is in the files. */}
-      <Against
-        open={against !== null}
-        sides={against?.sides ?? []}
-        busy={busy}
-        onOpenInBrowser={openWaysInBrowser}
-        onClose={() => setAgainst(null)}
-        onKeep={(id) => {
-          // Open until the answer comes back: closing first hides the sheet
-          // behind whatever the press turns out to say.
-          keepAway(id, against?.where, (ok) => {
-            if (ok) setAgainst(null);
-          });
-        }}
-      />
+      <Suspense fallback={against === null ? null : ARRIVING}>
+        <Against
+          open={against !== null}
+          sides={against?.sides ?? []}
+          busy={busy}
+          onOpenInBrowser={openWaysInBrowser}
+          onClose={() => setAgainst(null)}
+          onKeep={(id) => {
+            // Open until the answer comes back: closing first hides the sheet
+            // behind whatever the press turns out to say.
+            keepAway(id, against?.where, (ok) => {
+              if (ok) setAgainst(null);
+            });
+          }}
+        />
+      </Suspense>
 
-      <Changes
-        open={changesOpen}
-        diff={changeText}
-        busy={busy}
-        onClose={() => setChangesOpen(false)}
-        onExplain={(file, line) => {
-          setChangesOpen(false);
-          const asked = CHANGE_WORDS.explain(file, line);
-          void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
-        }}
-        onFix={(file, line) => {
-          setChangesOpen(false);
-          const asked = CHANGE_WORDS.fix(file, line);
-          void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
-        }}
-        onKeep={(kept) => {
-          const whole = changeText ?? '';
-          const keeping = new Set(parseDiff(kept).flatMap((one) => one.hunks).map((one) => one.id));
-          // What was NOT kept is what to undo. Built from the whole change so
-          // the line numbers on the way out are the ones on the way in — and
-          // left where they are, because this is applied in reverse against a
-          // file that still holds every piece.
-          const dropping = undoOf(parseDiff(whole), (hunk) => !keeping.has(hunk.id));
-          setChangesOpen(false);
-          if (dropping.trim() === '') return;
-          void bridge.changesDrop(dropping).then((answer) => {
-            if (!answer.ok) troubleHere(answer.trouble);
-            else if (openProject !== null) void refreshOverview(openProject);
-          });
-        }}
-      />
+      <Suspense fallback={changesOpen ? ARRIVING : null}>
+        <Changes
+          open={changesOpen}
+          diff={changeText}
+          busy={busy}
+          onClose={() => setChangesOpen(false)}
+          onExplain={(file, line) => {
+            setChangesOpen(false);
+            const asked = CHANGE_WORDS.explain(file, line);
+            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+          }}
+          onFix={(file, line) => {
+            setChangesOpen(false);
+            const asked = CHANGE_WORDS.fix(file, line);
+            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+          }}
+          onKeep={(kept) => {
+            const whole = changeText ?? '';
+            const keeping = new Set(parseDiff(kept).flatMap((one) => one.hunks).map((one) => one.id));
+            // What was NOT kept is what to undo. Built from the whole change so
+            // the line numbers on the way out are the ones on the way in — and
+            // left where they are, because this is applied in reverse against a
+            // file that still holds every piece.
+            const dropping = undoOf(parseDiff(whole), (hunk) => !keeping.has(hunk.id));
+            setChangesOpen(false);
+            if (dropping.trim() === '') return;
+            void bridge.changesDrop(dropping).then((answer) => {
+              if (!answer.ok) troubleHere(answer.trouble);
+              else if (openProject !== null) void refreshOverview(openProject);
+            });
+          }}
+        />
+      </Suspense>
 
-      <Palette
-        open={paletteOpen}
-        commands={everyCommand}
-        onClose={() => setPaletteOpen(false)}
-      />
+      <Suspense fallback={null}>
+        <Palette
+          open={paletteOpen}
+          commands={everyCommand}
+          onClose={() => setPaletteOpen(false)}
+        />
+      </Suspense>
 
-      <Connected
-        open={connectedOpen}
-        state={connected}
-        onClose={() => setConnectedOpen(false)}
-        onCheck={async (name) => {
-          const answer = await bridge.connectedCheck(name);
-          return answer.ok ? answer.value : { state: 'would-not-start', because: answer.trouble.because };
-        }}
-        onSave={async (tools) => {
-          const answer = await bridge.connectedSave(tools);
-          if (answer.ok) setConnected(answer.value);
-          else troubleHere(answer.trouble);
-        }}
-        onGetHelper={async (id) => {
-          const answer = await bridge.getHelper(id);
-          if (answer.ok) return { ok: true, value: answer.value };
-          troubleHere(answer.trouble);
-          return { ok: false };
-        }}
-      />
+      <Suspense fallback={connectedOpen ? ARRIVING : null}>
+        <Connected
+          open={connectedOpen}
+          state={connected}
+          onClose={() => setConnectedOpen(false)}
+          onCheck={async (name) => {
+            const answer = await bridge.connectedCheck(name);
+            return answer.ok ? answer.value : { state: 'would-not-start', because: answer.trouble.because };
+          }}
+          onSave={async (tools) => {
+            const answer = await bridge.connectedSave(tools);
+            if (answer.ok) setConnected(answer.value);
+            else troubleHere(answer.trouble);
+          }}
+          onGetHelper={async (id) => {
+            const answer = await bridge.getHelper(id);
+            if (answer.ok) return { ok: true, value: answer.value };
+            troubleHere(answer.trouble);
+            return { ok: false };
+          }}
+        />
+      </Suspense>
 
-      <Skills
-        open={skillsOpen}
-        skills={skills}
-        workflows={workflows}
-        onClose={() => setSkillsOpen(false)}
-        onRefresh={refreshSkills}
-        onOpen={async (skill) => {
-          const answer = await bridge.skillText(skill.id);
-          return answer.ok ? answer.value : null;
-        }}
-      />
+      <Suspense fallback={skillsOpen ? ARRIVING : null}>
+        <Skills
+          open={skillsOpen}
+          skills={skills}
+          workflows={workflows}
+          onClose={() => setSkillsOpen(false)}
+          onRefresh={refreshSkills}
+          onOpen={async (skill) => {
+            const answer = await bridge.skillText(skill.id);
+            return answer.ok ? answer.value : null;
+          }}
+        />
+      </Suspense>
 
-      <Settings
-        open={settingsOpen}
-        onClose={() => {
-          setSettingsOpen(false);
-          setSettingsAt(null);
-        }}
-        startAt={settingsAt}
-        showMe={preferences.showMe}
-        showFiles={preferences.showFiles}
-        holdBack={holdsBack(preferences.heldBack, desk?.path)}
-        theme={theme}
-        onTheme={changeTheme}
-        onToggleShowMe={() => changeShowMe(!preferences.showMe)}
-        onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
-        onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}
-        always={alwaysNow}
-        keepLogins={keepsLogins(preferences.keptLogins, desk?.path)}
-        onToggleKeepLogins={() =>
-          changeKeepLogins(!keepsLogins(preferences.keptLogins, desk?.path))
-        }
-        onGo={openSettingsLink}
-        version={version ?? undefined}
-        storage={storage}
-        onCopyDiagnostics={() => {
-          void bridge.diagnostics().then((answer) => {
-            if (!answer.ok) return;
-            void navigator.clipboard.writeText(answer.value).then(
-              () => say(DIAGNOSTICS_COPIED),
-              () => undefined,
-            );
-          });
-        }}
-        onClearFinishedWork={() => {
-          void bridge.clearFinishedWork().then((answer) => {
-            if (!answer.ok) return;
-            setStorage((was) => (was === null ? was : { ...was, says: answer.value.says, couldClear: 0 }));
-            say(clearedWords(answer.value.removed, answer.value.freed));
-          });
-        }}
-        caps={saysCaps(capsNow())}
-        appearance={preferences.appearance}
-        onAppearance={(next) => {
-          void bridge.setAppearance(next).then((answer) => {
-            if (answer.ok) setPreferences(answer.value);
-          });
-        }}
-        showingDark={markFor(theme) !== null && markFor(theme) !== 'light' && markFor(theme) !== 'pink'}
-        ownStyles={ownStyles ?? undefined}
-        onReloadStyles={loadOwnStyles}
-        onMac={ON_MAC}
-        bindings={bindings}
-        onBind={bindKey}
-        connection={connection}
-        onSelectModel={selectModel}
-        onThinking={changeThinking}
-        onConnect={openConnect}
-        advisor={preferences.advisor}
-        onAdvisor={selectAdvisor}
-        advisorThinking={preferences.advisorThinking}
-        onAdvisorThinking={setAdvisorThinking}
-        advisorGates={preferences.advisorGates}
-        onAdvisorGate={setAdvisorGate}
-        addons={preferences.addons}
-        onAddons={setAddons}
-        addonsHere={addonsHere}
-      />
+      <Suspense fallback={settingsOpen ? ARRIVING : null}>
+        <Settings
+          open={settingsOpen}
+          onClose={() => {
+            setSettingsOpen(false);
+            setSettingsAt(null);
+          }}
+          startAt={settingsAt}
+          showMe={preferences.showMe}
+          showFiles={preferences.showFiles}
+          holdBack={holdsBack(preferences.heldBack, desk?.path)}
+          theme={theme}
+          onTheme={changeTheme}
+          onToggleShowMe={() => changeShowMe(!preferences.showMe)}
+          onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
+          onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}
+          always={alwaysNow}
+          keepLogins={keepsLogins(preferences.keptLogins, desk?.path)}
+          onToggleKeepLogins={() =>
+            changeKeepLogins(!keepsLogins(preferences.keptLogins, desk?.path))
+          }
+          onGo={openSettingsLink}
+          version={version ?? undefined}
+          storage={storage}
+          onCopyDiagnostics={() => {
+            void bridge.diagnostics().then((answer) => {
+              if (!answer.ok) return;
+              void navigator.clipboard.writeText(answer.value).then(
+                () => say(DIAGNOSTICS_COPIED),
+                () => undefined,
+              );
+            });
+          }}
+          onClearFinishedWork={() => {
+            void bridge.clearFinishedWork().then((answer) => {
+              if (!answer.ok) return;
+              setStorage((was) => (was === null ? was : { ...was, says: answer.value.says, couldClear: 0 }));
+              say(clearedWords(answer.value.removed, answer.value.freed));
+            });
+          }}
+          caps={saysCaps(capsNow())}
+          appearance={preferences.appearance}
+          onAppearance={changeAppearance}
+          showingDark={markFor(theme) === 'dark'}
+          ownStyles={ownStyles ?? undefined}
+          onReloadStyles={loadOwnStyles}
+          onMac={ON_MAC}
+          bindings={bindings}
+          onBind={bindKey}
+          connection={connection}
+          onSelectModel={selectModel}
+          onThinking={changeThinking}
+          onConnect={openConnect}
+          advisor={preferences.advisor}
+          onAdvisor={selectAdvisor}
+          advisorThinking={preferences.advisorThinking}
+          onAdvisorThinking={setAdvisorThinking}
+          advisorGates={preferences.advisorGates}
+          onAdvisorGate={setAdvisorGate}
+          addons={preferences.addons}
+          onAddons={setAddons}
+          addonsHere={addonsHere}
+        />
+      </Suspense>
 
-      <Usage
-        open={usageOpen}
-        spent={desk?.spent ?? null}
-        onClose={() => setUsageOpen(false)}
-        onTokens={() =>
-          bridge.tokenUsage().then((answer) => (answer.ok ? answer.value : null))
-        }
-      />
+      <Suspense fallback={usageOpen ? ARRIVING : null}>
+        <Usage
+          open={usageOpen}
+          spent={desk?.spent ?? null}
+          onClose={() => setUsageOpen(false)}
+          onTokens={() =>
+            bridge.tokenUsage().then((answer) => (answer.ok ? answer.value : null))
+          }
+        />
+      </Suspense>
 
       {filesExpanded && desk !== null ? (
         <aside className="filespanel">
@@ -5504,11 +5566,13 @@ function Conversation() {
               </svg>
             </button>
           </div>
-          <Files
-            files={files[desk.path] ?? []}
-            selected={reading?.path ?? null}
-            onSelect={readFile}
-          />
+          <Suspense fallback={null}>
+            <Files
+              files={files[desk.path] ?? []}
+              selected={reading?.path ?? null}
+              onSelect={readFile}
+            />
+          </Suspense>
         </aside>
       ) : null}
 
@@ -5517,12 +5581,14 @@ function Conversation() {
             the panel: a column of code is prose-width, not sidebar-width. */}
         {filesExpanded && reading !== null ? (
           <div className="app__file">
-            <FileView
-              path={reading.path}
-              text={reading.text}
-              trouble={reading.trouble}
-              onClose={() => setReading(null)}
-            />
+            <Suspense fallback={null}>
+              <FileView
+                path={reading.path}
+                text={reading.text}
+                trouble={reading.trouble}
+                onClose={() => setReading(null)}
+              />
+            </Suspense>
           </div>
         ) : null}
 
@@ -5746,7 +5812,7 @@ function Conversation() {
               helpers={angles}
               onOpen={(at) => {
                 goToScreen("helpers");
-                setHelpersAt({ at });
+                startTransition(() => setHelpersAt({ at }));
               }}
             />
             <InLine waiting={waitingHere} onTake={takeBack} />
@@ -5760,7 +5826,7 @@ function Conversation() {
                 className="reviewband"
                 onClick={() => {
                   goToScreen('review');
-                  setReviewQueueOpen(true);
+                  startTransition(() => setReviewQueueOpen(true));
                   refreshReviewQueue();
                 }}
               >
@@ -5824,7 +5890,7 @@ function Conversation() {
               onAdvisorThinking={setAdvisorThinking}
               onMoreAdvisor={() => {
                 setSettingsAt('model');
-                setSettingsOpen(true);
+                startTransition(() => setSettingsOpen(true));
               }}
               longJobs={longJobs}
               onConnect={openConnect}
@@ -5904,12 +5970,12 @@ function Conversation() {
           onLimit={setLimit}
           onOpenDesign={(part) => {
             goToScreen("design");
-            setDesignAt(part);
+            startTransition(() => setDesignAt(part));
           }}
           onOpenGraph={(repo) => {
             goToScreen("graph");
             setGraphRepo(repo ?? null);
-            setGraphOpen(true);
+            startTransition(() => setGraphOpen(true));
           }}
           onSwitchBranch={switchBranch}
           onCreateBranch={createBranch}
@@ -5920,6 +5986,12 @@ function Conversation() {
           onHowMuch={changeHowMuch}
           onHandOver={handToDeveloper}
           onOpenLink={(address) => void bridge.openLink(address)}
+          onOpenReview={(id) => {
+            goToScreen('review');
+            startTransition(() => setReviewQueueOpen(true));
+            refreshReviewQueue();
+            if (id !== undefined) openReviewEntry(id);
+          }}
           onOpenChanges={() => {
             setChangeText(null);
             setChangesOpen(true);
@@ -5979,114 +6051,120 @@ function Conversation() {
           Both take the room between the shelf and the panel, because both were
           unreadable in a 328px column. */}
       {designAt !== null && desk !== null ? (
-        <DesignView
-          at={designAt}
-          data={{
-            styles: designStyles,
-            motion: design.motion,
-            drifted: design.drifted,
-            unreadable: design.unreadable,
-            fixing,
-            looks: looks.looks,
-            looksSay: looks.says,
-            checkingWidths,
-            workingAt,
-            inStep,
-            lookingAtFigma,
-            busy,
-            showMe: preferences.showMe,
-          }}
-          dirty={designDirty()}
-          onSave={commitDesign}
-          onDiscard={discardDesign}
-          onClose={() => setDesignAt(null)}
-          onNudge={nudge}
-          onNudgeMotion={nudgeMotion}
-          onUseYours={(finding) => {
-            // Through the agent rather than straight to disk: the edit is then
-            // snapshotted, photographed and undoable like any other change.
-            const text = saysUseYours(finding, designStyles?.file ?? "");
-            setDesignAt(null);
-            void deliver(text, sizeUp(text), { lookFirst: true });
-          }}
-          onFixColour={(finding) => {
-            const token = design.repairs.get(finding.id);
-            if (token === undefined || finding.fix === null) return;
-            setFixing(finding.id);
-            nudge(token, finding.fix.colour);
-          }}
-          onCheckWidths={() => {
-            setCheckingWidths(true);
-            void bridge
-              .checkWidths(
-                panelRepoNow.current === null ? undefined : { repo: panelRepoNow.current },
-              )
-              .then((answer) => {
-                if (answer.ok) setLooks(answer.value);
-              })
-              .finally(() => setCheckingWidths(false));
-          }}
-          onWorkAt={(look) => setWorkingAt((was) => (was === look.id ? null : look.id))}
-          onFollowDesign={(address) => askFigma(() => bridge.followDesign(address))}
-          onLookAgain={() => askFigma(() => bridge.lookAgain())}
-          onCaughtUp={() => askFigma(() => bridge.caughtUp())}
-          onStopFollowing={() => askFigma(() => bridge.stopFollowing())}
-          /* The one thing here that is a request rather than a reading: what
-             moved goes to the conversation as the sentence that would bring the
-             work back in step. */
-          onBuildIn={(move: Move) => {
-            setDesignAt(null);
-            void send(move.asks);
-          }}
-        />
+        <Suspense fallback={ARRIVING}>
+          <DesignView
+            at={designAt}
+            data={{
+              styles: designStyles,
+              motion: design.motion,
+              drifted: design.drifted,
+              unreadable: design.unreadable,
+              fixing,
+              looks: looks.looks,
+              looksSay: looks.says,
+              checkingWidths,
+              workingAt,
+              inStep,
+              lookingAtFigma,
+              busy,
+              showMe: preferences.showMe,
+            }}
+            dirty={designDirty()}
+            onSave={commitDesign}
+            onDiscard={discardDesign}
+            onClose={() => setDesignAt(null)}
+            onNudge={nudge}
+            onNudgeMotion={nudgeMotion}
+            onUseYours={(finding) => {
+              // Through the agent rather than straight to disk: the edit is then
+              // snapshotted, photographed and undoable like any other change.
+              const text = saysUseYours(finding, designStyles?.file ?? "");
+              setDesignAt(null);
+              void deliver(text, sizeUp(text), { lookFirst: true });
+            }}
+            onFixColour={(finding) => {
+              const token = design.repairs.get(finding.id);
+              if (token === undefined || finding.fix === null) return;
+              setFixing(finding.id);
+              nudge(token, finding.fix.colour);
+            }}
+            onCheckWidths={() => {
+              setCheckingWidths(true);
+              void bridge
+                .checkWidths(
+                  panelRepoNow.current === null ? undefined : { repo: panelRepoNow.current },
+                )
+                .then((answer) => {
+                  if (answer.ok) setLooks(answer.value);
+                })
+                .finally(() => setCheckingWidths(false));
+            }}
+            onWorkAt={(look) => setWorkingAt((was) => (was === look.id ? null : look.id))}
+            onFollowDesign={(address) => askFigma(() => bridge.followDesign(address))}
+            onLookAgain={() => askFigma(() => bridge.lookAgain())}
+            onCaughtUp={() => askFigma(() => bridge.caughtUp())}
+            onStopFollowing={() => askFigma(() => bridge.stopFollowing())}
+            /* The one thing here that is a request rather than a reading: what
+               moved goes to the conversation as the sentence that would bring the
+               work back in step. */
+            onBuildIn={(move: Move) => {
+              setDesignAt(null);
+              void send(move.asks);
+            }}
+          />
+        </Suspense>
       ) : null}
 
       {graphOpen && desk !== null ? (
-        <HistoryView
-          versions={historyRepo === null ? desk.versions : (desk.repoVersions[historyRepo] ?? [])}
-          pictures={versionPictures[desk.path] ?? {}}
-          git={
-            historyRepo === null
-              ? (desk.overview?.git ?? null)
-              : (desk.overview?.repos?.find((one) => one.name === historyRepo)?.git ?? null)
-          }
-          busy={busy}
-          onClose={() => setGraphOpen(false)}
-          onPutBack={(versionId) => void putBack(versionId, historyRepo ?? undefined)}
-          onOpenFile={(file) => void bridge.openInEditor(file)}
-          repos={desk.overview?.repos ?? []}
-          repo={historyRepo}
-          onRepo={(name) => setGraphRepo(name)}
-        />
+        <Suspense fallback={ARRIVING}>
+          <HistoryView
+            versions={historyRepo === null ? desk.versions : (desk.repoVersions[historyRepo] ?? [])}
+            pictures={versionPictures[desk.path] ?? {}}
+            git={
+              historyRepo === null
+                ? (desk.overview?.git ?? null)
+                : (desk.overview?.repos?.find((one) => one.name === historyRepo)?.git ?? null)
+            }
+            busy={busy}
+            onClose={() => setGraphOpen(false)}
+            onPutBack={(versionId) => void putBack(versionId, historyRepo ?? undefined)}
+            onOpenFile={(file) => void bridge.openInEditor(file)}
+            repos={desk.overview?.repos ?? []}
+            repo={historyRepo}
+            onRepo={(name) => setGraphRepo(name)}
+          />
+        </Suspense>
       ) : null}
 
       {/* The canvas in front, drawn where a conversation would be. It is a tab,
           so the row of tabs stays above it and switching back is one press on
           something you can see. */}
       {canvasHere === null ? null : (
-        <CanvasView
-          flow={canvasHere}
-          onFlow={changeFlow}
-          onStart={startFlow}
-          onStop={stopFlow}
-          onCarryOn={openGate}
-          connection={connection}
-          thinking={preferences?.thinking ?? {}}
-          onThinking={setBlockThinking}
-          repos={desk?.overview?.repos ?? []}
-          doing={canvasDoing}
-          onModel={selectModel}
-          onConnect={() => setConnectedOpen(true)}
-          advisor={preferences.advisor}
-          onAdvisor={selectAdvisor}
-          {...(preferences.advisorThinking === null ? {} : { advisorThinking: preferences.advisorThinking })}
-          onAdvisorThinking={setAdvisorThinking}
-          full={canvasFull}
-          onFull={setCanvasFull}
-          {...(canvasHere.conversation === null || desk === null
-            ? {}
-            : { onOpenThread: () => void goToTab(keyOf(desk.path, canvasHere.conversation ?? '')) })}
-        />
+        <Suspense fallback={ARRIVING}>
+          <CanvasView
+            flow={canvasHere}
+            onFlow={changeFlow}
+            onStart={startFlow}
+            onStop={stopFlow}
+            onCarryOn={openGate}
+            connection={connection}
+            thinking={preferences?.thinking ?? {}}
+            onThinking={setBlockThinking}
+            repos={desk?.overview?.repos ?? []}
+            doing={canvasDoing}
+            onModel={selectModel}
+            onConnect={() => setConnectedOpen(true)}
+            advisor={preferences.advisor}
+            onAdvisor={selectAdvisor}
+            {...(preferences.advisorThinking === null ? {} : { advisorThinking: preferences.advisorThinking })}
+            onAdvisorThinking={setAdvisorThinking}
+            full={canvasFull}
+            onFull={setCanvasFull}
+            {...(canvasHere.conversation === null || desk === null
+              ? {}
+              : { onOpenThread: () => void goToTab(keyOf(desk.path, canvasHere.conversation ?? '')) })}
+          />
+        </Suspense>
       )}
 
       {reviewsOpen && desk !== null ? (
@@ -6111,77 +6189,83 @@ function Conversation() {
       ) : null}
 
       {reviewQueueOpen && desk !== null ? (
-        <ReviewQueue
-          entries={reviewQ}
-          chosen={reviewAt}
-          diff={reviewDiff}
-          busy={reviewBusy}
-          onChoose={openReviewEntry}
-          onFile={chooseReviewFile}
-          onDecide={decideReview}
-          onLand={landReview}
-          onOpenPr={openReviewPr}
-          onMirror={mirrorReview}
-          onRefresh={refreshReviewQueue}
-          onClose={() => setReviewQueueOpen(false)}
-          onExplain={(file, line) => {
-            setReviewQueueOpen(false);
-            const asked = CHANGE_WORDS.explain(file, line);
-            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
-          }}
-          onFix={(file, line) => {
-            setReviewQueueOpen(false);
-            const asked = CHANGE_WORDS.fix(file, line);
-            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
-          }}
-        />
+        <Suspense fallback={ARRIVING}>
+          <ReviewQueue
+            entries={reviewQ}
+            chosen={reviewAt}
+            diff={reviewDiff}
+            busy={reviewBusy}
+            onChoose={openReviewEntry}
+            onFile={chooseReviewFile}
+            onDecide={decideReview}
+            onLand={landReview}
+            onOpenPr={openReviewPr}
+            onMirror={mirrorReview}
+            onRefresh={refreshReviewQueue}
+            onClose={() => setReviewQueueOpen(false)}
+            onExplain={(file, line) => {
+              setReviewQueueOpen(false);
+              const asked = CHANGE_WORDS.explain(file, line);
+              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            }}
+            onFix={(file, line) => {
+              setReviewQueueOpen(false);
+              const asked = CHANGE_WORDS.fix(file, line);
+              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            }}
+          />
+        </Suspense>
       ) : null}
 
-      <Conflict
-        open={clashPath !== null}
-        paths={clashes.paths}
-        path={clashPath}
-        text={clashText}
-        busy={reviewBusy}
-        onPath={openClash}
-        onSettle={settleClash}
-        onAsk={askAboutClash}
-        onClose={() => {
-          setClashPath(null);
-          setClashText(null);
-        }}
-      />
+      <Suspense fallback={clashPath === null ? null : ARRIVING}>
+        <Conflict
+          open={clashPath !== null}
+          paths={clashes.paths}
+          path={clashPath}
+          text={clashText}
+          busy={reviewBusy}
+          onPath={openClash}
+          onSettle={settleClash}
+          onAsk={askAboutClash}
+          onClose={() => {
+            setClashPath(null);
+            setClashText(null);
+          }}
+        />
+      </Suspense>
 
-      <BrowserPane
-        room={pane}
-        address={pageAt ?? previewUrl}
-        onAddress={(address) => {
-          setPageAt(address);
-          void bridge.pageAt(address, null, true);
-        }}
-        onElsewhere={(address) => void bridge.openLink(address)}
-        onRoom={movePane}
-        onClose={() => movePane('off')}
-        variations={
-          variations === null
-            ? undefined
-            : variations.members.map((one) => ({ id: one.id, name: one.name }))
-        }
-        recording={recording}
-        onRecord={record}
-        watched={watched}
-        watching={watchAt !== null}
-        onWatch={watchTheBrowser}
-        variation={variations?.inFront ?? null}
-        onVariation={variations === null ? undefined : (id) => {
-          const chosen = variations.members.find((one) => one.id === id);
-          if (chosen === undefined) return;
-          setVariations((current) => (current === null ? current : { ...current, inFront: id }));
-          setPageAt(chosen.address);
-          movePane('split');
-        }}
-        onBounds={movedPage}
-      />
+      <Suspense fallback={null}>
+        <BrowserPane
+          room={pane}
+          address={pageAt ?? previewUrl}
+          onAddress={(address) => {
+            setPageAt(address);
+            void bridge.pageAt(address, null, true);
+          }}
+          onElsewhere={(address) => void bridge.openLink(address)}
+          onRoom={movePane}
+          onClose={() => movePane('off')}
+          variations={
+            variations === null
+              ? undefined
+              : variations.members.map((one) => ({ id: one.id, name: one.name }))
+          }
+          recording={recording}
+          onRecord={record}
+          watched={watched}
+          watching={watchAt !== null}
+          onWatch={watchTheBrowser}
+          variation={variations?.inFront ?? null}
+          onVariation={variations === null ? undefined : (id) => {
+            const chosen = variations.members.find((one) => one.id === id);
+            if (chosen === undefined) return;
+            setVariations((current) => (current === null ? current : { ...current, inFront: id }));
+            setPageAt(chosen.address);
+            movePane('split');
+          }}
+          onBounds={movedPage}
+        />
+      </Suspense>
 
       {/* Mode three keeps a way back that is one key and always the same key. */}
       {pane === 'whole' ? (
@@ -6192,7 +6276,9 @@ function Conversation() {
       ) : null}
 
       {helpersAt !== null ? (
-        <HelpersView helpers={helpers} at={helpersAt.at} onClose={() => setHelpersAt(null)} />
+        <Suspense fallback={ARRIVING}>
+          <HelpersView helpers={helpers} at={helpersAt.at} onClose={() => setHelpersAt(null)} />
+        </Suspense>
       ) : null}
 
       {!overviewed && desk !== null && desk.spent !== null ? (
@@ -6206,102 +6292,106 @@ function Conversation() {
         />
       ) : null}
 
-      <AddMore
-        open={addMore}
-        packs={packs}
-        vouchedFor={Object.fromEntries(
-          packs.filter((one) => one.curated).map((one) => [one.id, one.summary]),
-        )}
-        busy={packBusy}
-        warning={SOMEBODY_ELSES}
-        explaining={explaining}
-        explanations={explanations}
-        capabilities={addonSays}
-        addonProcesses={addonsRunning}
-        onClose={() => setAddMore(false)}
-        /* The vouched-for tools — a real browser among them — with whichever
-           this project already has marked as connected. Without these the
-           whole shelf never drew, so the one-press way to give the agent a
-           browser was invisible. */
-        reaches={alreadyReached((connected?.tools ?? []).map((one) => one.name))}
-        onConnect={(id) => {
-          const wanted = REACHABLE.find((one) => one.id === id);
-          if (wanted === undefined) return;
-          setPackBusy(id);
-          const now = connected?.tools ?? [];
-          void bridge
-            .connectedSave([...now.filter((one) => one.name !== id), asServer(wanted)])
-            .then((answer) => {
-              if (answer.ok) setConnected(answer.value);
-              else troubleHere(answer.trouble);
-            })
-            .finally(() => setPackBusy(null));
-        }}
-        onDisconnect={(id) => {
-          setPackBusy(id);
-          const now = connected?.tools ?? [];
-          void bridge
-            .connectedSave(now.filter((one) => one.name !== id))
-            .then((answer) => {
-              if (answer.ok) setConnected(answer.value);
-              else troubleHere(answer.trouble);
-            })
-            .finally(() => setPackBusy(null));
-        }}
-        onSearch={(term) => {
-          void bridge.packages(term).then((answer) => {
-            if (answer.ok) setPacks(answer.value);
-          });
-        }}
-        onAdd={(id) => {
-          setPackBusy(id);
-          void bridge
-            .addPackage(id)
-            .then((answer) => {
+      <Suspense fallback={null}>
+        <AddMore
+          open={addMore}
+          packs={packs}
+          vouchedFor={Object.fromEntries(
+            packs.filter((one) => one.curated).map((one) => [one.id, one.summary]),
+          )}
+          busy={packBusy}
+          warning={SOMEBODY_ELSES}
+          explaining={explaining}
+          explanations={explanations}
+          capabilities={addonSays}
+          addonProcesses={addonsRunning}
+          onClose={() => setAddMore(false)}
+          /* The vouched-for tools — a real browser among them — with whichever
+             this project already has marked as connected. Without these the
+             whole shelf never drew, so the one-press way to give the agent a
+             browser was invisible. */
+          reaches={alreadyReached((connected?.tools ?? []).map((one) => one.name))}
+          onConnect={(id) => {
+            const wanted = REACHABLE.find((one) => one.id === id);
+            if (wanted === undefined) return;
+            setPackBusy(id);
+            const now = connected?.tools ?? [];
+            void bridge
+              .connectedSave([...now.filter((one) => one.name !== id), asServer(wanted)])
+              .then((answer) => {
+                if (answer.ok) setConnected(answer.value);
+                else troubleHere(answer.trouble);
+              })
+              .finally(() => setPackBusy(null));
+          }}
+          onDisconnect={(id) => {
+            setPackBusy(id);
+            const now = connected?.tools ?? [];
+            void bridge
+              .connectedSave(now.filter((one) => one.name !== id))
+              .then((answer) => {
+                if (answer.ok) setConnected(answer.value);
+                else troubleHere(answer.trouble);
+              })
+              .finally(() => setPackBusy(null));
+          }}
+          onSearch={(term) => {
+            void bridge.packages(term).then((answer) => {
               if (answer.ok) setPacks(answer.value);
-              else troubleHere(answer.trouble);
-            })
-            .finally(() => setPackBusy(null));
-        }}
-        onRemove={(id) => {
-          setPackBusy(id);
-          void bridge
-            .removePackage(id)
-            .then((answer) => {
-              if (answer.ok) setPacks(answer.value);
-            })
-            .finally(() => setPackBusy(null));
-        }}
-        carried={carried}
-        onTrustCarried={trustCarried}
-        onExplain={(id) => {
-          setExplaining(id);
-          void bridge
-            .explainPackage(id)
-            .then((answer) => {
-              if (answer.ok) setExplanations((was) => ({ ...was, [id]: answer.value }));
-            })
-            .finally(() => setExplaining(null));
-        }}
-      />
+            });
+          }}
+          onAdd={(id) => {
+            setPackBusy(id);
+            void bridge
+              .addPackage(id)
+              .then((answer) => {
+                if (answer.ok) setPacks(answer.value);
+                else troubleHere(answer.trouble);
+              })
+              .finally(() => setPackBusy(null));
+          }}
+          onRemove={(id) => {
+            setPackBusy(id);
+            void bridge
+              .removePackage(id)
+              .then((answer) => {
+                if (answer.ok) setPacks(answer.value);
+              })
+              .finally(() => setPackBusy(null));
+          }}
+          carried={carried}
+          onTrustCarried={trustCarried}
+          onExplain={(id) => {
+            setExplaining(id);
+            void bridge
+              .explainPackage(id)
+              .then((answer) => {
+                if (answer.ok) setExplanations((was) => ({ ...was, [id]: answer.value }));
+              })
+              .finally(() => setExplaining(null));
+          }}
+        />
+      </Suspense>
 
-      <ConnectModal
-        open={connectOpen}
-        state={connection}
-        step={connectStep}
-        busy={connectBusy}
-        failure={connectFailure}
-        discovered={discovered}
-        importing={importing}
-        onClose={closeConnect}
-        onConnect={(providerId, method) => startConnect(providerId, method)}
-        onAnswer={answerConnect}
-        onCancel={cancelConnect}
-        onImport={importAccount}
-        onSelect={selectModel}
-        onDisconnect={disconnect}
-        onRefresh={() => refreshConnection(true)}
-      />
+      <Suspense fallback={null}>
+        <ConnectModal
+          open={connectOpen}
+          state={connection}
+          step={connectStep}
+          busy={connectBusy}
+          failure={connectFailure}
+          discovered={discovered}
+          importing={importing}
+          onClose={closeConnect}
+          onConnect={(providerId, method) => startConnect(providerId, method)}
+          onAnswer={answerConnect}
+          onCancel={cancelConnect}
+          onImport={importAccount}
+          onSelect={selectModel}
+          onDisconnect={disconnect}
+          onRefresh={() => refreshConnection(true)}
+        />
+      </Suspense>
     </main>
   );
 }
@@ -6314,23 +6404,25 @@ function Conversation() {
  *  somebody opens it and never before — see `VisualChange` in src/lib/ipc.ts. */
 function Picture({ change }: { change: VisualChange }) {
   return (
-    <VisualDiff
-      headline={change.headline}
-      inDesignWords={change.inDesignWords}
-      where={change.where}
-      areas={change.areas}
-      beforeThumb={change.beforeThumb}
-      afterThumb={change.afterThumb}
-      width={change.width}
-      height={change.height}
-      onOpen={async () => {
-        const answer = await bridge.visualFrames(change.id);
-        // A pair we no longer have is not worth a card. The small pictures are
-        // already on screen and stay there, which is a slightly soft comparison
-        // rather than none at all.
-        return answer.ok ? answer.value : null;
-      }}
-    />
+    <Suspense fallback={null}>
+      <VisualDiff
+        headline={change.headline}
+        inDesignWords={change.inDesignWords}
+        where={change.where}
+        areas={change.areas}
+        beforeThumb={change.beforeThumb}
+        afterThumb={change.afterThumb}
+        width={change.width}
+        height={change.height}
+        onOpen={async () => {
+          const answer = await bridge.visualFrames(change.id);
+          // A pair we no longer have is not worth a card. The small pictures are
+          // already on screen and stay there, which is a slightly soft comparison
+          // rather than none at all.
+          return answer.ok ? answer.value : null;
+        }}
+      />
+    </Suspense>
   );
 }
 

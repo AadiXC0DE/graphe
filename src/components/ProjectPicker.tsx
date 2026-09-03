@@ -7,7 +7,7 @@ type Props = {
   projects: readonly RecentProject[];
   /** Work in this one. Never called for a project that has gone missing. */
   onOpen: (project: RecentProject) => void;
-  /** Take it off the list. The folder itself is never touched. */
+  /** Remove the list. The folder itself is never touched. */
   onForget: (project: RecentProject) => void;
   /** Go and find a folder that is not on the list. */
   onBrowse: () => void;
@@ -120,7 +120,7 @@ export default function ProjectPicker({
                   <span className="pickerrow__name">{project.name}</span>
                   <span className="pickerrow__meta" id={`${project.path}-gone`}>
                     {project.missing ? (
-                      <>I cannot find this folder any more</>
+                      <>Not where it was</>
                     ) : (
                       <>
                         {ago(project.lastOpenedAt)}
@@ -145,7 +145,7 @@ export default function ProjectPicker({
                   onClick={() => onForget(project)}
                   aria-label={`Take ${project.name} off the list`}
                 >
-                  Take it off
+                  Remove
                 </button>
               ) : project.path === openPath ? (
                 <span className="pickerrow__badge">Open</span>

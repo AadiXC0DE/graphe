@@ -84,7 +84,7 @@ export default function Skills({ open, skills, workflows, onClose, onRefresh, on
         <div className="skills__actions"><button type="button" onClick={onRefresh}>Refresh</button><button type="button" className="skills__close" onClick={onClose}>Close <kbd>Esc</kbd></button></div>
       </header>
       <div className="skills__body">
-        <aside className="skills__library">
+        <aside className="skills__library scroll--auto">
           <input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Find a skill" autoFocus aria-label="Find a skill" />
           {rows(project, 'This project', 'Travels with this folder')}
           {rows(global, 'Your computer', 'Available in every project')}
@@ -99,8 +99,8 @@ export default function Skills({ open, skills, workflows, onClose, onRefresh, on
             ))}
           </section>
         </aside>
-        <article className="skills__detail">
-          {selected === null ? <div className="skills__blank"><span>@</span><h2>Choose a skill to read it.</h2><p>Its instructions stay local. Selecting it in chat makes it explicit for that one request.</p></div> : <>
+        <article className="skills__detail scroll--auto">
+          {selected === null ? <div className="skills__blank"><span>@</span><h2>Nothing selected</h2><p>Its instructions stay local. Selecting it in chat makes it explicit for that one request.</p></div> : <>
             <div className="skills__detailhead"><div><p className="skills__eyebrow">{selected.source === 'project' ? 'This project' : 'Your computer'}</p><h2>{selected.name}</h2><p>{selected.description}</p></div><code>@{selected.handle}</code></div>
             {loading ? (
               <p className="skills__reading">Opening its instructions…</p>

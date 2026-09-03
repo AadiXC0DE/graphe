@@ -1,0 +1,96 @@
+/* What has finished and is waiting to be looked at.
+
+   Rows of one shape, one press each, into the one screen where work is decided
+   about. The band is not drawn at all when nothing waits: an empty band teaches
+   people to stop looking at it. */
+
+.waiting__top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.waiting__top > .overview__title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A number, not a pill: the heading already says who it is for. */
+.waiting__count {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.waiting__list {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+}
+
+.waiting__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 40px;
+  padding: 0 var(--space-1);
+  text-align: left;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .waiting__row:hover {
+    background: color-mix(in oklab, var(--text) 7%, transparent);
+  }
+}
+
+.waiting__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.waiting__dot--unread {
+  background: var(--accent);
+}
+
+.waiting__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.waiting__title {
+  font-size: var(--text-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.waiting__meta {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.waiting__more {
+  margin-top: var(--space-1);
+  padding: 0 var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.waiting__more:hover {
+  color: var(--text);
+}

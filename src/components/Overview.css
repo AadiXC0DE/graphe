@@ -66,15 +66,16 @@
 }
 
 @media (hover: hover) {
-  .overview__tab:hover {
-    color: var(--text-muted);
-    background: var(--bg-sunken);
+  .overview__tab:not(.overview__tab--here):hover {
+    color: var(--text);
+    background: color-mix(in oklab, var(--text) 7%, transparent);
   }
 }
 
 .overview__tab--here {
   color: var(--text);
-  background: var(--bg-sunken);
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 /* Something is worth looking at under here. A dot rather than a count: the
@@ -721,7 +722,8 @@
 }
 
 .projects__pick--on {
-  background: var(--bg-sunken);
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
   border-color: var(--border-strong);
   color: var(--text);
 }
@@ -764,7 +766,7 @@
 
 .gitband__row {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: var(--space-2);
   margin-top: var(--space-2);
 }
@@ -772,13 +774,15 @@
 /* The count is a press, because the answer to "what changed" is the change and
    not the number. */
 .gitband__changes {
-  display: flex;
   flex: 1 1 auto;
-  align-items: baseline;
+  min-width: 0;
+  height: 30px;
+  padding: 0 var(--space-3);
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  min-width: 0;
-  padding: var(--space-2) var(--space-3);
+  white-space: nowrap;
   font-size: var(--text-xs);
   color: var(--text);
   text-align: left;
@@ -816,12 +820,12 @@
 }
 
 .gitband__commit {
-  display: flex;
   flex: none;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: var(--space-2) var(--space-3);
+  height: 30px;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
   font-size: var(--text-xs);
   color: var(--accent-text);
   background: var(--accent);
@@ -833,11 +837,6 @@
 .gitband__commit:disabled {
   cursor: default;
   opacity: 0.55;
-}
-
-.gitband__onto {
-  font-size: var(--text-2xs);
-  opacity: 0.8;
 }
 
 .gitband__quiet {

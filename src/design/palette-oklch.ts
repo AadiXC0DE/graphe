@@ -265,6 +265,9 @@ const GROUNDS: Readonly<Record<Base, Readonly<Record<Contrast, readonly [number,
  *  reads as a mistake long before it reads as warm. */
 const GROUND_CHROMA: Readonly<Record<Tone, number>> = { warm: 0.005, neutral: 0.002, cool: 0.005 };
 
+/** As much colour as a surface may carry. Past this it stops being a ground. */
+const MOST_GROUND_CHROMA = 0.03;
+
 /** Neutral keeps the accent's own hue; the other two commit to a direction. */
 function groundHue(accent: Oklch, tone: Tone): number {
   if (tone === 'warm') return 70;
@@ -291,16 +294,27 @@ function worstGround(grounds: readonly string[], base: Base): string {
   return worst;
 }
 
+/** How far the two other surfaces sit from a ground somebody chose. Raised is
+ *  lighter and sunken darker in both bases, as the table above has it. */
+const RAISED_BY = 0.03;
+const SUNKEN_BY = 0.025;
+
 /** Every colour a theme needs, from one accent.
  *
  * `base` is which way the ladder runs, because a person still chooses light or
  * dark; the accent decides everything else.
+ *
+ * `ground` and `ink` are the two a preset or a picker can name outright. The
+ * ink is taken only when it can be read: a colour that fails the ratio is a
+ * preference nobody can act on, so the derived one stands.
  */
 export function surfacesFrom(
   accent: string,
   tone: Tone,
   contrast: Contrast,
   base: Base = 'light',
+  ground?: string | null,
+  ink?: string | null,
 ): Surfaces {
   const asked = rgbFrom(accent);
   const chosen = asked === null ? { l: 0.55, c: 0.15, h: 30 } : oklchOf(asked);
@@ -308,27 +322,44 @@ export function surfacesFrom(
   // A grey accent would leave the palette with nothing to be coloured with.
   const chroma = Math.max(chosen.c, 0.02);
 
-  const [groundL, raisedL, sunkenL] = GROUNDS[base][contrast];
-  const greyHue = groundHue(chosen, tone);
+  const wanted = ground === undefined || ground === null ? null : rgbFrom(ground);
+  const set = wanted === null ? null : oklchOf(wanted);
+  const [tableGround, tableRaised, tableSunken] = GROUNDS[base][contrast];
+  const groundL = set?.l ?? tableGround;
+  const raisedL = set === null ? tableRaised : groundL + RAISED_BY;
+  const sunkenL = set === null ? tableSunken : groundL - SUNKEN_BY;
+  const greyHue = set?.h ?? groundHue(chosen, tone);
+  // A ground somebody named decides which way the ladder runs: black under a
+  // base of light is still black, and what is read on it still has to be read.
+  const runs: Base = set === null ? base : set.l > 0.5 ? 'light' : 'dark';
   const greyChroma = GROUND_CHROMA[tone];
-  const grey = (lightness: number): string => hexFrom({ l: lightness, c: greyChroma, h: greyHue });
+  /* A named ground keeps its own colour, or Slate is grey and Pink is grey.
+     Capped: past this a surface stops being a ground and starts being a tint,
+     and every piece of text on it has to fight it. */
+  const surfaceChroma = set === null ? greyChroma : Math.min(set.c, MOST_GROUND_CHROMA);
+  const grey = (lightness: number): string => hexFrom({ l: lightness, c: surfaceChroma, h: greyHue });
 
   const bg = grey(groundL);
   const bgRaised = grey(raisedL);
   const bgSunken = grey(sunkenL);
   const accentSoft = hexFrom({
-    l: base === 'light' ? sunkenL - 0.015 : raisedL + 0.005,
-    c: base === 'light' ? 0.045 : 0.05,
+    l: runs === 'light' ? sunkenL - 0.015 : raisedL + 0.005,
+    c: runs === 'light' ? 0.045 : 0.05,
     h: hue,
   });
 
   // Everything read is solved against the worst ground it can land on, so one
   // measurement covers all four rather than four that each nearly pass.
-  const hardest = worstGround([bg, bgRaised, bgSunken, accentSoft], base);
+  const hardest = worstGround([bg, bgRaised, bgSunken, accentSoft], runs);
 
   const reads = READS[contrast];
-  const text = readableOn(hardest, BODY[contrast], greyHue, greyChroma * 2, base);
-  const accentOn = readableOn(hardest, reads, hue, chroma, base);
+  const derived = readableOn(hardest, BODY[contrast], greyHue, greyChroma * 2, runs);
+  const wantedInk = ink === undefined || ink === null ? null : rgbFrom(ink);
+  const text =
+    wantedInk !== null && contrastRatio(wantedInk, hardest) >= BODY[contrast]
+      ? hexOf(wantedInk)
+      : derived;
+  const accentOn = readableOn(hardest, reads, hue, chroma, runs);
   const white = '#ffffff';
   const black = '#000000';
 
@@ -336,16 +367,16 @@ export function surfacesFrom(
     bg,
     bgRaised,
     bgSunken,
-    border: readableOn(bg, EDGES.hair, greyHue, greyChroma * 2, base),
-    borderStrong: readableOn(bg, EDGES.strong, greyHue, greyChroma * 2, base),
-    borderControl: readableOn(hardest, OUTLINES[contrast], greyHue, greyChroma * 2, base),
+    border: readableOn(bg, EDGES.hair, greyHue, greyChroma * 2, runs),
+    borderStrong: readableOn(bg, EDGES.strong, greyHue, greyChroma * 2, runs),
+    borderControl: readableOn(hardest, OUTLINES[contrast], greyHue, greyChroma * 2, runs),
     text,
-    textMuted: readableOn(hardest, reads + 1.4, greyHue, greyChroma * 3, base),
-    textFaint: readableOn(hardest, reads, greyHue, greyChroma * 3, base),
+    textMuted: readableOn(hardest, reads + 1.4, greyHue, greyChroma * 3, runs),
+    textFaint: readableOn(hardest, reads, greyHue, greyChroma * 3, runs),
     accent: accentOn,
     accentText: contrastRatio(white, accentOn) >= contrastRatio(black, accentOn) ? white : black,
     accentSoft,
-    accentInk: readableOn(hardest, reads + 1.2, hue, chroma, base),
-    danger: readableOn(hardest, reads, 27, 0.16, base),
+    accentInk: readableOn(hardest, reads + 1.2, hue, chroma, runs),
+    danger: readableOn(hardest, reads, 27, 0.16, runs),
   };
 }

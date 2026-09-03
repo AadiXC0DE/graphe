@@ -28,7 +28,7 @@ export const SAYS = {
   refresh: 'Refresh',
   empty: 'No pull requests here yet.',
   emptyDetail:
-    'When someone opens one in this project it will show up here to read and review.',
+    'Open pull requests show up here.',
   noIssues: 'No issues have been opened.',
   noIssuesDetail:
     'When someone raises one in this project it will show up here.',

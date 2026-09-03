@@ -48,6 +48,10 @@ export const standingWords = {
   ],
   agentsTrimmed: 'The rest of this file is on disk. Read it if you need it.',
   skillTrimmed: 'This skill is longer than shown. Ask for the rest if you need it.',
+  promptTrimmed: 'Some of what was installed here is left out for room.',
+  /** Said with the real path, so the model can change into it. */
+  scratch: (where: string): string =>
+    `Scratch folder for anything temporary (builds, derived data, checks): ${where}. Nothing outside the project should be written anywhere else.`,
 } as const;
 
 /* -------------------------------------------------------------------------- */
@@ -65,6 +69,9 @@ export type Standing = {
   goal: string | null;
   /** The two notes most worth carrying. Bounded, because memory is not the job. */
   notes: readonly string[];
+  /** Somewhere of its own to write anything temporary. Nothing gave a run a
+   *  place, so it picked /tmp and nothing ever cleared it. */
+  scratch?: string | null;
 };
 
 function notesLine(notes: readonly string[], most = 600): string | null {
@@ -99,6 +106,7 @@ export function standingBlock(standing: Standing): string | null {
   if (parts.length > 0) parts.push(standingWords.rules.join('\n'));
   const notes = notesLine(standing.notes);
   if (notes !== null) parts.push(notes);
+  if (standing.scratch != null && standing.scratch !== '') parts.push(standingWords.scratch(standing.scratch));
   if (parts.length === 0) return null;
   return [standingWords.open, parts.join('\n\n'), standingWords.close].join('\n');
 }

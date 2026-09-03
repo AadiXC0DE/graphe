@@ -25,7 +25,6 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { asAdvisor, asAdvisorThinking, sameAdvisor } from '../agent/advisor';
 import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
 import type { Theme } from '../lib/theme';
-import { themeFrom } from '../lib/theme';
 import { asTrusted, sameTrusted, type Trusted } from './carried';
 import { asKept, sameKept, type Kept } from './kept';
 
@@ -82,6 +81,11 @@ export type Preferences = {
    * same budget and names it. So it can be let through.
    */
   addons: 'on' | 'tools-only' | 'off';
+  /** Which editor "Open in editor" goes to, by name, or null for whichever is
+   *  found first. A machine with two always got the same one. */
+  editor: string | null;
+  /** The same for "Open in terminal". */
+  terminal: string | null;
   /** How the app looks, as a set of token overrides — accent, tone, contrast,
    *  radius, density, fonts, motion. Five colour presets were the whole of it
    *  before, and a preset is somebody else's taste. */
@@ -158,8 +162,9 @@ export type Preferences = {
    * afternoon would hold nobody to anything.
    */
   ceiling: Money | null;
-  /** Which finishing the window wears. 'system' follows the computer;
-   *  any other value is stamped as data-theme and wins over the media query. */
+  /** Which way the palette runs, mirroring the appearance's own base.
+   *  'system' follows the computer; the other two are stamped as data-theme
+   *  and win over the media query. */
   theme: Theme;
 };
 
@@ -167,7 +172,10 @@ export type Preferences = {
  *  a change that never reaches the disk. */
 function sameAppearance(one: Appearance, other: Appearance): boolean {
   return (
+    one.base === other.base &&
     one.accent === other.accent &&
+    one.ground === other.ground &&
+    one.ink === other.ink &&
     one.tone === other.tone &&
     one.contrast === other.contrast &&
     one.radius === other.radius &&
@@ -175,7 +183,8 @@ function sameAppearance(one: Appearance, other: Appearance): boolean {
     one.uiFont === other.uiFont &&
     one.codeFont === other.codeFont &&
     one.ligatures === other.ligatures &&
-    one.motion === other.motion
+    one.motion === other.motion &&
+    one.finish === other.finish
   );
 }
 
@@ -195,6 +204,8 @@ export const defaultPreferences: Preferences = {
   advisorThinking: null,
   advisorGates: { completionGate: false, loopGate: false },
   addons: 'on',
+  editor: null,
+  terminal: null,
   appearance: defaultAppearance,
   thinking: {},
   kept: {},
@@ -214,6 +225,9 @@ function asPreferences(value: unknown): Preferences {
   const raw = (value as { preferences?: unknown }).preferences;
   if (typeof raw !== 'object' || raw === null) return { ...defaultPreferences };
   const record = raw as Record<string, unknown>;
+  // The theme was a system of its own until the presets became appearances; an
+  // old one names the preset it is now, once.
+  const appearance = readAppearance(record['appearance'], record['theme']);
   const showMe = record['showMe'];
   const model = record['model'];
   const rawThinking = record['thinking'];
@@ -245,7 +259,9 @@ function asPreferences(value: unknown): Preferences {
       record['addons'] === 'tools-only' || record['addons'] === 'off'
         ? record['addons']
         : 'on',
-    appearance: readAppearance(record['appearance']),
+    editor: typeof record['editor'] === 'string' ? record['editor'] : null,
+    terminal: typeof record['terminal'] === 'string' ? record['terminal'] : null,
+    appearance,
     thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
@@ -254,7 +270,7 @@ function asPreferences(value: unknown): Preferences {
     keptLogins: asHeldBack(record['keptLogins']),
     howMuch: typeof record['howMuch'] === 'string' ? record['howMuch'] : null,
     ceiling: asCeiling(record['ceiling']),
-    theme: themeFrom(record['theme']),
+    theme: appearance.base,
   };
 }
 

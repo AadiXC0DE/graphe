@@ -379,8 +379,9 @@ describe('U-06 the notice that arrives on screen', () => {
     expect(notice.body.length).toBeLessThanOrEqual(120);
   });
 
-  /* Plain words both audiences already have are allowed; the machinery
-     underneath — what runs this, where, and in what — is not. */
+  /* Plain words both audiences already have are allowed, and `branch` is one of
+     them: what is machinery is the folder behind it. What runs this, where, and
+     in what, is not said. */
   it('never names the machinery underneath', () => {
     const everything = [
       ...Object.values(awayWords),
@@ -395,7 +396,6 @@ describe('U-06 the notice that arrives on screen', () => {
     for (const banned of [
       'git',
       'commit',
-      'branch',
       'staged',
       'session',
       'token',

@@ -74,7 +74,7 @@ export const pageWords: Record<Page, { name: string; note: string }> = {
   },
   advanced: {
     name: 'Advanced',
-    note: 'The editor you write code in, and the things this project does without being asked.',
+    note: 'Editor, terminal, and what runs on its own.',
   },
 };
 
@@ -103,7 +103,7 @@ export const ROWS: readonly Row[] = [
     name: THEME_WORDS.name,
     note: THEME_WORDS.note,
     kind: 'choice',
-    also: ['colour', 'color', 'dark', 'light', 'appearance', 'palette', 'finish'],
+    also: ['colour', 'color', 'dark', 'light', 'appearance', 'palette', 'finish', 'preset', 'glass'],
   },
   {
     id: 'show-me',

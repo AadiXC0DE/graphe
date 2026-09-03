@@ -33,14 +33,11 @@
 }
 
 :root[data-theme='dark'] .diffview,
-:root[data-theme='graphe'] .diffview,
-:root[data-theme='super'] .diffview,
-:root[data-theme='slate'] .diffview {
+:root[data-theme='graphe'] .diffview {
   --line-in: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
 }
 
-:root[data-theme='light'] .diffview,
-:root[data-theme='pink'] .diffview {
+:root[data-theme='light'] .diffview {
   --line-in: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
 }
 

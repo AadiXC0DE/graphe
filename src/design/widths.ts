@@ -486,7 +486,7 @@ export const responsive = {
   button: 'Does this work on a phone?',
   working: 'Having a look at every size…',
   empty: 'No pictures yet. Ask, and I’ll look at it at all three widths.',
-  again: 'Look again',
+  again: 'Check again',
   /** What the press does, said before anybody presses it: a button with no
    *  sentence over it is a button nobody presses twice. */
   what:

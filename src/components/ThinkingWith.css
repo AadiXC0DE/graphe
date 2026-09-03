@@ -70,10 +70,9 @@
 
 /* The list. It grows upward out of the chip, because the chip is at the bottom
    of the window and a menu that opens downward from there opens off-screen. */
+/* Placed from the chip's own rectangle, in window coordinates, so the same
+   control cannot land in two different places. */
 .thinking__menu {
-  position: absolute;
-  bottom: calc(100% + var(--space-2));
-  left: 0;
   /* Above every renderer panel. The native preview is hidden while this is
      open; CSS can only order renderer content. */
   z-index: 60;
@@ -108,11 +107,10 @@
   -webkit-app-region: no-drag;
 }
 
-.thinking--bare .thinking__menu {
-  bottom: auto;
-  top: calc(100% + var(--space-2));
-  left: auto;
-  right: 0;
+/* Hung under the chip rather than standing over it: in Settings the chip is at
+   the top of a page and there is nothing above it. */
+.thinking--bare ~ * .thinking__menu,
+.thinking__menu[style*='top'] {
   transform-origin: top right;
   animation-name: thinking-hangs;
 }

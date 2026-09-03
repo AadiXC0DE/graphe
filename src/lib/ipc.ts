@@ -1130,6 +1130,10 @@ export type GitSnapshot = {
   staged: number;
   /** Files the folder holds that history knows nothing about. */
   untracked: number;
+  /** How many files are changed at all. Not the three counts above added up:
+   *  a file both staged and edited again is one file, and was being counted
+   *  twice. */
+  changedPaths: number;
   /** Which files, by name, up to a limit. The panel names them rather than
    *  counting them: "3 files changed" is a number, `pricing.tsx` is a place. */
   files: readonly ChangedFile[];
@@ -1412,6 +1416,10 @@ export const CHANNEL = {
   flowLoad: 'graphe:flow-load',
   flowSave: 'graphe:flow-save',
   flowForget: 'graphe:flow-forget',
+  /** Every editor and terminal installed here, so a row can offer the choice. */
+  appsHere: 'graphe:apps-here',
+  /** Which of them "Open in editor" and "Open in terminal" go to. */
+  setOpensIn: 'graphe:set-opens-in',
   goalLoad: 'graphe:goal-load',
   goalSave: 'graphe:goal-save',
   goalClear: 'graphe:goal-clear',
@@ -1664,6 +1672,8 @@ export type GrapheApi = {
   flowSave(flow: import('../work/canvas').Flow, where?: Where): Promise<Result<null>>;
   /** Throw one away for good. */
   flowForget(id: string, where?: Where): Promise<Result<null>>;
+  appsHere(): Promise<Result<{ editors: readonly string[]; terminals: readonly string[] }>>;
+  setOpensIn(which: 'editor' | 'terminal', name: string | null): Promise<Result<Preferences>>;
   goalLoad(where?: Where): Promise<Result<import('../work/goal').Goal | null>>;
   goalSave(goal: import('../work/goal').Goal, where?: Where): Promise<Result<null>>;
   goalClear(where?: Where): Promise<Result<null>>;

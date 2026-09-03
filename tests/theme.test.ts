@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { PRESETS } from '../src/design/appearance';
 import { markFor, showing, themeFrom, THEMES, THEME_WORDS } from '../src/lib/theme';
 
 const TOKENS = readFileSync(new URL('../src/styles/tokens.css', import.meta.url), 'utf8');
@@ -42,7 +43,7 @@ function token(block: string, name: string): string {
 
 describe('picking a theme', () => {
   it('offers following the computer as a real answer, not the absence of one', () => {
-    expect(THEMES.map((one) => one.id)).toEqual(['light', 'graphe', 'super', 'pink', 'slate']);
+    expect(THEMES.map((one) => one.id)).toEqual(['light', 'dark']);
     // 'system' is still a valid Theme value via themeFrom/markFor, just not a pill
     expect(themeFrom('system')).toBe('system');
     expect(markFor('system')).toBeNull();
@@ -53,31 +54,35 @@ describe('picking a theme', () => {
   it('stamps nothing when following the computer', () => {
     expect(markFor('system')).toBeNull();
     expect(markFor('light')).toBe('light');
-    expect(markFor('graphe')).toBe('graphe');
-    // historic 'dark' still stamps as graphe
-    expect(markFor('dark')).toBe('graphe');
+    expect(markFor('dark')).toBe('dark');
   });
 
   it('falls back to following the computer on anything it cannot read', () => {
     for (const junk of [null, undefined, '', 'sepia', 7, {}]) {
       expect(themeFrom(junk)).toBe('system');
     }
-    expect(themeFrom('dark')).toBe('graphe');
-    expect(themeFrom('graphe')).toBe('graphe');
-    expect(themeFrom('super')).toBe('super');
-    expect(themeFrom('pink')).toBe('pink');
-    expect(themeFrom('slate')).toBe('slate');
+  });
+
+  /** The four names this app used to ship are presets now, and an old choice
+   *  arrives as the base of the preset it names. */
+  it('reads an old finish as the base of the preset of the same name', () => {
+    expect(themeFrom('graphe')).toBe('system');
+    expect(themeFrom('super')).toBe('dark');
+    expect(themeFrom('slate')).toBe('dark');
+    expect(themeFrom('pink')).toBe('light');
+    expect(themeFrom('dark')).toBe('dark');
+    for (const preset of PRESETS) {
+      if (preset.id === 'glass') continue;
+      expect(themeFrom(preset.id)).toBe(preset.is.base);
+    }
   });
 
   it('says which palette is actually on screen', () => {
-    expect(showing('system', true)).toBe('graphe');
+    expect(showing('system', true)).toBe('dark');
     expect(showing('system', false)).toBe('light');
     // A choice outranks the computer in both directions.
     expect(showing('light', true)).toBe('light');
-    expect(showing('graphe', false)).toBe('graphe');
-    expect(showing('super', false)).toBe('super');
-    expect(showing('pink', false)).toBe('pink');
-    expect(showing('slate', true)).toBe('slate');
+    expect(showing('dark', false)).toBe('dark');
   });
 
   it('names it the way somebody would say it', () => {
@@ -122,14 +127,8 @@ describe('an edge you can actually see', () => {
     }
   });
 
-  it('leaves every piece of text clearing AA on the five explicit themes', () => {
-    for (const block of [
-      "[data-theme='light']",
-      "[data-theme='graphe']",
-      "[data-theme='super']",
-      "[data-theme='pink']",
-      "[data-theme='slate']",
-    ]) {
+  it('leaves every piece of text clearing AA on both explicit themes', () => {
+    for (const block of ["[data-theme='light']", "[data-theme='graphe']"]) {
       const bg = token(block, 'bg');
       const raised = token(block, 'bg-raised');
       const sunken = token(block, 'bg-sunken');

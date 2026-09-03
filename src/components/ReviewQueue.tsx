@@ -53,6 +53,7 @@ export const SAYS = {
   keepFile: reviewWords.keepFile,
   files: 'Files',
   onBranch: (branch: string): string => `On ${branch}`,
+  decide: 'What to do with this',
   /** The count on the way in. */
   badge: reviewWords.badge,
 } as const;
@@ -120,6 +121,10 @@ export default function ReviewQueue({
 }: Props) {
   const shut = useRef<HTMLButtonElement>(null);
   const [precise, setPrecise] = useState(false);
+  /** Which of the four this entry is being given. Take it, because that is what
+   *  somebody opened the screen to do. */
+  const [chose, setChose] = useState<Verdict>('take it');
+  const [menuOpen, setMenuOpen] = useState(false);
   const [how, setHow] = useState<'squash' | 'every-version'>('squash');
   const [message, setMessage] = useState('');
   const [at, setAt] = useState<string | null>(null);
@@ -191,7 +196,7 @@ export default function ReviewQueue({
     <section className="sheet reviewq" aria-label={SAYS.heading}>
       {head}
 
-      <div className="sheet__body reviewq__body">
+      <div className="sheet__body reviewq__body scroll--auto">
         <ul className="reviewq__list">
           {entries.map((one) => (
             <li key={one.id}>
@@ -223,78 +228,118 @@ export default function ReviewQueue({
               </p>
             </div>
 
-            <label className="reviewq__mirror">
-              <span className="reviewq__mirrorname">{reviewWords.mirror}</span>
-              <Switch
-                on={entry.mirror}
-                onChange={(on) => onMirror(entry.id, on)}
-                label={reviewWords.mirror}
-                disabled={busy}
-              />
-            </label>
+            {/* The old behaviour, one row in a menu. It was a switch and a
+                sentence standing over the decision, which is not where a
+                once-a-project choice belongs. */}
+            <div className="reviewq__menuat">
+              <button
+                type="button"
+                className="reviewq__menubtn"
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+                onClick={() => setMenuOpen((was) => !was)}
+                title={reviewWords.menu}
+              >
+                <span aria-hidden="true">···</span>
+              </button>
+              {menuOpen ? (
+                <div className="reviewq__menu" role="menu">
+                  <label className="reviewq__mirror">
+                    <Switch
+                      on={entry.mirror}
+                      onChange={(on) => {
+                        onMirror(entry.id, on);
+                        setMenuOpen(false);
+                      }}
+                      label={reviewWords.mirror}
+                      disabled={busy}
+                    />
+                    <span className="reviewq__mirrortext">
+                      <span className="reviewq__mirrorname">{reviewWords.mirror}</span>
+                      <span className="reviewq__mirrorwhy">{reviewWords.mirrorWhy}</span>
+                    </span>
+                  </label>
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          <p className="reviewq__mirrorwhy">{reviewWords.mirrorWhy}</p>
-
+          {/* One decision, then one press named by it. Seven verbs in a row,
+              two of them meaning nearly the same thing, is a row nobody reads
+              twice. */}
           <div className="reviewq__does">
+            <div className="reviewq__verdicts" role="radiogroup" aria-label={SAYS.decide}>
+              {([
+                ['take it', reviewWords.take],
+                ['keep mine', reviewWords.mine],
+                ['ask again', reviewWords.again],
+                ['drop it', reviewWords.drop],
+              ] as const).map(([verdict, name]) => (
+                <button
+                  key={verdict}
+                  type="button"
+                  role="radio"
+                  aria-checked={chose === verdict}
+                  className={`reviewq__verdict ${chose === verdict ? 'reviewq__verdict--on' : ''}`}
+                  disabled={busy}
+                  onClick={() => setChose(verdict)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+
+            <span className="reviewq__spacer" />
+
             <div className="reviewq__land">
               <button
                 type="button"
                 className="reviewq__do"
-                disabled={busy || taking.length === 0}
-                onClick={() =>
+                disabled={busy || (chose === 'take it' && taking.length === 0)}
+                onClick={() => {
+                  if (chose !== 'take it') {
+                    onDecide(entry.id, chose);
+                    return;
+                  }
                   onLand(entry.id, {
                     how: partial ? 'squash' : how,
                     ...(message.trim() === '' ? {} : { message: message.trim() }),
-                  })
-                }
+                  });
+                }}
               >
-                {busy ? reviewWords.landing : reviewWords.land}
+                {busy ? reviewWords.landing : reviewWords.does[chose]}
               </button>
               {/* The precise controls live behind the same button, not in a
                   settings screen: one commit is the default and the other way
                   is a press away. */}
-              <button
-                type="button"
-                className="reviewq__more"
-                aria-expanded={precise}
-                aria-label={reviewWords.landingHow}
-                onClick={() => setPrecise((was) => !was)}
-              >
-                <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
-                  <path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+              {chose === 'take it' ? (
+                <button
+                  type="button"
+                  className="reviewq__more"
+                  aria-expanded={precise}
+                  aria-label={reviewWords.landingHow}
+                  onClick={() => setPrecise((was) => !was)}
+                >
+                  <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
+                    <path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              ) : null}
             </div>
 
-            <button
-              type="button"
-              className="reviewq__second"
-              disabled={busy || entry.branch === ''}
-              onClick={() => onOpenPr(entry.id, prBody(entry))}
-            >
-              {busy ? reviewWords.opening : reviewWords.openPr}
-            </button>
-
-            <span className="reviewq__spacer" />
-
-            {([
-              ['take it', reviewWords.take],
-              ['keep mine', reviewWords.mine],
-              ['ask again', reviewWords.again],
-              ['drop it', reviewWords.drop],
-            ] as const).map(([verdict, name]) => (
+            {chose === 'take it' ? (
               <button
-                key={verdict}
                 type="button"
-                className={`reviewq__second ${verdict === 'drop it' ? 'reviewq__second--away' : ''}`}
-                disabled={busy}
-                onClick={() => onDecide(entry.id, verdict)}
+                className="reviewq__second"
+                disabled={busy || entry.branch === ''}
+                onClick={() => onOpenPr(entry.id, prBody(entry))}
               >
-                {name}
+                {busy ? reviewWords.opening : reviewWords.openPr}
               </button>
-            ))}
+            ) : null}
           </div>
+
+          {chose === 'drop it' ? <p className="reviewq__note">{reviewWords.dropWhy}</p> : null}
 
           {precise ? (
             <div className="reviewq__precise">

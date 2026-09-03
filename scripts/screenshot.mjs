@@ -106,6 +106,19 @@ try {
       deviceScaleFactor: 2,
       colorScheme: theme,
     });
+    // Said outright rather than left to the media query. The window follows the
+    // computer by default, and a capture that has to win a race with that is a
+    // capture that is sometimes the other one.
+    await page.addInitScript(
+      (want) => {
+        try {
+          localStorage.setItem('graphe:theme', want);
+        } catch {
+          /* private mode: the media query is the fallback */
+        }
+      },
+      theme,
+    );
     await page.goto(url, { waitUntil: 'networkidle' });
     // Let entrance transitions settle so the capture is the resting state.
     await page.waitForTimeout(400);

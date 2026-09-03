@@ -27,7 +27,7 @@ export const SAYS = {
   tidy: 'Compact',
   tidying: 'Compacting…',
   tidyingWhat: 'Compacting the context now. The numbers settle when it is done.',
-  tidyHint: 'Summarises the conversation so far and frees the context it was using.',
+  tidyHint: 'Compact the context to make room',
   full: 'Nearly full. Compacting now would free room.',
 } as const;
 

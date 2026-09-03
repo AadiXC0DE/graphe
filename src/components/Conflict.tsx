@@ -154,7 +154,7 @@ export default function Conflict({
         </button>
       </header>
 
-      <div className="sheet__body clash__body">
+      <div className="sheet__body clash__body scroll--auto">
         <ul className="clash__files">
           {paths.map((one) => (
             <li key={one}>
@@ -208,7 +208,7 @@ export default function Conflict({
               {file.regions.map((region, index) => {
                 if (region.kind === 'same') {
                   return region.lines.length === 0 ? null : (
-                    <pre key={`same-${String(index)}`} className="clash__same">
+                    <pre key={`same-${String(index)}`} className="clash__same scroll--auto">
                       {region.lines.join('\n')}
                     </pre>
                   );

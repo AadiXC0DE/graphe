@@ -218,7 +218,7 @@ export default function AskAnything({
         <ul
           ref={list}
           id={LIST}
-          className="askanything__list"
+          className="askanything__list scroll--auto"
           role="listbox"
           aria-label={SAYS.results}
         >

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { cloneElement, Fragment, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { bridge } from '../lib/bridge';
 import type { Conversation, NewerVersion, RecentProject } from '../lib/ipc';
 import { ago } from '../lib/when';
@@ -59,6 +59,40 @@ type Props = {
   now?: number;
 };
 
+type Place = {
+  id: string;
+  name: string;
+  tip: string;
+  on: (() => void) | undefined;
+  icon: React.ReactNode;
+  count?: number;
+};
+
+/** The places the shelf can go, in the one order both states draw. Two
+ *  hand-written lists had drifted into two orders, and the strip had no way to
+ *  reach finished work at all. */
+function placesOf(p: Props): readonly Place[] {
+  return [
+    { id: 'ask', name: 'Find anything', tip: 'Find anything (⌘K)', on: p.onAsk, icon: <FindIcon /> },
+    { id: 'design', name: 'Design', tip: 'Design (⌘D)', on: p.onDesign, icon: <DesignIcon /> },
+    { id: 'canvas', name: 'Canvas', tip: 'Canvas', on: p.onCanvas, icon: <CanvasIcon /> },
+    { id: 'history', name: 'History', tip: 'History', on: p.onHistory, icon: <HistoryIcon /> },
+    {
+      id: 'review',
+      name: 'Review',
+      tip: 'Finished work waiting for review',
+      on: p.onReviewQueue,
+      icon: <ReviewIcon />,
+      count: p.reviewsWaiting,
+    },
+    { id: 'reviews', name: 'Pull requests', tip: 'Pull requests and issues', on: p.onReviews, icon: <PullIcon /> },
+    { id: 'skills', name: 'Skills', tip: 'Skills', on: p.onSkills, icon: <SkillsIcon /> },
+    { id: 'files', name: 'Project files', tip: 'Project files (⌘⇧F)', on: p.onFiles, icon: <FilesIcon /> },
+    { id: 'more', name: 'Add more', tip: 'Add more to Graphe', on: p.onAddMore, icon: <AddIcon /> },
+    { id: 'settings', name: 'Settings', tip: 'Settings', on: p.onSettings, icon: <SettingsIcon /> },
+  ].filter((one) => one.on !== undefined) as Place[];
+}
+
 /**
  * The shelf: which project, and everything said in it.
  *
@@ -72,7 +106,8 @@ type Props = {
  * without unfolding first. No animation either way: toggling a sidebar is a
  * thing people do constantly.
  */
-export default function Sidebar({
+export default function Sidebar(props: Props) {
+  const {
   projects,
   openPath,
   onOpen,
@@ -86,21 +121,11 @@ export default function Sidebar({
   ownCopy = false,
   onBringWorkBack,
   onThrowWorkAway,
-  onSettings,
   open,
   onToggle,
-  onAsk,
-  onDesign,
-  onCanvas,
-  onHistory,
-  onReviews,
-  onReviewQueue,
-  reviewsWaiting = 0,
-  onSkills,
-  onAddMore,
-  onFiles,
   now,
-}: Props) {
+  } = props;
+  const places = useMemo(() => placesOf(props), [props]);
   const [term, setTerm] = useState('');
   /** Which row has an "are you sure" standing over it, by its own path. */
   const [asking, setAsking] = useState<string | null>(null);
@@ -129,23 +154,10 @@ export default function Sidebar({
               type="button"
               className="shelf__collapse"
               onClick={onToggle}
-              aria-label="Collapse the sidebar"
+              aria-label="Hide sidebar"
+              title="Hide sidebar ⌘B"
             >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M9.5 4 5.5 8l4 4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <SidebarIcon size={14} />
             </button>
           </div>
           {/* Projects are the primary navigation. Keep the current one in the
@@ -243,7 +255,7 @@ export default function Sidebar({
                             <button
                               type="button"
                               className="shelf__forget"
-                              title="Throw this conversation away"
+                              title="Delete conversation"
                               aria-label={`Throw away “${one.title}”`}
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -344,205 +356,24 @@ export default function Sidebar({
 
           {/* The last row and never a band: it sits under the work rather than
               beside it, and stays put while the conversations scroll. */}
-          {onAsk === undefined && onDesign === undefined && onCanvas === undefined && onHistory === undefined &&
-            onReviews === undefined && onReviewQueue === undefined && onAddMore === undefined && onSkills === undefined && onSettings === undefined ? null : (
+          {places.length === 0 ? null : (
             <div className="shelf__foot">
               <NewerBuild />
-              {onAsk === undefined ? null : (
+              {places.map((one) => (
                 <button
+                  key={one.id}
                   type="button"
-                  className="shelf__row shelf__row--quiet shelf__more"
-                  onClick={onAsk}
-                  title="Find anything (⌘K)"
+                  className={`shelf__row shelf__row--quiet shelf__more ${one.id === 'settings' ? 'shelf__more--last' : ''}`}
+                  onClick={one.on}
+                  title={one.tip}
                 >
-                  <span className="shelf__moremark" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <circle cx="7" cy="7" r="4.25" stroke="currentColor" strokeWidth="1.5" />
-                      <path d="m10.25 10.25 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                  </span>
-                  <span className="shelf__rowname">Find anything</span>
-                </button>
-              )}
-              {onDesign === undefined ? null : (
-                <button
-                  type="button"
-                  className="shelf__row shelf__row--quiet shelf__more"
-                  onClick={onDesign}
-                  title="Colour, type and spacing (⌘D)"
-                >
-                  <span className="shelf__moremark" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <path
-                        d="M8 2.25c2 2.2 3.75 4.25 3.75 6.25a3.75 3.75 0 1 1-7.5 0c0-2 1.75-4.05 3.75-6.25Z"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className="shelf__rowname">Design</span>
-                </button>
-              )}
-              {onCanvas === undefined ? null : (
-                <button
-                  type="button"
-                  className="shelf__row shelf__row--quiet shelf__more"
-                  onClick={onCanvas}
-                  title="Every step, and what waits for what"
-                >
-                  <span className="shelf__moremark" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <rect x="1.5" y="5.5" width="4.5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                      <rect x="10" y="1.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                      <rect x="10" y="9.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                      <path
-                        d="M6 8h2a1.5 1.5 0 0 0 1.5-1.5V6.25M6 8h2a1.5 1.5 0 0 1 1.5 1.5v0.25"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className="shelf__rowname">Canvas</span>
-                </button>
-              )}
-              {onHistory === undefined ? null : (
-                <button
-                  type="button"
-                  className="shelf__row shelf__row--quiet shelf__more"
-                  onClick={onHistory}
-                  title="Every moment, and what came after what"
-                >
-                  <span className="shelf__moremark" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <circle cx="5" cy="3.75" r="1.5" stroke="currentColor" strokeWidth="1.5" />
-                      <circle cx="5" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
-                      <circle cx="11" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
-                      <path
-                        d="M5 5.25v5.5M5 7.75h3.5A2.5 2.5 0 0 1 11 10.25v.5"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className="shelf__rowname">History</span>
-                </button>
-              )}
-              {onReviewQueue === undefined ? null : (
-                <button
-                  type="button"
-                  className="shelf__row shelf__row--quiet shelf__more"
-                  onClick={onReviewQueue}
-                  title="Work that has finished and is waiting to be looked at"
-                >
-                  <span className="shelf__moremark" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <path
-                        d="M3 8.2 6 11.2l7-7"
-                        stroke="currentColor"
-                        strokeWidth="1.4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className="shelf__rowname">Review finished work</span>
-                  {reviewsWaiting === 0 ? null : (
-                    <span className="shelf__count">{String(reviewsWaiting)}</span>
+                  <span className="shelf__moremark" aria-hidden="true">{one.icon}</span>
+                  <span className="shelf__rowname">{one.name}</span>
+                  {one.count === undefined || one.count === 0 ? null : (
+                    <span className="shelf__count">{String(one.count)}</span>
                   )}
                 </button>
-              )}
-              {onReviews === undefined ? null : (
-                <button
-                  type="button"
-                  className="shelf__row shelf__row--quiet shelf__more"
-                  onClick={onReviews}
-                  title="The pull requests and issues of this project"
-                >
-                  <span className="shelf__moremark" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <path
-                        d="M5 2.5h6a1.5 1.5 0 0 1 1.5 1.5v8.5H5a1.5 1.5 0 0 0-1.5 1.5V4A1.5 1.5 0 0 1 5 2.5Z"
-                        stroke="currentColor"
-                        strokeWidth="1.4"
-                        strokeLinejoin="round"
-                      />
-                      <path d="M5 6h5M5 8.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                    </svg>
-                  </span>
-                  <span className="shelf__rowname">Pull requests</span>
-                </button>
-              )}
-              {onSettings === undefined ? null : (
-                <button
-                  type="button"
-                  className="shelf__row shelf__row--quiet shelf__more"
-                  onClick={onSettings}
-                  title="Skills, spend, and the rest"
-                >
-                  <span className="shelf__moremark" aria-hidden="true">
-                    {/* Two sliders, not a burst. Eight 1.4px rays at 1.4px
-                        wide cannot resolve at this size — it read as a smudge
-                        beside marks that read cleanly. */}
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <path d="M2.5 4.75h11M2.5 11.25h11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                      <circle cx="6" cy="4.75" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
-                      <circle cx="10.5" cy="11.25" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
-                    </svg>
-                  </span>
-                  <span className="shelf__rowname">Settings</span>
-                </button>
-              )}
-              {onSkills === undefined ? null : (
-                <button type="button" className="shelf__row shelf__row--quiet shelf__more" onClick={onSkills} title="Browse skills and use one with @">
-                  <span className="shelf__moremark" aria-hidden="true">@</span>
-                  <span className="shelf__rowname">Skills</span>
-                </button>
-              )}
-              {onAddMore === undefined ? null : <button
-                type="button"
-                className="shelf__row shelf__row--quiet shelf__more"
-                onClick={onAddMore}
-                title="Give Graphe new things it can do for you"
-              >
-                <span className="shelf__moremark" aria-hidden="true">
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                    <rect
-                      x="2.5"
-                      y="2.5"
-                      width="11"
-                      height="11"
-                      rx="3.25"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    />
-                    <path
-                      d="M8 5.75v4.5M5.75 8h4.5"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </span>
-                <span className="shelf__rowname">Add more to Graphe</span>
-              </button>}
-              {onFiles === undefined ? null : (
-                <button
-                  type="button"
-                  className="shelf__row shelf__row--quiet shelf__more"
-                  onClick={onFiles}
-                  title="Open project files"
-                >
-                  <span className="shelf__moremark" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <path d="M2.5 4.5h3l1.2 1.5h6.3v5.5H2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                    </svg>
-                  </span>
-                  <span className="shelf__rowname">Project files</span>
-                </button>
-              )}
+              ))}
             </div>
           )}
         </>
@@ -552,11 +383,11 @@ export default function Sidebar({
             type="button"
             className="shelf__mark"
             onClick={onToggle}
-            aria-label="Expand the sidebar"
+            aria-label="Show sidebar"
             aria-expanded={open}
-            data-tip="Show the sidebar"
+            data-tip="Show sidebar ⌘B"
           >
-            <span className="shelf__markdot" aria-hidden="true" />
+            <SidebarIcon />
           </button>
           <span className="shelf__thinline" aria-hidden="true" />
           <button
@@ -575,170 +406,21 @@ export default function Sidebar({
               />
             </svg>
           </button>
-          {onAsk === undefined ? null : (
+          {places.map((one) => (
             <button
+              key={one.id}
               type="button"
-              className="shelf__act"
-              onClick={onAsk}
-              aria-label="Find anything"
-              data-tip="Find anything (⌘K)"
+              className={`shelf__act ${one.id === 'settings' ? 'shelf__act--last' : ''}`}
+              onClick={one.on}
+              aria-label={one.name}
+              data-tip={one.tip}
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle
-                  cx="7"
-                  cy="7"
-                  r="4.25"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="m10.25 10.25 3 3"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
+              {cloneElement(one.icon as ReactElement<IconProps>, { size: 16 })}
+              {one.count === undefined || one.count === 0 ? null : (
+                <span className="shelf__actcount" aria-hidden="true">{String(one.count)}</span>
+              )}
             </button>
-          )}
-          {onDesign === undefined ? null : (
-            <button
-              type="button"
-              className="shelf__act"
-              onClick={onDesign}
-              aria-label="How this project looks"
-              data-tip="Design (⌘D)"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M8 2.25c2 2.2 3.75 4.25 3.75 6.25a3.75 3.75 0 1 1-7.5 0c0-2 1.75-4.05 3.75-6.25Z"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          )}
-          {onSkills === undefined ? null : (
-            <button type="button" className="shelf__act shelf__act--skills" onClick={onSkills} aria-label="Browse skills" data-tip="Skills">
-              @
-            </button>
-          )}
-          {onCanvas === undefined ? null : (
-            <button
-              type="button"
-              className="shelf__act"
-              onClick={onCanvas}
-              aria-label="Open the canvas"
-              data-tip="Canvas"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect x="1.5" y="5.5" width="4.5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                <rect x="10" y="1.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                <rect x="10" y="9.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                <path
-                  d="M6 8h2a1.5 1.5 0 0 0 1.5-1.5V6.25M6 8h2a1.5 1.5 0 0 1 1.5 1.5v0.25"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          )}
-          {onHistory === undefined ? null : (
-            <button
-              type="button"
-              className="shelf__act"
-              onClick={onHistory}
-              aria-label="Where this project has been"
-              data-tip="History"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle cx="5" cy="3.75" r="1.5" stroke="currentColor" strokeWidth="1.5" />
-                <circle cx="5" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
-                <circle cx="11" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
-                <path
-                  d="M5 5.25v5.5M5 7.75h3.5A2.5 2.5 0 0 1 11 10.25v.5"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          )}
-          {onReviews === undefined ? null : (
-            <button
-              type="button"
-              className="shelf__act"
-              onClick={onReviews}
-              aria-label="Open pull requests"
-              data-tip="Pull requests"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M5 2.5h6a1.5 1.5 0 0 1 1.5 1.5v8.5H5a1.5 1.5 0 0 0-1.5 1.5V4A1.5 1.5 0 0 1 5 2.5Z"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinejoin="round"
-                />
-                <path d="M5 6h5M5 8.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
-            </button>
-          )}
-          {onAddMore === undefined ? null : (
-            <button
-              type="button"
-              className="shelf__act"
-              onClick={onAddMore}
-              aria-label="Add more to Graphe"
-              data-tip="Add more to Graphe"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect
-                  x="2.5"
-                  y="2.5"
-                  width="11"
-                  height="11"
-                  rx="3.25"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="M8 5.75v4.5M5.75 8h4.5"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          )}
-          {onFiles === undefined ? null : (
-            <button
-              type="button"
-              className="shelf__act"
-              onClick={onFiles}
-              aria-label="Open project files"
-              data-tip="Project files"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M2.5 4.5h3l1.2 1.5h6.3v5.5H2.5z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
-              </svg>
-            </button>
-          )}
-          {onSettings === undefined ? null : (
-            <button
-              type="button"
-              className="shelf__act shelf__act--settings"
-              onClick={onSettings}
-              aria-label="Open settings"
-              data-tip="Settings"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M2.5 4.75h11M2.5 11.25h11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                <circle cx="6" cy="4.75" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
-                <circle cx="10.5" cy="11.25" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
-              </svg>
-            </button>
-          )}
+          ))}
         </div>
       )}
     </aside>
@@ -778,5 +460,141 @@ function NewerBuild() {
         {copied ? 'Copied' : `Copy ${out.upgrade}`}
       </button>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   The marks. One each, so the two sidebar states draw the same list.
+   --------------------------------------------------------------------------- */
+
+type IconProps = { size?: number };
+
+function FindIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="m10.25 10.25 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DesignIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 2.25c2 2.2 3.75 4.25 3.75 6.25a3.75 3.75 0 1 1-7.5 0c0-2 1.75-4.05 3.75-6.25Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CanvasIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1.5" y="5.5" width="4.5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="10" y="1.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="10" y="9.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M6 8h2a1.5 1.5 0 0 0 1.5-1.5V6.25M6 8h2a1.5 1.5 0 0 1 1.5 1.5v0.25"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function HistoryIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="5" cy="3.75" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="5" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="11" cy="12.25" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M5 5.25v5.5M5 7.75h3.5A2.5 2.5 0 0 1 11 10.25v.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ReviewIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M3 8.2 6 11.2l7-7"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PullIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M5 2.5h6a1.5 1.5 0 0 1 1.5 1.5v8.5H5a1.5 1.5 0 0 0-1.5 1.5V4A1.5 1.5 0 0 1 5 2.5Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M5 6h5M5 8.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function FilesIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2.5 4.5h3l1.2 1.5h6.3v5.5H2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function AddIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2.5" y="2.5" width="11" height="11" rx="3.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 5.75v4.5M5.75 8h4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ size = 14 }: IconProps) {
+  /* Two sliders, not a burst: eight rays cannot resolve at this size. */
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2.5 4.75h11M2.5 11.25h11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="6" cy="4.75" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="10.5" cy="11.25" r="1.85" fill="var(--bg)" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+/** The one mark that is a letter. A component like the rest, so the strip can
+ *  ask every mark for 16px without knowing which is which. */
+function SkillsIcon({ size = 14 }: IconProps) {
+  return (
+    <span aria-hidden="true" style={{ fontSize: `${String(size)}px`, lineHeight: 1 }}>
+      @
+    </span>
+  );
+}
+
+/** The sidebar glyph every mac app uses, so both states share one control. */
+function SidebarIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M6 2.75v10.5" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
   );
 }

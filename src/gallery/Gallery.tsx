@@ -84,7 +84,7 @@ const estimate: Estimate = {
 const bigJob = biggerJob(estimate);
 const bigJobNote = estimateNote(estimate);
 
-type Theme = 'system' | 'light' | 'graphe' | 'super' | 'pink' | 'slate';
+type Theme = 'system' | 'light' | 'dark';
 
 /* -------------------------------------------------------------------------- */
 /* Copy for the formatting section                                             */
@@ -475,6 +475,7 @@ const GIT_DIRTY = {
   unstaged: 2,
   staged: 1,
   untracked: 1,
+  changedPaths: 4,
   ahead: 0,
   behind: 0,
   files: [
@@ -503,6 +504,7 @@ const SEVERAL_REPOS = [
       unstaged: 2,
       staged: 0,
       untracked: 0,
+      changedPaths: 1,
       ahead: 0,
       behind: 0,
       files: [{ path: 'src/rates.ts', kind: 'changed' as const }],
@@ -523,6 +525,7 @@ const SEVERAL_REPOS = [
       unstaged: 0,
       staged: 0,
       untracked: 0,
+      changedPaths: 0,
       ahead: 3,
       behind: 0,
       files: [],
@@ -1184,10 +1187,9 @@ export default function Gallery() {
           </p>
         </div>
         <div className="gallery__themes" role="group" aria-label="Theme">
-          {/* Every palette the app ships, so a piece can be reviewed in the
-              one it will actually be seen in. 'dark' is not offered: graphe is
-              its living name. */}
-          {(['system', 'light', 'graphe', 'super', 'pink', 'slate'] as const).map((option) => (
+          {/* Both ways the palette runs, so a piece can be reviewed in the one
+              it will actually be seen in. */}
+          {(['system', 'light', 'dark'] as const).map((option) => (
             <button
               key={option}
               type="button"
@@ -1514,7 +1516,7 @@ export default function Gallery() {
           </Section>
 
           <Section
-            title="Who should I think with?"
+            title="Choose a model"
             note="The one screen that appears before the work does, so it is the rare moment that gets the dark treatment. Every provider and every model on the table at once. Nothing is gated behind a second click, because there is no smaller step worth hiding behind. It is live: open it, close it, look again."
           >
             <button

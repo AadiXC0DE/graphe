@@ -14,14 +14,17 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
+  PRESETS,
   appearanceWords,
   asCss,
   cssFor,
   defaultAppearance,
+  presetOf,
   readAppearance,
   tokensFor,
   type Appearance,
 } from '../src/design/appearance';
+import { surfacesFrom } from '../src/design/palette-oklch';
 
 const stylesheet = readFileSync(new URL('../src/styles/tokens.css', import.meta.url), 'utf8');
 
@@ -39,6 +42,7 @@ describe('AP-01 every value written is a value something reads', () => {
       defaultAppearance,
       like({ density: 'compact', radius: 'sharp', motion: 'off' }),
       like({ density: 'spacious', radius: 'round', contrast: 'high' }),
+      like({ finish: 'glass' }),
     ]) {
       for (const name of Object.keys(tokensFor(one))) {
         expect(declared.has(name), `${name} is written but nothing declares it`).toBe(true);
@@ -207,6 +211,88 @@ describe('AP-06 a file somebody has edited', () => {
   it('reads what it writes', () => {
     const one = like({ density: 'spacious', motion: 'reduced', accent: '#22c55e', ligatures: false });
     expect(readAppearance(JSON.parse(JSON.stringify(one)))).toEqual(one);
+  });
+});
+
+/* ========================================================================== */
+/* AP-08 the presets are appearances                                           */
+/* ========================================================================== */
+
+/** Which way a preset's palette runs, with 'system' settled the way a light
+ *  computer would settle it. */
+const runs = (one: Appearance) => (one.base === 'dark' ? 'dark' : 'light');
+
+const madeFor = (one: Appearance) =>
+  surfacesFrom(one.accent, one.tone, one.contrast, runs(one), one.ground, one.ink);
+
+describe('AP-08 five presets, five windows', () => {
+  it('gives each preset a ground of its own', () => {
+    const graphe = madeFor({ ...defaultAppearance, ...PRESETS[0]?.is });
+    for (const preset of PRESETS.slice(1)) {
+      const made = madeFor({ ...defaultAppearance, ...preset.is });
+      if (preset.id === 'glass') {
+        // Glass is Graphe seen through the desktop, so its ground is thinned
+        // rather than moved.
+        expect(tokensFor({ ...defaultAppearance, ...preset.is })['--bg']).toContain('color-mix');
+        continue;
+      }
+      expect(made.bg, `${preset.id} against graphe`).not.toBe(graphe.bg);
+    }
+  });
+
+  it('says which preset the appearance is sitting on', () => {
+    expect(presetOf(defaultAppearance)).toBe('graphe');
+    for (const preset of PRESETS) {
+      expect(presetOf({ ...defaultAppearance, ...preset.is })).toBe(preset.id);
+    }
+    expect(presetOf({ ...defaultAppearance, accent: '#22c55e' })).toBeNull();
+  });
+
+  it('builds the ground from the colour a preset names', () => {
+    const super_ = madeFor({ ...defaultAppearance, ...PRESETS[1]?.is });
+    expect(super_.bg).toBe('#0a0a0b');
+    // Raised is lighter than sunken, whichever way the ladder runs.
+    expect(super_.bgRaised).not.toBe(super_.bg);
+  });
+
+  /** The ink is a preference, not an override: one that cannot be read against
+   *  the surfaces it lands on is dropped for the derived one. */
+  it('takes an ink only when it can be read', () => {
+    const one: Appearance = { ...defaultAppearance, base: 'dark', ground: '#0a0a0b', ink: '#fafafa' };
+    expect(madeFor(one).text).toBe('#fafafa');
+    expect(madeFor({ ...one, ink: '#111111' }).text).not.toBe('#111111');
+  });
+});
+
+/* ========================================================================== */
+/* S-23 the theme somebody chose years ago                                     */
+/* ========================================================================== */
+
+describe('S-23 an old theme becomes the preset of the same name', () => {
+  it('reads super as the Super preset, ground and all', () => {
+    const read = readAppearance(null, 'super');
+    expect(presetOf(read)).toBe('super');
+    expect(read.base).toBe('dark');
+    expect(read.ground).toBe('#0a0a0b');
+    expect(madeFor(read).bg).toBe('#0a0a0b');
+  });
+
+  it('reads every old name, and nothing else', () => {
+    for (const id of ['graphe', 'super', 'pink', 'slate']) {
+      expect(presetOf(readAppearance(null, id))).toBe(id);
+    }
+    for (const junk of [null, undefined, 'sepia', 7]) {
+      expect(readAppearance(null, junk)).toEqual(defaultAppearance);
+    }
+  });
+
+  /** Once. A saved base is the mark that it has already run, so a theme left
+   *  in the file cannot keep overwriting what somebody has changed since. */
+  it('leaves an appearance that has already been read alone', () => {
+    const read = readAppearance({ base: 'light', accent: '#22c55e' }, 'super');
+    expect(read.base).toBe('light');
+    expect(read.accent).toBe('#22c55e');
+    expect(read.ground).toBeNull();
   });
 });
 

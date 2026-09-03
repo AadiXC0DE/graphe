@@ -96,11 +96,28 @@ describe('one entry', () => {
     }
   });
 
+  /* One decision, then one press named by it: seven verbs in a row, two of
+     them meaning nearly the same thing, is a row nobody reads twice. */
   it('sends the decision back with the entry it belongs to', () => {
     const onDecide = vi.fn();
     const { where } = draw({ onDecide });
-    act(() => named(where, reviewWords.take)?.click());
-    expect(onDecide).toHaveBeenCalledWith('a1', 'take it');
+    act(() => named(where, reviewWords.mine)?.click());
+    act(() => named(where, reviewWords.does['keep mine'])?.click());
+    expect(onDecide).toHaveBeenCalledWith('a1', 'keep mine');
+  });
+
+  it('names the one press after the decision it was given', () => {
+    const { where } = draw();
+    expect(named(where, reviewWords.does['take it'])).not.toBeNull();
+    act(() => named(where, reviewWords.again)?.click());
+    expect(named(where, reviewWords.does['ask again'])).not.toBeNull();
+  });
+
+  it('says what throwing away leaves behind, before the press', () => {
+    const { where } = draw();
+    expect(where.textContent).not.toContain(reviewWords.dropWhy);
+    act(() => named(where, reviewWords.drop)?.click());
+    expect(where.textContent).toContain(reviewWords.dropWhy);
   });
 
   it('offers Accept, Take theirs and Keep mine on every file', () => {
@@ -166,14 +183,18 @@ describe('one entry', () => {
     expect(said).toContain('src/Header.tsx');
   });
 
-  it('carries a live mirror switch per card', () => {
+  /* A once-a-project choice, out of the way of the once-an-entry one. */
+  it('carries a live mirror switch per card, behind the entry’s own menu', () => {
     const onMirror = vi.fn();
     const { where } = draw({ onMirror });
+    expect(where.querySelector('[role="switch"]')).toBeNull();
+    act(() => where.querySelector<HTMLButtonElement>('.reviewq__menubtn')?.click());
     const mirror = where.querySelector<HTMLButtonElement>('[role="switch"]');
     expect(mirror?.getAttribute('aria-checked')).toBe('false');
+    // The sentence lives on the row in the menu and nowhere else.
+    expect(where.textContent).toContain(reviewWords.mirrorWhy);
     act(() => mirror?.click());
     expect(onMirror).toHaveBeenCalledWith('a1', true);
-    expect(where.textContent).toContain(reviewWords.mirrorWhy);
   });
 
   it('marks what nobody has opened yet, and counts it', () => {

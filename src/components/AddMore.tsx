@@ -291,7 +291,7 @@ export default function AddMore({
           </div>
         ) : null}
 
-        <div className="addmore__body">
+        <div className="addmore__body scroll--auto">
           {/* First, because it is about the project in front of you — searching
               for something to add is a general errand and can wait. */}
           {carried.length === 0 ? null : (

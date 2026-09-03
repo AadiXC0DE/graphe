@@ -342,7 +342,7 @@ button.settings__row {
 }
 
 /* ---------------------------------------------------------------------------
-   Theme — five mini previews, instant switch, no reload
+   Theme — a base, five starting points, and the three colours under them
    --------------------------------------------------------------------------- */
 
 .settings__theme-wrap {
@@ -511,19 +511,39 @@ button.settings__row {
   outline-offset: 1px;
 }
 
-/* With the width of the whole grid under it, the swatches read as one strip
-   with the note beside them rather than a stack. */
-@container (min-width: 780px) {
-  .settings__theme-wrap {
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-5);
-  }
+/* The base, the swatches and the pickers are three bands under each other, and
+   each one reads across. */
+.settings__bases {
+  display: flex;
+  gap: var(--space-2);
+}
 
-  .settings__theme-foot {
-    margin-left: auto;
-  }
+.settings__pickers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.settings__picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings__picker-name {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.settings__colour {
+  width: 32px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
 }
 
 /* Which palette following the computer has actually landed on. */

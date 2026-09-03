@@ -23,6 +23,7 @@ import {
   type Surfaces,
   type Tone,
 } from '../src/design/palette-oklch';
+import { PRESETS, defaultAppearance } from '../src/design/appearance';
 
 const TONES: readonly Tone[] = ['warm', 'neutral', 'cool'];
 const CONTRASTS: readonly Contrast[] = ['normal', 'high'];
@@ -196,6 +197,74 @@ describe('CO-04 every derived pair can be read', () => {
     }
   });
 });
+
+/* The same promise for the five starting points, which are the only palettes
+   most people will ever see: a named ground and a named ink go through the same
+   solver as an accent nobody anticipated. */
+describe('CO-06 the presets clear the same bar', () => {
+  it('reads on every surface, at both contrasts', () => {
+    for (const preset of PRESETS) {
+      const one = { ...defaultAppearance, ...preset.is };
+      for (const contrast of CONTRASTS) {
+        for (const base of BASES) {
+          const made = surfacesFrom(one.accent, one.tone, contrast, base, one.ground, one.ink);
+          const needs = contrast === 'high' ? 7 : 4.5;
+          for (const ink of READABLE) {
+            for (const ground of grounds(made)) {
+              expect(
+                contrastRatio(made[ink], ground),
+                `${ink} on ${preset.id} at ${contrast} ${base}`,
+              ).toBeGreaterThanOrEqual(needs);
+            }
+          }
+          expect(contrastRatio(made.accentInk, made.accentSoft)).toBeGreaterThanOrEqual(needs);
+          expect(contrastRatio(made.accentText, made.accent)).toBeGreaterThanOrEqual(needs);
+          for (const ground of grounds(made)) {
+            expect(contrastRatio(made.borderControl, ground)).toBeGreaterThanOrEqual(
+              contrast === 'high' ? 4.5 : 3,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  /* A named ground must not turn the ladder upside down: raised is above the
+     page and sunken below it, whichever way the base runs. */
+  it('keeps raised above sunken on a ground somebody named', () => {
+    for (const preset of PRESETS) {
+      const one = { ...defaultAppearance, ...preset.is };
+      for (const base of BASES) {
+        const made = surfacesFrom(one.accent, one.tone, 'normal', base, one.ground, one.ink);
+        expect(
+          luminanceOf(rgbFrom(made.bgRaised) ?? { r: 0, g: 0, b: 0 }),
+          `${preset.id} on ${base}`,
+        ).toBeGreaterThan(luminanceOf(rgbFrom(made.bgSunken) ?? { r: 0, g: 0, b: 0 }));
+      }
+    }
+  });
+});
+describe('CO-07 a named ground keeps its own colour', () => {
+  /* Taking only the lightness and the hue left Slate grey and Pink grey, which
+     is a preset that does not look like its name. */
+  it('carries the colour of the ground it was given', () => {
+    const slate = surfacesFrom('#38bdf8', 'cool', 'normal', 'dark', '#0f172a', '#f8fafc');
+    const plain = surfacesFrom('#38bdf8', 'cool', 'normal', 'dark');
+    expect(oklchOf(rgbFrom(slate.bg)!).c).toBeGreaterThan(oklchOf(rgbFrom(plain.bg)!).c);
+  });
+
+  it('caps it, so a surface never becomes a tint text has to fight', () => {
+    const loud = surfacesFrom('#38bdf8', 'cool', 'normal', 'dark', '#1a00ff', '#ffffff');
+    expect(oklchOf(rgbFrom(loud.bg)!).c).toBeLessThanOrEqual(0.031);
+  });
+
+  it('leaves a ground nobody named exactly as the table has it', () => {
+    expect(surfacesFrom('#b8492c', 'warm', 'normal', 'dark').bg).toBe(
+      surfacesFrom('#b8492c', 'warm', 'normal', 'dark', null, null).bg,
+    );
+  });
+});
+
 
 describe('CO-05 the palette reads as a palette', () => {
   it('runs light to dark one way and dark to light the other', () => {

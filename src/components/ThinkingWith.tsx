@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+
+import { useAnchored } from '../lib/anchored';
 import { advisorWords, worthHaving } from '../agent/advisor';
 import type { ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { byTier, tierNames } from '../lib/modeltiers';
@@ -112,6 +115,11 @@ export default function ThinkingWith({
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'models' | 'thinking' | 'advisor' | 'advisorthinking'>('models');
   const root = useRef<HTMLDivElement>(null);
+  /* Placed from the chip's own rectangle rather than from whichever ancestor
+     happens to be positioned: in the composer that is the row, in Settings it
+     is the sheet, and the menu landed off the top right of the window. */
+  const menu = useRef<HTMLDivElement>(null);
+  const at = useAnchored(root, open, bare === true ? 'below-right' : 'above-left');
 
   /* Flat, because the provider is a heading in the list rather than a level to
      navigate into. */
@@ -203,7 +211,10 @@ export default function ThinkingWith({
   useEffect(() => {
     if (!open) return;
     const away = (event: MouseEvent) => {
-      if (root.current !== null && !root.current.contains(event.target as Node)) setOpen(false);
+      const inside =
+        root.current?.contains(event.target as Node) === true ||
+        menu.current?.contains(event.target as Node) === true;
+      if (!inside) setOpen(false);
     };
     const key = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -292,8 +303,11 @@ export default function ThinkingWith({
       </button>
 
       {open && !nothingConnected ? (
+        createPortal(
         <div
           className="thinking__menu"
+          ref={menu}
+          style={at ?? undefined}
           role="dialog"
           aria-label="Choose a model, how long it thinks, and who advises"
         >
@@ -318,7 +332,7 @@ export default function ThinkingWith({
                 />
               ) : null}
 
-              <div className="thinking__list" role="listbox" aria-label="Which model should answer">
+              <div className="thinking__list scroll--auto" role="listbox" aria-label="Which model should answer">
                 {shown.length === 0 ? (
                   <p className="thinking__empty">Nothing here matches that.</p>
                 ) : (
@@ -458,7 +472,7 @@ export default function ThinkingWith({
                     </p>
                   )}
 
-                  <div className="thinking__list" role="listbox" aria-label={advisorWords.advises}>
+                  <div className="thinking__list scroll--auto" role="listbox" aria-label={advisorWords.advises}>
                     {/* First, so turning it off is one press and never a hunt. */}
                     <button
                       type="button"
@@ -603,7 +617,9 @@ export default function ThinkingWith({
               />
             </>
           ) : null}
-        </div>
+        </div>,
+        document.body,
+        )
       ) : null}
     </div>
   );

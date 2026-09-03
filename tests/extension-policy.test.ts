@@ -128,7 +128,7 @@ describe('what a setting asks the loader to do', () => {
 
 describe('the words', () => {
   it('names what the switch does rather than how it does it', () => {
-    expect(policyWords.label).toBe('Add-ons that start work on their own');
+    expect(policyWords.label).toBe('Add-ons that start turns');
     const everything = [
       policyWords.label,
       policyWords.note,

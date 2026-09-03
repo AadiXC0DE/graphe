@@ -1517,7 +1517,7 @@ function Inspector({
                 {canvasWords.came}
                 <span className="canvas__iturns">{canvasWords.turnsTook(came.turns)}</span>
               </span>
-              <p className="canvas__icame">{came.text === '' ? canvasWords.nothingYet : came.text}</p>
+              <p className="canvas__icame scroll--auto">{came.text === '' ? canvasWords.nothingYet : came.text}</p>
             </>
           )}
 

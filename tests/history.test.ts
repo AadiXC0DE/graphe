@@ -16,6 +16,7 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
+import { parseDiff } from '../src/diff/hunks';
 import * as repo from '../src/history/repo';
 import * as titles from '../src/history/titles';
 import * as timeline from '../src/history/timeline';
@@ -953,5 +954,65 @@ describe('H-10 titles', () => {
     expect(titles.tidyName('  before I broke the nav \n')).toBe('before I broke the nav');
     expect(titles.tidyName('   ')).toBeNull();
     expect(titles.tidyName('x'.repeat(200))!.length).toBeLessThanOrEqual(72);
+  });
+});
+
+/* ========================================================================== */
+/* H-11 the change in front of the person right now                            */
+/* ========================================================================== */
+
+describe('H-11 unsaved work, as a diff', () => {
+  /** A file git has never seen has no diff of its own, so this writes one. It
+   *  has to be the real unified format: everything downstream reads it with
+   *  the same parser, and text in any other shape reads as no change at all. */
+  it('a file never saved before arrives as a real diff, not as raw contents', async () => {
+    const { root } = await projectWithOneVersion();
+    const lines = ['.hero { color: red; }', '', '.hero h1 { font-size: 3rem; }'];
+    await put(root, 'src/hero.css', `${lines.join('\n')}\n`);
+
+    const changed = parseDiff(await new ProjectHistory(root).diffWorking());
+    expect(changed.length).toBe(1);
+    expect(changed[0]?.path).toBe('src/hero.css');
+    expect(changed[0]?.kind).toBe('added');
+    expect(changed[0]?.hunks.length).toBe(1);
+    expect(changed[0]?.hunks[0]?.newLines).toBe(lines.length);
+    expect(changed[0]?.hunks[0]?.text).toContain('+.hero h1 { font-size: 3rem; }');
+  });
+
+  it('a new picture is named, and its bytes are not poured into the review', async () => {
+    const { root } = await projectWithOneVersion();
+    await put(root, 'public/logo.png', 'PNG\u0000IHDRnotreadablebyanyone');
+
+    const text = await new ProjectHistory(root).diffWorking();
+    expect(text).toContain('diff --git a/public/logo.png b/public/logo.png');
+    expect(text).toContain('binary');
+    expect(text).not.toContain('IHDRnotreadablebyanyone');
+    const changed = parseDiff(text);
+    expect(changed.length).toBe(1);
+    expect(changed[0]?.path).toBe('public/logo.png');
+    expect(changed[0]?.kind).toBe('added');
+  });
+
+  it('a new file too big to read is named, and says why', async () => {
+    const { root } = await projectWithOneVersion();
+    await put(root, 'data/dump.json', `{"marker":"${'x'.repeat(200_001)}"}`);
+
+    const text = await new ProjectHistory(root).diffWorking();
+    expect(text).toContain('diff --git a/data/dump.json b/data/dump.json');
+    expect(text).toContain('too big to show here');
+    expect(text.length).toBeLessThan(1000);
+    const changed = parseDiff(text);
+    expect(changed.length).toBe(1);
+    expect(changed[0]?.path).toBe('data/dump.json');
+    expect(changed[0]?.kind).toBe('added');
+  });
+
+  it('saved edits and never-saved files come back as one readable change', async () => {
+    const { root } = await projectWithOneVersion();
+    await put(root, 'index.html', '<h1>Hello again</h1>\n');
+    await put(root, 'about.html', '<h1>About</h1>\n');
+
+    const changed = parseDiff(await new ProjectHistory(root).diffWorking());
+    expect(changed.map((one) => one.path).sort()).toEqual(['about.html', 'index.html']);
   });
 });

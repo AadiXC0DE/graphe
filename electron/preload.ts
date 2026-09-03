@@ -561,6 +561,16 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.flowForget, id, named(where)) as Promise<Result<null>>;
   },
 
+  appsHere(): Promise<Result<{ editors: readonly string[]; terminals: readonly string[] }>> {
+    return ipcRenderer.invoke(CHANNEL.appsHere) as Promise<
+      Result<{ editors: readonly string[]; terminals: readonly string[] }>
+    >;
+  },
+
+  setOpensIn(which: 'editor' | 'terminal', name: string | null): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.setOpensIn, which, name) as Promise<Result<Preferences>>;
+  },
+
   goalLoad(where?: Where): Promise<Result<import('../src/work/goal').Goal | null>> {
     return ipcRenderer.invoke(CHANNEL.goalLoad, named(where)) as Promise<Result<import('../src/work/goal').Goal | null>>;
   },

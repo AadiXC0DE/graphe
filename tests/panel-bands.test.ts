@@ -49,8 +49,17 @@ describe('the Git band', () => {
     const git = band('GIT');
     expect(git).toContain('<Lines');
     expect(git).toContain('gitband__act');
-    expect(git).toContain('{GIT.changes}');
+    expect(git).toContain('{GIT.files(changedCount)}');
     expect(git).toContain('{COMMITTING.heading}');
+  });
+
+  /* A button is one line and its label is at most three words. The branch name
+     is already in the chip above; in the button it made both rows two lines
+     tall on any branch longer than about twelve characters. */
+  it('keeps the branch name out of the button', () => {
+    const git = band('GIT');
+    expect(git).not.toContain('gitband__onto');
+    expect(git).toContain('title={COMMITTING.what(git.branch)}');
   });
 
   it('makes what changed a press rather than a number', () => {
@@ -60,7 +69,12 @@ describe('the Git band', () => {
   it('says so plainly when nothing is uncommitted, rather than drawing a press', () => {
     const git = band('GIT');
     expect(git).toContain('{GIT.nothing}');
-    expect(git.indexOf('{GIT.nothing}')).toBeLessThan(git.indexOf('{GIT.changes}'));
+    expect(git.indexOf('{GIT.nothing}')).toBeLessThan(git.indexOf('gitband__changes'));
+  });
+
+  /* Three counts summed counted a file that is both staged and modified twice. */
+  it('counts paths rather than adding three numbers up', () => {
+    expect(panel).toContain('const changedCount = git === null ? 0 : git.changedPaths;');
   });
 
   it('still says where the branch stands against origin', () => {
@@ -103,9 +117,10 @@ describe('the two ways into the review queue', () => {
       fileURLToPath(new URL('../src/components/Sidebar.tsx', import.meta.url)),
       'utf8',
     );
-    expect(shelf).toContain('onClick={onReviewQueue}');
-    expect(shelf).toContain('Review finished work');
-    expect(shelf).toContain('{reviewsWaiting === 0 ? null : (');
+    // One list for both states now; `tests/sidebar.test.ts` renders it.
+    expect(shelf).toContain("on: p.onReviewQueue,");
+    expect(shelf).toContain("id: 'review'");
+    expect(shelf).toContain('one.count === undefined || one.count === 0 ? null : (');
   });
 
   it('is fed from the queue rather than from a count kept beside it', () => {

@@ -59,12 +59,12 @@ export default function Usage({ open, spent, onClose, onTokens }: Props) {
   const weeks = tokens === null ? [] : weeksOf(tokens.days, Date.now(), WEEKS);
 
   return (
-    <section className="usage" aria-label="What this cost" role="dialog" aria-modal="true">
+    <section className="usage scroll--auto" aria-label="What this cost" role="dialog" aria-modal="true">
       <header className="usage__top">
         <div>
           <p className="usage__eyebrow">This sitting</p>
           <h1>What this cost</h1>
-          <p>What was spent, what got another try, and what was reused from earlier.</p>
+          <p>Spend by day, model and conversation.</p>
         </div>
         <button type="button" className="usage__close" onClick={onClose}>
           Close <kbd>Esc</kbd>

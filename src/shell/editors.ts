@@ -77,26 +77,66 @@ async function isThere(path: string): Promise<boolean> {
   }
 }
 
-/**
- * The first known editor installed on this machine, or null.
- *
- * `exists` is injectable so the search order can be tested without installing
- * ten editors, which is the only part of this with any logic in it.
- */
-export async function findEditor(options: {
+/** The apps somebody opens a folder in a shell from. Same shape and the same
+ *  search as the editors, because it is the same question. */
+const TERMINALS: readonly { name: string; bundle: string }[] = [
+  { name: 'Terminal', bundle: 'Terminal.app' },
+  { name: 'iTerm', bundle: 'iTerm.app' },
+  { name: 'Warp', bundle: 'Warp.app' },
+  { name: 'Ghostty', bundle: 'Ghostty.app' },
+  { name: 'kitty', bundle: 'kitty.app' },
+];
+
+type Look = {
   folders?: readonly string[];
   exists?: (path: string) => Promise<boolean>;
-} = {}): Promise<Editor | null> {
+};
+
+async function installed(
+  known: readonly { name: string; bundle: string }[],
+  options: Look,
+): Promise<readonly Editor[]> {
   const folders = options.folders ?? applicationFolders();
   const exists = options.exists ?? isThere;
-
-  for (const editor of KNOWN) {
+  const found: Editor[] = [];
+  for (const one of known) {
     for (const folder of folders) {
-      const bundle = join(folder, editor.bundle);
-      if (await exists(bundle)) return { name: editor.name, bundle };
+      const bundle = join(folder, one.bundle);
+      if (await exists(bundle)) {
+        found.push({ name: one.name, bundle });
+        break;
+      }
     }
   }
-  return null;
+  return found;
+}
+
+/** Every known editor on this machine, in the order they are preferred.
+ *
+ * `exists` is injectable so the search order can be tested without installing
+ * ten editors, which is the only part of this with any logic in it. */
+export function findEditors(options: Look = {}): Promise<readonly Editor[]> {
+  return installed(KNOWN, options);
+}
+
+/** Every terminal on this machine, the same way. */
+export function findTerminals(options: Look = {}): Promise<readonly Editor[]> {
+  return installed(TERMINALS, options);
+}
+
+/** The one to use: what somebody chose, while it is still installed, else the
+ *  first found. A machine with VS Code and Cursor always gave VS Code. */
+export function chosenFrom(found: readonly Editor[], wanted: string | null): Editor | null {
+  if (wanted !== null) {
+    const asked = found.find((one) => one.name === wanted);
+    if (asked !== undefined) return asked;
+  }
+  return found[0] ?? null;
+}
+
+/** The first known editor installed on this machine, or null. */
+export async function findEditor(options: Look = {}): Promise<Editor | null> {
+  return (await findEditors(options))[0] ?? null;
 }
 
 /** What the button says. Null means there is no editor to offer, and the

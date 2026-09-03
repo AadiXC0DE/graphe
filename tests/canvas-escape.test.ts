@@ -137,10 +137,10 @@ describe('what Escape peels', () => {
     act(() => {
       chip.click();
     });
-    expect(host.querySelector('.thinking__menu')).not.toBeNull();
+    expect(document.querySelector('.thinking__menu')).not.toBeNull();
 
     press(document.body, 'Escape');
-    expect(host.querySelector('.thinking__menu')).toBeNull();
+    expect(document.querySelector('.thinking__menu')).toBeNull();
     expect(onFull).not.toHaveBeenCalled();
   });
 
@@ -157,7 +157,7 @@ describe('what Escape peels', () => {
       chip.click();
     });
     press(name, 'Escape');
-    expect(host.querySelector('.thinking__menu')).toBeNull();
+    expect(document.querySelector('.thinking__menu')).toBeNull();
   });
 
   it('puts the panel away before it gives up the window', () => {

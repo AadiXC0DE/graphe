@@ -30,7 +30,7 @@
     "eval:json": "node scripts/eval.mjs --json",
     "lint": "eslint .",
     "copy:check": "node scripts/no-dashes.mjs",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm run copy:check && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

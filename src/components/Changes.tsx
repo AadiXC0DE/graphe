@@ -27,7 +27,7 @@ export const SAYS = {
   readingDetail: 'A moment. This is being read off the disk.',
   nothing: 'Nothing has changed.',
   keptNothing: 'Nothing kept.',
-  nothingDetail: 'When there is work to look through, it will show up here.',
+  nothingDetail: 'Changes to this folder show up here.',
   keepAll: 'Keep all',
   dropAll: 'Drop all',
   keep: 'Keep',

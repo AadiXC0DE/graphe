@@ -56,13 +56,25 @@ export const reviewWords = {
   take: 'Take it',
   mine: 'Keep mine',
   again: 'Ask again',
-  drop: 'Throw it away',
+  drop: 'Throw away',
   /** The same two, per file. */
   takeFile: 'Take theirs',
   keepFile: 'Keep mine',
   /** The one press after a review that says yes: the branch arrives as one
    *  commit unless somebody asks for the conversation's own saves. */
   land: 'Land',
+  /** The one press after the decision, named by the decision. */
+  does: {
+    'take it': 'Land',
+    'keep mine': 'Keep my files',
+    'ask again': 'Send back',
+    'drop it': 'Throw it away',
+  } as const,
+  /** Said under the press before the one that cannot be undone. */
+  dropWhy: 'Its branch stays; only the copy goes.',
+  /** Where the old behaviour lives now: one row in a menu rather than a switch
+   *  and a sentence above the decision. */
+  menu: 'More',
   openDiff: 'See what changed',
   /** The two ways a landing can arrive, named as themselves. The precise one
    *  sits behind Land rather than in a settings screen. */
@@ -71,13 +83,17 @@ export const reviewWords = {
   opening: 'Opening the pull request…',
   landing: 'Landing…',
   /** The old behaviour, kept per card for anyone who wants it. */
-  mirror: 'Live mirror',
+  mirror: 'Carry files into my folder as it works',
   mirrorWhy:
     'Carry this conversation’s files into your folder as it works, instead of waiting here for a review.',
   /** A land cannot keep the conversation’s own saves once files are left out
    *  of it, so the precise control says so rather than quietly ignoring it. */
   heldBackNote: 'Files you kept your own version of stay out, so this arrives as one commit.',
   nothingChosen: 'Every file here is set to keep your own version, so there is nothing to take.',
+  /** Said once, the first time work waits here instead of arriving. Without it
+   *  the old behaviour looks like the work went missing. */
+  firstTime:
+    'Finished work now waits in Review instead of arriving in your folder. Open Review, or turn on carrying files as it works from the entry’s menu.',
   prOpened: (address: string): string => `Pull request opened: ${address}`,
   landed: (title: string): string => `Landed “${title}”.`,
   clashed: (files: readonly string[]): string =>
@@ -244,10 +260,11 @@ export function heldBack(entry: Entry): number {
  *
  * It cannot once any file is being left out: what would arrive then is not the
  * branch, it is a subset of it, and a subset has no history of its own to
- * bring across. Said out loud on the control rather than ignored underneath it.
+ * bring across. Nor can a piece from the board, whose copy is detached and has
+ * no branch at all. Said out loud on the control rather than ignored under it.
  */
 export function landsAsOneCommit(entry: Entry): boolean {
-  return heldBack(entry) > 0;
+  return heldBack(entry) > 0 || entry.from === 'board';
 }
 
 /** One entry off the list, without deciding anything about it. Used when the

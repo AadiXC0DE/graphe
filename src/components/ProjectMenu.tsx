@@ -118,8 +118,9 @@ export default function ProjectMenu({
             className="projectmenu__hatch projectmenu__hatch--state"
             aria-pressed={showFiles}
             onClick={() => onShowFiles(!showFiles)}
+            title="Everything in this project, beside the conversation"
           >
-            Everything in this project
+            Project files
             <span className="projectmenu__mark" aria-hidden="true">
               {showFiles ? (
                 <svg width="11" height="11" viewBox="0 0 16 16" fill="none">

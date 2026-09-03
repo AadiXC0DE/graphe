@@ -55,9 +55,8 @@ export const awayWords = {
   },
   /** When the only work anywhere is here. */
   onlyHere: 'Nothing is running in your other projects.',
-  keepGoing: 'Set something running',
-  keepGoingHint:
-    'I carry on with this in a copy of your project, even if you close the window. Whatever it makes is waiting for you, as a picture, when you come back.',
+  keepGoing: 'Start a task',
+  keepGoingHint: 'Runs on its own branch, even with the window closed.',
   /** The press that starts one. */
   start: 'Start it',
   /** The way out of the form, for whoever opened it and changed their mind. */

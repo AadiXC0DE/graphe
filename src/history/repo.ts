@@ -807,11 +807,12 @@ export class ProjectHistory {
         const absolute = path.resolve(this.root, file);
         try {
           const size = await stat(absolute);
-          if (size.size > 200_000) return `# ${file} (new, too big to show here)`;
+          if (size.size > 200_000) return newFileDiff(file, null, 'too big to show here');
           const contents = await readFile(absolute, 'utf8');
-          return `# ${file} (new)\n${contents}`;
+          if (contents.includes('\u0000')) return newFileDiff(file, null, 'binary');
+          return newFileDiff(file, contents, null);
         } catch {
-          return `# ${file} (new, could not be read)`;
+          return newFileDiff(file, null, 'could not be read');
         }
       });
     const extras = await Promise.all(neverSaved);
@@ -1056,6 +1057,15 @@ export class ProjectHistory {
 
 const LOG_FORMAT =
   ['%H', '%at', '%an', '%ae', '%B', '%N', '%P', '%D'].join(FIELD) + RECORD;
+
+/** A file git has never seen, as the unified diff `git diff` would print for it. */
+function newFileDiff(file: string, contents: string | null, why: string | null): string {
+  const head = `diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}`;
+  if (contents === null) return `${head}\n@@ -0,0 +0,0 @@\n+# ${why ?? ''}`;
+  const lines = contents.split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+  return `${head}\n@@ -0,0 +1,${String(lines.length)} @@\n${lines.map((l) => `+${l}`).join('\n')}`;
+}
 
 function detailsOf(attempt: Attempt): string {
   return [attempt.stderr, attempt.stdout].filter((part) => part.trim().length > 0).join('\n');

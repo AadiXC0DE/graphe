@@ -24,6 +24,11 @@
   animation: sheet-arrives var(--dur-large) var(--ease-out-quart) both;
 }
 
+/* The rectangle held while a sheet's code is still on its way. */
+.sheet--arriving {
+  background: var(--bg);
+}
+
 @keyframes sheet-arrives {
   from {
     opacity: 0;
@@ -119,7 +124,8 @@
 }
 
 .sheet__chip--here {
-  background: var(--bg-sunken);
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
   color: var(--text);
 }
 
@@ -245,8 +251,8 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .sheet__chip:hover {
-    background: var(--bg-sunken);
+  .sheet__chip:not(.sheet__chip--here):hover {
+    background: color-mix(in oklab, var(--text) 7%, transparent);
     color: var(--text);
   }
 

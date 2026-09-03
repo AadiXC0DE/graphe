@@ -46,7 +46,13 @@ import {
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
 import { readAgentsMd } from '../../lib/agentsMd';
-import { AGENTS_BUDGET, standingWords, withinBudget } from './standing';
+import {
+  AGENTS_BUDGET,
+  PROMPT_BUDGET,
+  saysPromptSize,
+  standingWords,
+  withinBudget,
+} from './standing';
 import {
   ALWAYS_WORDS,
   alwaysFile,
@@ -2254,16 +2260,32 @@ const MOST_AFTER_SAYINGS = 3;
       {
         name: 'graphe-standing',
         factory: (api) => {
+          /** Said once per sitting: a warning repeated every turn is a warning
+           *  nobody reads. */
+          const already = new Set<string>();
+          const sayOnce = (id: string, what: string): void => {
+            if (already.has(id)) return;
+            already.add(id);
+            options.onEvent({ type: 'notice', what });
+          };
           api.on('before_agent_start', async (_event, ctx) => {
             const block = await options.standing?.().catch(() => null);
-            const before = (ctx as { getSystemPrompt?: () => string }).getSystemPrompt?.() ?? '';
+            const was = (ctx as { getSystemPrompt?: () => string }).getSystemPrompt?.() ?? '';
+            /* Our own block is never cut: it is what holds the job together.
+               What is over budget is everything else, and a prompt too heavy
+               for a small model to hold a list in is a prompt that quietly
+               stops working. */
+            const room = PROMPT_BUDGET - (block?.length ?? 0);
+            const before =
+              was.length <= room ? was : withinBudget(was, room, standingWords.promptTrimmed);
+            const characters = before.length + (block?.length ?? 0);
             // Said whether or not there is a block, so the chip can show how
             // heavy the prompt has become before a small model stops coping.
-            options.onEvent({
-              type: 'prompt-size',
-              characters: before.length + (block?.length ?? 0),
-            });
-            if (block === null || block === undefined || block === '') return undefined;
+            options.onEvent({ type: 'prompt-size', characters });
+            if (before !== was) sayOnce('prompt-over-budget', saysPromptSize(was.length + (block?.length ?? 0)));
+            if (block === null || block === undefined || block === '') {
+              return before === was ? undefined : { systemPrompt: before };
+            }
             return { systemPrompt: `${before}\n\n${block}` };
           });
         },

@@ -46,7 +46,7 @@ export default function ErrorCard({
         {technicalDetails ? (
           <details className="errorcard__tech">
             <summary className="errorcard__summary">Technical details</summary>
-            <pre className="errorcard__pre">{technicalDetails}</pre>
+            <pre className="errorcard__pre scroll--auto">{technicalDetails}</pre>
           </details>
         ) : null}
       </div>

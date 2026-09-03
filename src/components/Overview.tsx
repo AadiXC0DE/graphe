@@ -1,6 +1,6 @@
 import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import Away from './Away';
-import Checkouts from './Checkouts';
+import Waiting from './Waiting';
 import CostMeter from './CostMeter';
 import { SAYS as DESIGN, type DesignPart } from './DesignView';
 import History from './History';
@@ -86,6 +86,9 @@ const GOAL = {
       .filter((one) => one !== null)
       .join(' · '),
 } as const;
+
+/** Where the Looked up band's own state is kept. */
+const LOOKED_UP = 'graphe:panel:lookedup';
 
 const GIT = {
   heading: 'Git',
@@ -298,6 +301,8 @@ type Props = {
   /** Read what changed, as a diff. The band names the count and this is the
    *  press behind it; left off, the count is drawn and cannot be opened. */
   onOpenChanges?: () => void;
+  /** Open the Review screen, at an entry when one is named. */
+  onOpenReview?: (id?: string) => void;
   /** Open one of the files the last turn made, in the person's editor. */
   onOpenFile: (file: string) => void;
 
@@ -449,6 +454,7 @@ export default function Overview({
   onHandOver,
   onOpenLink,
   onOpenChanges,
+  onOpenReview,
   onOpenFile,
   onKeepGoing,
   onStartAfter,
@@ -522,6 +528,19 @@ export default function Overview({
   /* Which band of the panel is in front. Bands used to stack into one column
      that only got longer; now each has a home and nothing is buried. */
   const [tab, setTab] = useState<TabId>('work');
+  /* Kept per machine: what somebody folded away stays folded. */
+  const [lookedUpOpen, setLookedUpOpen] = useState(() => {
+    try {
+      return localStorage.getItem(LOOKED_UP) === 'open';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOOKED_UP, lookedUpOpen ? 'open' : 'shut');
+    } catch { /* private mode */ }
+  }, [lookedUpOpen]);
 
   /* A dot on the tab, not a number: the count matters once you are looking, and
      before that it is only worth knowing there is something. */
@@ -533,7 +552,7 @@ export default function Overview({
 
   const shownResearch = research.slice(-WINDOW);
   const moreResearch = research.length - shownResearch.length;
-  const changedCount = git === null ? 0 : git.unstaged + git.staged + git.untracked;
+  const changedCount = git === null ? 0 : git.changedPaths;
 
   return (
     <aside className="overview" aria-label="What is going on">
@@ -708,11 +727,10 @@ export default function Overview({
                 disabled={onOpenChanges === undefined}
                 title={GIT.open}
               >
-                <span className="gitband__changesname">
-                  {GIT.changes}
+                <span className="gitband__changesname">{GIT.files(changedCount)}</span>
+                {GIT.lines(git.added, git.removed) === null ? null : (
                   <span className="gitband__lines">{GIT.lines(git.added, git.removed)}</span>
-                </span>
-                <span className="gitband__count">{GIT.files(changedCount)}</span>
+                )}
               </button>
             )}
             {changedCount === 0 ? null : (
@@ -724,9 +742,6 @@ export default function Overview({
                 title={COMMITTING.what(git.branch)}
               >
                 {COMMITTING.heading}
-                {git.branch === null ? null : (
-                  <span className="gitband__onto">{COMMITTING.onto(git.branch)}</span>
-                )}
               </button>
             )}
           </div>
@@ -737,10 +752,9 @@ export default function Overview({
         </section>
       )}
 
-      {/* One card per conversation working in its own copy. Under Git because
-          it is the same question one step out: not what this folder has, but
-          what every copy of it has, and which of them wants a person. */}
-      {git === null || several ? null : <Checkouts branch={git.branch} busy={busy} />}
+      {/* What has finished and is waiting. One press per row into the Review
+          screen, which is the one place work is decided about. */}
+      {several ? null : <Waiting onOpen={onOpenReview} clock={view.clock} />}
 
       {/* A folder holding several projects keeps its own commit press: the band
           above is one project's, and there is no folder-level branch to be on. */}
@@ -766,8 +780,17 @@ export default function Overview({
       ) : null}
 
       <section className="overview__block">
-        <h2 className="overview__title">Looked up</h2>
-        {shownResearch.length === 0 ? (
+        <button
+          type="button"
+          className="overview__fold"
+          aria-expanded={lookedUpOpen}
+          onClick={() => setLookedUpOpen((was) => !was)}
+        >
+          <h2 className="overview__title">Looked up</h2>
+          <span className="overview__foldcount">{String(research.length)}</span>
+          <span className="overview__foldmark" aria-hidden="true">{lookedUpOpen ? '⌄' : '›'}</span>
+        </button>
+        {!lookedUpOpen ? null : shownResearch.length === 0 ? (
           <p className="overview__quiet">Nothing looked up yet.</p>
         ) : (
           <>
@@ -786,11 +809,11 @@ export default function Overview({
             ) : null}
           </>
         )}
-        {now.filesRead > 0 ? (
+        {!lookedUpOpen || now.filesRead === 0 ? null : (
           <p className="overview__read">
             {`${now.filesRead} ${now.filesRead === 1 ? 'file' : 'files'} of yours opened`}
           </p>
-        ) : null}
+        )}
       </section>
 
       {references.length === 0 ? null : (

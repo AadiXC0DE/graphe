@@ -21,19 +21,19 @@ export type Policy = 'on' | 'tools-only' | 'off';
 /** Every word this decision puts on screen. The switch belongs beside the model
  *  chip, which is where the hand already is when the run is being set up. */
 export const policyWords = {
-  label: 'Add-ons that start work on their own',
+  label: 'Add-ons that start turns',
   note: 'Some add-ons ask for another turn, or carry on after a reply is finished. With this off their tools still work; only the starting stops.',
   /** The three settings, as somebody would choose them. */
-  on: 'Let them',
+  on: 'On',
   toolsOnly: 'Tools only',
-  off: 'Off here',
+  off: 'Off',
 } as const;
 
 /** What a setting means, on the row under its name. */
 export function saysPolicy(policy: Policy): string {
-  if (policy === 'on') return 'Can start turns of its own';
-  if (policy === 'tools-only') return 'Its tools work; it cannot start a turn';
-  return 'Not running here';
+  if (policy === 'on') return 'Starts turns and runs tools';
+  if (policy === 'tools-only') return 'Runs tools only';
+  return 'Not loaded';
 }
 
 /**

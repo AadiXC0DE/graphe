@@ -66,7 +66,7 @@ export type WorkspaceFacts = {
 };
 
 export const workspaceWords = {
-  heading: 'Workspaces',
+  heading: 'Branches',
   nothing: 'No conversation has a copy of this project yet.',
   /** What each state is called where somebody reads it. */
   states: {
@@ -79,15 +79,15 @@ export const workspaceWords = {
   review: 'Review',
   land: 'Land',
   /** The main folder switches to this branch. Its inverse is below it. */
-  bringForward: 'Bring to the front',
+  bringForward: 'Switch folder to this branch',
   sendBack: 'Send back to its copy',
-  putAway: 'Put the copy away',
+  putAway: 'Remove the copy',
   open: 'Open the conversation',
   /** On a card whose copy holds writing no branch is carrying yet. Said
    *  because putting it away is the one press that would lose it. */
-  holds: 'This copy holds changes its branch does not.',
+  holds: 'Uncommitted changes',
   nothingChanged: 'Nothing changed yet.',
-  awayDetail: 'Its work is on its branch. Opening the conversation spreads it out again.',
+  awayDetail: 'On its branch',
   from: (base: string): string => `from ${base}`,
   tally: (added: number, removed: number): string => `+${String(added)} −${String(removed)}`,
   files: (count: number): string => `${String(count)} ${count === 1 ? 'file' : 'files'}`,

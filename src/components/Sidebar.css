@@ -42,7 +42,6 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 34px;
   padding: 0 var(--space-1);
 }
 
@@ -194,10 +193,31 @@
   }
 }
 
-/* The one persistent control on the folded shelf: it stays at the lower edge,
+/* The one persistent control in either state: it stays at the lower edge,
    separate from the places somebody moves between. */
-.shelf__act--settings {
+.shelf__act--last {
   margin-top: auto;
+}
+
+.shelf__more--last {
+  margin-top: var(--space-2);
+}
+
+/* How much is waiting behind a mark with no room for a number beside it. */
+.shelf__actcount {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-radius: 7px;
+  font-variant-numeric: tabular-nums;
 }
 
 .shelf__mark {
@@ -205,12 +225,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-md);
-  background: var(--accent-soft);
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
   transition:
     background-color var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
@@ -226,13 +248,6 @@
 
 .shelf__mark:active {
   transform: scale(0.97);
-}
-
-.shelf__markdot {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--accent);
 }
 
 /* The picker inside the shelf keeps the roomy rhythm of its standalone form;
@@ -476,14 +491,41 @@
   }
 }
 
-/* Room at the top of the list for the traffic lights that sit over it. In full
-   screen macOS takes them away and the room goes back to the projects. */
+/* The caption rides the traffic lights' own line rather than sitting in a band
+   of nothing under them. In full screen macOS takes the lights away and the
+   room goes back to the projects. */
 [data-shell='desktop'] .shelf {
-  padding-top: var(--space-6);
+  padding-top: var(--space-3);
+}
+
+[data-shell='desktop'] .shelf__top {
+  min-height: 28px;
+  padding-left: 66px;
 }
 
 [data-full='yes'] .shelf {
   padding-top: var(--space-2);
+}
+
+[data-full='yes'] .shelf__top {
+  min-height: 30px;
+  padding-left: var(--space-1);
+}
+
+/* Collapsed the strip is 54px and the lights span 18 to 70, so nothing can
+   share their line. The band is drawn as the toolbar row it is. */
+[data-shell='desktop'] .shelf--closed {
+  padding-top: var(--topbar-height);
+}
+
+[data-shell='desktop'] .shelf--closed::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--topbar-height);
+  border-bottom: 1px solid var(--border);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -493,7 +535,8 @@
   }
 
   .shelf__mark:hover {
-    background: var(--accent-soft);
+    color: var(--text);
+    background: var(--bg-sunken);
   }
 
   .shelf__act:hover {

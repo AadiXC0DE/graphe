@@ -32,7 +32,7 @@ export const SAYS = {
   needs: 'Reading a file needs a Figma access token in FIGMA_TOKEN.',
   placeholder: 'Paste a Figma address',
   follow: 'Follow it',
-  lookAgain: 'Look again',
+  lookAgain: 'Refresh',
   looking: 'Looking…',
   buildIn: 'Build this in',
   caughtUp: 'It matches now',

@@ -4,11 +4,12 @@ import Switch from './Switch';
 import ThinkingWith from './ThinkingWith';
 import { advisorSwitchWords, advisorWords } from '../agent/advisor';
 import { policyWords, saysPolicy, type Policy } from '../agent/pi/extension-policy';
-import type { Appearance } from '../design/appearance';
+import { PRESETS, appearanceWords, presetOf, type Appearance } from '../design/appearance';
+import { hexOf, rgbFrom, surfacesFrom } from '../design/palette-oklch';
 import { ACTIONS, ACTION_WORDS, chordFor, clashesIn, type Bindings, type Chord, type Where } from '../lib/actions';
 import type { AddonHere, AlwaysDoes, ConnectionState, ModelChoice, ThinkingLevel } from '../lib/ipc';
 import { chordOf, saysChord } from '../lib/keys';
-import { THEMES, THEME_WORDS, showing, type Theme } from '../lib/theme';
+import { THEME_WORDS, showing, type Theme } from '../lib/theme';
 import {
   PAGES,
   pageFor,
@@ -130,6 +131,30 @@ const ADDON_WORDS = {
  *  card that clips its corners would cut in half. */
 const BLOCKS = new Set(['theme', 'model', 'addons']);
 
+/** The three answers to which way the palette runs, in the order a segmented
+ *  control reads them. */
+const BASES: readonly { id: Theme; says: string }[] = [
+  { id: 'system', says: appearanceWords.base.system },
+  { id: 'light', says: appearanceWords.base.light },
+  { id: 'dark', says: appearanceWords.base.dark },
+];
+
+/** What a colour input shows. On Auto that is the colour the palette worked
+ *  out, so an empty picker is never a lie about what is on screen. */
+function swatchFor(
+  one: Appearance,
+  which: 'accent' | 'ground' | 'ink',
+  computerIsDark: boolean,
+): string {
+  const said = which === 'accent' ? one.accent : one[which];
+  const asked = said === null ? null : rgbFrom(said);
+  if (asked !== null) return hexOf(asked);
+  const on = one.base === 'system' ? (computerIsDark ? 'dark' : 'light') : one.base;
+  const made = surfacesFrom(one.accent, one.tone, one.contrast, on, one.ground, one.ink);
+  if (which === 'accent') return made.accent;
+  return which === 'ink' ? made.text : made.bg;
+}
+
 /** The rows of a page cut into cards: a block row alone, everything else in the
  *  run it arrived in. */
 function runs(rows: readonly Row[]): readonly [Row, ...Row[]][] {
@@ -237,8 +262,8 @@ export default function Settings({
 
   /* Following the computer still lands somewhere; this is where. Read at the
      render of the sheet — it is open for seconds, not for ever. */
-  const onScreen = showing('system', window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const onScreenName = onScreen === 'dark' ? THEME_WORDS.graphe : THEME_WORDS[onScreen];
+  const computerIsDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const onScreenName = THEME_WORDS[showing('system', computerIsDark)];
 
   const shown = found ?? rowsOn(page);
   const highlighted = startAt === null || typed !== '' ? null : startAt;
@@ -314,59 +339,108 @@ export default function Settings({
           <li key={row.id} className={`settings__block${at}`}>
             <div className="settings__blockhead">{words(row)}</div>
             <div className="settings__theme-wrap">
-              <span className="settings__themes" role="group" aria-label={row.name}>
-                {THEMES.map((pick) => (
-                  <button
-                    key={pick.id}
-                    type="button"
-                    className={`settings__theme ${theme === pick.id ? 'settings__theme--on' : ''}`}
-                    aria-pressed={theme === pick.id}
-                    onClick={() => onTheme(pick.id)}
-                    title={pick.label}
-                  >
-                    <span
-                      className="settings__thumb"
-                      aria-hidden="true"
-                      style={
-                        {
-                          background: pick.preview.bg,
-                          borderColor: pick.preview.border,
-                          ['--thumb-accent' as string]: pick.preview.accent,
-                          ['--thumb-text' as string]: pick.preview.text,
-                        } as React.CSSProperties
-                      }
-                    >
-                      <span
-                        className="settings__thumb-raised"
-                        style={{ background: pick.preview.raised, borderColor: pick.preview.border }}
-                      />
-                      <span className="settings__thumb-dot" style={{ background: pick.preview.accent }} />
-                      <span className="settings__thumb-line" style={{ background: pick.preview.text }} />
-                      <span
-                        className="settings__thumb-line settings__thumb-line--muted"
-                        style={{ background: pick.preview.text }}
-                      />
-                    </span>
-                    <span className="settings__theme-label">{pick.label}</span>
-                  </button>
-                ))}
-              </span>
               <div className="settings__theme-foot">
-                <button
-                  type="button"
-                  className={`settings__system ${theme === 'system' ? 'settings__system--on' : ''}`}
-                  aria-pressed={theme === 'system'}
-                  onClick={() => onTheme('system')}
-                >
-                  {THEME_WORDS.system}
-                </button>
+                <span className="settings__bases" role="group" aria-label={appearanceWords.base.name}>
+                  {BASES.map((one) => (
+                    <button
+                      key={one.id}
+                      type="button"
+                      className={`settings__system ${theme === one.id ? 'settings__system--on' : ''}`}
+                      aria-pressed={theme === one.id}
+                      onClick={() => onTheme(one.id)}
+                    >
+                      {one.says}
+                    </button>
+                  ))}
+                </span>
                 {theme === 'system' ? (
                   /* Saying which palette the computer picked spares the reader
-                     five thumbnails and a guess about what they are actually
-                     looking at. */
+                     a guess about what they are actually looking at. */
                   <p className="settings__system-note">{onScreenName} right now.</p>
                 ) : null}
               </div>
+
+              {appearance === undefined || onAppearance === undefined ? null : (
+                <>
+                  <span className="settings__themes" role="group" aria-label={appearanceWords.presets.name}>
+                    {PRESETS.map((preset) => {
+                      const would = { ...appearance, ...preset.is };
+                      const on = would.base === 'system' ? (computerIsDark ? 'dark' : 'light') : would.base;
+                      const made = surfacesFrom(
+                        would.accent,
+                        would.tone,
+                        would.contrast,
+                        on,
+                        would.ground,
+                        would.ink,
+                      );
+                      const here = presetOf(appearance) === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          className={`settings__theme ${here ? 'settings__theme--on' : ''}`}
+                          aria-pressed={here}
+                          /* The base travels with the appearance, so this is
+                             one press and one write. */
+                          onClick={() => onAppearance(would)}
+                          title={preset.name}
+                        >
+                          <span
+                            className="settings__thumb"
+                            aria-hidden="true"
+                            style={{ background: made.bg, borderColor: made.border }}
+                          >
+                            <span
+                              className="settings__thumb-raised"
+                              style={{ background: made.bgRaised, borderColor: made.border }}
+                            />
+                            <span className="settings__thumb-dot" style={{ background: made.accent }} />
+                            <span className="settings__thumb-line" style={{ background: made.text }} />
+                            <span
+                              className="settings__thumb-line settings__thumb-line--muted"
+                              style={{ background: made.text }}
+                            />
+                          </span>
+                          <span className="settings__theme-label">{preset.name}</span>
+                        </button>
+                      );
+                    })}
+                  </span>
+
+                  <div className="settings__pickers">
+                    <label className="settings__picker">
+                      <span className="settings__picker-name">{appearanceWords.accent.name}</span>
+                      <input
+                        type="color"
+                        className="settings__colour"
+                        value={swatchFor(appearance, 'accent', computerIsDark)}
+                        onChange={(event) => onAppearance({ ...appearance, accent: event.target.value })}
+                      />
+                    </label>
+                    {(['ground', 'ink'] as const).map((which) => (
+                      <span className="settings__picker" key={which}>
+                        <span className="settings__picker-name">{appearanceWords[which].name}</span>
+                        <input
+                          type="color"
+                          aria-label={appearanceWords[which].name}
+                          className="settings__colour"
+                          value={swatchFor(appearance, which, computerIsDark)}
+                          onChange={(event) => onAppearance({ ...appearance, [which]: event.target.value })}
+                        />
+                        <button
+                          type="button"
+                          className={`settings__system ${appearance[which] === null ? 'settings__system--on' : ''}`}
+                          aria-pressed={appearance[which] === null}
+                          onClick={() => onAppearance({ ...appearance, [which]: null })}
+                        >
+                          {appearanceWords[which].auto}
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </li>
         );

@@ -1711,6 +1711,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     ...options.guard,
     projectRoot: options.projectRoot,
     agentFolder: agentDir,
+    // A board piece, a helper and a canvas run have nobody in front of them, so
+    // there is nobody to answer a question about working the computer.
+    unattended:
+      options.unattended === true ||
+      (options.sessionKind !== undefined && options.sessionKind !== 'conversation'),
   };
 
   /**

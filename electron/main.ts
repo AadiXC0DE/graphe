@@ -101,7 +101,7 @@ import {
 } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
 import type { GuardFacts } from '../src/agent/guard/policy';
-import { asComputerUse } from '../src/work/computeruse';
+import { asComputerUse, type ComputerUse } from '../src/work/computeruse';
 import {
   CHANNEL,
   type Away,
@@ -195,7 +195,7 @@ import { Recents } from '../src/projects/recents';
 import { addressed, Workspaces, type Workspace } from '../src/projects/workspaces';
 import { chosenFrom, findEditors, findTerminals, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
-import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
+import { packageShelf, type Pack } from '../src/agent/pi/packages';
 import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShippedWith } from '../src/agent/pi/skills';
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor, workflowWords } from '../src/work/workflows';
@@ -2023,11 +2023,15 @@ type ComputerUseFacts = NonNullable<GuardFacts['computerUse']>;
 /** The enrolment as the Guard reads it: plain values, copied out of prefs so
  *  nothing later can rewrite what a sitting was judged against. */
 async function computerUseFacts(): Promise<ComputerUseFacts> {
-  const use = (await preferences()).all().computerUse;
+  return factsFrom((await preferences()).all().computerUse);
+}
+
+function factsFrom(use: ComputerUse): ComputerUseFacts {
   return {
     anyApp: use.anyApp,
     browser: use.browser,
     excel: use.excel,
+    lockedUse: use.lockedUse,
     allowedApps: [...use.allowedApps],
     browserSites: [...use.browserSites],
   };
@@ -8099,26 +8103,15 @@ function register(): void {
     // a switch that turns itself on.
     const use = asComputerUse(raw);
     const changed = await (await preferences()).change({ computerUse: use });
-    syncComputerUse({
-      anyApp: use.anyApp,
-      browser: use.browser,
-      excel: use.excel,
-      allowedApps: [...use.allowedApps],
-      browserSites: [...use.browserSites],
-    });
+    syncComputerUse(factsFrom(use));
     return done(changed);
   });
 
   handle<ComputerStatus>(CHANNEL.computerStatus, async () => {
-    const [excel, chrome] = await Promise.all([
-      stat('/Applications/Microsoft Excel.app')
-        .then((found) => found.isDirectory())
-        .catch(() => false),
-      stat('/Applications/Google Chrome.app')
-        .then((found) => found.isDirectory())
-        .catch(() => false),
-    ]);
-    return done({ excelInstalled: excel, chromeInstalled: chrome });
+    const excel = await stat('/Applications/Microsoft Excel.app')
+      .then((found) => found.isDirectory())
+      .catch(() => false);
+    return done({ excelInstalled: excel });
   });
 
   handle<null>(CHANNEL.openComputerSettings, async (_event, args) => {
@@ -9070,25 +9063,6 @@ function register(): void {
     const shelved = await theShelf();
     await shelved.remove(id);
     return done(await shelved.mine());
-  });
-
-  handle<string>(CHANNEL.explainPackage, async (_event, args) => {
-    const [id] = args;
-    if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
-    const where = whereIn(args);
-    const open = projectAt(where);
-    const agent = open === null ? null : sessionAt(open, where);
-    if (agent === null) {
-      return done(
-        'Open a project first and I will read this one and tell you what it does.',
-      );
-    }
-    const found = (await (await theShelf()).mine()).find((one) => one.id === id) ?? null;
-    if (found === null) return done(WARNING);
-    // Asked and answered inside the conversation, because that is where the
-    // model already is. The window shows it beside the row it asked about.
-    await agent.prompt(askAbout(found));
-    return done('Asked. The answer is in the conversation.');
   });
 
   handle<readonly Conversation[]>(CHANNEL.conversations, async (_event, args) => {

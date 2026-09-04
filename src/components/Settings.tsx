@@ -1184,16 +1184,15 @@ export default function Settings({
               {found === null ? pageWords[page].note : ''}
             </p>
 
+            {/* The panel draws its own cards, so it is not put inside one. */}
             {found === null && page === 'computer' ? (
-              <div className="settings__group">
-                <ComputerUse
-                  use={computerUse}
-                  onChange={(next) => onComputerUse?.(next)}
-                  status={computerStatus}
-                  onRefreshStatus={onRefreshComputerStatus}
-                  onOpenSettings={onOpenComputerSettings}
-                />
-              </div>
+              <ComputerUse
+                use={computerUse}
+                onChange={(next) => onComputerUse?.(next)}
+                status={computerStatus}
+                onRefreshStatus={onRefreshComputerStatus}
+                onOpenSettings={onOpenComputerSettings}
+              />
             ) : found !== null && found.length === 0 ? (
               <p className="settings__empty">{settingsWords.nothing}</p>
             ) : (

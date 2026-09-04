@@ -814,13 +814,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.removePackage, id) as Promise<Result<readonly Pack[]>>;
   },
 
-  explainPackage(id: string, where?: Where): Promise<Result<string>> {
-    if (typeof id !== 'string' || id.trim() === '') {
-      return Promise.resolve(refuse<string>('I could not tell which one you meant.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.explainPackage, id, named(where)) as Promise<Result<string>>;
-  },
-
   designCommit(
     changes: DesignChange,
     where?: Where,

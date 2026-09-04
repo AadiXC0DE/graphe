@@ -81,7 +81,6 @@ export default function ComputerUse({ use, onChange, status = null, onRefreshSta
   const [app, setApp] = useState('');
   const [site, setSite] = useState('');
   const [learnMore, setLearnMore] = useState(false);
-  const [managing, setManaging] = useState(true);
 
   useEffect(() => {
     onRefreshStatus?.();
@@ -126,13 +125,7 @@ export default function ComputerUse({ use, onChange, status = null, onRefreshSta
                 <span className="settings__name">{computerWords.anyAppName}</span>
                 <span className="settings__note">{computerWords.anyAppNote}</span>
               </span>
-              {use.anyApp ? (
-                <Switch on label={computerWords.anyAppName} onChange={(on) => flip('anyApp', on)} />
-              ) : (
-                <button type="button" className="computer__install" onClick={() => flip('anyApp', true)}>
-                  {computerWords.install}
-                </button>
-              )}
+              <Switch on={use.anyApp} label={computerWords.anyAppName} onChange={(on) => flip('anyApp', on)} />
             </div>
           </li>
           <li>
@@ -142,15 +135,6 @@ export default function ComputerUse({ use, onChange, status = null, onRefreshSta
                 <span className="settings__name">{computerWords.browserName}</span>
                 <span className="settings__note">{computerWords.browserNote}</span>
               </span>
-              {use.browser ? (
-                <button type="button" className="computer__install" onClick={() => setManaging((was) => !was)}>
-                  {computerWords.browserManage}
-                </button>
-              ) : (
-                <button type="button" className="computer__install" onClick={() => flip('browser', true)}>
-                  {computerWords.enable}
-                </button>
-              )}
               <Switch on={use.browser} label={computerWords.browserName} onChange={(on) => flip('browser', on)} />
             </div>
           </li>
@@ -170,12 +154,13 @@ export default function ComputerUse({ use, onChange, status = null, onRefreshSta
 
       {use.anyApp && onOpenSettings !== undefined ? (
         <p className="computer__perms">
-          macOS still asks twice, once to see and once to point.{' '}
+          {computerWords.permsNote}{' '}
           <button type="button" className="settings__inline" onClick={() => onOpenSettings('see')}>
-            Seeing
-          </button>{' '}
+            {computerWords.permsSee}
+          </button>
+          {' · '}
           <button type="button" className="settings__inline" onClick={() => onOpenSettings('point')}>
-            Pointing
+            {computerWords.permsPoint}
           </button>
         </p>
       ) : null}
@@ -189,8 +174,13 @@ export default function ComputerUse({ use, onChange, status = null, onRefreshSta
                 <span className="settings__name">{computerWords.lockedTitle}</span>
                 <span className="settings__note">{computerWords.lockedNote}</span>
                 {learnMore ? <span className="settings__note">{computerWords.lockedLearn}</span> : null}
-                <button type="button" className="settings__inline" onClick={() => setLearnMore((was) => !was)}>
-                  Learn more
+                <button
+                  type="button"
+                  className="settings__inline computer__learn"
+                  aria-expanded={learnMore}
+                  onClick={() => setLearnMore((was) => !was)}
+                >
+                  {computerWords.lockedMore}
                 </button>
               </span>
               <Switch on={use.lockedUse} label={computerWords.lockedTitle} onChange={(on) => flip('lockedUse', on)} />
@@ -247,7 +237,7 @@ export default function ComputerUse({ use, onChange, status = null, onRefreshSta
         </div>
       )}
 
-      {managing || use.browserSites.length > 0 ? (
+      {use.browser ? (
         <>
           <h3 className="settings__subtitle settings__name">{computerWords.sitesTitle}</h3>
           <p className="settings__pagenote">{computerWords.sitesNote}</p>

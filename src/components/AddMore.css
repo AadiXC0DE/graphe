@@ -357,110 +357,17 @@
   color: var(--accent-ink);
 }
 
-.addmore__explain {
-  align-self: flex-start;
-  min-height: 26px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--accent-ink);
-  font-size: var(--text-xs);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  transition: color var(--dur-micro) var(--ease-hover);
-}
-
-.addmore__waiting {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 26px;
-  font-size: var(--text-xs);
-  color: var(--text-faint);
-}
-
-.addmore__spin {
-  flex: none;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  border: 2px solid var(--border-strong);
-  border-top-color: var(--accent);
-  animation: addmore-spin 0.9s linear infinite;
-}
-
-@keyframes addmore-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.addmore__explanation {
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
-  font-size: var(--text-sm);
-  line-height: 1.55;
-  color: var(--text);
-}
-
 /* ---------------------------------------------------------------------------
    What it can reach
-   The row reads as a sentence; the real address, program and words sit folded
-   underneath it, in the one typeface where an exact string is readable.
+   The row reads as a sentence: what it lets you do, and the one press.
    --------------------------------------------------------------------------- */
 
 .addmore__needs {
   color: var(--text-faint);
 }
 
-.addmore__exact,
 .addmore__hand {
   font-size: var(--text-xs);
-}
-
-.addmore__exactsummary {
-  display: inline-block;
-  color: var(--accent-ink);
-  cursor: default;
-  list-style: none;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.addmore__exactsummary::-webkit-details-marker {
-  display: none;
-}
-
-.addmore__exactlist {
-  margin: var(--space-2) 0 0;
-  padding: var(--space-2) var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
-}
-
-.addmore__exactrow {
-  display: flex;
-  gap: var(--space-3);
-  align-items: baseline;
-}
-
-.addmore__exactlabel {
-  flex: none;
-  min-width: 72px;
-  color: var(--text-faint);
-}
-
-.addmore__exactvalue {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  color: var(--text);
 }
 
 /* One of your own. Folded away, because most people never open it. */
@@ -513,9 +420,7 @@
 }
 
 .addmore__action:focus-visible,
-.addmore__explain:focus-visible,
 .addmore__chip:focus-visible,
-.addmore__exactsummary:focus-visible,
 .addmore__close:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -536,11 +441,6 @@
     color: var(--text);
   }
 
-  .addmore__explain:hover,
-  .addmore__exactsummary:hover {
-    color: var(--text);
-  }
-
   .addmore__chip:not(.addmore__chip--on):hover {
     border-color: var(--border-strong);
     color: var(--text);
@@ -555,10 +455,6 @@
   .addmore__backdrop,
   .addmore__panel {
     animation: none;
-  }
-
-  .addmore__spin {
-    animation-duration: 1.4s;
   }
 }
 

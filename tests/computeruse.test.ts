@@ -40,6 +40,7 @@ function enrolled(over: Partial<NonNullable<GuardFacts['computerUse']>> = {}): G
       anyApp: true,
       browser: true,
       excel: true,
+      lockedUse: false,
       allowedApps: [],
       browserSites: [],
       ...over,
@@ -48,8 +49,8 @@ function enrolled(over: Partial<NonNullable<GuardFacts['computerUse']>> = {}): G
 }
 
 describe('the enrolment itself', () => {
-  it('starts switched off, with empty lists', () => {
-    expect(defaultComputerUse.anyApp).toBe(false);
+  it('leaves what already worked on, and everything it grants off', () => {
+    expect(defaultComputerUse.anyApp).toBe(true);
     expect(defaultComputerUse.excel).toBe(false);
     expect(defaultComputerUse.lockedUse).toBe(false);
     expect(defaultComputerUse.allowedApps).toEqual([]);
@@ -57,10 +58,11 @@ describe('the enrolment itself', () => {
     expect(defaultComputerUse.browser).toBe(true);
   });
 
-  it('reads back defensively, so a hand-edited file cannot switch itself on', () => {
+  it('reads back defensively, so a hand-edited file cannot grant itself more', () => {
     expect(asComputerUse(null)).toEqual(defaultComputerUse);
-    expect(asComputerUse({ anyApp: 'yes please' }).anyApp).toBe(false);
+    expect(asComputerUse({ anyApp: false }).anyApp).toBe(false);
     expect(asComputerUse({ excel: 1 }).excel).toBe(false);
+    expect(asComputerUse({ lockedUse: 'sure' }).lockedUse).toBe(false);
     expect(asComputerUse({ allowedApps: ['Figma', 'figma', '', 42] }).allowedApps).toEqual([
       'Figma',
     ]);
@@ -89,7 +91,7 @@ describe('the enrolment itself', () => {
   it('compares enrolments field by field', () => {
     expect(sameComputerUse(defaultComputerUse, asComputerUse(null))).toBe(true);
     expect(
-      sameComputerUse(defaultComputerUse, { ...defaultComputerUse, anyApp: true }),
+      sameComputerUse(defaultComputerUse, { ...defaultComputerUse, anyApp: false }),
     ).toBe(false);
   });
 });
@@ -199,6 +201,36 @@ describe('the Excel row', () => {
     expect(evaluate(call('desktop_open', { app: 'Microsoft Excel' }), withIt).kind).toBe(
       'confirm',
     );
+  });
+
+  it('is not answered by the always-allowed list: the row is its own question', () => {
+    const listed = enrolled({ excel: false, allowedApps: ['Microsoft Excel'] });
+    expect(evaluate(call('desktop_open', { app: 'Microsoft Excel' }), listed).kind).toBe(
+      'confirm',
+    );
+  });
+});
+
+describe('locked use', () => {
+  const doing = call('desktop_do', { steps: [{ do: 'click', x: 1, y: 1 }] });
+
+  it('refuses background work the computer until it is switched on', () => {
+    const background: GuardFacts = { ...enrolled({ lockedUse: false }), unattended: true };
+    const verdict = evaluate(doing, background);
+    expect(verdict.kind).toBe('deny');
+    if (verdict.kind === 'deny') expect(verdict.reason).toContain('Locked use');
+  });
+
+  it('holds that refusal past a yes and past doing', () => {
+    const background: GuardFacts = { ...enrolled({ lockedUse: false }), unattended: true };
+    expect(evaluate(doing, { ...background, screenSaidYes: true }).kind).toBe('deny');
+    expect(evaluate(doing, { ...background, howFar: 'doing' }).kind).toBe('deny');
+  });
+
+  it('asks as usual once it is on, and never gets in the way of a conversation', () => {
+    const background: GuardFacts = { ...enrolled({ lockedUse: true }), unattended: true };
+    expect(evaluate(doing, background).kind).toBe('confirm');
+    expect(evaluate(doing, enrolled({ lockedUse: false })).kind).toBe('confirm');
   });
 });
 

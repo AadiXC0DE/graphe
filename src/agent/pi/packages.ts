@@ -275,28 +275,6 @@ export function everything(
   ];
 }
 
-/* -------------------------------------------------------------------------- */
-/* Asking about one                                                            */
-/* -------------------------------------------------------------------------- */
-
-/** What the model is asked when somebody wants to know what an addition is for.
- *  Two sentences because a paragraph is the thing they were avoiding. */
-export function askAbout(pack: Pack): string {
-  const known = [
-    `Name: ${pack.name} (${pack.id})`,
-    pack.version === null ? null : `Version: ${pack.version}`,
-    pack.downloads === null ? null : `Downloaded about ${pack.downloads} times recently`,
-    pack.summary === '' ? null : `How it describes itself: ${pack.summary}`,
-  ]
-    .filter((line): line is string => line !== null)
-    .join('\n');
-
-  return [
-    'Explain this addition to a designer who does not write code and does not want to.',
-    known,
-    'Answer in exactly two plain sentences. The first says what it would let them do: a thing they might actually want to do, not what it is or how it works. The second says plainly whether it looks risky to put on their computer, and says so straight if it does, because it will be running on their machine with reach over their files. No jargon: not one word they would have to look up, and never the name of a mechanism. If what is known above is too thin to be useful, say that instead of guessing.',
-  ].join('\n\n');
-}
 
 /* -------------------------------------------------------------------------- */
 /* The shelf                                                                   */

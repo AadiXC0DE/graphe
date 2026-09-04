@@ -13,15 +13,17 @@
   color: var(--text-muted);
 }
 
+/* No reading width here. What is on the right is a diff, and a diff is read
+   across as well as down: capping it left a third of a wide window empty while
+   the code wrapped. The list keeps its narrow column; everything else is the
+   change. */
 .reviewq__body {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: var(--space-5);
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-4);
   align-items: start;
-  max-width: 1400px;
   width: 100%;
-  margin: 0 auto;
-  padding: var(--space-4) var(--space-3);
+  padding: var(--space-4);
   overflow: auto;
 }
 

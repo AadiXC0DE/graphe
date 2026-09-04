@@ -47,7 +47,7 @@
  */
 
 import type { GuardContext, ToolCall, Verdict } from '../types';
-import { isAppAllowed, isExcelTarget } from '../../work/computeruse';
+import { isAppAllowed, isExcelTarget, siteReachable } from '../../work/computeruse';
 import type { PathCheck } from './paths';
 import {
   containsPath,
@@ -158,9 +158,17 @@ export type GuardFacts = GuardContext & {
     anyApp: boolean;
     browser: boolean;
     excel: boolean;
+    /** Whether work nobody is sitting in front of may work the computer. */
+    lockedUse: boolean;
     allowedApps: readonly string[];
     browserSites: readonly string[];
   };
+  /**
+   * Nobody is sitting in front of this one: a board piece, a scheduled piece,
+   * a helper. There is no one to answer a question, so working the computer
+   * here is the thing Locked use is the switch for.
+   */
+  unattended?: boolean;
 };
 
 /** Five files changed at once stops being an edit and starts being a sweep. */
@@ -283,13 +291,18 @@ const SAY = {
     'The browser is switched off in Settings, under Computer use, so I have left that page unopened.',
   computerSites:
     'This browser is held to a few named sites, and that address is not one of them, so I have left it unopened. Loosen the list in Settings, under Computer use, to reach anywhere.',
+  lockedOff:
+    'This is running in the background with nobody in front of it, and working the computer unattended is switched off. Turn Locked use on in Settings, under Computer use, or ask me again from a conversation.',
 } as const;
 
 /** Refused when Computer use names no enrolment at all: the legacy behaviour
- *  is to ask per press, so only an explicit off refuses. */
+ *  is to ask per press, so only an explicit off refuses. Background work needs
+ *  the second switch too — nobody is there to be asked. */
 function computerOff(ctx: GuardFacts): string | null {
   if (ctx.computerUse === undefined) return null;
-  return ctx.computerUse.anyApp === true ? null : SAY.computerOff;
+  if (ctx.computerUse.anyApp !== true) return SAY.computerOff;
+  if (ctx.unattended === true && ctx.computerUse.lockedUse !== true) return SAY.lockedOff;
+  return null;
 }
 
 /** Refused when the browser row is explicitly off. */
@@ -2053,18 +2066,16 @@ function judgeBrowserOpen(input: Record<string, unknown>, ctx: GuardFacts): Judg
   const url = readString(input, URL_KEYS) ?? readString(input, ['target']) ?? '';
   if (findSecret(url) !== null || findKnownSecret(url, ctx)) return deny(SAY.sendKeyOut);
   if (!onTheWeb(url)) return deny(SAY.notAWebAddress);
+  const where = siteOf(url);
   const use = ctx.computerUse;
   if (use !== undefined) {
     if (use.browser !== true) return deny(SAY.browserOff);
-    if (use.browserSites.length > 0) {
-      const host = siteOf(url);
-      const held =
-        host !== null &&
-        use.browserSites.some((one) => host === one || host.endsWith(`.${one}`));
-      if (!held) return deny(SAY.computerSites);
+    // Held to named sites, an address we cannot even name a host for is not
+    // one of them.
+    if (use.browserSites.length > 0 && (where === null || !siteReachable(where, use))) {
+      return deny(SAY.computerSites);
     }
   }
-  const where = siteOf(url);
   return ask(
     where === null ? 'Open a page in a browser?' : `Open ${where} in a browser?`,
     'I open it in a browser of my own and read what is on it.',
@@ -2442,19 +2453,17 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     if (off !== null) return deny(off);
     if (name === 'desktopopen') {
       const app = readString(input, ['app', 'name', 'program']) ?? 'a program';
+      // The Excel row is its own answer. An always-allowed app stills the
+      // ordinary question; it does not stand in for a row left off.
       if (
         ctx.computerUse !== undefined &&
         ctx.computerUse.excel !== true &&
         isExcelTarget(input)
       ) {
-        return allowedDesktop(
-          input,
-          ctx,
-          ask(
-            `Open ${app} on your computer?`,
-            'I read the workbook itself and press its named buttons, with no add-in to install.',
-            'To work in Excel, turn the Excel row on in Settings, under Computer use. It comes to the front, over whatever you are looking at now.',
-          ),
+        return ask(
+          `Open ${app} on your computer?`,
+          'I read the workbook itself and press its named buttons, with no add-in to install.',
+          'To work in Excel, turn the Excel row on in Settings, under Computer use. It comes to the front, over whatever you are looking at now.',
         );
       }
       return allowedDesktop(
@@ -2481,14 +2490,10 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
       ctx.computerUse.excel !== true &&
       isExcelTarget(input)
     ) {
-      return allowedDesktop(
-        input,
-        ctx,
-        ask(
-          'Work in Excel for you?',
-          'I read the workbook itself and press its named buttons, with no add-in to install.',
-          'To work in Excel, turn the Excel row on in Settings, under Computer use. This is your real file, so what changes is one version away.',
-        ),
+      return ask(
+        'Work in Excel for you?',
+        'I read the workbook itself and press its named buttons, with no add-in to install.',
+        'To work in Excel, turn the Excel row on in Settings, under Computer use. This is your real file, so what changes is one version away.',
       );
     }
     return allowedDesktop(
@@ -2704,6 +2709,7 @@ const NEVER_ON_ANY_RUNG: ReadonlySet<string> = new Set([
   SAY.computerOff,
   SAY.browserOff,
   SAY.computerSites,
+  SAY.lockedOff,
 ]);
 
 /**

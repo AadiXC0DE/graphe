@@ -1589,12 +1589,6 @@ let previewPlanMode = false;
       );
     },
 
-    explainPackage(): Promise<Result<string>> {
-      return Promise.resolve(
-        done('It lets Graphe read pages on the web while it works, so it can check something rather than guess at it.'),
-      );
-    },
-
     onShowProgress(listener: (progress: ShowProgress) => void): () => void {
       watching.add(listener);
       return () => {
@@ -1856,9 +1850,7 @@ let previewPlanMode = false;
     },
 
     computerStatus(): Promise<Result<ComputerStatus>> {
-      return Promise.resolve(
-        done({ excelInstalled: false, chromeInstalled: false }),
-      );
+      return Promise.resolve(done({ excelInstalled: false }));
     },
 
     openComputerSettings(): Promise<Result<null>> {
@@ -2471,7 +2463,6 @@ function connect(): Bridge {
     designCommit: (changes, where) => api.designCommit(changes, where),
     addPackage: (id) => api.addPackage(id),
     removePackage: (id) => api.removePackage(id),
-    explainPackage: (id, where) => api.explainPackage(id, where),
     onWindowState: (listener) => api.onWindowState(listener),
     onShowProgress: (listener) => api.onShowProgress(listener),
     onEvent: (listener) => api.onEvent(listener),

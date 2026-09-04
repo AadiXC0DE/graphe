@@ -574,7 +574,6 @@ export type Preferences = {
  *  macOS will not name without prompting reads as unknown rather than as on. */
 export type ComputerStatus = {
   excelInstalled: boolean;
-  chromeInstalled: boolean;
 };
 
 /** The preferences a row on Behaviour or Notifications writes by name. The
@@ -1537,7 +1536,6 @@ export const CHANNEL = {
   packages: 'graphe:packages',
   addPackage: 'graphe:add-package',
   removePackage: 'graphe:remove-package',
-  explainPackage: 'graphe:explain-package',
   visualChange: 'graphe:visual-change',
   visualFrames: 'graphe:visual-frames',
   connection: 'graphe:connection',
@@ -1954,8 +1952,6 @@ export type GrapheApi = {
   packages(term?: string): Promise<Result<readonly Pack[]>>;
   addPackage(id: string): Promise<Result<readonly Pack[]>>;
   removePackage(id: string): Promise<Result<readonly Pack[]>>;
-  /** Two plain sentences on what one does, written by the model. */
-  explainPackage(id: string, where?: Where): Promise<Result<string>>;
   /** Write every design change the window has been holding and save it as one
    *  version. `tokens` renames to real names with the value each is set to;
    *  `motions` are the shapes `src/motion/read.ts` hands out. Nothing is
@@ -2055,8 +2051,8 @@ export type GrapheApi = {
   /** Change one corner of Computer use. The whole object is set at once, so a
    *  half-written enrolment can never reach the disk. */
   setComputerUse(use: ComputerUse): Promise<Result<Preferences>>;
-  /** What this Mac can actually do for Computer use: Excel and Chrome found,
-   *  and the two system permissions as far as they can be read. */
+  /** What this Mac can actually do for Computer use: whether Excel is here to
+   *  be worked at all. */
   computerStatus(): Promise<Result<ComputerStatus>>;
   /** Open the system settings page behind one of the two permissions. */
   openComputerSettings(which: 'see' | 'point'): Promise<Result<null>>;

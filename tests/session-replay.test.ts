@@ -19,6 +19,8 @@ import {
   eventsFromEntries,
   momentsFromEntries,
 } from '../src/agent/pi/history';
+import { carryOnPrompt } from '../src/work/carryon';
+import { continuationWords } from '../src/work/continuation';
 import { applyEvent, type Turn } from '../src/lib/thread';
 
 /** Fold a saved conversation the way the window does when a project opens:
@@ -340,5 +342,55 @@ describe("S-03 the app's own words", () => {
 
   it('a sitting that ended in nothing but notes comes back as nothing', () => {
     expect(revived(settlingUp)).toEqual([]);
+  });
+
+  /* The rounds the app sends to keep a list, a goal or a board piece moving.
+     Each went out as an ordinary user message, so without this the loop comes
+     back reading as instructions somebody typed. */
+  const rounds = [
+    carryOnPrompt('Visual QA', 6, 7),
+    continuationWords.goalPrompt('ship the landing page', 'the page still 404s'),
+    continuationWords.boardPrompt([{ id: 'p1', title: 'Fix the header' }]),
+    continuationWords.recoveryPrompt,
+  ];
+
+  it('leaves the rounds it sent itself out of a reopened conversation', () => {
+    for (const round of rounds) {
+      expect(
+        eventsFromEntries([{ type: 'message', message: { role: 'user', content: round } }]),
+        round.slice(0, 40),
+      ).toEqual([]);
+    }
+  });
+
+  it('does not offer one of its own rounds as a moment to go back to', () => {
+    const entries = [
+      { type: 'message', id: 'm1', message: { role: 'user', content: 'Work the list.' } },
+      ...rounds.map((round, at) => ({
+        type: 'message',
+        id: `r${String(at)}`,
+        message: { role: 'user', content: round },
+      })),
+    ];
+    expect(momentsFromEntries(entries).map((one) => one.said)).toEqual(['Work the list.']);
+  });
+
+  it('still shows a person who happens to say the same opening words', () => {
+    const typed = 'Carry on with the checklist. I have to step out for ten minutes.';
+    expect(revived([{ type: 'message', message: { role: 'user', content: typed } }])).toMatchObject(
+      [{ kind: 'said', from: 'you', text: typed }],
+    );
+  });
+
+  it("leaves an add-on's own turn out, marked as it is by the shell", () => {
+    const entries = [
+      {
+        type: 'message',
+        id: 'x1',
+        message: { role: 'user', customType: 'watcher', content: 'The tests went red.' },
+      },
+    ];
+    expect(eventsFromEntries(entries)).toEqual([]);
+    expect(momentsFromEntries(entries)).toEqual([]);
   });
 });

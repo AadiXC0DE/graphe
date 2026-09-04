@@ -2,9 +2,16 @@
  *
  * The panel borrows the settings rows outright — same row, same text, same
  * note — so the screen reads as one place rather than two. What is its own is
- * the icon at the row's head, the Install press that enables rather than
- * flips, and the two editors (apps, sites) with their empty states.
+ * the icon at the row's head and the two editors (apps, sites) with their
+ * empty states.
  */
+
+.computer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  min-width: 0;
+}
 
 .computer__icon {
   flex: none;
@@ -71,6 +78,11 @@
 
 .computer__add .settings__field {
   flex: 1;
+}
+
+.computer__learn {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 .computer__perms {

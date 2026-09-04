@@ -17,9 +17,9 @@
  * - No silent persistent bypass. An always-allowed app skips the
  *   *question*, never a *refusal*: secrets, disk tools, elevation, and
  *   outside-project writes still deny on every rung.
- * - No auto-unlock. Locked use records consent for background work while the
- *   person steps away with the display on; Graphe never unlocks a Mac by
- *   itself and says so on the screen.
+ * - No auto-unlock. Locked use is the switch that lets background work — a
+ *   board piece, a scheduled one — work the computer at all; Graphe never
+ *   unlocks a Mac by itself and says so on the screen.
  * - Excel needs no add-in. Ranges are read from the file itself
  *   (`read_document`) and the app is driven with the same named presses as
  *   anything else, so there is nothing extra to install.
@@ -35,7 +35,9 @@ export type ComputerUse = {
   /** Let Graphe work in Microsoft Excel (and other spreadsheets) via named
    *  presses plus file reads. Mirrors the Excel add-in row, with no add-in. */
   excel: boolean;
-  /** Consent for background work while stepped away. Graphe still never
+  /** Whether work running in the background — a board piece, a scheduled
+   *  piece — may work the computer at all. Off, background work refuses and
+   *  the conversation in front of you is unaffected. Graphe still never
    *  unlocks a locked Mac; the screen says so. Mirrors Codex Locked use. */
   lockedUse: boolean;
   /** Apps that skip the per-turn question. Never passwords, never refusals.
@@ -47,7 +49,7 @@ export type ComputerUse = {
 };
 
 export const defaultComputerUse: ComputerUse = {
-  anyApp: false,
+  anyApp: true,
   browser: true,
   excel: false,
   lockedUse: false,
@@ -79,8 +81,9 @@ function cleanSite(raw: unknown): string | null {
   return site.slice(0, 120);
 }
 
-/** Read back defensively: a file edited by hand must not become a switch that
- *  turns itself on. Everything unreadable is off or empty. */
+/** Read back defensively. The two rows that were always on stay on unless the
+ *  file says otherwise; everything that grants something new — Excel, locked
+ *  use, the lists — is off or empty until it is written. */
 export function asComputerUse(raw: unknown): ComputerUse {
   if (typeof raw !== 'object' || raw === null) return { ...defaultComputerUse };
   const one = raw as Record<string, unknown>;
@@ -103,7 +106,7 @@ export function asComputerUse(raw: unknown): ComputerUse {
     }
   }
   return {
-    anyApp: one['anyApp'] === true,
+    anyApp: one['anyApp'] !== false,
     browser: one['browser'] !== false,
     excel: one['excel'] === true,
     lockedUse: one['lockedUse'] === true,
@@ -219,8 +222,13 @@ export const computerWords = {
   control: 'Control',
   lockedTitle: 'Locked use',
   lockedNote:
-    'Let Graphe keep working while you step away. It never unlocks your Mac by itself: a locked Mac still needs you.',
-  lockedLearn: 'Graphe works in the background where it can, pressing a named button without taking your mouse, and waits where it cannot. Nothing here installs an unlock plug-in, and locking the Mac pauses anything that needs the screen.',
+    'Let background work use your computer while you are elsewhere. It never unlocks your Mac by itself: a locked Mac still needs you.',
+  lockedLearn:
+    'Off, a board piece or a scheduled one refuses to touch your other apps and says so; the conversation in front of you is unaffected. Nothing here installs an unlock plug-in, and locking the Mac pauses anything that needs the screen.',
+  permsNote: 'macOS asks for two permissions of its own before any of this works.',
+  permsSee: 'Screen Recording',
+  permsPoint: 'Accessibility',
+  lockedMore: 'Learn more',
   alwaysTitle: 'Always-allowed apps',
   alwaysEmpty: 'None yet',
   alwaysNote:
@@ -233,12 +241,9 @@ export const computerWords = {
   anyAppOff: 'To work the computer, turn Any App on first.',
   browserName: 'Browser',
   browserNote: 'Let Graphe use its built-in browser for additional control',
-  browserManage: 'Manage',
   excelName: 'Microsoft Excel',
   excelNote: 'Let Graphe work in Excel, with no add-in to install',
   excelOff: 'To work in Excel, turn the Excel row on first.',
-  install: 'Install',
-  enable: 'Enable',
   remove: 'Remove',
   add: 'Add',
   appHint: 'App name, as it appears on this Mac',

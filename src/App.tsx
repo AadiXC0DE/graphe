@@ -158,7 +158,6 @@ import {
   type StorageNow,
   type ThinkingLevel,
   type Trouble,
-  type VisualChange,
   type Where,
   type HowItLands,
   type ReviewDecided,
@@ -227,7 +226,6 @@ const DesignView = lazy(() => import("./components/DesignView"));
 const CanvasView = lazy(() => import("./components/CanvasView"));
 const HistoryView = lazy(() => import("./components/HistoryView"));
 const AddMore = lazy(() => import("./components/AddMore"));
-const VisualDiff = lazy(() => import("./components/VisualDiff"));
 const Gallery = lazy(() => import("./gallery/Gallery"));
 const ConnectModal = lazy(() => import("./components/ConnectModal"));
 const HelpersView = lazy(() => import("./components/HelpersView"));
@@ -446,44 +444,6 @@ function pictureBytes(file: File): Promise<string | null> {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Where a before-and-after sits in the conversation                           */
-/* -------------------------------------------------------------------------- */
-
-/** One before-and-after, and the turn it arrived after. Null when it arrived
- *  before anything had been said, which only happens on a first launch. */
-type Pinned = { change: VisualChange; after: string | null };
-
-/**
- * Sort the pictures into the turns they belong under.
- *
- * A pin whose turn is no longer in the conversation — dismissed, or from a
- * thread that has been cleared — is not thrown away; it goes to the end, where
- * it is still true and still about the last thing that happened. Dropping it
- * instead would mean an error card being dismissed silently taking a picture of
- * somebody's page with it.
- */
-function sortPictures(
-  pictures: readonly Pinned[],
-  turns: readonly Turn[],
-): { under: Map<string, Pinned[]>; last: Pinned[] } {
-  const known = new Set(turns.map((turn) => turn.id));
-  const under = new Map<string, Pinned[]>();
-  const last: Pinned[] = [];
-
-  for (const picture of pictures) {
-    if (picture.after === null || !known.has(picture.after)) {
-      last.push(picture);
-      continue;
-    }
-    const already = under.get(picture.after);
-    if (already === undefined) under.set(picture.after, [picture]);
-    else already.push(picture);
-  }
-
-  return { under, last };
-}
-
-/* -------------------------------------------------------------------------- */
 /* Design edits held in the window                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -629,8 +589,6 @@ function Conversation() {
    *  when the screen opens: it changes only when a session is built. */
   const [carried, setCarried] = useState<readonly CarriedExtension[]>([]);
   const [packBusy, setPackBusy] = useState<string | null>(null);
-  const [explaining, setExplaining] = useState<string | null>(null);
-  const [explanations, setExplanations] = useState<Readonly<Record<string, string>>>({});
   /** Whether a message gets a looking-around pass before anything is touched.
    *  `auto` decides from the sentence, which is what almost everybody wants;
    *  the other two are for somebody who has an opinion about this one. */
@@ -883,7 +841,6 @@ function Conversation() {
    * the change it describes rather than at the bottom of whatever is happening
    * now.
    */
-  const [changes, setChanges] = useState<Record<string, readonly Pinned[]>>({});
   /** What each version looked like, per project. Asked for whenever the
    *  timeline is, and never per row: the rail draws a card for every moment of
    *  the afternoon and reading a picture inside one would be a disk on hover. */
@@ -2141,14 +2098,6 @@ function Conversation() {
   const forget = useCallback(async (project: { path: string }) => {
     setPickerTrouble(null);
     setDesks((current) => closeDesk(current, project.path));
-    // The pictures go with the desk. A project taken off the list must not
-    // leave screenshots of itself in the window's memory.
-    setChanges((current) => {
-      if (current[project.path] === undefined) return current;
-      const next = { ...current };
-      delete next[project.path];
-      return next;
-    });
     setFiles((current) => {
       if (current[project.path] === undefined) return current;
       const next = { ...current };
@@ -2821,24 +2770,6 @@ function Conversation() {
         if (notice.id === 'new-conversation') void swapConversation(null);
       }),
     [browse, swapConversation],
-  );
-
-  /* A before and after has been worked out. Pinned to whatever the conversation
-     had last said for that project at the moment it arrived — see `Pinned`. */
-  useEffect(
-    () =>
-      bridge.onVisualChange(({ project, change }) => {
-        if (project === null) return;
-        const turns = desksNow.current.byPath[project]?.turns ?? [];
-        const after = turns[turns.length - 1]?.id ?? null;
-        setChanges((current) => {
-          const already = current[project] ?? [];
-          if (already.some((one) => one.change.id === change.id))
-            return current;
-          return { ...current, [project]: [...already, { change, after }] };
-        });
-      }),
-    [],
   );
 
   /* A dropdown closes when you look away from it. Pointer down rather than
@@ -5374,11 +5305,6 @@ function Conversation() {
   // The first screen is a single centred conversation. Nothing else.
   // Regions appear the first time they have something to say — see
   // notes/strategy/UI-DESIGN.md.
-  const pictures = sortPictures(
-    openProject === null ? [] : (changes[openProject] ?? []),
-    desk?.turns ?? [],
-  );
-
   const picking = desk === null && !openingOnLaunch && recent !== null && recent.length > 0;
   /** Nothing has been opened and the list of what was open last time has not
    *  come back yet, so which of the two first screens is right is not known.
@@ -6139,7 +6065,7 @@ function Conversation() {
               // folded into a collapsed run is a picture nobody sees. So does
               // the advisor — nobody asked for a second model, so the line is
               // the only evidence it happened, and a fold hides it.
-              const showing = new Set(pictures.under.keys());
+              const showing = new Set<string>();
               for (const turn of paged.turns) {
                 if (turn.kind !== 'did') continue;
                 if (turn.shown !== undefined || isAdvisor(turn.label)) showing.add(turn.id);
@@ -6182,16 +6108,10 @@ function Conversation() {
                     showMe={preferences.showMe}
                     isLast={idx === lastIdx}
                   />
-                  {(pictures.under.get(row.turn.id) ?? []).map((one) => (
-                    <Picture key={one.change.id} change={one.change} />
-                  ))}
                 </div>
               ),
             )]; })()}
               {frontBusy && !runningNow ? <WorkingMark /> : null}
-              {pictures.last.map((one) => (
-                <Picture key={one.change.id} change={one.change} />
-              ))}
               {/* The run sits at the end of the conversation, next to the box,
                   because it is the newest thing anybody has to say about the
                   page and the next message is usually about it. */}
@@ -6793,8 +6713,6 @@ function Conversation() {
           )}
           busy={packBusy}
           warning={SOMEBODY_ELSES}
-          explaining={explaining}
-          explanations={explanations}
           capabilities={addonSays}
           addonProcesses={addonsRunning}
           onClose={() => setAddMore(false)}
@@ -6853,15 +6771,6 @@ function Conversation() {
           }}
           carried={carried}
           onTrustCarried={trustCarried}
-          onExplain={(id) => {
-            setExplaining(id);
-            void bridge
-              .explainPackage(id)
-              .then((answer) => {
-                if (answer.ok) setExplanations((was) => ({ ...was, [id]: answer.value }));
-              })
-              .finally(() => setExplaining(null));
-          }}
         />
       </Suspense>
 
@@ -6887,36 +6796,6 @@ function Conversation() {
 
       {covering ? COVER : null}
     </main>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* One before-and-after, drawn                                                 */
-/* -------------------------------------------------------------------------- */
-
-/** The strip in the conversation. The full-size pair is asked for the moment
- *  somebody opens it and never before — see `VisualChange` in src/lib/ipc.ts. */
-function Picture({ change }: { change: VisualChange }) {
-  return (
-    <Suspense fallback={null}>
-      <VisualDiff
-        headline={change.headline}
-        inDesignWords={change.inDesignWords}
-        where={change.where}
-        areas={change.areas}
-        beforeThumb={change.beforeThumb}
-        afterThumb={change.afterThumb}
-        width={change.width}
-        height={change.height}
-        onOpen={async () => {
-          const answer = await bridge.visualFrames(change.id);
-          // A pair we no longer have is not worth a card. The small pictures are
-          // already on screen and stay there, which is a slightly soft comparison
-          // rather than none at all.
-          return answer.ok ? answer.value : null;
-        }}
-      />
-    </Suspense>
   );
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Always from './Always';
 import AppearanceBand from './AppearanceBand';
+import ComputerUse from './ComputerUse';
 import Switch from './Switch';
 import { saysBytes } from '../work/bytes';
 import ColourPicker from './ColourPicker';
@@ -14,11 +15,13 @@ import type {
   AddonHere,
   AlwaysDoes,
   AlwaysRow,
+  ComputerStatus,
   ConnectionState,
   ModelChoice,
   StorageNow,
   ThinkingLevel,
 } from '../lib/ipc';
+import { defaultComputerUse, type ComputerUse as ComputerUsePrefs } from '../work/computeruse';
 import { chordOf, saysChord } from '../lib/keys';
 import { THEME_WORDS, showing, type Theme } from '../lib/theme';
 import { TELLINGS, type Telling } from '../work/notify';
@@ -164,6 +167,15 @@ type Props = {
   ) => void;
   onTelling?: (which: 'whenRunFinishes' | 'whenSomethingNeedsYou', told: Telling) => void;
 
+  /* -------------------------------------------------------------- computer */
+  /** How Graphe may work the programs on this computer. */
+  computerUse?: ComputerUsePrefs;
+  onComputerUse?: (next: ComputerUsePrefs) => void;
+  /** What this Mac reports about Computer use, or null before it is asked. */
+  computerStatus?: ComputerStatus | null;
+  onRefreshComputerStatus?: () => void;
+  onOpenComputerSettings?: (which: 'see' | 'point') => void;
+
   /* -------------------------------------------------------------- add-ons */
   /** How much of an add-on that starts turns of its own runs here. */
   addons?: Policy;
@@ -298,6 +310,11 @@ export default function Settings({
   onAdvisorThinking,
   advisorGates,
   onAdvisorGate,
+  computerUse = defaultComputerUse,
+  onComputerUse,
+  computerStatus = null,
+  onRefreshComputerStatus,
+  onOpenComputerSettings,
   addons,
   onAddons,
   addonsHere = [],
@@ -887,6 +904,102 @@ export default function Settings({
           </li>
         );
 
+      case 'computer-any-app':
+        return (
+          <li key={row.id} className={at}>
+            {flip(
+              row,
+              computerUse.anyApp,
+              () => onComputerUse?.({ ...computerUse, anyApp: !computerUse.anyApp }),
+              onComputerUse === undefined,
+            )}
+          </li>
+        );
+
+      case 'computer-browser':
+        return (
+          <li key={row.id} className={at}>
+            {flip(
+              row,
+              computerUse.browser,
+              () => onComputerUse?.({ ...computerUse, browser: !computerUse.browser }),
+              onComputerUse === undefined,
+            )}
+          </li>
+        );
+
+      case 'computer-excel':
+        return (
+          <li key={row.id} className={at}>
+            {flip(
+              row,
+              computerUse.excel,
+              () => onComputerUse?.({ ...computerUse, excel: !computerUse.excel }),
+              onComputerUse === undefined,
+            )}
+          </li>
+        );
+
+      case 'computer-locked':
+        return (
+          <li key={row.id} className={at}>
+            {flip(
+              row,
+              computerUse.lockedUse,
+              () => onComputerUse?.({ ...computerUse, lockedUse: !computerUse.lockedUse }),
+              onComputerUse === undefined,
+            )}
+          </li>
+        );
+
+      case 'computer-allowed':
+        return (
+          <li key={row.id} className={at}>
+            <button
+              type="button"
+              className="settings__row"
+              onClick={() => {
+                setQuery('');
+                setPage('computer');
+              }}
+            >
+              {words(row)}
+              <span className="settings__meta">
+                {computerUse.allowedApps.length === 0
+                  ? 'None yet'
+                  : `${String(computerUse.allowedApps.length)} of them`}
+              </span>
+              <span className="settings__chev" aria-hidden="true">
+                ›
+              </span>
+            </button>
+          </li>
+        );
+
+      case 'computer-sites':
+        return (
+          <li key={row.id} className={at}>
+            <button
+              type="button"
+              className="settings__row"
+              onClick={() => {
+                setQuery('');
+                setPage('computer');
+              }}
+            >
+              {words(row)}
+              <span className="settings__meta">
+                {computerUse.browserSites.length === 0
+                  ? 'The open web'
+                  : `${String(computerUse.browserSites.length)} held`}
+              </span>
+              <span className="settings__chev" aria-hidden="true">
+                ›
+              </span>
+            </button>
+          </li>
+        );
+
       case 'addons':
         return (
           <li key={row.id} className={`settings__block${at}`}>
@@ -1071,7 +1184,16 @@ export default function Settings({
               {found === null ? pageWords[page].note : ''}
             </p>
 
-            {found !== null && found.length === 0 ? (
+            {/* The panel draws its own cards, so it is not put inside one. */}
+            {found === null && page === 'computer' ? (
+              <ComputerUse
+                use={computerUse}
+                onChange={(next) => onComputerUse?.(next)}
+                status={computerStatus}
+                onRefreshStatus={onRefreshComputerStatus}
+                onOpenSettings={onOpenComputerSettings}
+              />
+            ) : found !== null && found.length === 0 ? (
               <p className="settings__empty">{settingsWords.nothing}</p>
             ) : (
               runs(shown).map((run) => (

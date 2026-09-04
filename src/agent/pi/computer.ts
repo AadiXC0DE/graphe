@@ -441,9 +441,19 @@ export function browserTools(
   projectRoot?: string,
   host?: BrowserHost,
   keeps?: () => string | null,
+  sites?: () => readonly string[],
 ): ToolDefinition[] {
   const run = host ?? defaultHost(projectRoot ?? tmpdir());
-  const setup = (): Setup => setupFrom(process.env, projectRoot, keeps?.() ?? null);
+  const setup = (): Setup => {
+    const base = setupFrom(process.env, projectRoot, keeps?.() ?? null);
+    // Settings wins over the environment where it names anything. Where it
+    // names nothing the environment stands: an empty list is "no list", and
+    // reading it as "the open web" would quietly undo a hold set outside.
+    const held = [
+      ...new Set((sites?.() ?? []).map((one) => one.trim().toLowerCase()).filter((one) => one !== '')),
+    ];
+    return held.length === 0 ? base : { ...base, hosts: held };
+  };
 
   /** Where the program is, worked out once. Null once we know there is none. */
   let way: Promise<Way | null> | null = null;

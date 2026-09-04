@@ -4,7 +4,6 @@ import type { CarriedExtension } from '../lib/ipc';
 import Switch from './Switch';
 import {
   REACHABLE,
-  describeStart,
   readReach,
   reachesMatching,
   type Reach,
@@ -41,8 +40,6 @@ export const SAYS = {
   remove: 'Remove',
   removing: 'Taking it off…',
   added: 'Added',
-  explain: 'What does this do?',
-  explainWait: 'Reading it…',
   noMatches: 'Nothing here matches that. Try a shorter word.',
   emptyCatalogue: 'There is nothing to show yet. Search above and whatever turns up will appear here.',
   nothingElse: 'Nothing from anybody else right now.',
@@ -62,7 +59,6 @@ export const SAYS = {
   reachNote:
     'Let me look at the places your work already lives, so I build from the real thing.',
   noReaches: 'None of these matches that.',
-  exact: 'Show me how it starts',
   byHand: 'Add one of your own',
   handName: 'Name',
   handWhat: 'What it lets you do',
@@ -83,13 +79,10 @@ type Props = {
   vouchedFor: Readonly<Record<string, string>>;
   busy: string | null;
   warning: string;
-  explaining: string | null;
-  explanations: Readonly<Record<string, string>>;
   onClose: () => void;
   onSearch: (term: string) => void;
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
-  onExplain: (id: string) => void;
   /**
    * What each installed add-on will actually do, by add-on id.
    *
@@ -133,9 +126,7 @@ const SETTLE = 250;
  * The screen where somebody adds more to Graphe.
  *
  * The ones we vouch for are first and say plainly what they let you do; the
- * rest are somebody else's work and are labelled as that. Every row carries a
- * "what does this do?" so nobody has to go and find a readme to answer the only
- * question they have.
+ * rest are somebody else's work and are labelled as that.
  */
 export default function AddMore({
   open,
@@ -143,13 +134,10 @@ export default function AddMore({
   vouchedFor,
   busy,
   warning,
-  explaining,
-  explanations,
   onClose,
   onSearch,
   onAdd,
   onRemove,
-  onExplain,
   capabilities = {},
   addonProcesses = null,
   reaches = REACHABLE,
@@ -353,11 +341,8 @@ export default function AddMore({
                       pack={pack}
                       sentence={vouchedFor[pack.id] ?? pack.summary}
                       busy={busy}
-                      explaining={explaining}
-                      explanation={explanations[pack.id]}
                       onAdd={onAdd}
                       onRemove={onRemove}
-                      onExplain={onExplain}
                       {...(capabilities[pack.id] === undefined
                         ? {}
                         : { capability: capabilities[pack.id] })}
@@ -391,11 +376,8 @@ export default function AddMore({
                       pack={pack}
                       sentence={vouchedFor[pack.id] ?? pack.summary}
                       busy={busy}
-                      explaining={explaining}
-                      explanation={explanations[pack.id]}
                       onAdd={onAdd}
                       onRemove={onRemove}
-                      onExplain={onExplain}
                       {...(capabilities[pack.id] === undefined
                         ? {}
                         : { capability: capabilities[pack.id] })}
@@ -421,25 +403,18 @@ function Row({
   pack,
   sentence,
   busy,
-  explaining,
-  explanation,
   onAdd,
   onRemove,
-  onExplain,
   capability,
 }: {
   pack: Pack;
   sentence: string;
   busy: string | null;
-  explaining: string | null;
-  explanation: string | undefined;
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
-  onExplain: (id: string) => void;
   capability?: string;
 }) {
   const working = busy === pack.id;
-  const waiting = explaining === pack.id && explanation === undefined;
 
   return (
     <div className="addmore__row">
@@ -477,29 +452,11 @@ function Row({
       {capability === undefined ? null : (
         <span className="addmore__does">{capability}</span>
       )}
-
-      {/* The answer to the only question most people have, without leaving the
-          screen to find a readme. */}
-      {explanation === undefined ? (
-        waiting ? (
-          <span className="addmore__waiting">
-            <span className="addmore__spin" aria-hidden="true" />
-            <span>{SAYS.explainWait}</span>
-          </span>
-        ) : (
-          <button type="button" className="addmore__explain" onClick={() => onExplain(pack.id)}>
-            {SAYS.explain}
-          </button>
-        )
-      ) : (
-        <p className="addmore__explanation">{explanation}</p>
-      )}
     </div>
   );
 }
 
-/** One place Graphe can reach: what it lets you do, one press, and the exact
- *  thing that starts it one click under that. */
+/** One place Graphe can reach: what it lets you do, and one press. */
 function ReachRow({
   reach,
   busy,
@@ -540,19 +497,6 @@ function ReachRow({
         {reach.needs === null ? null : <span className="addmore__needs">{reach.needs}</span>}
         {reach.added ? <span className="addmore__on">{SAYS.added}</span> : null}
       </div>
-
-      {/* The technical truth, one click away and never in the way. */}
-      <details className="addmore__exact">
-        <summary className="addmore__exactsummary">{SAYS.exact}</summary>
-        <dl className="addmore__exactlist">
-          {describeStart(reach.start).map((line) => (
-            <div className="addmore__exactrow" key={line.label}>
-              <dt className="addmore__exactlabel">{line.label}</dt>
-              <dd className="addmore__exactvalue">{line.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </details>
     </div>
   );
 }

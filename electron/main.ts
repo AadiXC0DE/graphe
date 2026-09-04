@@ -100,6 +100,8 @@ import {
   rowsFrom,
 } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
+import type { GuardFacts } from '../src/agent/guard/policy';
+import { asComputerUse, type ComputerUse } from '../src/work/computeruse';
 import {
   CHANNEL,
   type Away,
@@ -111,6 +113,7 @@ import {
   type AwayPiece,
   type EveryKind,
   type Repeating,
+  type ComputerStatus,
   type ConnectOutcome,
   type ConnectStep,
   type ConnectionState,
@@ -192,7 +195,7 @@ import { Recents } from '../src/projects/recents';
 import { addressed, Workspaces, type Workspace } from '../src/projects/workspaces';
 import { chosenFrom, findEditors, findTerminals, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
-import { WARNING, askAbout, packageShelf, type Pack } from '../src/agent/pi/packages';
+import { packageShelf, type Pack } from '../src/agent/pi/packages';
 import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShippedWith } from '../src/agent/pi/skills';
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor, workflowWords } from '../src/work/workflows';
@@ -2015,6 +2018,35 @@ function preferences(): Promise<PreferenceFile> {
   return preferencesPromise;
 }
 
+type ComputerUseFacts = NonNullable<GuardFacts['computerUse']>;
+
+/** The enrolment as the Guard reads it: plain values, copied out of prefs so
+ *  nothing later can rewrite what a sitting was judged against. */
+async function computerUseFacts(): Promise<ComputerUseFacts> {
+  return factsFrom((await preferences()).all().computerUse);
+}
+
+function factsFrom(use: ComputerUse): ComputerUseFacts {
+  return {
+    anyApp: use.anyApp,
+    browser: use.browser,
+    excel: use.excel,
+    lockedUse: use.lockedUse,
+    allowedApps: [...use.allowedApps],
+    browserSites: [...use.browserSites],
+  };
+}
+
+/** Hand new enrolment to every live conversation, so the switch takes effect
+ *  on the next tool call and not on the next session. */
+function syncComputerUse(use: ComputerUseFacts): void {
+  for (const one of workspaces.open) {
+    for (const session of one.held.sessions.open) {
+      session.held.setComputerUse(use);
+    }
+  }
+}
+
 let editorsPromise: Promise<readonly Editor[]> | null = null;
 let terminalsPromise: Promise<readonly Editor[]> | null = null;
 
@@ -3255,6 +3287,8 @@ async function checkItFirst(
   try {
     inside = await createSession({
       projectRoot: waiting.folder,
+      guard: { computerUse: await computerUseFacts() },
+      browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
       // A copy checking one message is not a conversation, so an add-on that
       // starts turns of its own has no business in it.
       sessionKind: 'helper',
@@ -4571,6 +4605,7 @@ async function startConversationUnlocked(
   try {
     session = await createSession({
       projectRoot: checkout?.folder ?? open.path,
+      guard: { computerUse: await computerUseFacts() },
       onEvent: forwardTo(open.path, held, from),
       // Restore points must describe the tree this session is actually changing.
       timeline:
@@ -4625,6 +4660,7 @@ async function startConversationUnlocked(
       // not to the end of every round of a loop working a list down.
       jobAtRest: () => continuations.resting(open.path, from.address ?? ''),
       keepsBrowserLogins: () => keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path),
+      browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
       planMode: held.planMode,
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
@@ -6351,6 +6387,8 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
   try {
     session = await createSession({
       projectRoot: folder,
+      guard: { computerUse: await computerUseFacts() },
+      browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
       // A piece on the board is not a conversation. Four of them each loading
       // an add-on that starts turns of its own is four loops nobody asked for.
       sessionKind: 'board',
@@ -8059,6 +8097,35 @@ function register(): void {
     return done(await (await preferences()).change({ keptLogins: { ...kept, [open.path]: on } }));
   });
 
+  handle<Preferences>(CHANNEL.setComputerUse, async (_event, args) => {
+    const [raw] = args;
+    // Read back defensively: a renderer putting nonsense here must not become
+    // a switch that turns itself on.
+    const use = asComputerUse(raw);
+    const changed = await (await preferences()).change({ computerUse: use });
+    syncComputerUse(factsFrom(use));
+    return done(changed);
+  });
+
+  handle<ComputerStatus>(CHANNEL.computerStatus, async () => {
+    const excel = await stat('/Applications/Microsoft Excel.app')
+      .then((found) => found.isDirectory())
+      .catch(() => false);
+    return done({ excelInstalled: excel });
+  });
+
+  handle<null>(CHANNEL.openComputerSettings, async (_event, args) => {
+    const [which] = args;
+    const page =
+      which === 'point'
+        ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+        : 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
+    // The settings pages, by the names the computer knows them under — the
+    // same pages the desktop tools open when a permission is missing.
+    await shell.openExternal(page).catch(() => undefined);
+    return done(null);
+  });
+
   handle<Preferences>(CHANNEL.setTheme, async (_event, args) => {
     const [theme] = args;
     const base = themeFrom(theme);
@@ -8998,25 +9065,6 @@ function register(): void {
     return done(await shelved.mine());
   });
 
-  handle<string>(CHANNEL.explainPackage, async (_event, args) => {
-    const [id] = args;
-    if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
-    const where = whereIn(args);
-    const open = projectAt(where);
-    const agent = open === null ? null : sessionAt(open, where);
-    if (agent === null) {
-      return done(
-        'Open a project first and I will read this one and tell you what it does.',
-      );
-    }
-    const found = (await (await theShelf()).mine()).find((one) => one.id === id) ?? null;
-    if (found === null) return done(WARNING);
-    // Asked and answered inside the conversation, because that is where the
-    // model already is. The window shows it beside the row it asked about.
-    await agent.prompt(askAbout(found));
-    return done('Asked. The answer is in the conversation.');
-  });
-
   handle<readonly Conversation[]>(CHANNEL.conversations, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) return done([]);
@@ -9926,6 +9974,8 @@ function register(): void {
     try {
       session = await createSession({
         projectRoot: folder,
+        guard: { computerUse: await computerUseFacts() },
+        browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
         onEvent: forwardTo(open.path, open.held, from),
         timeline: await Timeline.open(folder),
         model: prefs.model,

@@ -24,7 +24,7 @@ import {
 } from '../src/work/settingspages';
 
 describe('the pages', () => {
-  it('are the nine the app is split into', () => {
+  it('are the ten the app is split into', () => {
     expect(PAGES).toEqual([
       'appearance',
       'behaviour',
@@ -33,6 +33,7 @@ describe('the pages', () => {
       'models',
       'add-ons',
       'storage',
+      'computer',
       'privacy',
       'advanced',
     ]);
@@ -89,9 +90,31 @@ describe('the rows', () => {
       'connected',
       'add-more',
       'usage',
+      'computer-any-app',
+      'computer-browser',
+      'computer-excel',
+      'computer-locked',
+      'computer-allowed',
+      'computer-sites',
     ]) {
       expect(rowAt(id), id).not.toBeNull();
     }
+  });
+
+  it('files computer use on its own page, found by the words people use', () => {
+    for (const id of [
+      'computer-any-app',
+      'computer-browser',
+      'computer-excel',
+      'computer-locked',
+      'computer-allowed',
+      'computer-sites',
+    ]) {
+      expect(rowAt(id)?.page, id).toBe('computer');
+    }
+    expect(search('excel')[0]?.id).toBe('computer-excel');
+    expect(pageFor('excel')).toBe('computer');
+    expect(search('allowlist')[0]?.page).toBe('computer');
   });
 
   /* There is no such file. Nothing in the app or in the agent it embeds reads

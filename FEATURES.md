@@ -131,6 +131,9 @@ Whatever is answering does the work; a stronger one is asked before a plan, afte
 **41 · Goal mode**
 One sentence that says what done means, and it keeps going: full access while the goal stands, a check after every round for whether the objective has been met, and the next round started on its own if not. Twenty rounds and it stops and says so, so "carries on by itself" does not mean "for ever".
 
+**42 · Computer use, with its own settings screen**
+How Graphe uses the other applications on your computer, in one place: Any App to switch desktop control off altogether, the built-in browser with the list of sites it may reach, Excel with no add-in to install, Locked use for whether background work may touch your apps while you are elsewhere, and the always-allowed apps that skip the per-turn question. Passwords, keys, and anything the Guard refuses still refuse, listed or not.
+
 ---
 
 ## Under the hood

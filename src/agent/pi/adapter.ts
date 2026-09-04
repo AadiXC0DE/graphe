@@ -736,6 +736,9 @@ export type CreateSessionOptions = {
   /** Whether this project's browser keeps what it is signed in to between
    *  sittings. Asked each time, so turning it off takes effect at once. */
   keepsBrowserLogins?: () => boolean;
+  /** Sites the driven browser may reach at all. Asked each time, so the list
+   *  in Settings takes effect at once. Left out, the environment decides. */
+  browserSites?: () => readonly string[];
   /** A few sentences of fact about this folder, appended to the system prompt.
    *  For things the folder itself cannot say — that it holds several projects
    *  and git belongs inside each one, say. Facts only; never instructions
@@ -920,6 +923,9 @@ export type GrapheSession = {
   /** How far it may go on its own, for as long as this session lives. A
    *  ceiling on questions, never on what is refused. */
   goAsFarAs(howFar: HowFar): void;
+  /** Computer-use enrolment for the rest of this session. Takes effect on the
+   *  next tool call, not the next session. */
+  setComputerUse(use: NonNullable<GuardFacts['computerUse']>): void;
   /** Plan Mode — persistent read-only until explicit Exit / Do it. */
   setPlanMode(on: boolean): void;
   /** Where the ladder is set right now. */
@@ -1705,6 +1711,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     ...options.guard,
     projectRoot: options.projectRoot,
     agentFolder: agentDir,
+    // A board piece, a helper and a canvas run have nobody in front of them, so
+    // there is nobody to answer a question about working the computer.
+    unattended:
+      options.unattended === true ||
+      (options.sessionKind !== undefined && options.sessionKind !== 'conversation'),
   };
 
   /**
@@ -2445,6 +2456,7 @@ const MOST_AFTER_SAYINGS = 3;
         options.cancelBuild,
         options.makeChecklist,
         options.keepsBrowserLogins,
+        options.browserSites,
       );
 
   /* The anchored edit and its read: the model reads a file, the read's reply
@@ -3192,6 +3204,17 @@ const MOST_AFTER_SAYINGS = 3;
 
     goAsFarAs(howFar: HowFar): void {
       facts.howFar = howFar;
+    },
+
+    /* Mutated rather than rebuilt: the interceptor reads these facts on every
+       call, so the switch takes effect on the next tool call and not on the
+       next session. */
+    setComputerUse(use: NonNullable<GuardFacts['computerUse']>): void {
+      facts.computerUse = {
+        ...use,
+        allowedApps: [...use.allowedApps],
+        browserSites: [...use.browserSites],
+      };
     },
 
     setPlanMode(on: boolean): void {

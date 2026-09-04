@@ -2304,13 +2304,10 @@ vite v6.0.5 building for production...
         vouchedFor={VOUCHED_FOR}
         busy={null}
         warning="Made by people we do not know. Ask what one does before you add it."
-        explaining={null}
-        explanations={{}}
         onClose={() => setAddMoreOpen(false)}
         onSearch={noop}
         onAdd={noop}
         onRemove={noop}
-        onExplain={noop}
         carried={carried}
         onTrustCarried={(id, trust) =>
           setCarried((was) => was.map((one) => (one.id === id ? { ...one, trusted: trust } : one)))

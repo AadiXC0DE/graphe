@@ -2650,6 +2650,9 @@ export const grapheTools = (
   /** Whether this project's browser keeps what it is signed in to. Asked each
    *  time rather than read once, so turning it off takes effect at once. */
   keepsBrowserLogins?: () => boolean,
+  /** Sites the driven browser may reach at all. Asked each time, so the list
+   *  in Settings takes effect at once. Left out, the environment decides. */
+  browserSites?: () => readonly string[],
 ): ToolDefinition[] => {
   const tools: ToolDefinition[] = [
     websearchTool,
@@ -2661,8 +2664,11 @@ export const grapheTools = (
     // and hides it behind a plugin; this one is simply there, and the program
     // behind it is fetched the first time somebody asks for a page rather than
     // being homework they have to do before the feature exists.
-    ...browserTools(projectRoot, undefined, () =>
-      keepsBrowserLogins?.() === true ? browserFolder(agentDir, projectRoot) : null,
+    ...browserTools(
+      projectRoot,
+      undefined,
+      () => (keepsBrowserLogins?.() === true ? browserFolder(agentDir, projectRoot) : null),
+      browserSites,
     ),
   ];
   // Only where there is a screen we know how to read. Everywhere else these are

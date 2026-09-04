@@ -10,9 +10,11 @@
  * and a compaction, which Pi hoists above the messages it summarised.
  *
  * Graphe's own words are taken back off the messages it sent on somebody's
- * behalf. They went out as ordinary user messages and are on disk as such, so
- * without this a reopened conversation shows the app talking to itself as
- * though a person had typed it.
+ * behalf — the end-of-sitting prompt, the notes it pins above a first question,
+ * and every round it sends to carry a checklist or a goal on. They went out as
+ * ordinary user messages and are on disk as such, so without this a reopened
+ * conversation shows the app talking to itself as though a person had typed it.
+ * An add-on's turn is marked by Pi itself and is left out the same way.
  *
  * Known loss: a call the Guard blocked was written down as an ordinary failed
  * result, so it comes back as a step that failed rather than one somebody said
@@ -20,6 +22,7 @@
  */
 
 import type { AgentEvent, ToolCall } from '../types';
+import { sentOnTheirBehalf } from '../../work/continuation';
 
 type Fields = Readonly<Record<string, unknown>>;
 
@@ -73,13 +76,16 @@ export const NOTES_CARRIED = 'A few notes I keep about this project, most releva
 /**
  * What the person actually typed, out of the message that was sent for them.
  *
- * Two things are Graphe's: the whole end-of-sitting prompt, which nobody wrote
- * and nobody read the reply to, and the notes pinned above the first question,
- * which are the app remembering rather than the person speaking.
+ * Three things are Graphe's: the whole end-of-sitting prompt, which nobody
+ * wrote and nobody read the reply to; the notes pinned above the first
+ * question, which are the app remembering rather than the person speaking; and
+ * the rounds the app sends to carry a checklist, a goal or a board piece on,
+ * which are the loop talking to itself.
  */
 function whatTheyTyped(text: string): string | null {
   const said = text.trim();
   if (said === '' || said === WORTH_KEEPING) return null;
+  if (sentOnTheirBehalf(said)) return null;
   if (!said.startsWith(NOTES_CARRIED)) return said;
   const after = said.indexOf('\n\n');
   const typed = after === -1 ? '' : said.slice(after + 2).trim();
@@ -148,6 +154,7 @@ function eventsOf(entry: unknown): AgentEvent[] {
     if (message === null) return [];
     const role = textAt(message, 'role');
     if (role === 'user') {
+      if (textAt(message, 'customType') !== null) return [];
       const words = userWords(message);
       return words === null ? [] : [{ type: 'user-said', text: words }];
     }
@@ -208,6 +215,7 @@ export function momentsFromEntries(
     const id = textAt(source, 'id');
     const message = nestedAt(source, 'message');
     if (id === null || message === null || textAt(message, 'role') !== 'user') continue;
+    if (textAt(message, 'customType') !== null) continue;
     const said = userWords(message);
     if (said === null) continue;
     moments.push({ id, said, at: momentAt(source), mark: markOf(id) });

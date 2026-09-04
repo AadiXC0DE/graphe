@@ -26,6 +26,7 @@ export type Page =
   | 'models'
   | 'add-ons'
   | 'storage'
+  | 'computer'
   | 'privacy'
   | 'advanced'
   /** Reached from the Advanced row rather than the sidebar, because it is one
@@ -63,6 +64,7 @@ export const PAGES: readonly Page[] = [
   'models',
   'add-ons',
   'storage',
+  'computer',
   'privacy',
   'advanced',
 ];
@@ -87,6 +89,10 @@ export const pageWords: Record<Page, { name: string; note: string }> = {
     note: 'Skills, the tools this project can reach, and everything else you can give it.',
   },
   storage: { name: 'Storage', note: 'Where this keeps things, and how much room it is taking.' },
+  computer: {
+    name: 'Computer use',
+    note: 'How Graphe uses other applications on your computer.',
+  },
   privacy: {
     name: 'Privacy',
     note: 'What reaches your files, what the browser keeps, and what leaves this machine.',
@@ -401,6 +407,56 @@ export const ROWS: readonly Row[] = [
     note: 'Open it where this computer keeps files.',
     kind: 'goes',
     also: ['finder', 'directory', 'path', 'where'],
+  },
+
+  /* -------------------------------------------------------------- computer */
+  {
+    id: 'computer-any-app',
+    page: 'computer',
+    name: 'Any App',
+    note: 'Let Graphe control apps on your computer.',
+    kind: 'switch',
+    also: ['computer use', 'desktop', 'screen', 'control', 'any app', 'accessibility', 'permissions'],
+  },
+  {
+    id: 'computer-browser',
+    page: 'computer',
+    name: 'Browser',
+    note: 'Let Graphe use its built-in browser for additional control.',
+    kind: 'switch',
+    also: ['computer use', 'browser', 'chrome', 'extension', 'websites', 'sites'],
+  },
+  {
+    id: 'computer-excel',
+    page: 'computer',
+    name: 'Microsoft Excel',
+    note: 'Let Graphe work in Excel, with no add-in to install.',
+    kind: 'switch',
+    also: ['computer use', 'excel', 'spreadsheet', 'numbers', 'sheets', 'workbook'],
+  },
+  {
+    id: 'computer-locked',
+    page: 'computer',
+    name: 'Locked use',
+    note: 'Let background work use your computer while you are elsewhere. It never unlocks your Mac by itself.',
+    kind: 'switch',
+    also: ['computer use', 'locked', 'lock', 'sleep', 'away', 'background'],
+  },
+  {
+    id: 'computer-allowed',
+    page: 'computer',
+    name: 'Always-allowed apps',
+    note: 'Apps that skip the per-turn question. Passwords and refusals still refuse.',
+    kind: 'goes',
+    also: ['computer use', 'allowlist', 'allowed', 'trusted', 'always allow', 'approve'],
+  },
+  {
+    id: 'computer-sites',
+    page: 'computer',
+    name: 'Browser sites',
+    note: 'Websites the driven browser may reach. Empty means anywhere.',
+    kind: 'goes',
+    also: ['computer use', 'sites', 'allowlist', 'domains', 'hosts', 'manage'],
   },
 
   /* --------------------------------------------------------------- privacy */

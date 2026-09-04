@@ -128,6 +128,29 @@ export const continuationWords = {
     'That failed twice over, so I have stopped rather than trying the same thing again. Say what to try instead.',
 } as const;
 
+/**
+ * The messages this app sends on somebody's behalf, recognised by the words
+ * they always carry.
+ *
+ * They go out as ordinary user messages and are on disk as such, so a reopened
+ * conversation would show the app talking to itself as though a person had
+ * typed it — and the list of moments to go back to would offer them as things
+ * that were said. Matched at both ends rather than by the opening words alone,
+ * so somebody typing "carry on with the checklist" still gets their own
+ * message back.
+ */
+const OUR_OWN: readonly (readonly [string, string])[] = [
+  ['Carry on with the checklist.', 'permission to leave the list unfinished.'],
+  ['Carry on toward', 'Do not stop to report progress while it is still unmet.'],
+  ['Finished on the board:', 'carry on from there.'],
+  [continuationWords.recoveryPrompt, continuationWords.recoveryPrompt],
+];
+
+export function sentOnTheirBehalf(text: string): boolean {
+  const said = text.trim();
+  return OUR_OWN.some(([lead, tail]) => said.startsWith(lead) && said.endsWith(tail));
+}
+
 export function freshContinuation(): State {
   return {
     rounds: 0,

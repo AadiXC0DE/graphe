@@ -13,11 +13,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CURATED,
   WARNING,
-  askAbout,
   installed,
   packageShelf,
   readCatalog,
-  type Pack,
   type PackageHost,
 } from '../src/agent/pi/packages';
 import { cardFrom } from '../src/agent/pi/extension-probe';
@@ -408,40 +406,6 @@ describe('WARNING', () => {
   });
 });
 
-describe('askAbout', () => {
-  const pack: Pack = {
-    id: 'pi-lens',
-    name: 'Lens',
-    kind: 'mixed',
-    summary: 'Language server bridge.',
-    downloads: 90000,
-    version: '1.4.2',
-    installed: false,
-    curated: true,
-  };
-
-  it('hands over what is known about the addition', () => {
-    const asked = askAbout(pack);
-    expect(asked).toContain('pi-lens');
-    expect(asked).toContain('Lens');
-    expect(asked).toContain('1.4.2');
-    expect(asked).toContain('90000');
-    expect(asked).toContain('Language server bridge.');
-  });
-
-  it('asks for two plain sentences, what it lets you do, and the risk said plainly', () => {
-    const asked = askAbout(pack);
-    expect(asked).toMatch(/two plain sentences/i);
-    expect(asked).toMatch(/let them do/i);
-    expect(asked).toMatch(/risky/i);
-    expect(asked).toMatch(/no jargon/i);
-  });
-
-  it('leaves out what it does not know rather than saying null', () => {
-    const asked = askAbout({ ...pack, version: null, downloads: null, summary: '' });
-    expect(asked).not.toMatch(/null|undefined|Version:|Downloaded|describes itself/);
-  });
-});
 
 /* -------------------------------------------------------------------------- */
 /* The shelf                                                                   */

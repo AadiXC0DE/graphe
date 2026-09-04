@@ -31,7 +31,10 @@ import type { Pointed } from '../preview/point';
 import type { Said } from '../preview/tabs';
 export type { Said };
 import type { AlwaysRow } from '../work/always';
+import type { ComputerUse } from '../work/computeruse';
 import type { Telling } from '../work/notify';
+
+export type { ComputerUse } from '../work/computeruse';
 export type { AlwaysRow };
 import type { WorkState } from '../work/board';
 import type { Entry as ReviewQueued, FileVerdict, Verdict } from '../work/reviewqueue';
@@ -562,6 +565,15 @@ export type Preferences = {
   notifySound: boolean;
   /** Badge the dock with how many pieces are waiting to be looked at. */
   badgeDock: boolean;
+  /** How Graphe may work the programs on this computer. Global, like `model`:
+   *  enrolment belongs to the machine, not to one folder. */
+  computerUse: ComputerUse;
+};
+
+/** What this Mac reports about Computer use. Honest over clever: a permission
+ *  macOS will not name without prompting reads as unknown rather than as on. */
+export type ComputerStatus = {
+  excelInstalled: boolean;
 };
 
 /** The preferences a row on Behaviour or Notifications writes by name. The
@@ -1524,7 +1536,6 @@ export const CHANNEL = {
   packages: 'graphe:packages',
   addPackage: 'graphe:add-package',
   removePackage: 'graphe:remove-package',
-  explainPackage: 'graphe:explain-package',
   visualChange: 'graphe:visual-change',
   visualFrames: 'graphe:visual-frames',
   connection: 'graphe:connection',
@@ -1552,6 +1563,9 @@ export const CHANNEL = {
   landing: 'graphe:landing',
   setHoldBack: 'graphe:set-hold-back',
   setKeepLogins: 'graphe:set-keep-logins',
+  setComputerUse: 'graphe:set-computer-use',
+  computerStatus: 'graphe:computer-status',
+  openComputerSettings: 'graphe:open-computer-settings',
   setTheme: 'graphe:set-theme',
   setAppearance: 'graphe:set-appearance',
   ownStyles: 'graphe:own-styles',
@@ -1938,8 +1952,6 @@ export type GrapheApi = {
   packages(term?: string): Promise<Result<readonly Pack[]>>;
   addPackage(id: string): Promise<Result<readonly Pack[]>>;
   removePackage(id: string): Promise<Result<readonly Pack[]>>;
-  /** Two plain sentences on what one does, written by the model. */
-  explainPackage(id: string, where?: Where): Promise<Result<string>>;
   /** Write every design change the window has been holding and save it as one
    *  version. `tokens` renames to real names with the value each is set to;
    *  `motions` are the shapes `src/motion/read.ts` hands out. Nothing is
@@ -2036,6 +2048,14 @@ export type GrapheApi = {
   /** Keep this project's browser signed in between sittings, or stop keeping
    *  it. Off keeps nothing and starts every browser clean. */
   setKeepLogins(on: boolean, where?: Where): Promise<Result<Preferences>>;
+  /** Change one corner of Computer use. The whole object is set at once, so a
+   *  half-written enrolment can never reach the disk. */
+  setComputerUse(use: ComputerUse): Promise<Result<Preferences>>;
+  /** What this Mac can actually do for Computer use: whether Excel is here to
+   *  be worked at all. */
+  computerStatus(): Promise<Result<ComputerStatus>>;
+  /** Open the system settings page behind one of the two permissions. */
+  openComputerSettings(which: 'see' | 'point'): Promise<Result<null>>;
   setTheme(theme: Theme): Promise<Result<Preferences>>;
   /** Change how it looks. Every control writes a token; the whole thing is one
    *  small object, so it is set whole rather than a field at a time. */

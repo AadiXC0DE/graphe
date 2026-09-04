@@ -53,6 +53,11 @@ type Props = {
   /** More of the file than git sent, around a line at the edge of a piece.
    *  Left off, a fold still opens what is already in hand. */
   onExpand?: (file: string, around: number) => void | Promise<void>;
+  /** The screen around this one already lists the files, so the list starts
+   *  shut and the code gets the width. The toggle is still there, and it
+   *  remembers separately: shutting it beside a list must not shut it where
+   *  the list is the only one there is. */
+  alreadyListed?: boolean;
 };
 
 export const DIFF_SAYS = {
@@ -113,6 +118,10 @@ const REMEMBERED = 'graphe.diff.reading';
 
 /** Whether the file list is out. */
 const FILES_SHOWN = 'graphe.diff.files';
+
+/** The same habit, kept apart for a diff drawn beside a list of its own files.
+ *  Shut there by default: two lists of one thing is one list too many. */
+const FILES_BESIDE = 'graphe.diff.files.beside';
 
 /** Whether long runs of unchanged lines are folded. On unless turned off. */
 const COLLAPSED = 'graphe.diff.collapse';
@@ -366,12 +375,16 @@ export default function DiffView({
   comments,
   onComment,
   onExpand,
+  alreadyListed = false,
 }: Props) {
   const [reading, setReading] = useState<Reading>(rememberedReading);
   const [budget, setBudget] = useState(BUDGET);
   /* Folded with `[`. Kept, because whether somebody wants the list is a habit
      rather than a decision about this change. */
-  const [listing, setListing] = useState(() => remembered(FILES_SHOWN) !== 'shut');
+  const filesKey = alreadyListed ? FILES_BESIDE : FILES_SHOWN;
+  const [listing, setListing] = useState(() =>
+    alreadyListed ? remembered(FILES_BESIDE) === 'open' : remembered(FILES_SHOWN) !== 'shut',
+  );
   const [spacing, setSpacing] = useState(false);
   const [collapsed, setCollapsed] = useState(() => remembered(COLLAPSED) !== 'no');
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set<string>());
@@ -564,7 +577,7 @@ export default function DiffView({
       if (event.key === '[') {
         event.preventDefault();
         setListing((was) => {
-          keep(FILES_SHOWN, was ? 'shut' : 'open');
+          keep(filesKey, was ? 'shut' : 'open');
           return !was;
         });
         return;
@@ -586,7 +599,7 @@ export default function DiffView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [rows, here, goToFile, at, folded, open]);
+  }, [rows, here, goToFile, at, folded, open, filesKey]);
 
   const drawEntry = (entry: Entry): React.ReactNode => {
     if (entry.kind === 'file') {
@@ -793,7 +806,7 @@ export default function DiffView({
           title={listing ? DIFF_SAYS.hideFiles : DIFF_SAYS.showFiles}
           onClick={() =>
             setListing((was) => {
-              keep(FILES_SHOWN, was ? 'shut' : 'open');
+              keep(filesKey, was ? 'shut' : 'open');
               return !was;
             })
           }

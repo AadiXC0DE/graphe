@@ -88,6 +88,40 @@ describe('nothing waiting', () => {
   });
 });
 
+describe('the width the code gets', () => {
+  /* A column holding one card, beside a reading that already names it, is
+     260px taken off the diff. */
+  it('draws no list of entries when there is only one', () => {
+    const { where } = draw();
+    expect(where.querySelector('.reviewq__list')).toBeNull();
+    // And the reading still names which entry it is.
+    expect(where.textContent).toContain(ENTRY.title);
+  });
+
+  it('draws the list once there is a second one to choose between', () => {
+    const { where } = draw({
+      entries: [ENTRY, { ...ENTRY, id: 'a2', title: 'Tidy the footer' }],
+    });
+    expect(where.querySelector('.reviewq__list')).not.toBeNull();
+    expect(where.textContent).toContain('Tidy the footer');
+  });
+
+  /* The diff used to be asked for only by pressing a row, so the reading sat
+     on "Reading the change" until somebody pressed one, and with a single
+     entry there is no row to press. */
+  it('asks for the entry it is showing without waiting to be pressed', () => {
+    const onChoose = vi.fn();
+    draw({ chosen: null, diff: null, onChoose });
+    expect(onChoose).toHaveBeenCalledWith('a1');
+  });
+
+  it('does not ask again for the entry already chosen', () => {
+    const onChoose = vi.fn();
+    draw({ chosen: 'a1', onChoose });
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+});
+
 describe('one entry', () => {
   it('offers all four decisions', () => {
     const { where } = draw();

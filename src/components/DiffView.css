@@ -499,8 +499,18 @@
   min-width: 100%;
 }
 
+/* Two columns to fit, not one. Sized to the box rather than to the widest line
+   in the file: at max-content the after side sat past the right edge, so a pane
+   of added lines read as a pane of blanks with the code scrolled out of sight.
+   A line too long for its half wraps inside it. */
 .diffview__row--split {
   grid-template-columns: var(--gutter) minmax(0, 1fr) var(--gutter) minmax(0, 1fr);
+  width: 100%;
+}
+
+.diffview__row--split .diffview__code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .diffview__row--one {

@@ -246,6 +246,70 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const started = Date.now();
 
+
+const PREVIEW_REVIEW: readonly ReviewEntry[] = [
+  {
+    id: 'r1',
+    from: 'conversation',
+    title: '/Users/you/Library/Application Support/graphe/sessions/2026-09-04T08-19-16-936Z.jsonl',
+    address: 'conversation-71',
+    branch: 'feat/computer-use-settings',
+    at: Date.now() - 7 * MINUTE,
+    read: false,
+    files: [
+      { path: 'src/agent/guard/policy.ts', added: 130, removed: 11 },
+      { path: 'src/work/computeruse.ts', added: 246, removed: 0 },
+      { path: 'src/components/ComputerUse.tsx', added: 306, removed: 0 },
+    ],
+  },
+] as unknown as readonly ReviewEntry[];
+
+const PREVIEW_DIFF = [
+  'diff --git a/src/agent/guard/policy.ts b/src/agent/guard/policy.ts',
+  '--- a/src/agent/guard/policy.ts',
+  '+++ b/src/agent/guard/policy.ts',
+  '@@ -140,7 +140,18 @@ export type GuardFacts = GuardContext & {',
+  '   rowCounts?: Readonly<Record<string, number>>;',
+  '   knownSecretValues?: readonly string[];',
+  '+  /** Computer-use enrolment, from Settings > Computer use. */',
+  '+  computerUse?: {',
+  '+    anyApp: boolean;',
+  '+    browser: boolean;',
+  '+    excel: boolean;',
+  '+    lockedUse: boolean;',
+  '+    allowedApps: readonly string[];',
+  '+    browserSites: readonly string[];',
+  '+  };',
+  '+  /** Nobody is sitting in front of this one: a board piece, a helper. */',
+  '+  unattended?: boolean;',
+  ' };',
+  ' ',
+  ' /** Five files changed at once stops being an edit and starts being a sweep. */',
+  ' const A_SWEEP = 5;',
+  '@@ -280,6 +291,9 @@ const SAY = {',
+  '   computerSites:',
+  "     'This browser is held to a few named sites, and that address is not one of them.',",
+  '+  lockedOff:',
+  "+    'This is running in the background with nobody in front of it, and working the computer unattended is switched off.',",
+  ' } as const;',
+  ' ',
+  ' function computerOff(ctx: GuardFacts): string | null {',
+  'diff --git a/src/work/computeruse.ts b/src/work/computeruse.ts',
+  'new file mode 100644',
+  '--- /dev/null',
+  '+++ b/src/work/computeruse.ts',
+  '@@ -0,0 +1,9 @@',
+  '+/** Whether a site is reachable under the held list. Empty is the open web. */',
+  '+export function siteReachable(host: string, use: Pick<ComputerUse, sites>): boolean {',
+  '+  if (use.browserSites.length === 0) return true;',
+  '+  const cleaned = cleanSite(host);',
+  '+  if (cleaned === null) return false;',
+  '+  return use.browserSites.some(',
+  '+    (held) => cleaned === held || cleaned.endsWith(dotted(held)),',
+  '+  );',
+  '+}',
+].join('\n');
+
 const PREVIEW_PROJECTS: readonly {
   path: string;
   name: string;
@@ -1252,14 +1316,15 @@ let previewPlanMode = false;
       return Promise.resolve(previewFail<{ folder: string; opened: OpenedProject }>());
     },
 
-    /* Nothing finishes in a browser tab, so nothing is ever waiting to be
-       looked at. An empty queue is the true answer here, not a refusal. */
+    /* One waiting, so the screen can be seen in a browser tab. It could not
+       be before, and a screen nobody can look at is a screen that ships with
+       its code scrolled off the right edge. */
     reviewQueue(): Promise<Result<readonly ReviewEntry[]>> {
-      return Promise.resolve(done([]));
+      return Promise.resolve(done(PREVIEW_REVIEW));
     },
 
     reviewOpen(): Promise<Result<ReviewOpened>> {
-      return Promise.resolve(previewFail<ReviewOpened>());
+      return Promise.resolve(done({ entries: PREVIEW_REVIEW, diff: PREVIEW_DIFF }));
     },
 
     reviewChoose(): Promise<Result<readonly ReviewEntry[]>> {

@@ -287,7 +287,7 @@ describe('the file list', () => {
 
   it('is folded and unfolded with one key, and the choice is kept', () => {
     expect(view).toContain("if (event.key === '[') {");
-    expect(view).toContain("keep(FILES_SHOWN, was ? 'shut' : 'open')");
+    expect(view).toContain("keep(filesKey, was ? 'shut' : 'open')");
   });
 
   it('moves a file at a time on n and p', () => {

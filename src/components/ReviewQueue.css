@@ -27,6 +27,11 @@
   overflow: auto;
 }
 
+/* One entry, so no column for the list of them. */
+.reviewq__body--alone {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 @media (max-width: 900px) {
   .reviewq__body {
     grid-template-columns: minmax(0, 1fr);

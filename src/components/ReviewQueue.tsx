@@ -137,6 +137,13 @@ export default function ReviewQueue({
     shut.current?.focus();
   }, []);
 
+  /* The screen opens on an entry whether or not anybody pressed a row, so it
+     asks for that one itself. Without this the reading sat on "Reading the
+     change" until a row was pressed, and with one entry there is no row. */
+  useEffect(() => {
+    if (entry !== null && entry.id !== chosen) onChoose(entry.id);
+  }, [entry, chosen, onChoose]);
+
   // A different entry is a different landing.
   useEffect(() => {
     setPrecise(false);
@@ -196,7 +203,15 @@ export default function ReviewQueue({
     <section className="sheet reviewq" aria-label={SAYS.heading}>
       {head}
 
-      <div className="sheet__body reviewq__body scroll--auto">
+      {/* A list of one is not a list. With a single entry the column is a card
+          repeating the title already at the top of the reading, and the width
+          it takes comes off the code. */}
+      <div
+        className={`sheet__body reviewq__body scroll--auto ${
+          entries.length > 1 ? '' : 'reviewq__body--alone'
+        }`}
+      >
+        {entries.length <= 1 ? null : (
         <ul className="reviewq__list">
           {entries.map((one) => (
             <li key={one.id}>
@@ -217,6 +232,7 @@ export default function ReviewQueue({
             </li>
           ))}
         </ul>
+        )}
 
         <div className="reviewq__work">
           <div className="reviewq__band">
@@ -421,6 +437,7 @@ export default function ReviewQueue({
                 at={at}
                 onAt={setAt}
                 busy={busy}
+                alreadyListed
                 onKeepFile={(file, keep) =>
                   onFile(entry.id, file.path, keep ? 'take theirs' : 'keep mine')
                 }

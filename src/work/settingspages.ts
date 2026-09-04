@@ -438,7 +438,7 @@ export const ROWS: readonly Row[] = [
     id: 'computer-locked',
     page: 'computer',
     name: 'Locked use',
-    note: 'Let Graphe keep working while you step away. It never unlocks your Mac by itself.',
+    note: 'Let background work use your computer while you are elsewhere. It never unlocks your Mac by itself.',
     kind: 'switch',
     also: ['computer use', 'locked', 'lock', 'sleep', 'away', 'background'],
   },

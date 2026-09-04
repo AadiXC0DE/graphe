@@ -310,6 +310,46 @@ const PREVIEW_DIFF = [
   '+}',
 ].join('\n');
 
+
+const PREVIEW_SKILLS: readonly Skill[] = [
+  {
+    id: 'brandkit',
+    name: 'brandkit',
+    handle: 'brandkit',
+    description:
+      'Premium brand-kit image generation skill for creating high-end brand-guidelines boards, logo systems, identity decks, and visual-world presentations. Trained for minimalist, cinematic, editorial, dark-tech and luxury brand systems.',
+    source: 'global',
+    path: '~/.graphe/skills/brandkit',
+  },
+  {
+    id: 'design-taste-frontend',
+    name: 'design-taste-frontend',
+    handle: 'design-taste-frontend',
+    description:
+      'Anti-slop frontend skill for landing pages, portfolios, and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated.',
+    source: 'global',
+    path: '~/.graphe/skills/design-taste-frontend',
+  },
+  {
+    id: 'emil-design-eng',
+    name: 'emil-design-eng',
+    handle: 'emil-design-eng',
+    description:
+      "This skill encodes Emil Kowalski's philosophy on UI polish, component design, animation decisions, and the invisible details that make software feel great.",
+    source: 'global',
+    path: '~/.graphe/skills/emil-design-eng',
+  },
+  {
+    id: 'minimalist-ui',
+    name: 'minimalist-ui',
+    handle: 'minimalist-ui',
+    description:
+      'Clean editorial-style interfaces. Warm monochrome palette, typographic contrast, flat bento grids, muted pastels. No gradients, no heavy shadows.',
+    source: 'project',
+    path: '.graphe/skills/minimalist-ui',
+  },
+];
+
 const PREVIEW_PROJECTS: readonly {
   path: string;
   name: string;
@@ -1214,8 +1254,11 @@ let previewPlanMode = false;
       });
     },
 
+    /* Real ones, with the sentences they really carry: a skill's description
+       runs to a paragraph, and a row that cannot be seen in a browser tab is a
+       row that ships with its text off the side of the window. */
     skills(): Promise<Result<readonly Skill[]>> {
-      return Promise.resolve(done([]));
+      return Promise.resolve(done(PREVIEW_SKILLS));
     },
 
     skillText(): Promise<Result<string>> {

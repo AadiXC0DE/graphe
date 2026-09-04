@@ -889,7 +889,7 @@ export default function Composer({
               type="button"
               role="option"
               aria-selected={index === mentionAt}
-              className={index === mentionAt ? 'composer__skill--active' : ''}
+              className={`composer__mention ${index === mentionAt ? 'composer__skill--active' : ''}`}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => chooseMention(one)}
             >
@@ -897,6 +897,7 @@ export default function Composer({
                 <strong>{one.name}</strong>
                 {one.kind === 'skill' ? <small>{one.insert}</small> : null}
               </span>
+              {/* A sentence, so it goes under the name rather than beside it. */}
               <em>{one.note}</em>
             </button>
           ))}

@@ -62,3 +62,35 @@ describe('CR-03 the narrow rules still say how far', () => {
     expect(CSS).toMatch(/@container \(max-width: 380px\)[^@]*flex-wrap: wrap/s);
   });
 });
+
+/* ========================================================================== */
+/* CR-02 what `@` offers                                                       */
+/* ========================================================================== */
+
+/** A skill's note is a sentence, not a tag. Drawn beside the name it was a flex
+ *  item that does not shrink, so it took its whole content width: the name was
+ *  squeezed to nothing and the row ran off the side of the window, over
+ *  everything behind it. */
+describe('CR-02 the row a skill is offered on', () => {
+  const ROW = /\.composer__skills button\.composer__mention \{[^}]*\}/s;
+
+  it('stacks the note under the name rather than beside it', () => {
+    expect(ALWAYS).toMatch(ROW);
+    expect(ALWAYS.match(ROW)?.[0]).toContain('flex-direction: column');
+  });
+
+  it('lets the note shrink and clips it, so no row is wider than the menu', () => {
+    const note = ALWAYS.match(/\.composer__skills button\.composer__mention em \{[^}]*\}/s)?.[0] ?? '';
+    expect(note).toContain('flex: 0 1 auto');
+    expect(note).toContain('min-width: 0');
+    expect(note).toContain('text-overflow: ellipsis');
+    expect(note).toContain('overflow: hidden');
+  });
+
+  it('holds the menu itself to a width and a height, however many are offered', () => {
+    const menu = ALWAYS.match(/\.composer__skills \{[^}]*\}/s)?.[0] ?? '';
+    expect(menu).toMatch(/width: min\(/);
+    expect(menu).toContain('max-height');
+    expect(menu).toContain('overflow-y: auto');
+  });
+});

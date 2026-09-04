@@ -1,0 +1,80 @@
+/** Computer use, beside the settings rows.
+ *
+ * The panel borrows the settings rows outright — same row, same text, same
+ * note — so the screen reads as one place rather than two. What is its own is
+ * the icon at the row's head, the Install press that enables rather than
+ * flips, and the two editors (apps, sites) with their empty states.
+ */
+
+.computer__icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+}
+
+.computer__icon--any {
+  color: #7c6cf0;
+  background: color-mix(in srgb, #7c6cf0 14%, transparent);
+}
+
+.computer__icon--browser {
+  color: #3f8cff;
+  background: color-mix(in srgb, #3f8cff 12%, transparent);
+}
+
+.computer__icon--excel {
+  color: #1d7a3d;
+  background: color-mix(in srgb, #1d7a3d 12%, transparent);
+}
+
+.computer__icon--lock {
+  color: #8a8f98;
+  background: color-mix(in srgb, #8a8f98 14%, transparent);
+}
+
+.computer__install {
+  flex: none;
+  border: 1px solid var(--border, #2c2c2e);
+  background: var(--bg-raised, #1e1e20);
+  color: var(--text, #f5f5f7);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.computer__install:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.computer__empty {
+  margin: 0;
+  padding: 18px 16px;
+  text-align: center;
+  color: var(--text-muted, #98989f);
+  font-size: 13px;
+}
+
+.computer__add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 4px;
+}
+
+.computer__add .settings__field {
+  flex: 1;
+}
+
+.computer__perms {
+  margin: 8px 2px 0;
+  font-size: 12.5px;
+  color: var(--text-muted, #98989f);
+}

@@ -38,12 +38,16 @@
  *
  * Confirmation fatigue is what created "Accept All" (research/03 §7). Reading,
  * searching and editing a project file are silent, so the questions that do
- * appear are rare enough to be read rather than dismissed. There is deliberately
- * no "pre-approved" or "always allow" field on `GuardFacts`: a `confirm` cannot
- * be switched off, by the user or by the model.
+ * appear are rare enough to be read rather than dismissed. The one list that
+ * can skip a question is Computer use's always-allowed apps, and even that
+ * only skips the *question*: every refusal below still refuses, on every rung,
+ * whether or not the app is on the list. A `confirm` can be stilled for a
+ * named app by the person it belongs to, in Settings; a `deny` cannot be
+ * switched off, by the user or by the model.
  */
 
 import type { GuardContext, ToolCall, Verdict } from '../types';
+import { isAppAllowed, isExcelTarget } from '../../work/computeruse';
 import type { PathCheck } from './paths';
 import {
   containsPath,
@@ -140,6 +144,23 @@ export type GuardFacts = GuardContext & {
   rowCounts?: Readonly<Record<string, number>>;
   /** The user's real secret values, so we can spot one being pasted somewhere public. */
   knownSecretValues?: readonly string[];
+  /**
+   * Computer-use enrolment, from Settings > Computer use.
+   *
+   * Absent is the behaviour the app has always had: every press asks, once a
+   * turn. Present, the switches are honoured: a master left off refuses
+   * desktop control with directions to the switch instead of asking per
+   * press, and an app on the always-allowed list skips the question. Skips
+   * the question only: secrets, disk tools, elevation, and outside-project
+   * writes still deny, listed or not.
+   */
+  computerUse?: {
+    anyApp: boolean;
+    browser: boolean;
+    excel: boolean;
+    allowedApps: readonly string[];
+    browserSites: readonly string[];
+  };
 };
 
 /** Five files changed at once stops being an edit and starts being a sweep. */
@@ -256,7 +277,40 @@ const SAY = {
   ownInstructions:
     "This would rewrite the instructions I work from. I can read those, and I leave them exactly as you installed them. I've stopped it.",
   restorePoint: 'I will commit a checkpoint first, so this is one restore away.',
+  computerOff:
+    'Computer use is switched off, so I have not touched your other apps. Turn Any App on in Settings, under Computer use, and ask me again.',
+  browserOff:
+    'The browser is switched off in Settings, under Computer use, so I have left that page unopened.',
+  computerSites:
+    'This browser is held to a few named sites, and that address is not one of them, so I have left it unopened. Loosen the list in Settings, under Computer use, to reach anywhere.',
 } as const;
+
+/** Refused when Computer use names no enrolment at all: the legacy behaviour
+ *  is to ask per press, so only an explicit off refuses. */
+function computerOff(ctx: GuardFacts): string | null {
+  if (ctx.computerUse === undefined) return null;
+  return ctx.computerUse.anyApp === true ? null : SAY.computerOff;
+}
+
+/** Refused when the browser row is explicitly off. */
+function browserOff(ctx: GuardFacts): string | null {
+  if (ctx.computerUse === undefined) return null;
+  return ctx.computerUse.browser === true ? null : SAY.browserOff;
+}
+
+/** A question an always-allowed app has already answered in Settings. Only
+ *  ever stills a `confirm` into an `allow`; a refusal passes through
+ *  untouched, whichever list the app is on. */
+function allowedDesktop(
+  input: Record<string, unknown>,
+  ctx: GuardFacts,
+  judgement: Judgement,
+): Judgement {
+  if (judgement.verdict.kind !== 'confirm') return judgement;
+  const use = ctx.computerUse;
+  if (use === undefined) return judgement;
+  return isAppAllowed(input, use) ? allow(judgement.mutates) : judgement;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Tool names                                                                  */
@@ -1999,6 +2053,17 @@ function judgeBrowserOpen(input: Record<string, unknown>, ctx: GuardFacts): Judg
   const url = readString(input, URL_KEYS) ?? readString(input, ['target']) ?? '';
   if (findSecret(url) !== null || findKnownSecret(url, ctx)) return deny(SAY.sendKeyOut);
   if (!onTheWeb(url)) return deny(SAY.notAWebAddress);
+  const use = ctx.computerUse;
+  if (use !== undefined) {
+    if (use.browser !== true) return deny(SAY.browserOff);
+    if (use.browserSites.length > 0) {
+      const host = siteOf(url);
+      const held =
+        host !== null &&
+        use.browserSites.some((one) => host === one || host.endsWith(`.${one}`));
+      if (!held) return deny(SAY.computerSites);
+    }
+  }
   const where = siteOf(url);
   return ask(
     where === null ? 'Open a page in a browser?' : `Open ${where} in a browser?`,
@@ -2323,6 +2388,9 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
 
   if (BROWSER_ACT_TOOLS.has(name)) {
     const said = judgeBrowserAct(name, input, ctx);
+    if (said.verdict.kind === 'deny') return said;
+    const switchedOff = browserOff(ctx);
+    if (switchedOff !== null) return deny(switchedOff);
     return ctx.screenSaidYes === true && said.verdict.kind === 'confirm' ? allow(said.mutates) : said;
   }
 
@@ -2342,6 +2410,10 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
         folded = strictest(folded, judgeBrowserAct('browsertype', one, ctx));
       }
     }
+    if (folded.verdict.kind !== 'deny') {
+      const switchedOff = browserOff(ctx);
+      if (switchedOff !== null) return deny(switchedOff);
+    }
     // A yes already given covers the run, but only where the run was going to
     // ask. A step that is refused stays refused.
     return ctx.screenSaidYes === true && folded.verdict.kind === 'confirm'
@@ -2354,6 +2426,8 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   if (DESKTOP_LOOK_TOOLS.has(name)) return allow();
 
   if (DESKTOP_PICTURE_TOOLS.has(name)) {
+    const off = computerOff(ctx);
+    if (off !== null) return deny(off);
     if (ctx.screenSaidYes === true) return allow();
     return ask(
       'Take a picture of your screen?',
@@ -2364,12 +2438,33 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   }
 
   if (DESKTOP_ACT_TOOLS.has(name)) {
+    const off = computerOff(ctx);
+    if (off !== null) return deny(off);
     if (name === 'desktopopen') {
       const app = readString(input, ['app', 'name', 'program']) ?? 'a program';
-      return ask(
-        `Open ${app} on your computer?`,
-        'I open it the way you would from the dock, and take a picture so I can see it.',
-        'It comes to the front, over whatever you are looking at now.',
+      if (
+        ctx.computerUse !== undefined &&
+        ctx.computerUse.excel !== true &&
+        isExcelTarget(input)
+      ) {
+        return allowedDesktop(
+          input,
+          ctx,
+          ask(
+            `Open ${app} on your computer?`,
+            'I read the workbook itself and press its named buttons, with no add-in to install.',
+            'To work in Excel, turn the Excel row on in Settings, under Computer use. It comes to the front, over whatever you are looking at now.',
+          ),
+        );
+      }
+      return allowedDesktop(
+        input,
+        ctx,
+        ask(
+          `Open ${app} on your computer?`,
+          'I open it the way you would from the dock, and take a picture so I can see it.',
+          'It comes to the front, over whatever you are looking at now.',
+        ),
       );
     }
     // Words typed into a program on this computer go wherever that program
@@ -2381,10 +2476,29 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     // The refusal above is checked first, so a yes given earlier in the turn
     // can never carry a key past it.
     if (ctx.screenSaidYes === true) return allow(true);
-    return ask(
-      'Work your computer for you?',
-      'I press, type and scroll on the screen exactly as you would, in whatever is in front.',
-      'This is your real computer and not a copy, so what happens on it cannot be taken back.',
+    if (
+      ctx.computerUse !== undefined &&
+      ctx.computerUse.excel !== true &&
+      isExcelTarget(input)
+    ) {
+      return allowedDesktop(
+        input,
+        ctx,
+        ask(
+          'Work in Excel for you?',
+          'I read the workbook itself and press its named buttons, with no add-in to install.',
+          'To work in Excel, turn the Excel row on in Settings, under Computer use. This is your real file, so what changes is one version away.',
+        ),
+      );
+    }
+    return allowedDesktop(
+      input,
+      ctx,
+      ask(
+        'Work your computer for you?',
+        'I press, type and scroll on the screen exactly as you would, in whatever is in front.',
+        'This is your real computer and not a copy, so what happens on it cannot be taken back.',
+      ),
     );
   }
 
@@ -2585,6 +2699,11 @@ const NEVER_ON_ANY_RUNG: ReadonlySet<string> = new Set([
   // Reading this computer into the conversation through a browser is the same
   // shape of thing as a key leaving it, and the rung is about being asked.
   SAY.notAWebAddress,
+  // Switched-off computer use is an enrolment, not a question: "get on with
+  // it" agrees to unseen work, not to work the person never enabled.
+  SAY.computerOff,
+  SAY.browserOff,
+  SAY.computerSites,
 ]);
 
 /**

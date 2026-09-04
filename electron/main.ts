@@ -100,6 +100,8 @@ import {
   rowsFrom,
 } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
+import type { GuardFacts } from '../src/agent/guard/policy';
+import { asComputerUse } from '../src/work/computeruse';
 import {
   CHANNEL,
   type Away,
@@ -111,6 +113,7 @@ import {
   type AwayPiece,
   type EveryKind,
   type Repeating,
+  type ComputerStatus,
   type ConnectOutcome,
   type ConnectStep,
   type ConnectionState,
@@ -2015,6 +2018,31 @@ function preferences(): Promise<PreferenceFile> {
   return preferencesPromise;
 }
 
+type ComputerUseFacts = NonNullable<GuardFacts['computerUse']>;
+
+/** The enrolment as the Guard reads it: plain values, copied out of prefs so
+ *  nothing later can rewrite what a sitting was judged against. */
+async function computerUseFacts(): Promise<ComputerUseFacts> {
+  const use = (await preferences()).all().computerUse;
+  return {
+    anyApp: use.anyApp,
+    browser: use.browser,
+    excel: use.excel,
+    allowedApps: [...use.allowedApps],
+    browserSites: [...use.browserSites],
+  };
+}
+
+/** Hand new enrolment to every live conversation, so the switch takes effect
+ *  on the next tool call and not on the next session. */
+function syncComputerUse(use: ComputerUseFacts): void {
+  for (const one of workspaces.open) {
+    for (const session of one.held.sessions.open) {
+      session.held.setComputerUse(use);
+    }
+  }
+}
+
 let editorsPromise: Promise<readonly Editor[]> | null = null;
 let terminalsPromise: Promise<readonly Editor[]> | null = null;
 
@@ -3255,6 +3283,8 @@ async function checkItFirst(
   try {
     inside = await createSession({
       projectRoot: waiting.folder,
+      guard: { computerUse: await computerUseFacts() },
+      browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
       // A copy checking one message is not a conversation, so an add-on that
       // starts turns of its own has no business in it.
       sessionKind: 'helper',
@@ -4571,6 +4601,7 @@ async function startConversationUnlocked(
   try {
     session = await createSession({
       projectRoot: checkout?.folder ?? open.path,
+      guard: { computerUse: await computerUseFacts() },
       onEvent: forwardTo(open.path, held, from),
       // Restore points must describe the tree this session is actually changing.
       timeline:
@@ -4625,6 +4656,7 @@ async function startConversationUnlocked(
       // not to the end of every round of a loop working a list down.
       jobAtRest: () => continuations.resting(open.path, from.address ?? ''),
       keepsBrowserLogins: () => keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path),
+      browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
       planMode: held.planMode,
       // One folder of transcripts for all projects, under the app's own data
       // directory — never inside the user's project, so uninstalling Graphe
@@ -6351,6 +6383,8 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
   try {
     session = await createSession({
       projectRoot: folder,
+      guard: { computerUse: await computerUseFacts() },
+      browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
       // A piece on the board is not a conversation. Four of them each loading
       // an add-on that starts turns of its own is four loops nobody asked for.
       sessionKind: 'board',
@@ -8057,6 +8091,46 @@ function register(): void {
     // signed-in accounts on this disk under a switch that says they are not.
     if (!on) await forgetLogins(await defaultAgentDir(), open.path);
     return done(await (await preferences()).change({ keptLogins: { ...kept, [open.path]: on } }));
+  });
+
+  handle<Preferences>(CHANNEL.setComputerUse, async (_event, args) => {
+    const [raw] = args;
+    // Read back defensively: a renderer putting nonsense here must not become
+    // a switch that turns itself on.
+    const use = asComputerUse(raw);
+    const changed = await (await preferences()).change({ computerUse: use });
+    syncComputerUse({
+      anyApp: use.anyApp,
+      browser: use.browser,
+      excel: use.excel,
+      allowedApps: [...use.allowedApps],
+      browserSites: [...use.browserSites],
+    });
+    return done(changed);
+  });
+
+  handle<ComputerStatus>(CHANNEL.computerStatus, async () => {
+    const [excel, chrome] = await Promise.all([
+      stat('/Applications/Microsoft Excel.app')
+        .then((found) => found.isDirectory())
+        .catch(() => false),
+      stat('/Applications/Google Chrome.app')
+        .then((found) => found.isDirectory())
+        .catch(() => false),
+    ]);
+    return done({ excelInstalled: excel, chromeInstalled: chrome });
+  });
+
+  handle<null>(CHANNEL.openComputerSettings, async (_event, args) => {
+    const [which] = args;
+    const page =
+      which === 'point'
+        ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+        : 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
+    // The settings pages, by the names the computer knows them under — the
+    // same pages the desktop tools open when a permission is missing.
+    await shell.openExternal(page).catch(() => undefined);
+    return done(null);
   });
 
   handle<Preferences>(CHANNEL.setTheme, async (_event, args) => {
@@ -9926,6 +10000,8 @@ function register(): void {
     try {
       session = await createSession({
         projectRoot: folder,
+        guard: { computerUse: await computerUseFacts() },
+        browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
         onEvent: forwardTo(open.path, open.held, from),
         timeline: await Timeline.open(folder),
         model: prefs.model,

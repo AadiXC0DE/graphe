@@ -34,6 +34,7 @@ import { changeCurrent, currentDesk, noDesks, openDesk, receive } from '../src/l
 import { behind, realWords, showMeCopy } from '../src/lib/showme';
 import { applyEvent, said, type Turn } from '../src/lib/thread';
 import { defaultPreferences, PreferenceFile } from '../src/projects/preferences';
+import { defaultComputerUse } from '../src/work/computeruse';
 import { findEditor, openInLabel } from '../src/shell/editors';
 
 function call(name: string, input: Record<string, unknown> = {}): ToolCall {
@@ -183,6 +184,7 @@ describe('D1 — the real name of what just happened', () => {
           whenSomethingNeedsYou: 'system',
           notifySound: false,
           badgeDock: true,
+          computerUse: { ...defaultComputerUse },
         },
       });
     });

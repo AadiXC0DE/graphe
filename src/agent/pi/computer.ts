@@ -441,9 +441,17 @@ export function browserTools(
   projectRoot?: string,
   host?: BrowserHost,
   keeps?: () => string | null,
+  sites?: () => readonly string[],
 ): ToolDefinition[] {
   const run = host ?? defaultHost(projectRoot ?? tmpdir());
-  const setup = (): Setup => setupFrom(process.env, projectRoot, keeps?.() ?? null);
+  const setup = (): Setup => {
+    const base = setupFrom(process.env, projectRoot, keeps?.() ?? null);
+    // Settings wins over the environment where it names anything: the list on
+    // screen is the control somebody can see, and an env var is not.
+    if (sites === undefined) return base;
+    const held = [...new Set(sites().map((one) => one.trim().toLowerCase()).filter((one) => one !== ''))];
+    return { ...base, hosts: held };
+  };
 
   /** Where the program is, worked out once. Null once we know there is none. */
   let way: Promise<Way | null> | null = null;

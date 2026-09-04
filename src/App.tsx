@@ -35,6 +35,7 @@ import { gateOf, howMuchBy } from "./design/gate";
 import { holdsBack } from "./projects/heldback";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { keepsLogins } from "./projects/logins";
+import { defaultComputerUse } from "./work/computeruse";
 import { actionAt, chordFor, readActions, type Bindings, type Chord } from "./lib/actions";
 import { saysChord } from "./lib/keys";
 import { mark } from "./lib/marks";
@@ -49,7 +50,7 @@ import FindInThread from "./components/FindInThread";
 import { threadWords } from "./lib/threadview";
 import { capsNow, saysCaps } from "./work/capacity";
 import type { ReviewVerdict, RunningPiece } from "./agent/types";
-import type { AddonHere, AgentNotice, ConnectedState, ContinuationNotice } from "./lib/ipc";
+import type { AddonHere, AgentNotice, ComputerStatus, ConnectedState, ContinuationNotice } from "./lib/ipc";
 import {
   asOpenTo,
   asShelfAtLaunch,
@@ -688,6 +689,7 @@ function Conversation() {
     whenSomethingNeedsYou: 'system',
     notifySound: false,
     badgeDock: true,
+    computerUse: { ...defaultComputerUse },
   });
   /** The same, read by callbacks that must not be rebuilt every time one of
    *  them changes. */
@@ -2233,6 +2235,8 @@ function Conversation() {
   /** How much room this app is taking. Asked when the sheet opens: it walks
    *  folders, and the sheet is open for seconds. */
   const [storage, setStorage] = useState<StorageNow | null>(null);
+  /** What this Mac reports about Computer use, or null before it is asked. */
+  const [computerStatus, setComputerStatus] = useState<ComputerStatus | null>(null);
 
 
   /* The canvases this project has. Drawing one changes nothing until Start. */
@@ -4579,6 +4583,23 @@ function Conversation() {
     [openProject],
   );
 
+  const changeComputerUse = useCallback((next: Preferences['computerUse']) => {
+    setPreferences((was) => ({ ...was, computerUse: next }));
+    void bridge.setComputerUse(next).then((answer) => {
+      if (answer.ok) setPreferences(answer.value);
+    });
+  }, []);
+
+  const refreshComputerStatus = useCallback(() => {
+    void bridge.computerStatus().then((answer) => {
+      if (answer.ok) setComputerStatus(answer.value);
+    });
+  }, []);
+
+  const openComputerSettings = useCallback((which: 'see' | 'point') => {
+    void bridge.openComputerSettings(which);
+  }, []);
+
   const changeHoldBack = useCallback(
     (on: boolean) => {
       const path = openProject;
@@ -5865,6 +5886,11 @@ function Conversation() {
           onToggleKeepLogins={() =>
             changeKeepLogins(!keepsLogins(preferences.keptLogins, desk?.path))
           }
+          computerUse={preferences.computerUse}
+          onComputerUse={changeComputerUse}
+          computerStatus={computerStatus}
+          onRefreshComputerStatus={refreshComputerStatus}
+          onOpenComputerSettings={openComputerSettings}
           onGo={openSettingsLink}
           version={version ?? undefined}
           storage={storage}

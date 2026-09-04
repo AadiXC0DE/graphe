@@ -24,6 +24,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 import { asAdvisor, asAdvisorThinking, sameAdvisor } from '../agent/advisor';
 import type { ModelChoice, ThinkingLevel } from '../lib/ipc';
+import { asComputerUse, defaultComputerUse, sameComputerUse, type ComputerUse } from '../work/computeruse';
 import type { Theme } from '../lib/theme';
 import { asTelling, type Telling } from '../work/notify';
 import { asTrusted, sameTrusted, type Trusted } from './carried';
@@ -188,6 +189,14 @@ export type Preferences = {
   notifySound: boolean;
   /** Badge the dock with how many pieces are waiting to be looked at. */
   badgeDock: boolean;
+  /**
+   * How Graphe may work the programs on this computer.
+   *
+   * Global: enrolment belongs to the machine, not to one folder. Off where
+   * nothing has been said: a computer that starts controlling other apps
+   * before anybody asked is the thing this screen exists to prevent.
+   */
+  computerUse: ComputerUse;
 };
 
 /** Every field, because an appearance is small and comparing it wrongly means
@@ -246,6 +255,7 @@ export const defaultPreferences: Preferences = {
   whenSomethingNeedsYou: 'system',
   notifySound: false,
   badgeDock: true,
+  computerUse: { ...defaultComputerUse },
 };
 
 type Stored = { version: 1; preferences: Preferences };
@@ -309,6 +319,7 @@ function asPreferences(value: unknown): Preferences {
     whenSomethingNeedsYou: asTelling(record['whenSomethingNeedsYou']),
     notifySound: record['notifySound'] === true,
     badgeDock: record['badgeDock'] !== false,
+    computerUse: asComputerUse(record['computerUse']),
   };
 }
 
@@ -418,6 +429,7 @@ export class PreferenceFile {
       next.whenSomethingNeedsYou === this.#preferences.whenSomethingNeedsYou &&
       next.notifySound === this.#preferences.notifySound &&
       next.badgeDock === this.#preferences.badgeDock &&
+      sameComputerUse(next.computerUse, this.#preferences.computerUse) &&
       // Left out, a ceiling was the one preference that never reached the file:
       // nothing else about it had changed, so nothing was written, and it was
       // gone by the next launch while the window still said it was set.

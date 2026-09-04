@@ -37,6 +37,8 @@ import {
   type FileEntry,
   type FoundAccount,
   type GrapheApi,
+  type ComputerStatus,
+  type ComputerUse,
   type Hatches,
   type ModelChoice,
   type OpenedProject,
@@ -1130,6 +1132,21 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
     }
     return ipcRenderer.invoke(CHANNEL.setKeepLogins, on, named(where)) as Promise<Result<Preferences>>;
+  },
+
+  setComputerUse(use: ComputerUse): Promise<Result<Preferences>> {
+    return ipcRenderer.invoke(CHANNEL.setComputerUse, use) as Promise<Result<Preferences>>;
+  },
+
+  computerStatus(): Promise<Result<ComputerStatus>> {
+    return ipcRenderer.invoke(CHANNEL.computerStatus) as Promise<Result<ComputerStatus>>;
+  },
+
+  openComputerSettings(which: 'see' | 'point'): Promise<Result<null>> {
+    if (which !== 'see' && which !== 'point') {
+      return Promise.resolve(refuse<null>('I could not tell which setting you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.openComputerSettings, which) as Promise<Result<null>>;
   },
 
   setTheme(theme: string): Promise<Result<Preferences>> {

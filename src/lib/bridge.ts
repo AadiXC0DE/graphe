@@ -37,6 +37,7 @@ import { holdsBack } from '../projects/heldback';
 import { readFlows, withFlow, withoutFlow, type Flow } from '../work/canvas';
 import { keepsLogins } from '../projects/logins';
 import { keeping } from '../projects/kept';
+import { asComputerUse, defaultComputerUse, type ComputerUse } from '../work/computeruse';
 import { Ledger } from '../cost/ledger';
 import { createLimit } from '../cost/limits';
 import { daysFromUsage, type TokenUsageView } from '../lib/token-days';
@@ -58,6 +59,7 @@ import {
   type Repeating,
   type ConnectOutcome,
   type ConnectStep,
+  type ComputerStatus,
   type Conversation,
   type ConnectionState,
   type Decided,
@@ -754,6 +756,7 @@ let previewPlanMode = false;
     whenSomethingNeedsYou: 'system',
     notifySound: false,
     badgeDock: true,
+    computerUse: { ...defaultComputerUse },
   };
 
   const send = (event: AgentEvent): void => {
@@ -1847,6 +1850,21 @@ let previewPlanMode = false;
       return Promise.resolve(done({ ...preferred }));
     },
 
+    setComputerUse(use: ComputerUse): Promise<Result<Preferences>> {
+      preferred = { ...preferred, computerUse: asComputerUse(use) };
+      return Promise.resolve(done({ ...preferred }));
+    },
+
+    computerStatus(): Promise<Result<ComputerStatus>> {
+      return Promise.resolve(
+        done({ excelInstalled: false, chromeInstalled: false }),
+      );
+    },
+
+    openComputerSettings(): Promise<Result<null>> {
+      return Promise.resolve(done(null));
+    },
+
     setHowMuch(id: string): Promise<Result<Preferences>> {
       preferred = { ...preferred, howMuch: howMuchBy(id).id };
       return Promise.resolve(done({ ...preferred }));
@@ -2340,6 +2358,9 @@ function connect(): Bridge {
     // stopping, or press Stop ends the shell's front conversation instead of
     // the one on screen.
     setKeepLogins: (on, where) => api.setKeepLogins(on, where),
+    setComputerUse: (use) => api.setComputerUse(use),
+    computerStatus: () => api.computerStatus(),
+    openComputerSettings: (which) => api.openComputerSettings(which),
     stop: (where) => api.stop(where),
     waitForMe: (on, where) => api.waitForMe(on, where),
     steer: (text, where) => api.steer(text, where),

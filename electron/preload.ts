@@ -44,6 +44,8 @@ import {
   type OpenedProject,
   type Overview,
   type WorktreePlan,
+  type ExtensionRequest,
+  type ExtensionAnswer,
   type InStep,
   type Page,
   type PointedAt,
@@ -789,6 +791,29 @@ const api: GrapheApi = {
       wanted,
       named(where),
     ) as Promise<Result<OpenedProject>>;
+  },
+
+  onExtensionAsk(listener: (ask: ExtensionRequest) => void): () => void {
+    const forward = (_event: IpcRendererEvent, ask: ExtensionRequest): void => {
+      listener(ask);
+    };
+    ipcRenderer.on(CHANNEL.extensionAsk, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.extensionAsk, forward);
+    };
+  },
+
+  answerExtension(
+    requestId: string,
+    answer: ExtensionAnswer,
+    where?: Where,
+  ): Promise<Result<null>> {
+    if (typeof requestId !== 'string' || requestId === '') {
+      return Promise.resolve(refuse<null>('That question is no longer waiting.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.extensionAnswer, requestId, answer, named(where)) as Promise<
+      Result<null>
+    >;
   },
 
   worktreePlan(where?: Where): Promise<Result<WorktreePlan>> {

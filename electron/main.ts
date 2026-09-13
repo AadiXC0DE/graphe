@@ -129,6 +129,8 @@ import {
   type ModelChoice,
   type OpenedProject,
   type WorktreePlan,
+  type ExtensionAnswer,
+  type ExtensionAsk,
   type WentOnline,
   type Overview,
   type RepoOverview,
@@ -4983,6 +4985,9 @@ async function startConversationUnlocked(
       projectRoot: checkout?.folder ?? open.path,
       guard: { computerUse: await computerUseFacts() },
       onEvent: forwardTo(open.path, held, from),
+      // What an add-on asks goes to the window that is watching this
+      // conversation, and nowhere else.
+      ask: askTheWindowFor(open, from),
       // Restore points must describe the tree this session is actually changing.
       timeline:
         checkout === null
@@ -5714,6 +5719,100 @@ async function sendOnTheirBehalf(project: string, address: string, text: string)
  *  line they read as something somebody typed and is waiting for, and they are
  *  neither. */
 const ours = new Map<string, readonly string[]>();
+
+/** An answer off the wire, or null when it is not one. */
+function readAnswer(value: unknown): ExtensionAnswer | null {
+  const one = value as { kind?: unknown; value?: unknown } | null;
+  if (one === null || typeof one !== 'object') return null;
+  if (one.kind === 'confirm') return { kind: 'confirm', value: one.value === true };
+  if (one.kind === 'select' || one.kind === 'input' || one.kind === 'editor') {
+    const text = typeof one.value === 'string' ? one.value : null;
+    return { kind: one.kind, value: text };
+  }
+  return null;
+}
+
+/**
+ * Questions add-ons have asked, waiting for an answer.
+ *
+ * Keyed by a request id that only ever goes up, so an answer that arrives twice
+ * settles once and an answer to a question that has gone comes back harmless
+ * rather than granting something. A stop, a close or a window going away
+ * settles what is left as cancelled: nothing is ever left waiting for a screen
+ * that is not there.
+ */
+const addonAsks = new Map<
+  string,
+  { settle: (answer: ExtensionAnswer) => void; where: Where }
+>();
+
+let addonAsksSoFar = 0;
+
+/** The answer an add-on gets when its question cannot be put to anybody. */
+function nothingToAsk(ask: ExtensionAsk): ExtensionAnswer {
+  if (ask.kind === 'confirm') return { kind: 'confirm', value: false };
+  if (ask.kind === 'select') return { kind: 'select', value: null };
+  if (ask.kind === 'editor') return { kind: 'editor', value: null };
+  return { kind: 'input', value: null };
+}
+
+/** Settle every question that belongs to a conversation, as cancelled. Used
+ *  when its run stops and when the project closes. */
+function withdrawAsks(where: Where): void {
+  for (const [id, one] of [...addonAsks]) {
+    if (where.project !== undefined && one.where.project !== where.project) continue;
+    if (where.conversation !== undefined && one.where.conversation !== where.conversation) continue;
+    addonAsks.delete(id);
+    one.settle({ kind: 'confirm', value: false });
+  }
+}
+
+/**
+ * Put an add-on's question to the window and wait for the answer.
+ *
+ * The window is the only thing that can answer: with none, or with a request
+ * the window never answers, the result is a cancellation in the shape of the
+ * question. A timeout the add-on asked for is honoured here rather than trusted
+ * to the renderer.
+ */
+function askTheWindowFor(
+  open: { path: string },
+  from: Speaking,
+): (ask: ExtensionAsk) => Promise<ExtensionAnswer> {
+  return (ask: ExtensionAsk) =>
+    new Promise<ExtensionAnswer>((resolve) => {
+      const win = mainWindow;
+      if (win === null || win.isDestroyed()) {
+        resolve(nothingToAsk(ask));
+        return;
+      }
+      addonAsksSoFar += 1;
+      const requestId = `addon-${String(addonAsksSoFar)}`;
+      const where: Where = {
+        project: open.path,
+        ...(from.address === null ? {} : { conversation: from.address }),
+      };
+      let bell: ReturnType<typeof setTimeout> | undefined;
+      const settle = (answer: ExtensionAnswer): void => {
+        if (!addonAsks.has(requestId)) return;
+        addonAsks.delete(requestId);
+        if (bell !== undefined) clearTimeout(bell);
+        resolve(answer);
+      };
+      addonAsks.set(requestId, { settle, where });
+      const patience = ask.kind === 'editor' ? null : ask.timeoutMs;
+      if (patience !== null) {
+        bell = setTimeout(() => settle(nothingToAsk(ask)), patience);
+        (bell as unknown as { unref?: () => void }).unref?.();
+      }
+      win.webContents.send(CHANNEL.extensionAsk, {
+        ...ask,
+        requestId,
+        project: open.path,
+        conversation: from.address,
+      });
+    });
+}
 
 /**
  * One run per folder.
@@ -9287,6 +9386,33 @@ function register(): void {
   });
 
   /**
+   * The answer to something an add-on asked.
+   *
+   * Answered once: a second press, a press after Stop, or an answer to a
+   * question that has already gone comes back as "no longer waiting" rather
+   * than as a second answer. The shape is checked here because the renderer is
+   * not trusted with it, and an answer of the wrong shape is dropped.
+   */
+  handle<null>(CHANNEL.extensionAnswer, (_event, args) => {
+    const [requestId, answer] = args;
+    if (typeof requestId !== 'string' || requestId === '') return Promise.resolve(fail(NOTHING_OPEN));
+    const waiting = addonAsks.get(requestId);
+    if (waiting === undefined) {
+      return Promise.resolve(
+        fail({
+          what: 'That question is no longer waiting.',
+          because: 'It was answered already, or the run it belonged to has stopped.',
+          actionLabel: 'Got it',
+        }),
+      );
+    }
+    const settled = readAnswer(answer);
+    if (settled === null) return Promise.resolve(fail(NOTHING_OPEN));
+    waiting.settle(settled);
+    return Promise.resolve(done(null));
+  });
+
+  /**
    * What a New worktree would make, before anybody commits to it.
    *
    * Read only: no folder, no branch and no counter is spent, so asking twice
@@ -9327,6 +9453,7 @@ function register(): void {
     if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
     const found = conversationAt(open.held, where);
     if (found === null) return Promise.resolve(done(null));
+    withdrawAsks(where);
     // Put the copy away before the session goes, while it can still be asked
     // what it was written down as.
     const away = putAwayCheckoutAt(open.path, open.held, found.path);
@@ -11271,6 +11398,10 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return done(null);
+    // An add-on waiting on a person is waiting on a run that is over. Its
+    // question is settled as cancelled rather than left hanging on a screen
+    // that has moved on.
+    withdrawAsks(where);
     // A check running in a copy is nobody's conversation, so Stop used to reach
     // past it to the conversation behind and leave the thing actually running.
     await open.held.checking?.stop();

@@ -262,6 +262,26 @@ export async function probe(path: string): Promise<CapabilityCard | null> {
   return cardFrom(taken());
 }
 
+/**
+ * What each of these extensions will do, skipping the ones we may not run.
+ *
+ * A card is only ever read from code somebody has already said yes to. The
+ * whole point of the permission is that reading one means importing the file
+ * and calling its factory, which is running it: an untrusted extension gets
+ * `null` here, which the policy treats as unknown rather than as harmless.
+ */
+export async function cardsFor(
+  paths: readonly string[],
+  cacheDir: string,
+  mayRun: (path: string) => boolean,
+): Promise<Map<string, CapabilityCard | null>> {
+  const cards = new Map<string, CapabilityCard | null>();
+  for (const where of paths) {
+    cards.set(where, mayRun(where) ? await cachedProbe(where, cacheDir).catch(() => null) : null);
+  }
+  return cards;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Remembering                                                                 */
 /* -------------------------------------------------------------------------- */

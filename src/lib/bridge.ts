@@ -1667,6 +1667,22 @@ let previewPlanMode = false;
       );
     },
 
+    onExtensionAsk(): () => void {
+      // A browser tab has nothing to ask on behalf of: no extensions load here.
+      return () => undefined;
+    },
+
+    answerExtension(): Promise<Result<null>> {
+      return Promise.resolve({
+        ok: false,
+        trouble: {
+          what: 'There is nothing here to answer.',
+          because: 'This is Graphe in a browser tab, and a browser tab loads no add-ons.',
+          actionLabel: 'Got it',
+        },
+      });
+    },
+
     worktreePlan(): Promise<Result<WorktreePlan>> {
       const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
       return Promise.resolve(
@@ -2589,6 +2605,8 @@ function connect(): Bridge {
     conversations: (where) => api.conversations(where),
     openConversation: (path, workspace, where) => api.openConversation(path, workspace, where),
     worktreePlan: (where) => api.worktreePlan(where),
+    onExtensionAsk: (listener) => api.onExtensionAsk(listener),
+    answerExtension: (requestId, answer, where) => api.answerExtension(requestId, answer, where),
     worktreeNew: (wanted, where) => api.worktreeNew(wanted, where),
     deleteConversation: (path, where) =>
       api.deleteConversation?.(path, where) ?? Promise.resolve(done([])),

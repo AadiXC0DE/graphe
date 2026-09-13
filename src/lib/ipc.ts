@@ -1,3 +1,6 @@
+import type { ExtensionAnswer, ExtensionAsk } from './extension-ask';
+
+export type { ExtensionAnswer, ExtensionAsk };
 /** The contract between the desktop shell and the window it draws.
  *
  * Both sides import this file and nothing else in common. It is deliberately
@@ -154,6 +157,20 @@ export function whereIn(args: readonly unknown[]): Where {
  * read, so somebody can see where the copy would go and what it would start
  * from before anything is made.
  */
+/**
+ * A question an add-on asked, on its way to the window.
+ *
+ * The id is the window's to answer by, and is unique for the length of the
+ * app's life: a double press, an answer that arrives after Stop, or a stale
+ * answer to a request that was already settled all come back harmless rather
+ * than granting something nobody asked for.
+ */
+export type ExtensionRequest = ExtensionAsk & {
+  requestId: string;
+  project: string;
+  conversation: string | null;
+};
+
 export type WorktreePlan = {
   /** False in a folder that is not a repository, or that has nothing committed
    *  yet. `because` says which. */
@@ -1513,6 +1530,8 @@ export const CHANNEL = {
   checkoutPutAway: 'graphe:checkout-put-away',
   prWorktreePrepare: 'graphe:pr-worktree-prepare',
   worktreePlan: 'graphe:worktree-plan',
+  extensionAsk: 'graphe:extension-ask',
+  extensionAnswer: 'graphe:extension-answer',
   worktreeNew: 'graphe:worktree-new',
   prReviewOpen: 'graphe:pr-review-open',
   reviewQueue: 'graphe:review-queue',
@@ -1946,6 +1965,14 @@ export type GrapheApi = {
   ): Promise<Result<OpenedProject>>;
   /** What a New worktree would make, before anybody commits to it. */
   worktreePlan(where?: Where): Promise<Result<WorktreePlan>>;
+  /** Something an add-on is asking. Answered through `answerExtension`, and
+   *  with `extensionAnswer` in the shape its own question has. */
+  onExtensionAsk(listener: (ask: ExtensionRequest) => void): () => void;
+  answerExtension(
+    requestId: string,
+    answer: ExtensionAnswer,
+    where?: Where,
+  ): Promise<Result<null>>;
   /** Make the copy, and start a conversation in it. A context handoff from
    *  another conversation is a separate, explicit action. */
   worktreeNew(wanted: { base?: string | null }, where?: Where): Promise<Result<OpenedProject>>;

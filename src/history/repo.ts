@@ -333,7 +333,7 @@ async function checkpointRefFor(root: string): Promise<string> {
     const pointed = (await readFile(dot, 'utf8')).replace(/^gitdir:[ \t]*/, '').trim();
     const name = path.basename(pointed);
     if (name === '' || name === '.' || name === '..') return CHECKPOINTS_REF;
-    const readable = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.\-]+/, '');
+    const readable = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+/, '');
     const tag = createHash('sha1').update(pointed).digest('hex').slice(0, 8);
     return `${COPIES_REF}/${readable === '' ? 'copy' : readable}-${tag}`;
   } catch {

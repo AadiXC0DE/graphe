@@ -158,6 +158,7 @@ import {
   type StorageNow,
   type ThinkingLevel,
   type Trouble,
+  type ExtensionRequest as AddonAskRequest,
   type Where,
   type HowItLands,
   type ReviewDecided,
@@ -227,6 +228,7 @@ const CanvasView = lazy(() => import("./components/CanvasView"));
 const HistoryView = lazy(() => import("./components/HistoryView"));
 const AddMore = lazy(() => import("./components/AddMore"));
 const NewWorktree = lazy(() => import("./components/NewWorktree"));
+const AddonAsk = lazy(() => import("./components/ExtensionRequest"));
 const Gallery = lazy(() => import("./gallery/Gallery"));
 const ConnectModal = lazy(() => import("./components/ConnectModal"));
 const HelpersView = lazy(() => import("./components/HelpersView"));
@@ -328,11 +330,12 @@ let viewsWarm = false;
 let warming: Promise<void> | null = null;
 function warmViews(): Promise<void> {
   warming ??= Promise.all(VIEWS.slice(0, WARM_FIRST).map((load) => load()))
+    .then(() => undefined)
     // A chunk that fails to arrive is not a reason to keep a rejected promise
     // forever: the next press tries again. Uncaught, it also became an
     // unhandled rejection with nothing on screen to explain it.
     .catch(() => undefined);
-  return warming;
+  return warming ?? Promise.resolve();
 }
 
 /** Every screen's code, for the press that needs something not fetched yet. */
@@ -343,7 +346,7 @@ function fetchAllViews(): Promise<void> {
       viewsWarm = true;
     })
     .catch(() => undefined);
-  return fetchingAll;
+  return fetchingAll ?? Promise.resolve();
 }
 
 export default function App() {
@@ -608,6 +611,8 @@ function Conversation() {
   const [addMore, setAddMore] = useState(false);
   /** The New worktree card, which is the one deliberate way to make a copy. */
   const [worktreeOpen, setWorktreeOpen] = useState(false);
+  /** Something an add-on is waiting on an answer to. Null when nothing is. */
+  const [addonAsk, setAddonAsk] = useState<AddonAskRequest | null>(null);
   const [packs, setPacks] = useState<readonly Pack[]>([]);
   const packsNow = useRef<readonly Pack[]>([]);
   packsNow.current = packs;
@@ -3079,6 +3084,7 @@ function Conversation() {
       connectedOpen ||
       addMore ||
       worktreeOpen ||
+      addonAsk !== null ||
       paletteOpen ||
       graphOpen ||
       reviewsOpen ||
@@ -3255,6 +3261,8 @@ function Conversation() {
     asking,
     helpersAt,
     designAt,
+    addonAsk,
+    worktreeOpen,
   ]);
 
   /* ----------------------------------------------------------------- saying */
@@ -4894,6 +4902,15 @@ function Conversation() {
 
   /* The checklist, while the reply is still going. The model ticks its own
      items off now, so this is the only thing that shows it moving. */
+  /* An add-on's question, put where the person can see it. Answered once, and
+     the answer goes straight back to whatever is waiting on it. */
+  useEffect(() => {
+    const stop = bridge.onExtensionAsk((ask) => {
+      setAddonAsk(ask);
+    });
+    return stop;
+  }, []);
+
   useEffect(() => {
     const stopPlan = bridge.onBuildPlan((notice) => {
       setBuildPlan(notice.plan === null ? null : { path: notice.project, plan: notice.plan });
@@ -6764,6 +6781,22 @@ function Conversation() {
           onLimit={setLimit}
         />
       ) : null}
+
+      {addonAsk === null ? null : (
+        <Suspense fallback={null}>
+          <AddonAsk
+            request={addonAsk}
+            onAnswer={(answer) => {
+              const asking = addonAsk;
+              setAddonAsk(null);
+              void bridge.answerExtension(asking.requestId, answer, {
+                project: asking.project,
+                ...(asking.conversation === null ? {} : { conversation: asking.conversation }),
+              });
+            }}
+          />
+        </Suspense>
+      )}
 
       {worktreeOpen ? (
         <Suspense fallback={null}>

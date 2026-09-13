@@ -1,0 +1,47 @@
+# Phase 8 handoff: the desktop shell and the retired designer workflows
+
+Findings: U01 done, U02 partly, U03 open, U04 open, U05 not verified. This phase
+requires visual inspection; none was possible (see "No visual evidence").
+
+## Done
+
+**U01, the tab strip.** `tabs.slice(0, 3)` was the whole of the old behaviour:
+the fourth conversation was unreachable and the selected tab could be absent from
+the row.
+
+- Every tab is rendered. The strip scrolls horizontally, the width follows the
+  real tab count, and the selected tab is scrolled into view with
+  `block: 'nearest', inline: 'nearest'` when it changes. The overflow menu is
+  driven by measured clipping rather than a count, so it lists only what has
+  actually scrolled away.
+- U02, partly: roving tabindex (one tab stop, Tab leaves the strip), Arrow keys,
+  Home/End, Alt+Arrow for the keyboard equivalent of drag reorder, and focus that
+  returns to a neighbour after a close. Close controls are reachable and visible
+  on keyboard focus. Accessible names carry the project when two titles collide.
+- Evidence: `tests/tab-strip.test.ts` (11 jsdom tests, including 20 tabs
+  rendered, the selected state, the width following the count, Arrow/Home/End
+  calling `onOpen` with the expected tab, and `scrollIntoView` called with the
+  documented options). `tests/tab-order.test.ts` still passes unchanged.
+
+**The one place a copy is made** is a real card now: click the new-worktree
+button beside New conversation, read where it would go and what would not come
+with it, then press. That is 8.1's "isolation is visible before the first send".
+
+## Not done
+
+| Item | Note |
+| --- | --- |
+| The retirement table in 8.2 | Nothing was removed. Design, Canvas, Styles, colour and font pickers, the design-QA panels, Figma following, variations, Board/Away, SeeFirst/Landing, held-back changes, the evidence reel and the publish wrappers are all still in the build. This is the largest single piece of the plan left, and doing it badly (deleting a shared file, or removing a UI without an export path for what it holds) is worse than leaving it for a change that can be reviewed on its own |
+| U03, the navigation model | Not started |
+| U04, preview ownership | Not started |
+| U05, the 620x520 layout matrix | Not run |
+| Composer polish (8.4) | Untouched: IME, paste limits, message selection while streaming, failed highlighting fallbacks |
+| `CLAUDE.md` product guidance | Not edited. The file is untracked in this repository (`CLAUDE.md` is in `.gitignore`), so an edit would not reach the pull request. The plan's instruction to update its "worktree only under Show me" and designer-first guidance is therefore recorded here rather than done |
+
+## No visual evidence
+
+The audit that produced this plan could not drive a browser; neither could this
+work. Every claim above is from source, component tests and typechecking. No
+screenshot, no keyboard walkthrough, no screen-reader pass and no zoom matrix was
+performed, so the phase 8 exit criteria ("visual matrix has screenshots and
+recorded interaction results") are not met.

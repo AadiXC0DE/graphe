@@ -91,9 +91,21 @@ import { parseReview } from './review';
 import { askWords, cannotAsk, saysAnswers, tidyQuestions, type Answers } from '../asking';
 import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
 import { maskToolResult } from './redact';
-import { cachedProbe, extensionPathsIn, saysCard, type CapabilityCard } from './extension-probe';
+import {
+  cardsFor,
+  extensionPathsIn,
+  saysCard,
+  type CapabilityCard,
+} from './extension-probe';
 
 import { recentOverruns, withHookBudget, type Overrun } from './hook-budget';
+import {
+  dialogsOver,
+  unsupportedTerminal,
+  type AskTheWindow,
+  type ExtensionAnswer,
+  type ExtensionAsk,
+} from './extension-ui';
 import {
   dropsEntirely,
   dropsLifecycleHooks,
@@ -699,6 +711,14 @@ export type CreateSessionOptions = {
   /** Tick one thing off the checklist the person can see. */
   stepMoved?: StepMoved;
   /**
+   * Ask the person something an add-on asked for.
+   *
+   * Left out, every question is cancelled rather than answered. That is the
+   * honest default and it is never a made-up yes: an add-on that carries on as
+   * though somebody agreed is the failure this exists to prevent.
+   */
+  ask?: AskTheWindow;
+  /**
    * Graphe's own standing block, asked for at the top of every model call.
    *
    * A function rather than a string: the checklist moves during a turn, and a
@@ -1271,6 +1291,15 @@ export async function connection(
     });
   }
   return summaries;
+}
+
+/** The answer an add-on gets when there is nobody to ask: cancelled, in the
+ *  shape its own question has. Never a made-up yes. */
+function cancelledLike(ask: ExtensionAsk): ExtensionAnswer {
+  if (ask.kind === 'confirm') return { kind: 'confirm', value: false };
+  if (ask.kind === 'select') return { kind: 'select', value: null };
+  if (ask.kind === 'editor') return { kind: 'editor', value: null };
+  return { kind: 'input', value: null };
 }
 
 /** One extension that came down with the folder somebody opened. */
@@ -2240,11 +2269,12 @@ const MOST_AFTER_SAYINGS = 3;
   const leftOut: { where: string; policy: Policy; card: CapabilityCard | null }[] = [];
   const cardsFolder = join(agentDir, 'graphe-extension-cards');
   const mayProbe = probePermitted(options.projectRoot, options.trusts ?? (() => false));
-  for (const where of await extensionPathsIn(agentDir, options.projectRoot)) {
-    // Nothing in a folder is run to find out what it does until somebody has
-    // said yes to that exact source. Untrusted and unread are the same card
-    // here: unknown, which the policy already treats as the risky case.
-    cards.set(where, mayProbe(where) ? await cachedProbe(where, cardsFolder).catch(() => null) : null);
+  for (const [where, card] of await cardsFor(
+    await extensionPathsIn(agentDir, options.projectRoot),
+    cardsFolder,
+    mayProbe,
+  )) {
+    cards.set(where, card);
   }
   const agentsPrompt = agentsMdNote === null ? [] : [`<agents_md>\n${agentsMdNote}\n</agents_md>`];
   const allNotes = [...(options.contextNotes ?? []), ...agentsPrompt];
@@ -2733,6 +2763,107 @@ const MOST_AFTER_SAYINGS = 3;
     // Overwhelmingly this is "no model is set up yet". The app owns sign-in;
     // all we can do is say so without a stack trace.
     throw new AdapterError('I am not set up to work yet.', { cause });
+  }
+
+  /* Pi's extension UI, bound before the first prompt.
+   *
+   * Graphe never bound one. Pi's default interface selects nothing, declines
+   * every confirmation and drops notifications, so an installed add-on that
+   * asked a question carried on with an answer nobody gave — while the person
+   * never saw the question. The dialog half is real here; the half that is a
+   * terminal says so out loud. */
+  const sayUnsupported = (kind: string, method: string): void => {
+    options.onEvent({
+      type: 'notice',
+      what:
+        kind === 'terminal'
+          ? `An add-on asked for ${method}, which needs a terminal window. Nothing was drawn for it, and it was told so.`
+          : `An add-on asked for something this window could not do: ${method}.`,
+    });
+  };
+  const dialogs = dialogsOver(
+    options.ask ?? (async (ask: ExtensionAsk) => cancelledLike(ask)),
+  );
+  const terminal = unsupportedTerminal(sayUnsupported);
+  try {
+    await session.bindExtensions({
+      uiContext: {
+        select: dialogs.select,
+        confirm: dialogs.confirm,
+        input: dialogs.input,
+        editor: dialogs.editor,
+        notify: (message: string, type?: 'info' | 'warning' | 'error') => {
+          // Never dropped, and never dressed up: a warning is drawn as a
+          // warning, and the add-on's own words are what is said.
+          options.onEvent({
+            type: 'notice',
+            what: type === 'error' || type === 'warning' ? `${type}: ${message}` : message,
+          });
+        },
+        // A status line is a terminal's footer. There is no footer here, so it
+        // is recorded and said once rather than invented into some corner of
+        // the window that would then be showing something nobody put there.
+        setStatus: () => terminal.note('setStatus'),
+        setWorkingMessage: () => undefined,
+        setWorkingVisible: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setTitle: () => undefined,
+        // Terminal-only, and said so rather than silently succeeding.
+        onTerminalInput: () => {
+          terminal.note('onTerminalInput');
+          return () => undefined;
+        },
+        setWidget: () => terminal.note('setWidget'),
+        setFooter: () => terminal.note('setFooter'),
+        setHeader: () => terminal.note('setHeader'),
+        custom: () => terminal.fail('custom'),
+        pasteToEditor: () => terminal.note('pasteToEditor'),
+        setEditorText: () => terminal.note('setEditorText'),
+        getEditorText: () => {
+          terminal.note('getEditorText');
+          return '';
+        },
+        addAutocompleteProvider: () => terminal.note('addAutocompleteProvider'),
+        setEditorComponent: () => terminal.note('setEditorComponent'),
+        getEditorComponent: () => {
+          terminal.note('getEditorComponent');
+          return undefined;
+        },
+        get theme() {
+          return terminal.theme();
+        },
+        getAllThemes: () => {
+          terminal.note('getAllThemes');
+          return [];
+        },
+        getTheme: () => {
+          terminal.note('getTheme');
+          return undefined;
+        },
+        setTheme: () => {
+          terminal.note('setTheme');
+          return { success: false, error: 'this window has no terminal theme' };
+        },
+        getToolsExpanded: () => false,
+        setToolsExpanded: () => terminal.note('setToolsExpanded'),
+      },
+      mode: 'rpc',
+      // An add-on that falls over is reported rather than swallowed: the
+      // person sees which one, and the run carries on without it.
+      onError: (failure: { extensionPath?: string; event?: string; error?: string }) => {
+        options.onEvent({
+          type: 'notice',
+          what: `An add-on failed during ${failure.event ?? 'a step'}: ${failure.error ?? 'it did not say why'}`,
+        });
+      },
+    });
+  } catch (cause) {
+    // No UI is worse than no add-on; the conversation works either way.
+    options.onEvent({
+      type: 'notice',
+      what: `Add-ons could not be given a way to ask questions here: ${cause instanceof Error ? cause.message : String(cause)}`,
+    });
   }
 
   running = session;

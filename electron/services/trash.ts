@@ -4,7 +4,7 @@
  * the only copy of what was said, so it is moved somewhere it can be fetched
  * back from by hand rather than unlinked. Nothing here empties itself: throwing
  * old ones away is a storage decision somebody should be shown before it
- * happens, and that is a separate thing to build (plan 4.6).
+ * happens, and that is a separate thing to build.
  */
 
 import { mkdir, rename, rm } from 'node:fs/promises';

@@ -9,14 +9,14 @@ what we depend on and why lives in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.
 Graphe is not a fork of any of these projects. We depend on them as published packages and have
 not modified their source. Their names and marks belong to their respective owners.
 
-462 packages, generated 2026-09-04 from package-lock.json ecd5ed2154f0d88e.
+466 packages, generated 2026-09-13 from package-lock.json 3c5710221c1c5f2b.
 
 ## Summary
 
 | Package | Version | Licence |
 | --- | --- | --- |
 | [@antfu/install-pkg](https://github.com/antfu/install-pkg#readme) | 1.1.0 | MIT |
-| [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | 0.91.1 | MIT |
+| [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | 0.123.0 | MIT |
 | [@aws-crypto/crc32](https://github.com/aws/aws-sdk-js-crypto-helpers/tree/master/packages/crc32) | 5.2.0 | Apache-2.0 |
 | [@aws-crypto/sha256-browser](https://github.com/aws/aws-sdk-js-crypto-helpers/tree/master/packages/sha256-browser) | 5.2.0 | Apache-2.0 |
 | [@aws-crypto/sha256-js](https://github.com/aws/aws-sdk-js-crypto-helpers/tree/master/packages/sha256-js) | 5.2.0 | Apache-2.0 |
@@ -45,13 +45,13 @@ not modified their source. Their names and marks belong to their respective owne
 | [@babel/runtime](https://babel.dev/docs/en/next/babel-runtime) | 7.29.2 | MIT |
 | [@braintree/sanitize-url](https://github.com/braintree/sanitize-url#readme) | 7.1.2 | MIT |
 | [@chevrotain/types](https://chevrotain.io/documentation/) | 11.1.2 | Apache-2.0 |
-| [@earendil-works/pi-agent-core](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-ai](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-client](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-protocol](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-telemetry](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-tui](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
+| [@earendil-works/chord](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-agent-core](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-ai](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-telemetry](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-tui](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@esbuild/darwin-arm64](https://github.com/evanw/esbuild) | 0.28.1 | MIT |
 | [@google/genai](https://github.com/googleapis/js-genai#readme) | 1.52.0 | Apache-2.0 |
 | [@hono/node-server](https://github.com/honojs/node-server) | 2.1.1 | MIT |
 | [@huggingface/jinja](https://github.com/huggingface/huggingface.js) | 0.5.9 | MIT |
@@ -96,6 +96,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [@smithy/types](https://github.com/smithy-lang/smithy-typescript/tree/main/packages/types) | 4.14.2 | Apache-2.0 |
 | [@smithy/util-buffer-from](https://github.com/awslabs/smithy-typescript/tree/main/packages/util-buffer-from) | 2.2.0 | Apache-2.0 |
 | [@smithy/util-utf8](https://github.com/awslabs/smithy-typescript/tree/main/packages/util-utf8) | 2.3.0 | Apache-2.0 |
+| [@stablelib/base64](https://github.com/StableLib/stablelib/tree/master/packages/base64) | 1.0.1 | MIT |
 | [@types/d3](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3) | 7.4.3 | MIT |
 | [@types/d3-array](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-array) | 3.2.2 | MIT |
 | [@types/d3-axis](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-axis) | 3.0.6 | MIT |
@@ -244,6 +245,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [es-object-atoms](https://github.com/ljharb/es-object-atoms#readme) | 1.1.2 | MIT |
 | [es-toolkit](https://es-toolkit.dev) | 1.50.0 | MIT |
 | [es6-error](https://github.com/bjyoungblood/es6-error) | 4.1.1 | MIT |
+| [esbuild](https://github.com/evanw/esbuild) | 0.28.1 | MIT |
 | [escape-html](https://github.com/component/escape-html) | 1.0.3 | MIT |
 | [escape-string-regexp](https://github.com/sindresorhus/escape-string-regexp) | 4.0.0 | MIT |
 | [etag](https://github.com/jshttp/etag) | 1.8.1 | MIT |
@@ -253,6 +255,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [express-rate-limit](https://github.com/express-rate-limit/express-rate-limit) | 8.6.2 | MIT |
 | [extend](https://github.com/justmoon/node-extend) | 3.0.2 | MIT |
 | [fast-deep-equal](https://github.com/epoberezkin/fast-deep-equal#readme) | 3.1.3 | MIT |
+| [fast-sha256](https://github.com/dchest/fast-sha256-js) | 1.3.0 | Unlicense |
 | [fast-uri](https://github.com/fastify/fast-uri) | 3.1.5 | BSD-3-Clause |
 | [fast-xml-builder](https://github.com/NaturalIntelligence/fast-xml-builder) | 1.2.0 | MIT |
 | [fast-xml-parser](https://github.com/NaturalIntelligence/fast-xml-parser) | 5.7.3 | MIT |
@@ -430,6 +433,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [space-separated-tokens](https://github.com/wooorm/space-separated-tokens) | 2.0.2 | MIT |
 | [sprintf-js](https://github.com/alexei/sprintf.js) | 1.1.3 | BSD-3-Clause |
 | [sql.js](http://github.com/sql-js/sql.js) | 1.14.2 | MIT |
+| [standardwebhooks](https://github.com/standard-webhooks/standard-webhooks/tree/main/libraries/javascript) | 1.1.1 | MIT |
 | [statuses](https://github.com/jshttp/statuses) | 2.0.2 | MIT |
 | [string_decoder](https://github.com/nodejs/string_decoder) | 1.3.0 | MIT |
 | [string-width](https://github.com/sindresorhus/string-width) | 4.2.3 | MIT |
@@ -483,6 +487,31 @@ not modified their source. Their names and marks belong to their respective owne
 Optional dependencies for other platforms. They are not in this build, so nothing of theirs
 is redistributed by it — listed only so the absence is deliberate rather than a gap.
 
+- `@esbuild/aix-ppc64`
+- `@esbuild/android-arm`
+- `@esbuild/android-arm64`
+- `@esbuild/android-x64`
+- `@esbuild/darwin-x64`
+- `@esbuild/freebsd-arm64`
+- `@esbuild/freebsd-x64`
+- `@esbuild/linux-arm`
+- `@esbuild/linux-arm64`
+- `@esbuild/linux-ia32`
+- `@esbuild/linux-loong64`
+- `@esbuild/linux-mips64el`
+- `@esbuild/linux-ppc64`
+- `@esbuild/linux-riscv64`
+- `@esbuild/linux-s390x`
+- `@esbuild/linux-x64`
+- `@esbuild/netbsd-arm64`
+- `@esbuild/netbsd-x64`
+- `@esbuild/openbsd-arm64`
+- `@esbuild/openbsd-x64`
+- `@esbuild/openharmony-arm64`
+- `@esbuild/sunos-x64`
+- `@esbuild/win32-arm64`
+- `@esbuild/win32-ia32`
+- `@esbuild/win32-x64`
 - `@img/sharp-darwin-x64`
 - `@img/sharp-libvips-darwin-x64`
 - `@img/sharp-libvips-linux-arm`
@@ -526,7 +555,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @anthropic-ai/sdk 0.91.1
+### @anthropic-ai/sdk 0.123.0
 
 <https://github.com/anthropics/anthropic-sdk-typescript>
 
@@ -813,7 +842,7 @@ Licence: Apache-2.0
 [object Object]
 ```
 
-### @earendil-works/pi-agent-core 0.84.3
+### @earendil-works/chord 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -822,7 +851,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-ai 0.84.3
+### @earendil-works/pi-agent-core 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -831,7 +860,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-client 0.84.3
+### @earendil-works/pi-ai 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -840,7 +869,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-coding-agent 0.84.3
+### @earendil-works/pi-coding-agent 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -849,7 +878,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-protocol 0.84.3
+### @earendil-works/pi-telemetry 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -858,7 +887,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-telemetry 0.84.3
+### @earendil-works/pi-tui 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -867,9 +896,9 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-tui 0.84.3
+### @esbuild/darwin-arm64 0.28.1
 
-<https://github.com/earendil-works/pi>
+<https://github.com/evanw/esbuild>
 
 Licence: MIT
 
@@ -1306,6 +1335,16 @@ Licence: Apache-2.0
 <https://github.com/awslabs/smithy-typescript/tree/main/packages/util-utf8>
 
 Licence: Apache-2.0
+
+```
+[object Object]
+```
+
+### @stablelib/base64 1.0.1
+
+<https://github.com/StableLib/stablelib/tree/master/packages/base64>
+
+Licence: MIT
 
 ```
 [object Object]
@@ -2794,6 +2833,16 @@ Licence: MIT
 [object Object]
 ```
 
+### esbuild 0.28.1
+
+<https://github.com/evanw/esbuild>
+
+Licence: MIT
+
+```
+[object Object]
+```
+
 ### escape-html 1.0.3
 
 <https://github.com/component/escape-html>
@@ -2879,6 +2928,16 @@ Licence: MIT
 <https://github.com/epoberezkin/fast-deep-equal#readme>
 
 Licence: MIT
+
+```
+[object Object]
+```
+
+### fast-sha256 1.3.0
+
+<https://github.com/dchest/fast-sha256-js>
+
+Licence: Unlicense
 
 ```
 [object Object]
@@ -4639,6 +4698,15 @@ Licence: MIT
 ```
 [object Object]
 ```
+
+### standardwebhooks 1.1.1
+
+<https://github.com/standard-webhooks/standard-webhooks/tree/main/libraries/javascript>
+
+Licence: MIT
+
+> No licence file is published in this package. The declared licence above is the whole
+> of what its author provided.
 
 ### statuses 2.0.2
 

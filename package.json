@@ -51,7 +51,7 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.3",
+    "@earendil-works/pi-coding-agent": "0.85.1",
     "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "glob": "^7.2.3",

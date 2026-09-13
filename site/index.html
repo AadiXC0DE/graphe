@@ -1140,13 +1140,12 @@
             </span>
           </li>
           <li>
-            <b>rename</b>
+            <b>text search</b>
             <span>
-              A word-boundary sweep of the project rather than a language server, and it says so:
-              it lists every line it would change before it changes one, and refuses a name under
-              three characters. Lock files, minified bundles, binaries and anything holding
-              credentials are skipped, a file that moved while it was working is left alone, and a
-              restore point is written before the first byte.
+              A word-boundary sweep of the project's files rather than a language server, and it
+              says so: every match comes back with its file and line number, and a word that also
+              appears in a comment is counted. Dependencies, build output, binaries and anything
+              holding credentials are never read.
             </span>
           </li>
           <li>

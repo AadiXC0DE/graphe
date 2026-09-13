@@ -82,7 +82,7 @@ import { namedAs, readConversations, type Conversation } from './conversations';
 import { PORTS_HELD as PORTS } from '../../work/ports';
 import { browserFolder, closeBrowser } from './computer';
 import { grapheTools, memoryTools, readDiffTool, debugTools, newDebugRegistry, runningTools, type ChecksNoted, type PutOnBoard, type StepMoved, type CancelBuild, type MakeChecklist, type HelperModel, type HelperPace } from './tools';
-import { lspTool } from './lsp';
+import { searchSymbolsTextTool } from './search-symbols-text';
 import { whatWasChecked } from './checks';
 import { anchorEditTool, taggedReadTool } from './anchor-edit';
 import * as debug from './debug';
@@ -93,7 +93,7 @@ import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
 import { maskToolResult } from './redact';
 import { cachedProbe, extensionPathsIn, saysCard, type CapabilityCard } from './extension-probe';
 
-import { recentOverruns, withHookBudget } from './hook-budget';
+import { recentOverruns, withHookBudget, type Overrun } from './hook-budget';
 import {
   dropsEntirely,
   dropsLifecycleHooks,
@@ -873,8 +873,10 @@ export type GrapheSession = {
     runsBackgroundWork: boolean;
     rewritesSystemPrompt: boolean;
   }[];
-  /** Lifecycle handlers that ran past their budget, for the diagnostics. */
-  readonly hookOverruns: readonly { extension: string; event: string; ms: number }[];
+  /** Lifecycle handlers that ran past their budget, for the diagnostics. A
+   *  handler that overran may still be running: `stopped` says whether it is
+   *  known to have finished. */
+  readonly hookOverruns: readonly Overrun[];
   /**
    * The notes this conversation would find most relevant, for the standing
    * block the system prompt carries.
@@ -1296,6 +1298,24 @@ function nameOfExtension(root: string, where: string): string {
 }
 
 /**
+ * Whether a card may be read from this extension at all.
+ *
+ * Reading one means importing the file and calling its factory, which is
+ * running somebody's code. An extension that came with a folder is not trusted
+ * until somebody says yes to that exact source, so its card waits for the same
+ * decision its loading waits for. An installed add-on was chosen by hand and is
+ * already in that position.
+ */
+function probePermitted(projectRoot: string, trusts: (id: string) => boolean) {
+  const root = projectRoot.endsWith(sep) ? projectRoot : projectRoot + sep;
+  return (where: string): boolean => {
+    if (!where.startsWith(root)) return true;
+    const id = idFor(nameOfExtension(root, where), sourceOf(where));
+    return id !== '' && trusts(id);
+  };
+}
+
+/**
  * Keep the extensions somebody deliberately added, and the ones they have since
  * said yes to; drop the rest of what a folder brought with it.
  *
@@ -1329,26 +1349,31 @@ function theirsTrustedAndPolicied(
       const where = one.resolvedPath ?? one.path ?? '';
       if (where === '') return false;
 
+      const inside = where.startsWith(root);
+      const name = inside ? nameOfExtension(root, where) : '';
+      const id = inside ? idFor(name, sourceOf(where)) : '';
+      if (inside && id === '') return false;
+      const trusted = inside ? trusts(id) : true;
+      const reckon = (): void => {
+        if (inside) carried.push({ id, name, where: where.slice(root.length), trusted });
+      };
+
       /* What this extension will do, worked out by asking it rather than by
-         knowing its name. A card that was read and came back empty is treated
-         as the riskiest kind; one that was never looked at at all is left
-         alone, because "we did not check" is not evidence. */
+         knowing its name. A folder's extension has not been asked until it is
+         trusted, so its card is unknown here; unknown counts as the riskiest
+         kind rather than as a clean bill of health. */
       if (policy.cards.has(where)) {
         const card = policy.cards.get(where) ?? null;
         const verdict = policyFor(card, policy.kind, policy.chosen);
         if (dropsEntirely(verdict)) {
           policy.dropped({ where, policy: verdict, card });
+          // Still listed: a decision about this folder is what the list is for.
+          reckon();
           return false;
         }
       }
 
-      if (!where.startsWith(root)) return true;
-
-      const name = nameOfExtension(root, where);
-      const id = idFor(name, sourceOf(where));
-      if (id === '') return false;
-      const trusted = trusts(id);
-      carried.push({ id, name, where: where.slice(root.length), trusted });
+      reckon();
       return trusted;
     });
     seen(carried);
@@ -1424,15 +1449,27 @@ async function keepSubagentSettings(agentDir: string): Promise<void> {
 
 /** Every conversation this folder has had. Never throws: a folder with no
  *  transcripts is an empty list, not a failure. */
-export async function listConversations(
-  projectRoot: string,
+/**
+ * Every saved conversation in this app's own session folder.
+ *
+ * Across every workspace, not just the project folder: a chat that worked in a
+ * checkout has its transcript in the same sessions folder as one that did not,
+ * and asking Pi for one directory's worth of history left every isolated
+ * conversation out of the list — the sidebar simply did not show work that
+ * existed. Membership is decided by the caller, which knows the workspaces a
+ * project is made of.
+ *
+ * A failure is returned as a failure. It used to come back as an empty list,
+ * which reads as "you have no conversations" and is the one thing it is not.
+ */
+export async function listAllConversations(
   sessionDir: string,
-): Promise<readonly Conversation[]> {
+): Promise<{ ok: true; value: readonly Conversation[] } | { ok: false; because: string }> {
   try {
     const pi = await loadPi();
-    return readConversations(await pi.SessionManager.list(projectRoot, sessionDir));
-  } catch {
-    return [];
+    return { ok: true, value: readConversations(await pi.SessionManager.listAll(sessionDir)) };
+  } catch (cause) {
+    return { ok: false, because: cause instanceof Error ? cause.message : String(cause) };
   }
 }
 
@@ -2202,8 +2239,12 @@ const MOST_AFTER_SAYINGS = 3;
   const cards = new Map<string, CapabilityCard | null>();
   const leftOut: { where: string; policy: Policy; card: CapabilityCard | null }[] = [];
   const cardsFolder = join(agentDir, 'graphe-extension-cards');
+  const mayProbe = probePermitted(options.projectRoot, options.trusts ?? (() => false));
   for (const where of await extensionPathsIn(agentDir, options.projectRoot)) {
-    cards.set(where, await cachedProbe(where, cardsFolder).catch(() => null));
+    // Nothing in a folder is run to find out what it does until somebody has
+    // said yes to that exact source. Untrusted and unread are the same card
+    // here: unknown, which the policy already treats as the risky case.
+    cards.set(where, mayProbe(where) ? await cachedProbe(where, cardsFolder).catch(() => null) : null);
   }
   const agentsPrompt = agentsMdNote === null ? [] : [`<agents_md>\n${agentsMdNote}\n</agents_md>`];
   const allNotes = [...(options.contextNotes ?? []), ...agentsPrompt];
@@ -2335,9 +2376,13 @@ const MOST_AFTER_SAYINGS = 3;
    */
   const budgetHooks = (): void => {
     withHookBudget(loader.getExtensions(), (over) => {
+      // Not "and was left to it": a handler past its budget may still be
+      // running, and saying otherwise makes a live handler look finished.
       options.onEvent({
         type: 'notice',
-        what: `${over.extension} took too long on ${over.event} and was left to it.`,
+        what: over.stopped
+          ? `${over.extension} took too long on ${over.event} and has stopped.`
+          : `${over.extension} took too long on ${over.event}, and may still be running.`,
       });
     });
   };
@@ -2561,11 +2606,11 @@ const MOST_AFTER_SAYINGS = 3;
   // sentence the model can act on.
   if (!benchmarkToolFloor) customTools.push(mcpTool(mcpRegistry));
 
-  // Minimal LSP stub: always available via grep fallback, no external server needed.
-  // grapheTools already adds lspTool when not benchmark; this keeps the session
-  // covered even if that path is bypassed.
-  if (!benchmarkToolFloor && !customTools.some((tool) => tool.name === 'lsp')) {
-    customTools.push(lspTool(options.projectRoot));
+  // Text search over the project. grapheTools already adds it; this keeps the
+  // session covered even if that path is bypassed. No language server: the tool
+  // is a walk and a regex and says so, so nothing here is advertised as one.
+  if (!benchmarkToolFloor && !customTools.some((tool) => tool.name === 'search_symbols_text')) {
+    customTools.push(searchSymbolsTextTool(options.projectRoot));
   }
 
   // The shell is Pi's tool, not ours, and it is the one that can change
@@ -3268,7 +3313,7 @@ const MOST_AFTER_SAYINGS = 3;
       });
     },
 
-    get hookOverruns(): readonly { extension: string; event: string; ms: number }[] {
+    get hookOverruns(): readonly Overrun[] {
       return recentOverruns();
     },
 

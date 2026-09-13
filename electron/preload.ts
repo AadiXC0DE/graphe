@@ -43,6 +43,7 @@ import {
   type ModelChoice,
   type OpenedProject,
   type Overview,
+  type WorktreePlan,
   type InStep,
   type Page,
   type PointedAt,
@@ -557,13 +558,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.reviewPr, id, summary, named(where)) as Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>>;
   },
 
-  reviewMirror(id: string, on: boolean, where?: Where): Promise<Result<readonly ReviewEntry[]>> {
-    if (typeof id !== 'string' || id === '' || typeof on !== 'boolean') {
-      return Promise.resolve(refuse<readonly ReviewEntry[]>(NO_ENTRY));
-    }
-    return ipcRenderer.invoke(CHANNEL.reviewMirror, id, on, named(where)) as Promise<Result<readonly ReviewEntry[]>>;
-  },
-
   conflictLook(address: string, path: string, where?: Where): Promise<Result<ReviewClash>> {
     if (typeof address !== 'string' || address === '' || typeof path !== 'string' || path === '') {
       return Promise.resolve(refuse<ReviewClash>(NO_ENTRY));
@@ -780,9 +774,32 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.conversations, named(where)) as Promise<Result<readonly Conversation[]>>;
   },
 
-  openConversation(path: string | null, where?: Where): Promise<Result<OpenedProject>> {
+  openConversation(
+    path: string | null,
+    workspace?: string | null,
+    where?: Where,
+  ): Promise<Result<OpenedProject>> {
     const one = typeof path === 'string' && path.trim() !== '' ? path : null;
-    return ipcRenderer.invoke(CHANNEL.openConversation, one, named(where)) as Promise<Result<OpenedProject>>;
+    // A workspace means a new conversation in it, so a path and a workspace
+    // together would be two answers to one question. The path loses.
+    const wanted = typeof workspace === 'string' && workspace.trim() !== '' ? workspace : null;
+    return ipcRenderer.invoke(
+      CHANNEL.openConversation,
+      wanted === null ? one : null,
+      wanted,
+      named(where),
+    ) as Promise<Result<OpenedProject>>;
+  },
+
+  worktreePlan(where?: Where): Promise<Result<WorktreePlan>> {
+    return ipcRenderer.invoke(CHANNEL.worktreePlan, named(where)) as Promise<Result<WorktreePlan>>;
+  },
+
+  worktreeNew(wanted: { base?: string | null }, where?: Where): Promise<Result<OpenedProject>> {
+    const base = typeof wanted.base === 'string' && wanted.base.trim() !== '' ? wanted.base : null;
+    return ipcRenderer.invoke(CHANNEL.worktreeNew, base, named(where)) as Promise<
+      Result<OpenedProject>
+    >;
   },
 
   closeConversation(where?: Where): Promise<Result<null>> {

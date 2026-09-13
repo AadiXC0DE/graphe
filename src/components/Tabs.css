@@ -1,16 +1,15 @@
-/* A deliberately short strip. The current conversation is always first, and
-   tabs are names, not miniature cards — the project switcher already says what
-   folder they belong to. */
+/* A strip that scrolls rather than one that lies about how much is open. Tabs
+   are names, not miniature cards: the project switcher already says what folder
+   they belong to. */
 
 .tabs {
   display: flex;
   align-items: center;
   gap: 2px;
   min-width: 0;
-  /* Width comes from the number of visible tabs. It may shrink beside the
-     project menu, but must never grow into empty header space. */
+  /* Width comes from the number of tabs, worked out in Tabs.tsx. It may shrink
+     beside the project menu, but must never grow into empty header space. */
   flex: 0 1 auto;
-  max-width: 520px;
   -webkit-app-region: no-drag;
 }
 
@@ -28,18 +27,24 @@
   flex: 1 1 auto;
   width: 0;
   min-width: 0;
-  /* It cannot scroll, so it carries no scrollbar rules at all. A gutter is
-     reserved on any scroll box, hidden included, so a width that changed on
-     hover moved every tab out from under the pointer. */
-  overflow: hidden;
+  /* Sideways, and with no bar: a reserved gutter takes width from the tabs and
+     a visible one changes that width the moment it appears, which moves every
+     tab out from under the pointer. Wheel and keyboard still reach the rest,
+     and the menu names them. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
 }
 
 .tabs__tab {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 1 1 192px;
-  min-width: 0;
+  /* A readable floor rather than a share of the space: with more tabs than fit,
+     they scroll at this width instead of shrinking into unreadable slivers. */
+  flex: 1 1 168px;
+  min-width: 96px;
   max-width: 168px;
   overflow: hidden;
   border-radius: var(--radius-sm);

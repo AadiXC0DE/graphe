@@ -342,7 +342,7 @@ function allowedDesktop(
 const ASKING_TOOLS = new Set(['askfirst']);
 
 const READ_TOOLS = new Set([
-  'read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff', 'readmap', 'runchecks', 'lsp',
+  'read', 'readfile', 'view', 'viewfile', 'open', 'openfile', 'cat', 'readdiff', 'readmap', 'runchecks',
   // A pdf or a deck is a file like any other: same folder rules, same refusals.
   'readdocument',
 ]);
@@ -350,7 +350,7 @@ const READ_TOOLS = new Set([
  *  without opening any of them. The shell command of the same word is a
  *  different program entirely — see `judgeFind`. */
 const LIST_TOOLS = new Set(['list', 'listfiles', 'listdir', 'ls', 'glob', 'tree', 'find']);
-const SEARCH_TOOLS = new Set(['search', 'grep', 'ripgrep', 'findfiles', 'codebasesearch']);
+const SEARCH_TOOLS = new Set(['search', 'grep', 'ripgrep', 'findfiles', 'codebasesearch', 'searchsymbolstext']);
 const WRITE_TOOLS = new Set([
   'write',
   'writefile',
@@ -372,7 +372,9 @@ const WRITE_TOOLS = new Set([
 ]);
 /** A change that reaches every file at once rather than a named one. Nobody
  *  can picture the shape of it beforehand, and it names no file for the checks
- *  above to judge — so it asks, and it takes a restore point either way. */
+ *  above to judge — so it asks, and it takes a restore point either way. Graphe
+ *  registers no such tool: this row is for an installed language server whose
+ *  rename reaches the model under this name. */
 const SWEEPING_TOOLS = new Set(['lsprename']);
 const DELETE_TOOLS = new Set(['delete', 'deletefile', 'remove', 'removefile', 'rm', 'rmdir', 'trash']);
 /** Anything that runs a command somebody typed. `keeprunning` starts one that

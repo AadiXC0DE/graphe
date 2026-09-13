@@ -226,6 +226,7 @@ const DesignView = lazy(() => import("./components/DesignView"));
 const CanvasView = lazy(() => import("./components/CanvasView"));
 const HistoryView = lazy(() => import("./components/HistoryView"));
 const AddMore = lazy(() => import("./components/AddMore"));
+const NewWorktree = lazy(() => import("./components/NewWorktree"));
 const Gallery = lazy(() => import("./gallery/Gallery"));
 const ConnectModal = lazy(() => import("./components/ConnectModal"));
 const HelpersView = lazy(() => import("./components/HelpersView"));
@@ -251,6 +252,12 @@ const VIEWS = [
   () => import("./components/Against"),
   () => import("./components/Conflict"),
 ];
+
+/** What is fetched first when the app goes idle, in the order a sitting is
+ *  likely to reach for it. Everything else waits for its own press: fetching
+ *  every screen at idle spends a laptop's idle time on panels that may never
+ *  be opened, and the ones people do open are the first few here. */
+const WARM_FIRST = 4;
 
 /** A sheet-coloured rectangle where the sheet will be, rather than nothing, for
  *  the frame or two a chunk still on its way costs. */
@@ -311,15 +318,32 @@ const openOnLoad = new URLSearchParams(window.location.search).get("open");
  *  and covering it would be the flash rather than the fix. */
 let viewsWarm = false;
 
-/** The one fetch of every screen's code. Started at idle, and again by the
- *  first press if that has not happened yet; the same promise either way, so a
- *  handful of presses in a row wait on one fetch rather than starting several. */
+/** The first fetch of the screens most likely to be pressed. Started at idle,
+ *  and again by the first press if that has not happened yet; the same promise
+ *  either way, so a handful of presses in a row wait on one fetch rather than
+ *  starting several.
+ *
+ * `viewsWarm` is set by every screen being here, so the first press (which
+ *  fetches the rest) still needs one place to ask for the whole set. */
 let warming: Promise<void> | null = null;
 function warmViews(): Promise<void> {
-  warming ??= Promise.all(VIEWS.map((load) => load())).then(() => {
-    viewsWarm = true;
-  });
+  warming ??= Promise.all(VIEWS.slice(0, WARM_FIRST).map((load) => load()))
+    // A chunk that fails to arrive is not a reason to keep a rejected promise
+    // forever: the next press tries again. Uncaught, it also became an
+    // unhandled rejection with nothing on screen to explain it.
+    .catch(() => undefined);
   return warming;
+}
+
+/** Every screen's code, for the press that needs something not fetched yet. */
+let fetchingAll: Promise<void> | null = null;
+function fetchAllViews(): Promise<void> {
+  fetchingAll ??= Promise.all(VIEWS.map((load) => load()))
+    .then(() => {
+      viewsWarm = true;
+    })
+    .catch(() => undefined);
+  return fetchingAll;
 }
 
 export default function App() {
@@ -582,6 +606,8 @@ function Conversation() {
   const [workingAt, setWorkingAt] = useState<string | null>(null);
   /** The screen where more can be added to Graphe, and what it is showing. */
   const [addMore, setAddMore] = useState(false);
+  /** The New worktree card, which is the one deliberate way to make a copy. */
+  const [worktreeOpen, setWorktreeOpen] = useState(false);
   const [packs, setPacks] = useState<readonly Pack[]>([]);
   const packsNow = useRef<readonly Pack[]>([]);
   packsNow.current = packs;
@@ -775,7 +801,9 @@ function Conversation() {
         return;
       }
       setCovering(true);
-      void warmViews().then(() => {
+      // A press the idle fetch has not covered waits for the whole set, not
+      // for the first few: the screen being opened may be any of them.
+      void fetchAllViews().then(() => {
         if (pressAt.current !== token) return;
         setCovering(false);
         swap();
@@ -854,6 +882,9 @@ function Conversation() {
   /** Last project/conversation navigation request. Only its response may change
    *  what is in front; IPC replies can arrive out of order. */
   const navigation = useRef(0);
+  /** How many asks each panel owner has made, so a slow answer for one chat
+   *  cannot land under another. Keyed by project and conversation together. */
+  const asksMade = useRef(new Map<string, number>());
 
   /** The row of tabs as it is drawn, published so the keys can act on the row
    *  somebody is looking at. See src/hooks/useTabRow.ts. */
@@ -1322,15 +1353,23 @@ function Conversation() {
   /** Hold a project read-only, or let it go again. Plan is a gate rather than a
    *  prompt, so the shell has to be told: nothing else can withhold a write. */
   const holdWrites = useCallback((on: boolean, project?: string) => {
-    const path = project ?? desksNow.current.current;
+    const desk = currentDesk(desksNow.current);
+    const path = project ?? desk?.path ?? null;
     if (path === null) return;
-    void bridge.setPlanMode(on, { project: path });
+    /* The conversation on screen, not the folder. Plan withholds writes from
+       the chat it was turned on in; a second chat in the same project carries
+       on working, which is what somebody with two chats open expects. */
+    void bridge.setPlanMode(on, {
+      project: path,
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    });
   }, []);
 
-  /* The chip belongs to the window and the gate belongs to a folder, so
-     switching projects would otherwise leave the chip saying Plan over a folder
-     that was never told, and the folder behind holding writes back with nothing
-     on screen to say so. The gate follows the chip to wherever you are. */
+  /* The chip belongs to the window and the gate belongs to a conversation, so
+     switching conversations would otherwise leave the chip saying Plan over a
+     chat that was never told, and the chat behind holding writes back with
+     nothing on screen to say so. The gate follows the chip to wherever you
+     are. */
   const heldProject = useRef<string | null>(null);
   useEffect(() => {
     const path = openProject;
@@ -1525,6 +1564,10 @@ function Conversation() {
    *  back — the shell answers about whatever is current, so a switch mid-flight
    *  would otherwise write one project's history onto another's desk. */
   const refreshVersions = useCallback(async (path: string) => {
+    const deskNow = desksNow.current.byPath[path];
+    const key = keyOf(path, deskNow?.address ?? '');
+    const mine = (asksMade.current.get(key) ?? 0) + 1;
+    asksMade.current.set(key, mine);
     const [answer, seen] = await Promise.all([bridge.versions(), bridge.versionPictures()]);
     // The pictures are answered about whatever project is in front of the
     // shell, exactly as the timeline is, so they stand on the same guard: a
@@ -1542,6 +1585,7 @@ function Conversation() {
       ),
     );
     if (desksNow.current.current !== path) return;
+    if (asksMade.current.get(key) !== mine) return;
     const perRepo: Record<string, readonly SavedVersion[]> = {};
     for (const [name, got] of each) if (got.ok) perRepo[name] = got.value;
     if (!answer.ok && several.length === 0) return;
@@ -1684,8 +1728,17 @@ function Conversation() {
       project: path,
       ...(address == null ? {} : { conversation: address }),
     };
+    // What this answer will be about, and which ask it is. Two conversations in
+    // one project share the folder and the panel, so "the same project" is not
+    // enough to write an answer under: an older ask arriving late would put one
+    // chat's files, branch or processes on screen under another chat's name.
+    const key = keyOf(path, address ?? '');
+    const mine = (asksMade.current.get(key) ?? 0) + 1;
+    asksMade.current.set(key, mine);
     const answer = await bridge.overview(where);
     if (!answer.ok) return;
+    if (asksMade.current.get(key) !== mine) return;
+    if ((desksNow.current.byPath[path]?.address ?? null) !== (address ?? null)) return;
     setDesks((current) =>
       current.current === path
         ? changeDesk(current, path, (one) => ({
@@ -1892,7 +1945,7 @@ function Conversation() {
    * conversation, so they stay.
    */
   const swapConversation = useCallback(
-    async (path: string | null) => {
+    async (path: string | null, force = false) => {
       // Already here. Silent, because pressing the row you are on is a person
       // checking where they are, not asking for anything. A conversation
       // nothing has been said in yet is the same case: "new" from an empty
@@ -1908,7 +1961,11 @@ function Conversation() {
       goToScreen('chat');
       const showing = desksNow.current.byPath[desksNow.current.current ?? '']?.address ?? null;
       if (path !== null && path === inConversation && path === showing) return;
-      if (path === null && (desk?.turns.length ?? 0) === 0) {
+      // `force` is for the one caller that has just thrown the conversation on
+      // screen away: whatever the desk still holds belongs to a transcript that
+      // no longer exists, and the empty-thread guard read that as "already
+      // looking at a new one" and left the window with nothing.
+      if (!force && path === null && (desk?.turns.length ?? 0) === 0) {
         // Already looking at an empty one. Still worth getting out of the way
         // of it, since that is what was pressed.
         toChat();
@@ -1926,6 +1983,7 @@ function Conversation() {
       const request = ++navigation.current;
       const opened = await bridge.openConversation(
         path,
+        null,
         projectAtStart === null ? undefined : { project: projectAtStart },
       );
       if (request !== navigation.current) return;
@@ -1967,6 +2025,10 @@ function Conversation() {
                     turns: one.turns,
                     doing: one.doing,
                     counted: one.counted,
+                    // Whether a turn is in flight here belongs to this
+                    // conversation, exactly as the turns do. Leaving it behind
+                    // made a chat come back looking idle while it was working.
+                    busy: one.busy,
                   },
                 };
           return {
@@ -1974,6 +2036,7 @@ function Conversation() {
             turns,
             doing: incoming?.doing ?? null,
             counted: incoming?.counted ?? 0,
+            busy: incoming?.busy ?? false,
             address: opened.value.address ?? null,
             parked,
             order:
@@ -2021,7 +2084,7 @@ function Conversation() {
         return;
       }
       setConversations(answer.value);
-      if (wasHere) await swapConversation(null);
+      if (wasHere) await swapConversation(null, true);
     },
     [busy, inConversation, swapConversation, troubleHere],
   );
@@ -2317,7 +2380,7 @@ function Conversation() {
       // Its own conversation, opened but not switched to: the canvas stays in
       // front, and what the flow says is readable afterwards like anything else
       // said in this project.
-      const opened = await bridge.openConversation(null, {
+      const opened = await bridge.openConversation(null, null, {
         project: path,
         ...(flow.repo === null ? {} : { repo: flow.repo }),
       });
@@ -3015,6 +3078,7 @@ function Conversation() {
       skillsOpen ||
       connectedOpen ||
       addMore ||
+      worktreeOpen ||
       paletteOpen ||
       graphOpen ||
       reviewsOpen ||
@@ -3753,16 +3817,6 @@ function Conversation() {
         .finally(() => setReviewBusy(false));
     },
     [reviewWhere, troubleHere, say],
-  );
-
-  const mirrorReview = useCallback(
-    (id: string, on: boolean) => {
-      void bridge.reviewMirror(id, on, reviewWhere()).then((answer) => {
-        if (answer.ok) setReviewQ(answer.value);
-        else troubleHere(answer.trouble);
-      });
-    },
-    [reviewWhere, troubleHere],
   );
 
   /** One clash read out of the two versions. Nothing on disk is touched to
@@ -5605,6 +5659,7 @@ function Conversation() {
           conversations={conversations}
           openConversation={inConversation}
           onOpenConversation={(path) => void swapConversation(path)}
+          onNewWorktree={() => setWorktreeOpen(true)}
           onNewConversation={() => void swapConversation(null)}
           open={shelfOpen}
           onToggle={() => setShelfOpen((was) => !was)}
@@ -6307,6 +6362,13 @@ function Conversation() {
       {overviewed && desk !== null ? (
         <Overview
           key={keyOf(desk.path, desk.address ?? '')}
+          /* Only this conversation's finished work. The queue is the project's,
+             but the panel is the chat's, and a project list drawn under a chat
+             heading reads as this chat's state. Project-wide work has its own
+             screen, which names the chat behind every row. */
+          waitingHere={reviewQ.filter(
+            (one) => desk.address !== null && one.address === desk.address,
+          )}
           view={{
             now: nowThere,
             git: desk.overview?.git ?? null,
@@ -6612,7 +6674,6 @@ function Conversation() {
             onDecide={decideReview}
             onLand={landReview}
             onOpenPr={openReviewPr}
-            onMirror={mirrorReview}
             onRefresh={refreshReviewQueue}
             onClose={() => setReviewQueueOpen(false)}
             onExplain={(file, line) => {
@@ -6702,6 +6763,19 @@ function Conversation() {
           onDetails={() => void showSplit()}
           onLimit={setLimit}
         />
+      ) : null}
+
+      {worktreeOpen ? (
+        <Suspense fallback={null}>
+        <NewWorktree
+          project={desksNow.current.current}
+          onClose={() => setWorktreeOpen(false)}
+          onMade={(address) => {
+            setWorktreeOpen(false);
+            if (address !== null) void swapConversation(address);
+          }}
+        />
+        </Suspense>
       ) : null}
 
       <Suspense fallback={null}>

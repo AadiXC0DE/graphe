@@ -77,6 +77,17 @@ const no = (because: string): Result => ({ ok: false, because });
  *  so the whole apply is one step back. Written as a version title. */
 export const beforeBringingWorkIn = 'Before bringing work in';
 
+/** Said when a conversation that works in its own checkout is opened.
+ *
+ * The window reads the project folder, so a conversation writing elsewhere
+ * looks, from the outside, exactly like one writing here. Opening it is
+ * navigation and changes nothing: the copy is described, and merging it stays
+ * something somebody asks for. */
+export const ownCopyWords = {
+  whereItWorks: (folder: string, project: string): string =>
+    `This conversation works in its own checkout at ${folder}. Nothing it writes reaches ${project} until you merge it back.`,
+} as const;
+
 export const bringBackWords = {
   notRepo: 'This folder is not a git repository, so a conversation cannot bring its work back here.',
   /** Said when work stayed behind. Both sides changed the same file, so keeping

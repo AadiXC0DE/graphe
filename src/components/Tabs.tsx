@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import './Tabs.css';
 
 /** What a tab is doing, when it is doing anything. Idle carries no mark at all:
@@ -67,7 +67,19 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Pr
    *  the event, because a drop needs both and only one of them is in it. */
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<number | null>(null);
+  /** Which tab the keyboard is on. Roving tabindex: exactly one tab is a tab
+   *  stop, so Tab leaves the strip instead of walking every close button. */
+  const [focused, setFocused] = useState<string | null>(null);
+  /** The neighbour that takes focus after a close, or `add` when the row empties. */
+  const [returnTo, setReturnTo] = useState<string | 'add' | null>(null);
+  /** Whether the strip has scrolled tabs out of sight. Measured, not counted:
+   *  how many fit depends on the width the header gives it. */
+  const [clipped, setClipped] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const strip = useRef<HTMLDivElement>(null);
+  const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const add = useRef<HTMLButtonElement>(null);
+  const empty = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!listing) return;
@@ -87,10 +99,41 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Pr
     };
   }, [listing]);
 
+  /* Keep the tab in front where it can be seen, without ever moving the row:
+     scrolling is not rearrangement, and nothing here takes focus. */
+  useEffect(() => {
+    if (at === null) return;
+    const node = buttons.current.get(at);
+    if (node === undefined) return;
+    // A layout-less test environment has no scrollIntoView to call.
+    if (typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  }, [at, tabs]);
+
+  useEffect(() => {
+    const node = strip.current;
+    if (node === null) return;
+    const measure = (): void => setClipped(node.scrollWidth > node.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const watching = new ResizeObserver(measure);
+    watching.observe(node);
+    return () => watching.disconnect();
+  }, [tabs]);
+
+  useEffect(() => {
+    if (returnTo === null) return;
+    setReturnTo(null);
+    const node =
+      returnTo === 'add' ? (add.current ?? empty.current) : buttons.current.get(returnTo);
+    node?.focus();
+  }, [returnTo, tabs]);
+
   if (tabs.length === 0) {
     return (
       <div className="tabs tabs--empty" ref={root}>
-        <button type="button" className="tabs__empty" onClick={onNew}>
+        <button type="button" className="tabs__empty" ref={empty} onClick={onNew}>
           <svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true">
             <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
@@ -102,18 +145,86 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Pr
 
   // A tab strip is spatial memory. Never bring the selected tab to the front:
   // that turns a click into a moving target and makes the row impossible to
-  // learn. The current tab is marked in place instead.
-  const shown = tabs.slice(0, 3);
-  /* A tab strip should finish where its tabs finish. Each tab is capped at
-     168px (Tabs.css) and the strip reserves only that — counting any wider
-     leaves a visible hole between the last tab and the add button. The
-     overflow control, when there are more conversations, sits at the end. */
-  const compactWidth = shown.length * 168 + 30 + (tabs.length > shown.length ? 32 : 0);
+  // learn. The current tab is marked in place instead, and kept in view by
+  // scrolling rather than by moving.
+  /* Every tab is drawn. The strip is as wide as the tabs in it, capped so a
+     long row scrolls inside the header instead of pushing the project menu off
+     the end. Each tab is capped at 168px (Tabs.css), so counting that leaves no
+     hole between the last tab and the add button. */
+  const WIDEST = 520;
+  const width = Math.min(tabs.length * 168 + Math.max(0, tabs.length - 1) * 2 + 30, WIDEST);
+
+  /* Two conversations can carry one title, and then the folder is the only
+     thing that tells them apart. It belongs in the accessible name too, not
+     only in the tooltip, or the row is two identical buttons to a screen
+     reader. */
+  const doubled = new Set(
+    tabs.map((tab) => tab.title).filter((title, index, all) => all.indexOf(title) !== index),
+  );
+  const called = (tab: Tab): string =>
+    doubled.has(tab.title) ? `${tab.title} (${tab.project})` : tab.title;
+
+  /* Exactly one tab is a tab stop, so Tab leaves the strip rather than walking
+     every mark in it. The arrows are how the rest are reached. */
+  const stop =
+    focused !== null && tabs.some((tab) => tab.id === focused)
+      ? focused
+      : at !== null && tabs.some((tab) => tab.id === at)
+        ? at
+        : (tabs[0]?.id ?? null);
+
+  const keyed = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const held = (event.target as HTMLElement).closest('[role="tab"]');
+    const from =
+      held === null
+        ? tabs.findIndex((tab) => tab.id === at)
+        : tabs.findIndex((tab) => buttons.current.get(tab.id) === held);
+    /* Dragging is a mouse gesture. The same rearrangement has to be reachable
+       from the keyboard, or the order is not really the person's to decide. */
+    if (
+      onReorder !== undefined &&
+      event.altKey &&
+      (event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+    ) {
+      const here = tabs[from];
+      if (here === undefined) return;
+      event.preventDefault();
+      const step = event.key === 'ArrowLeft' ? -1 : 1;
+      const to = Math.max(0, Math.min(tabs.length - 1, from + step));
+      onReorder(here.id, to);
+      return;
+    }
+    const go = (index: number): void => {
+      const next = tabs[((index % tabs.length) + tabs.length) % tabs.length];
+      if (next === undefined) return;
+      onOpen(next.id);
+      buttons.current.get(next.id)?.focus();
+    };
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      go(from + 1);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      go(from - 1);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      go(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      go(tabs.length - 1);
+    }
+  };
 
   return (
-    <div className="tabs" ref={root} style={{ width: `${String(compactWidth)}px` }}>
-      <div className="tabs__strip" role="tablist" aria-label={SAYS.label}>
-        {shown.map((tab, index) => (
+    <div className="tabs" ref={root} style={{ width: `${String(width)}px` }}>
+      <div
+        className="tabs__strip"
+        role="tablist"
+        aria-label={SAYS.label}
+        ref={strip}
+        onKeyDown={keyed}
+      >
+        {tabs.map((tab, index) => (
           <div
             key={tab.id}
             className={[
@@ -154,6 +265,13 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Pr
               type="button"
               role="tab"
               aria-selected={tab.id === at}
+              aria-label={called(tab)}
+              tabIndex={tab.id === stop ? 0 : -1}
+              ref={(node) => {
+                if (node === null) buttons.current.delete(tab.id);
+                else buttons.current.set(tab.id, node);
+              }}
+              onFocus={() => setFocused(tab.id)}
               className="tabs__open"
               onClick={() => onOpen(tab.id)}
               onAuxClick={(event) => {
@@ -173,8 +291,18 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Pr
             <button
               type="button"
               className="tabs__close"
-              onClick={() => onClose(tab.id)}
-              aria-label={SAYS.close(tab.title)}
+              tabIndex={tab.id === stop ? 0 : -1}
+              onClick={() => {
+                /* Focus lands on the tab the row closes into, or on the button
+                   that starts a new conversation when the row empties. */
+                const where = tabs.findIndex((one) => one.id === tab.id);
+                const rest = tabs.filter((one) => one.id !== tab.id);
+                const next = rest[where] ?? rest[where - 1];
+                setFocused((was) => (was === tab.id ? null : was));
+                setReturnTo(next?.id ?? 'add');
+                onClose(tab.id);
+              }}
+              aria-label={SAYS.close(called(tab))}
             >
               <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
                 <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
@@ -189,6 +317,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Pr
       <button
         type="button"
         className="tabs__add"
+        ref={add}
         onClick={onNew}
         aria-label={SAYS.add}
         title={SAYS.add}
@@ -200,7 +329,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Pr
 
       {/* The strip scrolls; this lists everything, marks and all, for the ones
           that have scrolled out of sight. */}
-      {tabs.length > shown.length ? (
+      {clipped ? (
         <div className="tabs__overflow">
           <button
             type="button"

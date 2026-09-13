@@ -75,6 +75,7 @@ import {
   type InStep,
   type ModelChoice,
   type OpenedProject,
+  type WorktreePlan,
   type Look,
   type Overview,
   type Pack,
@@ -1386,10 +1387,6 @@ let previewPlanMode = false;
       return Promise.resolve(previewFail<{ url: string; entries: readonly ReviewEntry[] }>());
     },
 
-    reviewMirror(): Promise<Result<readonly ReviewEntry[]>> {
-      return Promise.resolve(done([]));
-    },
-
     conflictLook(): Promise<Result<ReviewClash>> {
       return Promise.resolve(previewFail<ReviewClash>());
     },
@@ -1651,7 +1648,7 @@ let previewPlanMode = false;
     /** Whichever project is in front, never the first one in the list: a
      *  conversation opened onto another project's desk is the bug this whole
      *  path exists to avoid. */
-    openConversation(path: string | null): Promise<Result<OpenedProject>> {
+    openConversation(path: string | null, workspace?: string | null): Promise<Result<OpenedProject>> {
       const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
       // A name of its own even before anything has been written down, which is
       // what lets a brand new conversation have a tab.
@@ -1663,10 +1660,37 @@ let previewPlanMode = false;
           history: [],
           conversation: path,
           address: path ?? `new-${String(previewMade)}`,
-          // The first conversation of a project works in the folder itself and
-          // every one after it on a copy, so the preview shows the offer the
-          // real shell makes rather than hiding half the shelf.
-          ownCopy: previewMade > 1,
+          // A chat works in the project's own folder unless somebody asked for
+          // a copy, which is what the real shell does now.
+          ownCopy: typeof workspace === 'string' && workspace !== '',
+        }),
+      );
+    },
+
+    worktreePlan(): Promise<Result<WorktreePlan>> {
+      const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
+      return Promise.resolve(
+        done({
+          possible: true,
+          because: null,
+          folder: `${here?.path ?? ''}/.graphe/worktrees/one`,
+          baseBranch: 'main',
+          baseSha: 'a1b2c3d',
+          leftBehind: [],
+        }),
+      );
+    },
+
+    worktreeNew(): Promise<Result<OpenedProject>> {
+      const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
+      return Promise.resolve(
+        done({
+          path: here?.path ?? '',
+          name: here?.name ?? '',
+          history: [],
+          conversation: null,
+          address: 'new-copy',
+          ownCopy: true,
         }),
       );
     },
@@ -2523,7 +2547,6 @@ function connect(): Bridge {
     reviewDecide: (id, verdict, where) => api.reviewDecide(id, verdict, where),
     reviewLand: (id, landing, where) => api.reviewLand(id, landing, where),
     reviewPr: (id, summary, where) => api.reviewPr(id, summary, where),
-    reviewMirror: (id, on, where) => api.reviewMirror(id, on, where),
     conflictLook: (address, path, where) => api.conflictLook(address, path, where),
     conflictSettle: (address, path, text, where) => api.conflictSettle(address, path, text, where),
     buildStart: (source, where) => api.buildStart(source, where),
@@ -2564,7 +2587,9 @@ function connect(): Bridge {
     shareReview: (where) => api.shareReview(where),
     checkWidths: (where) => api.checkWidths(where),
     conversations: (where) => api.conversations(where),
-    openConversation: (path, where) => api.openConversation(path, where),
+    openConversation: (path, workspace, where) => api.openConversation(path, workspace, where),
+    worktreePlan: (where) => api.worktreePlan(where),
+    worktreeNew: (wanted, where) => api.worktreeNew(wanted, where),
     deleteConversation: (path, where) =>
       api.deleteConversation?.(path, where) ?? Promise.resolve(done([])),
     packages: (term) => api.packages(term),

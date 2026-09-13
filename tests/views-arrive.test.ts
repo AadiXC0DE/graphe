@@ -116,9 +116,12 @@ describe('opening a view', () => {
 
   it('covers the ground at once while the code is still arriving', () => {
     const at = app.indexOf('const startScreen = useCallback(');
-    const body = app.slice(at, at + 900);
+    // Up to the end of that callback: the block carries a few lines of comment,
+    // and a fixed character count made the assertion about the comments.
+    const body = app.slice(at, app.indexOf('\n  }, []);', at));
     expect(body).toContain('if (viewsWarm) {\n        swap();\n        return;\n      }');
-    expect(body).toContain('setCovering(true);\n      void warmViews().then(() => {');
+    expect(body).toContain('setCovering(true);');
+    expect(body).toContain('void fetchAllViews().then(() => {');
     expect(app).toContain('{covering ? COVER : null}');
     expect(app).toContain('const COVER = <div className="sheet sheet--arriving sheet--cover"');
     expect(sheet).toMatch(/\.sheet--cover \{[^}]*animation: none;/);
@@ -171,7 +174,12 @@ describe('warming the views', () => {
     );
     expect(app).toContain('window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 1500))');
     expect(app).toContain('void warmViews();');
-    expect(app).toContain('warming ??= Promise.all(VIEWS.map((load) => load())).then(() => {');
+    // The idle fetch is the screens a sitting reaches first; everything else
+    // waits for a press that needs it. Fetching all of them spent idle time on
+    // panels nobody had opened.
+    expect(app).toContain('warming ??= Promise.all(VIEWS.slice(0, WARM_FIRST).map((load) => load()))');
+    expect(app).toContain('fetchingAll ??= Promise.all(VIEWS.map((load) => load()))');
+    expect(app).toContain('void fetchAllViews()');
     expect(app).toContain('(window.cancelIdleCallback ?? clearTimeout)(handle as never)');
   });
 

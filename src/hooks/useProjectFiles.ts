@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 
 import { bridge } from '../lib/bridge';
 import type { Desks } from '../lib/projects';
-import type { FileEntry } from '../lib/ipc';
+import type { FileEntry, Where } from '../lib/ipc';
 
 /** One file, open. `text` is null while it is on its way; `trouble` is the one
  *  sentence saying why it cannot be shown at all. */
@@ -61,8 +61,19 @@ export function useProjectFiles(options: {
   const refresh = useCallback(
     async (path: string) => {
       if (!wantsFiles.current) return;
-      const answer = await bridge.projectFiles();
+      const desk = desksNow.current.byPath[path];
+      const address = desk?.address ?? null;
+      const where: Where = {
+        project: path,
+        ...(address === null ? {} : { conversation: address }),
+      };
+      const answer = await bridge.projectFiles(where);
+      // The folder this answer is about, and the conversation it was asked
+      // for. Two chats in one project share the folder, so "the same project"
+      // is not enough: a late answer for the chat that was on screen a moment
+      // ago would draw its files under this chat's name.
       if (!answer.ok || desksNow.current.current !== path) return;
+      if ((desksNow.current.byPath[path]?.address ?? null) !== address) return;
       setFiles((current) => ({ ...current, [path]: answer.value }));
     },
     [desksNow],
@@ -86,6 +97,11 @@ export function useProjectFiles(options: {
 
   const readFile = useCallback((path: string) => {
     const token = (openAt.current += 1);
+    const desk = desksNow.current.byPath[desksNow.current.current ?? ''];
+    const where: Where = {
+      ...(desksNow.current.current === null ? {} : { project: desksNow.current.current }),
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    };
     /* Nothing on screen changes until the file is here. Emptying the panel
        first and filling it a few milliseconds later is a flicker in the panel
        and, because the panel has a height, one in the conversation beside it;
@@ -94,7 +110,7 @@ export function useProjectFiles(options: {
     const saySo = setTimeout(() => {
       if (openAt.current === token) setReading({ path, text: null, trouble: null });
     }, 150);
-    void bridge.fileText(path).then((answer) => {
+    void bridge.fileText(path, where).then((answer) => {
       clearTimeout(saySo);
       if (openAt.current !== token) return;
       setReading(
@@ -103,7 +119,7 @@ export function useProjectFiles(options: {
           : { path, text: null, trouble: answer.trouble.because },
       );
     });
-  }, []);
+  }, [desksNow]);
 
   const wanted = useCallback((on: boolean) => {
     wantsFiles.current = on;

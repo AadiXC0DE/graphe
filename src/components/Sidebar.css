@@ -604,6 +604,27 @@
   padding: 0;
 }
 
+.shelf__newworktree {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: var(--space-1);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.shelf__newworktree:hover,
+.shelf__newworktree:focus-visible {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
 .shelf__new {
   display: inline-flex;
   align-items: center;

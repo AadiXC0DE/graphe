@@ -1,0 +1,100 @@
+/* The New worktree card. Beside the work, like every other question here:
+   nothing is dimmed, nothing is trapped, and closing it costs nothing. */
+
+.newworktree {
+  position: fixed;
+  left: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 40;
+  max-width: 460px;
+  padding: var(--space-4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: newworktree-rise var(--dur-ui) var(--ease-out-quart) both;
+}
+
+@keyframes newworktree-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.newworktree__head {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+}
+
+.newworktree__lead,
+.newworktree__quiet,
+.newworktree__dirty,
+.newworktree__trouble {
+  margin: 0 0 var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.newworktree__trouble {
+  color: var(--text);
+}
+
+.newworktree__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.newworktree__facts dt {
+  color: var(--text-dim);
+}
+
+.newworktree__facts dd {
+  margin: 0;
+}
+
+.newworktree__path {
+  overflow-wrap: anywhere;
+}
+
+.newworktree__sha {
+  font-family: var(--font-mono, monospace);
+}
+
+.newworktree__actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.newworktree__button {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.newworktree__button--make {
+  border-color: var(--border-strong);
+  background: var(--bg-sunken);
+}
+
+.newworktree__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.newworktree__button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

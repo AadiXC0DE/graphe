@@ -43,7 +43,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { constants, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
@@ -63,7 +63,7 @@ import {
   type Decision,
   type FoundAccount,
   type GrapheSession,
-  listConversations,
+  listAllConversations,
   packageHost,
   type Conversation,
   type OurAuthInteraction,
@@ -128,6 +128,7 @@ import {
   type Landing,
   type ModelChoice,
   type OpenedProject,
+  type WorktreePlan,
   type WentOnline,
   type Overview,
   type RepoOverview,
@@ -212,6 +213,7 @@ import {
   landWorktree,
   landingWords,
   nextCheckoutName,
+  ownCopyWords,
   renameCheckoutBranch,
   dropWorktree,
   holdsWork,
@@ -250,6 +252,27 @@ import {
 } from '../src/work/notify';
 import { conflictWords, readConflict } from '../src/diff/conflict';
 import { preparePrWorktree } from './prWorktree';
+import { WorkspaceLocks } from './services/workspace-locks';
+import {
+  MARKER_FILE,
+  LOCK_FILE,
+  commit,
+  discover,
+  readMarker,
+} from './services/migration-service';
+import {
+  addWorkspace,
+  attachConversation,
+  canonical,
+  emptyIndex,
+  ensureProject,
+  parseIndex,
+  serializeIndex,
+  workspaceById,
+  workspaceForConversation,
+  type WorkspaceIndex,
+  type WorkspaceRecord,
+} from './services/workspace-registry';
 import { RUNTIME_SCRATCH, keepOutOfCommits } from './excludes';
 import {
   addTasks,
@@ -309,7 +332,7 @@ import {
   withElapsed,
   type Goal,
 } from '../src/work/goal';
-import { openingFor, type Opening } from '../src/agent/pi/conversations';
+import { openingFor, openingIn, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
 import { readTokens, steps, writeToken } from '../src/design/tokens';
 import { writeMotionAll } from '../src/motion/read';
@@ -1789,9 +1812,10 @@ type Held = {
   /** Finished work waiting to be looked at, before any of it touches the
    *  person's folder. Newest first, as the queue keeps it. */
   review: readonly ReviewQueued[];
-  /** Conversations still carrying their work home on every settle, by address.
-   *  The per-card way back to how this behaved before the queue. */
-  mirroring: Set<string>;
+  /** Addresses that had live mirror on when this profile was last written by a
+   *  version that had it. Kept so an old setting is not lost, never applied:
+   *  a finished turn does not move files into anybody's folder any more. */
+  mirroringLegacy: readonly string[];
   /** A conversation's own checkout, by its address. Present only for the ones
    *  running isolated in a worktree — the primary conversation works directly
    *  on the project folder. The branch is the durable half: the folder is put
@@ -2442,21 +2466,6 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
  *  one call. Null when this folder is not a github repo, or gh is not ready —
  *  both are "nothing to show" rather than a failure.
  */
-/**
- * Whether a conversation's copy is on the same line of work as the project.
- *
- * Unreadable either side answers no. Not knowing is not a reason to write into
- * somebody's folder, and the work is never lost by staying where it was made.
- */
-async function onTheSameLine(project: string, folder: string): Promise<boolean> {
-  const here = await gitRun(project, ['rev-parse', '--abbrev-ref', 'HEAD']);
-  const there = await gitRun(folder, ['rev-parse', '--abbrev-ref', 'HEAD']);
-  if (here.code !== 0 || there.code !== 0) return false;
-  const a = (here.out ?? '').trim();
-  const b = (there.out ?? '').trim();
-  return a !== '' && b !== '' && a === b;
-}
-
 /** The line of work this folder is on, and the commit it sits at. A review that
  *  does not know this reads whatever happens to be checked out and reports it as
  *  the pull request. */
@@ -2958,71 +2967,15 @@ function settleUpTheJob(path: string, held: Held, from: Speaking): void {
           : held.checkouts.get(address) ?? null;
       const holding = known !== null && existsSync(known.folder) ? known : null;
 
-      /* Live mirror is how this behaved before the review queue, kept per card
-         for anybody who wants it: the work is carried into the folder as the
-         conversation makes it. Off, which is the default, an entry arrives on
-         the review list and nothing moves until somebody says so. Still only
-         ever the conversation in front, because a tab working in the background
-         writing over the folder on screen is the bug that rule exists for. */
-      const mirroring =
-        address !== null &&
-        held.mirroring.has(address) &&
-        held.sessions.current?.path === address;
-
+      /* A finished turn does not move files into anybody's folder. Work that
+         happened in a copy arrives on the review list, and putting it into the
+         project is a press that says which line it came from. Live mirror, which
+         used to do it automatically, is gone: it wrote to the person's files
+         because a conversation settled, which is not a decision anybody made. */
       if (holding !== null && address !== null) {
-        void noteForReview(path, held, address, holding, mirroring).catch(() => undefined);
+        void noteForReview(path, held, address, holding).catch(() => undefined);
       }
-      if (!mirroring) {
-        void look(path, held);
-        return;
-      }
-      const checkout = holding;
-      // What came back, and what did not. A file both sides changed is left as
-      // this checkout has it — which is right, and used to happen in silence:
-      // the person saw a finished turn and a file that had not changed.
-      // Carrying home is for a copy working on the same line as the folder on
-      // screen. A conversation somebody deliberately put on its own line is the
-      // opposite of that: applying its files here would land one line of work on
-      // top of another, which is how a folder ends up holding a branch's changes
-      // it never asked for. Landing it is still one press, and says which line.
-      /* A version before the first apply of a job, so the moment before
-         somebody's files were changed is one press away. Once per job: a
-         version before every round would be a rail of identical entries. */
-      const who = from.address ?? '';
-      const first =
-        checkout === null ||
-        held.snappedBeforeApply.has(who) ||
-        preferencesNow?.all().snapBeforeApply === false
-          ? Promise.resolve()
-          : (held.snappedBeforeApply.add(who),
-            held.timeline
-              ?.snapshot({ name: beforeBringingWorkIn, boundary: 'turn-ended' })
-              .then(() => undefined)
-              .catch(() => undefined) ?? Promise.resolve());
-      const carried =
-        checkout === null || !existsSync(checkout.folder)
-          ? null
-          : first
-              .then(() => onTheSameLine(path, checkout.folder))
-              .then((sameLine) =>
-                sameLine ? bringBack(gitRunHereFor(), path, checkout.folder) : null,
-              );
-      void (carried ?? Promise.resolve(null))
-        .then((outcome) => {
-          if (outcome !== null && outcome.ok && outcome.value.conflicted.length > 0) {
-            const which = [...outcome.value.conflicted].sort().join('\u0000');
-            if (which !== held.saidHeldBack) {
-              held.saidHeldBack = which;
-              const at = from.address ?? undefined;
-              send(path, { type: 'message-delta', text: `\n\n${bringBackWords.heldBack(outcome.value.conflicted)}` }, at);
-              send(path, { type: 'message-end' }, at);
-            }
-          } else if (outcome !== null && outcome.ok) {
-            held.saidHeldBack = '';
-          }
-          look(path, held);
-        })
-        .catch(() => look(path, held));
+      void look(path, held);
   }
 }
 
@@ -3859,6 +3812,434 @@ function keepAside(project: string, whose: string): Rescue {
   };
 }
 
+/**
+ * Every saved conversation that belongs to this project.
+ *
+ * Across all its workspaces, and decided by the registry where the registry
+ * knows: Pi's own per-directory listing only ever sees the chats that started
+ * in one folder, which left every conversation that worked in a checkout out of
+ * the sidebar. A transcript nobody has written down yet falls back to the
+ * folder it was started in.
+ *
+ * A failure to read the list is a failure, not an empty list: "you have no
+ * conversations" is the one thing it is not.
+ */
+async function conversationsInProject(
+  path: string,
+): Promise<{ ok: true; value: readonly Conversation[] } | { ok: false; because: string }> {
+  const listed = await listAllConversations(sessionsFolder());
+  if (!listed.ok) return listed;
+  const index = await loadWorkspaceIndex();
+  const { projectId } = await localWorkspaceFor(path);
+  const root = canonical(path);
+  const under = canonical(worktreesFolder(path));
+  return {
+    ok: true,
+    value: listed.value.filter((one) => {
+      // What the registry says first: a conversation works in a workspace, and
+      // a workspace belongs to a project, however the folder is named.
+      const workspace =
+        workspaceForConversation(index, one.path) ?? workspaceForConversation(index, one.id);
+      if (workspace !== null) return workspace.projectId === projectId;
+      // Nothing written down yet: the folder it was started in, so a chat from
+      // a checkout still belongs to the project that owns the checkout.
+      const cwd = one.cwd === null ? '' : canonical(one.cwd);
+      return cwd !== '' && (cwd === root || cwd === under || cwd.startsWith(`${under}${sep}`));
+    }),
+  };
+}
+
+/**
+ * Write down where the conversations saved before the registry were working.
+ *
+ * Once, under a lock, with the legacy files copied aside first. It never moves,
+ * renames or deletes anything: it reads what earlier versions wrote, asks the
+ * disk what is actually there, and records the answer. A run that is
+ * interrupted resumes from its own marker, and a profile that has already been
+ * migrated is not asked twice.
+ */
+async function migrateWorkspacesOnce(): Promise<void> {
+  const dir = app.getPath('userData');
+  const markerFile = join(dir, MARKER_FILE);
+  const already = await readFile(markerFile, 'utf8').catch(() => null);
+  if (already !== null && readMarker(already) !== null) return;
+  const lock = join(dir, LOCK_FILE);
+  // Somebody else is doing it, or did it a moment ago. A second writer here
+  // would decide the same ids and fight over the same file.
+  const mine = await mkdir(lock, { recursive: false }).then(
+    () => true,
+    () => false,
+  );
+  if (!mine) return;
+  try {
+    const index = await loadWorkspaceIndex();
+    const remembered = await rememberedProjects().catch(() => []);
+    const projects = await Promise.all(
+      remembered.map(async (one) => {
+        const checkoutFile = checkoutIndexFile(one.path);
+        const raw = await readFile(checkoutFile, 'utf8').catch(() => null);
+        return {
+          path: one.path,
+          checkoutFile,
+          // The whole file, not the filtered map: a row whose folder is outside
+          // the managed root is exactly what has to be seen and marked, not
+          // quietly dropped on the way in.
+          ...(raw === null ? {} : { checkouts: JSON.parse(raw) as unknown }),
+          managedRoot: worktreesFolder(one.path),
+        };
+      }),
+    );
+    const manifest = discover({
+      projects,
+      recentsFile: join(dir, 'projects.json'),
+      exists: (path: string) => existsSync(path),
+    });
+    const run = await commit(manifest, {
+      index,
+      probe: {
+        exists: async (path) => existsSync(path),
+        isRepo: async (path) =>
+          (await gitRun(path, ['rev-parse', '--is-inside-work-tree']).catch(() => null))?.code === 0,
+        branchOf: async (path) => {
+          const named = await gitRun(path, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => null);
+          const branch = (named?.out ?? '').trim();
+          return named?.code === 0 && branch !== '' && branch !== 'HEAD' ? branch : null;
+        },
+        worktreeList: async (repo) => {
+          const listed = await gitRun(repo, ['worktree', 'list', '--porcelain']).catch(() => null);
+          return (listed?.out ?? '')
+            .split('\n')
+            .filter((line) => line.startsWith('worktree '))
+            .map((line) => line.slice('worktree '.length).trim())
+            .filter((one) => one !== '');
+        },
+      },
+      now: Date.now(),
+      indexFile: workspaceIndexFile(),
+    });
+    // The copies first: a migration that rewrote the index and then failed to
+    // keep the old files would have nothing to go back to.
+    for (const one of run.backups) {
+      await copyFile(one.path, one.backup).catch(() => undefined);
+    }
+    workspaceIndex = run.index;
+    await saveWorkspaceIndex();
+    await writeAtomically(
+      markerFile,
+      `${JSON.stringify({ ...run.marker, unlinked: run.unlinked, quarantined: run.quarantined }, null, 2)}\n`,
+    );
+    log.line('info', 'workspaces migrated', {
+      sources: run.marker.sources,
+      verdicts: run.marker.verdicts,
+      unlinked: run.unlinked.length,
+      quarantined: run.quarantined.length,
+      collisions: run.collisions.length,
+    });
+  } finally {
+    await rm(lock, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/* ---------------------------------------------- which folder, written down -- */
+
+/**
+ * Where every conversation works, in one file.
+ *
+ * One index for the whole app rather than one per project: a conversation has to
+ * be answerable about its folder before any project is open, and a workspace's
+ * identity is only worth having if one writer decides it.
+ */
+function workspaceIndexFile(): string {
+  return join(app.getPath('userData'), 'workspaces.json');
+}
+
+let workspaceIndex: WorkspaceIndex = emptyIndex();
+let workspaceIndexLoaded = false;
+let writingWorkspaceIndex: Promise<void> = Promise.resolve();
+
+/**
+ * Read the index once and keep it.
+ *
+ * A file that cannot be read is moved aside, with the reason in the log, rather
+ * than replaced. What is in it is the record of where somebody's work was, and
+ * deciding on their behalf what it said is worse than starting empty.
+ */
+async function loadWorkspaceIndex(): Promise<WorkspaceIndex> {
+  if (workspaceIndexLoaded) return workspaceIndex;
+  workspaceIndexLoaded = true;
+  const file = workspaceIndexFile();
+  const text = await readFile(file, 'utf8').catch(() => null);
+  if (text === null) return workspaceIndex;
+  const read = parseIndex(text);
+  if (read.problem !== null) {
+    const kept = `${file}.unreadable-${String(Date.now())}`;
+    await rename(file, kept).catch(() => undefined);
+    log.line('warn', 'workspace index was unreadable; kept aside', { problem: read.problem, kept });
+    return workspaceIndex;
+  }
+  workspaceIndex = read.index;
+  return workspaceIndex;
+}
+
+/** Written in the order it was asked for, so two saves cannot interleave and
+ *  leave the file holding half of each. */
+function saveWorkspaceIndex(): Promise<void> {
+  const text = serializeIndex(workspaceIndex);
+  writingWorkspaceIndex = writingWorkspaceIndex
+    .then(() => writeAtomically(workspaceIndexFile(), text))
+    .catch(() => undefined);
+  return writingWorkspaceIndex;
+}
+
+/** The project's own folder, written down. No git: opening a folder is not an
+ *  operation on a repository, and this is what opening one does. */
+async function localWorkspaceFor(
+  projectPath: string,
+): Promise<{ projectId: string; workspace: WorkspaceRecord }> {
+  const index = await loadWorkspaceIndex();
+  const ensured = ensureProject(index, projectPath);
+  const added = addWorkspace(ensured.index, {
+    projectId: ensured.project.projectId,
+    path: projectPath,
+    kind: 'local',
+    managed: false,
+    now: Date.now(),
+  });
+  workspaceIndex = added.index;
+  if (ensured.made || added.made) await saveWorkspaceIndex();
+  return { projectId: ensured.project.projectId, workspace: added.workspace };
+}
+
+/** A checkout this app works in, written down if it is not already known. Used
+ *  for a worktree that exists (ours or imported), so a conversation can point at
+ *  it without inventing a second record for the same folder. */
+async function worktreeWorkspaceFor(
+  projectPath: string,
+  folder: string,
+  branch: string | null,
+  baseSha: string | null,
+): Promise<WorkspaceRecord> {
+  const index = await loadWorkspaceIndex();
+  const ensured = ensureProject(index, projectPath);
+  const added = addWorkspace(ensured.index, {
+    projectId: ensured.project.projectId,
+    path: folder,
+    kind: 'worktree',
+    managed: true,
+    branch,
+    baseSha,
+    now: Date.now(),
+  });
+  workspaceIndex = added.index;
+  if (ensured.made || added.made) await saveWorkspaceIndex();
+  return added.workspace;
+}
+
+/** Remember which workspace a conversation works in. The one line that answers
+ *  "which files am I changing" without asking which tab is in front. */
+async function noteConversationWorkspace(
+  conversationId: string,
+  workspaceId: string,
+): Promise<void> {
+  await loadWorkspaceIndex();
+  const attached = attachConversation(workspaceIndex, conversationId, workspaceId);
+  if (attached === workspaceIndex) return;
+  workspaceIndex = attached;
+  await saveWorkspaceIndex();
+}
+
+/** What the registry says about a conversation, or null when it has never been
+ *  written down. Null is an answer, not a reason to pick the folder in front. */
+async function recordedWorkspace(conversationId: string): Promise<WorkspaceRecord | null> {
+  return workspaceForConversation(await loadWorkspaceIndex(), conversationId);
+}
+
+/** The workspace a request named, when it named one. `how` carries it for a New
+ *  worktree, which is the only way a chat starts somewhere other than the
+ *  project's own folder. */
+async function namedWorkspaceOf(how: Opening): Promise<WorkspaceRecord | null> {
+  const id = how.kind === 'fresh' ? how.workspace : undefined;
+  if (id === undefined) return null;
+  return workspaceById(await loadWorkspaceIndex(), id);
+}
+
+/**
+ * Write down which workspace a conversation works in.
+ *
+ * Under both names it will be known by: the address the window is using now,
+ * and the one Pi files the transcript under once there is a word written. An
+ * address is temporary and a record must not be, or a conversation resumed
+ * tomorrow is a conversation nobody can say the folder of.
+ */
+async function noteWhereItWorks(
+  open: { path: string; held: Held },
+  address: string,
+  folder: string | null,
+): Promise<void> {
+  const home =
+    folder === null
+      ? (await localWorkspaceFor(open.path)).workspace
+      : await worktreeWorkspaceFor(
+          open.path,
+          folder,
+          open.held.checkouts.get(address)?.branch ?? null,
+          null,
+        );
+  await noteConversationWorkspace(address, home.workspaceId);
+  const durable = checkoutKey(open.held, address);
+  if (durable !== address) await noteConversationWorkspace(durable, home.workspaceId);
+}
+
+/**
+ * A checkout that exists, spread out again if it was put away.
+ *
+ * A record with no folder on disk and no branch to bring back is a workspace
+ * that is gone: the answer is that, and never the project folder, because an
+ * agent that thinks it is editing its own copy while it edits somebody's work
+ * is the failure this whole file is arranged around.
+ */
+async function spreadOutAgain(
+  project: string,
+  record: WorkspaceRecord,
+): Promise<Result<Checkout>> {
+  if (existsSync(record.cwd)) return done({ folder: record.cwd, branch: record.branch ?? '' });
+  if (record.branch === null || record.branch === '') return fail(workspaceGone(record));
+  const back = await reopenWorktree(gitRunHereFor(), project, record.branch, record.cwd).catch(
+    () => null,
+  );
+  if (back === null || !back.ok) return fail(workspaceGone(record));
+  return done({ folder: record.cwd, branch: record.branch });
+}
+
+/** Said when a conversation's workspace is not where it was. It is not opened
+ *  somewhere else, and this is the sentence that says so. */
+function workspaceGone(record: WorkspaceRecord): Trouble {
+  return {
+    what: 'The folder this conversation was working in is not there any more.',
+    because: `It worked in ${record.displayPath}, and that folder is gone or is no longer a checkout of this project. Nothing has been opened in your project folder instead.`,
+    actionLabel: 'Got it',
+  };
+}
+
+/**
+ * Start a conversation in a workspace, as a deliberate act.
+ *
+ * This is the only path that makes a checkout, and it makes one because somebody
+ * asked for one: named base, named folder, and the conversation the window is
+ * about to show. Everything it can go wrong at is reported as a failure rather
+ * than as a quiet fallback to the person's own files.
+ */
+async function startInNewWorktree(
+  open: { path: string; held: Held },
+  wanted: { base: string | null },
+): Promise<Result<Started>> {
+  const named = freshCheckout(open.held, open.path);
+  const made = await createWorktree(gitRunHereFor(), open.path, named.name, wanted.base === null ? null : { ref: wanted.base }, {
+    folder: named.folder,
+  });
+  if (!made.ok || made.value === null) {
+    return fail({
+      what: 'I could not make a copy of the project to work in.',
+      because: made.ok
+        ? 'Git did not answer, so nothing was created and your project is untouched.'
+        : made.because,
+      actionLabel: 'Got it',
+    });
+  }
+  const baseSha = await headSha(open.path);
+  const workspace = await worktreeWorkspaceFor(open.path, made.value.folder, made.value.branch, baseSha);
+  const started = await startConversation(open, openingIn(workspace.workspaceId));
+  if (!started.ok) {
+    // The copy exists and the conversation did not. It is left where it is,
+    // empty and named, rather than deleted underneath whoever was watching.
+    return started;
+  }
+  await noteConversationWorkspace(started.value.address, workspace.workspaceId);
+  return started;
+}
+
+/** The commit a checkout is being made from, written down so the copy can say
+ *  what it started at even after the branch has moved on. */
+async function headSha(folder: string): Promise<string | null> {
+  const found = await gitRun(folder, ['rev-parse', 'HEAD']).catch(() => null);
+  const sha = found?.code === 0 ? (found.out ?? '').trim() : '';
+  return sha === '' ? null : sha;
+}
+
+/**
+ * What a New worktree would do here, read and not done.
+ *
+ * The folder it would use, the commit it would start from, and the files that
+ * are changed here and would not come with it — a copy starts from a commit,
+ * and somebody deciding whether to make one deserves to know that before it
+ * exists rather than after.
+ */
+async function planForNewWorktree(
+  open: { path: string; held: Held },
+): Promise<WorktreePlan> {
+  const run = gitRunHereFor();
+  const empty: Pick<WorktreePlan, 'folder' | 'baseBranch' | 'baseSha' | 'leftBehind'> = {
+    folder: '',
+    baseBranch: null,
+    baseSha: null,
+    leftBehind: [],
+  };
+  const inside = await run(['rev-parse', '--is-inside-work-tree'], { cwd: open.path }).catch(
+    () => null,
+  );
+  if (inside === null || inside.code !== 0) {
+    return { ...empty, possible: false, because: worktreeWords.notRepo };
+  }
+  const sha = await headSha(open.path);
+  if (sha === null) {
+    return {
+      ...empty,
+      possible: false,
+      because: 'This repository has nothing committed yet, so a copy would have nowhere to start from.',
+    };
+  }
+  const named = await gitRun(open.path, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => null);
+  const branch = (named?.out ?? '').trim();
+  const status = await gitRun(open.path, ['status', '--porcelain']).catch(() => null);
+  const leftBehind = (status?.out ?? '')
+    .split('\n')
+    .map((line) => line.slice(3).trim())
+    .filter((one) => one !== '')
+    .slice(0, 50);
+  return {
+    possible: true,
+    because: null,
+    folder: freshCheckoutName(open.held, open.path),
+    baseBranch: branch === '' || branch === 'HEAD' ? null : branch,
+    baseSha: sha,
+    leftBehind,
+  };
+}
+
+/** The folder a new checkout would get, without spending the counter that
+ *  names it: a plan is not a decision. */
+function freshCheckoutName(held: Held, project: string): string {
+  const chosen = nextCheckoutName(
+    held.checkoutsMade,
+    (name) => existsSync(join(worktreesFolder(project), name)),
+  );
+  return join(worktreesFolder(project), chosen.name);
+}
+
+/** A conversation just started, in the shape the window opens one. */
+function openedFrom(open: { path: string; name: string; held: Held }, started: Started): OpenedProject {
+  const checkout = open.held.checkouts.get(started.address) ?? null;
+  return {
+    path: open.path,
+    name: open.name,
+    history: withNote(started.session.history, started.note),
+    conversation: started.session.conversation,
+    address: started.address,
+    howFar: started.session.howFar,
+    ownCopy: checkout !== null,
+  };
+}
+
 /* ------------------------------------------------ checkouts left behind -- */
 
 /** Every checkout left spread out on disk when the app last went away. What a
@@ -4175,7 +4556,7 @@ async function saveReviewQueue(project: string, held: Held): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   await writeAtomically(
     file,
-    JSON.stringify({ entries: held.review, mirroring: [...held.mirroring] }),
+    JSON.stringify({ entries: held.review, mirroring: held.mirroringLegacy }),
   );
 }
 
@@ -4271,7 +4652,6 @@ async function noteForReview(
   held: Held,
   address: string,
   checkout: Checkout,
-  mirrored: boolean,
   from: Arriving['from'] = 'conversation',
   called?: string,
 ): Promise<void> {
@@ -4293,11 +4673,10 @@ async function noteForReview(
   };
   const before = held.review.length;
   held.review = queueFrom(held.review, [arriving]);
-  if (mirrored) held.review = markRead(held.review, address);
   await saveReviewQueue(project, held).catch(() => undefined);
   // Said once, the first time work waits here instead of arriving. Without it
   // the change reads as the work having gone missing.
-  if (!mirrored && before === 0 && !toldAboutReview.has(project)) {
+  if (before === 0 && !toldAboutReview.has(project)) {
     toldAboutReview.add(project);
     await rememberToldAboutReview();
     send(project, { type: 'notice', what: reviewWords.firstTime }, address === '' ? undefined : address);
@@ -4355,7 +4734,6 @@ function reviewRows(held: Held): readonly ReviewEntry[] {
   return held.review.map((one) => ({
     ...one,
     branch: held.checkouts.get(one.address)?.branch ?? '',
-    mirror: held.mirroring.has(one.address),
   }));
 }
 
@@ -4564,30 +4942,28 @@ async function startConversationUnlocked(
 
   const from: Speaking = { address: null };
   const prefs = (await preferences()).all();
-  // The first conversation of a project is the one on the folder the person is
-  // looking at; any further one is a parallel tab and works in its own checkout
-  // rather than writing the same files the first one is writing.
-  const primary = held.sessions.open.length === 0;
-  // A put-down conversation may still own an isolated checkout with unapplied
-  // work. Reopening must resume that exact folder rather than overwrite its map
-  // entry with a fresh copy and orphan the old work.
+  /* Which folder this conversation works in, taken from the record and from
+     what was asked for — never from how many conversations are already open.
+     That count used to decide it, which made an ordinary second chat copy the
+     project and made a failed copy write to the person's folder instead. */
   let checkout: Checkout | null =
     asked === undefined ? null : (held.checkouts.get(asked) ?? null);
   if (checkout !== null) {
     checkout = await reopenCheckout(open.path, checkout);
-    // Its work is not in the project any more. A fresh checkout below is a
-    // better answer than refusing to open the conversation at all.
+    // Its work is not in the project any more. The record is dropped here and
+    // the registry below decides where this conversation works instead.
     if (checkout === null && asked !== undefined) held.checkouts.delete(asked);
   }
-  let madeCheckout = false;
-  if (!primary && checkout === null) {
-    const named = freshCheckout(held, open.path);
-    const made = await createWorktree(gitRunHereFor(), open.path, named.name, null, {
-      folder: named.folder,
-    });
-    if (made.ok && made.value !== null) {
-      checkout = { folder: made.value.folder, branch: made.value.branch };
-      madeCheckout = true;
+  const wanted = asked === undefined ? await namedWorkspaceOf(how) : undefined;
+  if (checkout === null) {
+    const recorded =
+      asked === undefined
+        ? (wanted ?? (await localWorkspaceFor(open.path)).workspace)
+        : await recordedWorkspace(asked);
+    if (recorded !== null && recorded.kind === 'worktree') {
+      const back = await spreadOutAgain(open.path, recorded);
+      if (!back.ok) return back;
+      checkout = { folder: recorded.cwd, branch: recorded.branch ?? '' };
     }
   }
   // A checkout holds tracked files and nothing else, so the `.env.local` the
@@ -4679,9 +5055,9 @@ async function startConversationUnlocked(
       ...(providerAuthPath === null ? {} : { authPath: providerAuthPath }),
     });
   } catch (cause) {
-    if (madeCheckout && checkout !== null) {
-      await dropWorktree(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
-    }
+    // Nothing is thrown away here. A checkout this app did not just make is
+    // somebody's work, and a session that would not start is not a reason to
+    // delete the folder it was going to work in.
     // The adapter wraps whatever went wrong in a sentence of its own, so the
     // reason worth reading is down the `cause` chain rather than on top of it.
     // Search the whole chain before falling back to the likeliest explanation.
@@ -4697,6 +5073,7 @@ async function startConversationUnlocked(
     held.checkouts.set(address, checkout);
     await saveCheckouts(open.path, held).catch(() => undefined);
   }
+  await noteWhereItWorks(open, address, checkout?.folder ?? null).catch(() => undefined);
   keepConversation(held, address, session);
   return done({
     session,
@@ -4798,7 +5175,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     checkoutsMade: restoredCheckouts.size,
     checkouts: restoredCheckouts,
     review: restoredReview.entries,
-    mirroring: new Set(restoredReview.mirroring),
+    mirroringLegacy: restoredReview.mirroring,
     waiting: null,
     checking: null,
     pictures: null,
@@ -5337,6 +5714,47 @@ async function sendOnTheirBehalf(project: string, address: string, text: string)
  *  line they read as something somebody typed and is waiting for, and they are
  *  neither. */
 const ours = new Map<string, readonly string[]>();
+
+/**
+ * One run per folder.
+ *
+ * Two chats may work in the same workspace; they may not write it at the same
+ * minute. A run holds its folder for its whole length — every tool, every child
+ * and the pause for an answer — and the next one waits in arrival order.
+ */
+const workspaceLocks = new WorkspaceLocks();
+
+/** The run each conversation currently has going, so a second message from the
+ *  same chat joins its own run rather than queueing behind it. */
+const runsHere = new Map<string, { key: string; runId: string }>();
+
+/** A run waiting for the folder, kept by conversation, so taking the line back
+ *  can actually stop it: the words are not in Pi's queue, so Pi cannot. */
+const waitingForTheFolder = new Map<string, { key: string; runId: string; text: string }>();
+
+let runsSoFar = 0;
+
+/**
+ * Take a message out of the folder's queue.
+ *
+ * The words belong to the window until the run has actually started, so taking
+ * them back has to cancel the wait itself: resolving the ticket as cancelled is
+ * what stops the send, and returning the words is what puts them in the box.
+ * Null when this conversation is not the one waiting.
+ */
+async function takeBackFromTheFolder(
+  open: Workspace<Held>,
+  where: Where,
+): Promise<string | null> {
+  const session = sessionAt(open, where);
+  if (session === null) return null;
+  const whose = keyOf(open.path, addressOf(session));
+  const waiting = waitingForTheFolder.get(whose);
+  if (waiting === undefined) return null;
+  if (!workspaceLocks.cancel(waiting.key, waiting.runId)) return null;
+  waitingForTheFolder.delete(whose);
+  return waiting.text;
+}
 
 /** How heavy the system prompt was on the last call of each conversation. Read
  *  by the diagnostics, drawn nowhere. */
@@ -6531,7 +6949,7 @@ function tellTheConversation(desk: AwayDesk, piece: PieceOfWork): void {
   // else a finished piece would be seen.
   const checkout = open.held.checkouts.get(piece.id);
   if (checkout !== undefined) {
-    void noteForReview(desk.path, open.held, piece.id, checkout, false, 'board', piece.doing).catch(
+    void noteForReview(desk.path, open.held, piece.id, checkout, 'board', piece.doing).catch(
       () => undefined,
     );
   }
@@ -6981,10 +7399,13 @@ function handle<T>(channel: string, run: (event: IpcMainInvokeEvent, args: unkno
       return await run(event, args);
     } catch (cause) {
       // Nothing below is expected to throw. If one does, the window still gets a
-      // sentence rather than a rejected promise it has no way to describe.
+      // sentence rather than a rejected promise it has no way to describe — and
+      // the sentence says what is true, which is that this stopped somewhere
+      // unknown rather than that the world is unchanged.
       return fail<T>({
-        what: 'Something went wrong on my side.',
-        because: 'I have stopped where I was. Nothing else has been changed.',
+        what: 'Something went wrong on my side, and this did not finish.',
+        because:
+          'Part of it may have gone through already, and I cannot tell from here how much did. Check how things stand before trying again.',
         actionLabel: 'Got it',
         details: detailsOf(cause),
       });
@@ -7915,16 +8336,29 @@ function register(): void {
     return Promise.resolve(done(session?.howFar ?? 'asking'));
   });
 
-  /** Plan is held on the project rather than on one conversation: it seeds every
-   *  conversation started while it is on, so the two would otherwise disagree
-   *  about a folder that is meant to be read-only. */
+  /**
+   * Plan is held on the conversation it was turned on in.
+   *
+   * It used to be a project-wide switch that reached into every open session, so
+   * turning it on in one chat made a second chat stop writing too, with nothing
+   * on that chat's screen saying why. The project default still seeds a new
+   * conversation, which is what Settings edits; the switch itself is this
+   * conversation's.
+   */
   handle<boolean>(CHANNEL.setPlanMode, (_event, args) => {
     const [on] = args;
     if (typeof on !== 'boolean') return Promise.resolve(fail<boolean>(NOT_A_YES_OR_NO));
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
-    open.held.planMode = on;
-    for (const one of open.held.sessions.open) one.held.setPlanMode(on);
+    const session = workingAt(open, where);
+    if (session === null) {
+      // Nobody named a conversation, which is the Settings case: this is the
+      // default a new chat starts with, not a change to whoever is open.
+      open.held.planMode = on;
+      return Promise.resolve(done(on));
+    }
+    session.setPlanMode(on);
     // What the board was holding is only waiting, so leaving Plan is what lets
     // it go — without this the queue waits for a turn that never comes.
     if (!on) {
@@ -8419,16 +8853,27 @@ function register(): void {
 
   handle<{ steering: readonly string[]; followUp: readonly string[] }>(
     CHANNEL.takeBackQueue,
-    (_event, args) => {
+    async (_event, args) => {
       const where = whereIn(args);
       const open = projectAt(where);
       const session = open === null ? null : sessionAt(open, where);
-      if (session === null) return Promise.resolve(done({ steering: [], followUp: [] }));
+      // A message waiting for the folder is not in Pi's queue, so Pi cannot
+      // give it back. It is taken out here, or the line would sit on screen
+      // with a press that does nothing.
+      const waiting = open === null ? null : await takeBackFromTheFolder(open, where);
+      if (session === null) {
+        return Promise.resolve(done({ steering: waiting === null ? [] : [waiting], followUp: [] }));
+      }
       const taken = session.takeBackQueue();
       // A line that would not come back is still queued. Answering with an
       // empty one took the words off the screen while the agent still had them.
       if (!taken.ok) return Promise.resolve(fail(couldNotTakeBack(taken.because)));
-      return Promise.resolve(done({ steering: taken.steering, followUp: taken.followUp }));
+      return Promise.resolve(
+        done({
+          steering: waiting === null ? taken.steering : [waiting, ...taken.steering],
+          followUp: taken.followUp,
+        }),
+      );
     },
   );
 
@@ -8822,30 +9267,16 @@ function register(): void {
     // one carried on, which is what opening the project already does.
     const started = await startConversation(open, openingFor(path, true));
     if (!started.ok) return started;
-    // Making a checkout conversation the one in front brings its work home so
-    // the folder the window reads is the work it has done so far. If it cannot
-    // come home (a conflict with the folder's own version), the conversation
-    // still opens and its work stays in its checkout until it settles.
+    // Opening a conversation is looking at it. A copy's work is described
+    // rather than carried home: bringing it back on a glance made navigating a
+    // write to the project, and merging stays a thing somebody asks for.
     const checkout = open.held.checkouts.get(started.value.address) ?? null;
-    if (checkout !== null) {
-      const carried = await bringBack(gitRunHereFor(), open.path, checkout.folder).catch(() => null);
-      // Said here as well as when a turn settles: opening a conversation and
-      // reading a file that never changed, with nothing on screen to explain
-      // it, is the same silence either way round.
-      if (carried !== null && carried.ok && carried.value.conflicted.length > 0) {
-        const which = [...carried.value.conflicted].sort().join('\u0000');
-        if (which !== open.held.saidHeldBack) {
-          open.held.saidHeldBack = which;
-          const at = started.value.address;
-          send(open.path, { type: 'message-delta', text: bringBackWords.heldBack(carried.value.conflicted) }, at);
-          send(open.path, { type: 'message-end' }, at);
-        }
-      }
-    }
+    const note =
+      checkout === null ? started.value.note : ownCopyWords.whereItWorks(checkout.folder, open.path);
     return done({
       path: open.path,
       name: open.name,
-      history: withNote(started.value.session.history, started.value.note),
+      history: withNote(started.value.session.history, note),
       conversation: started.value.session.conversation,
       address: started.value.address,
       howFar: started.value.session.howFar,
@@ -8853,6 +9284,35 @@ function register(): void {
       // being told the window cannot offer to bring that work back.
       ownCopy: checkout !== null,
     });
+  });
+
+  /**
+   * What a New worktree would make, before anybody commits to it.
+   *
+   * Read only: no folder, no branch and no counter is spent, so asking twice
+   * gives the same answer and a dialog can be opened and closed for free.
+   */
+  handle<WorktreePlan>(CHANNEL.worktreePlan, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    return done(await planForNewWorktree(open));
+  });
+
+  /**
+   * Make the copy, and start a conversation in it.
+   *
+   * The only thing in the app that makes a checkout without being asked to
+   * bring one back, and it makes one because somebody pressed this.
+   */
+  handle<OpenedProject>(CHANNEL.worktreeNew, async (_event, args) => {
+    const [base] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const started = await startInNewWorktree(open, {
+      base: typeof base === 'string' && base.trim() !== '' ? base : null,
+    });
+    if (!started.ok) return started;
+    return done(openedFrom(open, started.value));
   });
 
   /**
@@ -8939,7 +9399,11 @@ function register(): void {
         details: detailsOf(cause),
       });
     }
-    return done(await listConversations(open.path, sessionsFolder()));
+    const left = await conversationsInProject(open.path);
+    // The list comes from the shell either way: the file is gone, and a list
+    // that did not come back is worth saying rather than pretending.
+    if (!left.ok) return fail(NOTHING_OPEN);
+    return done(left.value);
   });
 
   /** One shelf per run. Building it reads settings off disk, and the screen it
@@ -9068,7 +9532,17 @@ function register(): void {
   handle<readonly Conversation[]>(CHANNEL.conversations, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) return done([]);
-    return done(await listConversations(open.path, sessionsFolder()));
+    const found = await conversationsInProject(open.path);
+    if (!found.ok) {
+      // Saying "none" would be a lie about somebody's history: the list could
+      // not be read, which is a different thing and worth a different answer.
+      return fail({
+        what: 'I could not read your saved conversations.',
+        because: 'The folder they are kept in did not answer. Nothing has been changed.',
+        actionLabel: 'Try again',
+      });
+    }
+    return done(found.value);
   });
 
   handle<null>(CHANNEL.revealFolder, async (_event, args) => {
@@ -9814,20 +10288,6 @@ function register(): void {
     return done({ url: made.url, entries: reviewRows(open.held) });
   });
 
-  /** The way back to how this behaved before the queue, one card at a time. */
-  handle<readonly ReviewEntry[]>(CHANNEL.reviewMirror, async (_event, args) => {
-    const [id, on] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    if (typeof id !== 'string' || typeof on !== 'boolean') return fail(NO_SUCH_ENTRY);
-    const entry = open.held.review.find((one) => one.id === id);
-    const address = entry?.address ?? id;
-    if (on) open.held.mirroring.add(address);
-    else open.held.mirroring.delete(address);
-    await saveReviewQueue(open.path, open.held).catch(() => undefined);
-    return done(reviewRows(open.held));
-  });
-
   /**
    * One file both sides changed, written out with markers to decide over.
    *
@@ -9957,8 +10417,13 @@ function register(): void {
     }
     const project = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
     let folder: string;
+    let branch = '';
     try {
-      folder = (await preparePrWorktree(project, prNumber)).folder;
+      const made = await preparePrWorktree(project, prNumber);
+      folder = made.folder;
+      // The branch carries the fetched head, so a review is pinned to the
+      // commit it was opened at rather than to whatever the PR is now.
+      branch = made.branch;
     } catch (cause) {
       const details = detailsOf(cause);
       return fail({
@@ -9998,7 +10463,7 @@ function register(): void {
     }
     const address = addressOf(session);
     from.address = address;
-    open.held.checkouts.set(address, { folder, branch: `graphe/pr-${String(prNumber)}` });
+    open.held.checkouts.set(address, { folder, branch });
     await saveCheckouts(open.path, open.held).catch(() => undefined);
     keepConversation(open.held, address, session);
     return done({
@@ -10677,6 +11142,26 @@ function register(): void {
     // Their words, not the workflow's expansion of them: the branch is named
     // after what was asked for.
     await nameBranchAfter(open, conversation.path, textIn).catch(() => undefined);
+    /* One writer per folder. A second chat working in the same files waits its
+       turn here — before anything is sent, so nothing it asked for has begun —
+       and the waiting line beside the composer is where that is said. */
+    const whose = keyOf(open.path, addressOf(conversation.held));
+    const workspaceKey = canonical(folderFor(open, where));
+    const own = runsHere.get(whose);
+    const runId = `run-${String((runsSoFar += 1))}`;
+    const admission = workspaceLocks.request(
+      { key: workspaceKey, runId, label: open.name },
+      own !== undefined && own.key === workspaceKey ? own.runId : undefined,
+    );
+    if (!admission.granted) {
+      waitingForTheFolder.set(whose, { key: workspaceKey, runId, text: textIn });
+      send(open.path, { type: 'queued', steering: [textIn], followUp: [] }, conversation.path);
+      const outcome = await admission.when;
+      waitingForTheFolder.delete(whose);
+      if (outcome === 'cancelled') return done(null);
+    }
+    if (admission.granted && admission.newlyHeld) runsHere.set(whose, { key: workspaceKey, runId });
+    send(open.path, { type: 'message-started', text: textIn }, conversation.path);
     try {
       // A PDF has become words by the time the message goes. Read here rather
       // than in the window: the extraction is Node's, and the same reader
@@ -10753,6 +11238,15 @@ function register(): void {
       // the two.
       const raw = cause instanceof Error ? cause.message : String(cause);
       return fail(plainTrouble(raw, detailsOf(cause)));
+    } finally {
+      /* The run is over — answered, stopped, or failed — so the folder is
+         somebody else's turn. Only a run that took the lock gives it up: a
+         second message that joined its own running chat never had it. */
+      const mine = runsHere.get(whose);
+      if (mine !== undefined && mine.runId === runId) {
+        runsHere.delete(whose);
+        workspaceLocks.release(workspaceKey, runId);
+      }
     }
   });
 
@@ -11455,6 +11949,11 @@ if (!app.requestSingleInstanceLock()) {
     // And servers. A helper is known by its filename; a server is whatever
     // somebody asked for, so it is known only because we wrote it down.
     await endStrayServers().catch(() => 0);
+    // Where every conversation's files are, written down from the copies this
+    // app already kept. Runs once, on the profile that predates the registry.
+    await migrateWorkspacesOnce().catch((cause: unknown) => {
+      log.line('warn', 'workspace migration did not finish', { cause: String(cause) });
+    });
     // And the copies of the project those conversations were working in.
     await sweepStrayCheckouts().catch(() => 0);
     /* And everything else this app leaves behind. Only the safe categories,

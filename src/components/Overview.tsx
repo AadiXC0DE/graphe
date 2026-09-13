@@ -9,6 +9,7 @@ import Landing, { type Outcome } from './Landing';
 import type { Verdict } from '../design/gate';
 import Swatches from './Swatches';
 import type {
+  ReviewEntry,
   Artifact,
   Away as AwayState,
   Decision,
@@ -303,6 +304,9 @@ type Props = {
   onOpenChanges?: () => void;
   /** Open the Review screen, at an entry when one is named. */
   onOpenReview?: (id?: string) => void;
+  /** What is waiting for this conversation. Owned by the app, which is the only
+   *  place that knows which conversation this panel is about. */
+  waitingHere?: readonly ReviewEntry[];
   /** Open one of the files the last turn made, in the person's editor. */
   onOpenFile: (file: string) => void;
 
@@ -454,6 +458,7 @@ export default function Overview({
   onHandOver,
   onOpenLink,
   onOpenChanges,
+  waitingHere = [],
   onOpenReview,
   onOpenFile,
   onKeepGoing,
@@ -754,7 +759,7 @@ export default function Overview({
 
       {/* What has finished and is waiting. One press per row into the Review
           screen, which is the one place work is decided about. */}
-      {several ? null : <Waiting onOpen={onOpenReview} clock={view.clock} />}
+      {several ? null : <Waiting entries={waitingHere} onOpen={onOpenReview} clock={view.clock} />}
 
       {/* A folder holding several projects keeps its own commit press: the band
           above is one project's, and there is no folder-level branch to be on. */}

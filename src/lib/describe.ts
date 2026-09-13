@@ -130,19 +130,11 @@ export function describeCall(call: ToolCall): Described {
         detail: short(textField(input, ['pattern', 'query', 'regex'])),
       };
 
-    case 'lsp':
+    case 'search_symbols_text':
       return {
         label: 'Looking through your code',
-        detail: short(textField(input, ['symbol', 'operation', 'query', 'path'])),
+        detail: short(textField(input, ['symbol', 'word', 'operation', 'path'])),
       };
-
-    case 'lsp_rename': {
-      const symbol = textField(input, ['symbol', 'word', 'name']);
-      return {
-        label: symbol === null ? 'Renaming across your project' : `Renaming ${symbol} across your project`,
-        detail: short(textField(input, ['newName', 'to'])),
-      };
-    }
 
     case 'bash':
     case 'shell':

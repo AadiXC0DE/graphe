@@ -21,6 +21,9 @@ type Props = {
   openConversation: string | null;
   onOpenConversation: (path: string) => void;
   onNewConversation: () => void;
+  /** Start a conversation in a copy of the project, on a branch of its own.
+   *  Optional: a shelf that cannot yet offer it is still whole. */
+  onNewWorktree?: () => void;
   /** Throw one away. Optional so a shelf that cannot yet is still whole. */
   onDeleteConversation?: (path: string) => void;
   /** Whether the conversation on screen is working on its own copy of the
@@ -121,6 +124,7 @@ export default function Sidebar(props: Props) {
   openConversation,
   onOpenConversation,
   onNewConversation,
+  onNewWorktree,
   onDeleteConversation,
   ownCopy = false,
   onBringWorkBack,
@@ -207,6 +211,24 @@ export default function Sidebar(props: Props) {
           <section className="shelf__band shelf__band--scroll">
             <div className="shelf__bandtop">
               <h2 className="shelf__caption">Conversations</h2>
+              {onNewWorktree === undefined ? null : (
+                <button
+                  type="button"
+                  className="shelf__newworktree"
+                  onClick={onNewWorktree}
+                  title="Start a conversation in a copy of this project"
+                  aria-label="New worktree"
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M8 4.5V12M5 9.5c0-1.7 1.3-3 3-3s3 1.3 3 3"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              )}
               <button
                 type="button"
                 className="shelf__new"

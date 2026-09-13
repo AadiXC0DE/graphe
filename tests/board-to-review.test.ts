@@ -29,7 +29,9 @@ describe('a piece that lands on the board', () => {
     const at = main.indexOf('function tellTheConversation(');
     const block = main.slice(at, main.indexOf('\n}', at));
     expect(block).toContain('continuations.landed(');
-    expect(block).toContain("noteForReview(desk.path, open.held, piece.id, checkout, false, 'board', piece.doing)");
+    // The list is told first, and nothing is carried into anybody's folder:
+    // the fifth argument used to be the live-mirror flag, which is gone.
+    expect(block).toContain("noteForReview(desk.path, open.held, piece.id, checkout, 'board', piece.doing)");
     expect(block.indexOf('continuations.landed(')).toBeLessThan(block.indexOf('noteForReview('));
   });
 

@@ -50,7 +50,7 @@ import type { AgentToolResult, AgentToolUpdateCallback, ToolDefinition } from '@
 import { Type } from 'typebox';
 import { READABLE, documentSaid, readDocument } from './documents';
 
-import { lspRenameTool, lspTool } from './lsp';
+import { searchSymbolsTextTool } from './search-symbols-text';
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
 import { ProjectHistory, type ReviewTarget } from '../../history/repo';
 import { mapFrom, saysMap, type SourceFile } from '../../files/map';
@@ -2703,11 +2703,10 @@ export const grapheTools = (
       // something connected, and the project with nothing yet is the whole
       // point of this one.
       connectingTool(projectRoot),
-      lspTool(projectRoot),
-      lspRenameTool(projectRoot),
+      searchSymbolsTextTool(projectRoot),
     );
   } else {
-    tools.push(lspTool(process.cwd()), lspRenameTool(process.cwd()));
+    tools.push(searchSymbolsTextTool(process.cwd()));
   }
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));

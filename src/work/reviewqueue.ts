@@ -82,10 +82,6 @@ export const reviewWords = {
   openPr: 'Open a pull request',
   opening: 'Opening the pull request…',
   landing: 'Landing…',
-  /** The old behaviour, kept per card for anyone who wants it. */
-  mirror: 'Carry files into my folder as it works',
-  mirrorWhy:
-    'Carry this conversation’s files into your folder as it works, instead of waiting here for a review.',
   /** A land cannot keep the conversation’s own saves once files are left out
    *  of it, so the precise control says so rather than quietly ignoring it. */
   heldBackNote: 'Files you kept your own version of stay out, so this arrives as one commit.',

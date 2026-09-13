@@ -68,14 +68,14 @@ describe('readOnlyTools', () => {
     expect(readOnlyTools([])).toEqual([]);
   });
 
-  it('keeps looking through code and drops the rename that writes it', () => {
-    expect(readOnlyTools(['lsp', 'lsp_rename'])).toEqual(['lsp']);
+  it('keeps a text search and drops a tool that rewrites the project', () => {
+    expect(readOnlyTools(['search_symbols_text', 'lsp_rename'])).toEqual(['search_symbols_text']);
   });
 
   /**
    * The regression this whole set exists to catch, swept rather than listed.
    *
-   * A tool that renamed a symbol across every file was classed as a read, so
+   * A tool that rewrote a symbol across every file was classed as a read, so
    * the looking-around pass rewrote the project it was only supposed to look
    * at. The evidence is each tool's own words to the model, never the Guard's
    * own lists — a check made of the same set it is checking agrees with itself

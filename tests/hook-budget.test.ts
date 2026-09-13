@@ -2,16 +2,19 @@
  *
  * The failure this stands against is silent: one handler that never answers
  * holds the whole conversation open, and the window shows a run that never
- * ends. So the tests are about a handler that never answers, and about the one
- * event where waiting is legitimate.
+ * ends. So the tests are about a handler that never answers, about the one
+ * event where waiting is legitimate, and about what a timeout does not claim:
+ * a handler it let go of may still be running, and its state is not reused.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   budgetMs,
   forgetOverruns,
+  forgetRunning,
   HOOK_BUDGET_MS,
+  hookStillRunning,
   raceBudget,
   recentOverruns,
   withHookBudget,
@@ -39,6 +42,7 @@ const never = (): Promise<never> => new Promise<never>(() => {});
 
 afterEach(() => {
   forgetOverruns();
+  forgetRunning();
 });
 
 describe('a handler that never answers', () => {
@@ -72,6 +76,111 @@ describe('a handler that never answers', () => {
     );
     await expect(handlerFor(runner, 'agent_settled')()).resolves.toBe('in time');
     expect(seen).toEqual([]);
+  });
+});
+
+describe('a handler the budget let go of', () => {
+  it('is recorded as possibly still running, never as stopped or failed', async () => {
+    const seen: Overrun[] = [];
+    const runner = withHookBudget(
+      runnerWith({ agent_end: [never] }, '/add-ons/never-answers/index.mjs'),
+      (one) => seen.push(one),
+      25,
+    );
+    await expect(handlerFor(runner, 'agent_end')()).resolves.toBeUndefined();
+
+    expect(seen[0]?.abandoned).toBe(true);
+    expect(seen[0]?.stopped).toBe(false);
+    // `never` declares no slot for a signal, so nothing could have stopped it.
+    expect(seen[0]?.signalled).toBe(false);
+    expect(hookStillRunning('never-answers', 'agent_end')).toBe(true);
+  });
+
+  it('stops counting as running once it answers, without rewriting how it ended', async () => {
+    const held = Promise.withResolvers<void>();
+    const seen: Overrun[] = [];
+    const runner = withHookBudget(
+      runnerWith({ turn_end: [() => held.promise] }, '/add-ons/settles-late/index.mjs'),
+      (one) => seen.push(one),
+      25,
+    );
+    await handlerFor(runner, 'turn_end')();
+    expect(hookStillRunning('settles-late', 'turn_end')).toBe(true);
+
+    held.resolve();
+    await vi.waitFor(() => {
+      expect(hookStillRunning('settles-late', 'turn_end')).toBe(false);
+    });
+
+    expect(recentOverruns()).toHaveLength(1);
+    expect(seen[0]?.abandoned).toBe(true);
+    expect(seen[0]?.stopped).toBe(true);
+  });
+
+  it('is not started again until the abandoned run has stopped', async () => {
+    let calls = 0;
+    const held = Promise.withResolvers<void>();
+    const handler = (): Promise<void> => {
+      calls += 1;
+      return held.promise;
+    };
+    const runner = withHookBudget(
+      runnerWith({ agent_end: [handler] }, '/add-ons/still-busy/index.mjs'),
+      () => {},
+      20,
+    );
+    const call = handlerFor(runner, 'agent_end');
+
+    await call();
+    expect(calls).toBe(1);
+    // Refused, not queued: the first run still holds whatever it holds.
+    await expect(call()).resolves.toBeUndefined();
+    expect(calls).toBe(1);
+
+    held.resolve();
+    await vi.waitFor(() => {
+      expect(hookStillRunning('still-busy', 'agent_end')).toBe(false);
+    });
+    await call();
+    expect(calls).toBe(2);
+  });
+
+  it('hands a signal to a handler that declares a slot for one, and aborts it', async () => {
+    let given: AbortSignal | undefined;
+    let aborted = false;
+    const handler = (_event: unknown, _ctx: unknown, signal?: AbortSignal): Promise<never> => {
+      given = signal;
+      signal?.addEventListener('abort', () => {
+        aborted = true;
+      });
+      return never();
+    };
+    const seen: Overrun[] = [];
+    const runner = withHookBudget(
+      runnerWith({ agent_end: [handler as Handler] }, '/add-ons/takes-signal/index.mjs'),
+      (one) => seen.push(one),
+      20,
+    );
+    // Pi calls a lifecycle handler with the event and its context; the signal
+    // is the slot after those, which this handler declares.
+    const call = handlerFor(runner, 'agent_end') as (...args: unknown[]) => Promise<unknown>;
+    await call({ type: 'agent_end' }, {});
+
+    expect(given).toBeInstanceOf(AbortSignal);
+    expect(aborted).toBe(true);
+    expect(seen[0]?.signalled).toBe(true);
+    expect(seen[0]?.stopped).toBe(false);
+  });
+
+  it('leaves a sibling handler on the same event alone', async () => {
+    const runner = withHookBudget(
+      runnerWith({ agent_end: [never, () => 'sibling'] }, '/add-ons/two-handlers/index.mjs'),
+      () => {},
+      20,
+    );
+    const [first, second] = runner.extensions[0]?.handlers.get('agent_end') ?? [];
+    await first?.();
+    expect(await second?.()).toBe('sibling');
   });
 });
 

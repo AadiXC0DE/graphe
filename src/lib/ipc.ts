@@ -147,6 +147,28 @@ export function whereIn(args: readonly unknown[]): Where {
 }
 
 /** A project folder, as the window refers to it. */
+/**
+ * What a New worktree would do, in the words a dialog can show.
+ *
+ * Nothing is created by asking: the folder, the base and the commit are all
+ * read, so somebody can see where the copy would go and what it would start
+ * from before anything is made.
+ */
+export type WorktreePlan = {
+  /** False in a folder that is not a repository, or that has nothing committed
+   *  yet. `because` says which. */
+  possible: boolean;
+  because: string | null;
+  /** The folder the copy would be made in. */
+  folder: string;
+  /** The branch it would start from, as it is called now. */
+  baseBranch: string | null;
+  /** The commit it would start at. */
+  baseSha: string | null;
+  /** Files that are changed here and would not come with it. */
+  leftBehind: readonly string[];
+};
+
 export type OpenedProject = {
   /** Absolute path. Shown only if the user asks for it. */
   path: string;
@@ -1380,14 +1402,11 @@ export type ReviewVerdict = Verdict;
 /**
  * One thing waiting to be looked at, as the window draws it.
  *
- * The queue's own `Entry` plus the two facts only the shell can supply: the
- * branch the work is on, which is what Land and the pull request are made from,
- * and whether this card is still mirroring into the folder as it works.
+ * The queue's own `Entry` plus the one fact only the shell can supply: the
+ * branch the work is on, which is what Land and the pull request are made from.
  */
 export type ReviewEntry = ReviewQueued & {
   branch: string;
-  /** True while this conversation carries its files home on every settle. */
-  mirror: boolean;
 };
 
 /** An entry opened for reading: the queue as it stands, and the change itself. */
@@ -1493,6 +1512,8 @@ export const CHANNEL = {
   checkoutLand: 'graphe:checkout-land',
   checkoutPutAway: 'graphe:checkout-put-away',
   prWorktreePrepare: 'graphe:pr-worktree-prepare',
+  worktreePlan: 'graphe:worktree-plan',
+  worktreeNew: 'graphe:worktree-new',
   prReviewOpen: 'graphe:pr-review-open',
   reviewQueue: 'graphe:review-queue',
   reviewOpen: 'graphe:review-open',
@@ -1500,7 +1521,6 @@ export const CHANNEL = {
   reviewDecide: 'graphe:review-decide',
   reviewLand: 'graphe:review-land',
   reviewPr: 'graphe:review-pr',
-  reviewMirror: 'graphe:review-mirror',
   conflictLook: 'graphe:conflict-look',
   conflictSettle: 'graphe:conflict-settle',
   buildStart: 'graphe:build-start',
@@ -1854,7 +1874,6 @@ export type GrapheApi = {
   /** Open a pull request from the entry's branch, with its summary as the body. */
   reviewPr(id: string, summary: string, where?: Where): Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>>;
   /** Carry this conversation's files home as it works, or stop doing that. */
-  reviewMirror(id: string, on: boolean, where?: Where): Promise<Result<readonly ReviewEntry[]>>;
   /** One file both sides changed, written out with markers to decide over.
    *  `address` is the conversation whose version is the other side. */
   conflictLook(address: string, path: string, where?: Where): Promise<Result<ReviewClash>>;
@@ -1920,7 +1939,16 @@ export type GrapheApi = {
   conversations(where?: Where): Promise<Result<readonly Conversation[]>>;
   /** Open one of them, or start a fresh one when given null. Comes back with
    *  the conversation replayed as events, the same as opening a project. */
-  openConversation(path: string | null, where?: Where): Promise<Result<OpenedProject>>;
+  openConversation(
+    path: string | null,
+    workspace?: string | null,
+    where?: Where,
+  ): Promise<Result<OpenedProject>>;
+  /** What a New worktree would make, before anybody commits to it. */
+  worktreePlan(where?: Where): Promise<Result<WorktreePlan>>;
+  /** Make the copy, and start a conversation in it. A context handoff from
+   *  another conversation is a separate, explicit action. */
+  worktreeNew(wanted: { base?: string | null }, where?: Where): Promise<Result<OpenedProject>>;
   /** Put one down. Only the view closes — it stays written down, and opening it
    *  again carries on from where it was left. Optional, so a bridge with no way
    *  to close one is still a whole bridge. */

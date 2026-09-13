@@ -5,6 +5,10 @@
  * that never ends. Lifecycle handlers get a budget; whatever is still running
  * when it expires is let go of and the event carries on.
  *
+ * Letting go of it is not the same as stopping it. A handler the budget ran out
+ * on may still be running, and what it holds is not settled. The overrun record
+ * says so, and the same hook is not started again on top of it until it stops.
+ *
  * `tool_call` is deliberately not in the set: a handler there may be waiting on
  * a person to answer, and a person is allowed to take their time.
  */
@@ -28,7 +32,17 @@ export const BUDGETED_EVENTS: readonly string[] = [
   'before_agent_start',
 ];
 
-export type Overrun = { extension: string; event: string; ms: number };
+export type Overrun = {
+  extension: string;
+  event: string;
+  ms: number;
+  /** The budget ran out while the handler was still going, so it may still be. */
+  abandoned: boolean;
+  /** False until that handler stops; one that never answers keeps it false. */
+  stopped: boolean;
+  /** We threaded a signal and the handler declared a slot to receive it. */
+  signalled: boolean;
+};
 
 export type Raced = { over: boolean; ms: number; value: unknown };
 
@@ -92,6 +106,37 @@ function remember(one: Overrun): void {
 }
 
 /* -------------------------------------------------------------------------- */
+/* What is still going                                                         */
+/* -------------------------------------------------------------------------- */
+
+/** A hook the budget let go of, until its handler actually stops. */
+type Loose = { abandoned: boolean; stopped: boolean };
+
+/** Keyed by extension and event; one extension may hold several handlers there. */
+const loose = new Map<string, Set<Loose>>();
+
+function keyOf(extension: string, event: string): string {
+  return `${extension}\u0000${event}`;
+}
+
+/**
+ * True when a hook for this extension and event ran past its budget and has not
+ * stopped since. A late completion clears it; a handler that never answers keeps
+ * it true, which is the honest answer and the reason its state is not reused.
+ */
+export function hookStillRunning(extension: string, event: string): boolean {
+  for (const one of loose.get(keyOf(extension, event)) ?? []) {
+    if (one.abandoned && !one.stopped) return true;
+  }
+  return false;
+}
+
+/** Drop every live record. A handler already let go of keeps running either way. */
+export function forgetRunning(): void {
+  loose.clear();
+}
+
+/* -------------------------------------------------------------------------- */
 /* Wrapping a runner                                                           */
 /* -------------------------------------------------------------------------- */
 
@@ -127,11 +172,57 @@ function budgeted(
   ms: number,
   onOverrun: (o: Overrun) => void,
 ): Handler {
+  // One record per wrapped handler: Pi lets a single extension register several
+  // handlers for one event, and a slow one must not silence its siblings.
+  const mine: Loose = { abandoned: false, stopped: false };
   const wrapped = async (...args: never[]): Promise<unknown> => {
-    const raced = await raceBudget(Promise.resolve(handler(...args)), ms);
-    if (!raced.over) return raced.value;
-    const one: Overrun = { extension, event, ms: raced.ms };
+    // The last run of this handler never stopped, so the extension's state is
+    // not ours to hand to another run yet.
+    if (mine.abandoned && !mine.stopped) return undefined;
+
+    const stop = new AbortController();
+    const key = keyOf(extension, event);
+    mine.abandoned = false;
+    mine.stopped = false;
+    // A handler that declares a slot past what Pi passes gets a signal it can
+    // act on. One that does not cannot be stopped this way, and the record says
+    // so rather than pretending the timeout stopped it.
+    const signalled = handler.length > args.length;
+    const invoke = handler as (...given: unknown[]) => unknown;
+    let set = loose.get(key);
+    if (set === undefined) {
+      set = new Set<Loose>();
+      loose.set(key, set);
+    }
+    set.add(mine);
+    const work = Promise.resolve(invoke(...args, stop.signal));
+
+    const raced = await raceBudget(work, ms);
+    if (!raced.over) {
+      set.delete(mine);
+      return raced.value;
+    }
+
+    stop.abort();
+    const one: Overrun = {
+      extension,
+      event,
+      ms: raced.ms,
+      abandoned: true,
+      stopped: false,
+      signalled,
+    };
+    mine.abandoned = true;
     remember(one);
+    // The handler may settle long after the event moved on. Its ending stands:
+    // a late answer is not a fresh result, so only this record is updated and
+    // nothing is fed back into the event.
+    const ended = (): void => {
+      mine.stopped = true;
+      one.stopped = true;
+      set.delete(mine);
+    };
+    work.then(ended, ended);
     onOverrun(one);
     // No opinion from a handler that ran out of time; the event moves on.
     return undefined;

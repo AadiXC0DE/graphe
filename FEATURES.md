@@ -125,8 +125,8 @@ Work as the graph it already is: every step left to right, what waits for what, 
 **39 · Two models: one thinks, one does**
 Whatever is answering does the work; a stronger one is asked before a plan, after the same thing has failed twice, and before it calls something done. It reads and answers and never touches your project. The split shows on the same line as the money, and turning it off is one press.
 
-**40 · Rename across the project**
-`formatBytes` becomes `formatFileSize` everywhere it is used, in every file that uses it, in one step — with a preview first, credentials and binaries left alone, and a restore point before a single file is written.
+**40 · Search across the project**
+Every line a word appears on, in every file, with the file and line number. It is a text search and says so rather than pretending to be a language server, so a word that also appears in a comment is counted; credentials, dependencies and build output are never read.
 
 **41 · Goal mode**
 One sentence that says what done means, and it keeps going: full access while the goal stands, a check after every round for whether the objective has been met, and the next round started on its own if not. Twenty rounds and it stops and says so, so "carries on by itself" does not mean "for ever".

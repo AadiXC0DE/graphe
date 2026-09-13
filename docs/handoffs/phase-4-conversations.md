@@ -30,6 +30,12 @@ delete went through the empty-thread guard, which read a desk still holding the
 deleted conversation's turns as "already looking at a new one". `swapConversation`
 takes an explicit `force`, used only by the delete path.
 
+**Delete keeps what it deletes.** The transcript is moved into a trash folder
+under the profile with the time it went, and only then is the delete reported as
+having happened; the `.bak` shadow copy travels with it. A name already there is
+never overwritten. Emptying the trash is deliberately not automatic: it is a
+storage decision somebody should be shown (plan 4.6).
+
 **S04 and S13, waiting and stale panels.** See the phase 5 handoff: the waiting
 band is owned by the conversation, and overview/version answers carry a
 per-owner ask counter so a late answer cannot land under a newer chat.
@@ -45,7 +51,7 @@ per-owner ask counter so a late answer cannot land under a newer chat.
 | Replay fidelity | 4.3 / S09 | `src/agent/pi/history.ts:eventsOf` still discards tool-result detail and custom messages. Untouched |
 | `Continue in new chat` | 4.4 | Not implemented. The worktree action starts a fresh conversation; there is no handoff summary, no `Fork here`, and no `Resume`/`Continue` distinction in the UI |
 | Drafts and attachments | 4.5 / S01 | Draft text is still window state and attachments project state. Untouched |
-| Archive and undo-delete | 4.6 | Delete removes the transcript file through the existing path; there is no recoverable trash location and no archive concept |
+| Archive and undo-delete | 4.6 | Delete now moves the transcript to `<userData>/trash-conversations/<when>-<name>.jsonl` instead of unlinking it (`electron/services/trash.ts`, 3 tests in `tests/trash.test.ts`), and every view of the id is removed from the strip rather than only the one in front. What is still missing: no archive flag, no retention or emptying policy, and no UI for putting one back |
 | Temporary address mapping | 4.4 / S11 | `noteWhereItWorks` writes both the current address and the durable one, which covers the first-write case, but rebuild/fork/eviction transitions are not all covered |
 
 Exit criteria: not met. Resume after close/restart works through the existing

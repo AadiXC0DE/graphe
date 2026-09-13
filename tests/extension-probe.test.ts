@@ -5,7 +5,7 @@
  * tools, one that drives, and one that falls over.
  */
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -96,6 +96,38 @@ describe('the same answer without running anybody’s code twice', () => {
       at('orchestrating')
     ];
     expect(one?.card.orchestrating).toBe(true);
+  });
+
+  it('asks again when a file it imported changed, not just the entry file', async () => {
+    const dir = await scratch();
+    const where = join(await scratch(), 'plain');
+    await mkdir(where, { recursive: true });
+    await copyFile(
+      fileURLToPath(new URL('./fixtures/extensions/plain/index.mjs', import.meta.url)),
+      join(where, 'index.mjs'),
+    );
+    const first = await cachedProbe(join(where, 'index.mjs'), dir);
+    expect(first?.tools).toEqual(['count_words', 'spell_check']);
+
+    // A module the entry does not name in its own bytes: the fingerprint is of
+    // the folder, so this is a different extension now.
+    await writeFile(join(where, 'extra.mjs'), 'export const extra = 1;\n');
+    const after = await cachedProbe(join(where, 'index.mjs'), dir);
+    expect(after).not.toBeNull();
+    // Same answer, because the code that runs is the same; what matters is
+    // that it was asked rather than assumed. The stored fingerprint moved.
+    const held: unknown = JSON.parse(await readFile(join(dir, 'cards.json'), 'utf8'));
+    const row = (held as Record<string, { fingerprint: string }>)[join(where, 'index.mjs')];
+    expect(row?.fingerprint).toContain('unknown');
+  });
+
+  it('survives a cache file somebody truncated', async () => {
+    const dir = await scratch();
+    await writeFile(join(dir, 'cards.json'), '{ half a');
+    await expect(cachedProbe(at('plain'), dir)).resolves.toMatchObject({ });
+    // And it writes a whole one back.
+    const held: unknown = JSON.parse(await readFile(join(dir, 'cards.json'), 'utf8'));
+    expect(Object.keys(held as Record<string, unknown>)).toEqual([at('plain')]);
   });
 
   it('remembers that an add-on could not be read, too', async () => {

@@ -2089,6 +2089,11 @@ function Conversation() {
         return;
       }
       setConversations(answer.value);
+      /* Every view of it goes, not only the one that was in front: a tab left
+         pointing at a transcript that is not there any more is a tab that
+         fails the moment it is pressed. */
+      const project = here?.path;
+      if (project !== undefined) setDesks((current) => parkThread(current, project, path));
       if (wasHere) await swapConversation(null, true);
     },
     [busy, inConversation, swapConversation, troubleHere],

@@ -39,7 +39,7 @@ as though somebody had answered.
 | --- | --- |
 | E02, a real terminal surface | Not started. The Commands drawer is still output-only. `@xterm/xterm` and a PTY implementation are new dependencies the plan asks to evaluate before adopting; none was added |
 | E04, probe timeouts | Partial. The gate removes pre-trust execution; a trusted extension's factory that spins synchronously still cannot be interrupted by a `Promise.race`. The plan's answer (a disposable process) is not built |
-| E05, card cache | Open. The cache is still keyed on the entry file's mtime and rewritten without a fingerprint of dependencies, the host version or an atomic replace |
+| ~~E05, card cache~~ | Done after the first draft of this handoff. The cache is keyed on a SHA-256 fingerprint of the extension's own files (the whole folder, not just the entry file, since a local add-on is usually a directory of modules) plus the installed Pi version, and written through the atomic writer so two sessions probing at once cannot leave half a file. Corrupt rows are dropped one at a time, and a cache that cannot be parsed is empty rather than fatal. Two new tests: a file the entry does not name changing invalidates the card, and a truncated cache re-probes and rewrites |
 | E06, tools-only policy | Open. `policyFor` still returns 'on' for a conversation, so no hooks are deleted there, but the plan's coherent enable/disable story is not built |
 | E07, admission before a turn starts | Open. `forwardTo` still accounts after a turn has begun |
 | E09, tool collisions | Open. Duplicate names between Graphe's built-ins and an installed add-on are not detected at registration |

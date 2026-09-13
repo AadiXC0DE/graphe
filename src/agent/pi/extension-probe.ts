@@ -11,12 +11,21 @@
  * today.
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { writeAtomically } from '../../lib/atomic';
 import { EXTENSION_BUDGET } from './standing';
+
+/** The runtime a card was read under. A card read by one version is not
+ *  evidence about another, so the version is part of the key. */
+/** Which runtime read the card. A card read by one version is not evidence
+ *  about another, so the caller passes the version it loaded — this file never
+ *  reaches for Pi itself, which is the rule the whole adapter folder lives by. */
+export type RuntimeTag = string;
 
 /** A factory that never answers is a factory we stop waiting for. */
 const PROBE_MS = 5000;
@@ -274,10 +283,14 @@ export async function cardsFor(
   paths: readonly string[],
   cacheDir: string,
   mayRun: (path: string) => boolean,
+  runtime: RuntimeTag,
 ): Promise<Map<string, CapabilityCard | null>> {
   const cards = new Map<string, CapabilityCard | null>();
   for (const where of paths) {
-    cards.set(where, mayRun(where) ? await cachedProbe(where, cacheDir).catch(() => null) : null);
+    cards.set(
+      where,
+      mayRun(where) ? await cachedProbe(where, cacheDir, runtime).catch(() => null) : null,
+    );
   }
   return cards;
 }
@@ -286,39 +299,94 @@ export async function cardsFor(
 /* Remembering                                                                 */
 /* -------------------------------------------------------------------------- */
 
-type Card = { at: number; card: CapabilityCard | null };
+type Card = { fingerprint: string; card: CapabilityCard | null };
 
 async function readCards(file: string): Promise<Record<string, Card>> {
   try {
     const held: unknown = JSON.parse(await readFile(file, 'utf8'));
-    return typeof held === 'object' && held !== null && !Array.isArray(held)
-      ? (held as Record<string, Card>)
-      : {};
+    if (typeof held !== 'object' || held === null || Array.isArray(held)) return {};
+    const cards: Record<string, Card> = {};
+    for (const [where, one] of Object.entries(held as Record<string, unknown>)) {
+      // Field by field: one damaged row costs that row, not the file.
+      const row = one as { fingerprint?: unknown; card?: unknown } | null;
+      if (row === null || typeof row !== 'object') continue;
+      if (typeof row.fingerprint !== 'string' || row.fingerprint === '') continue;
+      cards[where] = { fingerprint: row.fingerprint, card: (row.card ?? null) as CapabilityCard | null };
+    }
+    return cards;
   } catch {
+    // A cache that cannot be read is a cache that has nothing to say. It is
+    // never a reason to run anybody's code early: the caller decides that.
     return {};
   }
+}
+
+/** Every file under the folder an extension lives in, smallest first, so a
+ *  fingerprint does not depend on the order a directory happens to list in. */
+async function filesUnder(folder: string, prefix = '', depth = 0): Promise<readonly string[]> {
+  if (depth > 4) return [];
+  const found = await readdir(join(folder, prefix), { withFileTypes: true }).catch(() => []);
+  const files: string[] = [];
+  for (const one of found) {
+    if (one.name === 'node_modules' || one.name.startsWith('.')) continue;
+    const at = prefix === '' ? one.name : `${prefix}/${one.name}`;
+    if (one.isDirectory()) files.push(...(await filesUnder(folder, at, depth + 1)));
+    else if (one.isFile()) files.push(at);
+  }
+  return files.sort();
+}
+
+/**
+ * What the code that would actually run is made of.
+ *
+ * Content, not a last-changed time: a checkout, a copy or a tool that writes a
+ * file wholesale can leave the time alone, and a card that outlives the code it
+ * describes is a policy decision made about something that is no longer there.
+ * The whole folder is walked because a local extension is usually a directory
+ * of modules, and the one that changed may not be the entry file.
+ */
+async function fingerprintOf(path: string): Promise<string | null> {
+  const entry = await readFile(path).catch(() => null);
+  if (entry === null) return null;
+  const folder = dirname(path);
+  const files = await filesUnder(folder);
+  const hash = createHash('sha256').update(path).update('\u0000');
+  if (files.length === 0) return hash.update(entry).digest('hex');
+  for (const one of files) {
+    const bytes = await readFile(join(folder, one)).catch(() => null);
+    if (bytes === null) continue;
+    hash.update(one).update('\u0000').update(bytes).update('\u0000');
+  }
+  return hash.digest('hex');
 }
 
 /**
  * The same answer without running anybody's code again.
  *
- * Keyed on the file's own last-changed time, so editing an extension re-probes
- * it and a card can never outlive the code it describes.
+ * Keyed on a fingerprint of the extension's own files plus the version of the
+ * runtime that would load it, so an edited, replaced or downgraded extension is
+ * asked again rather than judged by what a previous version did.
  */
-export async function cachedProbe(path: string, cacheDir: string): Promise<CapabilityCard | null> {
-  const at = (await stat(path).catch(() => null))?.mtimeMs ?? null;
-  if (at === null) return null;
+export async function cachedProbe(
+  path: string,
+  cacheDir: string,
+  runtime: RuntimeTag = 'unknown',
+): Promise<CapabilityCard | null> {
+  const fingerprint = await fingerprintOf(path);
+  if (fingerprint === null) return null;
+  const key = `${runtime}\u0000${fingerprint}`;
 
   const file = join(cacheDir, 'cards.json');
   const cards = await readCards(file);
   const held = cards[path];
-  if (held !== undefined && held.at === at) return held.card;
+  if (held !== undefined && held.fingerprint === key) return held.card;
 
   const card = await probe(path);
-  cards[path] = { at, card };
+  cards[path] = { fingerprint: key, card };
   try {
-    await mkdir(cacheDir, { recursive: true });
-    await writeFile(file, `${JSON.stringify(cards, null, 2)}\n`, 'utf8');
+    // Written beside itself and moved into place: two sessions probing at once
+    // used to be able to leave half a file behind, which read as "no cards".
+    await writeAtomically(file, `${JSON.stringify(cards, null, 2)}\n`);
   } catch {
     // Probing again next launch costs a moment; failing to open does not.
   }

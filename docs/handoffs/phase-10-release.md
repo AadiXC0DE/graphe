@@ -11,7 +11,7 @@ ticked.
 | `npm run typecheck` | clean |
 | `npm run lint` | clean |
 | `npm run copy:check` | clean |
-| `npx vitest run` | 317 files, 6913 tests, all passing |
+| `npx vitest run` | 319 files, 6920 tests, all passing |
 | `npx vite build` | 6.4 s, main chunk 691.3 KB raw / 222.7 KB gzip |
 | `node scripts/perf-report.mjs --check` | **fails**, 691.3 KB against a 450 KB limit. Measured, attributed, and recorded as an assessed exception (phase 9 handoff) |
 | `npm run app:build` / `npm run package` / `npm run verify:package` | not run in this environment |

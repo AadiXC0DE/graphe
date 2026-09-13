@@ -2273,6 +2273,8 @@ const MOST_AFTER_SAYINGS = 3;
     await extensionPathsIn(agentDir, options.projectRoot),
     cardsFolder,
     mayProbe,
+    // Read from the package that is actually loaded, never assumed.
+    `pi-${String((await loadPi()).VERSION)}`,
   )) {
     cards.set(where, card);
   }

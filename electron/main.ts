@@ -255,6 +255,7 @@ import {
 import { conflictWords, readConflict } from '../src/diff/conflict';
 import { preparePrWorktree } from './prWorktree';
 import { WorkspaceLocks } from './services/workspace-locks';
+import { moveToTrash } from './services/trash';
 import {
   MARKER_FILE,
   LOCK_FILE,
@@ -9516,12 +9517,16 @@ function register(): void {
       }
     }
     try {
-      await rm(target, { force: true });
-      await rm(`${target}.bak`, { force: true }).catch(() => undefined);
+      /* Moved, not destroyed. Deleting a chat is a press and a press can be a
+         mistake, and the transcript is the only copy of what was said. The
+         caller is told it is gone only when it really is out of the sessions
+         folder. */
+      const kept = await moveToTrash(target, app.getPath('userData'));
+      if (kept === null) throw new Error('the transcript would not move');
     } catch (cause) {
       return fail({
         what: 'I could not throw that conversation away.',
-        because: 'This computer would not let me remove the file.',
+        because: 'This computer would not let me move the file.',
         actionLabel: 'Got it',
         details: detailsOf(cause),
       });

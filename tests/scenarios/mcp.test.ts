@@ -91,12 +91,16 @@ describe('T54: a server that takes a tool call and never answers', () => {
   /* Phase 10.2 requires that a tool call cannot leave a spinner forever, and a
      silent server is the way that happens: the call is awaited, no timer is
      armed, and the `catch` below only runs if the call rejects rather than
-     hangs (src/agent/pi/mcp.ts:376). The test is written to fail: the race it
-     loses is the app's wait against a deadline of its own. */
-  it.fails('gives up on a call the server never answers, within a bound of its own', async () => {
+     hangs. The bound is now the app's own (src/agent/pi/mcp.ts), and
+     `GRAPHE_MCP_CALL_MS` is what lets this test prove it takes effect in the
+     time a test can wait for. */
+  it('gives up on a call the server never answers, within a bound of its own', async () => {
     const file = await serverFile();
     const registry = await registryFor(file);
     expect(await registry.call('half-answering', 'ping', {})).toBe('pong');
+    // Short enough for a test, and the same code path the two-minute default
+    // takes: what is asserted is that the app stops waiting at all.
+    process.env['GRAPHE_MCP_CALL_MS'] = '400';
 
     // A bound of its own, not one the server has to keep: what is asserted is
     // that the call settles at all. Real time on purpose — the subject of the
@@ -105,9 +109,21 @@ describe('T54: a server that takes a tool call and never answers', () => {
       new Promise((done) => {
         setTimeout(() => done('still waiting'), ms);
       });
-    const answered = await Promise.race([registry.call('half-answering', 'never', {}), deadline(2_000)]);
+    /* The call gives up on its own and says so; what it must not do is still be
+       waiting when the deadline above arrives. Both a refusal and a settled
+       answer are acceptable outcomes here - the defect was that neither ever
+       came. */
+    const answered = await Promise.race([
+      registry.call('half-answering', 'never', {}).then(
+        (text) => text,
+        (cause: unknown) => (cause instanceof Error ? cause.message : String(cause)),
+      ),
+      deadline(2_000),
+    ]);
 
     expect(answered).not.toBe('still waiting');
+    expect(answered).toContain('did not answer within');
+    delete process.env['GRAPHE_MCP_CALL_MS'];
     await registry.close();
   });
 

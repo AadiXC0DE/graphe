@@ -142,15 +142,13 @@ describe('T13: two fetches asked for at once', () => {
   });
 
   /* Phase 10.2 requires that two fetches asked for at once each get the SHA
-     they asked for, and the same head is a SHA two reviews can ask for. What
-     the code does: both calls see no branch for that head and both try to
-     create it, so the loser is refused with "I fetched pull request #7 but
-     could not point a branch at it" instead of reusing the checkout the winner
-     just made. The folder is left alone and the message is typed, so nothing is
-     lost; what is missing is the second review (electron/prWorktree.ts:505-514
-     reads the branch and creates the checkout without holding anything across
-     the two). */
-  it.fails('gives two reviews of the same head one verified checkout rather than two', async () => {
+     they asked for, and the same head is a SHA two reviews can ask for. Reading
+     the branch and creating the checkout is a check-then-act across two git
+     calls, so it used to race: both saw no branch, both made one, and the loser
+     was refused a checkout the winner had just made. Preparing is serialized
+     per project now (electron/prWorktree.ts), so the second caller finds what
+     the first made and reuses it. */
+  it('gives two reviews of the same head one verified checkout rather than two', async () => {
     const head = openPullRequest(7, 'a.txt', 'only head\n');
     const [one, two] = await Promise.all([
       preparePrWorktree(repo, 7),

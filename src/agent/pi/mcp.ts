@@ -144,8 +144,16 @@ const MAX_RESULT_CHARACTERS = 20_000;
  * running for the rest of the sitting: `callTool` has no timer of its own, and
  * the catch below it only runs on a rejection. Two minutes is far longer than
  * any local tool here needs and short enough that a wedged server is a fact
- * rather than a mystery. */
+ * rather than a mystery. `GRAPHE_MCP_CALL_MS` exists so a test can prove the
+ * bound without waiting for it, the way the hook budget does. */
 const CALL_PATIENCE_MS = 120_000;
+
+function callPatienceMs(env: NodeJS.ProcessEnv = process.env): number {
+  const given = env['GRAPHE_MCP_CALL_MS'];
+  if (given === undefined) return CALL_PATIENCE_MS;
+  const asked = Number(given.trim());
+  return Number.isFinite(asked) && asked > 0 ? Math.round(asked) : CALL_PATIENCE_MS;
+}
 
 function toolResultText(text: string): { content: [{ type: 'text'; text: string }]; details: Record<string, never> } {
   return { content: [{ type: 'text', text }], details: {} };
@@ -386,9 +394,17 @@ export class McpRegistry {
       const result = await Promise.race([
         session.client.callTool({ name: toolName, arguments: arguments_ }),
         new Promise<never>((_resolve, reject) => {
+          const patience = callPatienceMs();
           const bell = setTimeout(
-            () => reject(new Error(`${serverName} did not answer within two minutes`)),
-            CALL_PATIENCE_MS,
+            () =>
+              reject(
+                new Error(
+                  patience >= 1000
+                    ? `${serverName} did not answer within ${String(Math.round(patience / 1000))} seconds`
+                    : `${serverName} did not answer within ${String(patience)} milliseconds`,
+                ),
+              ),
+            patience,
           );
           (bell as unknown as { unref?: () => void }).unref?.();
         }),

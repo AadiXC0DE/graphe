@@ -432,7 +432,47 @@ export type PrCheckout = {
  * commit, and holding nothing. Anything else is refused with the reason, and
  * the folder is left where it is.
  */
+/**
+ * One prepare at a time per project.
+ *
+ * Two reviews of the same pull request asked for together used to race: both
+ * looked for the branch, both found none, both tried to make it, and the loser
+ * was refused a checkout the winner had just made. Nothing was lost, and the
+ * second review simply did not open. Reading and creating the branch is a
+ * check-then-act across two git calls, so the fix is to not interleave them:
+ * the same project queues behind whatever is already preparing, and the second
+ * caller then finds the branch, the folder and the registration that the first
+ * one made, and reuses them.
+ *
+ * Keyed by the resolved project path, so two different projects still prepare
+ * at the same time.
+ */
+const preparing = new Map<string, Promise<unknown>>();
+
 export async function preparePrWorktree(
+  project: string,
+  prNumber: number,
+): Promise<PrCheckout> {
+  const key = resolve(project);
+  const ahead = preparing.get(key) ?? Promise.resolve();
+  const mine = ahead.then(
+    () => preparePrWorktreeOne(project, prNumber),
+    () => preparePrWorktreeOne(project, prNumber),
+  );
+  // The queue holds a version that cannot reject: one prepare that failed must
+  // not take the next caller down with it.
+  const queued = mine.catch(() => undefined);
+  preparing.set(key, queued);
+  try {
+    return await mine;
+  } finally {
+    // Only the last one out clears the entry, so a caller arriving while this
+    // one is finishing still queues behind it.
+    if (preparing.get(key) === queued) preparing.delete(key);
+  }
+}
+
+async function preparePrWorktreeOne(
   project: string,
   prNumber: number,
 ): Promise<PrCheckout> {

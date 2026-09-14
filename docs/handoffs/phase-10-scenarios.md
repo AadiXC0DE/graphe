@@ -36,8 +36,11 @@ window test for those today would be a test of a modal, not of the scenario.
 | `npm run test:electron` | **run and green**: 2 tests, a real window on a disposable profile. It does not cover this catalogue's turn-dependent cases (see above) but it caught the switch-back defect recorded below |
 | `npx vitest run` (whole suite) | 330 files passed, 1 skipped, **6739 tests passed**, 2 skipped, including all 96 here |
 
-Three of the tests are `it.fails(...)`: vitest counts them as passing when they
-fail, which is what they are for. Each names its finding in the comment above it.
+Two of the three defects recorded here have since been fixed and their tests are
+now ordinary passing tests: T13 (the PR prepare race, fixed by serializing
+preparation per project) and T54 (the unbounded MCP call, fixed with a bound the
+test drives through `GRAPHE_MCP_CALL_MS`). One remains recorded as `it.fails(...)`:
+T23, the references a fresh conversation inherits from another chat.
 
 ## The catalogue
 
@@ -49,8 +52,8 @@ provable today.
 | --- | --- | --- |
 | T01 | B sees the same workspace files as A; B's transcript and context are empty | `tests/scenarios/workspace-ownership.test.ts` `T01: chat A writes without committing, then New B opens in the same project` (three tests: same folder and the file visible, B a separate record with no session file or lineage, the write left uncommitted). The window half is not provable: the Electron profile has no model (see above) |
 | T02 | Same conversation, session, branch, context and files after close and reopen | `tests/scenarios/conversation-ownership.test.ts` `T02: a conversation with a long history, closed and reopened` (session file, branch leaf and workspace survive; the folder is untouched). The transcript's own content is Pi's and is covered by T28/T29 |
-| T03 | A visible handoff and a parent link; B has a new identity | Not provable. `Continue` is not implemented (phase 4.4): `handoffMessage()` exists in `src/work/continuing.ts:60` and no channel or control calls it, and `addConversation` accepts `lineage` while no caller passes one |
-| T04 | Correct inherited context and compaction semantics at a fork point | Not provable. No fork path exists (phase 4.4); `lineage: { kind: 'fork' }` is a registry field nothing writes. Compaction boundaries can be *read* (`tests/session-replay-fidelity.test.ts` `RF-04 where the conversation was tidied`) but nothing chooses one to fork at |
+| T03 | A visible handoff and a parent link; B has a new identity | Not proven here. Continue now exists end to end - `CHANNEL.conversationContinue` composes the note with `handoffMessage()`, starts the conversation in the source's workspace and records `lineage` - and the row was written before it landed; what is missing is a named test driving it (the service half is testable, the draft-in-the-composer half needs the Electron runner) |
+| T04 | Correct inherited context and compaction semantics at a fork point | Partly. `CHANNEL.conversationFork` now writes `lineage: { kind: 'fork' }` and forks through Pi's own `SessionManager.forkFrom`, refusing while the source is working; it forks the whole conversation, not a chosen earlier boundary, so the "at a pre-compaction point" half is still unbuilt and no scenario test drives even the whole-transcript case |
 | T05 | Correct base and cwd for the new workspace; the local workspace unchanged | `tests/scenarios/workspace-ownership.test.ts` `T05: an isolated workspace created for one conversation` (base is the project head, the checkout carries the committed files, and the project's status, index, HEAD bytes and note file are unchanged apart from the new untracked `.graphe/`). The "isolation is visible before the first send" half is the New-worktree card, a window surface with no runner |
 | T06 | No file, index or HEAD change caused by navigation | `tests/scenarios/workspace-ownership.test.ts` `T06: selecting B and then A, again and again` (twenty selections: the snapshot of HEAD, branch, status, staged diff, working diff and the tracked tree is identical, and no mutating git verb was run) |
 | T07 | Explicit failure, no local fallback, no orphan duplicate record | `tests/scenarios/workspace-ownership.test.ts` `T07: an isolated workspace that cannot be made` (a typed refusal for a folder that is not a repository, nothing created anywhere, and a retry that cannot duplicate the record). Not provable: the channel path (`CHANNEL.worktreeNew` in `electron/main.ts`) that reports it and leaves the project untouched, and there is no orphan cleanup step to exercise (phase 3 records it as not done) |

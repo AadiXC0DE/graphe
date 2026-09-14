@@ -1,6 +1,8 @@
 # Phase 5 handoff: every panel, request and control scoped to its owner
 
-Findings: S02, S03, S04, S06, S07, S08 (partial), W10 (partial). U04 open.
+Findings: S02, S03, S04, S06, S07 and S08's conversation rule done; W10 done;
+U04 done; the 5.4 inventory written and its "zero unqualified callers" criterion
+met. S05 open; the normalised store partly.
 
 ## What changed
 
@@ -25,22 +27,70 @@ conversation on screen, so the chip follows the chat rather than the folder.
 
 **S07, file reads are addressed.** `useProjectFiles.refresh` passed no scope at
 all and cached per project path; `readFile` was unqualified too. Both now send
-`{project, conversation}` and drop an answer whose owner has changed.
+`{project, conversation}` and drop an answer whose owner has changed, and the
+handlers behind them (`projectFiles`, `fileText`) read out of
+`folderFor(open, where)`: a chat working in its own copy is shown, and opens, the
+files it is actually changing rather than the project's.
 
 **S02 and S14** are in the phase 4 handoff.
+
+**W10, one overview answer is about one folder.** `CHANNEL.overview` read the
+branch, the artifacts, the swatches and the preview address out of whichever
+root the call happened to name, so a panel could describe two folders at once.
+Every one of them is now read out of `folderFor(open, where)` — a conversation's
+own copy, a named child repository, or the folder the registry wrote down — so
+the file list, the diff and the branch in one panel are all the same folder's,
+and a folder holding several repositories lists them (`Overview.repos`).
+`tests/overview-roots.test.ts` (8) proves the precedence, the status read in the
+resolved folder, and that every root follows it.
+
+**U04, every picture of the preview says which preview it is.** A frame was
+`{project, bytes}`, so a picture taken of another workspace, or of this one
+before a reload, was drawn as though it were current. `PreviewFrame` now carries
+`preview`, `project` and `epoch`, and `src/preview/live.ts` accepts a frame only
+for the preview the window is showing: another preview's picture, an earlier
+epoch's and one with no identity are dropped, and nothing is captured while the
+window is hidden. The page itself is one native view for the whole window, so the
+four channels that move, hide or record it (`pageAt`, `pageHidden`, `watchStart`,
+`watchStop`) now name the project whose page they are about, and the shell
+refuses a call that names another project or none (`pageNamed`, "That page is not
+the one on screen") instead of reaching somebody else's page; a project closed
+while its page is up takes the page with it rather than leaving a view nothing
+can reach. `tests/preview-live.test.ts` (11) covers the adoption, the drops, the
+re-adoption after a reload and the hidden-window stop.
+
+**5.4, the inventory, and zero unqualified callers.** `docs/handoffs/ipc-inventory.md`
+is the per-channel audit the plan asked for: scope, target, the expression in
+`electron/main.ts` that resolves it, whether it changes anything, whose answer it
+is, and every caller. Against it, every mutation the window makes now names its
+target: the 18 call sites that could be told (in `src/App.tsx`, 20 in all
+including two `connectedSave` callers the sheet had missed) pass the project or
+the conversation they act on, and the four page channels were given a target
+rather than being told one. `graphe:watch-browser` follows the conversation's own
+folder now, so a chat working in a copy watches the browser that chat drives
+instead of the project root's.
+
+**S08, an event for an unknown owner goes nowhere confusing.** `receive` puts an
+event whose conversation this window no longer knows to the project's spend alone
+— the one part of it that is still true — and never into the tab in front
+(`tests/threads.test.ts`: "never puts a delayed event from an unknown
+conversation into the tab in front"). The project-less notices that remain are
+app-wide by construction (an app error, a newer release, a missing git,
+notifications being off) and have no other home; the only write of this class
+still unaddressed is the research settle in `src/App.tsx`, which is in the phase
+4 handoff's open list.
 
 ## What is not done
 
 | Item | Finding | Note |
 | --- | --- | --- |
-| S08 owner-less events | One routing rule was found and left: `src/lib/projects.ts:receive` still falls back to `desks.current` for an event with no project, and to spend-only for an unknown conversation. Changing it needs the owner ids to be carried on every event, which is the phase 4/5 normalisation work below |
-| Desk/Parked normalisation | Partly, after the first draft: `showThread` is now the one navigation reducer (`src/lib/projects.ts`), `App.swapConversation` ends in a single `showOpened(opened)` that applies a shell answer in one place, and the two bespoke field lists are gone - a field can no longer be added to one path only. The full maps-and-hooks extraction the plan sketches was not built |
-| W10 different roots in one overview | `CHANNEL.overview` still resolves git/preview/artifact roots per panel call. Each now carries the conversation, so a stale answer is dropped, but the roots themselves were not unified |
+| Desk/Parked normalisation | The renderer still holds the `Desk`/`Parked` shape rather than the maps of projects, workspaces, conversations, runs and views the plan sketches. `showThread` is the one navigation reducer (`src/lib/projects.ts`), `App.swapConversation` ends in a single `showOpened(opened)` that applies a shell answer in one place, and the two bespoke field lists are gone - a field can no longer be added to one path only - but the hooks extraction (conversation actions, workspace selectors, inspector queries, process/preview ownership) was not built |
 | Held singleton slots (S05) | `held.waiting/checking/pictures` are still one per project. Nothing was removed, because the replacement (per-run records) belongs with phase 7's task model |
-| U04 preview frames | Preview frame messages are still `{project, bytes}`. Not touched |
-| Legacy unqualified-call inventory and counter | Not done: no per-channel scope/target table was produced and no counter drives the remainder to zero |
+| The pane's address across a project switch | The page is one native view for the whole window. A switch closes the page that belonged to the previous project rather than showing it, and the pane's own address is window state, so it is not cleared when the project changes: the new project's page is pointed at the same address. Nothing here draws another project's page, but the address itself is not owned by the conversation |
 
-Exit criteria: the two blocking behaviours named in the phase (a delayed answer
-must not populate another chat's panel; the waiting band must not claim another
-chat's work) are implemented. The inventory, the normalised store and the
-"zero unqualified mutation callers" criterion are not.
+Exit criteria: met for the parts this phase names as blocking - the audit
+inventory includes every channel, zero unqualified mutation callers remain, a
+delayed answer cannot populate another chat's panel, the waiting band claims only
+its own conversation's work, and an event for an unknown owner never reaches the
+tab in front. Not met: the normalised store and hooks above, and S05's
+one-per-project slots.
